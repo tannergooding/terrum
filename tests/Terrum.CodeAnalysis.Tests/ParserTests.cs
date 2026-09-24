@@ -29,6 +29,55 @@ public sealed class ParserTests
     }
 
     [Theory]
+    [InlineData("int32??")]
+    [InlineData("T??")]
+    [InlineData("T? /* gap */ ?")]
+    [InlineData("int32?\r\n?")]
+    [InlineData("List<int32??>?")]
+    [InlineData("List<int32>??")]
+    public void RejectsRepeatedOptionalModifiersWithoutLosingText(string type)
+    {
+        var text = "void F(" + type + " value) {} void G() {}";
+        var tree = SyntaxTree.Parse(text);
+        var diagnostic = Assert.Single(tree.Diagnostics);
+        Assert.Equal("TRM1005", diagnostic.Code);
+        var firstQuestion = text.IndexOf('?', StringComparison.Ordinal);
+        Assert.Equal(text.IndexOf('?', firstQuestion + 1, StringComparison.Ordinal), diagnostic.Span.Start);
+        Assert.Equal(1, diagnostic.Span.Length);
+        Assert.Equal(2, tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.FunctionDeclaration));
+        AssertLossless(tree);
+    }
+
+    [Theory]
+    [InlineData("int32??? F() {}")]
+    [InlineData("struct S { int32??? value; }")]
+    [InlineData("void F() { int32??? value = Get(); }")]
+    [InlineData("void F() { var value = new Box???(); }")]
+    public void DiagnosesEveryExtraOptionalModifier(string text)
+    {
+        var tree = SyntaxTree.Parse(text);
+        Assert.Equal(2, tree.Diagnostics.Length);
+        Assert.All(tree.Diagnostics, diagnostic => {
+            Assert.Equal("TRM1005", diagnostic.Code);
+            Assert.Equal("?", tree.Source.GetSubText(diagnostic.Span));
+        });
+        AssertLossless(tree);
+    }
+
+    [Theory]
+    [InlineData("T?")]
+    [InlineData("int32?")]
+    [InlineData("List<int32?>?")]
+    [InlineData("Map<T?, List<int32?>?>?")]
+    [InlineData("Option<Option<int32>>")]
+    public void AllowsOptionalModifiersAtSeparateNestingLevels(string type)
+    {
+        var tree = SyntaxTree.Parse("void F(" + type + " value) {}");
+        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        AssertLossless(tree);
+    }
+
+    [Theory]
     [InlineData("void F() { return 1 + 2 * 3; }", SyntaxKind.BinaryExpression, "+", "*")]
     [InlineData("void F() { return 1 * 2 + 3; }", SyntaxKind.BinaryExpression, "+", "*")]
     [InlineData("void F() { return a || b && c; }", SyntaxKind.BinaryExpression, "||", "&&")]

@@ -15,6 +15,32 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class CliTests
 {
     [Theory]
+    [InlineData("check")]
+    [InlineData("tree")]
+    public async Task RepeatedOptionalReportsPreciseStructuredDiagnosticAsync(string command)
+    {
+        const string Source = "void F(T? /* gap */\n? value) {}";
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), command, "-", "--json");
+        Assert.Equal(1, exit);
+        Assert.Equal("", error);
+        using var document = JsonDocument.Parse(output);
+        var root = document.RootElement;
+        Assert.False(root.GetProperty("success").GetBoolean());
+        Assert.Equal("syntax-1", root.GetProperty("languageVersion").GetString());
+        var diagnostic = Assert.Single(root.GetProperty("diagnostics").EnumerateArray());
+        Assert.Equal("TRM1005", diagnostic.GetProperty("code").GetString());
+        Assert.Equal(Source.LastIndexOf('?', StringComparison.Ordinal), diagnostic.GetProperty("span").GetProperty("start").GetInt32());
+        Assert.Equal(1, diagnostic.GetProperty("span").GetProperty("length").GetInt32());
+
+        if (command == "tree")
+        {
+            var reconstructed = string.Concat(root.GetProperty("tokens").EnumerateArray().Select(token =>
+                string.Concat(token.GetProperty("leadingTrivia").EnumerateArray().Select(trivia => trivia.GetProperty("text").GetString())) + token.GetProperty("text").GetString()));
+            Assert.Equal(Source, reconstructed);
+        }
+    }
+
+    [Theory]
     [InlineData("name")]
     [InlineData("\"quote\\\" and \\\\ slash\"")]
     [InlineData("\"<tag> \u03B1 \U0001F600\"")]
@@ -58,13 +84,15 @@ public sealed class CliTests
         }
     }
 
-    [Fact]
-    public async Task HumanErrorsUseOneBasedLocationsAndStderrAsync()
+    [Theory]
+    [InlineData("void Main() {\nreturn 1\n}", "<stdin>(3,1): error TRM1001")]
+    [InlineData("void F(T? /* gap */\n? value) {}", "<stdin>(2,1): error TRM1005")]
+    public async Task HumanErrorsUseOneBasedLocationsAndStderrAsync(string source, string diagnostic)
     {
-        (var exit, var output, var error) = await RunAsync(Encoding.UTF8.GetBytes("void Main() {\nreturn 1\n}"), "check", "-");
+        (var exit, var output, var error) = await RunAsync(Encoding.UTF8.GetBytes(source), "check", "-");
         Assert.Equal(1, exit);
         Assert.Equal("", output);
-        Assert.Contains("<stdin>(3,1): error TRM1001", error, StringComparison.Ordinal);
+        Assert.Contains(diagnostic, error, StringComparison.Ordinal);
     }
 
     [Fact]

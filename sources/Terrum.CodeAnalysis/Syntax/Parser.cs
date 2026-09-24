@@ -162,14 +162,14 @@ internal sealed class Parser
             }
             else
             {
-                Report("TRM1002", "Expected a function declaration; this construct is outside syntax-0.", Current.Span);
+                Report("TRM1002", $"Expected a function declaration; this construct is outside {SyntaxTree.LanguageVersion}.", Current.Span);
                 children.Add(SkipDeclaration());
                 kind = SyntaxKind.SkippedSyntax;
             }
         }
         else
         {
-            Report("TRM1002", "Expected a function or struct declaration; this construct is outside syntax-0.", Current.Span);
+            Report("TRM1002", $"Expected a function or struct declaration; this construct is outside {SyntaxTree.LanguageVersion}.", Current.Span);
             children.Add(SkipDeclaration());
             kind = SyntaxKind.SkippedSyntax;
         }
@@ -244,9 +244,15 @@ internal sealed class Parser
             children.Add(Expect(TokenKind.Greater));
         }
 
-        while (Current.Kind == TokenKind.Question)
+        if (Current.Kind == TokenKind.Question)
         {
             children.Add(Take());
+
+            while (Current.Kind == TokenKind.Question)
+            {
+                Report("TRM1005", "An optional modifier cannot be repeated on the same source type.", Current.Span);
+                children.Add(Take());
+            }
         }
 
         _depth--;

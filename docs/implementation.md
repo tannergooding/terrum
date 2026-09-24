@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-0
+## Current boundary: syntax-1
 
 `Terrum.CodeAnalysis` is a reusable, immutable C# front end. `terrumc` exercises
 that library; it is not an independent parser. There is no Terrum execution,
@@ -15,9 +15,9 @@ fixtures.
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
 | Lexing | Pinned Unicode identifiers, ASCII numbers/tags, comments, leading trivia, strings, diagnostics, EOF | Interpolation, raw/character/native literals, directives |
 | Declarations | Using, optional file-scoped namespace, functions, structs with explicit fields/constructors/methods | Classes, interfaces, enums/unions, attributes, generic declarations/constraints, imports across modules |
-| Types | Qualified named types, nested type arguments, repeated `?`, `void` | Type resolution, normalization, ownership/form qualifiers |
-| Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, return, assignment and expression statements | `for`/`foreach`, switch/patterns, exceptions, cleanup, async, compound assignment |
-| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, member/index access, calls, `new`, named/ref/out arguments | Evaluation, conversions, overloads, generic calls, conditional expressions, construction semantics |
+| Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; repeated `?` diagnoses | Type resolution, optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
+| Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, return, assignment and expression statements | `require`, `for`/`foreach`, switch/patterns, exceptions, cleanup, async, compound assignment |
+| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, member/index access, calls, `new`, named/ref/out arguments | Cast syntax/binding, character literals, evaluation, conversions, overloads, generic calls, conditional expressions, constructor generic inference |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
 Only the grammar below is supported. Unsupported constructs diagnose rather than
@@ -34,7 +34,7 @@ struct      = "struct" name "{" (field | constructor | function)* "}"
 field       = modifiers type name ("=" expression)? ";"
 constructor = modifiers containingTypeName parameters block
 parameters  = "(" (mode? type name ("," mode? type name)*)? ")"
-type        = qualifiedName ("<" type ("," type)* ">")? "?"* | "void"
+type        = (qualifiedName | "void") ("<" type ("," type)* ">")? "?"?
 mode        = "ref" | "mut" "ref" | "out"
 local       = "mut"? ("var" | type) name "=" expression ";"
 statement   = block | local | if | while | return | assignment | expression ";" | ";"
@@ -51,6 +51,13 @@ first: postfix; unary `+ - ! ~`; `* / %`; `+ -`; `< <= > >=`; `== !=`; `&`; `^`;
 brackets into shift tokens. Generic-call/comparison ambiguities are not solved by
 guessing semantic types in the lexer. See [lexical grammar](lexical-grammar.md)
 for precise number, string, identifier and newline rules.
+
+`TRM1005` marks each extra optional modifier in `int32??`, `T??`, or
+`T? /* trivia */ ?`. Recovery retains every modifier and continues parsing.
+`List<int32?>?` and `T?` remain valid syntax; determining that `T` is already
+optional and normalizing its substituted type is future binder work.
+Explicit `Option<Option<T>>` syntax is unchanged. `syntax-1` publishes this
+rejection rule; the JSON schema remains 1 because its data shape is unchanged.
 
 ## Public syntax API
 
