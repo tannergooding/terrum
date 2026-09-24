@@ -1,0 +1,21 @@
+# Design samples
+
+These are **source sketches, not executable tests or compiled MVP programs**. The current P0 host is syntax-only and does not implement the semantics illustrated here. `.api.terrum` is an API-signature sketch with selected bodies, not a complete implementation or an implied foreign import. Compare expected behavior as design acceptance criteria, not as observed compiler output. See [language](language.md), [lifetimes](lifetimes.md), [libraries](libraries.md) and [implementation](implementation.md).
+
+| Program | Source | Design contract / expected behavior |
+|---|---|---|
+| Hello world | [hello-world](../samples/design/hello-world.terrum) | `void Main`; `Hello, world!`, exit 0 |
+| Async hello | [hello-async](../samples/design/hello-async.terrum) | `MainAsync`, `Task == Task<void>`, rooted arguments through completion; two lines with optional first argument |
+| Mandelbrot | [mandelbrot](../samples/design/mandelbrot.terrum) | Strict float32, explicit conversions, PBM; `5 3` yields rows `0 0 0 0 0`, `1 1 1 1 0`, `0 0 0 0 0`; invalid dimensions exit 2 |
+| Calculator | [calculator](../samples/design/calculator.terrum) | Checked `int32`, `bool`/status conditional `out`, ASCII operator tokens; `7 / 3 = 2`, `-7 % 3 = -1`, min-int remainder `-1 = 0`; overflow/errors exit 2 |
+| Collections | [collections](../samples/design/collections.terrum) | Incremental target builder, guarded writable span, attached/detached linked node identity, present-null versus missing; output `20`, `40`, `20`, `11`, `11`, `present, absent payload`, `missing element` |
+| Random composition | [random-composition](../samples/design/random-composition.terrum) | `IRandom` dispatch without payload copy; stored generic needs `[Sized]`; four words `A5A5A5A5`, `A5A5A5A4`, `A5A5A5A7`, `A5A5A5A6` |
+| Values/ownership | [types-and-ownership](../samples/design/types-and-ownership.terrum) | Copy struct vs shared class handle vs moved unique class, normalized optional, generic decimal parse and `own Text` |
+| Text/spans | [text-and-spans](../samples/design/text-and-spans.terrum) | Explicit `Span` interface projection, annotation-free single-source generic forwarding, immutable text validity, ASCII-only numeric tokens; `hello`, `1`, `Unicode lookalikes rejected.` |
+| Formatting/construction | [construction-and-formatting](../samples/design/construction-and-formatting.terrum) | Typed nested Point/scalar writer forwarding, borrowed hole, `require`, owning text target and collection builder; `point = (3, 4)`, `saved = (3, 4)`, `4` |
+| Numerics/tensors | [numerics-and-tensors](../samples/design/numerics-and-tensors.terrum) | Generic math/SIMD composition, distinct lane masks, masked tails, writable tensor projection and explicit dense-view reduction; no execution or performance claim |
+| Win32 + Direct3D 11 triangle | [overview](../samples/design/win32-dx11-triangle/README.md), [main](../samples/design/win32-dx11-triangle/main.terrum), [interop API](../samples/design/win32-dx11-triangle/interop.api.terrum), [shader](../samples/design/win32-dx11-triangle/triangle.hlsl), [NOTICE](../samples/design/win32-dx11-triangle/NOTICE.txt) | Intended cyan triangle on dark blue; window close exits 0; device removal reports and exits 3. Requires later native ownership/callback/ABI implementation |
+
+The calculator must reject U+0661/U+FF11 digits, U+2212 minus and U+FF0B operator rather than normalize them into ASCII. `mandelbrot` marks points bounded after 64 updates, not proven set membership. Async entry returns only after both writes and required cleanup. Nothing here claims a Terrum compiler produced an image, window, executable or output.
+
+The triangle's `NOTICE.txt` contains the Microsoft Tutorial02 attribution and license. Its README describes platform contracts and deliberate exclusions rather than a runnable recipe. All design examples use provisional source notation; unsupported declarations are not silently treated as a compiler feature. For current executable parser/syntax fixtures, consult [implementation](implementation.md) instead.

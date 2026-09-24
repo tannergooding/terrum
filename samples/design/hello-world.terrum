@@ -1,0 +1,7 @@
+// Terrum source sketch.
+using Terrum;
+
+public static void Main()
+{
+    Terminal.WriteLine("Hello, world!");
+}

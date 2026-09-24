@@ -1,0 +1,47 @@
+// DESIGN ONLY: conceptual SIMD contracts; associated-family syntax and target ABI are open.
+namespace Terrum.Numerics;
+
+// TElement describes lanes, TVector the complete shape, TMask its boolean lane mask.
+// The explicit type parameters stand in for a checked associated-family relationship.
+// Compose the same generic operator protocol used by scalar and tensor code.
+// No INumber/IScalarNumber inheritance is implied for any vector.
+public interface ISimdVector<TVector, TElement, TMask>
+    : IAdditionOperators<TVector, TVector, TVector>
+    where TVector : ISimdVector<TVector, TElement, TMask>, [Copy]
+    where TElement : [SimdElement], [Copy]
+    where TMask : ISimdMask<TMask, TVector, TElement>
+{
+    static abstract nuint LaneCount { get; }
+    static abstract TVector Splat(TElement value);
+    static abstract TVector Load(Span<TElement> source);
+    static abstract TVector LoadMasked(Span<TElement> source, TMask active, TElement inactive);
+    static abstract void Store(TVector value, mut Span<TElement> destination);
+    static abstract void StoreMasked(TVector value, TMask active, mut Span<TElement> destination);
+    static abstract TMask CompareEqual(TVector left, TVector right);
+    static abstract TMask CompareLessThan(TVector left, TVector right);
+    static abstract TVector Select(TMask condition, TVector whenTrue, TVector whenFalse);
+}
+
+public interface ISimdMask<TMask, TVector, TElement>
+    where TMask : ISimdMask<TMask, TVector, TElement>, [Copy]
+    where TVector : ISimdVector<TVector, TElement, TMask>
+    where TElement : [SimdElement], [Copy]
+{
+    static abstract TMask First(nuint activeLanes);
+    static abstract bool Any(TMask value);
+    static abstract bool All(TMask value);
+}
+
+// Fixed vector shapes are sized and may appear in fields/arrays if their lane type
+// meets the layout constraints. Separate mask families mirror width and lane granularity.
+public struct simd128<T> : ISimdVector<simd128<T>, T, simd128mask<T>>
+    where T : [SimdElement], [Copy], [Sized];
+
+public struct simd128mask<T> : ISimdMask<simd128mask<T>, simd128<T>, T>
+    where T : [SimdElement], [Copy], [Sized];
+
+// The family above is a schematic spelling, not a parser-checked declaration.
+// The same contract applies independently to simd64/256/512 and their mask shapes.
+// A hardware-scalable simd<T> is sizeless: locals and compatible specialized calls,
+// but not ordinary fields, arrays, boxes, aggregates or suspension-spanning values.
+// It is not an alias of the host's preferred fixed-width register.

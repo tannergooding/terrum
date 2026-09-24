@@ -1,0 +1,81 @@
+// API signatures; implementations omitted. See README.md for contracts.
+using Terrum;
+using Terrum.Interop.DirectX;
+using Terrum.Interop.Windows;
+
+namespace Triangle.Interop;
+
+public unique struct ComOwner<TInterface>
+    where TInterface : [NativeComInterface]
+{
+    public TInterface* Pointer { get; }
+
+    public ComOwner<TInterface> Clone(); // AddRef; never an implicit handle copy.
+}
+
+public unique struct ComSlot<TInterface>
+    where TInterface : [NativeComInterface]
+{
+    public ComSlot(); // Initializes the native pointer cell to null.
+
+    public bool HasValue { get; }
+
+    public TInterface* Pointer { get; }
+
+    public mut TInterface** Address();
+
+    public mut ComOwner<TInterface> Take();
+}
+
+public unique struct WindowClassOwner
+{
+    public static unsafe WindowClassOwner Adopt(HINSTANCE instance, ATOM atom);
+}
+
+public unique struct WindowOwner
+{
+    public static unsafe WindowOwner Adopt(HWND handle);
+
+    public HWND Handle { get; }
+}
+
+public unique struct ContextBindingsGuard
+{
+    public unsafe ContextBindingsGuard(ID3D11DeviceContext* context);
+}
+
+public unique struct NativeUtf16Z
+{
+    public static NativeUtf16Z FromApplicationAsset(TextSpan filename);
+
+    public char16* Pointer { get; }
+}
+
+public static class NativeError
+{
+    public static void ThrowIfFailed(HRESULT status, TextSpan operation);
+
+    public static void RequireTrue(BOOL value, TextSpan operation);
+
+    public static void RequireAtom(ATOM value, TextSpan operation);
+
+    public static void RequireHandle(HMODULE value, TextSpan operation);
+
+    public static void RequireHandle(HWND value, TextSpan operation);
+
+    public static void RequireHandle(HDC value, TextSpan operation);
+}
+
+public static class NativeDiagnostics
+{
+    public static void WriteHResult(HRESULT status, TextSpan operation);
+
+    public static unsafe void WriteCompilerOutput(ID3DBlob* blob);
+}
+
+public static class Runtime
+{
+    [DoesNotReturn]
+    [NoThrow]
+    public static void FailFastCurrentException();
+}

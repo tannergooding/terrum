@@ -1,0 +1,69 @@
+// DESIGN ONLY: the P0 syntax-only front end does not bind or run these APIs.
+// No executable claim is made for associated masks, shape metadata or SIMD ABIs.
+using Terrum;
+using Terrum.Numerics;
+using Terrum.Numerics.Tensors;
+
+public static TVector AddBias<TVector, TMask>(TVector value, float32 bias)
+    where TVector : ISimdVector<TVector, float32, TMask>
+    where TMask : ISimdMask<TMask, TVector, float32>
+{
+    return value + TVector.Splat(bias);
+}
+
+// The caller must supply disjoint source and destination loans. This sketch checks
+// destination length but does not perform a runtime alias/overlap validation;
+// it is not a checked executable entry point until that precondition is proven.
+public static void AddBias128(
+    Span<float32> source, mut Span<float32> destination, float32 bias)
+{
+    if (destination.Length < source.Length)
+    {
+        throw new ArgumentException("Destination is too short.");
+    }
+
+    nuint width = simd128<float32>.LaneCount;
+    mut nuint offset = 0;
+
+    while (source.Length - offset >= width)
+    {
+        var block = simd128<float32>.Load(source.Slice(offset, width));
+        var result = AddBias<simd128<float32>, simd128mask<float32>>(block, bias);
+        simd128<float32>.Store(result, mut destination.Slice(offset, width));
+        offset = offset + width;
+    }
+
+    nuint remainder = source.Length - offset;
+
+    if (remainder != 0)
+    {
+        // Inactive lanes do not read or write beyond the provided slices.
+        var active = simd128mask<float32>.First(remainder);
+        var tail = simd128<float32>.LoadMasked(source.Slice(offset, remainder), active, 0.0f32);
+        var result = AddBias<simd128<float32>, simd128mask<float32>>(tail, bias);
+        simd128<float32>.StoreMasked(result, active, mut destination.Slice(offset, remainder));
+    }
+}
+
+// The caller supplies a validated immutable shape. View creation retains both
+// storage and any external shape-metadata dependency; it does not own either.
+public static float32 AddAndSum(
+    Span<float32> leftStorage,
+    Span<float32> rightStorage,
+    mut Span<float32> destinationStorage,
+    TensorShape shape)
+{
+    var left = TensorViews.View(leftStorage, shape, 0);
+    var right = TensorViews.View(rightStorage, shape, 0);
+    var destination = TensorViews.View(mut destinationStorage, shape, 0);
+
+    TensorPrimitives.Add(left, right, mut destination);
+
+    if (TensorViews.TryAsDenseSpan(destination, out var dense))
+    {
+        return TensorPrimitives.Sum(dense);
+    }
+
+    // A strided result needs logical-index traversal, not a pretend flat span.
+    throw new InvalidOperationException("This example requires a dense destination.");
+}

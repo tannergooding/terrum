@@ -1,0 +1,53 @@
+// DESIGN ONLY: eager, nonmaterializing algorithms over borrowed contiguous views.
+using Terrum;
+
+namespace Terrum.Collections.Algorithms;
+
+public interface IEqualityComparer<T>
+{
+    bool Equals(ref T left, ref T right);
+}
+
+public interface IKeyComparer<T> : IEqualityComparer<T>
+{
+    uint64 GetHashCode(ref T value);
+}
+
+public interface IMapper<TSource, TResult>
+{
+    TResult Map(ref TSource value);
+}
+
+public interface IPredicate<T>
+{
+    bool Test(ref T value);
+}
+
+public static class SpanAlgorithms
+{
+    // Missing is a bool, not a sentinel. The comparer may be an inline struct:
+    // constrained invocation never boxes it or snapshots source storage.
+    public static bool TryIndexOf<T, TComparer>(
+        Span<T> source, ref T value, mut ref TComparer comparer, out nuint index)
+        where TComparer : IEqualityComparer<T>;
+
+    // Destination capacity is checked before invoking any callback. Source and
+    // destination must not overlap, even for TSource == TResult; otherwise a
+    // stateful mapper or result write can invalidate a later source read.
+    // Exactly one callback per visited element; a callback failure can leave
+    // a valid written prefix without rolling it back.
+    public static void Select<TSource, TResult, TMapper>(
+        Span<TSource> source, mut Span<TResult> destination, mut ref TMapper mapper)
+        where TMapper : IMapper<TSource, TResult>;
+
+    // Require destination.Length >= source.Length before calling predicate so a
+    // stateful predicate is never replayed to count/filter. Disjoint buffers
+    // work; exact same-start in-place compaction is also safe because every
+    // predicate completes and its [Copy] input is read before each write,
+    // with write index <= read index. Reject displaced overlap before callbacks.
+    // Return written count; callback failure may leave an accepted prefix.
+    public static nuint Where<T, TPredicate>(
+        Span<T> source, mut Span<T> destination, mut ref TPredicate predicate)
+        where T : [Copy]
+        where TPredicate : IPredicate<T>;
+}

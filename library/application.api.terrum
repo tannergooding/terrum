@@ -1,0 +1,157 @@
+// DESIGN ONLY: API signatures with selected implementations. Inventory across modules.
+using Terrum.Threading.Tasks;
+
+namespace Terrum;
+
+public interface IContiguousSequence<T>
+{
+    Span<T> AsSpan();
+}
+
+// Language-defined view families; representation and conditional capabilities omitted.
+public struct Span<T> : IContiguousSequence<T>
+{
+    public nuint Length { get; }
+
+    public T this[nuint index] { get; mut set; }
+
+    public Span<T> Slice(nuint start, nuint length);
+
+    // Forwards existing backing, not the descriptor's own storage. Publishing
+    // this refinement through generic member contracts still needs final syntax.
+    Span<T> IContiguousSequence<T>.AsSpan();
+}
+
+// Immutable text ranges; publication/validity contracts are in the baseline.
+public struct TextSpan<TCodeUnit> : IContiguousSequence<TCodeUnit>, IFormattable
+    where TCodeUnit : [TextCodeUnit]
+{
+    public nuint Length { get; }
+
+    public Span<TCodeUnit> AsSpan();
+
+    public TextSpan AsTextSpan();
+
+    public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
+        where TWriter : ITextWriter;
+}
+
+// Encoding-erased contiguous range, not an alias for a default encoding.
+public struct TextSpan : IFormattable
+{
+    public bool EqualsOrdinal(TextSpan other);
+
+    public bool TryGetUtf8Span(out Span<char8> value);
+
+    public bool TryGetUtf16Span(out Span<char16> value);
+
+    public bool TryGetUtf32Span(out Span<char32> value);
+
+    public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
+        where TWriter : ITextWriter;
+}
+
+public struct InlineArray<T, const nuint N>
+    where T : [Sized]
+{
+    // Working annotation: returned element access follows receiver access.
+    [MatchedAccess]
+    public ref T this[nuint index] { get; }
+}
+
+// Immutable text with an explicitly supported GC-free own Text form.
+// This sketch's backing is contiguous; the final string representation remains open.
+[TextBuilder(nameof(Text.Create))]
+public class Text : IFormattable
+{
+    public TextSpan AsSpan();
+
+    public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
+        where TWriter : ITextWriter
+    {
+        return AsSpan().TryFormat(mut ref writer, format);
+    }
+
+    [TextTarget(nameof(content))]
+    public static own Text Create<TContent>(TContent content)
+        where TContent : IFormattable;
+}
+
+public interface ITextWriter
+{
+    mut bool TryWrite(TextSpan text);
+
+    mut bool TryWriteFormatted<TValue>(ref TValue value, TextSpan format)
+        where TValue : IFormattable;
+}
+
+public static class TextFormatting
+{
+    [TextTarget(nameof(content))]
+    public static bool TryWrite<TWriter, TContent>(mut ref TWriter writer, TContent content)
+        where TWriter : ITextWriter
+        where TContent : IFormattable
+    {
+        return writer.TryWriteFormatted(ref content, "");
+    }
+}
+
+public unique struct SpanTextWriter<TCodeUnit> : ITextWriter
+    where TCodeUnit : [TextCodeUnit]
+{
+    [Captures(nameof(destination))]
+    public SpanTextWriter(mut Span<TCodeUnit> destination);
+
+    public nuint Written { get; }
+
+    public mut bool TryWrite(TextSpan text);
+
+    public mut bool TryWriteFormatted<TValue>(ref TValue value, TextSpan format)
+        where TValue : IFormattable;
+}
+
+public enum TerminalOutput : int32
+{
+    Standard = 0,
+    Error = 1
+}
+
+// Standard-stream conveniences and writer access; input and terminal controls omitted.
+public static class Terminal
+{
+    [TextTarget(nameof(content))]
+    public static void Write<TContent>(TContent content, TerminalOutput output = TerminalOutput.Standard)
+        where TContent : IFormattable;
+
+    [TextTarget(nameof(content))]
+    public static void WriteLine<TContent>(TContent content, TerminalOutput output = TerminalOutput.Standard)
+        where TContent : IFormattable;
+
+    [TextTarget(nameof(content))]
+    public static Task WriteLineAsync<TContent>(TContent content, TerminalOutput output = TerminalOutput.Standard)
+        where TContent : IFormattable;
+
+    public static TextWriter Output { get; }
+
+    public static TextWriter Error { get; }
+}
+
+public class TextWriter : ITextWriter
+{
+    public mut bool TryWrite(TextSpan text);
+
+    public mut bool TryWriteFormatted<TValue>(ref TValue value, TextSpan format)
+        where TValue : IFormattable;
+
+    [TextTarget(nameof(content))]
+    public mut void Write<TContent>(TContent content)
+        where TContent : IFormattable;
+
+    [TextTarget(nameof(content))]
+    public mut void WriteLine<TContent>(TContent content)
+        where TContent : IFormattable;
+
+    [TextTarget(nameof(content))]
+    public mut Task WriteLineAsync<TContent>(TContent content)
+        where TContent : IFormattable;
+}

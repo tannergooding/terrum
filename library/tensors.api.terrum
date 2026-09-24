@@ -1,0 +1,65 @@
+// DESIGN ONLY: illustrative rank-dynamic tensor/primitive surface, not executable declarations.
+using Terrum;
+
+namespace Terrum.Numerics.Tensors;
+
+// Shape is immutable. Validate every length against the address/offset range,
+// then any zero dimension makes ElementCount zero without multiplying other
+// lengths or evaluating (length - 1) * stride for an empty view.
+// Lengths and signed element strides are copied into, or held through,
+// independently valid shape metadata; the borrowing form is not implicit.
+public struct TensorShape
+{
+    public nuint Rank { get; }
+    public nuint ElementCount { get; }
+    public Span<nuint> Lengths { get; }
+    public Span<nint> Strides { get; }
+}
+
+// One qualified tensor-view family over the same opaque backing dependencies as
+// Span<T>. A stored view keeps BOTH data and any externally backed shape metadata
+// live; a scoped lowering can carry those dependencies beside the descriptor.
+public struct TensorSpan<T>
+{
+    public TensorShape Shape { get; }
+    public nuint ElementCount { get; }
+    [MatchedAccess]
+    public ref T this[Span<nuint> indexes] { get; }
+
+    public TensorSpan<T> Slice(Span<nuint> origin, Span<nuint> lengths);
+    public TensorSpan<T> Transpose(Span<nuint> permutation);
+}
+
+public static class TensorViews
+{
+    // Constructing a view preserves dependencies from storage AND shape.
+    // A checked multi-source view contract is required; its syntax is not finalized.
+    public static TensorSpan<T> View<T>(Span<T> storage, TensorShape shape, nuint origin);
+    public static mut TensorSpan<T> View<T>(mut Span<T> storage, TensorShape shape, nuint origin);
+
+    // No promise to flatten an arbitrary transposed/broadcast tensor as a
+    // contiguous span. CopyTo requires equal logical shapes and either disjoint
+    // backings or exactly identical per-index mappings (a no-op). Displaced or
+    // differently strided overlap is rejected before writing; it never allocates
+    // a hidden temporary. Copies require [Copy] independently of view capability.
+    public static bool TryAsDenseSpan<T>(TensorSpan<T> source, out Span<T> result);
+    public static void CopyTo<T>(TensorSpan<T> source, mut TensorSpan<T> destination)
+        where T : [Copy];
+}
+
+// Elementwise operations preflight shape, destination extent and alias safety
+// before writes. They neither allocate nor silently broadcast/reduce dimensions.
+public static class TensorPrimitives
+{
+    public static void Add<T>(Span<T> left, Span<T> right, mut Span<T> destination)
+        where T : IAdditionOperators<T, T, T>, [Copy];
+
+    public static T Sum<T>(Span<T> source)
+        where T : IAdditionOperators<T, T, T>, IAdditiveIdentity<T, T>, [Copy];
+
+    public static T Dot<T>(Span<T> left, Span<T> right)
+        where T : IAdditionOperators<T, T, T>, IMultiplyOperators<T, T, T>, IAdditiveIdentity<T, T>, [Copy];
+
+    public static void Add<T>(TensorSpan<T> left, TensorSpan<T> right, mut TensorSpan<T> destination)
+        where T : IAdditionOperators<T, T, T>, [Copy];
+}

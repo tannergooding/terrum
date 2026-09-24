@@ -1,0 +1,73 @@
+// Terrum source sketch. A deterministic fixture, not a statistical RNG.
+using Terrum;
+
+public interface IRandom
+{
+    mut uint32 NextUInt32();
+}
+
+public interface ISeedableRandom : IRandom
+{
+    mut void Reseed(uint32 seed);
+}
+
+public struct CounterRandom : ISeedableRandom
+{
+    private mut uint32 _next;
+
+    public CounterRandom(uint32 seed)
+    {
+        _next = seed;
+    }
+
+    public mut uint32 NextUInt32()
+    {
+        var result = _next;
+        _next = uint32.AddWrapping(_next, 1);
+
+        return result;
+    }
+
+    public mut void Reseed(uint32 seed)
+    {
+        _next = seed;
+    }
+}
+
+public unique struct DifferentRandom<TRandom> : IRandom
+    where TRandom : IRandom, [Sized]
+{
+    private mut TRandom _inner;
+    private uint32 _mask;
+
+    public DifferentRandom(TRandom inner, uint32 mask)
+    {
+        _inner = move inner;
+        _mask = mask;
+    }
+
+    public mut uint32 NextUInt32()
+    {
+        return _inner.NextUInt32() ^ _mask;
+    }
+}
+
+public static uint32 Draw<TRandom>(mut ref TRandom random)
+    where TRandom : IRandom
+{
+    return random.NextUInt32();
+}
+
+public static int32 Main()
+{
+    mut var random = new DifferentRandom<CounterRandom>(new CounterRandom(0), 0xA5A5A5A5);
+    mut int32 index = 0;
+
+    while (index < 4)
+    {
+        Terminal.WriteLine($"{Draw(mut ref random):X8}");
+        index = index + 1;
+    }
+
+    return 0;
+}

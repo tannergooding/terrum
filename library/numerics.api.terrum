@@ -1,0 +1,197 @@
+// DESIGN ONLY: API signatures with selected implementations. Primitive representation omitted.
+namespace Terrum;
+
+public interface IParsable<TSelf>
+    where TSelf : IParsable<TSelf>
+{
+    static abstract bool TryParse(TextSpan text, out TSelf value);
+}
+
+public interface IFormattable
+{
+    bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
+        where TWriter : ITextWriter;
+}
+
+// Operations compose independently of scalar classification. TOther and TResult
+// are not assumed to equal TSelf (vector/scalar, complex/real, and widening cases).
+public interface IAdditionOperators<TSelf, TOther, TResult>
+    where TSelf : IAdditionOperators<TSelf, TOther, TResult>
+{
+    static abstract TResult operator +(TSelf left, TOther right);
+}
+
+public interface IMultiplyOperators<TSelf, TOther, TResult>
+    where TSelf : IMultiplyOperators<TSelf, TOther, TResult>
+{
+    static abstract TResult operator *(TSelf left, TOther right);
+}
+
+public interface IAdditiveIdentity<TSelf, TResult>
+    where TSelf : IAdditiveIdentity<TSelf, TResult>
+{
+    static abstract TResult Zero { get; }
+}
+
+// Scalar classification and IEEE behavior are opt-in, not implied by arithmetic.
+// In particular ISimdVector<TVector, TElement, TMask> does not inherit IScalarNumber.
+public interface IScalarNumber<TSelf>
+    : IAdditionOperators<TSelf, TSelf, TSelf>,
+      IMultiplyOperators<TSelf, TSelf, TSelf>,
+      IAdditiveIdentity<TSelf, TSelf>
+    where TSelf : IScalarNumber<TSelf>
+{
+}
+
+public interface IScalarIeee754<TSelf> : IScalarNumber<TSelf>
+    where TSelf : IScalarIeee754<TSelf>
+{
+    static abstract bool IsNaN(TSelf value);
+    static abstract bool IsFinite(TSelf value);
+    static abstract TSelf FusedMultiplyAdd(TSelf left, TSelf right, TSelf addend);
+}
+
+public struct int32
+    : IParsable<int32>,
+      IFormattable,
+      IScalarNumber<int32>
+{
+    public static int32 Zero => 0;
+
+    public static int32 MinValue => -2147483648;
+
+    public static int32 MaxValue => 2147483647;
+
+    public int32 GetHashCode()
+    {
+        return this;
+    }
+
+    public static bool TryParse(TextSpan text, out int32 value);
+
+    public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
+        where TWriter : ITextWriter;
+
+    public static bool TryAdd(int32 left, int32 right, out int32 result)
+    {
+        return TryNarrow(int64.FromInt32(left) + int64.FromInt32(right), out result);
+    }
+
+    public static bool TrySubtract(int32 left, int32 right, out int32 result)
+    {
+        return TryNarrow(int64.FromInt32(left) - int64.FromInt32(right), out result);
+    }
+
+    public static bool TryMultiply(int32 left, int32 right, out int32 result)
+    {
+        return TryNarrow(int64.FromInt32(left) * int64.FromInt32(right), out result);
+    }
+
+    private static bool TryNarrow(int64 value, out int32 result)
+    {
+        if (value < int64.FromInt32(MinValue) || value > int64.FromInt32(MaxValue))
+        {
+            return false;
+        }
+
+        result = FromInt64Checked(value);
+
+        return true;
+    }
+
+    public static int32 FromInt64Checked(int64 value);
+
+    public static int32 FromChar16Checked(char16 value);
+
+    public static int32 FromBits(uint32 bits);
+}
+
+public struct float32
+    : IParsable<float32>,
+      IFormattable,
+      IScalarIeee754<float32>
+{
+    public static float32 Zero => 0.0f32;
+
+    // Numeric key equality treats all NaNs alike and -0 as +0.
+    public int32 GetKeyHashCode()
+    {
+        if (this == 0)
+        {
+            return 0;
+        }
+
+        if (IsNaN(this))
+        {
+            return int32.FromBits(0x7FC00000);
+        }
+
+        return int32.FromBits(ToBits(this));
+    }
+
+    public bool KeyEquals(float32 other)
+    {
+        return this == other || (IsNaN(this) && IsNaN(other));
+    }
+
+    public static bool IsNaN(float32 value);
+
+    public static bool IsFinite(float32 value);
+
+    public static float32 FusedMultiplyAdd(float32 left, float32 right, float32 addend);
+
+    public static uint32 ToBits(float32 value);
+
+    public static float32 FromInt32(int32 value);
+
+    public static float32 FromUInt32(uint32 value);
+
+    public static bool TryParse(TextSpan text, out float32 value);
+
+    public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
+        where TWriter : ITextWriter;
+}
+
+public struct decimal32
+    : IParsable<decimal32>,
+      IFormattable,
+      IScalarIeee754<decimal32>
+{
+    public static decimal32 Zero => 0;
+
+    public static decimal32 FromInt32(int32 value);
+
+    public static bool IsNaN(decimal32 value);
+
+    public static bool IsFinite(decimal32 value);
+
+    public static decimal32 FusedMultiplyAdd(decimal32 left, decimal32 right, decimal32 addend);
+
+    // Cohort-independent numeric equality/hash; NaNs and signed zero match float keys.
+    public bool KeyEquals(decimal32 other);
+
+    public int32 GetKeyHashCode();
+
+    public static bool TryParse(TextSpan text, out decimal32 value);
+
+    public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
+        where TWriter : ITextWriter;
+}
+
+// Additional primitive operations used by the samples.
+public struct int64
+{
+    public static int64 FromInt32(int32 value);
+}
+
+public struct uint32 : IFormattable
+{
+    public static uint32 AddWrapping(uint32 left, uint32 right);
+
+    public static uint32 FromInt32Checked(int32 value);
+
+    public static uint32 FromNUIntChecked(nuint value);
+
+    public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
+        where TWriter : ITextWriter;
+}

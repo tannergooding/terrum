@@ -1,0 +1,65 @@
+// DESIGN ONLY: representative explicit-ownership storage, not a complete allocator API.
+using Terrum;
+
+namespace Terrum.Collections;
+
+// An allocation-specific capability OWNS the actual backing allocation, its
+// address, byte extent, alignment and release action (including any provider
+// lifetime dependency). Merely retaining an allocator wrapper is not enough.
+public unique struct AllocationLease
+{
+    public nuint ByteLength { get; }
+    public nuint Alignment { get; }
+    public mut void Dispose();
+}
+
+// A move-only, independently valid provider handle for obtaining replacement
+// allocations. Vector owns this context for its entire lifetime; each buffer
+// separately owns its allocation lease. Providers may issue multiple handles.
+public unique struct AllocatorContext
+{
+    public mut AllocationLease Allocate(nuint byteLength, nuint alignment);
+    public mut void Dispose();
+}
+
+// Capacity is storage, not initialized T values. Adopt takes ownership of an
+// EXISTING allocation, never conjures memory from a release-only token.
+// Checked creation verifies capacity * sizeof(T), actual base-address alignment,
+// and any required tracing/write-barrier support for the complete element layout.
+public unique struct Buffer<T>
+    where T : [Sized]
+{
+    public nuint Capacity { get; }
+    public nuint Count { get; }
+
+    public static Buffer<T> Adopt(nuint capacity, AllocationLease storage);
+
+    // Only index == Count is a vacant next slot; capacity is not initialized.
+    public mut void Initialize(nuint index, T value);
+
+    public Span<T> AsSpan();
+
+    [ViewOf(Access.Write)]
+    public mut Span<T> GetWriteAccess();
+
+    public mut void Clear();
+}
+
+public unique struct Vector<T>
+    where T : [Sized], [Copy]
+{
+    public nuint Count { get; }
+    public nuint Capacity { get; }
+
+    // Takes the growth provider handle; it is not the current allocation.
+    public static Vector<T> Create(AllocatorContext allocator);
+
+    public mut void Add(T value);
+    // Allocate first, copy the initialized prefix into replacement storage,
+    // clean partial copies on failure and leave the old buffer unchanged.
+    // Publish only after success, then release the old lease. No Reserve
+    // while a loan to current storage is live; [Copy] is not a cost promise.
+    public mut void Reserve(nuint capacity);
+    public Span<T> AsSpan();
+    public mut void Clear();
+}

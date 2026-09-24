@@ -1,0 +1,45 @@
+// Terrum source sketch.
+using Terrum;
+
+public static bool HasContent<TSequence>(ref TSequence source)
+    where TSequence : IContiguousSequence<char8>
+{
+    return source.AsSpan().Length != 0;
+}
+
+public static Span<char8> ReadUnits<TSequence>(ref TSequence source)
+    where TSequence : IContiguousSequence<char8>
+{
+    return source.AsSpan();
+}
+
+public static int32 Main()
+{
+    TextSpan<char8> text = "hello";
+    Span<char8> units = ReadUnits(ref text);
+
+    if (!HasContent(ref text) || !HasContent(ref units))
+    {
+        Terminal.WriteLine("Expected both sequence projections to be nonempty.", output: TerminalOutput.Error);
+
+        return 2;
+    }
+
+    // AsSpan forgets text validity, not immutable backing.
+    Terminal.WriteLine(text.AsTextSpan());
+
+    if (!int32.TryParse("1", out var one) ||
+        int32.TryParse("\u0661", out var arabicIndic) ||
+        int32.TryParse("\uFF11", out var fullWidth) ||
+        int32.TryParse("\u22121", out var unicodeMinus))
+    {
+        Terminal.WriteLine("Expected ordinal-plus-invariant numeric parsing.", output: TerminalOutput.Error);
+
+        return 2;
+    }
+
+    Terminal.WriteLine(one);
+    Terminal.WriteLine("Unicode lookalikes rejected.");
+
+    return 0;
+}

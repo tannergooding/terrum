@@ -1,0 +1,13 @@
+// Terrum source sketch. The host keeps argument storage alive through completion.
+using Terrum;
+using Terrum.Threading.Tasks;
+
+public static async Task MainAsync(Span<TextSpan> args)
+{
+    await Terminal.WriteLineAsync("Hello, async world!");
+
+    if (args.Length != 0)
+    {
+        await Terminal.WriteLineAsync(args[0]);
+    }
+}
