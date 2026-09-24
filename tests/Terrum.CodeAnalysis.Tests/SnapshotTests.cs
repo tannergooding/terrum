@@ -1,4 +1,4 @@
-// Copyright (c) Tanner Gooding and Contributors. Licensed under the MIT License.
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using Terrum.CodeAnalysis.Syntax;
@@ -12,8 +12,8 @@ public sealed class SnapshotTests
     [Fact]
     public void AppliesAnAtomicOrderedEditBatchWithoutMutatingOriginal()
     {
-        SyntaxTree original = SyntaxTree.Parse("void F() { return; }", "source.terrum");
-        SyntaxTree changed = original.WithChanges(original.ContentId,
+        var original = SyntaxTree.Parse("void F() { return; }", "source.terrum");
+        var changed = original.WithChanges(original.ContentId,
         [
             new TextChange(new TextSpan(5, 1), "Main"),
             new TextChange(new TextSpan(11, 7), "Terminal.WriteLine(\"hello\");"),
@@ -28,13 +28,13 @@ public sealed class SnapshotTests
     [Fact]
     public void RejectsStaleOverlappingAndOutOfRangeChanges()
     {
-        SyntaxTree tree = SyntaxTree.Parse("void F() {}");
-        Assert.Throws<InvalidOperationException>(() => tree.WithChanges("stale", []));
-        Assert.Throws<ArgumentException>(() => tree.WithChanges(tree.ContentId,
+        var tree = SyntaxTree.Parse("void F() {}");
+        _ = Assert.Throws<InvalidOperationException>(() => tree.WithChanges("stale", []));
+        _ = Assert.Throws<ArgumentException>(() => tree.WithChanges(tree.ContentId,
             [new TextChange(new TextSpan(1, 3), ""), new TextChange(new TextSpan(2, 0), "x")]));
-        Assert.Throws<ArgumentException>(() => tree.WithChanges(tree.ContentId,
+        _ = Assert.Throws<ArgumentException>(() => tree.WithChanges(tree.ContentId,
             [new TextChange(new TextSpan(0, 0), "a"), new TextChange(new TextSpan(0, 0), "b")]));
-        Assert.Throws<ArgumentException>(() => tree.WithChanges(tree.ContentId, [new TextChange(new TextSpan(50, 0), "")]));
+        _ = Assert.Throws<ArgumentException>(() => tree.WithChanges(tree.ContentId, [new TextChange(new TextSpan(50, 0), "")]));
         Assert.Equal("void F() {}", tree.Root.ToFullString());
     }
 
@@ -44,7 +44,7 @@ public sealed class SnapshotTests
         Assert.Equal(SyntaxTree.Parse("a").ContentId, SyntaxTree.Parse("a", "other-path").ContentId);
         Assert.NotEqual(SyntaxTree.Parse("\uD800").ContentId, SyntaxTree.Parse("\uD801").ContentId);
         Assert.NotEqual(SyntaxTree.Parse("\uD800").ContentId, SyntaxTree.Parse("\uFFFD").ContentId);
-        SyntaxTree tree = SyntaxTree.Parse("void F() {}");
+        var tree = SyntaxTree.Parse("void F() {}");
         Assert.Equal(tree.ContentId, tree.WithChanges(tree.ContentId, []).ContentId);
     }
 }

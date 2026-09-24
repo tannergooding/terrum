@@ -1,4 +1,4 @@
-// Copyright (c) Tanner Gooding and Contributors. Licensed under the MIT License.
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.Collections.Generic;
@@ -27,7 +27,7 @@ internal static class Program
             return 0;
         }
 
-        bool json = args.Contains("--json", StringComparer.Ordinal);
+        var json = args.Contains("--json", StringComparer.Ordinal);
 
         if (args.Length is not (2 or 3) || args[0] is not ("check" or "tokens" or "tree")
             || (args.Length == 3 && args[2] != "--json") || args[1] == "--json")
@@ -43,12 +43,12 @@ internal static class Program
         {
             if (args[1] == "-")
             {
-                using Stream input = Console.OpenStandardInput();
+                using var input = Console.OpenStandardInput();
                 text = ReadUtf8(input);
             }
             else
             {
-                using FileStream input = File.OpenRead(args[1]);
+                using var input = File.OpenRead(args[1]);
                 text = ReadUtf8(input);
             }
         }
@@ -59,14 +59,14 @@ internal static class Program
             return 2;
         }
 
-        SourceText source = SourceText.From(text, args[1] == "-" ? "<stdin>" : args[1]);
-        SyntaxTree? tree = args[0] == "tokens" ? null : SyntaxTree.Parse(source);
+        var source = SourceText.From(text, args[1] == "-" ? "<stdin>" : args[1]);
+        var tree = args[0] == "tokens" ? null : SyntaxTree.Parse(source);
         ImmutableArray<SyntaxToken> tokens;
         ImmutableArray<Diagnostic> diagnostics;
 
         if (tree is null)
         {
-            LexResult lex = Lexer.Lex(source);
+            var lex = Lexer.Lex(source);
             tokens = lex.Tokens;
             diagnostics = lex.Diagnostics;
         }
@@ -75,7 +75,7 @@ internal static class Program
             tokens = tree.Tokens;
             diagnostics = tree.Diagnostics;
         }
-        bool hasErrors = diagnostics.Any(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        var hasErrors = diagnostics.Any(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
 
         if (json)
         {
@@ -85,9 +85,9 @@ internal static class Program
         {
             if (args[0] == "tokens")
             {
-                foreach (SyntaxToken token in tokens)
+                foreach (var token in tokens)
                 {
-                    Console.Out.WriteLine(FormattableString.Invariant($"{token.Kind} [{token.Span.Start}..{token.Span.End}) {JsonSerializer.Serialize(token.Text)}"));
+                    Console.Out.WriteLine(FormattableString.Invariant($"{token.Kind} [{token.Span.Start}..{token.Span.End}) \"{JsonEncodedText.Encode(token.Text)}\""));
                 }
             }
             else if (args[0] == "tree" && tree is not null)
@@ -95,10 +95,10 @@ internal static class Program
                 WriteTree(tree.Root);
             }
 
-            foreach (Diagnostic diagnostic in diagnostics)
+            foreach (var diagnostic in diagnostics)
             {
-                LinePosition position = source.GetLinePosition(diagnostic.Span.Start);
-                Console.Error.WriteLine(FormattableString.Invariant($"{source.Path}({position.Line + 1},{position.Character + 1}): {diagnostic.Severity.ToString().ToLowerInvariant()} {diagnostic.Code}: {diagnostic.Message}"));
+                var position = source.GetLinePosition(diagnostic.Span.Start);
+                Console.Error.WriteLine(FormattableString.Invariant($"{source.Path}({position.Line + 1},{position.Character + 1}): {GetSeverityText(diagnostic.Severity)} {diagnostic.Code}: {diagnostic.Message}"));
             }
 
             if (args[0] == "check" && !hasErrors)
@@ -114,9 +114,9 @@ internal static class Program
     {
         // Do not let StreamReader's BOM detection silently switch to UTF-16 or replace invalid bytes.
         using var reader = new StreamReader(input, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-        string text = reader.ReadToEnd();
+        var text = reader.ReadToEnd();
 
-        return text.StartsWith('\uFEFF') ? text[1..] : text;
+        return text.StartsWith('\uFEFF', StringComparison.Ordinal) ? text[1..] : text;
     }
 
     private static void WriteTree(SyntaxNode root)
@@ -124,7 +124,7 @@ internal static class Program
         var pending = new Stack<(SyntaxElement Element, int Depth)>();
         pending.Push((root, 0));
 
-        while (pending.TryPop(out (SyntaxElement Element, int Depth) item))
+        while (pending.TryPop(out var item))
         {
             string indentation = new(' ', Math.Min(item.Depth, 40) * 2);
 
@@ -132,14 +132,14 @@ internal static class Program
             {
                 Console.Out.WriteLine(FormattableString.Invariant($"{indentation}{node.Kind} [{node.Span.Start}..{node.Span.End})"));
 
-                for (int index = node.Children.Length - 1; index >= 0; index--)
+                for (var index = node.Children.Length - 1; index >= 0; index--)
                 {
                     pending.Push((node.Children[index], item.Depth + 1));
                 }
             }
             else if (item.Element is SyntaxTokenElement leaf)
             {
-                Console.Out.WriteLine($"{indentation}{leaf.Token.Kind}{(leaf.Token.IsMissing ? " missing" : "")} {JsonSerializer.Serialize(leaf.Token.Text)}");
+                Console.Out.WriteLine($"{indentation}{leaf.Token.Kind}{(leaf.Token.IsMissing ? " missing" : "")} \"{JsonEncodedText.Encode(leaf.Token.Text)}\"");
             }
         }
     }
@@ -166,10 +166,10 @@ internal static class Program
 
         if (command != "check")
         {
-            SyntaxToken[] tokens = command == "tree" && tree is not null ? tree.Root.DescendantTokens().ToArray() : lexicalTokens.ToArray();
+            var tokens = command == "tree" && tree is not null ? tree.Root.DescendantTokens().ToArray() : [.. lexicalTokens];
             writer.WriteStartArray("tokens");
 
-            foreach (SyntaxToken token in tokens)
+            foreach (var token in tokens)
             {
                 WriteToken(writer, token);
             }
@@ -178,16 +178,16 @@ internal static class Program
 
             if (command == "tree" && tree is not null)
             {
-                SyntaxNode[] nodes = tree.Root.DescendantNodes(includeSelf: true).ToArray();
+                var nodes = tree.Root.DescendantNodes(includeSelf: true).ToArray();
                 var nodeIds = new Dictionary<SyntaxNode, int>();
                 var tokenIds = new Dictionary<SyntaxToken, int>();
 
-                for (int index = 0; index < nodes.Length; index++)
+                for (var index = 0; index < nodes.Length; index++)
                 {
                     nodeIds.Add(nodes[index], index);
                 }
 
-                for (int index = 0; index < tokens.Length; index++)
+                for (var index = 0; index < tokens.Length; index++)
                 {
                     tokenIds.Add(tokens[index], index);
                 }
@@ -195,7 +195,7 @@ internal static class Program
                 writer.WriteNumber("root", 0);
                 writer.WriteStartArray("nodes");
 
-                foreach (SyntaxNode node in nodes)
+                foreach (var node in nodes)
                 {
                     writer.WriteStartObject();
                     writer.WriteString("kind", node.Kind.ToString());
@@ -203,7 +203,7 @@ internal static class Program
                     WriteSpan(writer, "fullSpan", node.FullSpan);
                     writer.WriteStartArray("children");
 
-                    foreach (SyntaxElement child in node.Children)
+                    foreach (var child in node.Children)
                     {
                         writer.WriteStartObject();
 
@@ -241,7 +241,7 @@ internal static class Program
         WriteSpan(writer, "fullSpan", token.FullSpan);
         writer.WriteStartArray("leadingTrivia");
 
-        foreach (SyntaxTrivia trivia in token.LeadingTrivia)
+        foreach (var trivia in token.LeadingTrivia)
         {
             writer.WriteStartObject();
             writer.WriteString("kind", trivia.Kind.ToString());
@@ -254,17 +254,24 @@ internal static class Program
         writer.WriteEndObject();
     }
 
+    private static string GetSeverityText(DiagnosticSeverity severity) => severity switch {
+        DiagnosticSeverity.Error => "error",
+        DiagnosticSeverity.Warning => "warning",
+        DiagnosticSeverity.Info => "info",
+        _ => throw new ArgumentOutOfRangeException(nameof(severity)),
+    };
+
     private static void WriteDiagnostics(Utf8JsonWriter writer, SourceText source, ImmutableArray<Diagnostic> diagnostics)
     {
         writer.WriteStartArray("diagnostics");
 
-        foreach (Diagnostic diagnostic in diagnostics)
+        foreach (var diagnostic in diagnostics)
         {
-            LinePosition start = source.GetLinePosition(diagnostic.Span.Start);
-            LinePosition end = source.GetLinePosition(diagnostic.Span.End);
+            var start = source.GetLinePosition(diagnostic.Span.Start);
+            var end = source.GetLinePosition(diagnostic.Span.End);
             writer.WriteStartObject();
             writer.WriteString("code", diagnostic.Code);
-            writer.WriteString("severity", diagnostic.Severity.ToString().ToLowerInvariant());
+            writer.WriteString("severity", GetSeverityText(diagnostic.Severity));
             writer.WriteString("message", diagnostic.Message);
             WriteSpan(writer, "span", diagnostic.Span);
             writer.WriteStartObject("range");

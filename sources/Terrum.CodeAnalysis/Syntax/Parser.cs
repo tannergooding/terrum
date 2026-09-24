@@ -1,8 +1,9 @@
-// Copyright (c) Tanner Gooding and Contributors. Licensed under the MIT License.
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Lexing;
@@ -35,16 +36,16 @@ internal sealed class Parser
 
         try
         {
-            bool seenDeclaration = false;
-            bool seenNamespace = false;
+            var seenDeclaration = false;
+            var seenNamespace = false;
 
             while (Current.Kind != TokenKind.EndOfFile)
             {
-                int start = _position;
+                var start = _position;
 
                 if (Current.Kind is TokenKind.UsingKeyword or TokenKind.NamespaceKeyword)
                 {
-                    bool isNamespace = Current.Kind == TokenKind.NamespaceKeyword;
+                    var isNamespace = Current.Kind == TokenKind.NamespaceKeyword;
 
                     if (seenDeclaration || (isNamespace && seenNamespace) || (!isNamespace && seenNamespace))
                     {
@@ -72,7 +73,7 @@ internal sealed class Parser
             children.Clear();
             var skipped = new List<SyntaxElement>(_tokens.Length - 1);
 
-            for (int index = 0; index < _tokens.Length - 1; index++)
+            for (var index = 0; index < _tokens.Length - 1; index++)
             {
                 _cancellationToken.ThrowIfCancellationRequested();
                 skipped.Add(new SyntaxTokenElement(_tokens[index]));
@@ -115,13 +116,13 @@ internal sealed class Parser
         if (Current.Text == "struct")
         {
             children.Add(Take());
-            SyntaxTokenElement name = Expect(TokenKind.Identifier);
+            var name = Expect(TokenKind.Identifier);
             children.Add(name);
             children.Add(Expect(TokenKind.OpenBrace));
 
             while (Current.Kind is not (TokenKind.CloseBrace or TokenKind.EndOfFile))
             {
-                int start = _position;
+                var start = _position;
                 children.Add(ParseDeclaration(name.Token.Text));
                 EnsureProgress(start, children);
             }
@@ -181,7 +182,7 @@ internal sealed class Parser
     private SyntaxNode SkipDeclaration()
     {
         var children = new List<SyntaxElement>();
-        int braces = 0;
+        var braces = 0;
 
         while (Current.Kind != TokenKind.EndOfFile)
         {
@@ -190,7 +191,7 @@ internal sealed class Parser
                 break;
             }
 
-            TokenKind kind = Current.Kind;
+            var kind = Current.Kind;
             children.Add(Take());
 
             if (kind == TokenKind.OpenBrace)
@@ -259,7 +260,7 @@ internal sealed class Parser
 
         while (Current.Kind is not (TokenKind.CloseParen or TokenKind.OpenBrace or TokenKind.EndOfFile))
         {
-            int start = _position;
+            var start = _position;
             var parameter = new List<SyntaxElement>();
             ParsePassingMode(parameter);
             parameter.Add(ParseType());
@@ -291,7 +292,7 @@ internal sealed class Parser
         if (Current.Kind != TokenKind.OpenBrace)
         {
             Report("TRM1001", "Expected a braced block.", new TextSpan(Current.Span.Start, 0));
-            SyntaxNode missingBlock = Node(SyntaxKind.Block, [Missing(TokenKind.OpenBrace), Missing(TokenKind.CloseBrace)]);
+            var missingBlock = Node(SyntaxKind.Block, [Missing(TokenKind.OpenBrace), Missing(TokenKind.CloseBrace)]);
             _depth--;
 
             return missingBlock;
@@ -306,7 +307,7 @@ internal sealed class Parser
                 break;
             }
 
-            int start = _position;
+            var start = _position;
             children.Add(ParseStatement());
             EnsureProgress(start, children);
         }
@@ -317,6 +318,7 @@ internal sealed class Parser
         return Node(SyntaxKind.Block, children);
     }
 
+    [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Other tokens enter expression parsing or recovery; they are not distinct statement forms.")]
     private SyntaxNode ParseStatement()
     {
         Enter();
@@ -325,70 +327,70 @@ internal sealed class Parser
         switch (Current.Kind)
         {
             case TokenKind.OpenBrace:
-                {
-                    node = ParseBlock();
-                    break;
-                }
+            {
+                node = ParseBlock();
+                break;
+            }
             case TokenKind.IfKeyword:
             case TokenKind.WhileKeyword:
-                {
-                    bool isIf = Current.Kind == TokenKind.IfKeyword;
-                    var children = new List<SyntaxElement>
-                {
+            {
+                var isIf = Current.Kind == TokenKind.IfKeyword;
+                var children = new List<SyntaxElement>
+            {
                     Take(), Expect(TokenKind.OpenParen), ParseExpression(), Expect(TokenKind.CloseParen), ParseBlock(),
                 };
 
-                    if (isIf && Current.Kind == TokenKind.ElseKeyword)
-                    {
-                        var clause = new List<SyntaxElement> { Take() };
-                        clause.Add(Current.Kind == TokenKind.IfKeyword ? ParseStatement() : ParseBlock());
-                        children.Add(Node(SyntaxKind.ElseClause, clause));
-                    }
-
-                    node = Node(isIf ? SyntaxKind.IfStatement : SyntaxKind.WhileStatement, children);
-                    break;
-                }
-            case TokenKind.ReturnKeyword:
+                if (isIf && Current.Kind == TokenKind.ElseKeyword)
                 {
-                    var children = new List<SyntaxElement> { Take() };
+                    var clause = new List<SyntaxElement> { Take() };
+                    clause.Add(Current.Kind == TokenKind.IfKeyword ? ParseStatement() : ParseBlock());
+                    children.Add(Node(SyntaxKind.ElseClause, clause));
+                }
 
-                    if (Current.Kind is not (TokenKind.Semicolon or TokenKind.CloseBrace or TokenKind.EndOfFile))
+                node = Node(isIf ? SyntaxKind.IfStatement : SyntaxKind.WhileStatement, children);
+                break;
+            }
+            case TokenKind.ReturnKeyword:
+            {
+                var children = new List<SyntaxElement> { Take() };
+
+                if (Current.Kind is not (TokenKind.Semicolon or TokenKind.CloseBrace or TokenKind.EndOfFile))
+                {
+                    children.Add(ParseExpression());
+                }
+
+                children.Add(Expect(TokenKind.Semicolon));
+                node = Node(SyntaxKind.ReturnStatement, children);
+                break;
+            }
+            case TokenKind.Semicolon:
+            {
+                node = Node(SyntaxKind.EmptyStatement, [Take()]);
+                break;
+            }
+            default:
+            {
+                if (Current.Kind is TokenKind.VarKeyword or TokenKind.MutKeyword || LooksLikeLocal())
+                {
+                    node = ParseLocal();
+                }
+                else
+                {
+                    var children = new List<SyntaxElement> { ParseExpression() };
+                    var assignment = Current.Kind == TokenKind.Equals;
+
+                    if (assignment)
                     {
+                        children.Add(Take());
                         children.Add(ParseExpression());
                     }
 
                     children.Add(Expect(TokenKind.Semicolon));
-                    node = Node(SyntaxKind.ReturnStatement, children);
-                    break;
+                    node = Node(assignment ? SyntaxKind.AssignmentStatement : SyntaxKind.ExpressionStatement, children);
                 }
-            case TokenKind.Semicolon:
-                {
-                    node = Node(SyntaxKind.EmptyStatement, [Take()]);
-                    break;
-                }
-            default:
-                {
-                    if (Current.Kind is TokenKind.VarKeyword or TokenKind.MutKeyword || LooksLikeLocal())
-                    {
-                        node = ParseLocal();
-                    }
-                    else
-                    {
-                        var children = new List<SyntaxElement> { ParseExpression() };
-                        bool assignment = Current.Kind == TokenKind.Equals;
 
-                        if (assignment)
-                        {
-                            children.Add(Take());
-                            children.Add(ParseExpression());
-                        }
-
-                        children.Add(Expect(TokenKind.Semicolon));
-                        node = Node(assignment ? SyntaxKind.AssignmentStatement : SyntaxKind.ExpressionStatement, children);
-                    }
-
-                    break;
-                }
+                break;
+            }
         }
 
         _depth--;
@@ -421,7 +423,7 @@ internal sealed class Parser
             return false;
         }
 
-        int offset = 1;
+        var offset = 1;
 
         while (Peek(offset).Kind == TokenKind.Dot && Peek(offset + 1).Kind == TokenKind.Identifier)
         {
@@ -430,12 +432,12 @@ internal sealed class Parser
 
         if (Peek(offset).Kind == TokenKind.Less)
         {
-            int nesting = 0;
+            var nesting = 0;
 
             do
             {
                 _cancellationToken.ThrowIfCancellationRequested();
-                TokenKind kind = Peek(offset++).Kind;
+                var kind = Peek(offset++).Kind;
 
                 if (kind == TokenKind.Less)
                 {
@@ -465,7 +467,7 @@ internal sealed class Parser
     {
         Enter();
         SyntaxNode left;
-        int unaryPrecedence = UnaryPrecedence(Current.Kind);
+        var unaryPrecedence = UnaryPrecedence(Current.Kind);
 
         if (unaryPrecedence != 0 && unaryPrecedence >= parentPrecedence)
         {
@@ -478,7 +480,7 @@ internal sealed class Parser
 
         while (true)
         {
-            int precedence = BinaryPrecedence(Current.Kind);
+            var precedence = BinaryPrecedence(Current.Kind);
 
             if (precedence == 0 || precedence <= parentPrecedence)
             {
@@ -500,7 +502,7 @@ internal sealed class Parser
         if (Current.Kind == TokenKind.OpenParen)
         {
             var children = new List<SyntaxElement> { Take() };
-            bool isVoid = Current.Kind == TokenKind.CloseParen;
+            var isVoid = Current.Kind == TokenKind.CloseParen;
 
             if (!isVoid)
             {
@@ -557,7 +559,7 @@ internal sealed class Parser
 
         while (Current.Kind is not (TokenKind.CloseParen or TokenKind.Semicolon or TokenKind.CloseBrace or TokenKind.EndOfFile))
         {
-            int start = _position;
+            var start = _position;
             var argument = new List<SyntaxElement>();
 
             if (Current.Kind == TokenKind.Identifier && Peek(1).Kind == TokenKind.Colon)
@@ -566,7 +568,7 @@ internal sealed class Parser
                 argument.Add(Take());
             }
 
-            bool isOut = Current.Kind == TokenKind.OutKeyword;
+            var isOut = Current.Kind == TokenKind.OutKeyword;
             ParsePassingMode(argument);
 
             if (isOut && Current.Kind == TokenKind.VarKeyword)
@@ -639,7 +641,7 @@ internal sealed class Parser
     private SyntaxTokenElement Take()
     {
         _cancellationToken.ThrowIfCancellationRequested();
-        SyntaxToken token = Current;
+        var token = Current;
 
         if (_position < _tokens.Length - 1)
         {
@@ -672,8 +674,8 @@ internal sealed class Parser
 
     private static int UnaryPrecedence(TokenKind kind) => kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde ? 11 : 0;
 
-    private static int BinaryPrecedence(TokenKind kind) => kind switch
-    {
+    [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Non-operator tokens have zero precedence.")]
+    private static int BinaryPrecedence(TokenKind kind) => kind switch {
         TokenKind.Star or TokenKind.Slash or TokenKind.Percent => 10,
         TokenKind.Plus or TokenKind.Minus => 9,
         TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals => 7,
@@ -686,5 +688,7 @@ internal sealed class Parser
         _ => 0,
     };
 
+    [SuppressMessage("Design", "CA1032:Implement standard exception constructors", Justification = "Private parser unwind signal; always caught by ParseCompilationUnit.")]
+    [SuppressMessage("Design", "CA1064:Exceptions should be public", Justification = "Private parser unwind signal, never part of the public API.")]
     private sealed class NestingLimitException : Exception;
 }

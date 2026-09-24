@@ -1,4 +1,4 @@
-// Copyright (c) Tanner Gooding and Contributors. Licensed under the MIT License.
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.Linq;
@@ -23,7 +23,7 @@ public sealed class ParserTests
     [InlineData("void F() { var point = new Point(3, 4); }")]
     public void ParsesSupportedSyntax(string text)
     {
-        SyntaxTree tree = SyntaxTree.Parse(text);
+        var tree = SyntaxTree.Parse(text);
         Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
         AssertLossless(tree);
     }
@@ -34,7 +34,7 @@ public sealed class ParserTests
     [InlineData("void F() { return a || b && c; }", SyntaxKind.BinaryExpression, "||", "&&")]
     public void PreservesOperatorPrecedence(string text, SyntaxKind kind, string outer, string inner)
     {
-        SyntaxNode[] binaries = SyntaxTree.Parse(text).Root.DescendantNodes().Where(node => node.Kind == kind).ToArray();
+        var binaries = SyntaxTree.Parse(text).Root.DescendantNodes().Where(node => node.Kind == kind).ToArray();
         Assert.Equal(outer, Assert.IsType<SyntaxTokenElement>(binaries[0].Children[1]).Token.Text);
         Assert.Equal(inner, Assert.IsType<SyntaxTokenElement>(binaries[1].Children[1]).Token.Text);
     }
@@ -42,8 +42,8 @@ public sealed class ParserTests
     [Fact]
     public void BinaryOperatorsAssociateToTheLeft()
     {
-        SyntaxTree tree = SyntaxTree.Parse("int32 F() { return a - b - c; }");
-        SyntaxNode outer = tree.Root.DescendantNodes().First(node => node.Kind == SyntaxKind.BinaryExpression);
+        var tree = SyntaxTree.Parse("int32 F() { return a - b - c; }");
+        var outer = tree.Root.DescendantNodes().First(node => node.Kind == SyntaxKind.BinaryExpression);
         Assert.Equal(SyntaxKind.BinaryExpression, Assert.IsType<SyntaxNode>(outer.Children[0]).Kind);
         Assert.Equal(SyntaxKind.NameExpression, Assert.IsType<SyntaxNode>(outer.Children[2]).Kind);
     }
@@ -60,7 +60,7 @@ public sealed class ParserTests
     [InlineData("void F() { var x = $\"unsupported\"; }")]
     public void RecoversWithoutLosingText(string text)
     {
-        SyntaxTree tree = SyntaxTree.Parse(text);
+        var tree = SyntaxTree.Parse(text);
         Assert.True(tree.HasErrors);
         AssertLossless(tree);
         Assert.All(tree.Diagnostics, diagnostic => Assert.InRange(diagnostic.Span.End, 0, text.Length));
@@ -69,8 +69,8 @@ public sealed class ParserTests
     [Fact]
     public void MissingTokensAreExplicitAndDoNotInventText()
     {
-        SyntaxTree tree = SyntaxTree.Parse("void F() { return 1 }");
-        SyntaxToken missing = Assert.Single(tree.Root.DescendantTokens(), token => token.IsMissing);
+        var tree = SyntaxTree.Parse("void F() { return 1 }");
+        var missing = Assert.Single(tree.Root.DescendantTokens(), token => token.IsMissing);
         Assert.Equal(TokenKind.Semicolon, missing.Kind);
         Assert.Equal("", missing.Text);
         Assert.Equal(0, missing.Span.Length);
@@ -80,7 +80,7 @@ public sealed class ParserTests
     [Fact]
     public void UnsupportedDeclarationDoesNotHideFollowingFunction()
     {
-        SyntaxTree tree = SyntaxTree.Parse("enum E { A, B } void Main() { return; }");
+        var tree = SyntaxTree.Parse("enum E { A, B } void Main() { return; }");
         Assert.True(tree.HasErrors);
         Assert.Contains(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.FunctionDeclaration);
         AssertLossless(tree);
@@ -91,7 +91,7 @@ public sealed class ParserTests
     [InlineData("void F() { return; public static void G() {}")]
     public void MissingBlockDoesNotConsumeFollowingDeclaration(string text)
     {
-        SyntaxTree tree = SyntaxTree.Parse(text);
+        var tree = SyntaxTree.Parse(text);
         Assert.True(tree.HasErrors);
         Assert.Equal(2, tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.FunctionDeclaration));
         AssertLossless(tree);
@@ -100,13 +100,13 @@ public sealed class ParserTests
     [Fact]
     public void BoundsRecursiveNestingButTraversesLongLeftAssociativeTrees()
     {
-        string nested = "void F() { return " + new string('(', 2000) + "1" + new string(')', 2000) + "; }";
-        SyntaxTree tree = SyntaxTree.Parse(nested);
+        var nested = "void F() { return " + new string('(', 2000) + "1" + new string(')', 2000) + "; }";
+        var tree = SyntaxTree.Parse(nested);
         Assert.Contains(tree.Diagnostics, diagnostic => diagnostic.Code == "TRM1004");
         AssertLossless(tree);
 
-        string flat = "void F() { return " + string.Join("+", Enumerable.Repeat("1", 5000)) + "; }";
-        SyntaxTree flatTree = SyntaxTree.Parse(flat);
+        var flat = "void F() { return " + string.Join("+", Enumerable.Repeat("1", 5000)) + "; }";
+        var flatTree = SyntaxTree.Parse(flat);
         Assert.False(flatTree.HasErrors);
         AssertLossless(flatTree);
     }
@@ -116,7 +116,7 @@ public sealed class ParserTests
     {
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
-        Assert.Throws<OperationCanceledException>(() => SyntaxTree.Parse("void F() {}", cancellationToken: cancellation.Token));
+        _ = Assert.Throws<OperationCanceledException>(() => SyntaxTree.Parse("void F() {}", cancellationToken: cancellation.Token));
     }
 
     [Fact]
@@ -125,9 +125,9 @@ public sealed class ParserTests
         var random = new Random(12345);
         string[] pieces = ["void", "return", "x", "{", "}", "(", ")", "[", "]", ";", "+", "=", ",", " ", "\r\n", "\uD800", "/*", "\"", "mut", "ref", "<", ">"];
 
-        for (int iteration = 0; iteration < 200; iteration++)
+        for (var iteration = 0; iteration < 200; iteration++)
         {
-            string text = string.Concat(Enumerable.Range(0, 60).Select(_ => pieces[random.Next(pieces.Length)]));
+            var text = string.Concat(Enumerable.Range(0, 60).Select(_ => pieces[random.Next(pieces.Length)]));
             AssertLossless(SyntaxTree.Parse(text));
         }
     }
@@ -135,13 +135,13 @@ public sealed class ParserTests
     private static void AssertLossless(SyntaxTree tree)
     {
         Assert.Equal(tree.Source.Text, tree.Root.ToFullString());
-        Assert.Equal(tree.Tokens.ToArray(), tree.Root.DescendantTokens().Where(token => !token.IsMissing).ToArray());
+        Assert.Equal(tree.Tokens.ToArray(), [.. tree.Root.DescendantTokens().Where(token => !token.IsMissing)]);
         Assert.Equal(0, tree.Root.FullSpan.Start);
         Assert.Equal(tree.Source.Length, tree.Root.FullSpan.End);
 
-        foreach (SyntaxNode node in tree.Root.DescendantNodes(includeSelf: true))
+        foreach (var node in tree.Root.DescendantNodes(includeSelf: true))
         {
-            foreach (SyntaxElement child in node.Children)
+            foreach (var child in node.Children)
             {
                 Assert.True(node.FullSpan.Start <= child.FullSpan.Start);
                 Assert.True(node.FullSpan.End >= child.FullSpan.End);

@@ -1,4 +1,4 @@
-// Copyright (c) Tanner Gooding and Contributors. Licensed under the MIT License.
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
@@ -10,8 +10,10 @@ public abstract class SyntaxElement
 {
     private protected SyntaxElement() { }
 
+    /// <summary>Gets the half-open UTF-16 range excluding outer trivia.</summary>
     public abstract TextSpan Span { get; }
 
+    /// <summary>Gets the half-open UTF-16 range including leading trivia.</summary>
     public abstract TextSpan FullSpan { get; }
 }
 
@@ -23,9 +25,12 @@ public sealed class SyntaxTokenElement : SyntaxElement
         Token = token;
     }
 
+    /// <summary>Gets the token represented by this leaf.</summary>
     public SyntaxToken Token { get; }
 
+    /// <inheritdoc/>
     public override TextSpan Span => Token.Span;
 
+    /// <inheritdoc/>
     public override TextSpan FullSpan => Token.FullSpan;
 }

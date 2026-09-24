@@ -1,4 +1,4 @@
-// Copyright (c) Tanner Gooding and Contributors. Licensed under the MIT License.
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.Buffers;
@@ -10,9 +10,10 @@ using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Lexing;
 
+/// <summary>Tokenizes source snapshots without discarding trivia or malformed UTF-16.</summary>
 public sealed class Lexer
 {
-    private static readonly string[] NumericTags =
+    private static readonly string[] s_numericTags =
     [
         "i8", "i16", "i32", "i64", "i128",
         "u8", "u16", "u32", "u64", "u128",
@@ -30,19 +31,25 @@ public sealed class Lexer
         _cancellationToken = cancellationToken;
     }
 
+    /// <summary>Reads the complete token stream, including EOF, and reports lexical errors.</summary>
+    /// <param name="source">The immutable source snapshot to tokenize.</param>
+    /// <param name="cancellationToken">A token that cancels lexing by throwing, not by returning a partial result.</param>
+    /// <returns>Tokens and diagnostics in UTF-16 source coordinates.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="source"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     public static LexResult Lex(SourceText source, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
         cancellationToken.ThrowIfCancellationRequested();
         Lexer lexer = new(source, cancellationToken);
-        ImmutableArray<SyntaxToken>.Builder tokens = ImmutableArray.CreateBuilder<SyntaxToken>();
+        var tokens = ImmutableArray.CreateBuilder<SyntaxToken>();
 
         do
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ImmutableArray<SyntaxTrivia> trivia = lexer.ReadTrivia();
-            int start = lexer._position;
-            TokenKind kind = lexer.ReadToken();
+            var trivia = lexer.ReadTrivia();
+            var start = lexer._position;
+            var kind = lexer.ReadToken();
             TextSpan span = new(start, lexer._position - start);
             tokens.Add(new SyntaxToken(kind, source.GetSubText(span), span, trivia));
         }
@@ -55,20 +62,20 @@ public sealed class Lexer
     private char Current => AtEnd ? '\0' : _source[_position];
     private char Peek(int offset) => offset < _source.Length - _position ? _source[_position + offset] : '\0';
     private static bool IsDigit(char value) => value is >= '0' and <= '9';
-    private static bool IsHex(char value) => IsDigit(value) || value is >= 'a' and <= 'f' or >= 'A' and <= 'F';
+    private static bool IsHex(char value) => IsDigit(value) || value is (>= 'a' and <= 'f') or (>= 'A' and <= 'F');
     private static bool IsNewline(char value) => value is '\r' or '\n' or '\u0085' or '\u2028' or '\u2029';
     private static bool IsSpace(char value) =>
         value is '\t' or '\v' or '\f' or ' ' or '\u00A0' or '\u1680'
-            or >= '\u2000' and <= '\u200A' or '\u202F' or '\u205F' or '\u3000';
+            or (>= '\u2000' and <= '\u200A') or '\u202F' or '\u205F' or '\u3000';
 
     private ImmutableArray<SyntaxTrivia> ReadTrivia()
     {
-        ImmutableArray<SyntaxTrivia>.Builder trivia = ImmutableArray.CreateBuilder<SyntaxTrivia>();
+        var trivia = ImmutableArray.CreateBuilder<SyntaxTrivia>();
 
         while (!AtEnd)
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            int start = _position;
+            var start = _position;
             TriviaKind kind;
             if (IsSpace(Current))
             {
@@ -127,7 +134,7 @@ public sealed class Lexer
 
     private void AdvanceCommentScalar()
     {
-        if (TryScalar(_position, out _, out int width))
+        if (TryScalar(_position, out _, out var width))
         {
             _position += width;
         }
@@ -145,8 +152,8 @@ public sealed class Lexer
             return TokenKind.EndOfFile;
         }
 
-        int start = _position;
-        if (TryScalar(_position, out int scalar, out int width) && (scalar == '_' || UnicodeXid.IsStart(scalar)))
+        var start = _position;
+        if (TryScalar(_position, out var scalar, out var width) && (scalar == '_' || UnicodeXid.IsStart(scalar)))
         {
             _position += width;
             while (!AtEnd && TryScalar(_position, out scalar, out width) &&
@@ -172,30 +179,54 @@ public sealed class Lexer
         _position++;
         switch (_source[start])
         {
-            case '(': return TokenKind.OpenParen;
-            case ')': return TokenKind.CloseParen;
-            case '{': return TokenKind.OpenBrace;
-            case '}': return TokenKind.CloseBrace;
-            case '[': return TokenKind.OpenBracket;
-            case ']': return TokenKind.CloseBracket;
-            case ';': return TokenKind.Semicolon;
-            case ',': return TokenKind.Comma;
-            case '.': return TokenKind.Dot;
-            case ':': return TokenKind.Colon;
-            case '?': return TokenKind.Question;
-            case '+': return TokenKind.Plus;
-            case '-': return TokenKind.Minus;
-            case '*': return TokenKind.Star;
-            case '/': return TokenKind.Slash;
-            case '%': return TokenKind.Percent;
-            case '~': return TokenKind.Tilde;
-            case '^': return TokenKind.Caret;
-            case '!': return Compound('=', TokenKind.BangEquals, TokenKind.Bang);
-            case '=': return Compound('=', TokenKind.EqualsEquals, TokenKind.Equals);
-            case '<': return Compound('=', TokenKind.LessEquals, TokenKind.Less);
-            case '>': return Compound('=', TokenKind.GreaterEquals, TokenKind.Greater);
-            case '&': return Compound('&', TokenKind.AmpersandAmpersand, TokenKind.Ampersand);
-            case '|': return Compound('|', TokenKind.PipePipe, TokenKind.Pipe);
+            case '(':
+                return TokenKind.OpenParen;
+            case ')':
+                return TokenKind.CloseParen;
+            case '{':
+                return TokenKind.OpenBrace;
+            case '}':
+                return TokenKind.CloseBrace;
+            case '[':
+                return TokenKind.OpenBracket;
+            case ']':
+                return TokenKind.CloseBracket;
+            case ';':
+                return TokenKind.Semicolon;
+            case ',':
+                return TokenKind.Comma;
+            case '.':
+                return TokenKind.Dot;
+            case ':':
+                return TokenKind.Colon;
+            case '?':
+                return TokenKind.Question;
+            case '+':
+                return TokenKind.Plus;
+            case '-':
+                return TokenKind.Minus;
+            case '*':
+                return TokenKind.Star;
+            case '/':
+                return TokenKind.Slash;
+            case '%':
+                return TokenKind.Percent;
+            case '~':
+                return TokenKind.Tilde;
+            case '^':
+                return TokenKind.Caret;
+            case '!':
+                return Compound('=', TokenKind.BangEquals, TokenKind.Bang);
+            case '=':
+                return Compound('=', TokenKind.EqualsEquals, TokenKind.Equals);
+            case '<':
+                return Compound('=', TokenKind.LessEquals, TokenKind.Less);
+            case '>':
+                return Compound('=', TokenKind.GreaterEquals, TokenKind.Greater);
+            case '&':
+                return Compound('&', TokenKind.AmpersandAmpersand, TokenKind.Ampersand);
+            case '|':
+                return Compound('|', TokenKind.PipePipe, TokenKind.Pipe);
             default:
                 if (char.IsHighSurrogate(_source[start]) && !AtEnd && char.IsLowSurrogate(Current))
                 {
@@ -221,7 +252,7 @@ public sealed class Lexer
 
     private TokenKind ReadNumber()
     {
-        int start = _position;
+        var start = _position;
         while (!AtEnd && IsDigit(Current))
         {
             _cancellationToken.ThrowIfCancellationRequested();
@@ -238,13 +269,13 @@ public sealed class Lexer
             }
         }
 
-        bool malformedExponent = false;
+        var malformedExponent = false;
         if (Current is 'e' or 'E')
         {
-            int afterExponent = _position + 1;
-            bool sign = Peek(1) is '+' or '-';
-            bool nextStartsIdentifier = afterExponent < _source.Length &&
-                TryScalar(afterExponent, out int scalar, out _) &&
+            var afterExponent = _position + 1;
+            var sign = Peek(1) is '+' or '-';
+            var nextStartsIdentifier = afterExponent < _source.Length &&
+                TryScalar(afterExponent, out var scalar, out _) &&
                 (scalar == '_' || UnicodeXid.IsContinue(scalar));
             if (IsDigit(Peek(sign ? 2 : 1)) || sign || !nextStartsIdentifier)
             {
@@ -279,17 +310,17 @@ public sealed class Lexer
 
     private int ReadNumericTag()
     {
-        ReadOnlySpan<char> remaining = _source.Text.AsSpan(_position);
-        foreach (string tag in NumericTags)
+        var remaining = _source.Text.AsSpan(_position);
+        foreach (var tag in s_numericTags)
         {
             if (!remaining.StartsWith(tag, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            int end = _position + tag.Length;
+            var end = _position + tag.Length;
             if (end == _source.Length ||
-                !(TryScalar(end, out int scalar, out _) && (scalar == '_' || UnicodeXid.IsContinue(scalar))))
+                !(TryScalar(end, out var scalar, out _) && (scalar == '_' || UnicodeXid.IsContinue(scalar))))
             {
                 return tag.Length;
             }
@@ -300,8 +331,8 @@ public sealed class Lexer
 
     private TokenKind ReadString()
     {
-        int start = _position++;
-        bool terminated = false;
+        var start = _position++;
+        var terminated = false;
         while (!AtEnd && !IsNewline(Current))
         {
             _cancellationToken.ThrowIfCancellationRequested();
@@ -323,15 +354,15 @@ public sealed class Lexer
                 continue;
             }
 
-            int escapeStart = _position++;
+            var escapeStart = _position++;
             if (AtEnd || IsNewline(Current))
             {
                 Report("TRM0005", "Incomplete string escape.", escapeStart, 1);
                 break;
             }
 
-            char escape = Current;
-            if (TryScalar(_position, out _, out int escapeWidth))
+            var escape = _source.Text[_position];
+            if (TryScalar(_position, out _, out var escapeWidth))
             {
                 _position += escapeWidth;
             }
@@ -347,9 +378,9 @@ public sealed class Lexer
 
             if (escape is 'u' or 'U')
             {
-                int digits = escape == 'u' ? 4 : 8;
-                int value = 0;
-                int count = 0;
+                var digits = escape == 'u' ? 4 : 8;
+                var value = 0;
+                var count = 0;
                 while (count < digits && !AtEnd && IsHex(Current))
                 {
                     value = (value << 4) | (IsDigit(Current) ? Current - '0' : (Current | 0x20) - 'a' + 10);
@@ -374,7 +405,7 @@ public sealed class Lexer
 
     private bool TryScalar(int position, out int scalar, out int width)
     {
-        OperationStatus status = Rune.DecodeFromUtf16(_source.Text.AsSpan(position), out Rune rune, out width);
+        var status = Rune.DecodeFromUtf16(_source.Text.AsSpan(position), out var rune, out width);
         scalar = rune.Value;
 
         return status == OperationStatus.Done;
@@ -383,8 +414,7 @@ public sealed class Lexer
     private void Report(string code, string message, int start, int length)
         => _diagnostics.Add(new Diagnostic(code, DiagnosticSeverity.Error, message, new TextSpan(start, length)));
 
-    private static TokenKind Keyword(ReadOnlySpan<char> text) => text switch
-    {
+    private static TokenKind Keyword(ReadOnlySpan<char> text) => text switch {
         "using" => TokenKind.UsingKeyword,
         "namespace" => TokenKind.NamespaceKeyword,
         "public" => TokenKind.PublicKeyword,

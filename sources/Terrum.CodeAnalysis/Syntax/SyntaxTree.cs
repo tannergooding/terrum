@@ -1,4 +1,4 @@
-// Copyright (c) Tanner Gooding and Contributors. Licensed under the MIT License.
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.Buffers.Binary;
@@ -16,6 +16,7 @@ namespace Terrum.CodeAnalysis.Syntax;
 /// <summary>An immutable, source-owning parse snapshot shared by all tooling clients.</summary>
 public sealed class SyntaxTree
 {
+    /// <summary>Identifies the syntax contract used by this parser.</summary>
     public const string LanguageVersion = "syntax-0";
 
     private SyntaxTree(SourceText source, LexResult lexResult, SyntaxNode root, ImmutableArray<Diagnostic> diagnostics, CancellationToken cancellationToken)
@@ -27,11 +28,13 @@ public sealed class SyntaxTree
         ContentId = ComputeContentId(source.Text, cancellationToken);
     }
 
+    /// <summary>Gets the source snapshot represented by this tree.</summary>
     public SourceText Source { get; }
 
     /// <summary>The lexical stream, including EOF; parser-inserted missing tokens occur only in Root.</summary>
     public ImmutableArray<SyntaxToken> Tokens { get; }
 
+    /// <summary>Gets the parsed compilation-unit node, including any recovery syntax.</summary>
     public SyntaxNode Root { get; }
 
     /// <summary>Lexical and parser diagnostics ordered by source position, then ordinal code.</summary>
@@ -40,11 +43,12 @@ public sealed class SyntaxTree
     /// <summary>SHA-256 of exact UTF-16LE code units, including malformed surrogates. Not a semantic identity.</summary>
     public string ContentId { get; }
 
+    /// <summary>Gets whether any lexical or parser diagnostic has error severity.</summary>
     public bool HasErrors
     {
         get
         {
-            foreach (Diagnostic diagnostic in Diagnostics)
+            foreach (var diagnostic in Diagnostics)
             {
                 if (diagnostic.Severity == DiagnosticSeverity.Error)
                 {
@@ -56,6 +60,13 @@ public sealed class SyntaxTree
         }
     }
 
+    /// <summary>Lexes and parses source text into an immutable snapshot.</summary>
+    /// <param name="text">The exact source content.</param>
+    /// <param name="path">The associated path, or an empty string for unnamed source.</param>
+    /// <param name="cancellationToken">A token to cancel parsing or content hashing.</param>
+    /// <returns>The source-owning parse snapshot.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="text"/> or <paramref name="path"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     public static SyntaxTree Parse(string text, string path = "", CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -63,18 +74,23 @@ public sealed class SyntaxTree
         return Parse(SourceText.From(text, path), cancellationToken);
     }
 
+    /// <summary>Lexes and parses an existing source snapshot.</summary>
+    /// <param name="source">The source snapshot to parse.</param>
+    /// <param name="cancellationToken">A token to cancel parsing or content hashing.</param>
+    /// <returns>The parsed snapshot, retaining <paramref name="source"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="source"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     public static SyntaxTree Parse(SourceText source, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(source);
-        LexResult lexResult = Lexer.Lex(source, cancellationToken);
+        var lexResult = Lexer.Lex(source, cancellationToken);
         var parser = new Parser(lexResult.Tokens, cancellationToken);
-        SyntaxNode root = parser.ParseCompilationUnit();
+        var root = parser.ParseCompilationUnit();
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
         diagnostics.AddRange(lexResult.Diagnostics);
         diagnostics.AddRange(parser.Diagnostics);
-        diagnostics.Sort(static (left, right) =>
-        {
-            int position = left.Span.Start.CompareTo(right.Span.Start);
+        diagnostics.Sort(static (left, right) => {
+            var position = left.Span.Start.CompareTo(right.Span.Start);
 
             return position != 0 ? position : string.CompareOrdinal(left.Code, right.Code);
         });
@@ -88,6 +104,14 @@ public sealed class SyntaxTree
     /// Changes must be ordered and nonoverlapping; multiple insertions at one position are rejected.
     /// No source file is written and no mutable workspace is updated.
     /// </summary>
+    /// <param name="expectedContentId">The content identifier expected for this original snapshot.</param>
+    /// <param name="changes">Edits in original-source coordinates, ordered by start offset.</param>
+    /// <param name="cancellationToken">A token to cancel validation, parsing, or content hashing.</param>
+    /// <returns>A fully reparsed snapshot with all changes applied; this tree remains unchanged.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="expectedContentId"/>, <paramref name="changes"/>, or an edit is null.</exception>
+    /// <exception cref="InvalidOperationException"><paramref name="expectedContentId"/> does not match this snapshot.</exception>
+    /// <exception cref="ArgumentException">Edits are out of order, overlap, repeat a start offset, or extend past the source.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     public SyntaxTree WithChanges(string expectedContentId, IReadOnlyList<TextChange> changes, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(expectedContentId);
@@ -100,10 +124,10 @@ public sealed class SyntaxTree
 
         cancellationToken.ThrowIfCancellationRequested();
         var builder = new StringBuilder();
-        int position = 0;
-        int previousStart = -1;
+        var position = 0;
+        var previousStart = -1;
 
-        foreach (TextChange change in changes)
+        foreach (var change in changes)
         {
             ArgumentNullException.ThrowIfNull(change);
             cancellationToken.ThrowIfCancellationRequested();
@@ -113,13 +137,13 @@ public sealed class SyntaxTree
                 throw new ArgumentException("Changes must be ordered, nonoverlapping, and within the original source.", nameof(changes));
             }
 
-            builder.Append(Source.Text, position, change.Span.Start - position);
-            builder.Append(change.NewText);
+            _ = builder.Append(Source.Text, position, change.Span.Start - position);
+            _ = builder.Append(change.NewText);
             previousStart = change.Span.Start;
             position = change.Span.End;
         }
 
-        builder.Append(Source.Text, position, Source.Length - position);
+        _ = builder.Append(Source.Text, position, Source.Length - position);
 
         return Parse(builder.ToString(), Source.Path, cancellationToken);
     }
@@ -127,16 +151,16 @@ public sealed class SyntaxTree
     private static string ComputeContentId(string text, CancellationToken cancellationToken)
     {
         // Encoding.Unicode replaces malformed surrogates. Hash the actual code units instead.
-        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         Span<byte> buffer = stackalloc byte[1024];
-        int position = 0;
+        var position = 0;
 
         while (position < text.Length)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            int count = Math.Min(buffer.Length / 2, text.Length - position);
+            var count = Math.Min(buffer.Length / 2, text.Length - position);
 
-            for (int index = 0; index < count; index++)
+            for (var index = 0; index < count; index++)
             {
                 BinaryPrimitives.WriteUInt16LittleEndian(buffer.Slice(index * 2, 2), text[position + index]);
             }

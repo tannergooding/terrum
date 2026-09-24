@@ -124,7 +124,7 @@ dotnet run --project sources\terrumc -- tokens samples\syntax\control-flow.terru
 dotnet run --project sources\terrumc -- tree samples\syntax\hello.terrum --json
 ```
 
-Use the built executable or `dotnet artifacts\bin\terrumc\debug\terrumc.dll ...`
+Use the built executable or `dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll ...`
 when stdout must contain only protocol output; `dotnet run` may print build
 messages. `-` reads stdin. Commands exit 0 for no relevant errors, 1 for lexical
 or syntax errors, and 2 for usage/input failures. `tokens` performs only lexical

@@ -1,4 +1,4 @@
-// Copyright (c) Tanner Gooding and Contributors. Licensed under the MIT License.
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.IO;
@@ -14,10 +14,10 @@ public sealed class FixtureTests
     [InlineData("control-flow.terrum")]
     public void PublishedSyntaxFixtureParsesAndRoundTrips(string name)
     {
-        string root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
-        string path = Path.Combine(root, "samples", "syntax", name);
-        string text = File.ReadAllText(path);
-        SyntaxTree tree = SyntaxTree.Parse(text, path);
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var path = Path.Combine(root, "samples", "syntax", name);
+        var text = File.ReadAllText(path);
+        var tree = SyntaxTree.Parse(text, path);
         Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
         Assert.Equal(text, tree.Root.ToFullString());
     }
@@ -28,10 +28,10 @@ public sealed class FixtureTests
     [InlineData("RangeTests.terrum")]
     public void InitialSelfHostCandidateHasSupportedSyntaxOnly(string name)
     {
-        string root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
-        string path = Path.Combine(root, "self-host", name);
-        string text = File.ReadAllText(path);
-        SyntaxTree tree = SyntaxTree.Parse(text, path);
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var path = Path.Combine(root, "self-host", name);
+        var text = File.ReadAllText(path);
+        var tree = SyntaxTree.Parse(text, path);
         Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
         Assert.Equal(text, tree.Root.ToFullString());
     }

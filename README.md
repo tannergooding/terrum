@@ -11,20 +11,32 @@ types, ownership or public contracts.
 
 ## Build
 
-Install the exact .NET SDK specified in `global.json`. The initial toolchain uses
-.NET 11 RC, already available on the development host; no system SDK installation
-is performed by the repository.
+Use the exact .NET 11 RC SDK specified in `global.json`. The default commands
+use an existing installation; `-architecture x64` acquires that version under
+`artifacts\dotnet` instead, without changing the system SDK installation.
 
 ```powershell
-dotnet build Terrum.slnx
-dotnet test Terrum.slnx --no-build
+.\restore.cmd
+.\build.cmd
+.\test.cmd
+.\pack.cmd
 dotnet run --project sources\terrumc -- check samples\syntax\hello.terrum
 dotnet run --project sources\terrumc -- tree samples\syntax\control-flow.terrum --json
 ```
 
-Outputs go to `artifacts`. Builds enable nullable analysis, checked host integer
-arithmetic, deterministic compilation and warnings as errors. Compiler arithmetic
-is not the implementation of Terrum numeric semantics.
+The wrappers use `scripts\build.ps1`, copied from TerraFX along with the build
+props/targets, EditorConfig and public signing key. Actions are explicit:
+`.\build.cmd -restore -test -configuration Release` restores, builds and tests;
+`.\pack.cmd` packages an existing build without publishing it. Direct
+`dotnet build Terrum.slnx` and `dotnet test Terrum.slnx` remain supported.
+See [build infrastructure](docs/building.md) for the few Terrum-specific changes.
+
+Outputs go to `artifacts\bin\<category>\<project>\<configuration>\<framework>`,
+intermediates to `artifacts\obj`, binary logs to `artifacts\log`, test results
+to `artifacts\tst` and packages to `artifacts\pkg`. Builds enforce TerraFX's
+analyzer/style policy, XML documentation, nullable analysis, public signing and
+trimming/AOT compatibility. Host overflow checks are enabled in Debug as in
+TerraFX; this is not the implementation of Terrum numeric semantics.
 
 ## Layout
 
@@ -45,7 +57,7 @@ The repository is the canonical design/development location.
 The bootstrap path targets .NET CLI IL, not LLVM. Terrum semantic IL will remain
 distinct from its eventual CLI lowering.
 
-For machine consumers use the built `artifacts\bin\terrumc\debug\terrumc.dll`
+For machine consumers use the built `artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll`
 rather than mixing `dotnet run` build messages with protocol output. CLI exit
 codes distinguish a clean syntax result (0), source diagnostics (1), and
 usage/input errors (2). See the implementation guide for coordinates, recovery,

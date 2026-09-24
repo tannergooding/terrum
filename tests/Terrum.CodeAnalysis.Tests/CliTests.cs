@@ -1,7 +1,8 @@
-// Copyright (c) Tanner Gooding and Contributors. Licensed under the MIT License.
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -14,17 +15,30 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class CliTests
 {
     [Theory]
+    [InlineData("name")]
+    [InlineData("\"quote\\\" and \\\\ slash\"")]
+    [InlineData("\"<tag> \u03B1 \U0001F600\"")]
+    public async Task HumanTokensPreserveJsonEscapingAsync(string source)
+    {
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "tokens", "-");
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        Assert.Contains(JsonSerializer.Serialize(source), output, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("check", "void Main() { return; }", 0)]
     [InlineData("tree", "void Main() { return 1 }", 1)]
     [InlineData("tokens", " \r\n\u03B1 + 12i32 // end", 0)]
     [InlineData("tokens", "1 \u0661", 1)]
-    public async Task EmitsStructuredResultsWithExpectedExit(string command, string source, int exitCode)
+    [SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "The xUnit data rows supply non-null source strings.")]
+    public async Task EmitsStructuredResultsWithExpectedExitAsync(string command, string source, int exitCode)
     {
-        (int exit, string output, string error) = await RunAsync(Encoding.UTF8.GetBytes(source), command, "-", "--json");
+        (var exit, var output, var error) = await RunAsync(Encoding.UTF8.GetBytes(source), command, "-", "--json");
         Assert.Equal(exitCode, exit);
         Assert.Equal("", error);
-        using JsonDocument document = JsonDocument.Parse(output);
-        JsonElement root = document.RootElement;
+        using var document = JsonDocument.Parse(output);
+        var root = document.RootElement;
         Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
         Assert.Equal("utf-16", root.GetProperty("coordinateSystem").GetString());
         Assert.Equal(exitCode == 0, root.GetProperty("success").GetBoolean());
@@ -32,7 +46,7 @@ public sealed class CliTests
 
         if (command != "check")
         {
-            string reconstructed = string.Concat(root.GetProperty("tokens").EnumerateArray().Select(token =>
+            var reconstructed = string.Concat(root.GetProperty("tokens").EnumerateArray().Select(token =>
                 string.Concat(token.GetProperty("leadingTrivia").EnumerateArray().Select(trivia => trivia.GetProperty("text").GetString())) + token.GetProperty("text").GetString()));
             Assert.Equal(source, reconstructed);
         }
@@ -45,56 +59,56 @@ public sealed class CliTests
     }
 
     [Fact]
-    public async Task HumanErrorsUseOneBasedLocationsAndStderr()
+    public async Task HumanErrorsUseOneBasedLocationsAndStderrAsync()
     {
-        (int exit, string output, string error) = await RunAsync(Encoding.UTF8.GetBytes("void Main() {\nreturn 1\n}"), "check", "-");
+        (var exit, var output, var error) = await RunAsync(Encoding.UTF8.GetBytes("void Main() {\nreturn 1\n}"), "check", "-");
         Assert.Equal(1, exit);
         Assert.Equal("", output);
         Assert.Contains("<stdin>(3,1): error TRM1001", error, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task InputFailuresRemainStructuredAndDoNotClaimToParse()
+    public async Task InputFailuresRemainStructuredAndDoNotClaimToParseAsync()
     {
-        foreach (string[] arguments in new[] { new[] { "bad", "-", "--json" }, new[] { "check", Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".terrum"), "--json" } })
+        foreach (var arguments in new[] { new[] { "bad", "-", "--json" }, ["check", Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".terrum"), "--json"] })
         {
-            (int exit, string output, string error) = await RunAsync([], arguments);
+            (var exit, var output, var error) = await RunAsync([], arguments);
             Assert.Equal(2, exit);
             Assert.Equal("", error);
-            using JsonDocument document = JsonDocument.Parse(output);
+            using var document = JsonDocument.Parse(output);
             Assert.False(document.RootElement.GetProperty("success").GetBoolean());
             Assert.StartsWith("TRM200", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString(), StringComparison.Ordinal);
         }
     }
 
     [Fact]
-    public async Task StrictUtf8RejectsInvalidBytesAndAcceptsAnOptionalBom()
+    public async Task StrictUtf8RejectsInvalidBytesAndAcceptsAnOptionalBomAsync()
     {
-        (int exit, string output, _) = await RunAsync([0xFF, 0xFE, 0x00, 0xD8], "check", "-", "--json");
+        (var exit, var output, _) = await RunAsync([0xFF, 0xFE, 0x00, 0xD8], "check", "-", "--json");
         Assert.Equal(2, exit);
-        using JsonDocument document = JsonDocument.Parse(output);
+        using var document = JsonDocument.Parse(output);
         Assert.Equal("TRM2001", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
-        (int validExit, _, _) = await RunAsync([0xEF, 0xBB, 0xBF, .. Encoding.UTF8.GetBytes("void Main() {}")], "check", "-");
+        (var validExit, _, _) = await RunAsync([0xEF, 0xBB, 0xBF, .. Encoding.UTF8.GetBytes("void Main() {}")], "check", "-");
         Assert.Equal(0, validExit);
     }
 
     [Fact]
-    public async Task FlatTreeProtocolPreservesReferencesAndDeepTrees()
+    public async Task FlatTreeProtocolPreservesReferencesAndDeepTreesAsync()
     {
-        string source = "void F() { return " + string.Join("+", Enumerable.Repeat("1", 500)) + "; }";
-        (int exit, string output, _) = await RunAsync(Encoding.UTF8.GetBytes(source), "tree", "-", "--json");
+        var source = "void F() { return " + string.Join("+", Enumerable.Repeat("1", 500)) + "; }";
+        (var exit, var output, _) = await RunAsync(Encoding.UTF8.GetBytes(source), "tree", "-", "--json");
         Assert.Equal(0, exit);
-        using JsonDocument document = JsonDocument.Parse(output);
-        JsonElement nodes = document.RootElement.GetProperty("nodes");
-        JsonElement tokens = document.RootElement.GetProperty("tokens");
-        int[] nodeReferences = new int[nodes.GetArrayLength()];
-        int[] tokenReferences = new int[tokens.GetArrayLength()];
+        using var document = JsonDocument.Parse(output);
+        var nodes = document.RootElement.GetProperty("nodes");
+        var tokens = document.RootElement.GetProperty("tokens");
+        var nodeReferences = new int[nodes.GetArrayLength()];
+        var tokenReferences = new int[tokens.GetArrayLength()];
 
-        foreach (JsonElement node in nodes.EnumerateArray())
+        foreach (var node in nodes.EnumerateArray())
         {
-            foreach (JsonElement child in node.GetProperty("children").EnumerateArray())
+            foreach (var child in node.GetProperty("children").EnumerateArray())
             {
-                if (child.TryGetProperty("node", out JsonElement nodeId))
+                if (child.TryGetProperty("node", out var nodeId))
                 {
                     nodeReferences[nodeId.GetInt32()]++;
                 }
@@ -108,19 +122,19 @@ public sealed class CliTests
         Assert.Equal(0, nodeReferences[0]);
         Assert.All(nodeReferences.Skip(1), count => Assert.Equal(1, count));
         Assert.All(tokenReferences, count => Assert.Equal(1, count));
-        (int secondExit, string secondOutput, _) = await RunAsync(Encoding.UTF8.GetBytes(source), "tree", "-", "--json");
+        (var secondExit, var secondOutput, _) = await RunAsync(Encoding.UTF8.GetBytes(source), "tree", "-", "--json");
         Assert.Equal(exit, secondExit);
         Assert.Equal(output, secondOutput);
     }
 
     private static async Task<(int ExitCode, string Output, string Error)> RunAsync(byte[] input, params string[] arguments)
     {
-        string configuration = new DirectoryInfo(AppContext.BaseDirectory).Name;
-        string root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
-        string cli = Path.Combine(root, "artifacts", "bin", "terrumc", configuration, "terrumc.dll");
+        var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = frameworkDirectory.Parent?.Name ?? throw new InvalidOperationException("Missing configuration directory.");
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var cli = Path.Combine(root, "artifacts", "bin", "sources", "terrumc", configuration, frameworkDirectory.Name, "terrumc.dll");
         Assert.True(File.Exists(cli), $"CLI was not built: {cli}");
-        var start = new ProcessStartInfo("dotnet")
-        {
+        var start = new ProcessStartInfo("dotnet") {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -129,26 +143,32 @@ public sealed class CliTests
         };
         start.ArgumentList.Add(cli);
 
-        foreach (string argument in arguments)
+        foreach (var argument in arguments)
         {
             start.ArgumentList.Add(argument);
         }
 
-        using Process process = Process.Start(start) ?? throw new InvalidOperationException("Could not start CLI.");
-        Task<string> output = process.StandardOutput.ReadToEndAsync();
-        Task<string> error = process.StandardError.ReadToEndAsync();
-        await process.StandardInput.BaseStream.WriteAsync(input);
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start CLI.");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        await process.StandardInput.BaseStream.WriteAsync(input).ConfigureAwait(true);
         process.StandardInput.Close();
-        Task completed = await Task.WhenAny(process.WaitForExitAsync(), Task.Delay(TimeSpan.FromSeconds(20)));
 
-        if (!process.HasExited)
+        try
         {
-            process.Kill(entireProcessTree: true);
-            throw new TimeoutException("CLI did not complete within 20 seconds.");
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20)).ConfigureAwait(true);
+        }
+        catch (TimeoutException)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync().ConfigureAwait(true);
+            }
+
+            throw;
         }
 
-        await completed;
-
-        return (process.ExitCode, await output, await error);
+        return (process.ExitCode, await output.ConfigureAwait(true), await error.ConfigureAwait(true));
     }
 }

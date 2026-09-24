@@ -1,40 +1,74 @@
-// Copyright (c) Tanner Gooding and Contributors. Licensed under the MIT License.
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 namespace Terrum.CodeAnalysis.Syntax;
 
+/// <summary>The syntactic construct represented by a node.</summary>
 public enum SyntaxKind
 {
+    /// <summary>A complete source file.</summary>
     CompilationUnit,
+    /// <summary>A <c>using</c> directive.</summary>
     UsingDirective,
+    /// <summary>A namespace declaration.</summary>
     NamespaceDeclaration,
+    /// <summary>A function declaration.</summary>
     FunctionDeclaration,
+    /// <summary>A structure declaration.</summary>
     StructDeclaration,
+    /// <summary>A constructor declaration.</summary>
     ConstructorDeclaration,
+    /// <summary>A field declaration.</summary>
     FieldDeclaration,
+    /// <summary>A type name.</summary>
     TypeName,
+    /// <summary>A function or constructor parameter list.</summary>
     ParameterList,
+    /// <summary>A declared parameter.</summary>
     Parameter,
+    /// <summary>A braced statement block.</summary>
     Block,
+    /// <summary>A variable declaration.</summary>
     VariableDeclaration,
+    /// <summary>An <c>if</c> statement.</summary>
     IfStatement,
+    /// <summary>An <c>else</c> clause.</summary>
     ElseClause,
+    /// <summary>A <c>while</c> statement.</summary>
     WhileStatement,
+    /// <summary>A <c>return</c> statement.</summary>
     ReturnStatement,
+    /// <summary>An expression used as a statement.</summary>
     ExpressionStatement,
+    /// <summary>An assignment statement.</summary>
     AssignmentStatement,
+    /// <summary>A statement consisting only of a semicolon.</summary>
     EmptyStatement,
+    /// <summary>An identifier expression.</summary>
     NameExpression,
+    /// <summary>A literal expression.</summary>
     LiteralExpression,
+    /// <summary>An expression enclosed in parentheses.</summary>
     ParenthesizedExpression,
+    /// <summary>An empty parenthesized expression (<c>()</c>).</summary>
     VoidExpression,
+    /// <summary>A unary operator expression.</summary>
     UnaryExpression,
+    /// <summary>A binary operator expression.</summary>
     BinaryExpression,
+    /// <summary>A function invocation expression.</summary>
     InvocationExpression,
+    /// <summary>An object creation expression.</summary>
     ObjectCreationExpression,
+    /// <summary>A member access expression.</summary>
     MemberAccessExpression,
+    /// <summary>An indexed access expression.</summary>
     IndexExpression,
+    /// <summary>An invocation or creation argument list.</summary>
     ArgumentList,
+    /// <summary>An individual argument.</summary>
     Argument,
+    /// <summary>An absent expression represented during parser recovery.</summary>
     MissingExpression,
+    /// <summary>Unrecognized source preserved during parser recovery.</summary>
     SkippedSyntax,
 }
