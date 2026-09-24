@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/sources/">
+    <Project Path="sources/Terrum.CodeAnalysis/Terrum.CodeAnalysis.csproj" />
+  </Folder>
+</Solution>
