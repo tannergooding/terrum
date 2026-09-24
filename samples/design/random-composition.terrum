@@ -60,7 +60,7 @@ public static uint32 Draw<TRandom>(mut ref TRandom random)
 
 public static int32 Main()
 {
-    mut var random = new DifferentRandom<CounterRandom>(new CounterRandom(0), 0xA5A5A5A5);
+    mut var random = new DifferentRandom(new CounterRandom(0), 0xA5A5A5A5);
     mut int32 index = 0;
 
     while (index < 4)

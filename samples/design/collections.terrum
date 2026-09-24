@@ -17,9 +17,9 @@ public static int32 Main()
     Terminal.WriteLine(values[0]); // 20
     Terminal.WriteLine(values[1]); // 40
 
-    var pending = new LinkedList<int32>();
-    var first = pending.AddLast(10);
-    var second = pending.AddLast(20);
+    LinkedList<int32> pending = [10, 20];
+    require pending.First is some first;
+    require pending.Last is some second;
 
     pending.Remove(first);
     pending.AddAfter(second, first);

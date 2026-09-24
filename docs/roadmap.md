@@ -21,8 +21,11 @@ or translating every sample. Stabilize syntax accessors while extending the
 grammar; keep diagnostics/source mappings usable on incomplete input.
 
 Open design decisions are centralized in [language](language.md),
-[lifetimes](lifetimes.md) and [libraries](libraries.md). In particular, generic
+[lifetimes](lifetimes.md), [type families](type-families.md),
+[conversions](conversions.md) and [libraries](libraries.md). In particular, generic
 member-contract refinement, stored-view ABI, inline class eligibility,
-exception/low-memory ABI, text representation, async start policy, scalable
+exception/low-memory ABI, family/conditional-conformance grammar and custom
+participation, text representation, explicit async affinity/scheduler syntax,
+async start policy, floating-destination conversion policies, scalable
 sharing ABI and final construction/annotation spellings remain open. None should
 be silently fixed by a convenient CLR lowering.

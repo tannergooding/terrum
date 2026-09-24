@@ -1,12 +1,13 @@
 // DESIGN ONLY: the P0 syntax-only front end does not bind or run these APIs.
-// No executable claim is made for associated masks, shape metadata or SIMD ABIs.
+// Fixed-vector family constraints below are LOCAL PSEUDO-CODE, not grammar.
 using Terrum;
 using Terrum.Numerics;
 using Terrum.Numerics.Tensors;
 
 public static TVector AddBias<TVector, TMask>(TVector value, float32 bias)
-    where TVector : ISimdVector<TVector, float32, TMask>
-    where TMask : ISimdMask<TMask, TVector, float32>
+    where TVector : [FixedSimdMember<float32, TMask>], [Copy],
+                    IAdditionOperators<TVector, TVector, TVector>
+    where TMask : [FixedSimdMaskFor<TVector, float32>], [Copy]
 {
     return value + TVector.Splat(bias);
 }

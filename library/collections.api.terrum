@@ -55,6 +55,7 @@ public class List<T>
 
     public mut void RemoveAt(nuint index);
 
+    // GetWriteAccess/TryGetWriteAccess are provisional names, not settled API spelling.
     [ViewOf(Access.Write)]
     public mut ListWriteAccess<T> GetWriteAccess();
 
@@ -105,6 +106,7 @@ public class LinkedListNode<T>
     public LinkedListNode<T>? Next { get; }
 }
 
+[CollectionBuilder(typeof(LinkedListBuilder<>))]
 public class LinkedList<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
@@ -140,6 +142,20 @@ public class LinkedList<T>
     public mut void Clear();
 
     public LinkedListCursor<T> GetEnumerator();
+}
+
+// Builds privately in source order with a fresh node for each accepted element.
+// Failure/abandonment detaches and releases the partial chain exactly once;
+// TryBuild publishes the completed list and consumes the builder's ownership.
+public unique struct LinkedListBuilder<T>
+    where T : [ManagedStorable], [Copy], [Sized]
+{
+    // Capacity is only a hint, not contiguous-storage or eager-node allocation.
+    public LinkedListBuilder(nuint capacityHint);
+
+    public mut bool TryAdd(T value);
+
+    public mut bool TryBuild(out LinkedList<T> value);
 }
 
 public unique struct LinkedListCursor<T>

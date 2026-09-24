@@ -16,7 +16,7 @@ public struct Point : IFormattable
     public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
         where TWriter : ITextWriter
     {
-        require format.EqualsOrdinal("");
+        require format.IsEmpty;
 
         return TextFormatting.TryWrite(mut ref writer, $"({X}, {Y})");
     }

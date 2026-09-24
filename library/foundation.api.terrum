@@ -39,6 +39,7 @@ public unique struct Buffer<T>
 
     public Span<T> AsSpan();
 
+    // Provisional name for an exclusive loan tied to this allocation's lease.
     [ViewOf(Access.Write)]
     public mut Span<T> GetWriteAccess();
 

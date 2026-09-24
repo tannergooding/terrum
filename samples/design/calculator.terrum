@@ -43,7 +43,7 @@ public static int32 Main(Span<TextSpan> args)
 [OutputWhen(nameof(result), CalculateStatus.Success)]
 public static CalculateStatus TryCalculate(int32 left, TextSpan operation, int32 right, out int32 result)
 {
-    if (operation.EqualsOrdinal("+"))
+    if (operation.EqualsOrdinal('+'))
     {
         if (int32.TryAdd(left, right, out var sum))
         {
@@ -55,7 +55,7 @@ public static CalculateStatus TryCalculate(int32 left, TextSpan operation, int32
         return CalculateStatus.Overflow;
     }
 
-    if (operation.EqualsOrdinal("-"))
+    if (operation.EqualsOrdinal('-'))
     {
         if (int32.TrySubtract(left, right, out var difference))
         {
@@ -67,7 +67,7 @@ public static CalculateStatus TryCalculate(int32 left, TextSpan operation, int32
         return CalculateStatus.Overflow;
     }
 
-    if (operation.EqualsOrdinal("*"))
+    if (operation.EqualsOrdinal('*'))
     {
         if (int32.TryMultiply(left, right, out var product))
         {
@@ -79,7 +79,7 @@ public static CalculateStatus TryCalculate(int32 left, TextSpan operation, int32
         return CalculateStatus.Overflow;
     }
 
-    if (operation.EqualsOrdinal("/") || operation.EqualsOrdinal("%"))
+    if (operation.EqualsOrdinal('/') || operation.EqualsOrdinal('%'))
     {
         if (right == 0)
         {
@@ -88,7 +88,7 @@ public static CalculateStatus TryCalculate(int32 left, TextSpan operation, int32
 
         if (left == int32.MinValue && right == -1)
         {
-            if (operation.EqualsOrdinal("/"))
+            if (operation.EqualsOrdinal('/'))
             {
                 return CalculateStatus.Overflow;
             }
@@ -98,7 +98,7 @@ public static CalculateStatus TryCalculate(int32 left, TextSpan operation, int32
             return CalculateStatus.Success;
         }
 
-        result = operation.EqualsOrdinal("/") ? left / right : left % right;
+        result = operation.EqualsOrdinal('/') ? left / right : left % right;
 
         return CalculateStatus.Success;
     }

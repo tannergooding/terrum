@@ -34,7 +34,7 @@ public interface IAdditiveIdentity<TSelf, TResult>
 }
 
 // Scalar classification and IEEE behavior are opt-in, not implied by arithmetic.
-// In particular ISimdVector<TVector, TElement, TMask> does not inherit IScalarNumber.
+// In particular membership in a fixed-vector family does not imply IScalarNumber.
 public interface IScalarNumber<TSelf>
     : IAdditionOperators<TSelf, TSelf, TSelf>,
       IMultiplyOperators<TSelf, TSelf, TSelf>,
@@ -49,6 +49,28 @@ public interface IScalarIeee754<TSelf> : IScalarNumber<TSelf>
     static abstract bool IsNaN(TSelf value);
     static abstract bool IsFinite(TSelf value);
     static abstract TSelf FusedMultiplyAdd(TSelf left, TSelf right, TSelf addend);
+}
+
+// PROVISIONAL protocols: implement only supported source/destination policy pairs.
+// Cast syntax selects the checked witness. Operator/witness lookup is still open.
+public interface ICheckedConversion<TSelf, TSource>
+    where TSelf : ICheckedConversion<TSelf, TSource>
+{
+    static abstract TSelf ConvertChecked(TSource value);
+}
+
+public interface ISaturatingConversion<TSelf, TSource>
+    where TSelf : ISaturatingConversion<TSelf, TSource>
+{
+    static abstract TSelf ConvertSaturating(TSource value);
+}
+
+public interface ITruncatingConversion<TSelf, TSource>
+    where TSelf : ITruncatingConversion<TSelf, TSource>
+{
+    // Finite float -> integer removes the fraction, then performs modulo narrowing.
+    // Not a promise about floating-destination policies; see docs/conversions.md.
+    static abstract TSelf ConvertTruncating(TSource value);
 }
 
 public struct int32
@@ -74,33 +96,33 @@ public struct int32
 
     public static bool TryAdd(int32 left, int32 right, out int32 result)
     {
-        return TryNarrow(int64.FromInt32(left) + int64.FromInt32(right), out result);
+        return TryNarrow((int64)left + (int64)right, out result);
     }
 
     public static bool TrySubtract(int32 left, int32 right, out int32 result)
     {
-        return TryNarrow(int64.FromInt32(left) - int64.FromInt32(right), out result);
+        return TryNarrow((int64)left - (int64)right, out result);
     }
 
     public static bool TryMultiply(int32 left, int32 right, out int32 result)
     {
-        return TryNarrow(int64.FromInt32(left) * int64.FromInt32(right), out result);
+        return TryNarrow((int64)left * (int64)right, out result);
     }
 
     private static bool TryNarrow(int64 value, out int32 result)
     {
-        if (value < int64.FromInt32(MinValue) || value > int64.FromInt32(MaxValue))
+        if (value < (int64)MinValue || value > (int64)MaxValue)
         {
             return false;
         }
 
-        result = FromInt64Checked(value);
+        result = (int32)value;
 
         return true;
     }
 
-    public static int32 FromInt64Checked(int64 value);
-
+    // Temporary syntax-only self-host fixture hook until cast syntax is parsed.
+    // Not the proposed permanent conversion API.
     public static int32 FromChar16Checked(char16 value);
 
     public static int32 FromBits(uint32 bits);
@@ -142,10 +164,6 @@ public struct float32
 
     public static uint32 ToBits(float32 value);
 
-    public static float32 FromInt32(int32 value);
-
-    public static float32 FromUInt32(uint32 value);
-
     public static bool TryParse(TextSpan text, out float32 value);
 
     public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
@@ -158,8 +176,6 @@ public struct decimal32
       IScalarIeee754<decimal32>
 {
     public static decimal32 Zero => 0;
-
-    public static decimal32 FromInt32(int32 value);
 
     public static bool IsNaN(decimal32 value);
 
@@ -178,19 +194,9 @@ public struct decimal32
         where TWriter : ITextWriter;
 }
 
-// Additional primitive operations used by the samples.
-public struct int64
-{
-    public static int64 FromInt32(int32 value);
-}
-
 public struct uint32 : IFormattable
 {
     public static uint32 AddWrapping(uint32 left, uint32 right);
-
-    public static uint32 FromInt32Checked(int32 value);
-
-    public static uint32 FromNUIntChecked(nuint value);
 
     public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
         where TWriter : ITextWriter;

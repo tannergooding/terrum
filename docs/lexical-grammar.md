@@ -53,6 +53,12 @@ invalid escapes, is preserved. A line break or EOF before a closing quote
 diagnoses an unterminated string without swallowing the next line. No
 interpolation is defined; `$` outside a string is a bad token.
 
+Single-quoted character literals in design samples are not implemented tokens.
+Their proposed scalar/target-representability contract is in
+[conversions](conversions.md#character-intent); it does not choose UTF-16 as
+runtime text's default encoding. Numeric literal construction and cast semantics
+are likewise binder work, distinct from the raw numeric token grammar above.
+
 Horizontal whitespace, line breaks, `//` comments up to but not including
 the break, and non-nesting `/* ... */` comments are leading trivia. The final
 zero-width EOF token owns trailing trivia. Unterminated block comments receive

@@ -61,7 +61,9 @@ public static int32 Main()
     Finish(move job);
     // Finish(job); // error: consumed owning handle
 
-    int32?? absent = null; // Same type as int32?.
+    int32? absent = null;
+    // Explicit int32?? and T?? are syntax errors. Generic T? still normalizes
+    // to int32? when T is instantiated with int32?.
 
     if (absent is null)
     {

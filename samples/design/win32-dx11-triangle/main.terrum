@@ -35,7 +35,7 @@ public static int32 Main(Span<TextSpan> args)
         NativeError.RequireHandle(instance, "GetModuleHandleW");
 
         mut var windowClass = WNDCLASSEXW.Zero;
-        windowClass.cbSize = uint32.FromNUIntChecked(sizeof(WNDCLASSEXW));
+        windowClass.cbSize = (uint32)sizeof(WNDCLASSEXW);
         windowClass.lpfnWndProc = &WindowProcedure;
         windowClass.hInstance = instance;
         windowClass.lpszClassName = utf16z"TerrumTriangle";
@@ -66,8 +66,8 @@ public static int32 Main(Span<TextSpan> args)
         mut var client = RECT.Zero;
         NativeError.RequireTrue(Win32.GetClientRect(window.Handle, &client), "GetClientRect");
 
-        uint32 width = uint32.FromInt32Checked(client.right - client.left);
-        uint32 height = uint32.FromInt32Checked(client.bottom - client.top);
+        uint32 width = (uint32)(client.right - client.left);
+        uint32 height = (uint32)(client.bottom - client.top);
 
         mut var swapDescription = DXGI_SWAP_CHAIN_DESC.Zero;
         swapDescription.BufferDesc.Width = width;
@@ -155,7 +155,7 @@ public static int32 Main(Span<TextSpan> args)
             new Vertex(-0.6, -0.5, 0.5)
         ];
 
-        uint32 stride = uint32.FromNUIntChecked(sizeof(Vertex));
+        uint32 stride = (uint32)sizeof(Vertex);
         uint32 offset = 0;
 
         mut var bufferDescription = D3D11_BUFFER_DESC.Zero;
@@ -174,8 +174,8 @@ public static int32 Main(Span<TextSpan> args)
         // CreateBuffer copied the vertices; it does not retain this stack address.
 
         mut var viewport = D3D11_VIEWPORT.Zero;
-        viewport.Width = float32.FromUInt32(width);
-        viewport.Height = float32.FromUInt32(height);
+        viewport.Width = (float32)width;
+        viewport.Height = (float32)height;
         viewport.MaxDepth = 1;
 
         var targetPointer = target.Pointer;

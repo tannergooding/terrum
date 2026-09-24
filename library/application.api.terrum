@@ -22,33 +22,62 @@ public struct Span<T> : IContiguousSequence<T>
     Span<T> IContiguousSequence<T>.AsSpan();
 }
 
-// Immutable text ranges; publication/validity contracts are in the baseline.
-public struct TextSpan<TCodeUnit> : IContiguousSequence<TCodeUnit>, IFormattable
+// LOCAL PSEUDO-CODE: the type default and conditional extensions below spell
+// one opted-in family; their grammar and custom participation remain open.
+// Members: char8/char16/char32 and void (recorded encoding, not a code unit).
+// Every member retains validated immutable text and its backing, access, root,
+// lease and lifetime. Bare TextSpan is exactly TextSpan<void>.
+// family TextSpan<TCodeUnit = void> {
+//     members TextSpan<void>, TextSpan<char8>, TextSpan<char16>, TextSpan<char32>;
+// }
+public struct TextSpan<TCodeUnit = void> : IFormattable
+{
+    public bool IsEmpty { get; }
+    public bool EqualsOrdinal(TextSpan other);
+    // Whole-view equality to one scalar, not a prefix or folded match.
+    public bool EqualsOrdinal(rune other);
+    public int32 CompareOrdinal(TextSpan other);
+
+    public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
+        where TWriter : ITextWriter;
+}
+
+// LOCAL PSEUDO-CODE: family-owned conditional contracts, not extension lookup.
+// Only typed members implement contiguous code-unit access.
+// AsSpan forgets text validity but cannot gain write access to immutable backing.
+public extension TextSpan<TCodeUnit> : IContiguousSequence<TCodeUnit>
     where TCodeUnit : [TextCodeUnit]
 {
     public nuint Length { get; }
 
     public Span<TCodeUnit> AsSpan();
 
-    public TextSpan AsTextSpan();
-
-    public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
-        where TWriter : ITextWriter;
+    // No copy/transcode; forwards the actual encoding and all dependencies.
+    public TextSpan<void> AsTextSpan();
 }
 
-// Encoding-erased contiguous range, not an alias for a default encoding.
-public struct TextSpan : IFormattable
+// LOCAL PSEUDO-CODE: a failed mismatch produces no typed view. Successful
+// projection retains validated text, access and all backing dependencies;
+// only then can the caller request the typed AsSpan().
+public extension TextSpan<void>
 {
-    public bool EqualsOrdinal(TextSpan other);
+    public bool TryProject<TRequested>(out TextSpan<TRequested> result)
+        where TRequested : [TextCodeUnit];
+}
 
-    public bool TryGetUtf8Span(out Span<char8> value);
-
-    public bool TryGetUtf16Span(out Span<char16> value);
-
-    public bool TryGetUtf32Span(out Span<char32> value);
-
+// A rune is a Unicode scalar. Target-typed 'x' produces exactly one scalar;
+// char8 accepts ASCII, char16 non-surrogate BMP, char32/rune any scalar.
+// There is no default character-literal type. TextTarget character fragments
+// use rune and forward directly to the same writer, without temporary Text.
+public struct rune : IFormattable
+{
     public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
-        where TWriter : ITextWriter;
+        where TWriter : ITextWriter
+    {
+        require format.IsEmpty;
+
+        return writer.TryWriteScalar(this);
+    }
 }
 
 public struct InlineArray<T, const nuint N>
@@ -81,6 +110,8 @@ public interface ITextWriter
 {
     mut bool TryWrite(TextSpan text);
 
+    mut bool TryWriteScalar(rune value);
+
     mut bool TryWriteFormatted<TValue>(ref TValue value, TextSpan format)
         where TValue : IFormattable;
 }
@@ -105,6 +136,9 @@ public unique struct SpanTextWriter<TCodeUnit> : ITextWriter
     public nuint Written { get; }
 
     public mut bool TryWrite(TextSpan text);
+
+    // Encodes one scalar directly; on insufficient capacity writes no units.
+    public mut bool TryWriteScalar(rune value);
 
     public mut bool TryWriteFormatted<TValue>(ref TValue value, TextSpan format)
         where TValue : IFormattable;
@@ -139,6 +173,8 @@ public static class Terminal
 public class TextWriter : ITextWriter
 {
     public mut bool TryWrite(TextSpan text);
+
+    public mut bool TryWriteScalar(rune value);
 
     public mut bool TryWriteFormatted<TValue>(ref TValue value, TextSpan format)
         where TValue : IFormattable;

@@ -1,0 +1,101 @@
+# Literal construction and numeric conversion
+
+These are proposed binding/library contracts, not implemented execution.
+Cast spelling follows C#; conversion-protocol names and declaration lookup
+remain provisional. Numeric operators are checked by default in every build.
+
+## Context before construction
+
+A numeric literal has no initial `int32` or `float64` type. An unambiguous
+expected type constructs and validates its value directly in that format,
+including target-format rounding; decimal literals do not pass through binary64.
+An explicit tag commits the type. Already-typed numeric values do not implicitly
+widen or narrow, even when their current value happens to fit.
+
+```terrum
+float32 fraction = 0.1;       // Construct directly as float32.
+uint32 seed = 0;             // Construct directly as uint32.
+var exactWidth = 1i32;       // Tag supplies the type.
+var unknown = 1;             // Error: no type context.
+float64 widened = exactWidth; // Error: typed numeric conversion must be explicit.
+float64 converted = (float64)exactWidth;
+float64 tagged = 0.1f32;     // Error: a target cannot retag an existing float32.
+```
+
+Resolve known parameter/operand/target types before unresolved literals when
+that yields a unique answer. For `F<T>(T left, T right)`, `F(knownInt32, 1)` can
+infer `T = int32`; unconstrained `F(1, 2)` cannot guess it. Competing viable
+numeric overloads without a unique contextual solution diagnose, rather than
+using a default width or an arbitrary ranking based on representable values.
+Negative integer literal construction must accommodate the signed minimum;
+it must not first overflow by constructing its positive magnitude in that type.
+
+Ordinary constructor inference uses the same evidence. In
+`new DifferentRandom(new CounterRandom(0), 0xA5A5A5A5)`, the first argument
+establishes `TRandom = CounterRandom`; the declared `uint32` seed/mask parameters
+give the literals their context. This neither captures primary-constructor
+fields nor infers a concrete type from a constraint. Copy/move rules still apply.
+Non-injective `T?`/`box<T>` relationships cannot be inverted to guess `T`.
+
+## Conversion policies
+
+`(TDestination)value` selects the pair's checked numeric conversion, not
+`FromInt32`/`FromUInt32` method families. Checked means validated range and
+representation, **not exactness**: `int32` to `float32` may round. Fractional
+rounding, range handling and bit reinterpretation are separate decisions.
+
+| Operation | Proposed primitive policy |
+|---|---|
+| Checked integer to integer | Preserve value or throw on range failure. |
+| Checked finite floating to integer | Round fraction toward zero, then check the integer result's range; throw on failure. NaN and infinities throw. |
+| Checked integer/floating to floating | Round to nearest, ties to even. A finite value that would round to infinity throws; inexact finite results and underflow to subnormal/zero are allowed. Existing infinities remain infinities; NaNs follow the destination's numeric NaN policy. |
+| Saturating to integer | Round a finite fraction toward zero, then clamp to the destination range; infinities clamp to endpoints. NaN throws because it has no ordered endpoint. |
+| Truncating to integer | For finite floating input, first remove the fraction toward zero; then reduce the mathematical integer modulo the destination width. Signed destinations interpret those bits in two's complement. NaN and infinities throw. |
+| Bit reinterpretation | `FromBits`/`ToBits` preserve the specified representation, including payload bits; this is not numeric conversion. Width, validity and representation must match the declared operation. |
+
+The proposed primitive policies above are distinct from IEEE arithmetic
+exceptions and do not grant arbitrary user-defined conversions. Binary/decimal
+cross-format conversions need a specified direct rounding implementation;
+floating-destination saturating/truncating policies are **open**, not aliases
+for integer modulo or blanket promises on every numeric type. Exact conversions,
+if exposed, need their own contract.
+
+Granular `ICheckedConversion<TSelf, TSource>`,
+`ISaturatingConversion<...>` and `ITruncatingConversion<...>` sketches in
+[numerics](../library/numerics.api.terrum) let generic algorithms request only a
+supported policy for a source/destination pair. Neither a broad number marker
+nor the existence of a checked conversion promises the other two. Final
+source/destination witness lookup and user-defined operator declaration grammar
+remain open; consumers must bind to a published contract, never inspect a body
+or silently switch to another policy.
+
+Named wrapping operations remain sufficient for the current sketches.
+If `unchecked` is added, it should select a declared wrapping **operator or
+conversion lexically**. It must not be dynamically ambient, flow into callees,
+disable bounds/niche/lifetime checks, or fall back for a user operator that lacks
+the required contract. General saturating-expression/block syntax remains open.
+Random counter wrapping and numeric-key bit hashing intentionally keep their
+explicit `AddWrapping` and `FromBits`/`ToBits` calls.
+
+## Character intent
+
+The design-only `'x'` notation denotes one Unicode scalar after escape decoding,
+not an untyped integer or a UTF-16 default. An expected `rune`/`char32` accepts
+any scalar; `char16` accepts a scalar representable by one nonsurrogate code
+unit; `char8` accepts only ASCII as one standalone UTF-8 unit. Multicode-unit
+characters need text, not a falsely validated standalone code unit. Empty,
+multiple-scalar and surrogate character literals diagnose. Without an expected
+type, a character literal has no fallback type.
+
+Text-target registration supplies `rune` context for direct character fragments,
+including character-valued conditional branches. The typed formatter forwards
+to `TryWriteScalar(rune)` on the same writer; callers need not construct `Text`.
+This does not make arbitrary raw `char8`/`char16` values valid scalars.
+`EqualsOrdinal(rune)` compares the entire text view with that one scalar, so
+`'+'` accepts ASCII plus only, not fullwidth plus or a longer operator string.
+Changing quotes alone is not evidence of an allocation or throughput improvement.
+
+The front end currently supports neither character literals nor casts.
+`require`, family declarations and contextual/constructor inference also remain
+design/binder work. The parser's rejection of repeated optional modifiers is
+independent of all these proposed conversions.

@@ -19,9 +19,14 @@ or cover the unsupported cursor/host-interface syntax.
 
 `SourceRange` deliberately mirrors the current host's signed 32-bit UTF-16
 coordinates, including the checked end bound. This is an interchange limit for
-syntax-0, not a decision that Terrum collection extents are signed or that
+syntax-1, not a decision that Terrum collection extents are signed or that
 runtime text must use UTF-16. A later larger-source protocol needs an explicit
 schema change. Source file UTF-8 decoding remains separate from coordinates.
+
+`CharacterFacts` retains a temporary `FromChar16Checked` call so this small
+candidate remains covered by host parser fixtures before casts are parsed.
+That hook is not the permanent per-source-type conversion API; the proposed
+numeric conversion direction uses casts and reusable policy protocols.
 
 The candidates reuse `Span<Token>`/`TextSpan` rather than imitating C# strings,
 `IEnumerator`, `ImmutableArray`, reflection, GC handles or compiler-generated
