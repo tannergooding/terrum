@@ -9,10 +9,10 @@ using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Native;
 
-/// <summary>Behavior on a checked arithmetic failure in a native executable.</summary>
+/// <summary>Behavior on a checked runtime failure in a native executable.</summary>
 public enum NativeRuntimePolicy
 {
-    /// <summary>Terminate with status 0xE0540001 for overflow or 0xE0540002 for division by zero.</summary>
+    /// <summary>Terminate with status 0xE0540001 for overflow, 0xE0540002 for division by zero, or 0xE0540003 for a failed requirement.</summary>
     FailFast,
 }
 
@@ -50,12 +50,10 @@ internal sealed class PeCompiler
     private readonly List<(int Offset, int Target)> _calls = new();
     private readonly List<(int Offset, int Target)> _runtimeCalls = new();
     private readonly List<int> _imports = new();
-    private int _overflow;
-    private int _zeroDivisor;
+    private readonly int[] _failureStarts = new int[3];
+    private readonly int[] _failureEnds = new int[3];
     private int _entryStart;
     private int _entryEnd;
-    private int _overflowEnd;
-    private int _zeroEnd;
     private int _frame;
     private int _outgoingSize;
     private int _slotCount;
@@ -109,21 +107,16 @@ internal sealed class PeCompiler
         _code.Byte(0xCC);
         _entryEnd = _code.Position;
 
-        _overflow = _code.Position;
-        Prolog(40);
-        _code.Bytes(0xB9);
-        _code.Int32(unchecked((int)0xE0540001));
-        _imports.Add(_code.ImportCall());
-        _code.Byte(0xCC);
-        _overflowEnd = _code.Position;
-
-        _zeroDivisor = _code.Position;
-        Prolog(40);
-        _code.Byte(0xB9);
-        _code.Int32(unchecked((int)0xE0540002));
-        _imports.Add(_code.ImportCall());
-        _code.Byte(0xCC);
-        _zeroEnd = _code.Position;
+        for (var failure = 0; failure < _failureStarts.Length; failure++)
+        {
+            _failureStarts[failure] = _code.Position;
+            Prolog(40);
+            _code.Byte(0xB9);
+            _code.Int32(unchecked((int)0xE0540001) + failure);
+            _imports.Add(_code.ImportCall());
+            _code.Byte(0xCC);
+            _failureEnds[failure] = _code.Position;
+        }
 
         for (var i = 0; i < _program.Functions.Length; i++)
         {
@@ -166,10 +159,19 @@ internal sealed class PeCompiler
         }
         foreach (var (offset, target) in _runtimeCalls)
         {
-            _code.PatchRelative(offset, target == 0 ? _overflow : _zeroDivisor);
+            _code.PatchRelative(offset, _failureStarts[target]);
         }
-        return PeImage.Build(_code.ToArray(), _entryStart, _entryEnd, _overflow, _overflowEnd,
-            _zeroDivisor, _zeroEnd, _starts, _ends, _frames, _imports);
+        var functions = new List<(int Start, int End, int Frame)> { (_entryStart, _entryEnd, 40) };
+        for (var i = 0; i < _failureStarts.Length; i++)
+        {
+            functions.Add((_failureStarts[i], _failureEnds[i], 40));
+        }
+        for (var i = 0; i < _starts.Length; i++)
+        {
+            functions.Add((_starts[i], _ends[i], _frames[i]));
+        }
+
+        return PeImage.Build(_code.ToArray(), _entryStart, functions, _imports);
     }
 
     private static int AlignFrame(int bytes) => ((bytes + 8 + 15) & ~15) - 8;
@@ -198,6 +200,8 @@ internal sealed class PeCompiler
             case BoundWhile loop:
                 return Math.Max(ExpressionSpills(loop.Condition, ref maximumArguments),
                     StatementSpills(loop.Body, ref maximumArguments));
+            case BoundRequire requirement:
+                return ExpressionSpills(requirement.Condition, ref maximumArguments);
             case BoundReturn result when result.Value is BoundExpression value:
                 return ExpressionSpills(value, ref maximumArguments);
             default:
@@ -259,6 +263,11 @@ internal sealed class PeCompiler
         _cancellationToken.ThrowIfCancellationRequested();
         switch (statement)
         {
+            case BoundRequire requirement:
+                Expression(requirement.Condition, 0);
+                _code.Bytes(0x85, 0xC0);
+                RuntimeBranch(0x84, 2);
+                break;
             case BoundBlock block:
                 foreach (var child in block.Statements)
                 {

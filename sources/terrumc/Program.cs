@@ -18,8 +18,8 @@ internal static partial class Program
 {
     private const string Usage = "Usage: terrumc <check|tokens|tree|analyze> <path|-> [--json]\n"
         + "       terrumc build <path|-> -o <output.exe> --runtime fail-fast [--json]\n"
-        + "check/tokens/tree inspect syntax; analyze binds native-0; build emits Windows x64 PE.\n"
-        + "fail-fast explicitly selects process termination for runtime arithmetic errors, not catchable exceptions.\n"
+        + "check/tokens/tree inspect syntax; analyze binds the native profile; build emits Windows x64 PE.\n"
+        + "fail-fast explicitly selects process termination for runtime failures, not catchable exceptions.\n"
         + "'-' reads strict UTF-8 from stdin. Exit: 0 success, 1 source/compile diagnostics, 2 usage/input/output error.";
 
     private static int Main(string[] args)

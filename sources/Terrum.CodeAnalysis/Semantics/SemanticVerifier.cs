@@ -164,6 +164,13 @@ public static class SemanticVerifier
                 var bodyState = (bool[])initialized.Clone();
                 _ = Statement(loop.Body, bodyState, declarations, function, program, ref remaining, depth + 1);
                 return false;
+            case BoundRequire requirement:
+                Expression(requirement.Condition, initialized, function, program, ref remaining, depth + 1);
+                if (requirement.Condition.Type != PrimitiveType.Bool)
+                {
+                    throw Invalid();
+                }
+                return false;
             case BoundReturn result:
                 if (result.Value is null)
                 {

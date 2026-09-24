@@ -2,7 +2,7 @@
 
 These files are parallel design candidates, not a bootstrapped compiler.
 They are not linked into the C# implementation. `IntegerFacts` is small enough
-for native-0 execution; the other candidates still need later language slices.
+for native execution; the other candidates still need later language slices.
 The host test runner remains C#, even when it compiles and executes a candidate.
 
 Host fixture tests parse and round-trip `SourceRange`, `CharacterFacts` and
@@ -11,7 +11,7 @@ or cover the unsupported cursor/host-interface syntax.
 
 | Candidate | Purpose | Gates before execution |
 |---|---|---|
-| [IntegerFacts](IntegerFacts.terrum) | Overflow-free signed-addition range predicate | Supported by native-0; tested with native entry wrappers, not a full compiler bootstrap |
+| [IntegerFacts](IntegerFacts.terrum) | Overflow-free signed-addition range predicate | Supported by the native profile; tested with native entry wrappers, not a full compiler bootstrap |
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Struct/member binding, private construction, conditional bool/out publication |
 | [CharacterFacts](CharacterFacts.terrum) | Shared ASCII numeric and newline decisions | Static calls, `char16` comparisons, typed literals |
 | [TokenCursor](TokenCursor.terrum) | Read-view traversal without copying backing storage or cleanup | Span indexing, matched access, stored backing dependencies, capture contract, constructor initialization |
@@ -20,7 +20,7 @@ or cover the unsupported cursor/host-interface syntax.
 
 `SourceRange` deliberately mirrors the current host's signed 32-bit UTF-16
 coordinates, including the checked end bound. This is an interchange limit for
-syntax-1, not a decision that Terrum collection extents are signed or that
+the syntax protocol, not a decision that Terrum collection extents are signed or that
 runtime text must use UTF-16. A later larger-source protocol needs an explicit
 schema change. Source file UTF-8 decoding remains separate from coordinates.
 

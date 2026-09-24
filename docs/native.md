@@ -1,6 +1,6 @@
 # Windows x64 native profile
 
-`native-0` is a deliberately bounded executable language profile, separate from
+`native-1` is a deliberately bounded executable language profile, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
@@ -39,7 +39,7 @@ authorize emission.
 | Variables | Initialized typed/inferred locals; immutable bindings by default, explicit `mut` assignments; lexical scopes |
 | Expressions | Direct calls, forward calls/recursion, parentheses; unary `+`, checked `-`, `~`, `!` |
 | Operators | Checked integer `+ - * / %`, bitwise operations, signed comparisons, same-type equality, boolean operations |
-| Flow | Blocks, `if`/`else`, `while`, return; left-to-right argument/operand evaluation and short-circuit `&&`/`||` |
+| Flow | Blocks, `if`/`else`, `while`, return, boolean `require`; left-to-right argument/operand evaluation and short-circuit `&&`/`||` |
 
 Literal context comes from declarations, parameters, return types or a known
 operand, not an implicit `int32` fallback. `var x = 1` is rejected; `var x = 1i32`
@@ -67,6 +67,16 @@ only explicit `fail-fast` selection. Checked arithmetic remains checked:
 |---|---|
 | Signed arithmetic overflow, including minimum divided by -1 | `0xE0540001` |
 | Integer division or remainder by zero | `0xE0540002` |
+| A false boolean `require` predicate | `0xE0540003` |
+
+`require predicate;` evaluates its boolean once and continues only on true.
+This is executable semantic code, not a debug assertion, unchecked assumption
+or inferred public precondition. Its ordinary language exception contract is
+not yet available: **the explicit fail-fast profile terminates instead**.
+Conditional outputs and exceptional cleanup remain unsupported rather than
+being approximated. A predicate's own arithmetic failure retains that failure
+status. `samples/native/requirements.terrum` demonstrates a parameter-dependent
+requirement and returns 10.
 
 Division truncates toward zero; signed minimum remainder -1 is zero, not an
 overflow. Neither compiler-host overflow mode nor x64 `idiv` traps define these

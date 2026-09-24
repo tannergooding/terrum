@@ -14,6 +14,9 @@ namespace Terrum.CodeAnalysis.Semantics;
 /// </summary>
 public sealed class Compilation
 {
+    /// <summary>The version of the supported executable semantic profile.</summary>
+    public const string ProfileVersion = "native-1";
+
     private Compilation(SyntaxTree syntaxTree, ImmutableArray<Diagnostic> diagnostics, BoundProgram? program)
     {
         SyntaxTree = syntaxTree;

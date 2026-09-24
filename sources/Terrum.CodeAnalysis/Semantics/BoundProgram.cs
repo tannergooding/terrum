@@ -80,6 +80,11 @@ public sealed record BoundIf(BoundExpression Condition, BoundStatement Then, Bou
 /// <param name="Span">The source range.</param>
 public sealed record BoundWhile(BoundExpression Condition, BoundStatement Body, TextSpan Span) : BoundStatement(Span);
 
+/// <summary>Evaluates a boolean once and fails according to the selected runtime policy when false.</summary>
+/// <param name="Condition">The boolean success predicate.</param>
+/// <param name="Span">The source range.</param>
+public sealed record BoundRequire(BoundExpression Condition, TextSpan Span) : BoundStatement(Span);
+
 /// <summary>A function return.</summary>
 /// <param name="Value">The result, or null for a void return.</param>
 /// <param name="Span">The source range.</param>

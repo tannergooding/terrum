@@ -15,15 +15,14 @@ internal static class PeImage
     private const int TextRva = 0x1000;
     private const ulong ImageBase = 0x140000000;
 
-    internal static byte[] Build(byte[] code, int entry, int entryEnd, int overflow, int overflowEnd,
-        int zero, int zeroEnd, int[] starts, int[] ends, int[] frames, List<int> importOffsets)
+    internal static byte[] Build(byte[] code, int entry, List<(int Start, int End, int Frame)> functions, List<int> importOffsets)
     {
         const int ImportTableSize = 104;
         var textRva = TextRva;
         var dataRva = Align(textRva + code.Length, SectionAlignment);
-        var pdataSize = checked(12 * (starts.Length + 3));
+        var pdataSize = checked(12 * functions.Count);
         var pdataRva = Align(dataRva + ImportTableSize, SectionAlignment);
-        var xdataSize = checked(8 * (starts.Length + 3));
+        var xdataSize = checked(8 * functions.Count);
         var xdataRva = Align(pdataRva + pdataSize, SectionAlignment);
         var imageSize = Align(xdataRva + xdataSize, SectionAlignment);
         var textFile = HeaderSize;
@@ -48,12 +47,9 @@ internal static class PeImage
         Encoding.ASCII.GetBytes("KERNEL32.dll\0").CopyTo(image, dataFile + 88);
 
         var range = 0;
-        Unwind(entry, entryEnd, 40);
-        Unwind(overflow, overflowEnd, 40);
-        Unwind(zero, zeroEnd, 40);
-        for (var i = 0; i < starts.Length; i++)
+        foreach (var (start, end, frame) in functions)
         {
-            Unwind(starts[i], ends[i], frames[i]);
+            Unwind(start, end, frame);
         }
 
         void Unwind(int start, int end, int frame)

@@ -96,6 +96,8 @@ This does not make arbitrary raw `char8`/`char16` values valid scalars.
 Changing quotes alone is not evidence of an allocation or throughput improvement.
 
 The front end currently supports neither character literals nor casts.
-`require`, family declarations and contextual/constructor inference also remain
-design/binder work. The parser's rejection of repeated optional modifiers is
-independent of all these proposed conversions.
+Family declarations and generic/constructor inference remain design/binder work.
+The native profile implements contextual `int32` literal construction and boolean
+`require`, but not conditional outputs, general conversions or catchable
+requirement exceptions. The parser's rejection of repeated optional modifiers
+is independent of those later conversion protocols.

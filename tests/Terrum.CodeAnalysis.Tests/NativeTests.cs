@@ -17,6 +17,18 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class NativeTests
 {
     [Theory]
+    [InlineData("require true; return 7;", 7)]
+    [InlineData("require false; return 7;", unchecked((int)0xE0540003))]
+    [InlineData("require (1i32 < 2); return 8;", 8)]
+    [InlineData("require true || (1i32 / 0 == 0); return 9;", 9)]
+    [InlineData("require false && (1i32 / 0 == 0); return 9;", unchecked((int)0xE0540003))]
+    [InlineData("require 1i32 / 0 == 0; return 9;", unchecked((int)0xE0540002))]
+    public async Task ExecutesRequirementsWithExplicitFailurePolicyAsync(string body, int expected)
+    {
+        Assert.Equal(expected, await ExecuteAsync(Emit("int32 Main() { " + body + " }")).ConfigureAwait(true));
+    }
+
+    [Theory]
     [InlineData("int32 Main() { return 42; }", 42)]
     [InlineData("void Main() { }", 0)]
     [InlineData("int32 Main() { return -2147483648; }", int.MinValue)]
@@ -38,6 +50,7 @@ public sealed class NativeTests
     [InlineData("void Main() { return Fail(); } void Fail() { int32 value = 1 / 0; }", unchecked((int)0xE0540002))]
     [InlineData("int32 Main() { mut int32 n = 0; while (n < 4) { int32 value = n * 2; n = n + 1; if (value == 6) { return value; } } return 0; }", 6)]
     [InlineData("int32 Main() { if (Equal(2, 2)) { return 1; } else { return 0; } } bool Equal(int32 a, int32 b) { return a == b; }", 1)]
+    [InlineData("int32 Main() { mut int32 n = 0; while (n < 3) { require Valid(n); n = n + 1; } return n; } bool Valid(int32 n) { return n >= 0; }", 3)]
     public async Task ExecutesNativeFunctionsAndStructuredControlFlowAsync(string source, int expected)
     {
         Assert.Equal(expected, await ExecuteAsync(Emit(source)));
@@ -69,6 +82,7 @@ public sealed class NativeTests
     [InlineData("factorial.terrum", 720)]
     [InlineData("control-flow.terrum", 45)]
     [InlineData("stack-arguments.terrum", 91)]
+    [InlineData("requirements.terrum", 10)]
     public async Task PublishedNativeExamplesExecuteAsync(string name, int expected)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -162,8 +176,12 @@ public sealed class NativeTests
                 new BoundReturn(new BoundConstant(1, PrimitiveType.Int32, span), span),
                 new BoundReturn(new BoundConstant(0, PrimitiveType.Int32, span), span), span)], span),
         };
+        var invalidRequirement = function with {
+            Body = new BoundBlock([new BoundRequire(new BoundConstant(1, PrimitiveType.Int32, span), span),
+                new BoundReturn(new BoundConstant(0, PrimitiveType.Int32, span), span)], span),
+        };
 
-        foreach (var invalid in new[] { wrongReturn, uninitialized, invalidBoolean })
+        foreach (var invalid in new[] { wrongReturn, uninitialized, invalidBoolean, invalidRequirement })
         {
             _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(program with { Functions = [invalid] }, NativeRuntimePolicy.FailFast));
         }

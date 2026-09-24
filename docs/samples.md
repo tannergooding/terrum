@@ -20,8 +20,10 @@ The calculator must reject U+0661/U+FF11 digits, U+2212 minus and U+FF0B operato
 
 Single ASCII operators/delimiters use target-typed character intent where helpful;
 casts replace per-source numeric helpers without changing the proposed output.
-Character literal/cast syntax, `require`, family conformance, constructor
-inference and builders are still design-only. See [conversion contracts](conversions.md)
+Character literal/cast syntax, family conformance, constructor inference and
+builders are still design-only. Boolean `require` runs in the native profile,
+but these sketches' bool/out publication and cleanup need later semantics.
+See [conversion contracts](conversions.md)
 and [type families](type-families.md), not parser success, for their rationale.
 
 The triangle's `NOTICE.txt` contains the Microsoft Tutorial02 attribution and license. Its README describes platform contracts and deliberate exclusions rather than a runnable recipe. All design examples use provisional source notation; unsupported declarations are not silently treated as a compiler feature. For current executable parser/syntax fixtures, consult [implementation](implementation.md) instead.

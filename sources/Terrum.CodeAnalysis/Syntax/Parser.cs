@@ -356,6 +356,11 @@ internal sealed class Parser
                 node = Node(isIf ? SyntaxKind.IfStatement : SyntaxKind.WhileStatement, children);
                 break;
             }
+            case TokenKind.RequireKeyword:
+            {
+                node = Node(SyntaxKind.RequireStatement, [Take(), ParseExpression(), Expect(TokenKind.Semicolon)]);
+                break;
+            }
             case TokenKind.ReturnKeyword:
             {
                 var children = new List<SyntaxElement> { Take() };

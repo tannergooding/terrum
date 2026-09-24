@@ -22,7 +22,7 @@ public sealed class CliTests
 
         try
         {
-            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return 23; }"),
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { require true; return 23; }"),
                 "build", "-", "-o", path, "--runtime", "fail-fast", "--json");
             Assert.Equal(0, exit);
             Assert.Equal("", error);
@@ -99,7 +99,7 @@ public sealed class CliTests
         var (semanticExit, output, _) = await RunAsync(source, "analyze", "-", "--json");
         Assert.Equal(1, semanticExit);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal("native-0", document.RootElement.GetProperty("profile").GetString());
+        Assert.Equal("native-1", document.RootElement.GetProperty("profile").GetString());
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
     }
 
@@ -115,7 +115,7 @@ public sealed class CliTests
         using var document = JsonDocument.Parse(output);
         var root = document.RootElement;
         Assert.False(root.GetProperty("success").GetBoolean());
-        Assert.Equal("syntax-1", root.GetProperty("languageVersion").GetString());
+        Assert.Equal("syntax-2", root.GetProperty("languageVersion").GetString());
         var diagnostic = Assert.Single(root.GetProperty("diagnostics").EnumerateArray());
         Assert.Equal("TRM1005", diagnostic.GetProperty("code").GetString());
         Assert.Equal(Source.LastIndexOf('?', StringComparison.Ordinal), diagnostic.GetProperty("span").GetProperty("start").GetInt32());

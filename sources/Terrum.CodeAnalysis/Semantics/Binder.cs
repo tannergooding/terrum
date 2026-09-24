@@ -280,6 +280,9 @@ internal sealed class Binder
             case SyntaxKind.EmptyStatement:
                 return new BoundBlock([], node.Span);
 
+            case SyntaxKind.RequireStatement:
+                return new BoundRequire(BindExpression((SyntaxNode)node.Children[1], PrimitiveType.Bool), node.Span);
+
             case SyntaxKind.ReturnStatement:
             {
                 var valueNode = node.Children[1] as SyntaxNode;

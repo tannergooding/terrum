@@ -111,8 +111,8 @@ internal static partial class Program
             if (success)
             {
                 Console.Out.WriteLine(build
-                    ? $"{outputPath}: Windows x64 native-0 (fail-fast runtime)"
-                    : $"{tree.Source.Path}: native-0 semantic analysis OK");
+                    ? $"{outputPath}: Windows x64 {Compilation.ProfileVersion} (fail-fast runtime)"
+                    : $"{tree.Source.Path}: {Compilation.ProfileVersion} semantic analysis OK");
             }
         }
 
@@ -153,7 +153,7 @@ internal static partial class Program
         writer.WriteStartObject();
         writer.WriteNumber("schemaVersion", 1);
         writer.WriteString("languageVersion", SyntaxTree.LanguageVersion);
-        writer.WriteString("profile", "native-0");
+        writer.WriteString("profile", Compilation.ProfileVersion);
         writer.WriteString("command", command);
         writer.WriteString("path", tree.Source.Path);
         writer.WriteString("coordinateSystem", "utf-16");

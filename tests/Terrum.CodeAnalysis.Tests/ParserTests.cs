@@ -12,6 +12,20 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class ParserTests
 {
     [Theory]
+    [InlineData("void F() { require /* \u03B1 */ ready; }")]
+    [InlineData("void F() { require TryRead(out var value) && value > 0; }")]
+    public void ParsesRequirementsWithoutLosingTriviaOrSourceShape(string source)
+    {
+        var tree = SyntaxTree.Parse(source);
+        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        var requirement = Assert.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.RequireStatement);
+        Assert.Equal(3, requirement.Children.Length);
+        Assert.Equal(TokenKind.RequireKeyword, Assert.IsType<SyntaxTokenElement>(requirement.Children[0]).Token.Kind);
+        Assert.Equal(TokenKind.Semicolon, Assert.IsType<SyntaxTokenElement>(requirement.Children[2]).Token.Kind);
+        AssertLossless(tree);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("// only trivia\r\n")]
     [InlineData("using Terrum; public static void Main() { Terminal.WriteLine(\"Hello, world!\"); }")]
@@ -107,6 +121,8 @@ public sealed class ParserTests
     [InlineData("} } }")]
     [InlineData("void F() { x = y = z; }")]
     [InlineData("void F() { var x = $\"unsupported\"; }")]
+    [InlineData("void F() { require ; return; }")]
+    [InlineData("void F() { require true }")]
     public void RecoversWithoutLosingText(string text)
     {
         var tree = SyntaxTree.Parse(text);

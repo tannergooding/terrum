@@ -1,0 +1,18 @@
+int32 SumThrough(int32 limit)
+{
+    require limit >= 0;
+    mut int32 sum = 0;
+    mut int32 value = 0;
+    while (value < limit)
+    {
+        value = value + 1;
+        sum = sum + value;
+    }
+
+    return sum;
+}
+
+int32 Main()
+{
+    return SumThrough(4);
+}

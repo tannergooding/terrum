@@ -71,4 +71,6 @@ public enum SyntaxKind
     MissingExpression,
     /// <summary>Unrecognized source preserved during parser recovery.</summary>
     SkippedSyntax,
+    /// <summary>A checked boolean requirement statement.</summary>
+    RequireStatement,
 }

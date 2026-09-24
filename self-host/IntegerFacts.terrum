@@ -1,4 +1,4 @@
-// Candidate compiler arithmetic helper; native-0 can execute this function.
+// Candidate compiler arithmetic helper; the native profile can execute this function.
 // Bounds are rearranged so the check itself cannot overflow.
 bool CanAddInt32(int32 left, int32 right)
 {
