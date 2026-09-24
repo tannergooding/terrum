@@ -1,0 +1,20 @@
+// Native-0: local initialization, mutation, loops and boolean short-circuiting.
+// Process exit code: 45.
+bool IsIncluded(int32 value)
+{
+    return value >= 0 && value < 10;
+}
+
+int32 Main()
+{
+    mut int32 index = 0;
+    mut int32 sum = 0;
+
+    while (IsIncluded(index))
+    {
+        sum = sum + index;
+        index = index + 1;
+    }
+
+    return sum;
+}

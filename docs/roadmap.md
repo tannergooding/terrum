@@ -1,23 +1,23 @@
 # Development roadmap
 
-The first milestone is a working syntax front end, not the entire language.
+The current milestone is a small checked native compiler, not the entire language.
 The [language](language.md) defines accepted semantic direction, while
 [implementation](implementation.md) records actual support and tool contracts.
 
 | Stage | Deliverable | Exit evidence |
 |---|---|---|
-| Syntax foundation (current) | Source, Unicode lexer, lossless CST, recovery, CLI, content-bound edits | Public API/CLI tests for round trips, positions, malformed input, numeric boundaries and stale edits |
-| Binding kernel | Symbol/type identity, target-typed literals, calls, places, initialized/consumed state, conditional outputs | Positive/negative semantic fixtures, including unresolved numerics and invalid output reads |
-| Structured operations | Explicit control/exception/cleanup structure and checked contracts | Mandatory verifier, deterministic dump/round trip, invalid-IR rejection |
-| CLI execution | Minimal CLI IL emission, entry host, checked arithmetic | Same corpus under JIT and supported Native AOT; no hidden allocation or semantic fallback |
+| Syntax foundation (implemented) | Source, Unicode lexer, lossless CST, recovery, CLI, content-bound edits | Public API/CLI tests for round trips, positions, malformed input, numeric boundaries and stale edits |
+| Integer binding and native AOT (current) | Typed functions/locals, contextual literals, structured control flow, mandatory verifier, direct Windows x64 PE emission | Positive/negative semantic tests, real native execution, checked failures, stack arguments, imports/unwind inspection and safe artifact replacement |
+| Semantic growth | Numeric types/conversions, aggregate construction, explicit places, conditional outputs | Boundary and invalid-state tests; explicit rejection of unsupported effects |
+| Full runtime and structured contracts | Exception/cleanup regions, roots, runtime contracts and richer verifier | Catch/cleanup correctness, failure injection, source-mapped diagnostics and invalid-IR rejection |
 | Resources and graphs | Checked loans/cleanup, managed handles, list/node identity and guards | Invalidating-operation rejection; retained-node/clear/reinsertion and GC stress fixtures |
 | Separate compilation | LMOD contract metadata, baseline comparison, binding and resilient layouts | Unchanged consumer against compatible producer, incompatible replacement rejected, side-by-side identities |
 | Rich libraries and self-hosting | Static protocols/generic math, views/builders, candidate compiler pieces | Executed shared host/self-host fixtures, not parser-only bootstrap claims |
-| Later capabilities | Async, generation/reflection, interop, scalable SIMD, independent runtime/backend | Workload-specific correctness, ABI, lifetime and measured cost evidence |
+| Later capabilities | JIT and additional native targets, async, generation/reflection, interop, scalable SIMD | JIT/AOT agreement; workload-specific correctness, ABI, lifetime and measured cost evidence |
 
 Do not implement all later stages simultaneously. The immediate next coherent
-slice is binding a small integer/function corpus, not designing a plugin loader
-or translating every sample. Stabilize syntax accessors while extending the
+work extends the verified native corpus and its semantic checks, not a plugin
+loader or wholesale translation of every design sample. Stabilize syntax accessors while extending the
 grammar; keep diagnostics/source mappings usable on incomplete input.
 
 Open design decisions are centralized in [language](language.md),
@@ -28,4 +28,4 @@ exception/low-memory ABI, family/conditional-conformance grammar and custom
 participation, text representation, explicit async affinity/scheduler syntax,
 async start policy, floating-destination conversion policies, scalable
 sharing ABI and final construction/annotation spellings remain open. None should
-be silently fixed by a convenient CLR lowering.
+be silently fixed by a convenient host or machine instruction.

@@ -1,0 +1,15 @@
+// Native-0: checked int32 calls and recursion. Process exit code: 720.
+int32 Factorial(int32 value)
+{
+    if (value <= 1)
+    {
+        return 1;
+    }
+
+    return value * Factorial(value - 1);
+}
+
+int32 Main()
+{
+    return Factorial(6);
+}

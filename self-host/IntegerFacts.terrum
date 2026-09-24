@@ -1,0 +1,16 @@
+// Candidate compiler arithmetic helper; native-0 can execute this function.
+// Bounds are rearranged so the check itself cannot overflow.
+bool CanAddInt32(int32 left, int32 right)
+{
+    if (right > 0)
+    {
+        return left <= 2147483647 - right;
+    }
+
+    if (right < 0)
+    {
+        return left >= -2147483648 - right;
+    }
+
+    return true;
+}

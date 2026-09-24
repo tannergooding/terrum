@@ -1,6 +1,6 @@
 # Lifetime and access contracts
 
-This document specifies the accepted direction for checked loans, views and published member contracts, with **provisional notation** where the grammar is unresolved. It refines [language](language.md); [libraries](libraries.md) illustrates the span/text/collection protocols. No lifetime binder or implementation of these contracts exists in the current P0 syntax-only front end ([implementation](implementation.md)).
+This document specifies the accepted direction for checked loans, views and published member contracts, with **provisional notation** where the grammar is unresolved. It refines [language](language.md); [libraries](libraries.md) illustrates the span/text/collection protocols. The current native integer/bool binder does not implement these lifetime contracts ([implementation](implementation.md)); dependent constructs are rejected for execution.
 
 ## Three independent dependencies
 
@@ -65,4 +65,4 @@ Store both the **broad interface contract** and the **resolved published impleme
 
 ## Implementation and unsettled points
 
-P0 currently parses syntax only; it has **no** flow-sensitive place/loan analysis, metadata contract verifier, stored interiors, generic witness binder, return-anchor ABI or runtime guard enforcement. The proposed next semantic stages must check loan use after transfer, place disjointness and last use, constructor/exception cleanup, bounded result escapes, interface variance/refinement and dynamic dependency binding before executing examples that depend on them. Unsupported escapes should diagnose, never trigger silent boxing, cloning, registration, retention or copying. Exact receiver/conditional syntax, static-source-set versus dependent predicates, multi-source ABI, first-class stored loan qualifiers and lease/root descriptors remain design work.
+The compiler has **no** flow-sensitive place/loan analysis, metadata contract verifier, stored interiors, generic witness binder, return-anchor ABI or runtime guard enforcement. Its current slot-initialization/mutation verifier is not a lifetime checker. Later semantic stages must check loan use after transfer, place disjointness and last use, constructor/exception cleanup, bounded result escapes, interface variance/refinement and dynamic dependency binding before executing examples that depend on them. Unsupported escapes should diagnose, never trigger silent boxing, cloning, registration, retention or copying. Exact receiver/conditional syntax, static-source-set versus dependent predicates, multi-source ABI, first-class stored loan qualifiers and lease/root descriptors remain design work.

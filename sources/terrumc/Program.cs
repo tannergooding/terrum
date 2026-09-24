@@ -14,9 +14,13 @@ using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.Tools;
 
-internal static class Program
+internal static partial class Program
 {
-    private const string Usage = "Usage: terrumc <check|tokens|tree> <path|-> [--json]\nChecks syntax only; '-' reads strict UTF-8 from stdin. Exit: 0 clean, 1 diagnostics, 2 usage/input error.";
+    private const string Usage = "Usage: terrumc <check|tokens|tree|analyze> <path|-> [--json]\n"
+        + "       terrumc build <path|-> -o <output.exe> --runtime fail-fast [--json]\n"
+        + "check/tokens/tree inspect syntax; analyze binds native-0; build emits Windows x64 PE.\n"
+        + "fail-fast explicitly selects process termination for runtime arithmetic errors, not catchable exceptions.\n"
+        + "'-' reads strict UTF-8 from stdin. Exit: 0 success, 1 source/compile diagnostics, 2 usage/input/output error.";
 
     private static int Main(string[] args)
     {
@@ -28,6 +32,11 @@ internal static class Program
         }
 
         var json = args.Contains("--json", StringComparer.Ordinal);
+
+        if (args.Length != 0 && args[0] is "analyze" or "build")
+        {
+            return RunCompilation(args, json);
+        }
 
         if (args.Length is not (2 or 3) || args[0] is not ("check" or "tokens" or "tree")
             || (args.Length == 3 && args[2] != "--json") || args[1] == "--json")
@@ -41,16 +50,7 @@ internal static class Program
 
         try
         {
-            if (args[1] == "-")
-            {
-                using var input = Console.OpenStandardInput();
-                text = ReadUtf8(input);
-            }
-            else
-            {
-                using var input = File.OpenRead(args[1]);
-                text = ReadUtf8(input);
-            }
+            text = ReadSource(args[1]);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or DecoderFallbackException or ArgumentException or NotSupportedException)
         {
@@ -108,6 +108,13 @@ internal static class Program
         }
 
         return hasErrors ? 1 : 0;
+    }
+
+    private static string ReadSource(string path)
+    {
+        using var input = path == "-" ? Console.OpenStandardInput() : File.OpenRead(path);
+
+        return ReadUtf8(input);
     }
 
     private static string ReadUtf8(Stream input)

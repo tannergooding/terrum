@@ -1,0 +1,16 @@
+// Native-0: register and stack arguments, with nested calls. Exit code: 91.
+int32 Identity(int32 value)
+{
+    return value;
+}
+
+int32 WeightedSum(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f)
+{
+    return a + b * 2 + c * 3 + d * 4 + e * 5 + f * 6;
+}
+
+int32 Main()
+{
+    return WeightedSum(Identity(1), Identity(2), Identity(3),
+                       Identity(4), Identity(5), Identity(6));
+}

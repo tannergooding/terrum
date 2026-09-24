@@ -1,6 +1,6 @@
 # Design samples
 
-These are **source sketches, not executable tests or compiled MVP programs**. The current P0 host is syntax-only and does not implement the semantics illustrated here. `.api.terrum` is an API-signature sketch with selected bodies, not a complete implementation or an implied foreign import. Compare expected behavior as design acceptance criteria, not as observed compiler output. See [language](language.md), [lifetimes](lifetimes.md), [libraries](libraries.md) and [implementation](implementation.md).
+The catalog below describes **design sketches, not executable tests or compiled MVP programs**. The native integer/bool profile does not implement the richer semantics illustrated here. `.api.terrum` is an API-signature sketch with selected bodies, not a complete implementation or an implied foreign import. Compare expected behavior as design acceptance criteria, not as observed compiler output. Separately, [`samples/native`](../samples/native) contains runnable recursion (factorial: 720), loop/mutation (45), and six-argument call (91) examples under the explicit [native runtime profile](native.md). See also [language](language.md), [lifetimes](lifetimes.md), [libraries](libraries.md) and [implementation](implementation.md).
 
 | Program | Source | Design contract / expected behavior |
 |---|---|---|

@@ -4,7 +4,7 @@ using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Diagnostics;
 
-/// <summary>A source-located lexical or syntactic diagnostic.</summary>
+/// <summary>A source-located compiler diagnostic.</summary>
 /// <param name="Code">The stable diagnostic identifier.</param>
 /// <param name="Severity">The diagnostic's severity.</param>
 /// <param name="Message">The human-readable explanation.</param>

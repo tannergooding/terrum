@@ -2,13 +2,14 @@
 
 ## Current boundary: syntax-1
 
-`Terrum.CodeAnalysis` is a reusable, immutable C# front end. `terrumc` exercises
-that library; it is not an independent parser. There is no Terrum execution,
-binding, type/lifetime checker, semantic IL, CLI IL emitter, runtime or working
-standard library yet. A clean syntax result is deliberately not a valid-program
-claim: `var x = 1;` parses even though the language requires a numeric target or
-tag. API sketches and broad samples are design inputs, not successful compiler
-fixtures.
+`Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
+that library; it is not an independent parser or binder. Syntax snapshots remain
+immutable and usable independently. The separate [native-0 profile](native.md)
+binds a bounded integer/bool language and emits Windows x64 executables through
+verified structured operations. A clean syntax result is deliberately not a
+valid-program claim: `var x = 1;` parses but semantic analysis rejects its missing
+numeric context. Ownership/lifetime checking, general semantic IL/LMOD,
+managed graphs and standard-library execution are not implemented.
 
 | Surface | Implemented | Not yet implemented |
 |---|---|---|
@@ -44,8 +45,9 @@ return      = "return" expression? ";"
 assignment  = expression "=" expression ";"
 ```
 
-Assignment is a statement, not an expression; place validity is a future binding
-check. Braces are required on control bodies. Supported precedence, strongest
+Assignment is a statement, not an expression; native-0 permits only initialized
+mutable local places. Other place kinds need future binding support.
+Braces are required on control bodies. Supported precedence, strongest
 first: postfix; unary `+ - ! ~`; `* / %`; `+ -`; `< <= > >=`; `== !=`; `&`; `^`;
 `|`; `&&`; `||`. Binary operators associate left. Lexing does not fuse angle
 brackets into shift tokens. Generic-call/comparison ambiguities are not solved by
@@ -129,12 +131,14 @@ are attached to this first implementation.
 dotnet run --project sources\terrumc -- check samples\syntax\hello.terrum
 dotnet run --project sources\terrumc -- tokens samples\syntax\control-flow.terrum --json
 dotnet run --project sources\terrumc -- tree samples\syntax\hello.terrum --json
+dotnet run --project sources\terrumc -- analyze samples\native\factorial.terrum --json
+dotnet run --project sources\terrumc -- build samples\native\factorial.terrum -o artifacts\factorial.exe --runtime fail-fast --json
 ```
 
 Use the built executable or `dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll ...`
 when stdout must contain only protocol output; `dotnet run` may print build
-messages. `-` reads stdin. Commands exit 0 for no relevant errors, 1 for lexical
-or syntax errors, and 2 for usage/input failures. `tokens` performs only lexical
+messages. `-` reads stdin. Commands exit 0 for no relevant errors, 1 for source
+or compilation diagnostics, and 2 for usage/input/output failures. `tokens` performs only lexical
 analysis. Human diagnostics go to stderr; JSON writes one object to stdout,
 including failures. No source is executed.
 
@@ -148,7 +152,8 @@ limits on long expression chains and permits targeted consumers to index nodes
 without recursively decoding source-sized nested objects.
 
 Messages are human-facing and not stable dispatch keys. `TRM0xxx` denotes lexical
-errors, `TRM1xxx` parsing and `TRM2xxx` CLI input/usage. Schema changes require
+errors, `TRM1xxx` parsing, `TRM2xxx` CLI I/O/usage, `TRM3xxx` semantic
+analysis and `TRM4xxx` native emission limits. Schema changes require
 versioning. Clients must reject unknown versions or explicitly negotiate them,
 not infer meaning from enum ordinals or diagnostic English.
 
@@ -159,6 +164,9 @@ parse options, module/reference identities and expanded public contracts. A
 semantic model resolves names/types/places and exposes structured queries:
 symbol at range, required/proven obligations, call target, initialization and
 escape facts, and why a diagnostic applies. Syntax is usable without binding.
+The initial `Semantics.Compilation` already binds one syntax snapshot to
+source-mapped, typed `BoundProgram` operations or diagnostics, never a partially
+valid executable. It is not yet the multi-module semantic query service.
 Partial/error semantics must distinguish unknown, invalid and proven states;
 absence of a diagnostic is not a safety proof.
 
@@ -195,7 +203,7 @@ lifetime contract or a source program's validity.
 ## Binding and backend path
 
 Keep diagnostics and source mapping through syntax -> bound operations ->
-validated structured Terrum semantic IL -> CLI lowering. The semantic layer
+validated structured Terrum operations -> target lowering. The semantic layer
 must represent values versus places, copy/move/borrow, initialization and
 conditional publication, blocks/edges/block arguments, exceptional cleanup,
 regions, loops and suspension. Mandatory validation checks terminators,
@@ -204,11 +212,20 @@ is represented honestly, not disguised as one natural loop. Cached analyses
 are optional/versioned; validating structure is not optional.
 
 LMOD is the future independently versioned Terrum module/contract artifact, not
-a renamed CLI assembly. CLI IL is the initial executable lowering. Start with
-small verified functions and a JIT/AOT agreement corpus; unsupported runtime
-capabilities must diagnose. Native AOT's managed dynamic-loading constraints
-are bootstrap limitations, not a change to Terrum's eventual separate-library
-semantics. An owned backend/runtime comes later, not LLVM by default.
+a renamed CLI assembly or a PE file. The current backend emits Windows x64
+machine instructions and PE32+ images directly, with no CIL/LLVM translation
+or linker dependency. `BoundProgram` retains structured blocks, branches,
+loops, slot reads/writes and checked expressions; its verifier precedes
+machine lowering. It is not a claim to implement the complete semantic IL.
+Target-specific encodings, import fixups and unwind records live under `Native`,
+not in binding or the public lossless syntax model.
+
+An optional CIL/reference backend would need a concrete validation/deployment
+benefit; it is not a prerequisite for native progress. Future JIT support needs
+executable-memory policy and dynamic unwind registration, and future separately
+serviced modules need versioned contracts and compatibility checks. The first
+single-image native profile implements neither. Unsupported runtime/ABI
+capabilities diagnose rather than inherit accidental CLR behavior.
 
 ## Design references and tradeoffs
 

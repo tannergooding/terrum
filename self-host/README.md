@@ -1,9 +1,9 @@
 # Candidate Terrum compiler sources
 
 These files are parallel design candidates, not a bootstrapped compiler.
-They are not linked into the C# implementation and no Terrum execution is claimed.
-The host tests remain executable C# tests; the candidate tests below have the same
-eventual self-hosting premise as the compiler sources.
+They are not linked into the C# implementation. `IntegerFacts` is small enough
+for native-0 execution; the other candidates still need later language slices.
+The host test runner remains C#, even when it compiles and executes a candidate.
 
 Host fixture tests parse and round-trip `SourceRange`, `CharacterFacts` and
 `RangeTests` only. They do not execute their functions, prove their semantics,
@@ -11,7 +11,8 @@ or cover the unsupported cursor/host-interface syntax.
 
 | Candidate | Purpose | Gates before execution |
 |---|---|---|
-| [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Binding, private construction, checked integers, conditional bool/out publication, CLI IL emission |
+| [IntegerFacts](IntegerFacts.terrum) | Overflow-free signed-addition range predicate | Supported by native-0; tested with native entry wrappers, not a full compiler bootstrap |
+| [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Struct/member binding, private construction, conditional bool/out publication |
 | [CharacterFacts](CharacterFacts.terrum) | Shared ASCII numeric and newline decisions | Static calls, `char16` comparisons, typed literals |
 | [TokenCursor](TokenCursor.terrum) | Read-view traversal without copying backing storage or cleanup | Span indexing, matched access, stored backing dependencies, capture contract, constructor initialization |
 | [RangeTests](RangeTests.terrum) | Small success/failure and overflow boundary cases | The above plus a test runner/assertion library and short-circuit initialization analysis |
@@ -34,8 +35,8 @@ state machines. A read cursor may forward backing dependencies; retaining its
 descriptor alone cannot extend an external allocation lease. `[Captures]` is
 working contract notation, not an unchecked annotation accepted by the MVP.
 
-To progress: execute the range/character tests through the future binder and CLI
-backend; port token records and the pinned Unicode tables; add parser routines;
+To progress: extend binding and native emission to execute the range/character
+tests; port token records and the pinned Unicode tables; add parser routines;
 then compare host/self-host token, tree and diagnostic fixtures. Keep shared
 fixture expectations about observable ranges and contracts, not host object
 layouts. An independent compiler bootstrap requires rebuilding and comparing

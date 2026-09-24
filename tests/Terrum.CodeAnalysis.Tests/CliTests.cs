@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -14,6 +15,94 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class CliTests
 {
+    [Fact]
+    public async Task BuildPublishesNativeArtifactAndFailedCompilationPreservesItAsync()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-cli-{Guid.NewGuid():N}.exe");
+
+        try
+        {
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return 23; }"),
+                "build", "-", "-o", path, "--runtime", "fail-fast", "--json");
+            Assert.Equal(0, exit);
+            Assert.Equal("", error);
+            using var document = JsonDocument.Parse(output);
+            var artifact = document.RootElement.GetProperty("artifact");
+            Assert.Equal("windows-x64", artifact.GetProperty("target").GetString());
+            Assert.Equal("fail-fast", artifact.GetProperty("runtimePolicy").GetString());
+            var original = await File.ReadAllBytesAsync(path);
+            Assert.Equal(original.Length, artifact.GetProperty("length").GetInt32());
+            Assert.Equal(Convert.ToHexString(SHA256.HashData(original)), artifact.GetProperty("sha256").GetString());
+
+            var (failure, failedOutput, _) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return unknown; }"),
+                "build", "-", "-o", path, "--runtime", "fail-fast", "--json");
+            Assert.Equal(1, failure);
+            using var failedDocument = JsonDocument.Parse(failedOutput);
+            Assert.False(failedDocument.RootElement.GetProperty("success").GetBoolean());
+            Assert.False(failedDocument.RootElement.TryGetProperty("artifact", out _));
+            Assert.Equal(original, await File.ReadAllBytesAsync(path));
+
+            var oversized = "int32 Main() {" + string.Concat(Enumerable.Range(0, 257)
+                .Select(static index => FormattableString.Invariant($"int32 v{index} = 0;"))) + "return 0;}";
+            var (limitExit, limitOutput, _) = await RunAsync(Encoding.UTF8.GetBytes(oversized),
+                "build", "-", "-o", path, "--runtime", "fail-fast", "--json");
+            Assert.Equal(1, limitExit);
+            using var limitDocument = JsonDocument.Parse(limitOutput);
+            Assert.Equal("TRM4001", limitDocument.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+            Assert.False(limitDocument.RootElement.TryGetProperty("artifact", out _));
+            Assert.Equal(original, await File.ReadAllBytesAsync(path));
+
+            using var process = Process.Start(new ProcessStartInfo(path) { UseShellExecute = false, CreateNoWindow = true })
+                ?? throw new InvalidOperationException("Could not start native artifact.");
+
+            try
+            {
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            catch (TimeoutException)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync();
+                }
+
+                throw;
+            }
+
+            Assert.Equal(23, process.ExitCode);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("build", "-", "-o", "unused.exe", "--json")]
+    [InlineData("build", "-", "-o", "unused.exe", "--runtime", "implicit", "--json")]
+    [SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "The xUnit data rows supply non-null argument arrays.")]
+    public async Task BuildRequiresExplicitRuntimePolicyAsync(params string[] arguments)
+    {
+        var (exit, output, _) = await RunAsync([], arguments);
+        Assert.Equal(2, exit);
+        using var document = JsonDocument.Parse(output);
+        Assert.Equal("TRM2000", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task AnalyzeRunsBindingRatherThanOnlyParsingAsync()
+    {
+        var source = Encoding.UTF8.GetBytes("int32 Main() { var x = 1; return x; }");
+        var (syntaxExit, _, _) = await RunAsync(source, "check", "-", "--json");
+        Assert.Equal(0, syntaxExit);
+        var (semanticExit, output, _) = await RunAsync(source, "analyze", "-", "--json");
+        Assert.Equal(1, semanticExit);
+        using var document = JsonDocument.Parse(output);
+        Assert.Equal("native-0", document.RootElement.GetProperty("profile").GetString());
+        Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+    }
+
     [Theory]
     [InlineData("check")]
     [InlineData("tree")]
