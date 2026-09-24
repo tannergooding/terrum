@@ -1,5 +1,9 @@
 <Solution>
   <Folder Name="/sources/">
     <Project Path="sources/Terrum.CodeAnalysis/Terrum.CodeAnalysis.csproj" />
+    <Project Path="sources/terrumc/terrumc.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Terrum.CodeAnalysis.Tests/Terrum.CodeAnalysis.Tests.csproj" />
   </Folder>
 </Solution>

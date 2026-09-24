@@ -1,0 +1,40 @@
+// Copyright (c) Tanner Gooding and Contributors. Licensed under the MIT License.
+
+namespace Terrum.CodeAnalysis.Syntax;
+
+public enum SyntaxKind
+{
+    CompilationUnit,
+    UsingDirective,
+    NamespaceDeclaration,
+    FunctionDeclaration,
+    StructDeclaration,
+    ConstructorDeclaration,
+    FieldDeclaration,
+    TypeName,
+    ParameterList,
+    Parameter,
+    Block,
+    VariableDeclaration,
+    IfStatement,
+    ElseClause,
+    WhileStatement,
+    ReturnStatement,
+    ExpressionStatement,
+    AssignmentStatement,
+    EmptyStatement,
+    NameExpression,
+    LiteralExpression,
+    ParenthesizedExpression,
+    VoidExpression,
+    UnaryExpression,
+    BinaryExpression,
+    InvocationExpression,
+    ObjectCreationExpression,
+    MemberAccessExpression,
+    IndexExpression,
+    ArgumentList,
+    Argument,
+    MissingExpression,
+    SkippedSyntax,
+}

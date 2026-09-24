@@ -1,0 +1,31 @@
+namespace Examples;
+
+public struct Point
+{
+    public int32 X;
+    public int32 Y;
+
+    public Point(int32 x, int32 y)
+    {
+        X = x;
+        Y = y;
+    }
+}
+
+public static int32 Sum(Span<int32> values)
+{
+    mut int32 index = 0;
+    mut int32 result = 0;
+
+    while (index < values.Length)
+    {
+        if (values[index] > 0)
+        {
+            result = result + values[index];
+        }
+
+        index = index + 1;
+    }
+
+    return result;
+}
