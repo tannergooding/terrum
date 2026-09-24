@@ -1,0 +1,31 @@
+using Terrum;
+namespace Terrum.CodeAnalysis;
+
+public struct SourceRange
+{
+    public int32 Start;
+    public int32 Length;
+
+    private SourceRange(int32 start, int32 length)
+    {
+        Start = start;
+        Length = length;
+    }
+
+    public static bool TryCreate(int32 start, int32 length, out SourceRange range)
+    {
+        if (start < 0 || length < 0 || start > int32.MaxValue - length)
+        {
+            return false;
+        }
+
+        range = new SourceRange(start, length);
+
+        return true;
+    }
+
+    public int32 GetEnd()
+    {
+        return Start + Length;
+    }
+}

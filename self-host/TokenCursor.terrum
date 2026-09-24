@@ -1,0 +1,40 @@
+using Terrum;
+namespace Terrum.CodeAnalysis;
+
+public struct Token
+{
+    public int32 Kind;
+    public SourceRange Range;
+
+    public Token(int32 kind, SourceRange range)
+    {
+        Kind = kind;
+        Range = range;
+    }
+}
+
+public unique struct TokenCursor
+{
+    private Span<Token> _tokens;
+    private mut nuint _position;
+
+    [Captures(nameof(tokens))]
+    public TokenCursor(Span<Token> tokens)
+    {
+        _tokens = tokens;
+        _position = 0;
+    }
+
+    public mut bool TryRead(out Token token)
+    {
+        if (_position == _tokens.Length)
+        {
+            return false;
+        }
+
+        token = _tokens[_position];
+        _position = _position + 1;
+
+        return true;
+    }
+}

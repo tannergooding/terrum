@@ -1,0 +1,17 @@
+namespace Terrum.CodeAnalysis;
+
+public static bool IsAsciiDigit(char16 value)
+{
+    return value >= 48 && value <= 57;
+}
+
+public static bool IsLineBreak(char16 value)
+{
+    return value == 10 || value == 13 || value == 133 || value == 8232 || value == 8233;
+}
+
+public static int32 GetDecimalDigit(char16 value)
+{
+    // Caller has established IsAsciiDigit; conversion is explicit, not digit folding.
+    return int32.FromChar16Checked(value) - 48;
+}

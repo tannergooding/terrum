@@ -1,0 +1,32 @@
+using Terrum;
+namespace Terrum.CodeAnalysis.Tests;
+
+public static bool CheckSourceRange()
+{
+    if (!SourceRange.TryCreate(2, 3, out var range))
+    {
+        return false;
+    }
+
+    if (range.GetEnd() != 5)
+    {
+        return false;
+    }
+
+    if (SourceRange.TryCreate(-1, 0, out var negative))
+    {
+        return false;
+    }
+
+    if (SourceRange.TryCreate(int32.MaxValue, 1, out var overflowing))
+    {
+        return false;
+    }
+
+    if (!SourceRange.TryCreate(int32.MaxValue, 0, out var end))
+    {
+        return false;
+    }
+
+    return end.GetEnd() == int32.MaxValue;
+}
