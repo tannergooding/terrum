@@ -70,7 +70,7 @@ def main():
         "    }",
     ]
     for name in ("Start", "Continue"):
-        output += ["", f"    private static System.ReadOnlySpan<int> {name}Ranges => ["]
+        output += ["", f"    internal static System.ReadOnlySpan<int> {name}Ranges => ["]
         for start, end in ranges(data, f"XID_{name}"):
             output.append(f"        0x{start:X}, 0x{end:X},")
         output.append("    ];")

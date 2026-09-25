@@ -32,7 +32,7 @@ internal static class UnicodeXid
         return false;
     }
 
-    private static System.ReadOnlySpan<int> StartRanges => [
+    internal static System.ReadOnlySpan<int> StartRanges => [
         0x41, 0x5A,
         0x61, 0x7A,
         0xAA, 0xAA,
@@ -726,7 +726,7 @@ internal static class UnicodeXid
         0x31350, 0x33479,
     ];
 
-    private static System.ReadOnlySpan<int> ContinueRanges => [
+    internal static System.ReadOnlySpan<int> ContinueRanges => [
         0x30, 0x39,
         0x41, 0x5A,
         0x5F, 0x5F,
