@@ -259,8 +259,8 @@ public static class ScannerHost
             var record = bytes.Slice(4 + (index * 20), 20);
             var tokenIndex = BinaryPrimitives.ReadInt32LittleEndian(record);
             var status = (ScannerIntegerStatus)BinaryPrimitives.ReadInt32LittleEndian(record[4..]);
-            var low = (uint)BinaryPrimitives.ReadInt32LittleEndian(record[8..]);
-            var high = (uint)BinaryPrimitives.ReadInt32LittleEndian(record[12..]);
+            var low = BinaryPrimitives.ReadUInt32LittleEndian(record[8..]);
+            var high = BinaryPrimitives.ReadUInt32LittleEndian(record[12..]);
             var tag = (ScannerIntegerTag)BinaryPrimitives.ReadInt32LittleEndian(record[16..]);
             if (tokenIndex <= previousIndex || tokenIndex >= tokens.Length - 1
                 || !Enum.IsDefined(status) || !Enum.IsDefined(tag)
