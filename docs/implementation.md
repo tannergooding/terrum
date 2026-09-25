@@ -15,7 +15,7 @@ managed graphs and standard-library execution are not implemented.
 |---|---|---|
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
 | Lexing | Pinned Unicode identifiers, ASCII numbers/tags, comments, leading trivia, strings, diagnostics, EOF | Interpolation, raw/character/native literals, directives |
-| Declarations | Using, file-scoped namespaces, functions, compact structs with explicit fields/constructors/methods; bounded semantic module contracts | Classes, interfaces, enums/unions, attributes, generic declarations/constraints, general module imports |
+| Declarations | Using, file-scoped namespaces, functions, compact structs with explicit fields/constructors/methods; library binding and one validated module reference per consumer | Classes, interfaces, enums/unions, attributes, generic declarations/constraints, general module dependency graphs |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; repeated `?` diagnoses | General type resolution, optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, return, `require`, assignment and expression statements | `for`/`foreach`, switch/patterns, exceptions, cleanup, async, compound assignment |
 | Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named/ref/out argument syntax | Character literals, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
@@ -239,7 +239,9 @@ An optional CIL/reference backend would need a concrete validation/deployment
 benefit; it is not a prerequisite for native progress. The [JIT proof](jit.md)
 reuses the encoder with W^X memory and dynamic unwind registration.
 [Semantic modules](modules.md) persist verified bodies and normalized contracts
-for bounded process-start replacement; this is not the general LMOD design or
+for bounded process-start replacement. Consumers bind against imported declarations
+without producer source; private implementation layouts and helpers can evolve
+without changing the persisted consumer. This is not the general LMOD design or
 native DLL servicing. Unsupported runtime/ABI capabilities diagnose rather than
 inherit accidental CLR behavior.
 

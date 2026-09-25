@@ -52,7 +52,7 @@ public sealed class Compilation
     /// <summary>Gets each diagnostic with the source snapshot that owns its span.</summary>
     public ImmutableArray<SourceDiagnostic> SourceDiagnostics { get; }
 
-    /// <summary>Gets the executable program, or null if any error occurred.</summary>
+    /// <summary>Gets the verified program, or null on error. Libraries and programs with external declarations require linking.</summary>
     public BoundProgram? Program { get; }
 
     /// <summary>Gets whether the compilation contains errors.</summary>
@@ -78,7 +78,25 @@ public sealed class Compilation
     /// <returns>A compilation; its program is null whenever there are errors.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="tree"/> is null.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
-    public static Compilation Create(SyntaxTree tree, CancellationToken cancellationToken = default)
+    public static Compilation Create(SyntaxTree tree, CancellationToken cancellationToken = default) =>
+        CreateCore(tree, isLibrary: false, cancellationToken);
+
+    /// <summary>Binds and verifies library definitions without requiring or selecting a Main entry point.</summary>
+    /// <param name="tree">The source snapshot containing the definitions.</param>
+    /// <param name="cancellationToken">Cancellation for semantic traversal.</param>
+    /// <returns>A compilation whose successful program has EntryPoint -1 and must be linked before execution.</returns>
+    public static Compilation CreateLibrary(SyntaxTree tree, CancellationToken cancellationToken = default) =>
+        CreateCore(tree, isLibrary: true, cancellationToken);
+
+    /// <summary>Binds consumer source against validated module declarations, without reading producer source or binding its bodies.</summary>
+    public static Compilation Create(SyntaxTree tree, CompilationReference reference, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        return CreateCore(tree, isLibrary: false, cancellationToken, reference);
+    }
+
+    private static Compilation CreateCore(SyntaxTree tree, bool isLibrary, CancellationToken cancellationToken,
+        CompilationReference? reference = null)
     {
         ArgumentNullException.ThrowIfNull(tree);
         cancellationToken.ThrowIfCancellationRequested();
@@ -89,7 +107,7 @@ public sealed class Compilation
             return new Compilation(tree, tree.Diagnostics, null);
         }
 
-        var binder = new Binder(tree, cancellationToken);
+        var binder = new Binder(tree, isLibrary, cancellationToken, reference);
         var program = binder.Bind();
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
         diagnostics.AddRange(tree.Diagnostics);

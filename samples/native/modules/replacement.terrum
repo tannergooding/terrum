@@ -2,8 +2,3 @@ public int32 Helper()
 {
     return 22;
 }
-
-int32 Main()
-{
-    return 0;
-}

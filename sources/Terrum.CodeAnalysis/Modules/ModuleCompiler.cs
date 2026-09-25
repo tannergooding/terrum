@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public static class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 2;
+    private const int Version = 3;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -25,11 +25,90 @@ public static class ModuleCompiler
     private const int MaximumDepth = 128;
     private const int MaximumStringBytes = 1024;
 
+    /// <summary>Reads and verifies a producer artifact, exposing only exported declarations and their value layouts to source binding.</summary>
+    public static CompilationReference CreateReference(byte[] producerBytes)
+    {
+        var producer = Read(producerBytes, expectedConsumer: false);
+        ValidateProducer(producer);
+        var declarations = producer.Functions.Where(static function => function.Import)
+            .Select(static item => Declaration(item.Function ?? throw new ModuleFormatException("Missing export declaration.")))
+            .ToImmutableArray();
+        var required = RequiredStructures(declarations, producer.Structures);
+        var structures = producer.Structures.Where(structure => required.Contains(structure.Name)).ToImmutableArray();
+        return new CompilationReference(structures,
+            [.. declarations.Select(function => RemapFunction(function, producer.Structures, structures))]);
+    }
+
+    private static BoundFunction Declaration(BoundFunction function) => function with {
+        IsExternal = true,
+        Variables = [.. function.Variables.Take(function.ParameterCount + (function.IsConstructor ? 1 : 0))
+            .Select(static variable => variable with { Span = default })],
+        Body = new BoundBlock([], default),
+        Span = default,
+    };
+
+    private static HashSet<string> RequiredStructures(IEnumerable<BoundFunction> functions, ImmutableArray<BoundStruct> structures)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var function in functions)
+        {
+            Add(function.ReturnType);
+            foreach (var variable in function.Variables)
+            {
+                Add(variable.Type);
+            }
+            if (function.DeclaringStruct is string declaring)
+            {
+                _ = result.Add(declaring);
+            }
+        }
+        return result;
+
+        void Add(PrimitiveType type)
+        {
+            var index = (int)type - 100;
+            if (index >= 0)
+            {
+                if (index >= structures.Length)
+                {
+                    throw new ModuleFormatException("Invalid declared type reference.");
+                }
+                _ = result.Add(structures[index].Name);
+            }
+        }
+    }
+
+    private static void ValidateProducer(Module producer)
+    {
+        var names = producer.Functions.Select((function, index) => (function.Name, Index: index))
+            .ToDictionary(static item => item.Name, static item => item.Index, StringComparer.Ordinal);
+        var program = Resolve(new BoundProgram([.. producer.Functions.Select(static function =>
+            function.Function ?? throw new ModuleFormatException("Missing producer body."))], -1) {
+            Structures = producer.Structures,
+        }, names);
+        try
+        {
+            SemanticVerifier.VerifyLibrary(program);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+        {
+            throw new ModuleFormatException("Producer IR failed semantic verification.", exception);
+        }
+    }
+
     /// <summary>Creates an independently stored producer from named functions in a verified compilation.</summary>
     public static byte[] CreateProducer(BoundProgram program, IEnumerable<string> exports)
     {
         ArgumentNullException.ThrowIfNull(exports);
-        SemanticVerifier.Verify(program);
+        ArgumentNullException.ThrowIfNull(program);
+        if (program.EntryPoint == -1)
+        {
+            SemanticVerifier.VerifyLibrary(program);
+        }
+        else
+        {
+            SemanticVerifier.Verify(program);
+        }
         if (!program.Buffers.IsDefaultOrEmpty)
         {
             throw new ModuleFormatException("Host buffers are not serializable module dependencies.");
@@ -71,9 +150,12 @@ public static class ModuleCompiler
                 }
             }
         }
-        var functions = program.Functions.Where((_, index) => indexes.Contains(index));
-        var module = new Module(false, -1, program.Structures, [.. functions.Select(function =>
-            new ModuleFunction(function.Name, Contract(function, program.Structures), function, names.Contains(function.Name)))]);
+        var functions = program.Functions.Where((_, index) => indexes.Contains(index)).ToImmutableArray();
+        var required = RequiredStructures(functions, program.Structures);
+        var structures = program.Structures.Where(structure => required.Contains(structure.Name)).ToImmutableArray();
+        var remapped = functions.Select(function => RemapFunction(function, program.Structures, structures));
+        var module = new Module(false, -1, structures, [.. remapped.Select(function =>
+            new ModuleFunction(function.Name, Contract(function, structures), function, names.Contains(function.Name)))]);
         return Write(module, program);
     }
 
@@ -81,25 +163,23 @@ public static class ModuleCompiler
     public static byte[] CreateConsumer(BoundProgram program, byte[] referenceProducer)
     {
         ArgumentNullException.ThrowIfNull(referenceProducer);
-        SemanticVerifier.Verify(program);
+        SemanticVerifier.VerifyReferences(program);
         if (!program.Buffers.IsDefaultOrEmpty)
         {
             throw new ModuleFormatException("Host buffers are not serializable module dependencies.");
         }
         var producer = Read(referenceProducer, expectedConsumer: false);
-        if (!SameStructures(program.Structures, producer.Structures))
-        {
-            throw new ModuleContractException("Reference type layouts differ from the producer.");
-        }
+        ValidateProducer(producer);
         var exports = producer.Functions.Where(static function => function.Import)
             .ToDictionary(function => function.Name, StringComparer.Ordinal);
         var implementationFunctions = producer.Functions.Where(static function => !function.Import)
             .Select(function => function.Name).ToHashSet(StringComparer.Ordinal);
+        var hasExternalDeclarations = program.Functions.Any(static function => function.IsExternal);
         var declarations = ImmutableArray.CreateBuilder<ModuleFunction>();
         for (var i = 0; i < program.Functions.Length; i++)
         {
             var function = program.Functions[i];
-            if (implementationFunctions.Contains(function.Name))
+            if (!hasExternalDeclarations && implementationFunctions.Contains(function.Name))
             {
                 continue;
             }
@@ -117,9 +197,13 @@ public static class ModuleCompiler
             }
             else
             {
+                if (function.IsExternal)
+                {
+                    throw new ModuleContractException($"External declaration '{function.Name}' is not provided by this producer.");
+                }
                 foreach (var callee in Calls(function.Body))
                 {
-                    if (implementationFunctions.Contains(program.Functions[callee].Name))
+                    if (!hasExternalDeclarations && implementationFunctions.Contains(program.Functions[callee].Name))
                     {
                         throw new ModuleContractException("Consumer cannot call an unexported producer implementation.");
                     }
@@ -140,7 +224,31 @@ public static class ModuleCompiler
         {
             throw new ModuleContractException("Main must be owned by the consumer.");
         }
-        return Write(new Module(true, entryPoint, program.Structures, declarations.ToImmutable()), program);
+        var retained = declarations.ToDictionary(static declaration => declaration.Name, StringComparer.Ordinal);
+        var required = RequiredStructures(program.Functions.Where(function => retained.ContainsKey(function.Name))
+            .Select(function => retained[function.Name].Import ? Declaration(function) : function), program.Structures);
+        var structures = program.Structures.Where(structure => required.Contains(structure.Name)).ToImmutableArray();
+        var exportedTypes = RequiredStructures(producer.Functions.Where(static function => function.Import)
+            .Select(static function => Declaration(function.Function ?? throw new ModuleFormatException("Missing export."))), producer.Structures);
+        var producerTypes = producer.Structures.Where(structure => exportedTypes.Contains(structure.Name))
+            .ToDictionary(static structure => structure.Name, StringComparer.Ordinal);
+        var importedTypes = ImmutableArray.CreateBuilder<string>();
+        foreach (var structure in structures)
+        {
+            if (producerTypes.TryGetValue(structure.Name, out var imported))
+            {
+                if (!SameStructures([structure], [imported]) || structure.IsPrivate || structure.IsInternal)
+                {
+                    throw new ModuleContractException($"Incompatible or inaccessible imported value layout '{structure.Name}'.");
+                }
+                importedTypes.Add(structure.Name);
+            }
+        }
+        var remapped = declarations.Select(declaration => declaration.Function is BoundFunction function
+            ? declaration with { Function = RemapFunction(function, program.Structures, structures) } : declaration).ToImmutableArray();
+        return Write(new Module(true, entryPoint, structures, remapped) {
+            ImportedStructures = importedTypes.ToImmutable(),
+        }, program);
     }
 
     /// <summary>Resolves symbolic calls against a separately supplied producer, checks contracts and verifies the complete linked IR.</summary>
@@ -148,16 +256,30 @@ public static class ModuleCompiler
     {
         var consumer = Read(consumerBytes, expectedConsumer: true);
         var producer = Read(producerBytes, expectedConsumer: false);
-        if (!SameStructures(consumer.Structures, producer.Structures))
+        ValidateProducer(producer);
+        var sharedTypes = consumer.ImportedStructures.ToHashSet(StringComparer.Ordinal);
+        var producerTypes = producer.Structures.ToDictionary(static structure => structure.Name, StringComparer.Ordinal);
+        foreach (var structure in consumer.Structures)
         {
-            throw new ModuleContractException("Incompatible producer type layout.");
+            if (sharedTypes.Contains(structure.Name)
+                && (!producerTypes.TryGetValue(structure.Name, out var actual)
+                    || !SameStructures([structure], [actual]) || actual.IsPrivate || actual.IsInternal))
+            {
+                throw new ModuleContractException($"Incompatible producer type layout '{structure.Name}'.");
+            }
         }
+        var structures = consumer.Structures.ToBuilder();
+        var renamedTypes = producer.Structures.Select(structure => sharedTypes.Contains(structure.Name)
+            ? structure : structure with { Name = "$producer." + structure.Name }).ToImmutableArray();
+        structures.AddRange(renamedTypes.Where(structure => !sharedTypes.Contains(structure.Name)));
+        var allStructures = structures.ToImmutable();
         var available = producer.Functions.Where(static function => function.Import)
             .ToDictionary(function => function.Name, StringComparer.Ordinal);
         var names = new Dictionary<string, int>(StringComparer.Ordinal);
+        var producerNames = new Dictionary<string, int>(StringComparer.Ordinal);
         var functions = ImmutableArray.CreateBuilder<BoundFunction>();
         var consumerOwned = new List<int>();
-        var producerOnly = new HashSet<int>();
+        var producerOwned = new List<int>();
         foreach (var declaration in consumer.Functions)
         {
             if (!names.TryAdd(declaration.Name, functions.Count))
@@ -171,43 +293,41 @@ public static class ModuleCompiler
                 {
                     throw new ModuleContractException($"Incompatible or missing producer contract for '{declaration.Name}'.");
                 }
-                functions.Add(RemapFunction(replacement.Function
-                    ?? throw new ModuleFormatException("Producer has an unowned function."), producer.Structures, consumer.Structures));
+                producerNames.Add(declaration.Name, functions.Count);
+                producerOwned.Add(functions.Count);
+                functions.Add(ImportFunction(replacement, declaration.Name));
             }
             else
             {
+                if (declaration.Function?.DeclaringStruct is string owner && sharedTypes.Contains(owner))
+                {
+                    throw new ModuleContractException("Consumer cannot define members of an imported value type.");
+                }
                 consumerOwned.Add(functions.Count);
                 functions.Add(declaration.Function ?? throw new ModuleFormatException("Consumer has an unowned function."));
             }
         }
         foreach (var exported in producer.Functions)
         {
-            if (!exported.Import)
+            if (!producerNames.ContainsKey(exported.Name))
             {
-                if (!names.TryAdd(exported.Name, functions.Count))
-                {
-                    throw new ModuleFormatException("Unexported producer function conflicts with a consumer symbol.");
-                }
-                _ = producerOnly.Add(functions.Count);
-                functions.Add(RemapFunction(exported.Function
-                    ?? throw new ModuleFormatException("Missing private producer body."), producer.Structures, consumer.Structures));
-            }
-            else if (!names.ContainsKey(exported.Name))
-            {
-                throw new ModuleContractException($"Producer export '{exported.Name}' was not declared by the consumer.");
+                producerNames.Add(exported.Name, functions.Count);
+                producerOwned.Add(functions.Count);
+                var owner = exported.Function?.DeclaringStruct;
+                var name = owner is not null && sharedTypes.Contains(owner)
+                    ? owner + ".$producer." + exported.Name[(owner.Length + 1)..] : "$producer." + exported.Name;
+                functions.Add(ImportFunction(exported, name));
             }
         }
-        var result = Resolve(new BoundProgram(functions.ToImmutable(), consumer.EntryPoint) { Structures = consumer.Structures }, names);
         foreach (var owner in consumerOwned)
         {
-            foreach (var callee in Calls(result.Functions[owner].Body))
-            {
-                if (producerOnly.Contains(callee))
-                {
-                    throw new ModuleContractException("Consumer cannot call an unexported producer implementation.");
-                }
-            }
+            functions[owner] = functions[owner] with { Body = (BoundBlock)ResolveStatement(functions[owner].Body, names) };
         }
+        foreach (var owner in producerOwned)
+        {
+            functions[owner] = functions[owner] with { Body = (BoundBlock)ResolveStatement(functions[owner].Body, producerNames) };
+        }
+        var result = new BoundProgram(functions.ToImmutable(), consumer.EntryPoint) { Structures = allStructures };
         try
         {
             SemanticVerifier.Verify(result);
@@ -217,6 +337,17 @@ public static class ModuleCompiler
             throw new ModuleFormatException("Linked module IR failed semantic verification.", exception);
         }
         return result;
+
+        BoundFunction ImportFunction(ModuleFunction declaration, string name)
+        {
+            var function = declaration.Function ?? throw new ModuleFormatException("Producer has an unowned function.");
+            var owner = function.DeclaringStruct;
+            if (owner is not null && !sharedTypes.Contains(owner))
+            {
+                owner = "$producer." + owner;
+            }
+            return RemapFunction(function with { Name = name, DeclaringStruct = owner }, renamedTypes, allStructures);
+        }
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Only nodes with nested expressions or statements need traversal.")]
@@ -440,6 +571,7 @@ public static class ModuleCompiler
                 BoundCast cast => cast with { Type = Type(cast.Type), Operand = Expression(cast.Operand) },
                 BoundFieldRead field => field with { Type = Type(field.Type), Receiver = Expression(field.Receiver) },
                 BoundOutArgument output => output with { Type = Type(output.Type) },
+                BoundCall call => call with { Type = Type(call.Type), Arguments = [.. call.Arguments.Select(Expression)] },
                 SymbolicCall call => call with { Type = Type(call.Type), Arguments = [.. call.Arguments.Select(Expression)] },
                 _ => throw new ModuleFormatException("Unknown producer expression kind."),
             };
@@ -498,6 +630,11 @@ public static class ModuleCompiler
                 writer.Write(field.IsPrivate);
                 writer.Write(field.IsInternal);
             }
+        }
+        writer.Write(module.ImportedStructures.Length);
+        foreach (var imported in module.ImportedStructures)
+        {
+            PutString(writer, imported);
         }
         writer.Write(module.Functions.Length);
         var names = program.Functions.Select(function => function.Name).ToArray();
@@ -573,6 +710,18 @@ public static class ModuleCompiler
                     IsInternal = isInternal,
                 });
             }
+            var importCount = Count(reader, structureCount);
+            var importedTypes = ImmutableArray.CreateBuilder<string>(importCount);
+            var importedNames = new HashSet<string>(StringComparer.Ordinal);
+            for (var index = 0; index < importCount; index++)
+            {
+                var name = GetString(reader);
+                if (!expectedConsumer || !structureNames.Contains(name) || !importedNames.Add(name))
+                {
+                    throw new ModuleFormatException("Invalid imported type identity.");
+                }
+                importedTypes.Add(name);
+            }
             var count = Count(reader, MaximumFunctions);
             if (count == 0 || (expectedConsumer ? entry < 0 || entry >= count : entry != -1))
             {
@@ -612,7 +761,9 @@ public static class ModuleCompiler
             {
                 throw new ModuleFormatException("Module has trailing data or an imported entry point.");
             }
-            return new Module(expectedConsumer, entry, structures.ToImmutable(), items.ToImmutable());
+            return new Module(expectedConsumer, entry, structures.ToImmutable(), items.ToImmutable()) {
+                ImportedStructures = importedTypes.ToImmutable(),
+            };
         }
         catch (Exception exception) when (exception is EndOfStreamException or DecoderFallbackException or OverflowException or ArgumentOutOfRangeException or IOException)
         {
@@ -978,7 +1129,10 @@ public static class ModuleCompiler
         return new UTF8Encoding(false, true).GetString(bytes);
     }
 
-    private sealed record Module(bool Consumer, int EntryPoint, ImmutableArray<BoundStruct> Structures, ImmutableArray<ModuleFunction> Functions);
+    private sealed record Module(bool Consumer, int EntryPoint, ImmutableArray<BoundStruct> Structures, ImmutableArray<ModuleFunction> Functions)
+    {
+        public ImmutableArray<string> ImportedStructures { get; init; } = [];
+    }
     private sealed record ModuleFunction(string Name, string Contract, BoundFunction? Function, bool Import);
     private sealed record SymbolicCall(string Name, ImmutableArray<BoundExpression> Arguments, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 }

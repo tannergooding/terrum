@@ -26,7 +26,7 @@ public enum PrimitiveType
 
 /// <summary>A source-mapped, structured program with resolved function and local indexes.</summary>
 /// <param name="Functions">Functions in declaration order.</param>
-/// <param name="EntryPoint">The index of the parameterless Main function.</param>
+/// <param name="EntryPoint">The index of the parameterless Main function, or -1 for a library requiring linking.</param>
 public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int EntryPoint)
 {
     /// <summary>Validated scalar ABI value layouts; type identifiers are 100 + declaration index.</summary>
@@ -66,6 +66,9 @@ public sealed record BoundStructField(string Name, PrimitiveType Type, int Offse
 public sealed record BoundFunction(string Name, PrimitiveType ReturnType, ImmutableArray<BoundVariable> Variables,
     int ParameterCount, BoundBlock Body, TextSpan Span)
 {
+    /// <summary>Whether this is an imported declaration with no implementation. Native emission requires it to be resolved.</summary>
+    public bool IsExternal { get; init; }
+
     /// <summary>Whether this function initializes its receiver's fields and returns the value.</summary>
     public bool IsConstructor { get; init; }
 

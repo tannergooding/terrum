@@ -25,7 +25,25 @@ public static class SemanticVerifier
     public static void Verify(BoundProgram program)
     {
         ArgumentNullException.ThrowIfNull(program);
-        if (program.Functions.IsDefaultOrEmpty || program.EntryPoint < 0 || program.EntryPoint >= program.Functions.Length)
+        VerifyCore(program, requireEntryPoint: true);
+    }
+
+    /// <summary>Checks a fully defined library with no process entry point. Libraries cannot be emitted as executables without linking.</summary>
+    /// <exception cref="ArgumentException">The library is malformed or contains an entry point.</exception>
+    /// <exception cref="NotSupportedException">The library exceeds verification limits.</exception>
+    public static void VerifyLibrary(BoundProgram program) => VerifyCore(program, requireEntryPoint: false);
+
+    internal static void VerifyReferences(BoundProgram program)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        VerifyCore(program, requireEntryPoint: true, allowExternal: true);
+    }
+
+    private static void VerifyCore(BoundProgram program, bool requireEntryPoint, bool allowExternal = false)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        if (program.Functions.IsDefaultOrEmpty || (requireEntryPoint
+            ? program.EntryPoint < 0 || program.EntryPoint >= program.Functions.Length : program.EntryPoint != -1))
         {
             throw Invalid();
         }
@@ -122,6 +140,12 @@ public static class SemanticVerifier
             {
                 throw Limit();
             }
+            if (function.IsExternal && (!allowExternal || function.IsPrivate || function.IsInternal
+                || function.Body.Statements.IsDefault || !function.Body.Statements.IsEmpty
+                || function.Variables.Length != function.ParameterCount + (function.IsConstructor ? 1 : 0)))
+            {
+                throw Invalid();
+            }
             for (var variableIndex = 0; variableIndex < function.Variables.Length; variableIndex++)
             {
                 var variable = function.Variables[variableIndex];
@@ -169,17 +193,24 @@ public static class SemanticVerifier
             }
         }
 
-        var entry = program.Functions[program.EntryPoint];
-        if ((entry.Name != "Main" && !entry.Name.EndsWith(".Main", StringComparison.Ordinal)) || entry.ParameterCount != 0
-            || entry.DeclaringStruct is not null || entry.ReturnType is not (PrimitiveType.Void or PrimitiveType.Int32))
+        if (requireEntryPoint)
         {
-            throw Invalid();
+            var entry = program.Functions[program.EntryPoint];
+            if ((entry.Name != "Main" && !entry.Name.EndsWith(".Main", StringComparison.Ordinal)) || entry.ParameterCount != 0
+                || entry.IsExternal || entry.DeclaringStruct is not null || entry.ReturnType is not (PrimitiveType.Void or PrimitiveType.Int32))
+            {
+                throw Invalid();
+            }
         }
 
         var remaining = MaximumAnalysisVisits;
         for (var functionIndex = 0; functionIndex < program.Functions.Length; functionIndex++)
         {
             var function = program.Functions[functionIndex];
+            if (function.IsExternal)
+            {
+                continue;
+            }
             var initialized = new bool[function.Variables.Length];
             if (function.IsConstructor)
             {
@@ -229,7 +260,7 @@ public static class SemanticVerifier
     {
         try
         {
-            Verify(program);
+            VerifyCore(program, requireEntryPoint: program.EntryPoint != -1, allowExternal: true);
             functionIndex = -1;
             span = default;
             exceededWorkLimit = false;
@@ -237,9 +268,9 @@ public static class SemanticVerifier
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
         {
-            functionIndex = exception.Data[FunctionIndexKey] is int index ? index : program.EntryPoint;
+            functionIndex = exception.Data[FunctionIndexKey] is int index ? index : Math.Max(0, program.EntryPoint);
             span = exception.Data[SourceSpanKey] is TextSpan sourceSpan
-                ? sourceSpan : program.Functions[functionIndex].Span;
+                ? sourceSpan : program.Functions.IsDefaultOrEmpty ? default : program.Functions[functionIndex].Span;
             exceededWorkLimit = exception is NotSupportedException;
             return false;
         }

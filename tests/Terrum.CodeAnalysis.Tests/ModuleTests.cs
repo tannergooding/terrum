@@ -20,6 +20,151 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class ModuleTests
 {
     [Fact]
+    public async Task ConsumerBindsOnlyImportedDeclarationsAndExecutesValuesAndOutputsAsync()
+    {
+        const string Library = """
+            namespace Values;
+            public struct Value {
+                public int32 Number;
+                public Value(int32 number) { this.Number = number; }
+                public int32 Add(int32 amount) { return this.Number + amount; }
+                public static bool Try(int32 number, out Value value) {
+                    if (number < 0) { return false; }
+                    value = new Value(number);
+                    return true;
+                }
+            }
+            """;
+        var producer = Produce(Library, "Values.Value.#ctor", "Values.Value.Add", "Values.Value.Try");
+        var reference = ModuleCompiler.CreateReference(producer);
+        Assert.All(reference.Functions, static function => {
+            Assert.True(function.IsExternal);
+            Assert.Empty(function.Body.Statements);
+        });
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            using Values;
+            namespace Consumer;
+            struct Local { public int32 Number; public Local() { this.Number = 1; } }
+            int32 Main() {
+                Local local = new Local();
+                Value initial = new Value(20);
+                require Value.Try(initial.Add(local.Number), out var result);
+                if (Value.Try(-1, out var unused)) { return 99; }
+                return result.Number;
+            }
+            """), reference);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program));
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast));
+        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(program, ["Consumer.Main"]));
+        var consumer = ModuleCompiler.CreateConsumer(program, producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.DoesNotContain(linked.Functions, static function => function.IsExternal);
+        Assert.Equal(21, await ExecuteAsync(NativeEmitter.Emit(linked, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData("int32 Main() { return Private(); }")]
+    [InlineData("int32 Main() { return Try(1); }")]
+    [InlineData("int32 Main() { Try(out var value); return value; }")]
+    [InlineData("int32 Main() { if (!Try(out var value)) { return value; } return 0; }")]
+    [InlineData("int32 Main() { return Try(out var value); }")]
+    [InlineData("public bool Try(out int32 value) { value = 0; return true; } int32 Main() { return 0; }")]
+    public void ImportedDeclarationsEnforceSourceContracts(string source)
+    {
+        var producer = Produce("public bool Try(out int32 value) { value = Private(); return true; } "
+            + "int32 Private() { return 7; }", "Try");
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), ModuleCompiler.CreateReference(producer));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public async Task PersistedConsumerAllowsPrivateLayoutsNamesAndExportAdditionsToEvolveAsync()
+    {
+        const string First = """
+            struct State { public int32 Value; public State() { this.Value = 11; } }
+            int32 Compute() { State state = new State(); return state.Value; }
+            public int32 API() { return Compute(); }
+            """;
+        const string Second = """
+            struct State { public char16 Value; public bool Valid;
+                public State() { this.Value = (char16)22; this.Valid = true; } }
+            struct Extra { public uint32 Value; public Extra() { this.Value = 0; } }
+            int32 Calculate() { State state = new State(); Extra extra = new Extra();
+                require state.Valid; return (int32)state.Value + (int32)extra.Value; }
+            public int32 API() { return Calculate(); }
+            public int32 NewAPI() { return 33; }
+            """;
+        var first = Produce(First, "API");
+        var second = Produce(Second, "API", "NewAPI");
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct State { public bool Valid; public State() { this.Valid = true; } }
+            int32 Compute() { return 0; }
+            int32 Main() { State state = new State(); require state.Valid; return API() + Compute(); }
+            """), ModuleCompiler.CreateReference(first));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), first);
+        var consumerPath = Path.Combine(AppContext.BaseDirectory, $"independent-{Guid.NewGuid():N}.trm");
+        var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");
+        try
+        {
+            await File.WriteAllBytesAsync(consumerPath, consumer).ConfigureAwait(true);
+            foreach (var (producer, expected) in new[] { (first, 11), (second, 22) })
+            {
+                await File.WriteAllBytesAsync(producerPath, producer).ConfigureAwait(true);
+                var (exit, error) = await RunJitWorkerAsync(consumerPath, producerPath).ConfigureAwait(true);
+                Assert.Equal(expected, exit);
+                Assert.Empty(error);
+                Assert.Equal(expected, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, producer),
+                    NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+                Assert.Equal(consumer, await File.ReadAllBytesAsync(consumerPath).ConfigureAwait(true));
+            }
+        }
+        finally
+        {
+            File.Delete(consumerPath);
+            File.Delete(producerPath);
+        }
+    }
+
+    private static byte[] Produce(string source, params string[] exports)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), exports);
+    }
+
+    [Fact]
+    public async Task ProducerLibraryNeedsNoSyntheticEntryPointAsync()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("public int32 Helper() { return 29; }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var library = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(-1, library.EntryPoint);
+        SemanticVerifier.VerifyLibrary(library);
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(library, NativeRuntimePolicy.FailFast));
+        var producer = ModuleCompiler.CreateProducer(library, ["Helper"]);
+        var reference = Compile("public int32 Helper() { return 0; } int32 Main() { return Helper(); }");
+        var consumer = ModuleCompiler.CreateConsumer(reference, producer);
+        Assert.Equal(29, await ExecuteAsync(NativeEmitter.Emit(
+            ModuleCompiler.Link(consumer, producer), NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("public int32 Helper() { return missing; }")]
+    [InlineData("public bool Helper(out int32 value) { return true; }")]
+    [InlineData("struct S { public int32 X; public S() { } }")]
+    public void InvalidLibrariesProduceSourceDiagnostics(string source)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
     public async Task StaticLinksProduceSeparateImagesFromIndependentProducersAsync()
     {
         var first = Compile("int32 Main() { return Helper(); } public int32 Helper() { return 11; }");
@@ -107,6 +252,7 @@ public sealed class ModuleTests
     {
         var prefix = Path.Combine(AppContext.BaseDirectory, $"module-cli-{Guid.NewGuid():N}");
         var referenceSource = prefix + "-reference.terrum";
+        var consumerSource = prefix + "-consumer.terrum";
         var replacementSource = prefix + "-replacement.terrum";
         var consumer = prefix + "-consumer.trm";
         var original = prefix + "-producer-v1.trm";
@@ -115,12 +261,13 @@ public sealed class ModuleTests
         try
         {
             await File.WriteAllTextAsync(referenceSource,
-                "int32 Main() { return Helper(); } public int32 Helper() { return 11; }").ConfigureAwait(true);
+                "public int32 Helper() { return 11; }").ConfigureAwait(true);
+            await File.WriteAllTextAsync(consumerSource, "int32 Main() { return Helper(); }").ConfigureAwait(true);
             await File.WriteAllTextAsync(replacementSource,
-                "int32 Main() { return 0; } public int32 Helper() { return 22; }").ConfigureAwait(true);
+                "public int32 Helper() { return 22; }").ConfigureAwait(true);
             Assert.Equal(0, (await RunCliAsync("compile-module", "producer", referenceSource, "Helper", "-o", original)
                 .ConfigureAwait(true)).ExitCode);
-            Assert.Equal(0, (await RunCliAsync("compile-module", "consumer", referenceSource, original, "-o", consumer)
+            Assert.Equal(0, (await RunCliAsync("compile-module", "consumer", consumerSource, original, "-o", consumer)
                 .ConfigureAwait(true)).ExitCode);
             var (compileExit, compileError, compileOutput) = await RunCliWithOutputAsync(
                 "compile-module", "producer", replacementSource, "Helper", "-o", replacement, "--json").ConfigureAwait(true);
@@ -135,7 +282,12 @@ public sealed class ModuleTests
                     document.RootElement.GetProperty("artifact").GetProperty("sha256").GetString());
             }
             var consumerBytes = await File.ReadAllBytesAsync(consumer).ConfigureAwait(true);
+            await File.WriteAllTextAsync(consumerSource, "int32 Main() { return Helper(true); }").ConfigureAwait(true);
+            Assert.Equal(1, (await RunCliAsync("compile-module", "consumer", consumerSource, original, "-o", consumer)
+                .ConfigureAwait(true)).ExitCode);
+            Assert.Equal(consumerBytes, await File.ReadAllBytesAsync(consumer).ConfigureAwait(true));
             File.Delete(referenceSource);
+            File.Delete(consumerSource);
             File.Delete(replacementSource);
             Assert.Equal(11, (await RunJitWorkerAsync(consumer, original).ConfigureAwait(true)).ExitCode);
             Assert.Equal(22, (await RunJitWorkerAsync(consumer, replacement).ConfigureAwait(true)).ExitCode);
@@ -170,6 +322,7 @@ public sealed class ModuleTests
         finally
         {
             File.Delete(referenceSource);
+            File.Delete(consumerSource);
             File.Delete(replacementSource);
             File.Delete(consumer);
             File.Delete(original);
@@ -277,18 +430,18 @@ public sealed class ModuleTests
     public async Task PersistedConsumerRejectsChangedOutputLayoutAndFieldAccessInWorkerAsync()
     {
         const string PairSource = "public struct Pair { public int32 A; public int32 B; "
-            + "public Pair() { this.A = 11; this.B = 1; } } "
-            + "int32 Main() { return Value(); } public int32 Value() { Pair p = new Pair(); return p.A; }";
-        const string PairReplacement = "public Pair() { this.A = 11; this.B = 1; } } "
-            + "int32 Main() { return 0; } public int32 Value() { Pair p = new Pair(); return p.A; }";
+            + "public Pair() { this.A = 11; this.B = 1; } "
+            + "public static int32 Value() { Pair p = new Pair(); return p.A; } } "
+            + "int32 Main() { return Pair.Value(); }";
+        const string PairReplacement = "public Pair() { this.A = 11; this.B = 1; } "
+            + "public static int32 Value() { Pair p = new Pair(); return p.A; } } int32 Main() { return 0; }";
         var cases = new (string Initial, string Export, string Changed)[] {
             ("int32 Main() { if (Try(out var value)) { return value; } return 0; } "
                 + "public bool Try(out int32 value) { value = 11; return true; }",
                 "Try", "int32 Main() { return 0; } public bool Try(int32 value) { return true; }"),
-            (PairSource, "Value", "public struct Pair { public int32 B; public int32 A; " + PairReplacement),
-            (PairSource, "Value", "public struct Pair { public int32 A; private int32 B; " + PairReplacement),
-            (PairSource, "Value", "public struct Pair { public int32 A; internal int32 B; " + PairReplacement),
-            (PairSource, "Value", "internal struct Pair { public int32 A; public int32 B; " + PairReplacement),
+            (PairSource, "Pair.Value", "public struct Pair { public int32 B; public int32 A; " + PairReplacement),
+            (PairSource, "Pair.Value", "public struct Pair { public int32 A; private int32 B; " + PairReplacement),
+            (PairSource, "Pair.Value", "public struct Pair { public int32 A; internal int32 B; " + PairReplacement),
         };
 
         foreach (var (initialSource, export, changedSource) in cases)
@@ -513,9 +666,11 @@ public sealed class ModuleTests
         var producer = ModuleCompiler.CreateProducer(initial, ["Helper"]);
         var consumer = ModuleCompiler.CreateConsumer(initial, producer);
         var version = (byte[])consumer.Clone();
-        version[4] = 3;
+        version[4] = 4;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
         version[4] = 1;
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
+        version[4] = 2;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(consumer[..^1], producer));
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(new byte[(4 * 1024 * 1024) + 1], producer));

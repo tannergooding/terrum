@@ -1,10 +1,13 @@
 # Bounded semantic modules
 
-The version 2 `.trm` format records the semantic profile and persists verified, typed, source-mapped structured IR,
+The version 3 `.trm` format records the semantic profile and persists verified, typed, source-mapped structured IR,
 not source text or a native DLL. `CreateProducer` stores selected function bodies
 and exported contracts. `CreateConsumer` stores its own function bodies and the
-reference producer's declaration contracts, **not** producer bodies. Source is
-bound once while creating each artifact; linking reads only the two artifacts.
+reference producer's declaration contracts, **not** producer bodies.
+`CreateReference` validates a producer artifact and exposes exported signatures
+and their value layouts to `Compilation.Create`. Consumer source needs neither
+producer source nor placeholder implementations. Source is bound once while
+creating each artifact; linking reads only the two artifacts.
 
 The process-start semantic-module JIT loader, `run-module`, reads the **same
 persisted consumer artifact** and the selected separately persisted producer
@@ -41,9 +44,13 @@ receiver/static mode and constructor identity; unexported producer dependencies
 are kept solely in the producer artifact. A consumer call into a private
 producer implementation is rejected even if both declarations share a
 declaring type name.
-This first format conservatively pins all bound struct layouts from the initial
-compilation, including producer-only structures, rather than tracking only
-types reachable through exported signatures.
+Only layouts referenced by retained consumer definitions and imported
+declarations are stored in the consumer. Imported layouts remain exact,
+including private fields of a public static member's owner; this is not resilient
+public layout evolution. Producer-only layouts and helpers have module-local
+identities at linking and may change independently. Private names can coincide
+with consumer-local names without binding to the wrong implementation.
+Compatible replacements may also add exports not requested by the consumer.
 
 The binary reader rejects unknown versions, malformed/truncated records,
 trailing bytes, unknown nodes, invalid graph depth, excessive symbols, strings
@@ -57,12 +64,18 @@ budget, including conditional-flow analysis.
 Host-provided buffer capabilities are outside this module format and are
 rejected at artifact creation rather than silently dropped.
 
-The current API creates a producer from a verified combined program, selecting
-exported function names; the initial combined compilation may contain reference
-bodies for the producer. A replacement producer is compiled independently and
-its selected bodies replace those reference bodies at link time. A standalone
-producer may include an unused `Main` only because the current executable
-binder requires an entry point; it is not serialized into the producer module.
+Producer artifacts select explicit exported function names from a verified library.
+`Compilation.CreateLibrary` verifies source definitions without requiring
+`Main`; its program has `EntryPoint = -1` and cannot be emitted or executed
+without linking. `compile-module producer` uses this library mode. A function
+named `Main` in library source is an ordinary definition, not a process entry.
+External `BoundFunction` declarations have `IsExternal = true` and an empty body,
+not a synthetic implementation. The source verifier checks their signatures and
+conditional-output usage; the executable verifier rejects unresolved declarations.
+The module linker supplies real, verified bodies before native lowering.
+For existing API callers, `CreateConsumer` also accepts an already bound combined
+program and extracts selected producer definitions. The CLI uses independent
+consumer source and the validated artifact-reference path.
 
 From the repository root after building, compile the reference source and
 replacement source independently, then persist each artifact:
@@ -70,7 +83,7 @@ replacement source independently, then persist each artifact:
 ```powershell
 $cli = 'artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll'
 dotnet $cli compile-module producer samples\native\modules\reference.terrum Helper -o artifacts\producer-v1.trm
-dotnet $cli compile-module consumer samples\native\modules\reference.terrum artifacts\producer-v1.trm -o artifacts\consumer.trm
+dotnet $cli compile-module consumer samples\native\modules\consumer.terrum artifacts\producer-v1.trm -o artifacts\consumer.trm
 dotnet $cli compile-module producer samples\native\modules\replacement.terrum Helper -o artifacts\producer-v2.trm
 dotnet $cli run-module artifacts\consumer.trm artifacts\producer-v1.trm --runtime fail-fast # exits 11
 dotnet $cli run-module artifacts\consumer.trm artifacts\producer-v2.trm --runtime fail-fast # exits 22
@@ -100,7 +113,7 @@ output paths; module source and each artifact are limited to 4 MiB.
 Private and internal methods cannot be exported or imported. Functions transitively
 called by an exported producer function, including public helpers not explicitly
 exported, are stored as producer-owned implementation only,
-omitted from the consumer body table, and linked after its public imports;
+omitted from the consumer body table, and resolved in the producer's own symbol table;
 the module linker rejects consumer calls into those bodies even if a forged
 symbolic target has the same declaring type. Field visibility is part of the
 serialized layout contract. Imported members must belong to public structs;
@@ -113,3 +126,8 @@ implementation but are not grants to the consumer. Top-level `private`
 structs and `mut` struct-field declarations are rejected at source binding
 rather than silently dropping their modifiers; field writes to mutable
 *local values* do not change the declared field layout.
+
+The proof supports one producer reference per consumer, compact primitive-field
+layouts and the existing native value profile. Version 2 artifacts are rejected;
+recreate them from source. Multi-producer identity/version resolution, dependency
+cycles, resilient public layouts and native DLL import slots remain later work.

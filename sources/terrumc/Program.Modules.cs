@@ -46,7 +46,9 @@ internal static partial class Program
                 }
                 var source = ReadModuleSource(args[2]);
                 var tree = SyntaxTree.Parse(source, args[2]);
-                var compilation = Compilation.Create(tree);
+                var reference = args[1] == "consumer" ? ReadModuleFile(args[3]) : null;
+                var compilation = reference is null ? Compilation.CreateLibrary(tree)
+                    : Compilation.Create(tree, ModuleCompiler.CreateReference(reference));
                 if (compilation.HasErrors)
                 {
                     if (json)
@@ -68,7 +70,8 @@ internal static partial class Program
                 }
                 result = args[1] switch {
                     "producer" => ModuleCompiler.CreateProducer(program, [args[3]]),
-                    "consumer" => ModuleCompiler.CreateConsumer(program, ReadModuleFile(args[3])),
+                    "consumer" => ModuleCompiler.CreateConsumer(program,
+                        reference ?? throw new InvalidOperationException("Consumer reference is missing.")),
                     _ => throw new InvalidOperationException("Unknown module kind."),
                 };
                 output = args[5];

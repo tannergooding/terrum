@@ -2,8 +2,3 @@ public bool Helper()
 {
     return true;
 }
-
-int32 Main()
-{
-    return 0;
-}

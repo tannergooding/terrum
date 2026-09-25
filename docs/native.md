@@ -196,7 +196,9 @@ PE layout, relative code/import fixups and unwind records are target-specific.
 The same encoder's `NativeCode` result is consumed by both PE layout and the
 [JIT execution proof](jit.md); code/data fixups and unwind ranges are explicit.
 The [module proof](modules.md) persists typed semantic bodies and normalized
-contracts, verifies replacements, then lowers at process start. Static AOT
+contracts, supports source binding against artifact declarations, verifies replacements,
+then lowers at process start. Producer libraries need no artificial entry point;
+unresolved imported declarations cannot reach the encoder. Static AOT
 linking from these artifacts is separate from replacement of an unchanged PE.
 There is no optimizer, debug-symbol format, native export/import API, managed
 root map, production runtime or hot replacement. The broader LMOD design

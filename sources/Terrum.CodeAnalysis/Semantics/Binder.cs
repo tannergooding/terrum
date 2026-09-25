@@ -35,10 +35,19 @@ internal sealed class Binder
     private PrimitiveType _returnType;
     private string? _currentStruct;
     private bool _constructor;
+    private readonly bool _isLibrary;
+    private readonly CompilationReference? _reference;
 
     internal Binder(SyntaxTree tree, CancellationToken cancellationToken)
         : this([tree], [], cancellationToken)
     {
+    }
+
+    internal Binder(SyntaxTree tree, bool isLibrary, CancellationToken cancellationToken, CompilationReference? reference = null)
+        : this([tree], [], cancellationToken)
+    {
+        _isLibrary = isLibrary;
+        _reference = reference;
     }
 
     internal Binder(ImmutableArray<SyntaxTree> trees, CancellationToken cancellationToken)
@@ -73,6 +82,28 @@ internal sealed class Binder
     {
         // Parser depth limits do not bound left-associated flat expression trees.
         var pending = new Stack<(SyntaxTree Tree, SyntaxNode Node, int Depth)>();
+        if (_reference is not null)
+        {
+            foreach (var structure in _reference.Structures)
+            {
+                _structNames.Add(structure.Name, (PrimitiveType)(100 + _structs.Count));
+                _structs.Add(structure);
+            }
+            foreach (var function in _reference.Functions)
+            {
+                _functions.Add(function.Name, _signatures.Count);
+                var parameters = ImmutableArray.CreateBuilder<Parameter>();
+                var offset = function.IsConstructor || (function.DeclaringStruct is not null && !function.IsStatic) ? 1 : 0;
+                for (var index = offset; index < function.Variables.Length; index++)
+                {
+                    var parameter = function.Variables[index];
+                    parameters.Add(new Parameter(parameter.Name, parameter.Type, default, parameter.IsOut));
+                }
+                _signatures.Add(new Signature(function.Name, function.ReturnType, parameters.ToImmutable(),
+                    null, null, _trees[0], function.DeclaringStruct, function.IsConstructor,
+                    false, false, false, function.IsStatic, function));
+            }
+        }
         foreach (var tree in _trees)
         {
             pending.Push((tree, tree.Root, 0));
@@ -156,10 +187,10 @@ internal sealed class Binder
 
         var entryPoint = -1;
 
-        for (var index = 0; index < _signatures.Count; index++)
+        for (var index = 0; !_isLibrary && index < _signatures.Count; index++)
         {
             var signature = _signatures[index];
-            if (signature.StructName is null
+            if (signature.External is null && signature.Declaration is SyntaxNode declaration && signature.StructName is null
                 && (signature.Name == "Main" || signature.Name.EndsWith(".Main", StringComparison.Ordinal))
                 && signature.Parameters.Length == 0 &&
                 signature.ReturnType is PrimitiveType.Int32 or PrimitiveType.Void)
@@ -167,7 +198,7 @@ internal sealed class Binder
                 if (entryPoint >= 0)
                 {
                     _tree = signature.Tree;
-                    Report("TRM3002", "Multiple parameterless Main functions make the entry point ambiguous.", signature.Declaration.Span);
+                    Report("TRM3002", "Multiple parameterless Main functions make the entry point ambiguous.", declaration.Span);
                 }
                 else
                 {
@@ -176,7 +207,7 @@ internal sealed class Binder
             }
         }
 
-        if (entryPoint < 0)
+        if (!_isLibrary && entryPoint < 0)
         {
             Report("TRM3002", "A parameterless int32 or void Main function is required.", _tree.Root.Span);
         }
@@ -185,6 +216,13 @@ internal sealed class Binder
         foreach (var signature in _signatures)
         {
             _cancellationToken.ThrowIfCancellationRequested();
+            if (signature.External is BoundFunction external)
+            {
+                bound.Add(external);
+                continue;
+            }
+            var declaration = signature.Declaration ?? throw new InvalidOperationException("Source declaration is missing.");
+            var syntaxBody = signature.Body ?? throw new InvalidOperationException("Source body is missing.");
             SetContext(signature.Tree);
             _variables.Clear();
             _scopes.Clear();
@@ -196,7 +234,7 @@ internal sealed class Binder
             if (signature.StructName is not null && !signature.IsStatic)
             {
                 var receiverType = ResolveStruct(signature.StructName);
-                _ = AddVariable("this", receiverType, signature.IsConstructor || signature.IsMutable, signature.Declaration.Span);
+                _ = AddVariable("this", receiverType, signature.IsConstructor || signature.IsMutable, declaration.Span);
             }
 
             foreach (var parameter in signature.Parameters)
@@ -208,10 +246,10 @@ internal sealed class Binder
                 }
             }
 
-            var body = BindBlock(signature.Body);
+            var body = BindBlock(syntaxBody);
             if (_constructor)
             {
-                var end = new TextSpan(signature.Body.Span.End, 0);
+                var end = new TextSpan(syntaxBody.Span.End, 0);
                 body = body with {
                     Statements = body.Statements.Add(new BoundReturn(
                     new BoundRead(0, _returnType, end), end))
@@ -219,17 +257,17 @@ internal sealed class Binder
             }
             else if (_returnType == PrimitiveType.Void && !AlwaysReturns(body))
             {
-                var end = new TextSpan(signature.Body.Span.End, 0);
+                var end = new TextSpan(syntaxBody.Span.End, 0);
                 body = body with { Statements = body.Statements.Add(new BoundReturn(null, end)) };
             }
             else if (_returnType != PrimitiveType.Void && !AlwaysReturns(body))
             {
-                Report("TRM3012", $"Not all paths in '{signature.Name}' return a value.", signature.Body.Span);
+                Report("TRM3012", $"Not all paths in '{signature.Name}' return a value.", syntaxBody.Span);
             }
 
             bound.Add(new BoundFunction(signature.Name, signature.ReturnType, [.. _variables],
                 signature.Parameters.Length + (signature.StructName is not null && !signature.IsStatic && !signature.IsConstructor ? 1 : 0),
-                body, signature.Declaration.Span) {
+                body, declaration.Span) {
                 IsConstructor = signature.IsConstructor,
                 IsPrivate = signature.IsPrivate,
                 IsInternal = signature.IsInternal,
@@ -249,7 +287,7 @@ internal sealed class Binder
         };
         if (!SemanticVerifier.TryVerifySource(program, out var functionIndex, out var span, out var exceededWorkLimit))
         {
-            _tree = _signatures[functionIndex].Tree;
+            _tree = _signatures.Count == 0 ? _trees[0] : _signatures[functionIndex].Tree;
             Report("TRM3016", exceededWorkLimit
                 ? "Source exceeds the semantic verification work limit."
                 : "Source violates definite assignment, initialization, or executable type rules.", span);
@@ -1520,6 +1558,6 @@ internal sealed class Binder
     private sealed record Parameter(string Name, PrimitiveType Type, TextSpan Span, bool IsOut);
 
     private sealed record Signature(string Name, PrimitiveType ReturnType, ImmutableArray<Parameter> Parameters,
-        SyntaxNode Body, SyntaxNode Declaration, SyntaxTree Tree, string? StructName, bool IsConstructor, bool IsPrivate,
-        bool IsInternal, bool IsMutable, bool IsStatic);
+        SyntaxNode? Body, SyntaxNode? Declaration, SyntaxTree Tree, string? StructName, bool IsConstructor, bool IsPrivate,
+        bool IsInternal, bool IsMutable, bool IsStatic, BoundFunction? External = null);
 }
