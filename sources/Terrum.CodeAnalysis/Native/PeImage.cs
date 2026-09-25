@@ -39,10 +39,10 @@ internal static class PeImage
         var readOnlyRva = readOnlyLength == 0 ? 0 : Align(dataRva + importTableSize, SectionAlignment);
         var writableRva = writableLength == 0 ? 0 : Align(
             readOnlyLength == 0 ? dataRva + importTableSize : readOnlyRva + readOnlyLength, SectionAlignment);
-        var pdataSize = checked(12 * functions.Length);
+        var pdataSize = checked(NativeUnwind.RuntimeFunctionSize * functions.Length);
         var pdataRva = Align(writableLength != 0 ? writableRva + writableLength
             : readOnlyLength != 0 ? readOnlyRva + readOnlyLength : dataRva + importTableSize, SectionAlignment);
-        var xdataSize = checked(8 * functions.Length);
+        var xdataSize = checked(NativeUnwind.InfoSize * functions.Length);
         var xdataRva = Align(pdataRva + pdataSize, SectionAlignment);
         var exportSize = 0;
         if (exports is not null)
@@ -87,10 +87,12 @@ internal static class PeImage
             Write32(image, textFile + fixup.DisplacementOffset,
                 checked(targetRva - (textRva + fixup.DisplacementOffset + 4)));
         }
-        var range = 0;
-        foreach (var function in functions)
+        for (var range = 0; range < functions.Length; range++)
         {
-            Unwind(function.Start, function.End, function.StackSize);
+            var function = functions[range];
+            NativeUnwind.WriteFunction(image.AsSpan(pdataFile + (range * NativeUnwind.RuntimeFunctionSize)),
+                function, textRva, xdataRva + (range * NativeUnwind.InfoSize));
+            NativeUnwind.WriteInfo(image.AsSpan(xdataFile + (range * NativeUnwind.InfoSize)), function.StackSize);
         }
         if (exports is not null)
         {
@@ -121,23 +123,6 @@ internal static class PeImage
                 nameBytes.CopyTo(image, exportFile + stringAt);
                 stringAt += nameBytes.Length;
             }
-        }
-
-        void Unwind(int start, int end, int frame)
-        {
-            var record = pdataFile + (range * 12);
-            Write32(image, record, textRva + start);
-            Write32(image, record + 4, textRva + end);
-            Write32(image, record + 8, xdataRva + (range * 8));
-            var data = xdataFile + (range * 8);
-            image[data] = 1; // UNWIND_INFO v1, no flags
-            image[data + 1] = 7; // sub rsp,imm32 occupies 7 prolog bytes
-            image[data + 2] = 2; // UWOP_ALLOC_LARGE consumes one extra slot
-            image[data + 3] = 0;
-            image[data + 4] = 7;
-            image[data + 5] = 1; // UWOP_ALLOC_LARGE, opinfo 0: next 16-bit value is bytes / 8
-            Write16(image, data + 6, frame / 8);
-            range++;
         }
 
         // Code and data references are RIP-relative; imports and unwind entries are RVAs.

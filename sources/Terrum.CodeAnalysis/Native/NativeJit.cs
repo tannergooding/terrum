@@ -28,9 +28,6 @@ public sealed record NativeExecutionResult(int ExitCode, byte[] Data)
 /// </remarks>
 public static unsafe class NativeJit
 {
-    private const int UnwindSize = 8;
-    private const int RuntimeFunctionSize = 12;
-
     /// <summary>Emits and executes the callable entry point, returning its int32 result.</summary>
     /// <exception cref="PlatformNotSupportedException">The host is not Windows x64.</exception>
     public static int Execute(BoundProgram program, NativeRuntimePolicy runtimePolicy) =>
@@ -153,9 +150,9 @@ public static unsafe class NativeJit
 
         var pointerOffset = Align(text.Length, 8);
         var tableOffset = checked(pointerOffset + sizeof(nint));
-        var unwindOffset = checked(tableOffset + (functions.Length * RuntimeFunctionSize));
+        var unwindOffset = checked(tableOffset + (functions.Length * NativeUnwind.RuntimeFunctionSize));
         var pageSize = Environment.SystemPageSize;
-        var codeSize = Align(checked(unwindOffset + (functions.Length * UnwindSize)), pageSize);
+        var codeSize = Align(checked(unwindOffset + (functions.Length * NativeUnwind.InfoSize)), pageSize);
         var readOnlyOffset = codeSize;
         var writableOffset = Align(checked(readOnlyOffset + code.ReadOnlyDataLength), pageSize);
         var writableLength = data.Length - code.ReadOnlyDataLength;
@@ -229,18 +226,10 @@ public static unsafe class NativeJit
             for (var index = 0; index < functions.Length; index++)
             {
                 var function = functions[index];
-                var table = bytes.Slice(tableOffset + (index * RuntimeFunctionSize), RuntimeFunctionSize);
-                BinaryPrimitives.WriteInt32LittleEndian(table, function.Start);
-                BinaryPrimitives.WriteInt32LittleEndian(table[4..], function.End);
-                BinaryPrimitives.WriteInt32LittleEndian(table[8..], unwindOffset + (index * UnwindSize));
-
-                var unwind = bytes.Slice(unwindOffset + (index * UnwindSize), UnwindSize);
-                unwind[0] = 1; // UNWIND_INFO version 1, no flags
-                unwind[1] = 7; // sub rsp, imm32 ends at prolog offset 7
-                unwind[2] = 2; // UWOP_ALLOC_LARGE has one extra 16-bit slot
-                unwind[4] = 7;
-                unwind[5] = 1; // UWOP_ALLOC_LARGE, opinfo 0; allocation is encoded in units of 8
-                BinaryPrimitives.WriteUInt16LittleEndian(unwind[6..], checked((ushort)(function.StackSize / 8)));
+                var table = bytes.Slice(tableOffset + (index * NativeUnwind.RuntimeFunctionSize), NativeUnwind.RuntimeFunctionSize);
+                var unwindRva = unwindOffset + (index * NativeUnwind.InfoSize);
+                NativeUnwind.WriteFunction(table, function, 0, unwindRva);
+                NativeUnwind.WriteInfo(bytes.Slice(unwindRva, NativeUnwind.InfoSize), function.StackSize);
             }
 
             if (!JitWindows.VirtualProtect(memory, (nuint)codeSize, 0x20, out _))
@@ -271,7 +260,7 @@ public static unsafe class NativeJit
             for (var index = 0; index < functions.Length; index++)
             {
                 var entry = JitWindows.RtlLookupFunctionEntry(memory + functions[index].Start, out var imageBase, 0);
-                if (entry != tableAddress + (index * RuntimeFunctionSize) || imageBase != memory)
+                if (entry != tableAddress + (index * NativeUnwind.RuntimeFunctionSize) || imageBase != memory)
                 {
                     throw new InvalidOperationException("Native unwind registration could not be resolved.");
                 }
