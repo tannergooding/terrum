@@ -39,6 +39,29 @@ public static class ModuleCompiler
             [.. declarations.Select(function => RemapFunction(function, producer.Structures, structures))]);
     }
 
+    internal static ImmutableArray<string> GetConsumerCallImports(byte[] consumerBytes)
+    {
+        var consumer = Read(consumerBytes, expectedConsumer: true);
+        var indexes = consumer.Functions.Select((function, index) => (function.Name, index))
+            .ToDictionary(static item => item.Name, static item => item.index, StringComparer.Ordinal);
+        var imports = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var function in consumer.Functions)
+        {
+            if (function.Function is BoundFunction body)
+            {
+                var resolved = (BoundBlock)ResolveStatement(body.Body, indexes);
+                foreach (var target in Calls(resolved))
+                {
+                    if (consumer.Functions[target].Import)
+                    {
+                        _ = imports.Add(consumer.Functions[target].Name);
+                    }
+                }
+            }
+        }
+        return [.. imports.Order(StringComparer.Ordinal)];
+    }
+
     private static BoundFunction Declaration(BoundFunction function) => function with {
         IsExternal = true,
         Variables = [.. function.Variables.Take(function.ParameterCount + (function.IsConstructor ? 1 : 0))

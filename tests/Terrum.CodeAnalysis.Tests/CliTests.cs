@@ -18,7 +18,7 @@ using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
 
-public sealed class CliTests
+public sealed partial class CliTests
 {
     [Theory]
     [InlineData(false)]

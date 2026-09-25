@@ -1,0 +1,298 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System;
+using System.Buffers.Binary;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Reflection.PortableExecutable;
+using System.Text;
+
+namespace Terrum.CodeAnalysis.Modules;
+
+internal static class NativeModuleImageValidator
+{
+    internal static void Validate(byte[] image, bool isConsumer, string providerDll, IReadOnlyList<string> exports)
+    {
+        try
+        {
+            using var stream = new MemoryStream(image, writable: false);
+            using var reader = new PEReader(stream);
+            var headers = reader.PEHeaders;
+            if (headers.PEHeader is not PEHeader header
+                || headers.CoffHeader.Machine != Machine.Amd64 || header.Magic != PEMagic.PE32Plus
+                || headers.CoffHeader.SizeOfOptionalHeader != 0xF0
+                || header.NumberOfRvaAndSizes != 16 || header.SectionAlignment != 0x1000
+                || header.FileAlignment != 0x200 || header.ImageBase != 0x140000000
+                || ((int)headers.CoffHeader.Characteristics & 0x23) != 0x22
+                || (((int)headers.CoffHeader.Characteristics & 0x2000) != (isConsumer ? 0 : 0x2000))
+                || ((int)header.DllCharacteristics & 0x160) != 0x160
+                || header.CorHeaderTableDirectory.Size != 0
+                || header.BaseRelocationTableDirectory.Size != 0)
+            {
+                throw Invalid();
+            }
+            var sections = headers.SectionHeaders;
+            if (sections.Length != (isConsumer ? 4 : 5)
+                || !sections.Select(static section => section.Name).SequenceEqual(isConsumer
+                    ? [".text", ".idata", ".pdata", ".xdata"]
+                    : [".text", ".idata", ".pdata", ".xdata", ".edata"]))
+            {
+                throw Invalid();
+            }
+            long previousRaw = header.SizeOfHeaders;
+            long previousRva = header.SizeOfHeaders;
+            for (var index = 0; index < sections.Length; index++)
+            {
+                var section = sections[index];
+                var flags = unchecked((int)section.SectionCharacteristics);
+                var writable = (flags & unchecked((int)0x80000000)) != 0;
+                var executable = (flags & 0x20000000) != 0;
+                var expectedFlags = index == 0 ? 0x60000020
+                    : index == 1 ? unchecked((int)0xC0000040) : 0x40000040;
+                if (section.VirtualSize <= 0 || section.SizeOfRawData < section.VirtualSize
+                    || section.PointerToRawData < previousRaw || section.VirtualAddress < previousRva
+                    || section.PointerToRawData % header.FileAlignment != 0
+                    || section.VirtualAddress % header.SectionAlignment != 0
+                    || (long)section.PointerToRawData + section.SizeOfRawData > image.Length
+                    || (long)section.VirtualAddress + section.VirtualSize > header.SizeOfImage
+                    || (writable && executable) || flags != expectedFlags)
+                {
+                    throw Invalid();
+                }
+                previousRaw = (long)section.PointerToRawData + section.SizeOfRawData;
+                previousRva = ((long)section.VirtualAddress + section.VirtualSize + header.SectionAlignment - 1)
+                    / header.SectionAlignment * header.SectionAlignment;
+            }
+            if (previousRaw != image.Length || previousRva != header.SizeOfImage)
+            {
+                throw Invalid();
+            }
+            if ((header.AddressOfEntryPoint == 0 && isConsumer)
+                || (header.AddressOfEntryPoint != 0 && !isConsumer))
+            {
+                throw Invalid();
+            }
+            CheckDirectory(header.ImportTableDirectory, ".idata");
+            CheckDirectory(header.ImportAddressTableDirectory, ".idata");
+            CheckDirectory(header.ExceptionTableDirectory, ".pdata");
+            if (isConsumer)
+            {
+                if (header.ExportTableDirectory.Size != 0 || header.ExportTableDirectory.RelativeVirtualAddress != 0)
+                {
+                    throw Invalid();
+                }
+                _ = Offset(header.AddressOfEntryPoint, 1, ".text");
+            }
+            else
+            {
+                CheckDirectory(header.ExportTableDirectory, ".edata");
+            }
+            var pe = Read32(0x3C);
+            var optional = checked(pe + 24);
+            for (var index = 0; index < 16; index++)
+            {
+                if (index is 0 or 1 or 3 or 12)
+                {
+                    continue;
+                }
+                if (Read32(optional + 112 + (index * 8)) != 0 || Read32(optional + 116 + (index * 8)) != 0)
+                {
+                    throw Invalid();
+                }
+            }
+            CheckImports();
+            if (!isConsumer)
+            {
+                CheckExports(exports);
+            }
+
+            void CheckDirectory(DirectoryEntry directory, string name)
+            {
+                if (directory.RelativeVirtualAddress <= 0 || directory.Size <= 0)
+                {
+                    throw Invalid();
+                }
+                _ = Offset(directory.RelativeVirtualAddress, directory.Size, name);
+            }
+
+            int Offset(int rva, int size, string? name = null)
+            {
+                if (rva < 0 || size < 0)
+                {
+                    throw Invalid();
+                }
+                foreach (var section in sections)
+                {
+                    if (name is not null && section.Name != name)
+                    {
+                        continue;
+                    }
+                    var delta = (long)rva - section.VirtualAddress;
+                    if (delta >= 0 && delta + size <= section.VirtualSize && delta + size <= section.SizeOfRawData)
+                    {
+                        return checked(section.PointerToRawData + (int)delta);
+                    }
+                }
+                throw Invalid();
+            }
+
+            int Read32(int at)
+            {
+                if (at < 0 || (long)at + 4 > image.Length)
+                {
+                    throw Invalid();
+                }
+                return BinaryPrimitives.ReadInt32LittleEndian(image.AsSpan(at, 4));
+            }
+
+            int Rva32(int rva)
+            {
+                return Read32(Offset(rva, 4));
+            }
+
+            int Rva64(int rva)
+            {
+                var value = BinaryPrimitives.ReadUInt64LittleEndian(image.AsSpan(Offset(rva, 8), 8));
+                if (value > int.MaxValue)
+                {
+                    throw Invalid();
+                }
+                return (int)value;
+            }
+
+            string Name(int rva, int limit = 256)
+            {
+                var bytes = new List<byte>();
+                for (var index = 0; index <= limit; index++)
+                {
+                    var character = image[Offset(checked(rva + index), 1)];
+                    if (character == 0)
+                    {
+                        if (bytes.Count == 0)
+                        {
+                            throw Invalid();
+                        }
+                        return Encoding.ASCII.GetString([.. bytes]);
+                    }
+                    if (character is < 33 or > 126 || index == limit)
+                    {
+                        throw Invalid();
+                    }
+                    bytes.Add(character);
+                }
+                throw Invalid();
+            }
+
+            void CheckImports()
+            {
+                var table = header.ImportTableDirectory;
+                var count = isConsumer ? 2 : 1;
+                if (table.Size != 20 * (count + 1))
+                {
+                    throw Invalid();
+                }
+                var names = new List<string>();
+                for (var index = 0; index < count; index++)
+                {
+                    var at = Offset(table.RelativeVirtualAddress + (index * 20), 20, ".idata");
+                    var lookup = Read32(at);
+                    var name = Read32(at + 12);
+                    var address = Read32(at + 16);
+                    if (Read32(at + 4) != 0 || Read32(at + 8) != 0 || lookup % 8 != 0 || address % 8 != 0)
+                    {
+                        throw Invalid();
+                    }
+                    var dll = Name(name);
+                    if (dll != (index == 0 ? "KERNEL32.dll" : providerDll))
+                    {
+                        throw Invalid();
+                    }
+                    var symbols = new List<string>();
+                    for (var symbol = 0; symbol <= 1024; symbol++)
+                    {
+                        var hint = Rva64(checked(lookup + (symbol * 8)));
+                        var iat = Rva64(checked(address + (symbol * 8)));
+                        if (hint != iat)
+                        {
+                            throw Invalid();
+                        }
+                        if (hint == 0)
+                        {
+                            break;
+                        }
+                        if (symbol == 1024 || BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(Offset(hint, 2), 2)) != 0)
+                        {
+                            throw Invalid();
+                        }
+                        symbols.Add(Name(hint + 2));
+                    }
+                    if (symbols.Count == 0 || symbols.Count > 1024
+                        || symbols.Distinct(StringComparer.Ordinal).Count() != symbols.Count
+                        || !symbols.SequenceEqual(symbols.Order(StringComparer.Ordinal))
+                        || lookup < table.RelativeVirtualAddress + table.Size
+                        || lookup >= header.ImportAddressTableDirectory.RelativeVirtualAddress
+                        || address < header.ImportAddressTableDirectory.RelativeVirtualAddress
+                        || (long)address + ((symbols.Count + 1) * 8)
+                            > (long)header.ImportAddressTableDirectory.RelativeVirtualAddress
+                                + header.ImportAddressTableDirectory.Size)
+                    {
+                        throw Invalid();
+                    }
+                    if (index == 0 && !symbols.SequenceEqual(["ExitProcess"]))
+                    {
+                        throw Invalid();
+                    }
+                    if (index != 0)
+                    {
+                        names.AddRange(symbols);
+                    }
+                }
+                var terminator = Offset(table.RelativeVirtualAddress + (count * 20), 20, ".idata");
+                if (image.AsSpan(terminator, 20).IndexOfAnyExcept((byte)0) >= 0
+                    || header.ImportAddressTableDirectory.Size < 16
+                    || (isConsumer && names.Count == 0))
+                {
+                    throw Invalid();
+                }
+                if (isConsumer && !names.SequenceEqual(exports.Order(StringComparer.Ordinal)))
+                {
+                    throw Invalid();
+                }
+            }
+
+            void CheckExports(IReadOnlyList<string> expected)
+            {
+                var table = header.ExportTableDirectory;
+                var at = Offset(table.RelativeVirtualAddress, 40, ".edata");
+                var count = Read32(at + 20);
+                if (Read32(at + 4) != 0 || Read32(at + 8) != 0 || Read32(at + 16) != 1
+                    || count is < 1 or > 1024 || count != expected.Count || count != Read32(at + 24)
+                    || Name(Read32(at + 12)) != "terrum.dll")
+                {
+                    throw Invalid();
+                }
+                var functions = Read32(at + 28);
+                var names = Read32(at + 32);
+                var ordinals = Read32(at + 36);
+                var sorted = expected.Order(StringComparer.Ordinal).ToArray();
+                for (var index = 0; index < count; index++)
+                {
+                    var ordinal = BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(Offset(ordinals + (index * 2), 2), 2));
+                    var address = Rva32(functions + (index * 4));
+                    _ = Offset(address, 1, ".text");
+                    if (ordinal != index || Name(Rva32(names + (index * 4))) != sorted[index])
+                    {
+                        throw Invalid();
+                    }
+                }
+            }
+        }
+        catch (BadImageFormatException exception)
+        {
+            throw new ModuleFormatException("Native module image is not a valid PE32+ image.", exception);
+        }
+    }
+
+    private static ModuleFormatException Invalid() => new("Malformed or incompatible native module PE image.");
+}

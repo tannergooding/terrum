@@ -180,6 +180,9 @@ including failures. These inspection/build commands do not execute source.
 `jit`, `scan-component` and `run-module` are explicit execution workers;
 clients must supervise them with deadlines. JIT/module execution returns the
 program's raw status, not the compilation-command status convention.
+`run-native` validates its persisted consumer/producer packages and supervises
+a separate native child with a 30-second deadline. It likewise returns the
+program's raw status; a deadline failure reports `TRM5004`.
 
 Schema 1 publishes `languageVersion`, coordinate system, path, length, success
 and diagnostics. Parsed commands also include the content ID. Diagnostics have
@@ -270,11 +273,15 @@ reuses the encoder with W^X memory and dynamic unwind registration.
 [Semantic modules](modules.md) persist verified bodies and normalized contracts
 for bounded process-start replacement. Consumers bind against imported declarations
 without producer source; private implementation layouts and helpers can evolve
-without changing the persisted consumer. This is not the general LMOD design or
-native DLL servicing. Unsupported runtime/ABI capabilities diagnose rather than
+without changing the persisted consumer. Native `.trmn` packages additionally
+persist the EXE and DLL images, validate their contracts before launch, and
+support compatible single-provider replacement without regenerating consumer
+machine code. This is process-start servicing, not the general LMOD design or
+hot replacement. Unsupported runtime/ABI capabilities diagnose rather than
 inherit accidental CLR behavior.
 Multi-source compilations are available through the API and repeatable
-`--source` options on `analyze`, `build`, `build-library`, `jit` and `compile-module`.
+`--source` options on `analyze`, `build`, `build-library`, `jit`, `compile-module`
+and `compile-native`.
 Repeatable producer `--export` options select the module public surface.
 Multi-source compiler JSON uses schema 2 with input-ordered snapshot identities,
 diagnostic source indexes and, for successful builds, the native artifact.

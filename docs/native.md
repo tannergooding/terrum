@@ -54,6 +54,33 @@ exports produce `TRM4002`; source visibility alone never exports a declaration.
 dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-library self-host\SourceRange.terrum --export Terrum.CodeAnalysis.SourceRange.TryCreate --export Terrum.CodeAnalysis.SourceRange.GetEnd -o artifacts\ranges.dll --runtime fail-fast
 ```
 
+### Contract-checked native packages
+
+`compile-native` packages the native image with its versioned semantic contract;
+it does not defer machine-code generation to launch. Producers declare an
+identity and explicit exports. Consumers bind against a producer package and
+persist their complete EXE. Both roles accept `--source` and require
+`--runtime fail-fast`. Sources remain bounded to the module profile's 4 MiB
+combined input; package reads are bounded to 16 MiB.
+
+```powershell
+$cli = "artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll"
+dotnet $cli compile-native producer self-host\WideIntegerFacts.terrum CompilerValues --export Terrum.CodeAnalysis.Numerics64.TryAdd --export Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal -o artifacts\wide-provider.trmn --runtime fail-fast
+dotnet $cli compile-native consumer self-host\WideIntegerTests.terrum artifacts\wide-provider.trmn --source samples\native\modules\wide-entry.terrum -o artifacts\wide-consumer.trmn --runtime fail-fast
+dotnet $cli validate-native artifacts\wide-consumer.trmn artifacts\wide-provider.trmn --json
+dotnet $cli run-native artifacts\wide-consumer.trmn artifacts\wide-provider.trmn --runtime fail-fast
+```
+
+`validate-native` checks the selected pair without executing it. `run-native`
+validates first, stages the persisted images together, and supervises the
+native process with a 30-second deadline. It returns the program's raw status,
+including fail-fast statuses; `--json` describes compiler/contract errors, not
+a program-success envelope. Timeout reports `TRM5004`. A compatible replacement
+changes the provider package, not the consumer image. Package checksums detect
+corruption; these are trusted native-code artifacts, not a sandbox or an
+authenticated distribution format. See [modules](modules.md) for the precise
+identity, compatibility, loader and runtime boundaries.
+
 ## Executable language
 
 | Area | Supported |

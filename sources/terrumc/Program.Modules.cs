@@ -53,21 +53,9 @@ internal static partial class Program
                 {
                     throw new ModuleFormatException("Module output must be a distinct .trm artifact.");
                 }
-                var trees = ImmutableArray.CreateBuilder<SyntaxTree>(paths.Count);
-                var sourceBytes = 0;
-                foreach (var path in paths)
-                {
-                    var source = ReadModuleSource(path);
-                    sourceBytes += Encoding.UTF8.GetByteCount(source);
-                    if (sourceBytes > 4 * 1024 * 1024)
-                    {
-                        throw new ModuleFormatException("Combined module source exceeds the 4 MiB limit.");
-                    }
-                    trees.Add(SyntaxTree.Parse(source, path));
-                }
+                var snapshots = ReadModuleSources(paths);
                 var reference = args[1] == "consumer" ? ReadModuleFile(args[3]) : null;
                 var declarations = reference is null ? null : ModuleCompiler.CreateReference(reference);
-                var snapshots = trees.ToImmutable();
                 var compilation = snapshots.Length == 1
                     ? declarations is null ? Compilation.CreateLibrary(snapshots[0]) : Compilation.Create(snapshots[0], declarations)
                     : declarations is null ? Compilation.CreateLibrary(snapshots) : Compilation.Create(snapshots, declarations);
@@ -141,9 +129,11 @@ internal static partial class Program
         out List<string> exports, out string output)
     {
         sources = [args[2]];
-        exports = args[1] == "producer" ? [args[3]] : [];
+        var native = args[0] == "compile-native";
+        exports = args[1] == "producer" && !native ? [args[3]] : [];
         output = "";
         var hasOutput = false;
+        var hasRuntime = false;
         if ((count & 1) != 0)
         {
             return false;
@@ -165,11 +155,14 @@ internal static partial class Program
                     output = value;
                     hasOutput = true;
                     break;
+                case "--runtime" when native && !hasRuntime && value == "fail-fast":
+                    hasRuntime = true;
+                    break;
                 default:
                     return false;
             }
         }
-        return hasOutput;
+        return hasOutput && (!native || (hasRuntime && (args[1] != "producer" || exports.Count != 0)));
     }
 
     private static void WriteModuleSourceDiagnostics(Compilation compilation, bool json)
@@ -198,12 +191,12 @@ internal static partial class Program
         writer.WriteEndObject();
     }
 
-    private static byte[] ReadModuleFile(string path)
+    private static byte[] ReadModuleFile(string path, int maximumBytes = 4 * 1024 * 1024)
     {
         using var stream = File.OpenRead(path);
-        if (stream.Length > 4 * 1024 * 1024)
+        if (stream.Length > maximumBytes)
         {
-            throw new ModuleFormatException("Module file exceeds the 4 MiB limit.");
+            throw new ModuleFormatException(FormattableString.Invariant($"Module file exceeds the {maximumBytes / (1024 * 1024)} MiB limit."));
         }
         var bytes = new byte[checked((int)stream.Length)];
         stream.ReadExactly(bytes);
@@ -212,6 +205,24 @@ internal static partial class Program
             throw new ModuleFormatException("Module file changed while reading.");
         }
         return bytes;
+    }
+
+    private static ImmutableArray<SyntaxTree> ReadModuleSources(List<string> paths)
+    {
+        var trees = ImmutableArray.CreateBuilder<SyntaxTree>(paths.Count);
+        var sourceBytes = 0;
+        foreach (var path in paths)
+        {
+            var source = ReadModuleSource(path);
+            sourceBytes += Encoding.UTF8.GetByteCount(source);
+            if (sourceBytes > 4 * 1024 * 1024)
+            {
+                throw new ModuleFormatException("Combined module source exceeds the 4 MiB limit.");
+            }
+            trees.Add(SyntaxTree.Parse(source, path));
+        }
+
+        return trees.MoveToImmutable();
     }
 
     private static string ReadModuleSource(string path)

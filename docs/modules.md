@@ -1,4 +1,4 @@
-# Bounded semantic modules
+# Bounded semantic and native modules
 
 The version 7 `.trm` format records the semantic profile and persists verified, typed, source-mapped structured IR,
 not source text or a native DLL. `CreateProducer` stores selected function bodies
@@ -30,9 +30,9 @@ and is **not** replaceable merely by changing the producer artifact. Static
 PE links demonstrate AOT emission from persisted IR, not replacement of an
 unchanged native executable. The loader regenerates native machine code at
 each start, but never recompiles or mutates the consumer *artifact*.
-Precompiled native consumer code with runtime import slots could avoid this
-load-time lowering; that ABI, its relocations and unwind registration are not
-implemented by the bounded module profile.
+The native-package path below instead persists both machine images and uses
+Windows DLL import slots, avoiding load-time lowering. The semantic-module JIT
+path does not yet bind precompiled native imports.
 
 Calls use symbolic function identities rather than binder-local indexes.
 Types use declaration names, visibility and ordered field layouts as their contract;
@@ -69,8 +69,9 @@ rejected at artifact creation rather than silently dropped.
 
 Producer artifacts select explicit exported function names from a verified library.
 `Compilation.CreateLibrary` verifies source definitions without requiring
-`Main`; its program has `EntryPoint = -1` and cannot be emitted or executed
-without linking. `compile-module producer` uses this library mode. A function
+`Main`; its program has `EntryPoint = -1` and cannot be emitted as an executable
+without linking an entry point. Native library emission instead produces an
+entryless DLL with explicit exports. `compile-module producer` uses library mode. A function
 named `Main` in library source is an ordinary definition, not a process entry.
 External `BoundFunction` declarations have `IsExternal = true` and an empty body,
 not a synthetic implementation. The source verifier checks their signatures and
@@ -168,9 +169,9 @@ structs default to `internal`, while unmodified members and constructors default
 to `private`. The consumer-owned `Main` need not be exported.
 Internal structs and private/internal fields may remain within a producer's
 implementation but are not grants to the consumer. Top-level `private`
-structs and `mut` struct-field declarations are rejected at source binding
-rather than silently dropping their modifiers; field writes to mutable
-*local values* do not change the declared field layout.
+structs are rejected at source binding. Field writes require declared `mut`
+authority along the complete path, except a constructor's own fields during
+construction; mutable local storage alone does not upgrade a readonly field.
 
 The proof supports one producer reference per consumer, compact acyclic value
 layouts and the existing native value profile. Nested field types are retained
@@ -181,7 +182,7 @@ order, access and declared mutation authority. Version 7 stores a checked
 published value contract and is rejected during replacement. Older versions,
 including version 6 without field mutation contracts, are rejected;
 recreate them from source. Multi-producer identity/version resolution, dependency
-cycles, resilient public layouts and native DLL import slots remain later work.
+cycles and resilient public layouts remain later work.
 
 `NativeEmitter.EmitLibrary` can instead emit a Windows x64 PE32+ DLL directly
 from a verified `Compilation.CreateLibrary` program and an explicit list of
@@ -194,9 +195,8 @@ needs no base relocation entries. Export names are exact and stable per
 invocation; private/internal functions may be linked into their implementation
 but are not exported. Host buffer capabilities and unresolved external
 declarations are not accepted. This is an independently loadable native
-producer artifact, **not** a checked module replacement contract: there is
-no native consumer import table, live servicing, or production .NET interop
-promise. Callers must match the selected Windows x64 signatures and value
+producer artifact, **not** by itself a checked module replacement contract.
+Callers must match the selected Windows x64 signatures and value
 layouts themselves; unloading invalidates function pointers.
 
 `NativeEmitter.EmitWithImports` emits a separately persisted Windows x64
@@ -214,5 +214,45 @@ and in-memory JIT execution still reject external declarations. These
 bindings assert **names only**, not signature or value-layout compatibility,
 module provenance, or safe DLL search location: the caller must ensure the
 selected provider has the expected ABI contract and trusted load path before
-launch. There is no runtime contract validator, multi-provider contract linker,
-live patching or hot-unload protocol in this artifact layer.
+launch. This low-level artifact API does not perform contract validation;
+the package layer below adds that check. Neither provides a multi-provider
+contract linker, live patching or hot-unload protocol.
+
+`NativeModuleCompiler` packages each separately compiled native producer DLL
+or consumer EXE with its corresponding version 7 semantic `.trm` contract.
+Its version 1 package records the native-7 profile, fail-fast runtime policy,
+single explicit provider identity and the exact PE and semantic bytes. The
+identity is 1–64 ASCII letters, digits or underscores, beginning with a
+letter; its loader basename is `terrum-<identity>.dll`. Artifacts are bounded
+to 16 MiB overall and 4 MiB of semantic data. A SHA-256 checksum covers the
+package header and payload for corruption detection, **not** authentication.
+The consumer package stores its own image, without pinning the selected
+producer's image hash or implementation; the producer package retains its
+own image hash for inspection. Unknown package versions, profiles and
+requirements, excessive lengths, trailing bytes or inconsistent checksums
+are rejected.
+
+`CreateReference` exposes only the producer package's verified semantic
+declarations to independent consumer binding. `CreateConsumer` emits the
+consumer PE once, with an import for every external declaration from the
+reference, named exactly after that declaration. At validation and launch,
+`ModuleCompiler.Link` checks the persisted declaration, value layout,
+conditional output, field mutability and visibility contracts and verifies
+the linked IR. It does **not** emit code: the native consumer image is
+unchanged when a compatible producer package is selected for another
+launch. The consumer's exact imported call targets come from its bounded `.trm` reader,
+not from names in the replacement's linked function table; a replacement can
+add exports without changing a consumer that has an unrelated local function
+of the same name. Unused declarations retain semantic contracts but need no
+IAT cell. Bounded PE32+ structure checks require the declared exports
+and imports, x64 section and directory bounds, no CLR metadata, no unexpected
+initialization or dependency, and read-only executable text. `RunAsync`
+checks both packages before staging their exact persisted images under a
+unique temporary directory and launching one supervised Windows x64 child.
+The positive deadline is limited to two minutes; cancellation and timeout
+terminate that child and remove only its staged files and empty directory.
+The child process's raw exit code includes fail-fast codes. These checks
+assume the native images were produced and distributed by trusted parties:
+the checksum does not prove source-to-code equivalence or prevent an attacker
+from deliberately replacing executable bytes and recomputing it. This is
+neither an untrusted-code sandbox nor a hot-servicing loader.

@@ -71,7 +71,8 @@ ABI, artifact format and unsupported features. Native execution tests require
 Windows x64; emission itself does not invoke installed platform toolchains.
 The [JIT proof](docs/jit.md) covers executable-memory and unwind lifetimes;
 [modules](docs/modules.md) demonstrate process-start compatible producer
-replacement against an unchanged persisted consumer. Neither is a production
+replacement against unchanged persisted semantic or native consumers, with
+contract checks before execution. Neither is a production
 runtime or hot-servicing implementation. The [compiled scanner](docs/scanner.md)
 executes bounded Terrum tokenization against shared pinned Unicode data and
 decodes integer magnitudes without imposing a default numeric type.

@@ -27,6 +27,10 @@ internal static partial class Program
         + "       terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <output.trm> [--json]\n"
         + "       terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime fail-fast [--json]\n"
         + "       terrumc run-module <consumer.trm> <producer.trm> --runtime fail-fast [--json]\n"
+        + "       terrumc compile-native producer <source> <identity> --export <name> [--export <name>] [--source <source>] -o <producer.trmn> --runtime fail-fast [--json]\n"
+        + "       terrumc compile-native consumer <source> <producer.trmn> [--source <source>] -o <consumer.trmn> --runtime fail-fast [--json]\n"
+        + "       terrumc validate-native <consumer.trmn> <producer.trmn> [--json]\n"
+        + "       terrumc run-native <consumer.trmn> <producer.trmn> --runtime fail-fast [--json]\n"
         + "check/tokens/tree inspect syntax; analyze binds the native profile; build emits Windows x64 PE.\n"
         + "fail-fast explicitly selects process termination for runtime failures, not catchable exceptions.\n"
         + "jit/run-module execute in this process and return the program's status; supervise them with a deadline.\n"
@@ -52,6 +56,11 @@ internal static partial class Program
         if (args.Length != 0 && args[0] is "compile-module" or "link-module" or "run-module")
         {
             return RunModuleCommand(args);
+        }
+
+        if (args.Length != 0 && args[0] is "compile-native" or "validate-native" or "run-native")
+        {
+            return RunNativeModuleCommand(args, json);
         }
 
         if (args.Length != 0 && args[0] is "analyze" or "build" or "build-library" or "jit")
