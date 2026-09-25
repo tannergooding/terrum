@@ -5,9 +5,7 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
-using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
@@ -46,12 +44,29 @@ public sealed class SourceLineComponentTests
     [InlineData("bool ok = TryGetSourcePosition(-1, out var line, out var character); return character;")]
     public async Task FailedQueriesCannotPublishReadableOutputsAsync(string body)
     {
-        var source = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
-        var compilation = Compilation.Create(SyntaxTree.Parse(source + $"int32 Main() {{ {body} }}"),
+        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var entry = SyntaxTree.Parse($"namespace Terrum.CodeAnalysis; int32 Main() {{ {body} }}", "entry.terrum");
+        var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [65], false)]);
         Assert.True(compilation.HasErrors);
         Assert.Null(compilation.Program);
         Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3016");
+        Assert.Contains(compilation.SourceDiagnostics,
+            diagnostic => diagnostic.SyntaxTree == entry && diagnostic.Diagnostic.Code == "TRM3016");
+    }
+
+    [Fact]
+    public void MultipleSnapshotsPreserveHostGrantRestrictionsAndDiagnosticOwnership()
+    {
+        var entry = SyntaxTree.Parse("int32 Main() { Write(); return 0; }", "entry.terrum");
+        var write = SyntaxTree.Parse("void Write() { Host.Source[0] = (char16)66; }", "write.terrum");
+        var compilation = Compilation.Create([entry, write],
+            [new HostBuffer("Source", PrimitiveType.Char16, [65], false)]);
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+        Assert.Collection(compilation.SyntaxTrees, tree => Assert.Same(entry, tree), tree => Assert.Same(write, tree));
+        Assert.NotEmpty(compilation.SourceDiagnostics);
+        Assert.All(compilation.SourceDiagnostics, diagnostic => Assert.Same(write, diagnostic.SyntaxTree));
     }
 
     private static async Task CheckAsync(string text)
@@ -73,15 +88,16 @@ public sealed class SourceLineComponentTests
             positions.Add(location.Character);
         }
 
-        var components = await ReadComponentsAsync(includeTests: true).ConfigureAwait(true);
+        var trees = await ReadComponentsAsync(includeTests: true).ConfigureAwait(true);
         const string Harness = """
+            namespace Terrum.CodeAnalysis;
             int32 Main() {
                 int32 first = CheckSourceLines();
                 if (first != 0) { return first; }
                 return CheckSourceLines();
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(components + Harness),
+        var compilation = Compilation.Create(trees.Add(SyntaxTree.Parse(Harness, "entry.terrum")),
         [
             new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false),
             new HostBuffer("ExpectedLines", PrimitiveType.Int32, lines.ToImmutable(), false),
@@ -116,9 +132,9 @@ public sealed class SourceLineComponentTests
         }
     }
 
-    private static async Task<string> ReadComponentsAsync(bool includeTests)
+    private static async Task<ImmutableArray<SyntaxTree>> ReadComponentsAsync(bool includeTests)
     {
-        var source = new StringBuilder("using Terrum;\nnamespace Terrum.CodeAnalysis;\n");
+        var trees = ImmutableArray.CreateBuilder<SyntaxTree>();
         var names = new[] { "SourceRange.terrum", "CharacterFacts.terrum", "SourceLines.terrum" };
         foreach (var name in includeTests ? [.. names, "SourceLineTests.terrum"] : names)
         {
@@ -127,17 +143,9 @@ public sealed class SourceLineComponentTests
             var tree = SyntaxTree.Parse(text, path);
             Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
             Assert.Equal(text, tree.Root.ToFullString());
-
-            // Host grants currently bind one snapshot; retain declarations under their shared namespace.
-            foreach (var node in tree.Root.Children.OfType<SyntaxNode>())
-            {
-                if (node.DescendantTokens().First().Kind is not (TokenKind.UsingKeyword or TokenKind.NamespaceKeyword))
-                {
-                    _ = source.AppendLine(node.ToFullString());
-                }
-            }
+            trees.Add(tree);
         }
-        return source.ToString();
+        return trees.ToImmutable();
     }
 
     private static string RepositoryRoot() => Path.GetFullPath(

@@ -45,6 +45,9 @@ Raw `char16` values are code units, not automatically validated Unicode scalars.
 
 `SourceLines` reads the same immutable `Host.Source` capability as the scanner,
 without retaining a pointer, borrowing writable storage or allocating a line table.
+The host binds the original candidate snapshots through
+`Compilation.Create(trees, buffers)`, preserving source-associated diagnostics
+and the single-source capability restrictions without merging source text.
 `TryReadSourceLine` reads the suffix starting at a valid code-unit offset; callers
 enumerate physical lines by starting at zero and advancing past each returned
 break. EOF is a valid empty range. Position lookup scans those lines rather than

@@ -135,21 +135,26 @@ public sealed class Compilation
     /// <summary>Binds declarations across source files before resolving names and function bodies.</summary>
     /// <exception cref="ArgumentException">No source trees were supplied.</exception>
     public static Compilation Create(IEnumerable<SyntaxTree> trees, CancellationToken cancellationToken = default) =>
-        CreateCore(trees, isLibrary: false, cancellationToken);
+        CreateCore(trees, [], isLibrary: false, cancellationToken);
+
+    /// <summary>Binds source snapshots with explicit, fixed-size host buffer capabilities shared by the compilation.</summary>
+    public static Compilation Create(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers,
+        CancellationToken cancellationToken = default) =>
+        CreateCore(trees, buffers, isLibrary: false, cancellationToken);
 
     /// <summary>Binds library definitions across source snapshots, without requiring a process entry point.</summary>
     public static Compilation CreateLibrary(IEnumerable<SyntaxTree> trees, CancellationToken cancellationToken = default) =>
-        CreateCore(trees, isLibrary: true, cancellationToken);
+        CreateCore(trees, [], isLibrary: true, cancellationToken);
 
     /// <summary>Binds consumer source snapshots against one validated module reference.</summary>
     public static Compilation Create(IEnumerable<SyntaxTree> trees, CompilationReference reference, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(reference);
-        return CreateCore(trees, isLibrary: false, cancellationToken, reference);
+        return CreateCore(trees, [], isLibrary: false, cancellationToken, reference);
     }
 
-    private static Compilation CreateCore(IEnumerable<SyntaxTree> trees, bool isLibrary, CancellationToken cancellationToken,
-        CompilationReference? reference = null)
+    private static Compilation CreateCore(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers, bool isLibrary,
+        CancellationToken cancellationToken, CompilationReference? reference = null)
     {
         ArgumentNullException.ThrowIfNull(trees);
         cancellationToken.ThrowIfCancellationRequested();
@@ -175,7 +180,7 @@ public sealed class Compilation
             return new Compilation(snapshots[0], diagnostics.ToImmutable(), null,
                 snapshots.ToImmutable(), sourceDiagnostics.ToImmutable());
         }
-        var binder = new Binder(snapshots.ToImmutable(), [], cancellationToken, isLibrary, reference);
+        var binder = new Binder(snapshots.ToImmutable(), buffers, cancellationToken, isLibrary, reference);
         var program = binder.Bind();
         diagnostics.AddRange(binder.Diagnostics);
         sourceDiagnostics.AddRange(binder.SourceDiagnostics);
