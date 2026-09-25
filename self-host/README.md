@@ -24,6 +24,8 @@ remain hosted in C#.
 | [WideIntegerFacts](WideIntegerFacts.terrum) | Checked signed addition and bounded decimal accumulation through the full unsigned 64-bit range | Executed as a separately compiled module with conditional wide outputs |
 | [WideIntegerTests](WideIntegerTests.terrum) | Signed extrema, invalid digits, decimal overflow and repeated output publication | Executed through AOT and JIT with a shared entry wrapper |
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and conditional bool/out publication |
+| [SourceLines](SourceLines.terrum) | Streaming line ranges and UTF-16 line/character mapping over an immutable source grant | Executed with conditional outputs; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
+| [SourceLineTests](SourceLineTests.terrum) | Shared line-range/position fixtures, invalid offsets and repeated queries | Executed natively with host-supplied expected records; no source normalization or default output values |
 | [CharacterFacts](CharacterFacts.terrum) | Shared ASCII numeric and newline decisions | Executed with `char16` comparisons, checked numeric casts and verified NoThrow classification contracts |
 | [Token](Token.terrum) | Token category and nested source range | Executed as a 12-byte aggregate with independent producer/consumer artifacts |
 | [TokenCursor](TokenCursor.terrum) | Read-view traversal without copying backing storage or cleanup | Span indexing, matched access, stored backing dependencies, capture contract, constructor initialization |
@@ -40,6 +42,15 @@ schema change. Source file UTF-8 decoding remains separate from coordinates.
 
 `CharacterFacts` uses `(int32)value` instead of a per-source conversion hook.
 Raw `char16` values are code units, not automatically validated Unicode scalars.
+
+`SourceLines` reads the same immutable `Host.Source` capability as the scanner,
+without retaining a pointer, borrowing writable storage or allocating a line table.
+`TryReadSourceLine` reads the suffix starting at a valid code-unit offset; callers
+enumerate physical lines by starting at zero and advancing past each returned
+break. EOF is a valid empty range. Position lookup scans those lines rather than
+using the host's allocated binary-search index. Break units belong to the preceding
+line, and a trailing break creates a final empty line. This is an executed bounded
+component, not an implemented `SourceText` collection or an efficient indexed replacement.
 
 The candidates reuse `Span<Token>`/`TextSpan` rather than imitating C# strings,
 `IEnumerator`, `ImmutableArray`, reflection, GC handles or compiler-generated

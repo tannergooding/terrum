@@ -1,0 +1,60 @@
+namespace Terrum.CodeAnalysis;
+
+int32 CheckSourceLines()
+{
+    mut int32 start = 0;
+    mut int32 index = 0;
+    mut bool more = true;
+    while (more)
+    {
+        require TryReadSourceLine(start, out var content, out var includingBreak);
+        require index < Host.ExpectedLines.Length / 3;
+        if (content.Start != Host.ExpectedLines[index * 3]
+            || content.Length != Host.ExpectedLines[index * 3 + 1]
+            || includingBreak.Start != content.Start
+            || includingBreak.Length != Host.ExpectedLines[index * 3 + 2])
+        {
+            return 1;
+        }
+
+        more = content.Length != includingBreak.Length;
+        start = includingBreak.GetEnd();
+        index = index + 1;
+    }
+
+    if (index != Host.ExpectedLines.Length / 3)
+    {
+        return 2;
+    }
+
+    mut int32 at = 0;
+    while (at <= Host.Source.Length)
+    {
+        require TryGetSourcePosition(at, out var line, out var character);
+        if (line != Host.ExpectedPositions[at * 2]
+            || character != Host.ExpectedPositions[at * 2 + 1])
+        {
+            return 3;
+        }
+        at = at + 1;
+    }
+
+    if (TryReadSourceLine(-1, out var before, out var beforeBreak)
+        || TryReadSourceLine(Host.Source.Length + 1, out var after, out var afterBreak)
+        || TryReadSourceLine(int32.MaxValue, out var maximum, out var maximumBreak)
+        || TryGetSourcePosition(-1, out var beforeLine, out var beforeCharacter)
+        || TryGetSourcePosition(Host.Source.Length + 1, out var afterLine, out var afterCharacter)
+        || TryGetSourcePosition(int32.MaxValue, out var maximumLine, out var maximumCharacter))
+    {
+        return 4;
+    }
+
+    require TryReadSourceLine(Host.Source.Length, out var empty, out var emptyBreak);
+    if (empty.Start != Host.Source.Length || empty.Length != 0
+        || emptyBreak.Start != Host.Source.Length || emptyBreak.Length != 0)
+    {
+        return 5;
+    }
+
+    return 0;
+}
