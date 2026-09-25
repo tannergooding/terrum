@@ -264,6 +264,9 @@ checks both packages before staging their exact persisted images under a
 unique temporary directory and launching one supervised Windows x64 child.
 The positive deadline is limited to two minutes; cancellation and timeout
 terminate that child and remove only its staged files and empty directory.
+Image deletion retries transient Windows access/sharing failures for up to one
+second per file, including delayed image-section teardown after process exit;
+persistent cleanup failures are reported rather than silently discarded.
 The child process's raw exit code includes fail-fast codes. These checks
 assume the native images were produced and distributed by trusted parties:
 the checksum does not prove source-to-code equivalence or prevent an attacker

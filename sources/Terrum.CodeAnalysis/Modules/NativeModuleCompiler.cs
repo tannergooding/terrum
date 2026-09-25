@@ -151,9 +151,29 @@ public static class NativeModuleCompiler
         }
         finally
         {
-            File.Delete(consumerPath);
-            File.Delete(producerPath);
+            await DeleteImageAsync(consumerPath).ConfigureAwait(false);
+            await DeleteImageAsync(producerPath).ConfigureAwait(false);
             Directory.Delete(directory);
+        }
+    }
+
+    private static async Task DeleteImageAsync(string path)
+    {
+        // A signaled Windows process can still have an image section being torn down.
+        // Retry only access/sharing failures for one second; persistent failures remain visible.
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                File.Delete(path);
+                return;
+            }
+            catch (Exception exception) when (attempt < 20
+                && exception is IOException or UnauthorizedAccessException
+                && (exception.HResult & 0xFFFF) is 5 or 32 or 33)
+            {
+                await Task.Delay(50, CancellationToken.None).ConfigureAwait(false);
+            }
         }
     }
 

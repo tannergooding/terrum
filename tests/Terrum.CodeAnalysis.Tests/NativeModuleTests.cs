@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -243,5 +244,40 @@ public sealed class NativeModuleTests
         var after = Directory.GetDirectories(Path.GetTempPath(), "terrum-native-" + identity + "-*")
             .Order(StringComparer.Ordinal).ToArray();
         Assert.Equal(before, after);
+    }
+
+    [Fact]
+    public async Task CleanupWaitsForTransientImageSharingWithoutHidingTimeoutAsync()
+    {
+        var identity = "Sharing" + Guid.NewGuid().ToString("N");
+        var provider = Producer(identity: identity);
+        var consumer = ConsumerPackage(provider, Consumer.Replace("return Recurse(3);",
+            "while (true) { } return 0;", StringComparison.Ordinal));
+        var execution = NativeModuleCompiler.RunAsync(consumer, provider, TimeSpan.FromMilliseconds(800));
+        var heldLock = false;
+        var elapsed = Stopwatch.StartNew();
+        while (!heldLock && elapsed.Elapsed < TimeSpan.FromSeconds(2) && !execution.IsCompleted)
+        {
+            foreach (var directory in Directory.GetDirectories(Path.GetTempPath(), "terrum-native-" + identity + "-*"))
+            {
+                try
+                {
+                    await using var imageLock = File.Open(Path.Combine(directory, "consumer.exe"), FileMode.Open, FileAccess.Read, FileShare.Read);
+                    heldLock = true;
+                    await Task.Delay(1000).ConfigureAwait(true);
+                }
+                catch (IOException)
+                {
+                    // Creation is asynchronous and initially holds an exclusive write handle.
+                }
+            }
+            if (!heldLock)
+            {
+                await Task.Delay(10).ConfigureAwait(true);
+            }
+        }
+        _ = await Assert.ThrowsAsync<TimeoutException>(() => execution).ConfigureAwait(true);
+        Assert.True(heldLock);
+        Assert.Empty(Directory.GetDirectories(Path.GetTempPath(), "terrum-native-" + identity + "-*"));
     }
 }
