@@ -1,7 +1,6 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
-using System.Collections.Immutable;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -17,8 +16,12 @@ internal static partial class Program
 {
     private static int RunScannerComponent(string[] args, bool json)
     {
-        if (args.Length is not (5 or 6) || args[1] == "-" || args[3] != "--runtime" || args[4] != "fail-fast"
-            || (args.Length == 6 && args[5] != "--json"))
+        var build = args[0] == "build-component";
+        var count = build ? 7 : 5;
+        var runtime = build ? 5 : 3;
+        if ((args.Length != count && args.Length != count + 1) || args[1] == "-"
+            || (build && args[3] != "-o") || args[runtime] != "--runtime" || args[runtime + 1] != "fail-fast"
+            || (args.Length == count + 1 && args[count] != "--json"))
         {
             WriteInputError(json, "TRM2000", Usage);
             return 2;
@@ -26,8 +29,20 @@ internal static partial class Program
 
         string scanner;
         SourceText source;
+        string? outputPath = null;
         try
         {
+            if (build)
+            {
+                outputPath = Path.GetFullPath(args[4]);
+                if (!string.Equals(Path.GetExtension(outputPath), ".exe", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(outputPath, Path.GetFullPath(args[1]), StringComparison.OrdinalIgnoreCase)
+                    || (args[2] != "-" && string.Equals(outputPath, Path.GetFullPath(args[2]), StringComparison.OrdinalIgnoreCase)))
+                {
+                    WriteInputError(json, "TRM2002", "Output must be a distinct .exe path, not scanner or input source.");
+                    return 2;
+                }
+            }
             scanner = ReadSource(args[1]);
             source = SourceText.From(ReadSource(args[2]), args[2] == "-" ? "<stdin>" : args[2]);
         }
@@ -49,7 +64,7 @@ internal static partial class Program
         {
             if (json)
             {
-                WriteCompilationJson("scan-component", tree, compilation.Diagnostics, false, null, null);
+                WriteCompilationJson(args[0], tree, compilation.Diagnostics, false, null, null);
             }
             else
             {
@@ -77,23 +92,25 @@ internal static partial class Program
             return 1;
         }
 
-        ImmutableArray<ScannerToken> tokens;
-        ImmutableArray<ScannerTrivia> trivia;
-        ImmutableArray<ScannerDiagnostic> diagnostics;
+        LexResult lexResult;
         try
         {
             var words = result.Data.AsSpan(result.BufferOffsets[3], program.Buffers[3].Values.Length * 4);
-            tokens = ScannerHost.ReadTokens(source, result.ExitCode, words);
             var triviaWords = result.Data.AsSpan(result.BufferOffsets[5], program.Buffers[5].Values.Length * 4);
-            trivia = ScannerHost.ReadTrivia(source, tokens, triviaWords);
             var diagnosticWords = result.Data.AsSpan(result.BufferOffsets[4], program.Buffers[4].Values.Length * 4);
-            diagnostics = ScannerHost.ReadDiagnostics(source, diagnosticWords);
+            lexResult = ScannerHost.ReadLexResult(source, result.ExitCode, words, triviaWords, diagnosticWords);
         }
         catch (ArgumentException exception)
         {
             WriteInputError(json, "TRM5001", exception.Message);
             return 1;
         }
+        if (build)
+        {
+            return CompileTree(args[0], SyntaxTree.Parse(lexResult), outputPath, json);
+        }
+        var tokens = lexResult.Tokens;
+        var diagnostics = lexResult.Diagnostics;
         if (json)
         {
             using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
@@ -105,18 +122,15 @@ internal static partial class Program
             writer.WriteString("coordinateSystem", "utf-16");
             writer.WriteNumber("sourceLength", source.Length);
             writer.WriteStartArray("tokens");
-            var triviaIndex = 0;
-            for (var tokenIndex = 0; tokenIndex < tokens.Length; tokenIndex++)
+            foreach (var token in tokens)
             {
-                var token = tokens[tokenIndex];
                 writer.WriteStartObject();
                 writer.WriteString("kind", token.Kind.ToString());
                 writer.WriteNumber("start", token.Span.Start);
                 writer.WriteNumber("length", token.Span.Length);
                 writer.WriteStartArray("leadingTrivia");
-                while (triviaIndex < trivia.Length && trivia[triviaIndex].TokenIndex == tokenIndex)
+                foreach (var item in token.LeadingTrivia)
                 {
-                    var item = trivia[triviaIndex++];
                     writer.WriteStartObject();
                     writer.WriteString("kind", item.Kind.ToString());
                     writer.WriteNumber("start", item.Span.Start);
@@ -141,15 +155,12 @@ internal static partial class Program
         }
         else
         {
-            var triviaIndex = 0;
-            for (var tokenIndex = 0; tokenIndex < tokens.Length; tokenIndex++)
+            foreach (var token in tokens)
             {
-                while (triviaIndex < trivia.Length && trivia[triviaIndex].TokenIndex == tokenIndex)
+                foreach (var item in token.LeadingTrivia)
                 {
-                    var item = trivia[triviaIndex++];
                     Console.WriteLine(FormattableString.Invariant($"  {item.Kind} [{item.Span.Start}..{item.Span.End})"));
                 }
-                var token = tokens[tokenIndex];
                 Console.WriteLine(FormattableString.Invariant($"{token.Kind} [{token.Span.Start}..{token.Span.End})"));
             }
             foreach (var diagnostic in diagnostics)

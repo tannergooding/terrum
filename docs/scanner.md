@@ -9,10 +9,13 @@ or make source-dependent classification decisions for the component.
 
 ```powershell
 dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll scan-component self-host\Scanner.terrum input.txt --runtime fail-fast --json
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-component self-host\Scanner.terrum samples\native\factorial.terrum -o artifacts\scanned-factorial.exe --runtime fail-fast --json
 ```
 
-The command executes compiled code in its own process. Supervising clients must
-apply a deadline and treat abnormal termination as a runtime failure. When
+Both are execution-worker commands: compiled scanner code runs inside that CLI
+process. Supervising clients must launch a bounded subprocess and treat abnormal
+termination as a runtime failure. Ordinary `build` still uses the host lexer.
+When `scan-component`
 scanning completes, JSON uses `schemaVersion: 3`, `component: "scanner-3"`,
 `coordinateSystem: "utf-16"`, the pinned `unicodeVersion`, `sourceLength`,
 `success`, and arrays of `tokens` and `diagnostics`. Each token has an exact
@@ -25,6 +28,27 @@ and diagnostics on stdout. Without `--json`, token rows go to stdout and
 diagnostic code/spans go to stderr. Input, compilation, or invalid-result
 failures retain the standard schema-1 error response rather than producing a
 scanner-3 token response.
+
+`build-component` instead adapts the native records to `LexResult`, feeds that
+result into the official lossless parser, binds and verifies the resulting tree,
+and emits a native executable. It never re-lexes the target source or falls back
+to the host lexer when the scanner fails. The scanner's own source is still
+compiled by the host front end. This is a Terrum-implemented lexical phase in
+the real compiler pipeline, not a self-hosted parser or complete bootstrap.
+Its JSON is the ordinary schema-1 compilation response with command
+`build-component`. A completed successful build returns 0; diagnostics return
+1 and input/output errors return 2. Native scanner fail-fast terminates the
+worker with its reserved runtime status. Lexical, syntax, binding, runtime and
+record-validation failures leave an existing output artifact unchanged.
+
+`ScannerHost.ReadLexResult` materializes source-owned token/trivia text and
+standard diagnostic objects from validated buffer records. `SyntaxTree.Parse`
+accepts this lexical result without invoking the host lexer. These boundaries
+validate shape, source coverage and source identity, not the supplied scanner's
+classification algorithm. Use a trusted compiler component; shape validation
+cannot establish that an arbitrary replacement scanner implements Terrum.
+Lexical diagnostic codes/spans match the host lexer; their human messages are
+component-specific summaries.
 
 ## Storage and host boundary
 
@@ -106,7 +130,8 @@ fractions require a digit after `.`, exponents follow the host lexer's
 identifier-disambiguation and incomplete-exponent rules, and defined primitive
 width tags attach only at an identifier boundary. Spans retain original source
 positions. The component does not decode string values, type numeric values or
-construct the host's full diagnostic objects/messages. It is not a complete
+construct host objects. Its adapter materializes those objects after execution.
+It is not a complete
 self-hosted front end.
 
 Shared fixtures compare native exact token kinds, trivia kinds/ownership/spans,
@@ -116,3 +141,6 @@ boundaries, supplementary identifiers, combining marks, non-ASCII digits,
 Join_Control, comments, quoted escapes, malformed strings, numeric boundaries,
 whitespace, malformed surrogate pairs and operators. Output-capacity
 requirements are checked; the scanner does not silently truncate records.
+End-to-end build fixtures compare the native-scanned and host-scanned emitted
+images, execute generated programs, and verify that scanner failures neither
+fall back nor replace prior artifacts.

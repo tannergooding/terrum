@@ -74,11 +74,15 @@ The [JIT proof](docs/jit.md) covers executable-memory and unwind lifetimes;
 replacement against an unchanged persisted consumer. Neither is a production
 runtime or hot-servicing implementation. The [compiled scanner](docs/scanner.md)
 executes bounded Terrum tokenization against shared pinned Unicode data.
+The `build-component` worker can use those native token/trivia records as the
+lexical phase of the real parser/binder/native-emission pipeline, without
+re-lexing the target source in C#.
 
 For machine consumers use the built `artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll`
 rather than mixing `dotnet run` build messages with protocol output. CLI exit
 codes for inspection/build commands distinguish success (0), source/compile
 diagnostics (1), and usage/input/output errors (2). Execution workers instead
-return the program's status. `check` remains syntax-only; `analyze` binds.
+return the program's status; component workers can terminate on a native scanner
+failure and must be supervised. `check` remains syntax-only; `analyze` binds.
 See the implementation guide for coordinates, recovery,
 schema versioning and content-bound edits.

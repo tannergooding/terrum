@@ -315,6 +315,20 @@ public sealed class ScannerTests
             expectedDiagnostics.Add(diagnostic.Span.Length);
         }
 
+        var adapted = ScannerHost.ReadLexResult(lexed.Source, lexed.Tokens.Length,
+            EncodeWords(expected.ToImmutable()),
+            EncodeWords(expectedTrivia.ToImmutable().Insert(0, expectedTrivia.Count / 4)),
+            EncodeWords(expectedDiagnostics.ToImmutable().Insert(0, expectedDiagnostics.Count / 3)));
+        var hostTree = SyntaxTree.Parse(lexed);
+        var adaptedTree = SyntaxTree.Parse(adapted);
+        Assert.Same(lexed.Source, adaptedTree.Source);
+        Assert.Equal(source, adaptedTree.Root.ToFullString());
+        Assert.Equal(hostTree.ContentId, adaptedTree.ContentId);
+        Assert.Equal(hostTree.Root.DescendantNodes().Select(node => (node.Kind, node.Span)),
+            adaptedTree.Root.DescendantNodes().Select(node => (node.Kind, node.Span)));
+        Assert.Equal(hostTree.Diagnostics.Select(diagnostic => (diagnostic.Code, diagnostic.Severity, diagnostic.Span)),
+            adaptedTree.Diagnostics.Select(diagnostic => (diagnostic.Code, diagnostic.Severity, diagnostic.Span)));
+
         var buffers = ScannerHost.CreateBuffers(SourceText.From(source))
             .Add(new HostBuffer("Expected", PrimitiveType.Int32, expected.ToImmutable(), false))
             .Add(new HostBuffer("ExpectedTrivia", PrimitiveType.Int32, expectedTrivia.ToImmutable(), false))
@@ -383,6 +397,16 @@ public sealed class ScannerTests
         var compilation = Compilation.Create(SyntaxTree.Parse(scanner + Harness + (repeat ? Twice : Once)), buffers);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), 0).ConfigureAwait(true);
+    }
+
+    private static byte[] EncodeWords(ImmutableArray<int> words)
+    {
+        var bytes = new byte[words.Length * 4];
+        for (var index = 0; index < words.Length; index++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(index * 4), words[index]);
+        }
+        return bytes;
     }
 
     private static async Task ExecuteAsync(BoundProgram program, int expected)

@@ -13,6 +13,10 @@ using only that artifact's declarations. Both AOT and JIT execute the linked
 result; no producer source is rebound while compiling the consumer.
 The cursor and general host-interface sketches still require later language
 slices. Executing these components is not a self-hosted compiler bootstrap.
+`build-component` uses the compiled scanner's records as the lexical input to
+the official host parser, binder and native emitter; it does not re-lex the
+target input. The scanner's own compilation and the later compiler phases
+remain hosted in C#.
 
 | Candidate | Purpose | Gates before execution |
 |---|---|---|

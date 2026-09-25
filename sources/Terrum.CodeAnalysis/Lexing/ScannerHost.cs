@@ -4,6 +4,8 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using System.Threading;
+using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
 
@@ -248,6 +250,57 @@ public static class ScannerHost
         }
 
         return diagnostics.MoveToImmutable();
+    }
+
+    /// <summary>Adapts a completed native scan into the lexical input consumed by the official parser, without re-lexing.</summary>
+    /// <param name="source">The exact source snapshot used by the scanner.</param>
+    /// <param name="count">The scanner's token count, including EOF.</param>
+    /// <param name="tokenBytes">The copied token buffer.</param>
+    /// <param name="triviaBytes">The copied leading-trivia buffer.</param>
+    /// <param name="diagnosticBytes">The copied lexical-diagnostic buffer.</param>
+    /// <param name="cancellationToken">A token to cancel record materialization.</param>
+    /// <returns>A lossless lexical result with source-owned text and scanner-supplied classification.</returns>
+    /// <exception cref="ArgumentNullException">The source is null.</exception>
+    /// <exception cref="ArgumentException">The records violate the scanner interchange contract.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    public static LexResult ReadLexResult(SourceText source, int count, ReadOnlySpan<byte> tokenBytes,
+        ReadOnlySpan<byte> triviaBytes, ReadOnlySpan<byte> diagnosticBytes, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var records = ReadTokens(source, count, tokenBytes);
+        var trivia = ReadTrivia(source, records, triviaBytes);
+        var diagnosticRecords = ReadDiagnostics(source, diagnosticBytes);
+        var tokens = ImmutableArray.CreateBuilder<SyntaxToken>(records.Length);
+        var triviaIndex = 0;
+        for (var index = 0; index < records.Length; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var leading = ImmutableArray.CreateBuilder<SyntaxTrivia>();
+            while (triviaIndex < trivia.Length && trivia[triviaIndex].TokenIndex == index)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var item = trivia[triviaIndex++];
+                leading.Add(new SyntaxTrivia(item.Kind, item.Span, source.Text.Substring(item.Span.Start, item.Span.Length)));
+            }
+            var record = records[index];
+            tokens.Add(new SyntaxToken(record.Kind, source.Text.Substring(record.Span.Start, record.Span.Length),
+                record.Span, leading.ToImmutable()));
+        }
+        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>(diagnosticRecords.Length);
+        foreach (var diagnostic in diagnosticRecords)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var message = diagnostic.Code switch {
+                "TRM0001" => "Unrecognized character or malformed UTF-16 code unit.",
+                "TRM0002" => "Unterminated string literal.",
+                "TRM0003" => "Unterminated block comment.",
+                "TRM0004" => "An exponent requires at least one decimal digit.",
+                "TRM0005" => "Invalid string escape sequence.",
+                _ => throw new ArgumentException("Unknown scanner diagnostic.", nameof(diagnosticBytes)),
+            };
+            diagnostics.Add(new Diagnostic(diagnostic.Code, DiagnosticSeverity.Error, message, diagnostic.Span));
+        }
+        return new LexResult(source, tokens.MoveToImmutable(), diagnostics.MoveToImmutable());
     }
 }
 

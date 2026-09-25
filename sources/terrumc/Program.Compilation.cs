@@ -59,6 +59,13 @@ internal static partial class Program
         }
 
         var tree = SyntaxTree.Parse(text, args[1] == "-" ? "<stdin>" : args[1]);
+
+        return CompileTree(args[0], tree, outputPath, json);
+    }
+
+    private static int CompileTree(string command, SyntaxTree tree, string? outputPath, bool json)
+    {
+        var build = outputPath is not null;
         var compilation = Compilation.Create(tree);
         var diagnostics = compilation.Diagnostics;
         byte[]? image = null;
@@ -98,7 +105,7 @@ internal static partial class Program
 
         if (json)
         {
-            WriteCompilationJson(args[0], tree, diagnostics, success, outputPath, image);
+            WriteCompilationJson(command, tree, diagnostics, success, outputPath, image);
         }
         else
         {

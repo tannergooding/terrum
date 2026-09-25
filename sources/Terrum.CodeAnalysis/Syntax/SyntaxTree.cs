@@ -84,6 +84,34 @@ public sealed class SyntaxTree
     {
         ArgumentNullException.ThrowIfNull(source);
         var lexResult = Lexer.Lex(source, cancellationToken);
+        return ParseCore(lexResult, cancellationToken);
+    }
+
+    /// <summary>Parses a caller-supplied lossless lexical stream without lexing again.</summary>
+    /// <remarks>
+    /// Requires a nonnull source, nondefault token and diagnostic arrays, and at least one token.
+    /// Every nonmissing token and its nonempty leading trivia must partition the source in order,
+    /// with exact UTF-16 text at each span and one final, zero-width EOF at source length.
+    /// Diagnostics require in-range spans, defined severity, a TRM-prefixed four-digit code,
+    /// and a nonblank message. The caller owns lexical classification: defined token and trivia
+    /// kinds are accepted as supplied, not independently reclassified from source text.
+    /// </remarks>
+    /// <param name="lexResult">A complete lexical stream and its source snapshot.</param>
+    /// <param name="cancellationToken">A token to cancel validation, parsing, or content hashing.</param>
+    /// <returns>The parsed snapshot retaining the supplied source and token instances.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="lexResult"/> is null.</exception>
+    /// <exception cref="ArgumentException">The supplied source, stream, trivia, or diagnostics violate the interchange contract.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    public static SyntaxTree Parse(LexResult lexResult, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(lexResult);
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateLexResult(lexResult, cancellationToken);
+        return ParseCore(lexResult, cancellationToken);
+    }
+
+    private static SyntaxTree ParseCore(LexResult lexResult, CancellationToken cancellationToken)
+    {
         var parser = new Parser(lexResult.Tokens, cancellationToken);
         var root = parser.ParseCompilationUnit();
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
@@ -96,7 +124,88 @@ public sealed class SyntaxTree
         });
         cancellationToken.ThrowIfCancellationRequested();
 
-        return new SyntaxTree(source, lexResult, root, diagnostics.ToImmutable(), cancellationToken);
+        return new SyntaxTree(lexResult.Source, lexResult, root, diagnostics.ToImmutable(), cancellationToken);
+    }
+
+    private static void ValidateLexResult(LexResult lexResult, CancellationToken cancellationToken)
+    {
+        if (lexResult.Source is null || lexResult.Tokens.IsDefaultOrEmpty || lexResult.Diagnostics.IsDefault)
+        {
+            throw new ArgumentException("A lexical result requires a source, tokens, and diagnostics.", nameof(lexResult));
+        }
+
+        var source = lexResult.Source;
+        var position = 0;
+        for (var index = 0; index < lexResult.Tokens.Length; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var token = lexResult.Tokens[index];
+            if (token is null || token.IsMissing || !Enum.IsDefined(token.Kind) || token.LeadingTrivia.IsDefault
+                || token.Text is null)
+            {
+                throw new ArgumentException("Invalid lexical token.", nameof(lexResult));
+            }
+
+            foreach (var trivia in token.LeadingTrivia)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (trivia is null || !Enum.IsDefined(trivia.Kind) || trivia.Text is null
+                    || trivia.Span.Start != position || trivia.Span.Length == 0
+                    || trivia.Span.Length > source.Length - position
+                    || !source.Text.AsSpan(position, trivia.Span.Length).SequenceEqual(trivia.Text.AsSpan()))
+                {
+                    throw new ArgumentException("Invalid leading trivia or source coverage.", nameof(lexResult));
+                }
+
+                position = trivia.Span.End;
+            }
+
+            var eof = token.Kind == TokenKind.EndOfFile;
+            if (token.Span.Start != position || token.Span.Length > source.Length - position
+                || (eof ? index != lexResult.Tokens.Length - 1 || token.Span.Length != 0
+                    : token.Span.Length == 0)
+                || !source.Text.AsSpan(position, token.Span.Length).SequenceEqual(token.Text.AsSpan()))
+            {
+                throw new ArgumentException("Invalid lexical token or source coverage.", nameof(lexResult));
+            }
+
+            position = token.Span.End;
+        }
+
+        if (lexResult.Tokens[^1].Kind != TokenKind.EndOfFile || position != source.Length)
+        {
+            throw new ArgumentException("The lexical stream must end with EOF at the end of the source.", nameof(lexResult));
+        }
+
+        foreach (var diagnostic in lexResult.Diagnostics)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (diagnostic is null || !Enum.IsDefined(diagnostic.Severity)
+                || !IsDiagnosticCode(diagnostic.Code) || string.IsNullOrWhiteSpace(diagnostic.Message)
+                || diagnostic.Span.Start > source.Length
+                || diagnostic.Span.Length > source.Length - diagnostic.Span.Start)
+            {
+                throw new ArgumentException("Invalid lexical diagnostic.", nameof(lexResult));
+            }
+        }
+    }
+
+    private static bool IsDiagnosticCode(string? code)
+    {
+        if (code is null || code.Length != 7 || !code.StartsWith("TRM", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        foreach (var digit in code.AsSpan(3))
+        {
+            if (digit is < '0' or > '9')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

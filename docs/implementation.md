@@ -97,6 +97,13 @@ SyntaxTree edited = tree.WithChanges(tree.ContentId,
     [new TextChange(new TextSpan(5, 4), "Run")]);
 ```
 
+`SyntaxTree.Parse(LexResult)` accepts a completed lexical snapshot, including
+one produced by the compiled Terrum scanner. It validates the exact source
+partition, token/trivia text, EOF and diagnostic shape before invoking the same
+parser; it does not invoke the host lexer. The supplied component remains
+responsible for correct classification. Normal source-based parsing uses its
+own trusted lexer output without repeating this boundary validation.
+
 `SourceText` owns exact input text and a diagnostic path label. All library
 offsets, line characters and lengths are UTF-16 units, not scalar/grapheme/display
 columns; ranges are half-open. Lines and characters are zero-based. Only human

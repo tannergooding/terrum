@@ -40,15 +40,21 @@ public sealed class CliTests
         Assert.Equal(lengths, tokens.Select(static token => token.GetProperty("length").GetInt32()));
     }
 
-    [Fact]
-    public async Task BuildPublishesNativeArtifactAndFailedCompilationPreservesItAsync()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BuildPublishesNativeArtifactAndFailedCompilationPreservesItAsync(bool nativeScanner)
     {
         var path = Path.Combine(Path.GetTempPath(), $"terrum-cli-{Guid.NewGuid():N}.exe");
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        string[] arguments = nativeScanner
+            ? ["build-component", Path.Combine(root, "self-host", "Scanner.terrum"), "-", "-o", path, "--runtime", "fail-fast", "--json"]
+            : ["build", "-", "-o", path, "--runtime", "fail-fast", "--json"];
 
         try
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { require true; return 23; }"),
-                "build", "-", "-o", path, "--runtime", "fail-fast", "--json");
+                arguments);
             Assert.Equal(0, exit);
             Assert.Equal("", error);
             using var document = JsonDocument.Parse(output);
@@ -60,7 +66,7 @@ public sealed class CliTests
             Assert.Equal(Convert.ToHexString(SHA256.HashData(original)), artifact.GetProperty("sha256").GetString());
 
             var (failure, failedOutput, _) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return unknown; }"),
-                "build", "-", "-o", path, "--runtime", "fail-fast", "--json");
+                arguments);
             Assert.Equal(1, failure);
             using var failedDocument = JsonDocument.Parse(failedOutput);
             Assert.False(failedDocument.RootElement.GetProperty("success").GetBoolean());
@@ -70,7 +76,7 @@ public sealed class CliTests
             var oversized = "int32 Main() {" + string.Concat(Enumerable.Range(0, 257)
                 .Select(static index => FormattableString.Invariant($"int32 v{index} = 0;"))) + "return 0;}";
             var (limitExit, limitOutput, _) = await RunAsync(Encoding.UTF8.GetBytes(oversized),
-                "build", "-", "-o", path, "--runtime", "fail-fast", "--json");
+                arguments);
             Assert.Equal(1, limitExit);
             using var limitDocument = JsonDocument.Parse(limitOutput);
             Assert.Equal("TRM3016", limitDocument.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
@@ -104,8 +110,104 @@ public sealed class CliTests
     }
 
     [Theory]
+    [InlineData("/* first */ int32 Main() { int32 \u03B1 = 17; return \u03B1 + 25; } // end")]
+    [InlineData("int32 F(int32 value) { if (value == 0) { return 1; } return value * F(value - 1); } int32 Main() { return F(5); }")]
+    [InlineData("struct S { public int32 Value; public S(int32 value) { Value = value; } } int32 Main() { S value = new S(42); return value.Value; }")]
+    public async Task NativeScannerFeedsTheOfficialCompilerWithoutChangingEmissionAsync(string source)
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var original = Path.Combine(Path.GetTempPath(), $"terrum-host-{Guid.NewGuid():N}.exe");
+        var scanned = original + ".scanned.exe";
+        try
+        {
+            var bytes = Encoding.UTF8.GetBytes(source);
+            var (hostExit, hostOutput, hostError) = await RunAsync(bytes, "build", "-", "-o", original,
+                "--runtime", "fail-fast", "--json");
+            Assert.Equal(0, hostExit);
+            Assert.Empty(hostError);
+            var (nativeExit, nativeOutput, nativeError) = await RunAsync(bytes, "build-component",
+                Path.Combine(root, "self-host", "Scanner.terrum"), "-", "-o", scanned, "--runtime", "fail-fast", "--json");
+            Assert.Equal(0, nativeExit);
+            Assert.Empty(nativeError);
+            using var host = JsonDocument.Parse(hostOutput);
+            using var native = JsonDocument.Parse(nativeOutput);
+            Assert.Equal(host.RootElement.GetProperty("contentId").GetString(), native.RootElement.GetProperty("contentId").GetString());
+            Assert.Equal("build-component", native.RootElement.GetProperty("command").GetString());
+            Assert.Equal(await File.ReadAllBytesAsync(original), await File.ReadAllBytesAsync(scanned));
+        }
+        finally
+        {
+            File.Delete(original);
+            File.Delete(scanned);
+        }
+    }
+
+    [Theory]
+    [InlineData("int32 Main() { return 0; } /*", "TRM0003")]
+    [InlineData("int32 Main() { return 0; }\0", "TRM0001")]
+    [InlineData("int32 Main() { return 1e+; }", "TRM0004")]
+    [InlineData("int32 Main() { return 0 }", "TRM1001")]
+    public async Task NativeScannerBuildPreservesLexicalAndParserDiagnosticsAsync(string source, string code)
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var artifact = Path.Combine(Path.GetTempPath(), $"terrum-scanner-failure-{Guid.NewGuid():N}.exe");
+        byte[] previous = [1, 2, 3, 4];
+        try
+        {
+            await File.WriteAllBytesAsync(artifact, previous);
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "build-component",
+                Path.Combine(root, "self-host", "Scanner.terrum"), "-", "-o", artifact, "--runtime", "fail-fast", "--json");
+            Assert.Equal(1, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+            Assert.Contains(document.RootElement.GetProperty("diagnostics").EnumerateArray(),
+                diagnostic => diagnostic.GetProperty("code").GetString() == code);
+            Assert.Equal(previous, await File.ReadAllBytesAsync(artifact));
+        }
+        finally
+        {
+            File.Delete(artifact);
+        }
+    }
+
+    [Theory]
+    [InlineData("int32 Scan() { return 0; }", 1)]
+    [InlineData("int32 Scan() { require false; return 0; }", unchecked((int)0xE0540003))]
+    public async Task ScannerFailureNeverFallsBackToTheHostLexerAsync(string scanner, int expected)
+    {
+        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-scanner-worker-{Guid.NewGuid():N}");
+        var component = prefix + ".terrum";
+        var artifact = prefix + ".exe";
+        byte[] previous = [1, 2, 3, 4];
+        try
+        {
+            await File.WriteAllTextAsync(component, scanner);
+            await File.WriteAllBytesAsync(artifact, previous);
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return 42; }"),
+                "build-component", component, "-", "-o", artifact, "--runtime", "fail-fast", "--json");
+            Assert.Equal(expected, exit);
+            Assert.Empty(error);
+            if (exit == 1)
+            {
+                using var document = JsonDocument.Parse(output);
+                Assert.Equal("TRM5001", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+            }
+            Assert.Equal(previous, await File.ReadAllBytesAsync(artifact));
+        }
+        finally
+        {
+            File.Delete(component);
+            File.Delete(artifact);
+        }
+    }
+
+    [Theory]
     [InlineData("build", "-", "-o", "unused.exe", "--json")]
     [InlineData("build", "-", "-o", "unused.exe", "--runtime", "implicit", "--json")]
+    [InlineData("build-component", "scanner.terrum", "-", "-o", "unused.exe", "--json")]
+    [InlineData("build-component", "scanner.terrum", "-", "-o", "unused.exe", "--runtime", "implicit", "--json")]
+    [InlineData("build-component", "-", "-", "-o", "unused.exe", "--runtime", "fail-fast", "--json")]
     [SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "The xUnit data rows supply non-null argument arrays.")]
     public async Task BuildRequiresExplicitRuntimePolicyAsync(params string[] arguments)
     {
