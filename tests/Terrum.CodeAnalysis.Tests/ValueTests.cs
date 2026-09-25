@@ -56,7 +56,7 @@ public sealed class ValueTests
     {
         const string Source = """
             struct Range {
-                public int32 Start;
+                public mut int32 Start;
                 public int32 Length;
                 private Range(int32 start, int32 length) {
                     this.Start = start;
@@ -179,7 +179,7 @@ public sealed class ValueTests
     {
         const string Source = """
             struct Pair {
-                public int32 A;
+                public mut int32 A;
                 public int32 B;
                 public Pair(int32 a, int32 b) { A = a; B = b; }
             }
@@ -532,7 +532,7 @@ public sealed class ValueTests
     [InlineData("int32 Main() { var n = 42; return n; }")]
     [InlineData("int32 Main() { uint32 n = -1; return 0; }")]
     [InlineData("struct S { public int32 A; public S() { A = 1; } public mut void Set() { A = 2; } } int32 Main() { S s = new S(); s.Set(); return s.A; }")]
-    [InlineData("struct S { mut int32 A; public S() { A = 1; } } int32 Main() { return 0; }")]
+    [InlineData("struct S { static int32 A; public S() { A = 1; } } int32 Main() { return 0; }")]
     [InlineData("struct S { static int32 A; } int32 Main() { return 0; }")]
     [InlineData("struct S { int32 A = 1; } int32 Main() { return 0; }")]
     [InlineData("struct S { int32 A; int32 B; int32 C; int32 D; int32 E; } int32 Main() { return 0; }")]

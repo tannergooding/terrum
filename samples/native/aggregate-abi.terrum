@@ -70,7 +70,7 @@ int32 Main()
 
 public struct Nested
 {
-    public Pair Value;
+    public mut Pair Value;
     public Nested(int32 first, int32 second)
     {
         Value = new Pair(first, second);
@@ -245,8 +245,8 @@ public int32 ReadMixed(Twelve first, Three second, Pair third, Six fourth, Twelv
 
 public struct Wide
 {
-    public Twelve Value;
-    public int32 Tail;
+    public mut Twelve Value;
+    public mut int32 Tail;
     public Wide(int32 tail)
     {
         Value = new Twelve(10, 11, 12);

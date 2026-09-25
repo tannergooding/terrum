@@ -713,8 +713,8 @@ public sealed class ModuleTests
             + "int32 Main() { return 0; } public Pair Make() { return new Pair(); }");
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(privateField, ["Make"]));
 
-        var mutableField = Compilation.Create(SyntaxTree.Parse("struct S { mut int32 Value; } int32 Main() { return 0; }"));
-        Assert.Contains(mutableField.Diagnostics, static diagnostic => diagnostic.Code == "TRM3001");
+        var staticField = Compilation.Create(SyntaxTree.Parse("struct S { static int32 Value; } int32 Main() { return 0; }"));
+        Assert.Contains(staticField.Diagnostics, static diagnostic => diagnostic.Code == "TRM3001");
     }
 
     [Fact]
@@ -872,7 +872,7 @@ public sealed class ModuleTests
         var producer = ModuleCompiler.CreateProducer(initial, ["Helper"]);
         var consumer = ModuleCompiler.CreateConsumer(initial, producer);
         var version = (byte[])consumer.Clone();
-        version[4] = 7;
+        version[4] = 8;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
         version[4] = 1;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
@@ -883,6 +883,8 @@ public sealed class ModuleTests
         version[4] = 4;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
         version[4] = 5;
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
+        version[4] = 6;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(consumer[..^1], producer));
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(new byte[(4 * 1024 * 1024) + 1], producer));

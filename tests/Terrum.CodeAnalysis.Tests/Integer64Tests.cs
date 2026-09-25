@@ -63,11 +63,11 @@ public sealed class Integer64Tests
     {
         var program = Compile("""
             struct Inner {
-                public int64 Value;
+                public mut int64 Value;
                 public Inner(int64 value) { Value = value; }
             }
             struct Pair {
-                public Inner Signed;
+                public mut Inner Signed;
                 public uint64 Unsigned;
                 public Pair(int64 signed, uint64 unsigned) {
                     Signed = new Inner(signed); Unsigned = unsigned;

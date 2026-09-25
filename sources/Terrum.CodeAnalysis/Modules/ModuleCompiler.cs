@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public static class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 6;
+    private const int Version = 7;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -553,6 +553,7 @@ public static class ModuleCompiler
             var x = a.Fields[field];
             var y = b.Fields[field];
             if (x.Name != y.Name || x.IsPrivate != y.IsPrivate || x.IsInternal != y.IsInternal
+                || x.IsMutable != y.IsMutable
                 || TypeName(x.Type, left) != TypeName(y.Type, right)
                 || x.Size != y.Size || x.Offset != y.Offset)
             {
@@ -670,6 +671,7 @@ public static class ModuleCompiler
                 writer.Write(field.Size);
                 writer.Write(field.IsPrivate);
                 writer.Write(field.IsInternal);
+                writer.Write(field.IsMutable);
             }
         }
         writer.Write(module.ImportedStructures.Length);
@@ -744,6 +746,7 @@ public static class ModuleCompiler
                         reader.ReadInt32(), reader.ReadInt32()) {
                         IsPrivate = GetBool(reader),
                         IsInternal = GetBool(reader),
+                        IsMutable = GetBool(reader),
                     });
                 }
                 structures.Add(new BoundStruct(name, fields.ToImmutable(), size) {

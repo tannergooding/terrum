@@ -1,6 +1,6 @@
 # Bounded semantic modules
 
-The version 6 `.trm` format records the semantic profile and persists verified, typed, source-mapped structured IR,
+The version 7 `.trm` format records the semantic profile and persists verified, typed, source-mapped structured IR,
 not source text or a native DLL. `CreateProducer` stores selected function bodies
 and exported contracts. `CreateConsumer` stores its own function bodies and the
 reference producer's declaration contracts, **not** producer bodies.
@@ -176,7 +176,10 @@ The proof supports one producer reference per consumer, compact acyclic value
 layouts and the existing native value profile. Nested field types are retained
 transitively and remapped across artifact-local type indexes. Every imported
 nested layout participates in replacement checking, including field types,
-order and access. Versions 2 and 3 are rejected;
+order, access and declared mutation authority. Version 7 stores a checked
+`IsMutable` flag per field; changing it in either direction changes the
+published value contract and is rejected during replacement. Older versions,
+including version 6 without field mutation contracts, are rejected;
 recreate them from source. Multi-producer identity/version resolution, dependency
 cycles, resilient public layouts and native DLL import slots remain later work.
 

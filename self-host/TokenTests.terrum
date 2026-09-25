@@ -9,10 +9,8 @@ public static bool CheckToken()
 
     Token token = new Token(7, range);
     mut Token copy = token;
-    require SourceRange.TryCreate(int32.MaxValue, 0, out var end);
-    copy.Range = end;
-    copy.Range.Start = int32.MaxValue - 1;
-    copy.Range.Length = 1;
+    require SourceRange.TryCreate(int32.MaxValue - 1, 1, out var end);
+    copy = new Token(copy.Kind, end);
 
     return token.Kind == 7 && token.Range.GetEnd() == 5
         && copy.Kind == 7 && copy.Range.GetEnd() == int32.MaxValue;

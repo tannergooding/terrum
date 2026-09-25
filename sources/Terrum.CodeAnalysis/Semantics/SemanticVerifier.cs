@@ -385,6 +385,10 @@ public static class SemanticVerifier
                     throw Invalid();
                 }
                 var targetField = program.Structures[structType].Fields[fieldAssignment.Field];
+                if (!targetField.IsMutable && !(function.IsConstructor && fieldAssignment.Variable == 0))
+                {
+                    throw Invalid();
+                }
                 var nestedWrite = !fieldAssignment.NestedFields.IsEmpty;
                 if (nestedWrite && (fieldMasks[fieldAssignment.Variable] & (1u << fieldAssignment.Field)) == 0)
                 {
@@ -402,6 +406,10 @@ public static class SemanticVerifier
                         throw Invalid();
                     }
                     targetField = program.Structures[nestedType].Fields[nestedField];
+                    if (!targetField.IsMutable)
+                    {
+                        throw Invalid();
+                    }
                 }
                 Expression(fieldAssignment.Value, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1);
                 if (fieldAssignment.Value.Type != targetField.Type

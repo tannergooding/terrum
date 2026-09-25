@@ -30,7 +30,7 @@ public sealed class AggregateAbiTests
             public Twelve(int32 a, int32 b, int32 c) { A = a; B = b; C = c; }
         }
         struct Wide {
-            public Twelve Value; public int32 Tail;
+            public mut Twelve Value; public mut int32 Tail;
             public Wide(int32 tail) { Value = new Twelve(10, 11, 12); Tail = tail; }
         }
         Wide Make(int32 tail) { return new Wide(tail); }
@@ -94,7 +94,7 @@ public sealed class AggregateAbiTests
         var source = new StringBuilder("struct Bytes {");
         for (var index = 0; index < size; index++)
         {
-            _ = source.Append("public bool F").Append(index).Append(';');
+            _ = source.Append(index == 0 ? "public mut bool F" : "public bool F").Append(index).Append(';');
         }
         _ = source.Append("public Bytes() {");
         for (var index = 0; index < size; index++)

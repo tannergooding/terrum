@@ -18,15 +18,15 @@ public sealed class NestedValueTests
 {
     private const string Values = """
         public struct Pair {
-            public Unit First;
-            public Unit Second;
+            public mut Unit First;
+            public mut Unit Second;
             public Pair(int32 first, int32 second) {
                 this.First = new Unit(first);
                 this.Second = new Unit(second);
             }
         }
         public struct Unit {
-            public int32 Value;
+            public mut int32 Value;
             public Unit(int32 value) { this.Value = value; }
         }
         """;
@@ -51,7 +51,7 @@ public sealed class NestedValueTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
             public struct Box {
-                public Pair Value;
+                public mut Pair Value;
                 public int32 Tail;
                 public Box() {
                     Value = new Pair(1, 2);
@@ -86,11 +86,11 @@ public sealed class NestedValueTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             struct Bits {
-                public bool First; public char16 Middle; public bool Last;
+                public mut bool First; public mut char16 Middle; public mut bool Last;
                 public Bits() { First = true; Middle = (char16)1; Last = false; }
             }
             struct Box {
-                public bool Head; public Bits Value; public char16 Tail;
+                public bool Head; public mut Bits Value; public char16 Tail;
                 public Box() { Head = true; Value = new Bits(); Tail = (char16)2; }
             }
             int32 Main() {
@@ -124,7 +124,7 @@ public sealed class NestedValueTests
     public void NestedWritesCannotPublishIncompleteValues(string constructor)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
-            struct Box { public Pair Value; public Box() {
+            struct Box { public mut Pair Value; public Box() {
             """ + constructor + """
             } }
             int32 Main() { Box value = new Box(); return 0; }
@@ -137,9 +137,9 @@ public sealed class NestedValueTests
     public void RightHandSideCannotVacateTheContainingValue()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            struct Inner { public bool Flag; public int32 Other;
+            struct Inner { public mut bool Flag; public int32 Other;
                 public Inner() { Flag = true; Other = 42; } }
-            struct Outer { public Inner Value; public Outer() { Value = new Inner(); } }
+            struct Outer { public mut Inner Value; public Outer() { Value = new Inner(); } }
             bool Clear(out Outer value) { return false; }
             int32 Main() {
                 mut Outer value = new Outer();
@@ -190,7 +190,7 @@ public sealed class NestedValueTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
             struct Box {
-                public Pair Value;
+                public mut Pair Value;
                 public Box(int32 first, int32 second) { this.Value = new Pair(first, second); }
             }
             bool Try(bool success, out Box result) {
@@ -300,8 +300,8 @@ public sealed class NestedValueTests
     public void NestingDoesNotBypassVisibilityOrMutation(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            struct Inner { private int32 Secret; public Inner() { Secret = 42; } }
-            struct Outer { public Inner Value; public Outer() { Value = new Inner(); } }
+            struct Inner { private mut int32 Secret; public Inner() { Secret = 42; } }
+            struct Outer { public mut Inner Value; public Outer() { Value = new Inner(); } }
             """ + "int32 Main() { " + body + " }"));
         Assert.True(compilation.HasErrors);
         Assert.Null(compilation.Program);
@@ -354,16 +354,16 @@ public sealed class NestedValueTests
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
         var reordered = Compilation.CreateLibrary(SyntaxTree.Parse("""
             struct Hidden { public int32 X; public Hidden() { X = 0; } }
-            public struct Unit { public int32 Value; public Unit(int32 value) { Value = value; } }
-            public struct Pair { public Unit First; public Unit Second;
+            public struct Unit { public mut int32 Value; public Unit(int32 value) { Value = value; } }
+            public struct Pair { public mut Unit First; public mut Unit Second;
                 public Pair(int32 a, int32 b) { First = new Unit(a); Second = new Unit(b); } }
             public Pair Make() { Hidden hidden = new Hidden(); return new Pair(20, 22); }
             """));
         Assert.False(reordered.HasErrors, string.Join(Environment.NewLine, reordered.Diagnostics));
         var replacement = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(reordered.Program), ["Make"]);
         await ExecuteBothAsync(ModuleCompiler.Link(consumer, replacement), 42).ConfigureAwait(true);
-        var changed = Compilation.CreateLibrary(SyntaxTree.Parse(Values.Replace("public int32 Value;",
-            "public uint32 Value;", StringComparison.Ordinal).Replace("this.Value = value;",
+        var changed = Compilation.CreateLibrary(SyntaxTree.Parse(Values.Replace("public mut int32 Value;",
+            "public mut uint32 Value;", StringComparison.Ordinal).Replace("this.Value = value;",
             "this.Value = (uint32)value;", StringComparison.Ordinal) + "public Pair Make() { return new Pair(1, 2); }"));
         Assert.False(changed.HasErrors, string.Join(Environment.NewLine, changed.Diagnostics));
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer,

@@ -412,6 +412,7 @@ internal sealed class Binder
             }
             var fieldIsPublic = false;
             var fieldIsInternal = false;
+            var mutableModifiers = 0;
             var accessModifiers = 0;
             foreach (var child in field.Children)
             {
@@ -420,9 +421,10 @@ internal sealed class Binder
                     fieldIsPublic |= modifier.Token.Kind == TokenKind.PublicKeyword;
                     fieldIsInternal |= modifier.Token.Kind == TokenKind.InternalKeyword;
                     accessModifiers += modifier.Token.Kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword or TokenKind.PrivateKeyword ? 1 : 0;
-                    if (modifier.Token.Kind is TokenKind.StaticKeyword or TokenKind.MutKeyword)
+                    mutableModifiers += modifier.Token.Kind == TokenKind.MutKeyword ? 1 : 0;
+                    if (modifier.Token.Kind == TokenKind.StaticKeyword)
                     {
-                        Report("TRM3001", "Struct fields cannot be static or independently mutable.", modifier.Span);
+                        Report("TRM3001", "Static struct fields are not supported.", modifier.Span);
                     }
                 }
             }
@@ -430,7 +432,12 @@ internal sealed class Binder
             {
                 Report("TRM3001", "A field can declare only one visibility modifier.", field.Span);
             }
+            if (mutableModifiers > 1)
+            {
+                Report("TRM3001", "A field can declare only one mut modifier.", field.Span);
+            }
             fields.Add(new BoundStructField(fieldName.Text, type, offset, width) {
+                IsMutable = mutableModifiers != 0,
                 IsPrivate = !fieldIsPublic && !fieldIsInternal,
                 IsInternal = fieldIsInternal,
             });
@@ -703,6 +710,7 @@ internal sealed class Binder
                         {
                             Report("TRM3008", "An immutable receiver cannot be mutated.", target.Span);
                         }
+                        CheckFieldMutation(ResolveStruct(_currentStruct), ownField, _constructor, target.Span);
                         return new BoundFieldAssignment(0, ownField,
                             BindExpression(valueNode, GetField(ResolveStruct(_currentStruct), ownField).Type), node.Span);
                     }
@@ -849,6 +857,7 @@ internal sealed class Binder
         var type = _variables[variable].Type;
         if (fields.Count != 0)
         {
+            CheckFieldMutation(type, fields[0], _constructor && variable == 0, root.Span);
             type = GetField(type, fields[0]).Type;
         }
         foreach (var member in members)
@@ -860,6 +869,7 @@ internal sealed class Binder
                 return new BoundBlock([], span);
             }
             CheckFieldAccess(type, field, member.Span);
+            CheckFieldMutation(type, field, _constructor && variable == 0 && fields.Count == 0, member.Span);
             fields.Add(field);
             type = GetField(type, field).Type;
         }
@@ -871,6 +881,15 @@ internal sealed class Binder
         return new BoundFieldAssignment(variable, path[0], BindExpression(value, type), span) {
             NestedFields = path.RemoveAt(0),
         };
+    }
+
+    private void CheckFieldMutation(PrimitiveType type, int field, bool constructingReceiver, TextSpan span)
+    {
+        var declaration = GetField(type, field);
+        if (!constructingReceiver && !declaration.IsMutable)
+        {
+            Report("TRM3008", $"Field '{declaration.Name}' is read-only after construction; assignment requires a mut field.", span);
+        }
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unsupported syntax kinds are rejected by the default branch.")]

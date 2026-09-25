@@ -1,6 +1,6 @@
 # Windows x64 native profile
 
-`native-6` is a deliberately bounded executable language profile, separate from
+`native-7` is a deliberately bounded executable language profile, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
@@ -96,8 +96,11 @@ and naturally aligned declaration-order layouts of 1 through 16 bytes.
 Constructors must initialize every field
 before reading or returning the entire receiver; individual initialized fields
 can be read during construction. Copying a value does not create a storage
-alias. Field writes require an accessible field and mutable receiver, except
-while initializing the constructor's receiver. Instance methods receive copies;
+alias. Fields are read-only after construction unless declared `mut`.
+Field writes require an accessible `mut` field and mutable receiver, except
+that a constructor can write its own receiver's fields regardless of `mut`.
+That exception does not grant write authority over nested fields declared by
+another type. Instance methods receive copies;
 mutating instance methods are rejected rather than silently losing writes.
 Layouts resolve across source files regardless of declaration order; recursive
 value containment is rejected. Nested field reads and whole-field replacement
@@ -108,9 +111,15 @@ the compiler owns argument copies and result storage, not source-visible pointer
 Nested field paths can be assigned through a mutable local or constructor
 receiver. Every containing value must already be initialized, including after
 evaluating the right-hand side; a call cannot vacate an enclosing output and
-leave a partially valid nested write. Each field's visibility is checked.
+leave a partially valid nested write. Each field's visibility and mutation
+authority is checked, including all containing fields. A writable binding does
+not upgrade a read-only field, and an `out` value does not grant constructor
+authority after publication into the callee's scratch storage.
 Only whole top-level fields establish constructor initialization. Writes
 through temporary values or immutable receivers are rejected.
+Whole-value replacement through a mutable local remains valid even when its
+fields are read-only. `SourceRange` and `Token` retain read-only fields; updates
+construct and replace valid values rather than bypass their constructors.
 Aggregates over 16 bytes, reference-containing aggregates and implicit
 construction are not implemented.
 

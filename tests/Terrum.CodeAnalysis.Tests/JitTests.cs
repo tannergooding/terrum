@@ -60,6 +60,9 @@ public sealed class JitTests
     [InlineData("int32 Main() { mut int32 sum = 0; for (mut int32 i = 0; Next(i, out var value); i = i + 1) { sum = sum + value; } return sum; } bool Next(int32 i, out int32 value) { if (i == 4) { return false; } value = i; return true; }", 6)]
     [InlineData("int32 Main() { for (mut int32 i = 0; i < 1; i = i / 0) { } return 0; }", unchecked((int)0xE0540002))]
     [InlineData("int32 Main() { for (mut int32 i = int32.MaxValue; i > 0; i = i + 1) { } return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("struct S { public int32 Value; public S() { Value = 1; this.Value = 42; } } int32 Main() { S value = new S(); return value.Value; }", 42)]
+    [InlineData("struct Inner { public mut int32 Value; public Inner() { Value = 1; } } struct Outer { public Inner Value; public Outer() { Value = new Inner(); Value.Value = 42; } } int32 Main() { Outer value = new Outer(); return value.Value.Value; }", 42)]
+    [InlineData("struct S { public int32 Value; public S(int32 value) { Value = value; } } int32 Main() { mut S value = new S(1); S copy = value; value = new S(41); return value.Value + copy.Value; }", 42)]
     public async Task WorkerAndNativeExecutableAgreeAsync(string source, int expected)
     {
         AssertWindowsX64();

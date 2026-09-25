@@ -55,6 +55,9 @@ public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> F
 /// <summary>A naturally aligned field whose offset and width are in bytes.</summary>
 public sealed record BoundStructField(string Name, PrimitiveType Type, int Offset, int Size)
 {
+    /// <summary>Whether assignment is permitted after the declaring receiver's construction.</summary>
+    public bool IsMutable { get; init; }
+
     /// <summary>Whether access is limited to methods of the declaring struct.</summary>
     public bool IsPrivate { get; init; }
 

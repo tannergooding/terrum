@@ -1,10 +1,10 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-5 and native-6
+## Current boundary: syntax-5 and native-7
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
-immutable and usable independently. The separate [native-6 profile](native.md)
+immutable and usable independently. The separate [native-7 profile](native.md)
 binds a bounded scalar/compact-value language and emits Windows x64 executables through
 verified structured operations. A clean syntax result is deliberately not a
 valid-program claim: `var x = 1;` parses but semantic analysis rejects its missing
@@ -76,9 +76,12 @@ optional and normalizing its substituted type is future binder work.
 Explicit `Option<Option<T>>` syntax is unchanged. `syntax-1` introduced this
 rejection rule; `syntax-2` added the lossless `RequireStatement` node.
 `syntax-5` adds scoped for-loop syntax to checked casts for the supported 32- and
-64-bit integer types and `char16`. The `native-6` profile supports checked
+64-bit integer types and `char16`. The `native-7` profile supports checked
 signed/unsigned 32- and 64-bit integers, raw code units, conditional outputs,
 fixed host-buffer capabilities and acyclic value layouts up to 16 bytes.
+Fields are read-only after construction unless explicitly declared `mut`.
+Binding and mandatory IR verification check mutation authority at every
+nested field, independently of mutable local bindings and visibility.
 Transitive module contracts and Windows x64 indirect argument/result storage
 preserve those layouts. Statically rooted writable field paths enforce
 initialization and visibility at every level. Larger aggregates, general
