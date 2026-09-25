@@ -8,6 +8,9 @@
 
 #define OWN_EXCEPTION ((DWORD)0xE0540091)
 #define FOREIGN_EXCEPTION ((DWORD)0xE0550091)
+#define OWN_MARKER ((ULONG_PTR)0x54455252554D0001ull)
+#define PROOF_VERSION ((ULONG_PTR)1)
+#define PROOF_REASON ((ULONG_PTR)3)
 
 static volatile LONG eventCount;
 static volatile LONG events[16];
@@ -22,19 +25,32 @@ static void Record(LONG value)
     }
 }
 
-__declspec(noinline) static void RaiseFromC(int foreign)
+__declspec(noinline) static void RaiseFromC(int mode)
 {
-    RaiseException(foreign ? FOREIGN_EXCEPTION : OWN_EXCEPTION, EXCEPTION_NONCONTINUABLE, 0, NULL);
+    ULONG_PTR details[] = {
+        mode == 3 ? OWN_MARKER ^ 1 : OWN_MARKER,
+        mode == 4 ? PROOF_VERSION + 1 : PROOF_VERSION,
+        mode == 5 ? PROOF_REASON + 1 : PROOF_REASON,
+    };
+    RaiseException(mode == 2 ? FOREIGN_EXCEPTION : OWN_EXCEPTION,
+        mode == 7 ? 0 : EXCEPTION_NONCONTINUABLE,
+        mode == 6 ? 2 : 3, details);
+}
+
+static int Matches(const EXCEPTION_RECORD* record)
+{
+    return record->ExceptionCode == OWN_EXCEPTION
+        && (record->ExceptionFlags & EXCEPTION_NONCONTINUABLE) != 0
+        && record->NumberParameters == 3
+        && record->ExceptionInformation[0] == OWN_MARKER
+        && record->ExceptionInformation[1] == PROOF_VERSION
+        && record->ExceptionInformation[2] == PROOF_REASON;
 }
 
 static int CFilter(EXCEPTION_POINTERS* pointers)
 {
-    if ((pointers->ExceptionRecord->ExceptionFlags & EXCEPTION_NONCONTINUABLE) == 0)
-    {
-        ++frameErrors;
-    }
     Record(1);
-    return pointers->ExceptionRecord->ExceptionCode == OWN_EXCEPTION
+    return Matches(pointers->ExceptionRecord)
         ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -47,7 +63,7 @@ __declspec(noinline) static int CReference(int mode)
         {
             if (mode != 0)
             {
-                RaiseFromC(mode == 2);
+                RaiseFromC(mode);
             }
             result = 10;
         }
@@ -68,7 +84,7 @@ __declspec(noinline) static int DynamicBody(int mode)
 {
     if (mode != 0)
     {
-        RaiseFromC(mode == 2);
+        RaiseFromC(mode);
     }
     return 10;
 }
@@ -218,7 +234,9 @@ static int Invoke(Entry entry, int mode)
     {
         result = entry(mode);
     }
-    __except(GetExceptionCode() == FOREIGN_EXCEPTION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH)
+    __except(GetExceptionCode() == FOREIGN_EXCEPTION
+        || (GetExceptionCode() == OWN_EXCEPTION && !Matches(GetExceptionInformation()->ExceptionRecord))
+        ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH)
     {
         Record(4);
         result = 30;
@@ -228,14 +246,17 @@ static int Invoke(Entry entry, int mode)
 
 static int Check(Entry entry, int dynamic, int mode)
 {
-    static const LONG expected[][3] = { { 2, 0, 0 }, { 1, 2, 3 }, { 1, 2, 4 } };
+    static const LONG expected[][3] = {
+        { 2, 0, 0 }, { 1, 2, 3 }, { 1, 2, 4 }, { 1, 2, 4 },
+        { 1, 2, 4 }, { 1, 2, 4 }, { 1, 2, 4 }, { 1, 2, 4 }
+    };
     int result;
     int count = mode == 0 ? 1 : 3;
     eventCount = 0;
     frameErrors = 0;
     abnormalFinally = 0;
     result = Invoke(entry, mode);
-    if (result != (mode + 1) * 10 || eventCount != count || frameErrors != 0
+    if (result != (mode >= 2 ? 30 : (mode + 1) * 10) || eventCount != count || frameErrors != 0
         || (dynamic && abnormalFinally != (mode != 0)))
     {
         fprintf(stderr, "mode=%d dynamic=%d result=%d count=%ld frameErrors=%ld abnormal=%ld\n",
@@ -281,7 +302,7 @@ int main(void)
     {
         result = 1;
     }
-    for (int mode = 0; mode < 3 && result == 0; mode++)
+    for (int mode = 0; mode < 8 && result == 0; mode++)
     {
         result |= Check(CReference, 0, mode);
         result |= Check((Entry)(uintptr_t)image, 1, mode);

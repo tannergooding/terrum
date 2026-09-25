@@ -16,7 +16,7 @@ in a ten-second supervised child. The compiler listing and build/execution
 logs remain under `artifacts`. The C compiler is a reference for this probe,
 not a Terrum backend dependency.
 
-The fixture executes the same three cases in a C `__try`/`__except`/`__finally`
+The fixture executes the same eight cases in a C `__try`/`__except`/`__finally`
 function and a manually encoded x64 function:
 
 | Path | Result | Observed order |
@@ -24,6 +24,7 @@ function and a manually encoded x64 function:
 | Normal completion | 10 | Finally |
 | Matching noncontinuable failure raised by a C callee | 20 | Filter, finally, selected handler |
 | Foreign noncontinuable failure | 30 | Filter declines, finally, outer C handler |
+| Same numeric failure code with mismatched marker, version, reason, payload length or continuable flag | 30 | Filter declines, finally, outer C handler |
 
 The dynamic filter receives `EXCEPTION_POINTERS*` in RCX and the establisher
 frame in RDX. The termination callback receives abnormal-termination state in
@@ -43,6 +44,13 @@ RVA, followed by a scope count and 16-byte scope records:
 to the registered image base. The inner finally record has a zero jump target;
 the enclosing catch record identifies a filter and landing pad. The C compiler's
 emitted listing independently shows that structure and inner-before-outer order.
+
+The matching filter checks a versioned marker and failure reason in the
+exception information array, its exact argument count and noncontinuable
+flag, in addition to the numeric exception code. An independent outer C
+filter observes each deliberately mismatched payload without the inner
+dynamic handler consuming it. This is identity discrimination, not an
+authentication or unforgeability guarantee.
 
 The handler is the actual `__C_specific_handler` export discovered in the
 running Windows `ntdll.dll`. In-allocation leaf tail-jump trampolines make its

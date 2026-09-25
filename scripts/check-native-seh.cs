@@ -39,9 +39,9 @@ var buildOutput = await Run(build, TimeSpan.FromMinutes(2)).ConfigureAwait(false
 await File.WriteAllTextAsync(Path.Combine(artifacts, "native-seh-build.log"), buildOutput).ConfigureAwait(false);
 var output = await Run(new ProcessStartInfo(executable), TimeSpan.FromSeconds(10)).ConfigureAwait(false);
 await File.WriteAllTextAsync(Path.Combine(artifacts, "native-seh-proof.log"), output).ConfigureAwait(false);
-if (output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length != 6)
+if (output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length != 16)
 {
-    throw new InvalidOperationException("The probe did not report all six C/dynamic execution cases.");
+    throw new InvalidOperationException("The probe did not report all sixteen C/dynamic execution cases.");
 }
 Console.Write(output);
 
