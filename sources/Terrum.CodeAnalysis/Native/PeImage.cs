@@ -90,8 +90,8 @@ internal static class PeImage
             range++;
         }
 
-        // DOS header and PE32+ COFF headers. All absolute addresses live in PE metadata,
-        // not code/data; relocations are intentionally stripped and ASLR is not advertised.
+        // Code and data references are RIP-relative; imports and unwind entries are RVAs.
+        // No image-base-dependent locations need entries in the base relocation directory.
         Write16(image, 0, 0x5A4D);
         Write32(image, 0x3C, 0x80);
         var pe = 0x80;
@@ -100,7 +100,7 @@ internal static class PeImage
         Write16(image, coff, 0x8664);
         Write16(image, coff + 2, 4 + (readOnlyLength == 0 ? 0 : 1) + (writableLength == 0 ? 0 : 1));
         Write16(image, coff + 16, 0xF0);
-        Write16(image, coff + 18, 0x0023); // executable, relocations stripped, large-address-aware
+        Write16(image, coff + 18, 0x0022); // executable, large-address-aware; relocations are not stripped
         var optional = coff + 20;
         Write16(image, optional, 0x20B);
         image[optional + 2] = 1;
@@ -118,7 +118,7 @@ internal static class PeImage
         Write32(image, optional + 56, imageSize);
         Write32(image, optional + 60, HeaderSize);
         Write16(image, optional + 68, 3); // console
-        Write16(image, optional + 70, 0x0100); // NX compatible; no DYNAMIC_BASE without relocations
+        Write16(image, optional + 70, 0x0160); // NX compatible, dynamic base, high-entropy VA
         Write64(image, optional + 72, 0x100000);
         Write64(image, optional + 80, 0x1000);
         Write64(image, optional + 88, 0x100000);

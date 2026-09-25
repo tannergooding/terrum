@@ -223,12 +223,23 @@ arguments with deliberately unspecified upper register bits. The script
 obtains function addresses from encoder ranges; the development executable
 does not advertise an exported native API.
 
-Images currently use fixed base `0x140000000`, 4 KiB section alignment and
-512-byte file alignment. `.text` is read/execute, `.idata` read/write and
+Images prefer base `0x140000000`, with 4 KiB section alignment and 512-byte
+file alignment. `.text` is read/execute, `.idata` read/write and
 `.pdata`/`.xdata` read-only. Optional `.rdata` holds immutable buffers and
-`.data` holds writable buffers. NX is enabled; ASLR is not advertised and base
-relocations are not emitted. This is a single-image development artifact, not
-a hardened or freely relocatable production/module format.
+`.data` holds writable buffers. NX, dynamic base and high-entropy 64-bit VA
+are enabled. Code and data references are RIP-relative; import and unwind
+metadata use RVAs. There are no image-base-dependent locations to fix up, so
+the base relocation directory is empty and relocations are **not** marked
+stripped. The [PE format](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format)
+defines relocation entries for addresses needing correction; the
+[`RELOCS_STRIPPED` flag](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-image_file_header)
+would instead require loading at the preferred base. A separate Windows
+loader probe reserves that address, loads two images concurrently, and calls
+their RVA-addressed functions. It also observes ordinary executable image
+bases through Windows debug events, checking successful and fail-fast exits
+after relocation.
+This remains a single-image executable artifact, not a DLL export surface,
+module hot-swap mechanism or general-purpose loader.
 
 PE layout, relative code/import fixups and unwind records are target-specific.
 The same encoder's `NativeCode` result is consumed by both PE layout and the
