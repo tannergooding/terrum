@@ -1,11 +1,11 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-2 and native-1
+## Current boundary: syntax-3 and native-2
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
-immutable and usable independently. The separate [native-1 profile](native.md)
-binds a bounded integer/bool language and emits Windows x64 executables through
+immutable and usable independently. The separate [native-2 profile](native.md)
+binds a bounded scalar/compact-value language and emits Windows x64 executables through
 verified structured operations. A clean syntax result is deliberately not a
 valid-program claim: `var x = 1;` parses but semantic analysis rejects its missing
 numeric context. Ownership/lifetime checking, general semantic IL/LMOD,
@@ -15,10 +15,10 @@ managed graphs and standard-library execution are not implemented.
 |---|---|---|
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
 | Lexing | Pinned Unicode identifiers, ASCII numbers/tags, comments, leading trivia, strings, diagnostics, EOF | Interpolation, raw/character/native literals, directives |
-| Declarations | Using, optional file-scoped namespace, functions, structs with explicit fields/constructors/methods | Classes, interfaces, enums/unions, attributes, generic declarations/constraints, imports across modules |
+| Declarations | Using, file-scoped namespaces, functions, compact structs with explicit fields/constructors/methods; bounded semantic module contracts | Classes, interfaces, enums/unions, attributes, generic declarations/constraints, general module imports |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; repeated `?` diagnoses | General type resolution, optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, return, `require`, assignment and expression statements | `for`/`foreach`, switch/patterns, exceptions, cleanup, async, compound assignment |
-| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, member/index access, calls, `new`, named/ref/out arguments | Cast syntax/binding, character literals, evaluation outside the native profile, conversions, overloads, generic calls, conditional expressions, constructor generic inference |
+| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named/ref/out argument syntax | Character literals, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
 Only the grammar below is supported. Unsupported constructs diagnose rather than
@@ -46,8 +46,10 @@ require     = "require" expression ";"
 assignment  = expression "=" expression ";"
 ```
 
-Assignment is a statement, not an expression; native-1 permits only initialized
-mutable local places. Other place kinds need future binding support.
+Assignment is a statement, not an expression. Native places include initialized
+mutable locals, accessible fields of mutable compact values, constructor fields,
+conditional output scratch slots and checked writable host-buffer elements.
+General borrowed references and owning places remain unsupported.
 Braces are required on control bodies. Supported precedence, strongest
 first: postfix; unary `+ - ! ~`; `* / %`; `+ -`; `< <= > >=`; `== !=`; `&`; `^`;
 `|`; `&&`; `||`. Binary operators associate left. Lexing does not fuse angle
@@ -60,8 +62,10 @@ for precise number, string, identifier and newline rules.
 `List<int32?>?` and `T?` remain valid syntax; determining that `T` is already
 optional and normalizing its substituted type is future binder work.
 Explicit `Option<Option<T>>` syntax is unchanged. `syntax-1` introduced this
-rejection rule; `syntax-2` adds the lossless `RequireStatement` node.
-`native-1` extends the first executable profile with boolean requirements.
+rejection rule; `syntax-2` added the lossless `RequireStatement` node.
+`syntax-3` adds checked cast syntax. `native-2` expands the original integer/bool
+profile with unsigned/code-unit values, compact structs, conditional outputs and
+host-buffer capabilities.
 The JSON schema remains 1 because its data shape is unchanged.
 
 ## Public syntax API
@@ -143,7 +147,10 @@ when stdout must contain only protocol output; `dotnet run` may print build
 messages. `-` reads stdin. Commands exit 0 for no relevant errors, 1 for source
 or compilation diagnostics, and 2 for usage/input/output failures. `tokens` performs only lexical
 analysis. Human diagnostics go to stderr; JSON writes one object to stdout,
-including failures. No source is executed.
+including failures. These inspection/build commands do not execute source.
+`jit`, `scan-component` and `run-module` are explicit execution workers;
+clients must supervise them with deadlines. JIT/module execution returns the
+program's raw status, not the compilation-command status convention.
 
 Schema 1 publishes `languageVersion`, coordinate system, path, length, success
 and diagnostics. Parsed commands also include the content ID. Diagnostics have
@@ -156,7 +163,8 @@ without recursively decoding source-sized nested objects.
 
 Messages are human-facing and not stable dispatch keys. `TRM0xxx` denotes lexical
 errors, `TRM1xxx` parsing, `TRM2xxx` CLI I/O/usage, `TRM3xxx` semantic
-analysis and `TRM4xxx` native emission limits. Schema changes require
+analysis, `TRM4xxx` native emission/runtime-host failures, and `TRM5xxx` bounded
+module/scanner interchange errors. Schema changes require
 versioning. Clients must reject unknown versions or explicitly negotiate them,
 not infer meaning from enum ordinals or diagnostic English.
 
@@ -170,6 +178,10 @@ escape facts, and why a diagnostic applies. Syntax is usable without binding.
 The initial `Semantics.Compilation` already binds one syntax snapshot to
 source-mapped, typed `BoundProgram` operations or diagnostics, never a partially
 valid executable. It is not yet the multi-module semantic query service.
+The multi-source overload declares all files before binding bodies, rejects
+ambiguous entry points, and exposes `SyntaxTrees` and source-associated
+`SourceDiagnostics`. Consumers must not interpret every multi-source diagnostic
+against the legacy first `SyntaxTree` property.
 Partial/error semantics must distinguish unknown, invalid and proven states;
 absence of a diagnostic is not a safety proof.
 
@@ -224,11 +236,12 @@ Target-specific encodings, import fixups and unwind records live under `Native`,
 not in binding or the public lossless syntax model.
 
 An optional CIL/reference backend would need a concrete validation/deployment
-benefit; it is not a prerequisite for native progress. Future JIT support needs
-executable-memory policy and dynamic unwind registration, and future separately
-serviced modules need versioned contracts and compatibility checks. The first
-single-image native profile implements neither. Unsupported runtime/ABI
-capabilities diagnose rather than inherit accidental CLR behavior.
+benefit; it is not a prerequisite for native progress. The [JIT proof](jit.md)
+reuses the encoder with W^X memory and dynamic unwind registration.
+[Semantic modules](modules.md) persist verified bodies and normalized contracts
+for bounded process-start replacement; this is not the general LMOD design or
+native DLL servicing. Unsupported runtime/ABI capabilities diagnose rather than
+inherit accidental CLR behavior.
 
 ## Design references and tradeoffs
 

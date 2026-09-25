@@ -1,0 +1,69 @@
+public struct Pair
+{
+    public int32 Start;
+    public int32 Length;
+
+    public Pair(int32 start, int32 length)
+    {
+        Start = start;
+        Length = length;
+    }
+}
+
+public Pair MakePair(int32 start, int32 length)
+{
+    return new Pair(start, length);
+}
+
+public int32 ReadPair(Pair pair)
+{
+    return pair.Start + pair.Length;
+}
+
+public bool TryPair(int32 start, int32 length, out Pair pair)
+{
+    if (start < 0)
+    {
+        return false;
+    }
+
+    pair = new Pair(start, length);
+    return true;
+}
+
+public bool TryInt32(out int32 value)
+{
+    value = -2147483648;
+    return true;
+}
+
+public bool TryChar16(out char16 value)
+{
+    value = (char16)55296;
+    return true;
+}
+
+public bool TryBool(out bool value)
+{
+    value = true;
+    return true;
+}
+
+public int32 ReadChar16(char16 value)
+{
+    return (int32)value;
+}
+
+public int32 ReadBool(bool value)
+{
+    if (value == true)
+    {
+        return 1;
+    }
+    return 0;
+}
+
+int32 Main()
+{
+    return ReadPair(MakePair(17, 25));
+}

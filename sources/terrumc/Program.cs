@@ -18,8 +18,15 @@ internal static partial class Program
 {
     private const string Usage = "Usage: terrumc <check|tokens|tree|analyze> <path|-> [--json]\n"
         + "       terrumc build <path|-> -o <output.exe> --runtime fail-fast [--json]\n"
+        + "       terrumc jit <path|-> --runtime fail-fast [--json]\n"
+        + "       terrumc scan-component <scanner.terrum> <input|-> --runtime fail-fast [--json]\n"
+        + "       terrumc compile-module producer <source> <export> -o <output.trm> [--json]\n"
+        + "       terrumc compile-module consumer <source> <producer.trm> -o <output.trm> [--json]\n"
+        + "       terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime fail-fast [--json]\n"
+        + "       terrumc run-module <consumer.trm> <producer.trm> --runtime fail-fast [--json]\n"
         + "check/tokens/tree inspect syntax; analyze binds the native profile; build emits Windows x64 PE.\n"
         + "fail-fast explicitly selects process termination for runtime failures, not catchable exceptions.\n"
+        + "jit/run-module execute in this process and return the program's status; supervise them with a deadline.\n"
         + "'-' reads strict UTF-8 from stdin. Exit: 0 success, 1 source/compile diagnostics, 2 usage/input/output error.";
 
     private static int Main(string[] args)
@@ -32,6 +39,21 @@ internal static partial class Program
         }
 
         var json = args.Contains("--json", StringComparer.Ordinal);
+
+        if (args.Length != 0 && args[0] == "scan-component")
+        {
+            return RunScannerComponent(args, json);
+        }
+
+        if (args.Length != 0 && args[0] is "compile-module" or "link-module" or "run-module")
+        {
+            return RunModuleCommand(args);
+        }
+
+        if (args.Length != 0 && args[0] == "jit")
+        {
+            return RunJit(args, json);
+        }
 
         if (args.Length != 0 && args[0] is "analyze" or "build")
         {

@@ -16,6 +16,25 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class CliTests
 {
     [Fact]
+    public async Task ScannerWorkerPublishesCompiledTokenRecordsAsync()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("\u03B12 + 42 \U00010400 \U0001F600"),
+            "scan-component", Path.Combine(root, "self-host", "Scanner.terrum"), "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(0, exit);
+        Assert.Equal("", error);
+        using var document = JsonDocument.Parse(output);
+        Assert.Equal("scanner-1", document.RootElement.GetProperty("component").GetString());
+        var tokens = document.RootElement.GetProperty("tokens").EnumerateArray().ToArray();
+        string[] kinds = ["Identifier", "Punctuation", "Integer", "Identifier", "Invalid", "EndOfFile"];
+        int[] starts = [0, 3, 5, 8, 11, 13];
+        int[] lengths = [2, 1, 2, 2, 2, 0];
+        Assert.Equal(kinds, tokens.Select(static token => token.GetProperty("kind").GetString()));
+        Assert.Equal(starts, tokens.Select(static token => token.GetProperty("start").GetInt32()));
+        Assert.Equal(lengths, tokens.Select(static token => token.GetProperty("length").GetInt32()));
+    }
+
+    [Fact]
     public async Task BuildPublishesNativeArtifactAndFailedCompilationPreservesItAsync()
     {
         var path = Path.Combine(Path.GetTempPath(), $"terrum-cli-{Guid.NewGuid():N}.exe");
@@ -48,7 +67,7 @@ public sealed class CliTests
                 "build", "-", "-o", path, "--runtime", "fail-fast", "--json");
             Assert.Equal(1, limitExit);
             using var limitDocument = JsonDocument.Parse(limitOutput);
-            Assert.Equal("TRM4001", limitDocument.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+            Assert.Equal("TRM3016", limitDocument.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
             Assert.False(limitDocument.RootElement.TryGetProperty("artifact", out _));
             Assert.Equal(original, await File.ReadAllBytesAsync(path));
 
@@ -99,7 +118,7 @@ public sealed class CliTests
         var (semanticExit, output, _) = await RunAsync(source, "analyze", "-", "--json");
         Assert.Equal(1, semanticExit);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal("native-1", document.RootElement.GetProperty("profile").GetString());
+        Assert.Equal("native-2", document.RootElement.GetProperty("profile").GetString());
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
     }
 
@@ -115,7 +134,7 @@ public sealed class CliTests
         using var document = JsonDocument.Parse(output);
         var root = document.RootElement;
         Assert.False(root.GetProperty("success").GetBoolean());
-        Assert.Equal("syntax-2", root.GetProperty("languageVersion").GetString());
+        Assert.Equal("syntax-3", root.GetProperty("languageVersion").GetString());
         var diagnostic = Assert.Single(root.GetProperty("diagnostics").EnumerateArray());
         Assert.Equal("TRM1005", diagnostic.GetProperty("code").GetString());
         Assert.Equal(Source.LastIndexOf('?', StringComparison.Ordinal), diagnostic.GetProperty("span").GetProperty("start").GetInt32());

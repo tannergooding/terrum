@@ -1,6 +1,8 @@
 # Literal construction and numeric conversion
 
-These are proposed binding/library contracts, not implemented execution.
+The native profile implements contextual literals and checked casts between
+`int32`, `uint32` and `char16`. The broader binding/library contracts below
+remain design direction, not implemented floating-point or generic execution.
 Cast spelling follows C#; conversion-protocol names and declaration lookup
 remain provisional. Numeric operators are checked by default in every build.
 
@@ -95,9 +97,14 @@ This does not make arbitrary raw `char8`/`char16` values valid scalars.
 `'+'` accepts ASCII plus only, not fullwidth plus or a longer operator string.
 Changing quotes alone is not evidence of an allocation or throughput improvement.
 
-The front end currently supports neither character literals nor casts.
-Family declarations and generic/constructor inference remain design/binder work.
-The native profile implements contextual `int32` literal construction and boolean
-`require`, but not conditional outputs, general conversions or catchable
-requirement exceptions. The parser's rejection of repeated optional modifiers
-is independent of those later conversion protocols.
+Character literals remain design-only. The executable cast `(char16)value`
+checks the code-unit range, not Unicode scalar validity; surrogate code units
+are representable and must be validated when decoding text. Narrowing and
+signed/unsigned range failures use the explicitly selected native fail-fast
+policy, not catchable conversion exceptions.
+
+Family declarations, generic inference and user-defined conversions remain
+future binder work. Boolean `require` and conditional bool/out publication are
+implemented for the bounded native value profile; catchable requirement
+exceptions and owning-output cleanup are not. The parser's rejection of
+repeated optional modifiers is independent of those later conversion protocols.

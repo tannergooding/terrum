@@ -1,0 +1,192 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System;
+using System.Buffers.Binary;
+using System.Collections.Immutable;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Native;
+using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Text;
+using Xunit;
+
+namespace Terrum.CodeAnalysis.Tests;
+
+public sealed class ScannerTests
+{
+    [Theory]
+    [InlineData("void Main() { Host.Source[0] = (char16)65; }")]
+    [InlineData("int32 Main() { return Host.Missing[0]; }")]
+    [InlineData("int32 Main() { return (int32)Host.Source[true]; }")]
+    [InlineData("void Main() { var borrowed = Host.Source; }")]
+    [InlineData("int32 Main() { Host.Tokens.Length = 1; return 0; }")]
+    [InlineData("int32 Main() { Host.Tokens[0] = true; return 0; }")]
+    public void BufferCapabilitiesRejectInvalidAccessAndEscape(string source)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), ScannerHost.CreateBuffers(SourceText.From("x")));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void NamedBuffersRequireExplicitHostGrants()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Host.Source.Length; }"));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData("int32 Main() { return Host.State[-1]; }", unchecked((int)0xE0540004))]
+    [InlineData("int32 Main() { return Host.State[2]; }", unchecked((int)0xE0540004))]
+    [InlineData("int32 Main() { Host.State[2] = Fail(); return 0; } int32 Fail() { require false; return 0; }", unchecked((int)0xE0540004))]
+    [InlineData("int32 Main() { Host.State[Index()] = Value(); return Host.State[0] * 10 + Host.State[1]; } int32 Index() { Host.State[0] = Host.State[0] + 1; return 1; } int32 Value() { return Host.State[0] + 6; }", 17)]
+    public async Task BufferAccessChecksBoundsAndPreservesEvaluationOrderAsync(string source, int expected)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            [new HostBuffer("State", PrimitiveType.Int32, [0, 0], true)]);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), expected).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" \t\r\n\u0085\u2028\u2029\u00A0\u3000")]
+    [InlineData("alpha _value 0123 + (beta != 7) >> >= && & || | == =")]
+    [InlineData("\U00010400_var \u2118 \u212E \u2122 \u0301")]
+    [InlineData("a\u200Cb a\u200Db \u200C \u200D \u0661 a\u06612")]
+    [InlineData("a\u00E9 ae\u0301 \U0001F600x")]
+    [InlineData("if while require int32 2147483648")]
+    public async Task CompiledScannerAgreesWithHostOnItsTokenSubsetAsync(string source)
+    {
+        await CheckScannerAsync(source).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public async Task MalformedSurrogatesRetainExactCodeUnitBoundariesAsync()
+    {
+        await CheckScannerAsync("\uD800x \uDC00 \uD800\uD800 \uDC00\uDC00 \U00010400").ConfigureAwait(true);
+    }
+
+    [Fact]
+    public async Task PinnedIdentifierRangeEdgesExecuteInTerrumAsync()
+    {
+        var source = new StringBuilder();
+        foreach (var pair in UnicodeIdentifierProfile.StartRanges.ToArray().Chunk(2).Where((_, index) => index % 31 == 0))
+        {
+            foreach (var scalar in new[] { pair[0] - 1, pair[0], pair[1], pair[1] + 1 })
+            {
+                if (scalar is >= 0 and <= 0x10FFFF and not (>= 0xD800 and <= 0xDFFF))
+                {
+                    _ = source.Append(char.ConvertFromUtf32(scalar)).Append(' ');
+                }
+            }
+        }
+
+        await CheckScannerAsync(source.ToString()).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public void HostBufferInputPreservesMalformedUnitsAndRejectsResourceExcess()
+    {
+        var buffers = ScannerHost.CreateBuffers(SourceText.From("\uD800\0\uDC00"));
+        Assert.Equal<int>([0xD800, 0, 0xDC00], buffers[0].Values);
+        Assert.Equal(UnicodeIdentifierProfile.StartRanges.ToArray(), buffers[1].Values.ToArray());
+        Assert.Equal(UnicodeIdentifierProfile.ContinueRanges.ToArray(), buffers[2].Values.ToArray());
+        Assert.False(buffers[0].IsWritable);
+        Assert.True(buffers[3].IsWritable);
+        _ = Assert.Throws<ArgumentException>(() => ScannerHost.CreateBuffers(
+            SourceText.From(new string('x', ScannerHost.MaximumSourceLength + 1))));
+    }
+
+    [Theory]
+    [InlineData(0, 0, 0)]
+    [InlineData(7, 0, 1)]
+    [InlineData(1, -1, 1)]
+    [InlineData(1, 0, 2)]
+    [InlineData(1, 0, 0)]
+    public void ResultAdapterRejectsInvalidPublishedRecords(int kind, int start, int length)
+    {
+        var bytes = new byte[24];
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, kind);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(4), start);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(8), length);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16), 1);
+        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadTokens(SourceText.From("x"), 2, bytes));
+    }
+
+    private static async Task CheckScannerAsync(string source)
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var scanner = await File.ReadAllTextAsync(Path.Combine(root, "self-host", "Scanner.terrum")).ConfigureAwait(true);
+        var lexed = Lexer.Lex(SourceText.From(source));
+        var expected = ImmutableArray.CreateBuilder<int>();
+        foreach (var token in lexed.Tokens)
+        {
+            var kind = token.Kind == TokenKind.EndOfFile ? 0
+                : token.Kind == TokenKind.Bad ? 4
+                : token.Kind == TokenKind.NumericLiteral ? 2
+                : token.Kind == TokenKind.Identifier || token.Kind.ToString().EndsWith("Keyword", StringComparison.Ordinal) ? 1 : 3;
+            expected.Add(kind);
+            expected.Add(token.Span.Start);
+            expected.Add(token.Span.Length);
+        }
+
+        var buffers = ScannerHost.CreateBuffers(SourceText.From(source))
+            .Add(new HostBuffer("Expected", PrimitiveType.Int32, expected.ToImmutable(), false));
+        const string Harness = """
+
+            int32 Main()
+            {
+                int32 count = Scan();
+                require count * 3 == Host.Expected.Length;
+                mut int32 index = 0;
+                while (index < count * 3)
+                {
+                    require Host.Tokens[index] == Host.Expected[index];
+                    index = index + 1;
+                }
+                return 0;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(scanner + Harness), buffers);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), 0).ConfigureAwait(true);
+    }
+
+    private static async Task ExecuteAsync(BoundProgram program, int expected)
+    {
+        var image = NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast);
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-scanner-{Guid.NewGuid():N}.exe");
+        try
+        {
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
+            using var process = Process.Start(new ProcessStartInfo(path) { UseShellExecute = false, CreateNoWindow = true })
+                ?? throw new InvalidOperationException("Could not start compiled scanner.");
+            try
+            {
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(true);
+            }
+            catch (TimeoutException)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+                throw;
+            }
+
+            Assert.Equal(expected, process.ExitCode);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+}

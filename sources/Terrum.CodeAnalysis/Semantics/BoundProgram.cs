@@ -17,12 +17,44 @@ public enum PrimitiveType
     /// <summary>A signed, checked 32-bit integer.</summary>
     [SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Names the Terrum primitive type represented by the compiler.")]
     Int32,
+    /// <summary>An unsigned, checked 32-bit integer.</summary>
+    [SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Names the Terrum primitive type represented by the compiler.")]
+    UInt32,
+    /// <summary>A UTF-16 code unit, including surrogate code units.</summary>
+    Char16,
 }
 
 /// <summary>A source-mapped, structured program with resolved function and local indexes.</summary>
 /// <param name="Functions">Functions in declaration order.</param>
 /// <param name="EntryPoint">The index of the parameterless Main function.</param>
-public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int EntryPoint);
+public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int EntryPoint)
+{
+    /// <summary>Validated scalar ABI value layouts; type identifiers are 100 + declaration index.</summary>
+    public ImmutableArray<BoundStruct> Structures { get; init; } = [];
+
+    /// <summary>Compiler-supplied, bounded buffers; never represented as source values or raw addresses.</summary>
+    public ImmutableArray<HostBuffer> Buffers { get; init; } = [];
+}
+
+/// <summary>A scalar-register ABI value type of at most eight bytes, with no references or aliases.</summary>
+public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> Fields, int Size)
+{
+    /// <summary>Whether access is limited to its declaring scope.</summary>
+    public bool IsPrivate { get; init; }
+
+    /// <summary>Whether access is limited to the current compilation or module.</summary>
+    public bool IsInternal { get; init; }
+}
+
+/// <summary>A naturally aligned field whose offset and width are in bytes.</summary>
+public sealed record BoundStructField(string Name, PrimitiveType Type, int Offset, int Size)
+{
+    /// <summary>Whether access is limited to methods of the declaring struct.</summary>
+    public bool IsPrivate { get; init; }
+
+    /// <summary>Whether access is limited to the current compilation or module.</summary>
+    public bool IsInternal { get; init; }
+}
 
 /// <summary>A function whose parameter slots precede its local slots.</summary>
 /// <param name="Name">The declared name.</param>
@@ -32,14 +64,34 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 /// <param name="Body">The structured body.</param>
 /// <param name="Span">The source range.</param>
 public sealed record BoundFunction(string Name, PrimitiveType ReturnType, ImmutableArray<BoundVariable> Variables,
-    int ParameterCount, BoundBlock Body, TextSpan Span);
+    int ParameterCount, BoundBlock Body, TextSpan Span)
+{
+    /// <summary>Whether this function initializes its receiver's fields and returns the value.</summary>
+    public bool IsConstructor { get; init; }
+
+    /// <summary>Whether calls are limited to the declaring struct.</summary>
+    public bool IsPrivate { get; init; }
+
+    /// <summary>Whether calls are limited to the current compilation or module.</summary>
+    public bool IsInternal { get; init; }
+
+    /// <summary>The fully qualified declaring struct, if this is a member.</summary>
+    public string? DeclaringStruct { get; init; }
+
+    /// <summary>Whether a member has no receiver.</summary>
+    public bool IsStatic { get; init; }
+}
 
 /// <summary>A parameter or initialized local declaration.</summary>
 /// <param name="Name">The source name.</param>
 /// <param name="Type">The stored type.</param>
 /// <param name="IsMutable">Whether assignment is permitted.</param>
 /// <param name="Span">The declaration range.</param>
-public sealed record BoundVariable(string Name, PrimitiveType Type, bool IsMutable, TextSpan Span);
+public sealed record BoundVariable(string Name, PrimitiveType Type, bool IsMutable, TextSpan Span)
+{
+    /// <summary>Whether this parameter receives a value only on a true bool return.</summary>
+    public bool IsOut { get; init; }
+}
 
 /// <summary>A structured statement, retaining its source range.</summary>
 /// <param name="Span">The source range.</param>
@@ -61,6 +113,12 @@ public sealed record BoundLocal(int Variable, BoundExpression Initializer, TextS
 /// <param name="Value">The assigned value.</param>
 /// <param name="Span">The source range.</param>
 public sealed record BoundAssignment(int Variable, BoundExpression Value, TextSpan Span) : BoundStatement(Span);
+
+/// <summary>Writes a field in a mutable local value, without aliasing its storage.</summary>
+public sealed record BoundFieldAssignment(int Variable, int Field, BoundExpression Value, TextSpan Span) : BoundStatement(Span);
+
+/// <summary>A checked write to a compiler-supplied writable buffer.</summary>
+public sealed record BoundBufferAssignment(int Buffer, BoundExpression Index, BoundExpression Value, TextSpan Span) : BoundStatement(Span);
 
 /// <summary>Evaluates a call for its effects, discarding its result.</summary>
 /// <param name="Expression">The call.</param>
@@ -96,7 +154,7 @@ public sealed record BoundReturn(BoundExpression? Value, TextSpan Span) : BoundS
 public abstract record BoundExpression(PrimitiveType Type, TextSpan Span);
 
 /// <summary>An integer or canonical boolean constant.</summary>
-/// <param name="Value">The value; booleans are zero or one.</param>
+/// <param name="Value">The 32-bit payload; uint32 uses its bit pattern, char16 uses 0..65535, and booleans use zero or one.</param>
 /// <param name="Type">The constant type.</param>
 /// <param name="Span">The source range.</param>
 public sealed record BoundConstant(int Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
@@ -130,3 +188,15 @@ public sealed record BoundBinary(TokenKind Operator, BoundExpression Left, Bound
 /// <param name="Span">The source range.</param>
 public sealed record BoundCall(int Function, ImmutableArray<BoundExpression> Arguments,
     PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
+/// <summary>A checked conversion between supported scalar types.</summary>
+public sealed record BoundCast(BoundExpression Operand, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
+/// <summary>Reads a scalar field from a copied struct value.</summary>
+public sealed record BoundFieldRead(BoundExpression Receiver, int Field, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
+/// <summary>A caller-owned output slot passed through private callee scratch storage.</summary>
+public sealed record BoundOutArgument(int Variable, bool DeclaresVariable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
+/// <summary>A checked read from a compiler-supplied buffer.</summary>
+public sealed record BoundBufferRead(int Buffer, BoundExpression Index, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);

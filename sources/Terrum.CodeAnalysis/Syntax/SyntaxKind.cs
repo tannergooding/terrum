@@ -53,6 +53,8 @@ public enum SyntaxKind
     VoidExpression,
     /// <summary>A unary operator expression.</summary>
     UnaryExpression,
+    /// <summary>An explicit cast.</summary>
+    CastExpression,
     /// <summary>A binary operator expression.</summary>
     BinaryExpression,
     /// <summary>A function invocation expression.</summary>

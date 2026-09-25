@@ -1,21 +1,23 @@
 # Candidate Terrum compiler sources
 
 These files are parallel design candidates, not a bootstrapped compiler.
-They are not linked into the C# implementation. `IntegerFacts` is small enough
-for native execution; the other candidates still need later language slices.
+They are not linked into the C# implementation. The native profile executes
+the range, character and integer components and a bounded token scanner.
 The host test runner remains C#, even when it compiles and executes a candidate.
 
-Host fixture tests parse and round-trip `SourceRange`, `CharacterFacts` and
-`RangeTests` only. They do not execute their functions, prove their semantics,
-or cover the unsupported cursor/host-interface syntax.
+Host fixtures retain syntax round trips and add native execution of
+`SourceRange`, `CharacterFacts` and `RangeTests` with entry wrappers.
+The cursor and general host-interface sketches still require later language
+slices. Executing these components is not a self-hosted compiler bootstrap.
 
 | Candidate | Purpose | Gates before execution |
 |---|---|---|
 | [IntegerFacts](IntegerFacts.terrum) | Overflow-free signed-addition range predicate | Supported by the native profile; tested with native entry wrappers, not a full compiler bootstrap |
-| [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Struct/member binding, private construction, conditional bool/out publication |
-| [CharacterFacts](CharacterFacts.terrum) | Shared ASCII numeric and newline decisions | Static calls, `char16` comparisons, typed literals |
+| [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and conditional bool/out publication |
+| [CharacterFacts](CharacterFacts.terrum) | Shared ASCII numeric and newline decisions | Executed with `char16` comparisons and checked numeric casts |
 | [TokenCursor](TokenCursor.terrum) | Read-view traversal without copying backing storage or cleanup | Span indexing, matched access, stored backing dependencies, capture contract, constructor initialization |
-| [RangeTests](RangeTests.terrum) | Small success/failure and overflow boundary cases | The above plus a test runner/assertion library and short-circuit initialization analysis |
+| [RangeTests](RangeTests.terrum) | Small success/failure and overflow boundary cases | Executed with a host-supplied entry wrapper; a Terrum test runner remains future work |
+| [Scanner](Scanner.terrum) | UTF-16 decoding, pinned Unicode identifiers, decimal integers and punctuation | Executed through fixed checked host buffers; see the [precise subset](../docs/scanner.md) |
 | [Host APIs](host.api.terrum) | Explicit source acquisition, cancellation, digest and output boundary | Interfaces, immutable publication, operation failures; host adapters |
 
 `SourceRange` deliberately mirrors the current host's signed 32-bit UTF-16
@@ -24,10 +26,8 @@ the syntax protocol, not a decision that Terrum collection extents are signed or
 runtime text must use UTF-16. A later larger-source protocol needs an explicit
 schema change. Source file UTF-8 decoding remains separate from coordinates.
 
-`CharacterFacts` retains a temporary `FromChar16Checked` call so this small
-candidate remains covered by host parser fixtures before casts are parsed.
-That hook is not the permanent per-source-type conversion API; the proposed
-numeric conversion direction uses casts and reusable policy protocols.
+`CharacterFacts` uses `(int32)value` instead of a per-source conversion hook.
+Raw `char16` values are code units, not automatically validated Unicode scalars.
 
 The candidates reuse `Span<Token>`/`TextSpan` rather than imitating C# strings,
 `IEnumerator`, `ImmutableArray`, reflection, GC handles or compiler-generated
@@ -35,9 +35,10 @@ state machines. A read cursor may forward backing dependencies; retaining its
 descriptor alone cannot extend an external allocation lease. `[Captures]` is
 working contract notation, not an unchecked annotation accepted by the MVP.
 
-To progress: extend binding and native emission to execute the range/character
-tests; port token records and the pinned Unicode tables; add parser routines;
-then compare host/self-host token, tree and diagnostic fixtures. Keep shared
+The scanner shares the host's generated Unicode ranges; classification and
+token-boundary decisions execute in Terrum. Comments, strings, full numeric
+grammar, lossless trivia, diagnostic production and parser routines remain
+future components. Keep shared
 fixture expectations about observable ranges and contracts, not host object
 layouts. An independent compiler bootstrap requires rebuilding and comparing
 outputs, not merely parsing these files.

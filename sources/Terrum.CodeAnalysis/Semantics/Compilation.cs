@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Threading;
 using Terrum.CodeAnalysis.Diagnostics;
@@ -8,27 +9,48 @@ using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
+/// <summary>A compiler diagnostic paired with the source snapshot that owns its UTF-16 span.</summary>
+public sealed record SourceDiagnostic(SyntaxTree SyntaxTree, Diagnostic Diagnostic);
+
 /// <summary>
-/// The semantic result for a single syntax snapshot. The executable profile supports only
-/// top-level functions, int32, bool, and void; directives and other declarations are rejected.
+/// The semantic result for one or more syntax snapshots. The executable profile supports only
+/// checked scalar values and compact POD structs with structured control flow.
 /// </summary>
 public sealed class Compilation
 {
     /// <summary>The version of the supported executable semantic profile.</summary>
-    public const string ProfileVersion = "native-1";
+    public const string ProfileVersion = "native-2";
 
-    private Compilation(SyntaxTree syntaxTree, ImmutableArray<Diagnostic> diagnostics, BoundProgram? program)
+    private Compilation(SyntaxTree syntaxTree, ImmutableArray<Diagnostic> diagnostics, BoundProgram? program,
+        ImmutableArray<SyntaxTree> syntaxTrees = default, ImmutableArray<SourceDiagnostic> sourceDiagnostics = default)
     {
         SyntaxTree = syntaxTree;
         Diagnostics = diagnostics;
         Program = program;
+        SyntaxTrees = syntaxTrees.IsDefault ? [syntaxTree] : syntaxTrees;
+        if (sourceDiagnostics.IsDefault)
+        {
+            var mapped = ImmutableArray.CreateBuilder<SourceDiagnostic>(diagnostics.Length);
+            foreach (var diagnostic in diagnostics)
+            {
+                mapped.Add(new SourceDiagnostic(syntaxTree, diagnostic));
+            }
+            sourceDiagnostics = mapped.ToImmutable();
+        }
+        SourceDiagnostics = sourceDiagnostics;
     }
 
-    /// <summary>Gets the source snapshot used to create this compilation.</summary>
+    /// <summary>Gets the first source snapshot; use SyntaxTrees for multi-source compilations.</summary>
     public SyntaxTree SyntaxTree { get; }
+
+    /// <summary>Gets all source snapshots in input order.</summary>
+    public ImmutableArray<SyntaxTree> SyntaxTrees { get; }
 
     /// <summary>Gets syntax and semantic diagnostics in source order, then ordinal code order.</summary>
     public ImmutableArray<Diagnostic> Diagnostics { get; }
+
+    /// <summary>Gets each diagnostic with the source snapshot that owns its span.</summary>
+    public ImmutableArray<SourceDiagnostic> SourceDiagnostics { get; }
 
     /// <summary>Gets the executable program, or null if any error occurred.</summary>
     public BoundProgram? Program { get; }
@@ -90,5 +112,57 @@ public sealed class Compilation
         }
 
         return new Compilation(tree, result, program);
+    }
+
+    /// <summary>Binds declarations across source files before resolving names and function bodies.</summary>
+    /// <exception cref="ArgumentException">No source trees were supplied.</exception>
+    public static Compilation Create(IEnumerable<SyntaxTree> trees, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(trees);
+        cancellationToken.ThrowIfCancellationRequested();
+        var snapshots = ImmutableArray.CreateBuilder<SyntaxTree>();
+        var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
+        var sourceDiagnostics = ImmutableArray.CreateBuilder<SourceDiagnostic>();
+        foreach (var tree in trees)
+        {
+            ArgumentNullException.ThrowIfNull(tree);
+            snapshots.Add(tree);
+            diagnostics.AddRange(tree.Diagnostics);
+            foreach (var diagnostic in tree.Diagnostics)
+            {
+                sourceDiagnostics.Add(new SourceDiagnostic(tree, diagnostic));
+            }
+        }
+        if (snapshots.Count == 0)
+        {
+            throw new ArgumentException("At least one source tree is required.", nameof(trees));
+        }
+        if (diagnostics.Count != 0)
+        {
+            return new Compilation(snapshots[0], diagnostics.ToImmutable(), null,
+                snapshots.ToImmutable(), sourceDiagnostics.ToImmutable());
+        }
+        var binder = new Binder(snapshots.ToImmutable(), cancellationToken);
+        var program = binder.Bind();
+        diagnostics.AddRange(binder.Diagnostics);
+        sourceDiagnostics.AddRange(binder.SourceDiagnostics);
+        cancellationToken.ThrowIfCancellationRequested();
+        return new Compilation(snapshots[0], diagnostics.ToImmutable(), diagnostics.Count == 0 ? program : null,
+            snapshots.ToImmutable(), sourceDiagnostics.ToImmutable());
+    }
+
+    /// <summary>Binds one source snapshot with explicit, fixed-size host buffer capabilities.</summary>
+    public static Compilation Create(SyntaxTree tree, ImmutableArray<HostBuffer> buffers, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(tree);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (tree.HasErrors)
+        {
+            return new Compilation(tree, tree.Diagnostics, null);
+        }
+        var binder = new Binder([tree], buffers, cancellationToken);
+        var program = binder.Bind();
+        var diagnostics = tree.Diagnostics.AddRange(binder.Diagnostics);
+        return new Compilation(tree, diagnostics, diagnostics.IsEmpty ? program : null);
     }
 }

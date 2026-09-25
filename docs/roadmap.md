@@ -7,13 +7,14 @@ The [language](language.md) defines accepted semantic direction, while
 | Stage | Deliverable | Exit evidence |
 |---|---|---|
 | Syntax foundation (implemented) | Source, Unicode lexer, lossless CST, recovery, CLI, content-bound edits | Public API/CLI tests for round trips, positions, malformed input, numeric boundaries and stale edits |
-| Integer binding and native AOT (current) | Typed functions/locals, contextual literals, structured control flow, mandatory verifier, direct Windows x64 PE emission | Positive/negative semantic tests, real native execution, checked failures, stack arguments, imports/unwind inspection and safe artifact replacement |
-| Semantic growth | Numeric types/conversions, aggregate construction, explicit places, conditional outputs | Boundary and invalid-state tests; explicit rejection of unsupported effects |
+| Integer binding and native AOT (implemented) | Typed functions/locals, contextual literals, structured control flow, mandatory verifier, direct Windows x64 PE emission | Positive/negative semantic tests, real native execution, checked failures, stack arguments, imports/unwind inspection and safe artifact replacement |
+| Bounded values and compiler components (current) | Checked signed/unsigned/code-unit numerics, compact aggregate construction, explicit places, conditional outputs, checked host buffers | Executed range/character/scanner candidates, shared pinned Unicode fixtures, boundary and invalid-state tests, independent C aggregate/out caller |
+| Early JIT and module proofs (current) | Shared x64 encoder, W^X/unwind lifetime, versioned persisted semantic consumer/producer contracts | AOT/JIT result and failure agreement; unchanged consumer against compatible implementation replacement; incompatible contracts rejected before execution |
 | Full runtime and structured contracts | Exception/cleanup regions, roots, runtime contracts and richer verifier | Catch/cleanup correctness, failure injection, source-mapped diagnostics and invalid-IR rejection |
 | Resources and graphs | Checked loans/cleanup, managed handles, list/node identity and guards | Invalidating-operation rejection; retained-node/clear/reinsertion and GC stress fixtures |
-| Separate compilation | LMOD contract metadata, baseline comparison, binding and resilient layouts | Unchanged consumer against compatible producer, incompatible replacement rejected, side-by-side identities |
+| General separate compilation | Rich LMOD contracts, native DLL imports, resilient layouts and independent deployment | Larger contract/layout evolution, side-by-side identities and servicing without whole-image relinking |
 | Rich libraries and self-hosting | Static protocols/generic math, views/builders, candidate compiler pieces | Executed shared host/self-host fixtures, not parser-only bootstrap claims |
-| Later capabilities | JIT and additional native targets, async, generation/reflection, interop, scalable SIMD | JIT/AOT agreement; workload-specific correctness, ABI, lifetime and measured cost evidence |
+| Later capabilities | Production JIT and additional native targets, async, generation/reflection, interop, scalable SIMD | Workload-specific correctness, ABI, lifetime, servicing and measured cost evidence |
 
 Do not implement all later stages simultaneously. The immediate next coherent
 work extends the verified native corpus and its semantic checks, not a plugin

@@ -1,6 +1,6 @@
 # Windows x64 native profile
 
-`native-1` is a deliberately bounded executable language profile, separate from
+`native-2` is a deliberately bounded executable language profile, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
@@ -33,13 +33,15 @@ authorize emission.
 
 | Area | Supported |
 |---|---|
-| Program | One source file; top-level functions; parameterless `int32 Main()` or `void Main()` |
-| Types | `int32`, `bool`, `void` results; no implicit typed numeric conversions |
-| Literals | Contextual decimal integer literals and explicit `i32` tags; booleans; unit `()` |
+| Program | File-scoped namespaces, using directives, top-level/static/instance functions; parameterless `int32 Main()` or `void Main()`; multi-source library compilation |
+| Types | `int32`, `uint32`, `char16`, `bool`, `void` results; compact reference-free structs |
+| Literals/constants | Contextual integers, explicit `i32`/`u32` tags, primitive `MinValue`/`MaxValue`; booleans; unit `()` |
 | Variables | Initialized typed/inferred locals; immutable bindings by default, explicit `mut` assignments; lexical scopes |
-| Expressions | Direct calls, forward calls/recursion, parentheses; unary `+`, checked `-`, `~`, `!` |
-| Operators | Checked integer `+ - * / %`, bitwise operations, signed comparisons, same-type equality, boolean operations |
+| Expressions | Direct calls, forward calls/recursion, constructors, field reads, checked numeric casts; unary `+`, signed checked `-`, `~`, `!` |
+| Operators | Checked signed/unsigned `+ - * / %`, bitwise operations, signed/unsigned comparisons, same-type scalar equality, boolean operations; code-unit comparison but no `char16` arithmetic |
 | Flow | Blocks, `if`/`else`, `while`, return, boolean `require`; left-to-right argument/operand evaluation and short-circuit `&&`/`||` |
+| Outputs | Bool/out true-only publication and definite assignment through branches, `!`, `&&`, `||` and `require` |
+| Storage | Explicitly granted, initialized fixed host buffers with checked indexing and read/write access; capabilities are not first-class source values |
 
 Literal context comes from declarations, parameters, return types or a known
 operand, not an implicit `int32` fallback. `var x = 1` is rejected; `var x = 1i32`
@@ -48,14 +50,55 @@ directly, without first overflowing its positive magnitude. Locals cannot be
 read before declaration/initialization, immutable bindings cannot be assigned,
 conditions must be boolean and non-void functions must return on all validated
 paths (loops are conservatively allowed to execute zero times). Function
-overloading, function modifiers, namespace/using directives, active-scope local
-shadowing and argument names/passing modes are not supported.
+overloading, active-scope local shadowing, named arguments, `ref`/`mut ref`
+passing and mutating instance methods are not supported.
 
-Other integer widths, unsigned arithmetic, floating point, casts, character/text
-values, shifts, structs/classes, optional/generic/family binding, borrowed references,
-conditional `out`, ownership/cleanup, exceptions, GC, async, interop, imports and
-libraries are outside the profile. Their syntax may be inspectable, but a build
+Other integer widths, floating point, character/text literals, shifts, classes,
+optional/generic/family binding, general borrowed references, ownership/cleanup,
+exceptions, GC, async, arbitrary interop and the standard library are outside the
+profile. Their syntax may be inspectable, but a build
 must diagnose unsupported semantics. No source library is silently assumed.
+
+## Values, places and conditional publication
+
+Struct fields contain supported primitive values, with explicit constructors
+and naturally aligned declaration-order layouts of 1, 2, 4 or 8 bytes.
+Constructors must initialize every field
+before reading or returning the entire receiver; individual initialized fields
+can be read during construction. Copying a value does not create a storage
+alias. Field writes require an accessible field and mutable receiver, except
+while initializing the constructor's receiver. Instance methods receive copies;
+mutating instance methods are rejected rather than silently losing writes.
+Larger/nested/reference-containing aggregates and implicit construction are
+not implemented.
+
+Top-level functions and types default to `internal`; struct members,
+constructors and fields default to `private`. Module exports require explicit
+public declarations and supported public value layouts. Top-level `private`,
+field initializers and field-level `mut`/`static` are rejected. Field writes
+are governed by the owning value's access, not a separate field-mutability flag.
+
+Checked casts preserve a numeric value or fail for range overflow. Raw
+`char16` values include surrogate code units: a successful cast is not Unicode
+scalar validation. The profile has no implicit conversion between typed numeric
+values and no implicit text encoding.
+
+A bool-returning declaration with `out` parameters promises initialized outputs
+on true. Callees construct outputs in private scratch storage and publish only
+on successful return; a false return does not manufacture a readable default.
+An output target is unavailable while the call is pending and is vacant on
+false, even if its backing storage still contains a previous value's bits.
+Calls stage output storage separately from ordinary arguments. Aliased output
+targets and reads of not-yet-initialized outputs are rejected. Conditional
+assignment facts follow evaluated short-circuit paths, and `require` carries
+the true-path facts forward. Owning outputs and exceptional cleanup are
+rejected, not simulated by this scratch protocol.
+
+[`self-host/SourceRange`](../self-host/SourceRange.terrum),
+[`CharacterFacts`](../self-host/CharacterFacts.terrum) and
+[`RangeTests`](../self-host/RangeTests.terrum) execute through this profile.
+The [scanner component](scanner.md) additionally uses fixed checked buffers;
+this does not implement a general span ABI or a complete lifetime checker.
 
 ## Runtime policy
 
@@ -65,16 +108,17 @@ only explicit `fail-fast` selection. Checked arithmetic remains checked:
 
 | Failure | Process exit status |
 |---|---|
-| Signed arithmetic overflow, including minimum divided by -1 | `0xE0540001` |
+| Checked signed/unsigned arithmetic or numeric conversion overflow | `0xE0540001` |
 | Integer division or remainder by zero | `0xE0540002` |
 | A false boolean `require` predicate | `0xE0540003` |
+| Negative or out-of-range host-buffer index | `0xE0540004` |
 
 `require predicate;` evaluates its boolean once and continues only on true.
 This is executable semantic code, not a debug assertion, unchecked assumption
 or inferred public precondition. Its ordinary language exception contract is
 not yet available: **the explicit fail-fast profile terminates instead**.
-Conditional outputs and exceptional cleanup remain unsupported rather than
-being approximated. A predicate's own arithmetic failure retains that failure
+Exceptional cleanup remains unsupported rather than approximated.
+A predicate's own arithmetic failure retains that failure
 status. `samples/native/requirements.terrum` demonstrates a parameter-dependent
 requirement and returns 10.
 
@@ -93,8 +137,12 @@ ordinary language semantics rather than silently inherit this explicit profile.
 
 ## Semantic and target boundaries
 
-`Compilation.Create(SyntaxTree)` declares names/signatures before binding bodies.
-It returns deterministic diagnostics and no `BoundProgram` on errors.
+`Compilation.Create` declares names/signatures before binding bodies.
+It returns deterministic diagnostics and no `BoundProgram` on errors, including
+definite-assignment and construction failures found during source verification.
+For multiple source snapshots, `SyntaxTrees` retains input order and
+`SourceDiagnostics` pairs each diagnostic with its owning snapshot; the legacy
+`SyntaxTree` property refers only to the first snapshot.
 Resolved functions, slots and types are immutable public data. Structured
 blocks, branches and loops preserve control-flow meaning; no source token is
 translated directly to an opcode.
@@ -106,29 +154,53 @@ without going through the binder. Invalid IR is an argument error, not a
 machine-code fallback. Limits on semantic depth and native frame/image size
 are intentional compilation failures, not stack-overflow handling strategies.
 The current ceilings are 1,024 functions, 256 parameter/local slots per function,
-64 arguments, 128 levels of IR nesting, 100,000 IR nodes, 3,840-byte frames and
+64 arguments, 128 levels of IR nesting, 100,000 verification visits, 3,840-byte frames and
 8 MiB of machine code. Valid programs exceeding emission limits report
 `TRM4001`; these are implementation limits, not language type or ABI guarantees.
+Verification visits include conditional-flow analysis, not only unique IR
+nodes. Source analysis reports an exhausted verification budget as `TRM3016`.
+The fixed-buffer profile additionally limits descriptors to 256 and total
+initialized storage to 1,048,576 32-bit words.
 
 The x64 backend uses fixed stack frames, caller shadow space and aligned calls.
-The first four integer/bool arguments use RCX, RDX, R8 and R9; later arguments
+The first four scalar arguments use RCX, RDX, R8 and R9; later arguments
 occupy stack slots. Live intermediate values and arguments are spilled across
 nested calls. Functions preserve nonvolatile registers and publish Windows
 unwind metadata for stack adjustment; those records support platform stack
 walking, not Terrum exception handling.
 
+The independent ABI fixture uses a C caller, rather than validating calls only
+by having Terrum call itself. From an x64 Visual Studio developer shell at the
+repository root:
+
+```powershell
+ml64 /nologo /c /Foartifacts\abi-carrier.obj tests\native\abi-carrier.asm
+cl /nologo /W4 /WX /O2 /TC tests\native\abi-probe.c /Foartifacts\abi-probe.obj /Feartifacts\abi-probe.exe /link artifacts\abi-carrier.obj /INCREMENTAL:NO
+dotnet run --file scripts\check-native-abi.cs
+```
+
+It checks an eight-byte aggregate passed/returned by value, true/false output
+publication, guard storage around scalar output destinations, and narrow
+arguments with deliberately unspecified upper register bits. The script
+obtains function addresses from encoder ranges; the development executable
+does not advertise an exported native API.
+
 Images currently use fixed base `0x140000000`, 4 KiB section alignment and
 512-byte file alignment. `.text` is read/execute, `.idata` read/write and
-`.pdata`/`.xdata` read-only. NX is enabled; ASLR is not advertised and base
+`.pdata`/`.xdata` read-only. Optional `.rdata` holds immutable buffers and
+`.data` holds writable buffers. NX is enabled; ASLR is not advertised and base
 relocations are not emitted. This is a single-image development artifact, not
 a hardened or freely relocatable production/module format.
 
 PE layout, relative code/import fixups and unwind records are target-specific.
-There is no optimizer, debug-symbol format, exported native API, managed root
-map, module loader, hot replacement or JIT registration yet. These need distinct
-contracts rather than extending a single-image executable format by accident.
-The design retains a future independently versioned semantic module/contract
-format separate from both PE and any optional CIL representation.
+The same encoder's `NativeCode` result is consumed by both PE layout and the
+[JIT execution proof](jit.md); code/data fixups and unwind ranges are explicit.
+The [module proof](modules.md) persists typed semantic bodies and normalized
+contracts, verifies replacements, then lowers at process start. Static AOT
+linking from these artifacts is separate from replacement of an unchanged PE.
+There is no optimizer, debug-symbol format, native export/import API, managed
+root map, production runtime or hot replacement. The broader LMOD design
+remains separate from both PE and any optional CIL representation.
 
 Authoritative ABI references:
 [Windows x64 calling convention](https://learn.microsoft.com/en-us/cpp/build/x64-calling-convention),

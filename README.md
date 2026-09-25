@@ -6,10 +6,12 @@ This repository hosts the language design and the C# bootstrap compiler/tooling.
 It is experimental; source syntax and public APIs are not stable.
 
 The compiler combines a Unicode-aware, lossless syntax API with a bounded
-`int32`/`bool`/`void` semantic profile and direct Windows x64 native emission.
-It binds functions and locals, checks types and mutation, verifies structured
-operations, and writes PE executables without CIL, LLVM or an external linker.
-Ownership, managed graphs, general exceptions and libraries are not implemented.
+value-type profile and direct Windows x64 native emission. It binds declarations,
+checked numerics, compact structs, places and conditional outputs, then verifies
+structured operations before encoding. The same backend writes PE executables
+and supplies a bounded JIT execution worker, without CIL, LLVM or an external
+linker. Ownership, managed graphs, general exceptions and the standard library
+are not implemented.
 
 ## Build
 
@@ -48,11 +50,11 @@ TerraFX; this is not the implementation of Terrum numeric semantics.
 
 | Location | Status |
 |---|---|
-| `sources/Terrum.CodeAnalysis` | Reusable source/syntax, binding, structured operations and native emitter |
+| `sources/Terrum.CodeAnalysis` | Reusable source/syntax, binding, verified operations, native backend and versioned semantic modules |
 | `sources/terrumc` | Human/JSON command-line consumer |
 | `tests/Terrum.CodeAnalysis.Tests` | Executable host and process-level CLI tests |
 | `samples/syntax` | Syntax fixtures accepted by the current parser; not executable Terrum |
-| `samples/native` | Executable Windows x64 integer/bool examples |
+| `samples/native` | Executable Windows x64 numeric, control-flow and compact-value examples |
 | `samples/design`, `library` | Broader language/API sketches, not implemented libraries |
 | `self-host` | Candidate Terrum compiler components with explicit execution gates |
 
@@ -67,10 +69,16 @@ benefit, but it is neither a dependency nor the default. See the
 [native profile](docs/native.md) for its explicit fail-fast runtime contract,
 ABI, artifact format and unsupported features. Native execution tests require
 Windows x64; emission itself does not invoke installed platform toolchains.
+The [JIT proof](docs/jit.md) covers executable-memory and unwind lifetimes;
+[modules](docs/modules.md) demonstrate process-start compatible producer
+replacement against an unchanged persisted consumer. Neither is a production
+runtime or hot-servicing implementation. The [compiled scanner](docs/scanner.md)
+executes bounded Terrum tokenization against shared pinned Unicode data.
 
 For machine consumers use the built `artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll`
 rather than mixing `dotnet run` build messages with protocol output. CLI exit
-codes distinguish success (0), source/compile diagnostics (1), and
-usage/input/output errors (2). `check` remains syntax-only; `analyze` binds.
+codes for inspection/build commands distinguish success (0), source/compile
+diagnostics (1), and usage/input/output errors (2). Execution workers instead
+return the program's status. `check` remains syntax-only; `analyze` binds.
 See the implementation guide for coordinates, recovery,
 schema versioning and content-bound edits.

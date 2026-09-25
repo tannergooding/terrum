@@ -1,0 +1,115 @@
+# Bounded semantic modules
+
+The version 2 `.trm` format records the semantic profile and persists verified, typed, source-mapped structured IR,
+not source text or a native DLL. `CreateProducer` stores selected function bodies
+and exported contracts. `CreateConsumer` stores its own function bodies and the
+reference producer's declaration contracts, **not** producer bodies. Source is
+bound once while creating each artifact; linking reads only the two artifacts.
+
+The process-start semantic-module JIT loader, `run-module`, reads the **same
+persisted consumer artifact** and the selected separately persisted producer
+artifact for every launch. `ModuleCompiler.Link` checks imported signatures
+(including conditional `out` parameter modes), layouts and symbolic call
+targets, reconstructs typed IR and runs the semantic verifier; only then does
+`NativeJit.Execute` lower the linked program to native code **in memory**.
+Consumer source is not read or rebound, producer reference bodies were not
+stored in the consumer, and neither module artifact is rewritten. Changing
+the compatible producer changes the next process launch's behavior. Changing
+a contract fails before native execution. This is *load-time semantic-module
+replacement*, not a patch to already running code or native DLL live servicing.
+The CLI regression deletes both source files after compiling the artifacts,
+then launches the worker with producer v1 and v2 and compares the consumer's
+bytes before and after both executions.
+
+`link-module` is separate: it emits a **new static PE** from the two artifacts.
+The previously emitted PE remains bound to its original producer implementation
+and is **not** replaceable merely by changing the producer artifact. Static
+PE links demonstrate AOT emission from persisted IR, not replacement of an
+unchanged native executable. The loader regenerates native machine code at
+each start, but never recompiles or mutates the consumer *artifact*.
+Precompiled native consumer code with runtime import slots could avoid this
+load-time lowering; that ABI, its relocations and unwind registration are not
+implemented by the bounded module profile.
+
+Calls use symbolic function identities rather than binder-local indexes.
+Types use declaration names, visibility and ordered field layouts as their contract;
+public import keys include declaring-type and signature-type visibility, while
+the complete ordered layout is checked separately before execution.
+Compatible reordered type declarations are remapped to the consumer's local
+type indexes before verification. Member contracts retain declaring type,
+receiver/static mode and constructor identity; unexported producer dependencies
+are kept solely in the producer artifact. A consumer call into a private
+producer implementation is rejected even if both declarations share a
+declaring type name.
+This first format conservatively pins all bound struct layouts from the initial
+compilation, including producer-only structures, rather than tracking only
+types reachable through exported signatures.
+
+The binary reader rejects unknown versions, malformed/truncated records,
+trailing bytes, unknown nodes, invalid graph depth, excessive symbols, strings
+or input length. The artifact limit is 4 MiB, graph limit 100,000 nodes,
+nesting limit 128, and function limit 1,024. No reflection-based serialization
+or saved-source rebind occurs. Import contracts are declaration-derived, not
+implementation hashes. This format is not authenticated: untrusted artifact
+bytes are checked for safety and compatibility, not provenance.
+Linked programs additionally pass the semantic verifier's 100,000-visit work
+budget, including conditional-flow analysis.
+Host-provided buffer capabilities are outside this module format and are
+rejected at artifact creation rather than silently dropped.
+
+The current API creates a producer from a verified combined program, selecting
+exported function names; the initial combined compilation may contain reference
+bodies for the producer. A replacement producer is compiled independently and
+its selected bodies replace those reference bodies at link time. A standalone
+producer may include an unused `Main` only because the current executable
+binder requires an entry point; it is not serialized into the producer module.
+
+From the repository root after building, compile the reference source and
+replacement source independently, then persist each artifact:
+
+```powershell
+$cli = 'artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll'
+dotnet $cli compile-module producer samples\native\modules\reference.terrum Helper -o artifacts\producer-v1.trm
+dotnet $cli compile-module consumer samples\native\modules\reference.terrum artifacts\producer-v1.trm -o artifacts\consumer.trm
+dotnet $cli compile-module producer samples\native\modules\replacement.terrum Helper -o artifacts\producer-v2.trm
+dotnet $cli run-module artifacts\consumer.trm artifacts\producer-v1.trm --runtime fail-fast # exits 11
+dotnet $cli run-module artifacts\consumer.trm artifacts\producer-v2.trm --runtime fail-fast # exits 22
+dotnet $cli link-module artifacts\consumer.trm artifacts\producer-v2.trm -o artifacts\linked.exe --runtime fail-fast
+```
+
+`samples/native/modules/incompatible.terrum` changes `Helper` to return `bool`.
+Its producer artifact can be compiled, but loading it with this consumer reports
+`TRM5002` before execution. The two compatible runs above use identical consumer
+bytes; no consumer source is required at load time.
+
+Each command accepts an optional trailing `--json`. Usage, artifact and
+contract errors then use schema 1 `diagnostics` on stdout; invalid module
+source uses the compiler's source-mapped schema 1 diagnostics. Successful
+`compile-module` and `link-module` commands report the written artifact's
+path, kind, size and SHA-256. Successful `run-module` still returns the
+program's raw exit code with no JSON envelope, since fail-fast execution can
+terminate the worker. `link-module` requires an explicit `--runtime fail-fast`;
+it writes only after compatibility checks and emission succeed, leaving an
+existing destination unchanged on failure.
+
+The `run-module` command is an explicitly in-process fail-fast JIT operation: a checked
+runtime failure terminates the *host process*. Use a child process for
+untrusted input. Compilation and linking keep inputs distinct from their
+output paths; module source and each artifact are limited to 4 MiB.
+
+Private and internal methods cannot be exported or imported. Functions transitively
+called by an exported producer function, including public helpers not explicitly
+exported, are stored as producer-owned implementation only,
+omitted from the consumer body table, and linked after its public imports;
+the module linker rejects consumer calls into those bodies even if a forged
+symbolic target has the same declaring type. Field visibility is part of the
+serialized layout contract. Imported members must belong to public structs;
+structs crossing an imported value signature must expose only public fields.
+Module exports require explicit `public`: unmodified top-level functions and
+structs default to `internal`, while unmodified members and constructors default
+to `private`. The consumer-owned `Main` need not be exported.
+Internal structs and private/internal fields may remain within a producer's
+implementation but are not grants to the consumer. Top-level `private`
+structs and `mut` struct-field declarations are rejected at source binding
+rather than silently dropping their modifiers; field writes to mutable
+*local values* do not change the declared field layout.

@@ -21,6 +21,7 @@ public sealed class CompilationTests
     [InlineData("int32 Main() { int32 x = 1; var y = (2 + 3) + x; return y; }")]
     [InlineData("int32 Main() { mut var x = 0i32; while (x < 10) { x = x + 1; } return x; }")]
     [InlineData("void Main() { require Ready(); } bool Ready() { return true; }")]
+    [InlineData("struct S { int32 X; } int32 Main() { return 0; }")]
     public void BindsTheExecutableProfile(string source)
     {
         var tree = SyntaxTree.Parse(source);
@@ -62,7 +63,6 @@ public sealed class CompilationTests
     [InlineData("int32 Main() { int32? x = 1; return 0; }")]
     [InlineData("int32 Main() { int64 x = 1; return 0; }")]
     [InlineData("int32 Main() { var x = \"text\"; return 0; }")]
-    [InlineData("struct S { int32 X; } int32 Main() { return 0; }")]
     [InlineData("int32 Main() { 1 + 2; return 0; }")]
     [InlineData("int32 Main() { return true + false; }")]
     [InlineData("int32 Main() { if (1i32 == true) { return 0; } return 1; }")]

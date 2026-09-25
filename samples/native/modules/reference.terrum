@@ -1,0 +1,9 @@
+public int32 Helper()
+{
+    return 11;
+}
+
+int32 Main()
+{
+    return Helper();
+}

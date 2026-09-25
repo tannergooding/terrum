@@ -20,9 +20,11 @@ The calculator must reject U+0661/U+FF11 digits, U+2212 minus and U+FF0B operato
 
 Single ASCII operators/delimiters use target-typed character intent where helpful;
 casts replace per-source numeric helpers without changing the proposed output.
-Character literal/cast syntax, family conformance, constructor inference and
-builders are still design-only. Boolean `require` runs in the native profile,
-but these sketches' bool/out publication and cleanup need later semantics.
+Character literals, family conformance, generic constructor inference and
+builders are still design-only. Checked casts among `int32`, `uint32` and
+`char16`, boolean `require`, and bool/out publication for supported copy values
+run in the native profile. These sketches' richer types and cleanup still need
+later semantics.
 See [conversion contracts](conversions.md)
 and [type families](type-families.md), not parser success, for their rationale.
 
