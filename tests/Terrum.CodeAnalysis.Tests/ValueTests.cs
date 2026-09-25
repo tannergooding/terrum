@@ -535,7 +535,7 @@ public sealed class ValueTests
     [InlineData("struct S { mut int32 A; public S() { A = 1; } } int32 Main() { return 0; }")]
     [InlineData("struct S { static int32 A; } int32 Main() { return 0; }")]
     [InlineData("struct S { int32 A = 1; } int32 Main() { return 0; }")]
-    [InlineData("struct S { bool A; bool B; bool C; } int32 Main() { return 0; }")]
+    [InlineData("struct S { int32 A; int32 B; int32 C; int32 D; int32 E; } int32 Main() { return 0; }")]
     [InlineData("private struct S { int32 A; } int32 Main() { return 0; }")]
     [InlineData("struct S { private int32 A; public S() { A = 1; } } int32 Main() { S value = new S(); return value.A; }")]
     public void InvalidValuesDoNotProduceExecutableIr(string source)

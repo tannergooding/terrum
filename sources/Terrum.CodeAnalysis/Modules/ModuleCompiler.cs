@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public static class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 3;
+    private const int Version = 4;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -34,7 +34,7 @@ public static class ModuleCompiler
             .Select(static item => Declaration(item.Function ?? throw new ModuleFormatException("Missing export declaration.")))
             .ToImmutableArray();
         var required = RequiredStructures(declarations, producer.Structures);
-        var structures = producer.Structures.Where(structure => required.Contains(structure.Name)).ToImmutableArray();
+        var structures = SelectStructures(producer.Structures, required);
         return new CompilationReference(structures,
             [.. declarations.Select(function => RemapFunction(function, producer.Structures, structures))]);
     }
@@ -50,6 +50,7 @@ public static class ModuleCompiler
     private static HashSet<string> RequiredStructures(IEnumerable<BoundFunction> functions, ImmutableArray<BoundStruct> structures)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Queue<PrimitiveType>();
         foreach (var function in functions)
         {
             Add(function.ReturnType);
@@ -59,7 +60,20 @@ public static class ModuleCompiler
             }
             if (function.DeclaringStruct is string declaring)
             {
-                _ = result.Add(declaring);
+                var index = 0;
+                while (index < structures.Length && structures[index].Name != declaring)
+                {
+                    index++;
+                }
+                Add((PrimitiveType)(100 + index));
+            }
+            _ = Calls(function.Body, Add);
+        }
+        while (pending.TryDequeue(out var type))
+        {
+            foreach (var field in structures[(int)type - 100].Fields)
+            {
+                Add(field.Type);
             }
         }
         return result;
@@ -73,7 +87,10 @@ public static class ModuleCompiler
                 {
                     throw new ModuleFormatException("Invalid declared type reference.");
                 }
-                _ = result.Add(structures[index].Name);
+                if (result.Add(structures[index].Name))
+                {
+                    pending.Enqueue(type);
+                }
             }
         }
     }
@@ -152,7 +169,7 @@ public static class ModuleCompiler
         }
         var functions = program.Functions.Where((_, index) => indexes.Contains(index)).ToImmutableArray();
         var required = RequiredStructures(functions, program.Structures);
-        var structures = program.Structures.Where(structure => required.Contains(structure.Name)).ToImmutableArray();
+        var structures = SelectStructures(program.Structures, required);
         var remapped = functions.Select(function => RemapFunction(function, program.Structures, structures));
         var module = new Module(false, -1, structures, [.. remapped.Select(function =>
             new ModuleFunction(function.Name, Contract(function, structures), function, names.Contains(function.Name)))]);
@@ -227,7 +244,7 @@ public static class ModuleCompiler
         var retained = declarations.ToDictionary(static declaration => declaration.Name, StringComparer.Ordinal);
         var required = RequiredStructures(program.Functions.Where(function => retained.ContainsKey(function.Name))
             .Select(function => retained[function.Name].Import ? Declaration(function) : function), program.Structures);
-        var structures = program.Structures.Where(structure => required.Contains(structure.Name)).ToImmutableArray();
+        var structures = SelectStructures(program.Structures, required);
         var exportedTypes = RequiredStructures(producer.Functions.Where(static function => function.Import)
             .Select(static function => Declaration(function.Function ?? throw new ModuleFormatException("Missing export."))), producer.Structures);
         var producerTypes = producer.Structures.Where(structure => exportedTypes.Contains(structure.Name))
@@ -237,7 +254,7 @@ public static class ModuleCompiler
         {
             if (producerTypes.TryGetValue(structure.Name, out var imported))
             {
-                if (!SameStructures([structure], [imported]) || structure.IsPrivate || structure.IsInternal)
+                if (!SameStructure(structure, imported, structures, producer.Structures) || structure.IsPrivate || structure.IsInternal)
                 {
                     throw new ModuleContractException($"Incompatible or inaccessible imported value layout '{structure.Name}'.");
                 }
@@ -263,7 +280,7 @@ public static class ModuleCompiler
         {
             if (sharedTypes.Contains(structure.Name)
                 && (!producerTypes.TryGetValue(structure.Name, out var actual)
-                    || !SameStructures([structure], [actual]) || actual.IsPrivate || actual.IsInternal))
+                    || !SameStructure(structure, actual, consumer.Structures, producer.Structures) || actual.IsPrivate || actual.IsInternal))
             {
                 throw new ModuleContractException($"Incompatible producer type layout '{structure.Name}'.");
             }
@@ -273,6 +290,11 @@ public static class ModuleCompiler
             ? structure : structure with { Name = "$producer." + structure.Name }).ToImmutableArray();
         structures.AddRange(renamedTypes.Where(structure => !sharedTypes.Contains(structure.Name)));
         var allStructures = structures.ToImmutable();
+        for (var index = consumer.Structures.Length; index < allStructures.Length; index++)
+        {
+            structures[index] = RemapStructure(allStructures[index], renamedTypes, allStructures);
+        }
+        allStructures = structures.ToImmutable();
         var available = producer.Functions.Where(static function => function.Import)
             .ToDictionary(function => function.Name, StringComparer.Ordinal);
         var names = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -351,7 +373,7 @@ public static class ModuleCompiler
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Only nodes with nested expressions or statements need traversal.")]
-    private static List<int> Calls(BoundStatement body)
+    private static List<int> Calls(BoundStatement body, Action<PrimitiveType>? visitType = null)
     {
         var calls = new List<int>();
         VisitStatement(body);
@@ -402,6 +424,7 @@ public static class ModuleCompiler
 
         void VisitExpression(BoundExpression expression)
         {
+            visitType?.Invoke(expression.Type);
             switch (expression)
             {
                 case BoundCall call:
@@ -475,12 +498,14 @@ public static class ModuleCompiler
         {
             return false;
         }
+        var visited = new HashSet<(int Index, bool PublicFields)>();
         if (function.DeclaringStruct is string declaring
-            && !structures.Any(structure => structure.Name == declaring && !structure.IsPrivate && !structure.IsInternal))
+            && !structures.Select((structure, index) => (structure, index))
+                .Any(item => item.structure.Name == declaring && PublicLayout((PrimitiveType)(100 + item.index), false)))
         {
             return false;
         }
-        bool PublicValue(PrimitiveType type)
+        bool PublicLayout(PrimitiveType type, bool publicFields)
         {
             var index = (int)type - 100;
             if (index < 0)
@@ -491,17 +516,23 @@ public static class ModuleCompiler
             {
                 return false;
             }
+            if (!visited.Add((index, publicFields)))
+            {
+                return true;
+            }
             var structure = structures[index];
             return !structure.IsPrivate && !structure.IsInternal
-                && structure.Fields.All(static field => !field.IsPrivate && !field.IsInternal);
+                && !structure.Fields.IsDefault
+                && structure.Fields.All(field => (!publicFields || (!field.IsPrivate && !field.IsInternal))
+                    && PublicLayout(field.Type, publicFields));
         }
-        if (!PublicValue(function.ReturnType))
+        if (!PublicLayout(function.ReturnType, true))
         {
             return false;
         }
         for (var index = 0; index < function.ParameterCount; index++)
         {
-            if (!PublicValue(function.Variables[index + parameterOffset].Type))
+            if (!PublicLayout(function.Variables[index + parameterOffset].Type, true))
             {
                 return false;
             }
@@ -509,33 +540,59 @@ public static class ModuleCompiler
         return true;
     }
 
-    private static bool SameStructures(ImmutableArray<BoundStruct> left, ImmutableArray<BoundStruct> right)
+    private static bool SameStructure(BoundStruct a, BoundStruct b,
+        ImmutableArray<BoundStruct> left, ImmutableArray<BoundStruct> right)
     {
-        if (left.Length != right.Length)
+        if (a.Name != b.Name || a.Size != b.Size || a.Fields.Length != b.Fields.Length
+            || a.IsPrivate != b.IsPrivate || a.IsInternal != b.IsInternal)
         {
             return false;
         }
-        var names = right.ToDictionary(structure => structure.Name, StringComparer.Ordinal);
-        foreach (var a in left)
+        for (var field = 0; field < a.Fields.Length; field++)
         {
-            if (!names.TryGetValue(a.Name, out var b) || a.Size != b.Size || a.Fields.Length != b.Fields.Length
-                || a.IsPrivate != b.IsPrivate || a.IsInternal != b.IsInternal)
+            var x = a.Fields[field];
+            var y = b.Fields[field];
+            if (x.Name != y.Name || x.IsPrivate != y.IsPrivate || x.IsInternal != y.IsInternal
+                || TypeName(x.Type, left) != TypeName(y.Type, right)
+                || x.Size != y.Size || x.Offset != y.Offset)
             {
                 return false;
             }
-            for (var field = 0; field < a.Fields.Length; field++)
-            {
-                var x = a.Fields[field];
-                var y = b.Fields[field];
-                if (x.Name != y.Name || x.IsPrivate != y.IsPrivate || x.IsInternal != y.IsInternal
-                    || TypeName(x.Type, left) != TypeName(y.Type, right)
-                    || x.Size != y.Size || x.Offset != y.Offset)
-                {
-                    return false;
-                }
-            }
         }
         return true;
+    }
+
+    private static PrimitiveType RemapType(PrimitiveType type, ImmutableArray<BoundStruct> source,
+        ImmutableArray<BoundStruct> destination)
+    {
+        var index = (int)type - 100;
+        if (index < 0)
+        {
+            return type;
+        }
+        if (index >= source.Length)
+        {
+            throw new ModuleFormatException("Unknown producer type reference.");
+        }
+        for (var i = 0; i < destination.Length; i++)
+        {
+            if (destination[i].Name == source[index].Name)
+            {
+                return (PrimitiveType)(100 + i);
+            }
+        }
+        throw new ModuleContractException($"Missing type '{source[index].Name}'.");
+    }
+
+    private static BoundStruct RemapStructure(BoundStruct structure, ImmutableArray<BoundStruct> source,
+        ImmutableArray<BoundStruct> destination) => structure with {
+            Fields = [.. structure.Fields.Select(field => field with { Type = RemapType(field.Type, source, destination) })],
+        };
+
+    private static ImmutableArray<BoundStruct> SelectStructures(ImmutableArray<BoundStruct> source, HashSet<string> required)
+    {
+        var selected = source.Where(structure => required.Contains(structure.Name)).ToImmutableArray();
+        return [.. selected.Select(structure => RemapStructure(structure, source, selected))];
     }
 
     private static BoundFunction RemapFunction(BoundFunction function, ImmutableArray<BoundStruct> source,
@@ -543,23 +600,7 @@ public static class ModuleCompiler
     {
         PrimitiveType Type(PrimitiveType type)
         {
-            var index = (int)type - 100;
-            if (index < 0)
-            {
-                return type;
-            }
-            if (index >= source.Length)
-            {
-                throw new ModuleFormatException("Unknown producer type reference.");
-            }
-            for (var i = 0; i < destination.Length; i++)
-            {
-                if (destination[i].Name == source[index].Name)
-                {
-                    return (PrimitiveType)(100 + i);
-                }
-            }
-            throw new ModuleContractException($"Missing type '{source[index].Name}'.");
+            return RemapType(type, source, destination);
         }
         BoundExpression Expression(BoundExpression expression)
         {

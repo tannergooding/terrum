@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct Pair
 {
@@ -17,13 +18,61 @@ typedef uint8_t (*TryPair)(int32_t, int32_t, Pair*);
 typedef uint8_t (*TryInt32)(int32_t*);
 typedef uint8_t (*TryChar16)(uint16_t*);
 typedef uint8_t (*TryBool)(uint8_t*);
+typedef struct Nested { Pair Value; } Nested;
+typedef Nested (*MakeNested)(int32_t, int32_t);
+typedef int32_t (*ReadNested)(Nested, Nested, Nested, Nested, Nested);
+typedef uint8_t (*TryNested)(uint8_t, Nested*);
+typedef struct AlignedInner { uint16_t Unit; uint8_t Valid; } AlignedInner;
+typedef struct AlignedOuter { uint16_t Prefix; AlignedInner Value; uint16_t Suffix; } AlignedOuter;
+typedef AlignedOuter (*MakeAligned)(void);
+typedef int32_t (*ReadAligned)(AlignedOuter);
+typedef struct Three { uint8_t First; uint8_t Second; uint8_t Third; } Three;
+typedef struct Six { uint16_t First; uint16_t Second; uint16_t Third; } Six;
+typedef struct Twelve { int32_t First; int32_t Second; int32_t Third; } Twelve;
+typedef struct Wide { Twelve Value; int32_t Tail; } Wide;
+typedef Three (*MakeThree)(void);
+typedef int32_t (*ReadThree)(Three);
+typedef Six (*MakeSix)(void);
+typedef int32_t (*ReadSix)(Six);
+typedef Twelve (*MakeTwelve)(int32_t, int32_t, int32_t);
+typedef int32_t (*ReadMixed)(Twelve, Three, Pair, Six, Twelve, int32_t);
+typedef Wide (*MakeWide)(int32_t);
+typedef int32_t (*ReadWide)(Wide);
+typedef Wide (*EchoWide)(Wide, Wide, Wide, Wide, Wide);
+typedef Wide (*RecurseWide)(int32_t);
+typedef uint8_t (*TryWide)(uint8_t, Wide*);
+typedef uint8_t (*TryThree)(uint8_t, Three*);
+typedef uint8_t (*TrySix)(uint8_t, Six*);
+typedef uint8_t (*TryTwelve)(uint8_t, Twelve*);
+typedef Wide (*MakeShiftedWide)(int32_t, int32_t, int32_t, int32_t, int32_t);
+typedef void* (*RawIndirectReturn)(void*, int32_t, int32_t, int32_t);
 extern int32_t CallWithCarrier(const void*, uint64_t);
+
+// Exercise the machine ABI directly: RCX is the hidden result pointer and RAX returns it.
+static int CheckGuardedReturn(const void* function, int size, int32_t first, int32_t second, int32_t third)
+{
+    __declspec(align(16)) uint8_t guarded[48];
+    memset(guarded, 0xA5, sizeof(guarded));
+    RawIndirectReturn invoke = (RawIndirectReturn)function;
+    if (invoke(guarded + 16, first, second, third) != guarded + 16)
+    {
+        return 0;
+    }
+    for (int index = 0; index < 48; index++)
+    {
+        if ((index < 16 || index >= 16 + size) && guarded[index] != 0xA5)
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
 
 // The fixture supplies source-function RVAs from the emitted unwind
 // table. Loading an EXE as a library does not execute its process entrypoint.
 int main(int argc, char** argv)
 {
-    if (argc != 10)
+    if (argc != 31)
     {
         return 90;
     }
@@ -90,6 +139,112 @@ int main(int argc, char** argv)
         || CallWithCarrier(readBool, UINT64_C(0x123456789ABCFF01)) != 1)
     {
         result = 99;
+    }
+
+    MakeNested makeNested = (MakeNested)((uint8_t*)image + strtoul(argv[10], NULL, 10));
+    ReadNested readNested = (ReadNested)((uint8_t*)image + strtoul(argv[11], NULL, 10));
+    TryNested tryNested = (TryNested)((uint8_t*)image + strtoul(argv[12], NULL, 10));
+    Nested nested = makeNested(17, 25);
+    if (nested.Value.Start != 17 || nested.Value.Length != 25
+        || readNested(nested, nested, nested, nested, nested) != 109)
+    {
+        result = 100;
+    }
+    Nested guarded[3] = { {{-1, -2}}, {{-3, -4}}, {{-5, -6}} };
+    if (!tryNested(1, &guarded[1]) || guarded[1].Value.Start != 17 || guarded[1].Value.Length != 25
+        || guarded[0].Value.Start != -1 || guarded[0].Value.Length != -2
+        || guarded[2].Value.Start != -5 || guarded[2].Value.Length != -6
+        || tryNested(0, &guarded[1]) || guarded[1].Value.Start != 17 || guarded[1].Value.Length != 25)
+    {
+        result = 101;
+    }
+    MakeAligned makeAligned = (MakeAligned)((uint8_t*)image + strtoul(argv[13], NULL, 10));
+    ReadAligned readAligned = (ReadAligned)((uint8_t*)image + strtoul(argv[14], NULL, 10));
+    AlignedOuter aligned = makeAligned();
+    if (aligned.Prefix != 1 || aligned.Value.Unit != 39 || aligned.Value.Valid != 1
+        || aligned.Suffix != 2 || readAligned(aligned) != 42)
+    {
+        result = 102;
+    }
+
+    MakeThree makeThree = (MakeThree)((uint8_t*)image + strtoul(argv[15], NULL, 10));
+    ReadThree readThree = (ReadThree)((uint8_t*)image + strtoul(argv[16], NULL, 10));
+    MakeSix makeSix = (MakeSix)((uint8_t*)image + strtoul(argv[17], NULL, 10));
+    ReadSix readSix = (ReadSix)((uint8_t*)image + strtoul(argv[18], NULL, 10));
+    MakeTwelve makeTwelve = (MakeTwelve)((uint8_t*)image + strtoul(argv[19], NULL, 10));
+    ReadMixed readMixed = (ReadMixed)((uint8_t*)image + strtoul(argv[20], NULL, 10));
+    MakeWide makeWide = (MakeWide)((uint8_t*)image + strtoul(argv[21], NULL, 10));
+    ReadWide readWide = (ReadWide)((uint8_t*)image + strtoul(argv[22], NULL, 10));
+    EchoWide echoWide = (EchoWide)((uint8_t*)image + strtoul(argv[23], NULL, 10));
+    RecurseWide recurseWide = (RecurseWide)((uint8_t*)image + strtoul(argv[24], NULL, 10));
+    TryWide tryWide = (TryWide)((uint8_t*)image + strtoul(argv[25], NULL, 10));
+    TryWide forwardWide = (TryWide)((uint8_t*)image + strtoul(argv[26], NULL, 10));
+    Three three = makeThree();
+    Six six = makeSix();
+    Twelve twelve = makeTwelve(1, 2, 7);
+    Wide wide = makeWide(9);
+    if (sizeof(Three) != 3 || sizeof(Six) != 6 || sizeof(Twelve) != 12 || sizeof(Wide) != 16
+        || three.First != 1 || three.Second != 0 || three.Third != 1
+        || readThree(three) != 42 || six.First != 4 || six.Second != 5 || six.Third != 6
+        || readSix(six) != 15 || twelve.First != 1 || twelve.Second != 2 || twelve.Third != 7
+        || readMixed(twelve, three, value, six, twelve, 19) != 60
+        || wide.Value.First != 10 || wide.Value.Second != 11 || wide.Value.Third != 12
+        || wide.Tail != 9 || readWide(wide) != 42)
+    {
+        result = 103;
+    }
+    Wide echoed = echoWide(wide, wide, wide, wide, wide);
+    Wide recursive = recurseWide(5);
+    if (readWide(echoed) != 42 || readWide(recursive) != 42)
+    {
+        result = 104;
+    }
+    __declspec(align(16)) Wide guardedWide[3] = {
+        {{-1, -2, -3}, -4}, {{-5, -6, -7}, -8}, {{-9, -10, -11}, -12}
+    };
+    if (((uintptr_t)&guardedWide[1] & 15) != 0
+        || !tryWide(1, &guardedWide[1])
+        || guardedWide[1].Value.First != 10 || guardedWide[1].Value.Second != 11
+        || guardedWide[1].Value.Third != 12 || guardedWide[1].Tail != 9
+        || guardedWide[0].Value.First != -1 || guardedWide[0].Tail != -4
+        || guardedWide[2].Value.First != -9 || guardedWide[2].Tail != -12
+        || forwardWide(0, &guardedWide[1]) || guardedWide[1].Tail != 9)
+    {
+        result = 105;
+    }
+    if (!forwardWide(1, &guardedWide[1]) || readWide(guardedWide[1]) != 42)
+    {
+        result = 106;
+    }
+    if (!CheckGuardedReturn((const void*)makeThree, 3, 0, 0, 0)
+        || !CheckGuardedReturn((const void*)makeSix, 6, 0, 0, 0)
+        || !CheckGuardedReturn((const void*)makeTwelve, 12, 1, 2, 7)
+        || !CheckGuardedReturn((const void*)makeWide, 16, 9, 0, 0))
+    {
+        result = 108;
+    }
+    TryThree tryThree = (TryThree)((uint8_t*)image + strtoul(argv[27], NULL, 10));
+    TrySix trySix = (TrySix)((uint8_t*)image + strtoul(argv[28], NULL, 10));
+    TryTwelve tryTwelve = (TryTwelve)((uint8_t*)image + strtoul(argv[29], NULL, 10));
+    MakeShiftedWide makeShiftedWide = (MakeShiftedWide)((uint8_t*)image + strtoul(argv[30], NULL, 10));
+    Three guardedThree[3] = {{101, 102, 103}, {104, 105, 106}, {107, 108, 109}};
+    Six guardedSix[3] = {{101, 102, 103}, {104, 105, 106}, {107, 108, 109}};
+    Twelve guardedTwelve[3] = {{101, 102, 103}, {104, 105, 106}, {107, 108, 109}};
+    if (!tryThree(1, &guardedThree[1]) || guardedThree[1].First != 1
+        || guardedThree[1].Second != 0 || guardedThree[1].Third != 1
+        || guardedThree[0].Third != 103 || guardedThree[2].First != 107
+        || tryThree(0, &guardedThree[1]) || guardedThree[1].Third != 1
+        || !trySix(1, &guardedSix[1]) || guardedSix[1].First != 4
+        || guardedSix[1].Second != 5 || guardedSix[1].Third != 6
+        || guardedSix[0].Third != 103 || guardedSix[2].First != 107
+        || trySix(0, &guardedSix[1]) || guardedSix[1].Third != 6
+        || !tryTwelve(1, &guardedTwelve[1]) || guardedTwelve[1].First != 1
+        || guardedTwelve[1].Second != 2 || guardedTwelve[1].Third != 7
+        || guardedTwelve[0].Third != 103 || guardedTwelve[2].First != 107
+        || tryTwelve(0, &guardedTwelve[1]) || guardedTwelve[1].Third != 7
+        || readWide(makeShiftedWide(1, 2, 3, 1, 2)) != 42)
+    {
+        result = 107;
     }
 
     if (!FreeLibrary(image))

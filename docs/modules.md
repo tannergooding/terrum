@@ -1,6 +1,6 @@
 # Bounded semantic modules
 
-The version 3 `.trm` format records the semantic profile and persists verified, typed, source-mapped structured IR,
+The version 4 `.trm` format records the semantic profile and persists verified, typed, source-mapped structured IR,
 not source text or a native DLL. `CreateProducer` stores selected function bodies
 and exported contracts. `CreateConsumer` stores its own function bodies and the
 reference producer's declaration contracts, **not** producer bodies.
@@ -109,6 +109,16 @@ dotnet $cli compile-module consumer self-host\RangeTests.terrum artifacts\compil
 dotnet $cli run-module artifacts\range-tests.trm artifacts\compiler-values.trm --runtime fail-fast # exits 0
 ```
 
+`Token` also compiles separately from its tests. Its nested `SourceRange` makes
+the value twelve bytes, exercising indirect arguments and results rather than
+the scalar-register-only profile:
+
+```powershell
+dotnet $cli compile-module producer self-host\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source self-host\Token.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export Terrum.CodeAnalysis.Token.#ctor -o artifacts\token-values.trm
+dotnet $cli compile-module consumer self-host\TokenTests.terrum artifacts\token-values.trm --source samples\native\modules\token-entry.terrum -o artifacts\token-tests.trm
+dotnet $cli run-module artifacts\token-tests.trm artifacts\token-values.trm --runtime fail-fast # exits 0
+```
+
 `samples/native/modules/incompatible.terrum` changes `Helper` to return `bool`.
 Its producer artifact can be compiled, but loading it with this consumer reports
 `TRM5002` before execution. The two compatible runs above use identical consumer
@@ -150,7 +160,10 @@ structs and `mut` struct-field declarations are rejected at source binding
 rather than silently dropping their modifiers; field writes to mutable
 *local values* do not change the declared field layout.
 
-The proof supports one producer reference per consumer, compact primitive-field
-layouts and the existing native value profile. Version 2 artifacts are rejected;
+The proof supports one producer reference per consumer, compact acyclic value
+layouts and the existing native value profile. Nested field types are retained
+transitively and remapped across artifact-local type indexes. Every imported
+nested layout participates in replacement checking, including field types,
+order and access. Versions 2 and 3 are rejected;
 recreate them from source. Multi-producer identity/version resolution, dependency
 cycles, resilient public layouts and native DLL import slots remain later work.

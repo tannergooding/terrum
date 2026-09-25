@@ -1,0 +1,13 @@
+namespace Terrum.CodeAnalysis;
+
+public struct Token
+{
+    public int32 Kind;
+    public SourceRange Range;
+
+    public Token(int32 kind, SourceRange range)
+    {
+        Kind = kind;
+        Range = range;
+    }
+}

@@ -124,7 +124,7 @@ public sealed class CliTests
         var (semanticExit, output, _) = await RunAsync(source, "analyze", "-", "--json");
         Assert.Equal(1, semanticExit);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal("native-2", document.RootElement.GetProperty("profile").GetString());
+        Assert.Equal("native-3", document.RootElement.GetProperty("profile").GetString());
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
     }
 

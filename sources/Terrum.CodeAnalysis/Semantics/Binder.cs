@@ -25,6 +25,9 @@ internal sealed class Binder
     private readonly List<SourceDiagnostic> _sourceDiagnostics = [];
     private readonly List<Signature> _signatures = [];
     private readonly List<BoundStruct> _structs = [];
+    private readonly Dictionary<int, (SyntaxTree Tree, SyntaxNode Declaration)> _structDeclarations = [];
+    private readonly HashSet<int> _layingOut = [];
+    private readonly HashSet<int> _laidOut = [];
     private readonly Dictionary<string, PrimitiveType> _structNames = new(StringComparer.Ordinal);
     private readonly ImmutableArray<HostBuffer> _buffers;
     private readonly Dictionary<string, int> _functions = new(StringComparer.Ordinal);
@@ -89,6 +92,7 @@ internal sealed class Binder
             {
                 _structNames.Add(structure.Name, (PrimitiveType)(100 + _structs.Count));
                 _structs.Add(structure);
+                _ = _laidOut.Add(_structs.Count - 1);
             }
             foreach (var function in _reference.Functions)
             {
@@ -151,9 +155,28 @@ internal sealed class Binder
             {
                 if (child is SyntaxNode { Kind: SyntaxKind.StructDeclaration } structure)
                 {
-                    DeclareStruct(structure);
+                    var name = StructName(structure).Text;
+                    var qualified = string.IsNullOrEmpty(_namespace) ? name : _namespace + "." + name;
+                    var index = _structs.Count;
+                    if (index >= SemanticVerifier.MaximumVariables)
+                    {
+                        Report("TRM3016", "Source exceeds the supported number of value layouts.", structure.Span);
+                        return null;
+                    }
+                    if (!_structNames.TryAdd(qualified, (PrimitiveType)(100 + index)))
+                    {
+                        Report("TRM3003", $"Duplicate struct '{name}'.", structure.Span);
+                        continue;
+                    }
+                    _structs.Add(new BoundStruct(qualified, [], 0));
+                    _structDeclarations.Add(index, (tree, structure));
                 }
             }
+        }
+
+        foreach (var index in _structDeclarations.Keys)
+        {
+            DeclareStruct(index);
         }
 
         foreach (var tree in _trees)
@@ -317,8 +340,19 @@ internal sealed class Binder
         return builder.ToString();
     }
 
-    private void DeclareStruct(SyntaxNode declaration)
+    private void DeclareStruct(int index)
     {
+        if (_laidOut.Contains(index))
+        {
+            return;
+        }
+        var (tree, declaration) = _structDeclarations[index];
+        SetContext(tree);
+        if (_layingOut.Count >= MaximumSemanticDepth || !_layingOut.Add(index))
+        {
+            Report("TRM3005", "Value layouts must be acyclic and within the semantic nesting limit.", declaration.Span);
+            return;
+        }
         var name = StructName(declaration);
         var qualified = string.IsNullOrEmpty(_namespace) ? name.Text : _namespace + "." + name.Text;
         var isPublic = false;
@@ -339,10 +373,6 @@ internal sealed class Binder
         {
             Report("TRM3001", "A struct can declare only one visibility modifier.", declaration.Span);
         }
-        if (!_structNames.TryAdd(qualified, (PrimitiveType)(100 + _structs.Count)))
-        {
-            Report("TRM3003", $"Duplicate struct '{name.Text}'.", name.Span);
-        }
         var fields = ImmutableArray.CreateBuilder<BoundStructField>();
         var size = 0;
         var alignment = 1;
@@ -360,22 +390,22 @@ internal sealed class Binder
             var typeNode = (SyntaxNode)field.Children[^3];
             var fieldName = ((SyntaxTokenElement)field.Children[^2]).Token;
             var type = BindType(typeNode, allowVoid: false);
-            var width = type switch {
-                PrimitiveType.Bool => 1,
-                PrimitiveType.Char16 => 2,
-                PrimitiveType.Int32 or PrimitiveType.UInt32 => 4,
-                PrimitiveType.Void => 0,
-                _ => 0,
-            };
+            if ((int)type >= 100 && !_laidOut.Contains((int)type - 100))
+            {
+                DeclareStruct((int)type - 100);
+                SetContext(tree);
+            }
+            var width = ValueLayout.Size(type, _structs);
+            var fieldAlignment = width == 0 ? 1 : ValueLayout.Alignment(type, _structs);
             var duplicate = false;
             foreach (var previous in fields)
             {
                 duplicate |= previous.Name == fieldName.Text;
             }
-            var offset = width == 0 ? size : (size + width - 1) & -width;
-            if (width == 0 || offset + width > 8 || duplicate)
+            var offset = (size + fieldAlignment - 1) & -fieldAlignment;
+            if (width == 0 || offset + width > ValueLayout.MaximumSize || duplicate)
             {
-                Report("TRM3005", "Structs require distinct, naturally aligned primitive fields fitting one 8-byte scalar register.", field.Span);
+                Report("TRM3005", "Structs require distinct, initialized value fields within the 16-byte aggregate profile.", field.Span);
                 continue;
             }
             var fieldIsPublic = false;
@@ -403,18 +433,20 @@ internal sealed class Binder
                 IsInternal = fieldIsInternal,
             });
             size = offset + width;
-            alignment = Math.Max(alignment, width);
+            alignment = Math.Max(alignment, fieldAlignment);
         }
         if (fields.Count == 0)
         {
             Report("TRM3005", "A struct requires at least one field.", declaration.Span);
         }
         size = (size + alignment - 1) & -alignment;
-        if (size is not (1 or 2 or 4 or 8))
+        if (size is < 1 or > ValueLayout.MaximumSize)
         {
-            Report("TRM3005", "A struct must have a naturally aligned size of 1, 2, 4, or 8 bytes for the Windows scalar ABI.", declaration.Span);
+            Report("TRM3005", "A struct must have a naturally aligned size from 1 through 16 bytes.", declaration.Span);
         }
-        _structs.Add(new BoundStruct(qualified, fields.ToImmutable(), size) { IsInternal = !isPublic });
+        _structs[index] = new BoundStruct(qualified, fields.ToImmutable(), size) { IsInternal = !isPublic };
+        _ = _layingOut.Remove(index);
+        _ = _laidOut.Add(index);
     }
 
     private static SyntaxToken StructName(SyntaxNode declaration)

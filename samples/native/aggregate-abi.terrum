@@ -67,3 +67,235 @@ int32 Main()
 {
     return ReadPair(MakePair(17, 25));
 }
+
+public struct Nested
+{
+    public Pair Value;
+    public Nested(int32 first, int32 second)
+    {
+        Value = new Pair(first, second);
+    }
+}
+
+public Nested MakeNested(int32 first, int32 second)
+{
+    return new Nested(first, second);
+}
+
+public int32 ReadNested(Nested first, Nested second, Nested third, Nested fourth, Nested fifth)
+{
+    return first.Value.Start + second.Value.Length + third.Value.Start + fourth.Value.Length + fifth.Value.Length;
+}
+
+public bool TryNested(bool success, out Nested value)
+{
+    if (!success)
+    {
+        return false;
+    }
+    value = new Nested(1, 2);
+    value.Value = new Pair(17, 25);
+    return true;
+}
+
+public struct AlignedInner
+{
+    public char16 Unit;
+    public bool Valid;
+    public AlignedInner(char16 unit)
+    {
+        Unit = unit;
+        Valid = true;
+    }
+}
+
+public struct AlignedOuter
+{
+    public char16 Prefix;
+    public AlignedInner Value;
+    public char16 Suffix;
+    public AlignedOuter()
+    {
+        Prefix = (char16)1;
+        Value = new AlignedInner((char16)39);
+        Suffix = (char16)2;
+    }
+}
+
+public AlignedOuter MakeAligned()
+{
+    return new AlignedOuter();
+}
+
+public int32 ReadAligned(AlignedOuter value)
+{
+    if (!value.Value.Valid)
+    {
+        return -1;
+    }
+    return (int32)value.Prefix + (int32)value.Value.Unit + (int32)value.Suffix;
+}
+
+public struct Three
+{
+    public bool First;
+    public bool Second;
+    public bool Third;
+    public Three(bool first, bool second, bool third)
+    {
+        First = first;
+        Second = second;
+        Third = third;
+    }
+}
+
+public Three MakeThree()
+{
+    return new Three(true, false, true);
+}
+
+public int32 ReadThree(Three value)
+{
+    if (value.First && !value.Second && value.Third)
+    {
+        return 42;
+    }
+    return -1;
+}
+
+public bool TryThree(bool success, out Three value)
+{
+    if (!success)
+    {
+        return false;
+    }
+    value = MakeThree();
+    return true;
+}
+
+public struct Six
+{
+    public char16 First;
+    public char16 Second;
+    public char16 Third;
+    public Six(char16 first, char16 second, char16 third)
+    {
+        First = first;
+        Second = second;
+        Third = third;
+    }
+}
+
+public Six MakeSix()
+{
+    return new Six((char16)4, (char16)5, (char16)6);
+}
+
+public int32 ReadSix(Six value)
+{
+    return (int32)value.First + (int32)value.Second + (int32)value.Third;
+}
+
+public bool TrySix(bool success, out Six value)
+{
+    if (!success)
+    {
+        return false;
+    }
+    value = MakeSix();
+    return true;
+}
+
+public struct Twelve
+{
+    public int32 First;
+    public int32 Second;
+    public int32 Third;
+    public Twelve(int32 first, int32 second, int32 third)
+    {
+        First = first;
+        Second = second;
+        Third = third;
+    }
+}
+
+public Twelve MakeTwelve(int32 first, int32 second, int32 third)
+{
+    return new Twelve(first, second, third);
+}
+
+public bool TryTwelve(bool success, out Twelve value)
+{
+    if (!success)
+    {
+        return false;
+    }
+    value = MakeTwelve(1, 2, 7);
+    return true;
+}
+
+public int32 ReadMixed(Twelve first, Three second, Pair third, Six fourth, Twelve fifth, int32 sixth)
+{
+    if (!second.First || second.Second || !second.Third)
+    {
+        return -1;
+    }
+    return first.First + first.Second + third.Length + (int32)fourth.Third + fifth.Third + sixth;
+}
+
+public struct Wide
+{
+    public Twelve Value;
+    public int32 Tail;
+    public Wide(int32 tail)
+    {
+        Value = new Twelve(10, 11, 12);
+        Tail = tail;
+    }
+}
+
+public Wide MakeWide(int32 tail)
+{
+    return new Wide(tail);
+}
+
+public Wide MakeShiftedWide(int32 first, int32 second, int32 third, int32 fourth, int32 fifth)
+{
+    return new Wide(first + second + third + fourth + fifth);
+}
+
+public int32 ReadWide(Wide value)
+{
+    return value.Value.First + value.Value.Second + value.Value.Third + value.Tail;
+}
+
+public Wide EchoWide(Wide first, Wide second, Wide third, Wide fourth, Wide fifth)
+{
+    return fifth;
+}
+
+public Wide RecurseWide(int32 depth)
+{
+    if (depth == 0)
+    {
+        return new Wide(9);
+    }
+    return RecurseWide(depth - 1);
+}
+
+public bool TryWide(bool success, out Wide value)
+{
+    if (!success)
+    {
+        return false;
+    }
+    value = new Wide(1);
+    value.Value = new Twelve(10, 11, 12);
+    value.Tail = 9;
+    return true;
+}
+
+public bool ForwardWide(bool success, out Wide value)
+{
+    return TryWide(success, out value);
+}

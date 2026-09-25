@@ -19,7 +19,7 @@ public sealed record SourceDiagnostic(SyntaxTree SyntaxTree, Diagnostic Diagnost
 public sealed class Compilation
 {
     /// <summary>The version of the supported executable semantic profile.</summary>
-    public const string ProfileVersion = "native-2";
+    public const string ProfileVersion = "native-3";
 
     private Compilation(SyntaxTree syntaxTree, ImmutableArray<Diagnostic> diagnostics, BoundProgram? program,
         ImmutableArray<SyntaxTree> syntaxTrees = default, ImmutableArray<SourceDiagnostic> sourceDiagnostics = default)

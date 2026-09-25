@@ -29,14 +29,14 @@ public enum PrimitiveType
 /// <param name="EntryPoint">The index of the parameterless Main function, or -1 for a library requiring linking.</param>
 public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int EntryPoint)
 {
-    /// <summary>Validated scalar ABI value layouts; type identifiers are 100 + declaration index.</summary>
+    /// <summary>Validated value layouts; type identifiers are 100 + declaration index.</summary>
     public ImmutableArray<BoundStruct> Structures { get; init; } = [];
 
     /// <summary>Compiler-supplied, bounded buffers; never represented as source values or raw addresses.</summary>
     public ImmutableArray<HostBuffer> Buffers { get; init; } = [];
 }
 
-/// <summary>A scalar-register ABI value type of at most eight bytes, with no references or aliases.</summary>
+/// <summary>A compact value type of at most sixteen bytes, with no references or aliases.</summary>
 public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> Fields, int Size)
 {
     /// <summary>Whether access is limited to its declaring scope.</summary>

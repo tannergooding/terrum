@@ -1,0 +1,13 @@
+namespace Terrum.CodeAnalysis.Tests;
+
+int32 Main()
+{
+    mut int32 iteration = 0;
+    while (iteration < 3)
+    {
+        require CheckToken();
+        iteration = iteration + 1;
+    }
+
+    return 0;
+}

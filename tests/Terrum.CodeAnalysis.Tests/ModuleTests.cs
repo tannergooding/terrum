@@ -66,8 +66,10 @@ public sealed class ModuleTests
         }
     }
 
-    [Fact]
-    public async Task CliBuildsMultiSourceSelfHostLibraryAndConsumerAsync()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CliBuildsMultiSourceSelfHostLibraryAndConsumerAsync(bool tokens)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var prefix = Path.Combine(AppContext.BaseDirectory, $"self-host-cli-{Guid.NewGuid():N}");
@@ -76,17 +78,21 @@ public sealed class ModuleTests
         var image = prefix + ".exe";
         try
         {
-            var (libraryExit, libraryError) = await RunCliAsync("compile-module", "producer",
+            var arguments = new List<string> { "compile-module", "producer",
                 Path.Combine(root, "self-host", "SourceRange.terrum"), "Terrum.CodeAnalysis.SourceRange.TryCreate",
-                "--source", Path.Combine(root, "self-host", "CharacterFacts.terrum"),
+                "--source", Path.Combine(root, "self-host", tokens ? "Token.terrum" : "CharacterFacts.terrum"),
                 "--export", "Terrum.CodeAnalysis.SourceRange.GetEnd",
-                "--export", "Terrum.CodeAnalysis.IsAsciiDigit", "--export", "Terrum.CodeAnalysis.IsLineBreak",
-                "--export", "Terrum.CodeAnalysis.GetDecimalDigit", "-o", producer).ConfigureAwait(true);
+            };
+            arguments.AddRange(tokens ? ["--export", "Terrum.CodeAnalysis.Token.#ctor"]
+                : ["--export", "Terrum.CodeAnalysis.IsAsciiDigit", "--export", "Terrum.CodeAnalysis.IsLineBreak",
+                    "--export", "Terrum.CodeAnalysis.GetDecimalDigit"]);
+            arguments.AddRange(["-o", producer]);
+            var (libraryExit, libraryError) = await RunCliAsync([.. arguments]).ConfigureAwait(true);
             Assert.Equal(0, libraryExit);
             Assert.Empty(libraryError);
             var (consumerExit, consumerError) = await RunCliAsync("compile-module", "consumer",
-                Path.Combine(root, "self-host", "RangeTests.terrum"), producer,
-                "--source", Path.Combine(root, "samples", "native", "modules", "range-entry.terrum"),
+                Path.Combine(root, "self-host", tokens ? "TokenTests.terrum" : "RangeTests.terrum"), producer,
+                "--source", Path.Combine(root, "samples", "native", "modules", tokens ? "token-entry.terrum" : "range-entry.terrum"),
                 "-o", consumer).ConfigureAwait(true);
             Assert.Equal(0, consumerExit);
             Assert.Empty(consumerError);
@@ -866,11 +872,13 @@ public sealed class ModuleTests
         var producer = ModuleCompiler.CreateProducer(initial, ["Helper"]);
         var consumer = ModuleCompiler.CreateConsumer(initial, producer);
         var version = (byte[])consumer.Clone();
-        version[4] = 4;
+        version[4] = 5;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
         version[4] = 1;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
         version[4] = 2;
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
+        version[4] = 3;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(consumer[..^1], producer));
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(new byte[(4 * 1024 * 1024) + 1], producer));

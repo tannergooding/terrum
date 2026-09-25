@@ -33,7 +33,13 @@ var start = new ProcessStartInfo(Path.GetFullPath(Path.Combine("artifacts", "abi
     CreateNoWindow = true,
 };
 start.ArgumentList.Add(imagePath);
-foreach (var name in new[] { "MakePair", "ReadPair", "TryPair", "TryInt32", "TryChar16", "TryBool", "ReadChar16", "ReadBool" })
+foreach (var name in new[] {
+    "MakePair", "ReadPair", "TryPair", "TryInt32", "TryChar16", "TryBool", "ReadChar16", "ReadBool",
+    "MakeNested", "ReadNested", "TryNested", "MakeAligned", "ReadAligned",
+    "MakeThree", "ReadThree", "MakeSix", "ReadSix", "MakeTwelve", "ReadMixed",
+    "MakeWide", "ReadWide", "EchoWide", "RecurseWide", "TryWide", "ForwardWide",
+    "TryThree", "TrySix", "TryTwelve", "MakeShiftedWide",
+})
 {
     var index = -1;
     for (var i = 0; i < program.Functions.Length; i++)

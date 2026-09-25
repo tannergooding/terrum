@@ -84,16 +84,39 @@ public static class SemanticVerifier
             }
         }
         var structNames = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var structure in program.Structures)
+        var layoutStates = new byte[program.Structures.Length];
+        var alignments = new int[program.Structures.Length];
+        var layoutHeights = new int[program.Structures.Length];
+        for (var index = 0; index < program.Structures.Length; index++)
         {
+            VerifyLayout(index, 0);
+        }
+
+        void VerifyLayout(int index, int depth)
+        {
+            if (depth >= MaximumDepth || layoutStates[index] == 1)
+            {
+                throw Invalid();
+            }
+            if (layoutStates[index] == 2)
+            {
+                if (depth + layoutHeights[index] > MaximumDepth)
+                {
+                    throw Invalid();
+                }
+                return;
+            }
+            layoutStates[index] = 1;
+            var structure = program.Structures[index];
             if (structure is null || string.IsNullOrWhiteSpace(structure.Name) || !structNames.Add(structure.Name)
                 || (structure.IsPrivate && structure.IsInternal)
-                || structure.Fields.IsDefaultOrEmpty || structure.Size is not (1 or 2 or 4 or 8))
+                || structure.Fields.IsDefaultOrEmpty || structure.Size is < 1 or > ValueLayout.MaximumSize)
             {
                 throw Invalid();
             }
             var offset = 0;
             var alignment = 1;
+            var height = 1;
             var fieldNames = new HashSet<string>(StringComparer.Ordinal);
             foreach (var field in structure.Fields)
             {
@@ -101,27 +124,35 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                var width = field.Type switch {
-                    PrimitiveType.Bool => 1,
-                    PrimitiveType.Char16 => 2,
-                    PrimitiveType.Int32 or PrimitiveType.UInt32 => 4,
-                    PrimitiveType.Void => 0,
-                    _ => 0,
-                };
-                var alignedOffset = width == 0 ? offset : (offset + width - 1) & -width;
+                var nested = (int)field.Type >= 100 ? (int)field.Type - 100 : -1;
+                if (nested >= program.Structures.Length)
+                {
+                    throw Invalid();
+                }
+                if (nested >= 0)
+                {
+                    VerifyLayout(nested, depth + 1);
+                    height = Math.Max(height, layoutHeights[nested] + 1);
+                }
+                var width = ValueLayout.Size(field.Type, program.Structures);
+                var fieldAlignment = nested >= 0 ? alignments[nested] : width;
+                var alignedOffset = fieldAlignment == 0 ? offset : (offset + fieldAlignment - 1) & -fieldAlignment;
                 if (string.IsNullOrWhiteSpace(field.Name) || !fieldNames.Add(field.Name)
                     || (field.IsPrivate && field.IsInternal)
-                    || width == 0 || field.Size != width || field.Offset != alignedOffset || alignedOffset + width > 8)
+                    || width == 0 || field.Size != width || field.Offset != alignedOffset || alignedOffset + width > ValueLayout.MaximumSize)
                 {
                     throw Invalid();
                 }
                 offset = alignedOffset + width;
-                alignment = Math.Max(alignment, width);
+                alignment = Math.Max(alignment, fieldAlignment);
             }
-            if (((offset + alignment - 1) & -alignment) != structure.Size || structure.Fields.Length > 8)
+            if (((offset + alignment - 1) & -alignment) != structure.Size || structure.Fields.Length > ValueLayout.MaximumSize)
             {
                 throw Invalid();
             }
+            alignments[index] = alignment;
+            layoutHeights[index] = height;
+            layoutStates[index] = 2;
         }
 
         var names = new HashSet<string>(StringComparer.Ordinal);
@@ -668,7 +699,9 @@ public static class SemanticVerifier
                     var argument = call.Arguments[i];
                     if (argument is BoundOutArgument output)
                     {
-                        if (output.Variable < function.ParameterCount || output.Variable >= initialized.Length
+                        if (output.Variable < 0 || output.Variable >= initialized.Length
+                            || (output.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                                && (!function.Variables[output.Variable].IsOut || output.DeclaresVariable))
                             || output.Type != function.Variables[output.Variable].Type
                             || !outTargets.Add(output.Variable)
                             || (output.DeclaresVariable && (!declarations.Add(output.Variable) || initialized[output.Variable]))

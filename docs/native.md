@@ -1,6 +1,6 @@
 # Windows x64 native profile
 
-`native-2` is a deliberately bounded executable language profile, separate from
+`native-3` is a deliberately bounded executable language profile, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
@@ -61,16 +61,22 @@ must diagnose unsupported semantics. No source library is silently assumed.
 
 ## Values, places and conditional publication
 
-Struct fields contain supported primitive values, with explicit constructors
-and naturally aligned declaration-order layouts of 1, 2, 4 or 8 bytes.
+Struct fields contain supported primitive values or other acyclic compact structs, with explicit constructors
+and naturally aligned declaration-order layouts of 1 through 16 bytes.
 Constructors must initialize every field
 before reading or returning the entire receiver; individual initialized fields
 can be read during construction. Copying a value does not create a storage
 alias. Field writes require an accessible field and mutable receiver, except
 while initializing the constructor's receiver. Instance methods receive copies;
 mutating instance methods are rejected rather than silently losing writes.
-Larger/nested/reference-containing aggregates and implicit construction are
-not implemented.
+Layouts resolve across source files regardless of declaration order; recursive
+value containment is rejected. Nested field reads and whole-field replacement
+preserve value copies, visibility and constructor initialization. A nested
+aggregate's alignment is its maximum field alignment, not its byte size.
+Sizes other than 1, 2, 4 and 8 require the Windows indirect aggregate ABI;
+the compiler owns argument copies and result storage, not source-visible pointers.
+Chained subfield mutation, aggregates over 16 bytes, reference-containing aggregates and implicit
+construction are not implemented.
 
 Top-level functions and types default to `internal`; struct members,
 constructors and fields default to `private`. Module exports require explicit
@@ -95,8 +101,9 @@ the true-path facts forward. Owning outputs and exceptional cleanup are
 rejected, not simulated by this scratch protocol.
 
 [`self-host/SourceRange`](../self-host/SourceRange.terrum),
-[`CharacterFacts`](../self-host/CharacterFacts.terrum) and
-[`RangeTests`](../self-host/RangeTests.terrum) execute through this profile.
+[`CharacterFacts`](../self-host/CharacterFacts.terrum),
+[`RangeTests`](../self-host/RangeTests.terrum) and
+[`Token`](../self-host/Token.terrum) execute through this profile.
 The [scanner component](scanner.md) additionally uses fixed checked buffers;
 this does not implement a general span ABI or a complete lifetime checker.
 
@@ -169,6 +176,14 @@ nested calls. Functions preserve nonvolatile registers and publish Windows
 unwind metadata for stack adjustment; those records support platform stack
 walking, not Terrum exception handling.
 
+Aggregate sizes of 1, 2, 4 and 8 bytes use integer carriers. Other supported
+sizes use pointers to caller-owned 16-byte-aligned copies. Indirect results
+receive a hidden first argument in RCX, shifting explicit arguments by one
+position; the callee returns that storage address in RAX. These addresses are
+backend storage, not language pointers, escaping borrows or shared mutable
+references. Outputs use separate exact-size publication into the caller's
+storage only on a true return.
+
 The independent ABI fixture uses a C caller, rather than validating calls only
 by having Terrum call itself. From an x64 Visual Studio developer shell at the
 repository root:
@@ -179,8 +194,9 @@ cl /nologo /W4 /WX /O2 /TC tests\native\abi-probe.c /Foartifacts\abi-probe.obj /
 dotnet run --file scripts\check-native-abi.cs
 ```
 
-It checks an eight-byte aggregate passed/returned by value, true/false output
-publication, guard storage around scalar output destinations, and narrow
+It checks flat and nested direct and indirect aggregates passed/returned by value,
+hidden results and register/stack arguments, true/false output publication, guard storage
+around scalar and aggregate output destinations, and narrow
 arguments with deliberately unspecified upper register bits. The script
 obtains function addresses from encoder ranges; the development executable
 does not advertise an exported native API.

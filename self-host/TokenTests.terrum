@@ -1,0 +1,17 @@
+namespace Terrum.CodeAnalysis.Tests;
+
+public static bool CheckToken()
+{
+    if (!SourceRange.TryCreate(2, 3, out var range))
+    {
+        return false;
+    }
+
+    Token token = new Token(7, range);
+    mut Token copy = token;
+    require SourceRange.TryCreate(int32.MaxValue, 0, out var end);
+    copy.Range = end;
+
+    return token.Kind == 7 && token.Range.GetEnd() == 5
+        && copy.Kind == 7 && copy.Range.GetEnd() == int32.MaxValue;
+}
