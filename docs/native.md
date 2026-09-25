@@ -136,6 +136,11 @@ the same native call ABI; the no-return proof does not require a fabricated
 return value. Catch/cleanup, root tracking and a catchable-exception runtime
 remain unimplemented.
 
+The independent [Windows SEH ABI probe](native-seh.md) checks filter search,
+normal/exceptional finally order, frame-local access and dynamic unwind-table
+lifetime against a C reference. It is a runtime prerequisite, not an alternate
+runtime policy accepted by this compiler.
+
 ## Executable language
 
 | Area | Supported |
