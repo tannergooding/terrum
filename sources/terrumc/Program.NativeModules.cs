@@ -14,10 +14,10 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
-    private const string NativeModuleUsage = "Usage: terrumc compile-native producer <source> <identity> --export <name> [--export <name>] [--source <source>] -o <producer.trmn> --runtime fail-fast [--json]; "
-        + "terrumc compile-native consumer <source> <producer.trmn> [--source <source>] -o <consumer.trmn> --runtime fail-fast [--json]; "
+    private const string NativeModuleUsage = "Usage: terrumc compile-native producer <source> <identity> --export <name> [--export <name>] [--source <source>] -o <producer.trmn> --runtime <fail-fast|checked-exceptions> [--json]; "
+        + "terrumc compile-native consumer <source> <producer.trmn> [--source <source>] -o <consumer.trmn> --runtime <fail-fast|checked-exceptions> [--json]; "
         + "terrumc validate-native <consumer.trmn> <producer.trmn> [--json]; "
-        + "terrumc run-native <consumer.trmn> <producer.trmn> --runtime fail-fast [--json]";
+        + "terrumc run-native <consumer.trmn> <producer.trmn> --runtime <fail-fast|checked-exceptions> [--json]";
 
     private static int RunNativeModuleCommand(string[] args, bool json)
     {
@@ -32,7 +32,7 @@ internal static partial class Program
         {
             if (count >= 8 && args[0] == "compile-native" && args[1] is "producer" or "consumer")
             {
-                if (!TryReadModuleOptions(args, count, out var paths, out var exports, out var output))
+                if (!TryReadModuleOptions(args, count, out var paths, out var exports, out var output, out var runtimePolicy))
                 {
                     WriteInputError(json, "TRM2000", NativeModuleUsage);
                     return 2;
@@ -47,11 +47,12 @@ internal static partial class Program
                 }
                 var snapshots = ReadModuleSources(paths);
                 var reference = producer ? null : ReadModuleFile(args[3], 16 * 1024 * 1024);
-                var compilation = reference is null ? Compilation.CreateLibrary(snapshots)
-                    : Compilation.Create(snapshots, NativeModuleCompiler.CreateReference(reference));
+                var compilation = reference is null ? Compilation.CreateLibrary(snapshots, (BoundRuntimePolicy)runtimePolicy)
+                    : Compilation.Create(snapshots, NativeModuleCompiler.CreateReference(reference), (BoundRuntimePolicy)runtimePolicy);
                 if (compilation.HasErrors)
                 {
-                    WriteCompilationResult(args[0], compilation, compilation.SourceDiagnostics, false, null, null, json);
+                    WriteCompilationResult(args[0], compilation, compilation.SourceDiagnostics, false, null, null, json,
+                        runtimePolicy);
                     return 1;
                 }
                 if (compilation.Program is not BoundProgram program)
@@ -59,30 +60,31 @@ internal static partial class Program
                     throw new InvalidOperationException("A successful compilation must contain a bound program.");
                 }
                 var bytes = reference is null
-                    ? NativeModuleCompiler.CreateProducer(program, exports, args[3], NativeRuntimePolicy.FailFast)
-                    : NativeModuleCompiler.CreateConsumer(program, reference, NativeRuntimePolicy.FailFast);
+                    ? NativeModuleCompiler.CreateProducer(program, exports, args[3], runtimePolicy)
+                    : NativeModuleCompiler.CreateConsumer(program, reference, runtimePolicy);
                 var info = NativeModuleCompiler.Inspect(bytes);
                 WriteArtifact(outputPath, bytes);
                 if (json)
                 {
-                    WriteNativeModuleArtifactJson(args[0], outputPath, bytes, info);
+                    WriteNativeModuleArtifactJson(args[0], outputPath, bytes, info, runtimePolicy);
                 }
                 else
                 {
-                    Console.WriteLine($"{outputPath}: {info.Identity} native {(info.IsConsumer ? "consumer" : "producer")} (fail-fast runtime)");
+                    Console.WriteLine($"{outputPath}: {info.Identity} native {(info.IsConsumer ? "consumer" : "producer")} ({PolicyName(runtimePolicy)} runtime)");
                 }
                 return 0;
             }
             if (count == 3 && args[0] == "validate-native")
             {
-                NativeModuleCompiler.Validate(ReadModuleFile(args[1], 16 * 1024 * 1024),
+                var consumer = ReadModuleFile(args[1], 16 * 1024 * 1024);
+                NativeModuleCompiler.Validate(consumer,
                     ReadModuleFile(args[2], 16 * 1024 * 1024));
                 if (json)
                 {
                     using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
                     writer.WriteStartObject();
                     writer.WriteNumber("schemaVersion", 1);
-                    writer.WriteString("profile", Compilation.ProfileVersion);
+                    writer.WriteString("profile", Profile(NativeModuleCompiler.Inspect(consumer).RuntimePolicy));
                     writer.WriteString("command", args[0]);
                     writer.WriteBoolean("success", true);
                     writer.WriteStartArray("diagnostics");
@@ -95,10 +97,13 @@ internal static partial class Program
                 }
                 return 0;
             }
-            if (count == 5 && args[0] == "run-native" && args[3] == "--runtime" && args[4] == "fail-fast")
+            if (count == 5 && args[0] == "run-native" && args[3] == "--runtime"
+                && args[4] is "fail-fast" or "checked-exceptions")
             {
                 return NativeModuleCompiler.RunAsync(ReadModuleFile(args[1], 16 * 1024 * 1024),
-                    ReadModuleFile(args[2], 16 * 1024 * 1024), TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
+                    ReadModuleFile(args[2], 16 * 1024 * 1024), TimeSpan.FromSeconds(30),
+                    args[4] == "fail-fast" ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions)
+                    .GetAwaiter().GetResult();
             }
 
             WriteInputError(json, "TRM2000", NativeModuleUsage);
@@ -127,12 +132,13 @@ internal static partial class Program
         }
     }
 
-    private static void WriteNativeModuleArtifactJson(string command, string path, byte[] bytes, NativeModuleInfo info)
+    private static void WriteNativeModuleArtifactJson(string command, string path, byte[] bytes, NativeModuleInfo info,
+        NativeRuntimePolicy policy)
     {
         using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
         writer.WriteStartObject();
         writer.WriteNumber("schemaVersion", 1);
-        writer.WriteString("profile", Compilation.ProfileVersion);
+        writer.WriteString("profile", Profile(policy));
         writer.WriteString("command", command);
         writer.WriteBoolean("success", true);
         writer.WriteStartArray("diagnostics");
@@ -141,7 +147,7 @@ internal static partial class Program
         writer.WriteString("path", path);
         writer.WriteString("kind", info.IsConsumer ? "native-consumer" : "native-producer");
         writer.WriteString("identity", info.Identity);
-        writer.WriteString("runtimePolicy", "fail-fast");
+        writer.WriteString("runtimePolicy", PolicyName(policy));
         writer.WriteNumber("length", bytes.Length);
         writer.WriteString("sha256", Convert.ToHexString(SHA256.HashData(bytes)));
         writer.WriteNumber("imageLength", info.ImageLength);

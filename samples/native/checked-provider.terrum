@@ -1,0 +1,3 @@
+public int32 Divide(int32 divisor) {
+    return 42 / divisor;
+}

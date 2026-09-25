@@ -97,7 +97,7 @@ internal static class PeImage
             var function = functions[range];
             NativeUnwind.WriteFunction(image.AsSpan(pdataFile + (range * NativeUnwind.RuntimeFunctionSize)),
                 function, textRva, xdataRva + infoOffset);
-            NativeUnwind.WriteInfo(image.AsSpan(xdataFile + infoOffset, NativeUnwind.InfoSize(function)), function);
+            NativeUnwind.WriteInfo(image.AsSpan(xdataFile + infoOffset, NativeUnwind.InfoSize(function)), function, textRva);
             infoOffset += NativeUnwind.InfoSize(function);
         }
         if (exports is not null)

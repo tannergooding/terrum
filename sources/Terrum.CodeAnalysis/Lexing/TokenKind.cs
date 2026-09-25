@@ -157,4 +157,6 @@ public enum TokenKind
     PipePipe,
     /// <summary>A caret (<c>^</c>).</summary>
     Caret,
+    /// <summary>The <c>unsafe</c> keyword, required for checked-failure recovery.</summary>
+    UnsafeKeyword,
 }

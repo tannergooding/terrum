@@ -17,8 +17,14 @@ internal static class NativeModuleImageValidator
     // allow eight additional entry and process-failure helpers.
     private const int MaximumUnwindRecords = 100_008;
 
-    internal static void Validate(byte[] image, bool isConsumer, string providerDll, IReadOnlyList<string> exports)
+    internal static void Validate(byte[] image, bool isConsumer, string providerDll, IReadOnlyList<string> exports,
+        NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast)
     {
+        if (policy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
+        {
+            throw Invalid();
+        }
+        var checkedExceptions = policy == NativeRuntimePolicy.CheckedExceptions;
         try
         {
             using var stream = new MemoryStream(image, writable: false);
@@ -194,7 +200,7 @@ internal static class NativeModuleImageValidator
             void CheckImports()
             {
                 var table = header.ImportTableDirectory;
-                var count = isConsumer ? 2 : 1;
+                var count = (isConsumer ? 2 : 1) + (checkedExceptions ? 1 : 0);
                 if (table.Size != 20 * (count + 1))
                 {
                     throw Invalid();
@@ -211,7 +217,8 @@ internal static class NativeModuleImageValidator
                         throw Invalid();
                     }
                     var dll = Name(name);
-                    if (dll != (index == 0 ? "KERNEL32.dll" : providerDll))
+                    if (dll != (index == 0 ? "KERNEL32.dll"
+                        : checkedExceptions && index == 1 ? "NTDLL.dll" : providerDll))
                     {
                         throw Invalid();
                     }
@@ -246,11 +253,16 @@ internal static class NativeModuleImageValidator
                     {
                         throw Invalid();
                     }
-                    if (index == 0 && !symbols.SequenceEqual(["ExitProcess"]))
+                    if (index == 0 && !symbols.SequenceEqual(checkedExceptions
+                        ? ["ExitProcess", "RaiseException"] : ["ExitProcess"]))
                     {
                         throw Invalid();
                     }
-                    if (index != 0)
+                    if (checkedExceptions && index == 1 && !symbols.SequenceEqual(["__C_specific_handler"]))
+                    {
+                        throw Invalid();
+                    }
+                    if (index != 0 && (!checkedExceptions || index != 1))
                     {
                         names.AddRange(symbols);
                     }
@@ -289,6 +301,8 @@ internal static class NativeModuleImageValidator
                 var sawSourceFrame = false;
                 var sawCleanupFrame = false;
                 var sawLegacySource = false;
+                var cleanupStarts = new HashSet<int>();
+                var exceptionalCleanups = new List<int>();
                 for (var index = 0; index < table.Size / 12; index++)
                 {
                     var at = Offset(table.RelativeVirtualAddress + (index * 12), 12, ".pdata");
@@ -301,14 +315,60 @@ internal static class NativeModuleImageValidator
                     }
                     var info = Offset(unwind, 8, ".xdata");
                     var savedFrame = image[info + 2] == 3;
-                    var size = savedFrame ? 12 : 8;
+                    var baseSize = savedFrame ? 12 : 8;
+                    var flags = image[info];
+                    var scoped = flags == 0x19;
+                    if ((flags != 1 && (!checkedExceptions || !scoped))
+                        || (!checkedExceptions && scoped))
+                    {
+                        throw Invalid();
+                    }
+                    var size = baseSize;
+                    if (scoped)
+                    {
+                        var metadataAt = Offset(unwind + baseSize, 8, ".xdata");
+                        var handler = Read32(metadataAt);
+                        var count = Read32(metadataAt + 4);
+                        var thunk = Offset(handler, 6, ".text");
+                        if (count is < 1 or > MaximumUnwindRecords
+                            || image[thunk] != 0xFF || image[thunk + 1] != 0x25)
+                        {
+                            throw Invalid();
+                        }
+                        size = checked(baseSize + 8 + (count * 16));
+                        var scopes = Offset(unwind + baseSize + 8, count * 16, ".xdata");
+                        for (var scope = 0; scope < count; scope++)
+                        {
+                            var rangeBegin = Read32(scopes + (scope * 16));
+                            var rangeEnd = Read32(scopes + (scope * 16) + 4);
+                            var handlerAddress = Read32(scopes + (scope * 16) + 8);
+                            var target = Read32(scopes + (scope * 16) + 12);
+                            if (rangeBegin < begin || rangeEnd > end || rangeBegin >= rangeEnd)
+                            {
+                                throw Invalid();
+                            }
+                            if (target == 0)
+                            {
+                                exceptionalCleanups.Add(handlerAddress);
+                            }
+                            else
+                            {
+                                var filter = Offset(handlerAddress, 3, ".text");
+                                if (target < begin || target >= end || image[filter] != 0x48
+                                    || image[filter + 1] != 0x8B || image[filter + 2] != 0x01)
+                                {
+                                    throw Invalid();
+                                }
+                            }
+                        }
+                    }
                     if (end - begin < (savedFrame ? 11 : 7))
                     {
                         throw Invalid();
                     }
                     _ = Offset(begin, end - begin, ".text");
                     info = Offset(unwind, size, ".xdata");
-                    if (image[info] != 1 || image[info + 1] != (savedFrame ? 11 : 7)
+                    if (image[info] != flags || image[info + 1] != (savedFrame ? 11 : 7)
                         || image[info + 2] != (savedFrame ? 3 : 2) || image[info + 3] != 0
                         || image[info + 4] != (savedFrame ? 8 : 7) || image[info + 5] != 1
                         || (savedFrame && (image[info + 8] != 1 || image[info + 9] != 0x50
@@ -347,6 +407,7 @@ internal static class NativeModuleImageValidator
                                 throw Invalid();
                             }
                             sawCleanupFrame = true;
+                            _ = cleanupStarts.Add(begin);
                         }
                         else
                         {
@@ -369,6 +430,10 @@ internal static class NativeModuleImageValidator
                     }
                     previousEnd = end;
                     nextInfo = checked(nextInfo + size);
+                }
+                if (exceptionalCleanups.Any(handler => !cleanupStarts.Contains(handler)))
+                {
+                    throw Invalid();
                 }
                 if (nextInfo != infoSection.VirtualAddress + infoSection.VirtualSize)
                 {

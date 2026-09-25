@@ -22,9 +22,10 @@ internal static partial class Program
         ImmutableArray<SyntaxTree> snapshots;
         List<string> exports;
         string? outputPath;
+        NativeRuntimePolicy runtimePolicy;
         try
         {
-            if (!TryReadCompilationOptions(args, out var paths, out exports, out outputPath))
+            if (!TryReadCompilationOptions(args, out var paths, out exports, out outputPath, out runtimePolicy))
             {
                 WriteInputError(json, "TRM2000", Usage);
 
@@ -56,14 +57,16 @@ internal static partial class Program
             return 2;
         }
 
-        return CompileTrees(args[0], snapshots, outputPath, json, [.. exports]);
+        return CompileTrees(args[0], snapshots, outputPath, json, [.. exports], runtimePolicy);
     }
 
-    private static bool TryReadCompilationOptions(string[] args, out List<string> paths, out List<string> exports, out string? outputPath)
+    private static bool TryReadCompilationOptions(string[] args, out List<string> paths, out List<string> exports,
+        out string? outputPath, out NativeRuntimePolicy runtimePolicy)
     {
         paths = [];
         exports = [];
         outputPath = null;
+        runtimePolicy = NativeRuntimePolicy.FailFast;
         var count = args.Length - (args.Length != 0 && args[^1] == "--json" ? 1 : 0);
         if (count < 2 || args[1] == "--json" || (count & 1) != 0)
         {
@@ -92,8 +95,11 @@ internal static partial class Program
                 case "-o" when args[0] is "build" or "build-library" && outputPath is null:
                     outputPath = Path.GetFullPath(value);
                     break;
-                case "--runtime" when args[0] is "build" or "build-library" or "jit" && !hasRuntime && value == "fail-fast":
+                case "--runtime" when args[0] is "analyze" or "build" or "build-library" or "jit"
+                    && !hasRuntime && value is "fail-fast" or "checked-exceptions":
                     hasRuntime = true;
+                    runtimePolicy = value == "fail-fast"
+                        ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
                     break;
                 default:
                     return false;
@@ -105,17 +111,16 @@ internal static partial class Program
                 && (args[0] != "build-library" || exports.Count != 0));
     }
 
-    private static int CompileTree(string command, SyntaxTree tree, string? outputPath, bool json) =>
-        CompileTrees(command, [tree], outputPath, json);
-
     private static int CompileTrees(string command, ImmutableArray<SyntaxTree> trees, string? outputPath, bool json,
-        ImmutableArray<string> exports = default)
+        ImmutableArray<string> exports = default, NativeRuntimePolicy runtimePolicy = NativeRuntimePolicy.FailFast)
     {
         var build = outputPath is not null;
         var library = command == "build-library";
         var compilation = library
-            ? trees.Length == 1 ? Compilation.CreateLibrary(trees[0]) : Compilation.CreateLibrary(trees)
-            : trees.Length == 1 ? Compilation.Create(trees[0]) : Compilation.Create(trees);
+            ? trees.Length == 1 ? Compilation.CreateLibrary(trees[0], (BoundRuntimePolicy)runtimePolicy)
+                : Compilation.CreateLibrary(trees, (BoundRuntimePolicy)runtimePolicy)
+            : trees.Length == 1 ? Compilation.Create(trees[0], (BoundRuntimePolicy)runtimePolicy)
+                : Compilation.Create(trees, (BoundRuntimePolicy)runtimePolicy);
         var diagnostics = compilation.SourceDiagnostics;
         byte[]? image = null;
 
@@ -132,11 +137,11 @@ internal static partial class Program
                 {
                     // This worker returns Main's raw exit status, not a JSON success envelope.
                     // Its caller must enforce a deadline; native fail-fast can terminate it.
-                    return NativeJit.Execute(program, NativeRuntimePolicy.FailFast);
+                    return NativeJit.Execute(program, runtimePolicy);
                 }
 
-                image = library ? NativeEmitter.EmitLibrary(program, exports, NativeRuntimePolicy.FailFast)
-                    : NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast);
+                image = library ? NativeEmitter.EmitLibrary(program, exports, runtimePolicy)
+                    : NativeEmitter.Emit(program, runtimePolicy);
             }
             catch (NotSupportedException exception)
             {
@@ -166,24 +171,25 @@ internal static partial class Program
             }
         }
 
-        WriteCompilationResult(command, compilation, diagnostics, success, outputPath, image, json);
+        WriteCompilationResult(command, compilation, diagnostics, success, outputPath, image, json, runtimePolicy);
 
         return success ? 0 : 1;
     }
 
     private static void WriteCompilationResult(string command, Compilation compilation,
-        ImmutableArray<SourceDiagnostic> diagnostics, bool success, string? outputPath, byte[]? image, bool json)
+        ImmutableArray<SourceDiagnostic> diagnostics, bool success, string? outputPath, byte[]? image, bool json,
+        NativeRuntimePolicy runtimePolicy = NativeRuntimePolicy.FailFast)
     {
         if (json)
         {
             if (compilation.SyntaxTrees.Length == 1)
             {
                 WriteCompilationJson(command, compilation.SyntaxTree, [.. diagnostics.Select(static item => item.Diagnostic)],
-                    success, outputPath, image);
+                    success, outputPath, image, runtimePolicy);
             }
             else
             {
-                WriteCompilationJson(command, compilation, diagnostics, success, outputPath, image);
+                WriteCompilationJson(command, compilation, diagnostics, success, outputPath, image, runtimePolicy);
             }
         }
         else
@@ -202,8 +208,8 @@ internal static partial class Program
                     ? compilation.SyntaxTree.Source.Path
                     : FormattableString.Invariant($"{compilation.SyntaxTrees.Length} source files");
                 Console.Out.WriteLine(outputPath is not null
-                    ? $"{outputPath}: Windows x64 {Compilation.ProfileVersion} (fail-fast runtime)"
-                    : $"{sourceDescription}: {Compilation.ProfileVersion} semantic analysis OK");
+                    ? $"{outputPath}: Windows x64 {Profile(runtimePolicy)} ({PolicyName(runtimePolicy)} runtime)"
+                    : $"{sourceDescription}: {Profile(runtimePolicy)} semantic analysis OK");
             }
         }
     }
@@ -236,13 +242,14 @@ internal static partial class Program
     }
 
     private static void WriteCompilationJson(string command, SyntaxTree tree, ImmutableArray<Diagnostic> diagnostics,
-        bool success, string? outputPath, byte[]? image)
+        bool success, string? outputPath, byte[]? image,
+        NativeRuntimePolicy runtimePolicy = NativeRuntimePolicy.FailFast)
     {
         using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
         writer.WriteStartObject();
         writer.WriteNumber("schemaVersion", 1);
         writer.WriteString("languageVersion", SyntaxTree.LanguageVersion);
-        writer.WriteString("profile", Compilation.ProfileVersion);
+        writer.WriteString("profile", Profile(runtimePolicy));
         writer.WriteString("command", command);
         writer.WriteString("path", tree.Source.Path);
         writer.WriteString("coordinateSystem", "utf-16");
@@ -253,20 +260,21 @@ internal static partial class Program
 
         if (success && image is not null)
         {
-            WriteNativeArtifactJson(writer, outputPath, image, command == "build-library");
+            WriteNativeArtifactJson(writer, outputPath, image, command == "build-library", runtimePolicy);
         }
 
         writer.WriteEndObject();
     }
 
     private static void WriteCompilationJson(string command, Compilation compilation,
-        ImmutableArray<SourceDiagnostic> diagnostics, bool success, string? outputPath, byte[]? image)
+        ImmutableArray<SourceDiagnostic> diagnostics, bool success, string? outputPath, byte[]? image,
+        NativeRuntimePolicy runtimePolicy)
     {
         using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
         writer.WriteStartObject();
         writer.WriteNumber("schemaVersion", 2);
         writer.WriteString("languageVersion", SyntaxTree.LanguageVersion);
-        writer.WriteString("profile", Compilation.ProfileVersion);
+        writer.WriteString("profile", Profile(runtimePolicy));
         writer.WriteString("command", command);
         writer.WriteString("coordinateSystem", "utf-16");
         writer.WriteBoolean("success", success);
@@ -291,13 +299,14 @@ internal static partial class Program
         writer.WriteEndArray();
         if (success && image is not null)
         {
-            WriteNativeArtifactJson(writer, outputPath, image, command == "build-library");
+            WriteNativeArtifactJson(writer, outputPath, image, command == "build-library", runtimePolicy);
         }
 
         writer.WriteEndObject();
     }
 
-    private static void WriteNativeArtifactJson(Utf8JsonWriter writer, string? outputPath, byte[] image, bool library)
+    private static void WriteNativeArtifactJson(Utf8JsonWriter writer, string? outputPath, byte[] image, bool library,
+        NativeRuntimePolicy runtimePolicy)
     {
         writer.WriteStartObject("artifact");
         writer.WriteString("path", outputPath);
@@ -306,9 +315,15 @@ internal static partial class Program
         {
             writer.WriteString("kind", "dynamic-library");
         }
-        writer.WriteString("runtimePolicy", "fail-fast");
+        writer.WriteString("runtimePolicy", PolicyName(runtimePolicy));
         writer.WriteNumber("length", image.Length);
         writer.WriteString("sha256", Convert.ToHexString(SHA256.HashData(image)));
         writer.WriteEndObject();
     }
+
+    private static string Profile(NativeRuntimePolicy policy) =>
+        policy == NativeRuntimePolicy.FailFast ? Compilation.ProfileVersion : "native-11";
+
+    private static string PolicyName(NativeRuntimePolicy policy) =>
+        policy == NativeRuntimePolicy.FailFast ? "fail-fast" : "checked-exceptions";
 }

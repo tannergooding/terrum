@@ -268,7 +268,7 @@ public sealed partial class CliTests
     [InlineData("analyze - --source - --json")]
     [InlineData("analyze - --source --json")]
     [InlineData("analyze - --json --json")]
-    [InlineData("analyze - --runtime fail-fast --json")]
+    [InlineData("analyze - --runtime unknown --json")]
     [InlineData("jit - --source another.terrum --json")]
     [InlineData("jit - -o output.exe --runtime fail-fast --json")]
     [InlineData("build - --runtime fail-fast --json")]
@@ -596,7 +596,7 @@ public sealed partial class CliTests
         using var document = JsonDocument.Parse(output);
         var root = document.RootElement;
         Assert.False(root.GetProperty("success").GetBoolean());
-        Assert.Equal("syntax-7", root.GetProperty("languageVersion").GetString());
+        Assert.Equal("syntax-8", root.GetProperty("languageVersion").GetString());
         var diagnostic = Assert.Single(root.GetProperty("diagnostics").EnumerateArray());
         Assert.Equal("TRM1005", diagnostic.GetProperty("code").GetString());
         Assert.Equal(Source.LastIndexOf('?', StringComparison.Ordinal), diagnostic.GetProperty("span").GetProperty("start").GetInt32());
@@ -725,7 +725,11 @@ public sealed partial class CliTests
         Assert.Equal(output, secondOutput);
     }
 
-    private static async Task<(int ExitCode, string Output, string Error)> RunAsync(byte[] input, params string[] arguments)
+    private static Task<(int ExitCode, string Output, string Error)> RunAsync(byte[] input, params string[] arguments) =>
+        RunAsync(input, arguments, workingDirectory: null);
+
+    private static async Task<(int ExitCode, string Output, string Error)> RunAsync(byte[] input, string[] arguments,
+        string? workingDirectory)
     {
         var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
         var configuration = frameworkDirectory.Parent?.Name ?? throw new InvalidOperationException("Missing configuration directory.");
@@ -739,6 +743,10 @@ public sealed partial class CliTests
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        if (workingDirectory is not null)
+        {
+            start.WorkingDirectory = workingDirectory;
+        }
         start.ArgumentList.Add(cli);
 
         foreach (var argument in arguments)

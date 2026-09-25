@@ -12,13 +12,14 @@ internal static class NativeUnwind
     internal const int RuntimeFunctionSize = 12;
 
     internal static int InfoSize(NativeFunctionRange function) =>
-        function.UsesFramePointer ? FramePointerInfoSize : BasicInfoSize;
+        checked((function.UsesFramePointer ? FramePointerInfoSize : BasicInfoSize)
+            + (function.ExceptionScopes.IsEmpty ? 0 : 8 + (function.ExceptionScopes.Length * 16)));
 
-    internal static void WriteInfo(Span<byte> destination, NativeFunctionRange function)
+    internal static void WriteInfo(Span<byte> destination, NativeFunctionRange function, int textRva = 0)
     {
         // UWOP_ALLOC_LARGE records the sub rsp operand. Saved-RBP functions also
         // record the preceding push; RBP holds the post-allocation frame base.
-        destination[0] = 1;
+        destination[0] = function.ExceptionScopes.IsEmpty ? (byte)1 : (byte)0x19;
         destination[1] = function.UsesFramePointer ? (byte)11 : (byte)7;
         destination[2] = function.UsesFramePointer ? (byte)3 : (byte)2;
         destination[3] = 0;
@@ -32,6 +33,22 @@ internal static class NativeUnwind
             destination[9] = 0x50; // UWOP_PUSH_NONVOL RBP, preceding the allocation
             destination[10] = 0;
             destination[11] = 0;
+        }
+        if (!function.ExceptionScopes.IsEmpty)
+        {
+            var at = function.UsesFramePointer ? FramePointerInfoSize : BasicInfoSize;
+            BinaryPrimitives.WriteInt32LittleEndian(destination[at..], checked(textRva + function.ExceptionHandler));
+            BinaryPrimitives.WriteInt32LittleEndian(destination[(at + 4)..], function.ExceptionScopes.Length);
+            at += 8;
+            foreach (var scope in function.ExceptionScopes)
+            {
+                BinaryPrimitives.WriteInt32LittleEndian(destination[at..], checked(textRva + scope.Begin));
+                BinaryPrimitives.WriteInt32LittleEndian(destination[(at + 4)..], checked(textRva + scope.End));
+                BinaryPrimitives.WriteInt32LittleEndian(destination[(at + 8)..], checked(textRva + scope.Handler));
+                BinaryPrimitives.WriteInt32LittleEndian(destination[(at + 12)..],
+                    scope.Target == 0 ? 0 : checked(textRva + scope.Target));
+                at += 16;
+            }
         }
     }
 

@@ -7,10 +7,12 @@ namespace Terrum.CodeAnalysis.Semantics;
 /// <summary>Validated module declarations for source binding, without implementation bodies or executable code.</summary>
 public sealed class CompilationReference
 {
-    internal CompilationReference(ImmutableArray<BoundStruct> structures, ImmutableArray<BoundFunction> functions)
+    internal CompilationReference(ImmutableArray<BoundStruct> structures, ImmutableArray<BoundFunction> functions,
+        BoundRuntimePolicy runtimePolicy)
     {
         Structures = structures;
         Functions = functions;
+        RuntimePolicy = runtimePolicy;
     }
 
     /// <summary>Gets the value layouts exposed by the imported declarations.</summary>
@@ -18,4 +20,7 @@ public sealed class CompilationReference
 
     /// <summary>Gets external function declarations whose empty bodies are not implementations.</summary>
     public ImmutableArray<BoundFunction> Functions { get; }
+
+    /// <summary>The checked-failure behavior required by imported declarations.</summary>
+    public BoundRuntimePolicy RuntimePolicy { get; }
 }

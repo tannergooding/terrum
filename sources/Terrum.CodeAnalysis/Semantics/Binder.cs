@@ -38,9 +38,11 @@ internal sealed class Binder
     private PrimitiveType _returnType;
     private string? _currentStruct;
     private bool _constructor;
+    private int _unsafeDepth;
     private bool _hasReceiver;
     private readonly bool _isLibrary;
     private readonly CompilationReference? _reference;
+    private readonly BoundRuntimePolicy _runtimePolicy;
 
     internal Binder(SyntaxTree tree, CancellationToken cancellationToken)
         : this([tree], [], cancellationToken)
@@ -58,7 +60,8 @@ internal sealed class Binder
     }
 
     internal Binder(ImmutableArray<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers, CancellationToken cancellationToken,
-        bool isLibrary = false, CompilationReference? reference = null)
+        bool isLibrary = false, CompilationReference? reference = null,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast)
     {
         _tree = trees[0];
         _trees = trees;
@@ -66,6 +69,7 @@ internal sealed class Binder
         _cancellationToken = cancellationToken;
         _isLibrary = isLibrary;
         _reference = reference;
+        _runtimePolicy = runtimePolicy;
     }
 
     internal IReadOnlyList<Diagnostic> Diagnostics => _diagnostics;
@@ -85,6 +89,11 @@ internal sealed class Binder
 
     internal BoundProgram? Bind()
     {
+        if (_reference is not null && _reference.RuntimePolicy != _runtimePolicy)
+        {
+            Report("TRM3022", "The referenced module requires a different checked-failure runtime policy.", _trees[0].Root.Span);
+            return null;
+        }
         // Parser depth limits do not bound left-associated flat expression trees.
         var pending = new Stack<(SyntaxTree Tree, SyntaxNode Node, int Depth)>();
         if (_reference is not null)
@@ -307,6 +316,7 @@ internal sealed class Binder
         var program = new BoundProgram(bound.ToImmutable(), entryPoint) {
             Structures = [.. _structs],
             Buffers = _buffers,
+            RuntimePolicy = _runtimePolicy,
         };
         if (!SemanticVerifier.TryVerifySource(program, out var functionIndex, out var span, out var exceededWorkLimit, out var invalidEffect))
         {
@@ -317,6 +327,8 @@ internal sealed class Binder
                 "NormalReturn" => ("TRM3012", "Not all normally completing paths return a value."),
                 "FinallyReturn" => ("TRM3019", "A finally block cannot return or transfer control out of cleanup."),
                 "FinallyNoReturn" => ("TRM3020", "Potentially nonreturning finally cleanup is unsupported in this bounded profile."),
+                "UnsafeRecovery" => ("TRM3021", "Checked failure recovery requires an unsafe block."),
+                "CheckedPolicy" => ("TRM3022", "Recovery requires the checked-exceptions runtime policy."),
                 _ => ("TRM3016", exceededWorkLimit
                     ? "Source exceeds the semantic verification work limit."
                     : "Source violates definite assignment, initialization, or executable type rules."),
@@ -689,6 +701,26 @@ internal sealed class Binder
                 var body = BindBlock((SyntaxNode)node.Children[1]);
                 var cleanup = BindBlock((SyntaxNode)node.Children[3]);
                 return new BoundTryFinally(body, cleanup, node.Span);
+            }
+
+            case SyntaxKind.UnsafeStatement:
+            {
+                _unsafeDepth++;
+                var body = BindBlock((SyntaxNode)node.Children[1]);
+                _unsafeDepth--;
+                return new BoundUnsafe(body, node.Span);
+            }
+
+            case SyntaxKind.TryCatchStatement:
+            {
+                if (_unsafeDepth == 0)
+                {
+                    Report("TRM3021", "Checked failure recovery requires an unsafe block.", node.Span);
+                }
+                var body = BindBlock((SyntaxNode)node.Children[1]);
+                var handler = BindBlock((SyntaxNode)node.Children[3]);
+                var cleanup = node.Children.Length > 4 ? BindBlock((SyntaxNode)node.Children[5]) : null;
+                return new BoundTryCatch(body, handler, cleanup, node.Span);
             }
 
             case SyntaxKind.VariableDeclaration:

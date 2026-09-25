@@ -16,7 +16,11 @@ using Terrum.CodeAnalysis.Semantics;
 namespace Terrum.CodeAnalysis.Modules;
 
 /// <summary>Metadata for a checked, persisted native producer or consumer package.</summary>
-public sealed record NativeModuleInfo(string Identity, bool IsConsumer, string ImageSha256, int ImageLength, int ContractLength);
+public sealed record NativeModuleInfo(string Identity, bool IsConsumer, string ImageSha256, int ImageLength, int ContractLength)
+{
+    /// <summary>The checked-failure policy encoded in this package and its semantic contract.</summary>
+    public NativeRuntimePolicy RuntimePolicy { get; init; }
+}
 
 /// <summary>Creates and checks single-provider Windows x64 native packages; this is not an authenticated code loader.</summary>
 public static class NativeModuleCompiler
@@ -86,19 +90,25 @@ public static class NativeModuleCompiler
         if (package.IsConsumer)
         {
             NativeModuleImageValidator.Validate(package.Image, isConsumer: true, DllName(package.Identity),
-                ModuleCompiler.GetConsumerCallImports(package.Contract));
+                ModuleCompiler.GetConsumerCallImports(package.Contract), package.Policy);
         }
         else
         {
             ValidateProducer(package);
         }
         return new NativeModuleInfo(package.Identity, package.IsConsumer,
-            Convert.ToHexString(SHA256.HashData(package.Image)), package.Image.Length, package.Contract.Length);
+            Convert.ToHexString(SHA256.HashData(package.Image)), package.Image.Length, package.Contract.Length) {
+            RuntimePolicy = package.Policy,
+        };
     }
 
     /// <summary>Checks contracts, then starts only the already persisted images in a fresh private staging directory.</summary>
-    public static async Task<int> RunAsync(byte[] consumer, byte[] producer, TimeSpan timeout,
-        CancellationToken cancellationToken = default)
+    public static Task<int> RunAsync(byte[] consumer, byte[] producer, TimeSpan timeout,
+        CancellationToken cancellationToken = default) =>
+        RunCoreAsync(consumer, producer, timeout, null, cancellationToken);
+
+    private static async Task<int> RunCoreAsync(byte[] consumer, byte[] producer, TimeSpan timeout,
+        NativeRuntimePolicy? runtimePolicy, CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsWindows() || System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture
             != System.Runtime.InteropServices.Architecture.X64)
@@ -112,6 +122,10 @@ public static class NativeModuleCompiler
         cancellationToken.ThrowIfCancellationRequested();
         var executable = Read(consumer);
         var provider = Read(producer);
+        if (runtimePolicy is NativeRuntimePolicy selected && executable.Policy != selected)
+        {
+            throw new ModuleContractException("Selected runtime policy differs from the native package.");
+        }
         ValidatePair(executable, provider);
         cancellationToken.ThrowIfCancellationRequested();
         var directory = Directory.CreateTempSubdirectory("terrum-native-" + provider.Identity + "-").FullName;
@@ -155,6 +169,14 @@ public static class NativeModuleCompiler
             await DeleteImageAsync(producerPath).ConfigureAwait(false);
             Directory.Delete(directory);
         }
+    }
+
+    /// <summary>Runs only if the explicitly requested checked-failure policy matches the persisted packages.</summary>
+    public static Task<int> RunAsync(byte[] consumer, byte[] producer, TimeSpan timeout,
+        NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default)
+    {
+        CheckPolicy(runtimePolicy);
+        return RunCoreAsync(consumer, producer, timeout, runtimePolicy, cancellationToken);
     }
 
     private static async Task DeleteImageAsync(string path)
@@ -201,12 +223,15 @@ public static class NativeModuleCompiler
         {
             throw new ModuleContractException("Native runtime policies differ.");
         }
-        _ = ModuleCompiler.Link(consumer.Contract, producer.Contract);
+        if (ModuleCompiler.Link(consumer.Contract, producer.Contract).RuntimePolicy != (BoundRuntimePolicy)consumer.Policy)
+        {
+            throw new ModuleFormatException("Native package and linked semantic policies differ.");
+        }
         var exports = ModuleCompiler.CreateReference(producer.Contract).Functions.Select(static function => function.Name)
             .ToArray();
-        NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, DllName(producer.Identity), exports);
+        NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, DllName(producer.Identity), exports, producer.Policy);
         NativeModuleImageValidator.Validate(consumer.Image, isConsumer: true, DllName(producer.Identity),
-            ModuleCompiler.GetConsumerCallImports(consumer.Contract));
+            ModuleCompiler.GetConsumerCallImports(consumer.Contract), consumer.Policy);
     }
 
     private static void ValidateProducer(Package producer)
@@ -216,8 +241,12 @@ public static class NativeModuleCompiler
             throw new ModuleFormatException("Expected a native producer package.");
         }
         var reference = ModuleCompiler.CreateReference(producer.Contract);
+        if (reference.RuntimePolicy != (BoundRuntimePolicy)producer.Policy)
+        {
+            throw new ModuleFormatException("Native package and semantic contract policies differ.");
+        }
         NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, DllName(producer.Identity),
-            [.. reference.Functions.Select(static function => function.Name)]);
+            [.. reference.Functions.Select(static function => function.Name)], producer.Policy);
     }
 
     private static byte[] Write(bool isConsumer, string identity, NativeRuntimePolicy policy, byte[] contract, byte[] image)
@@ -225,7 +254,8 @@ public static class NativeModuleCompiler
         CheckIdentity(identity);
         CheckPolicy(policy);
         var name = Encoding.ASCII.GetBytes(identity);
-        var profile = Encoding.ASCII.GetBytes(Compilation.ProfileVersion);
+        var profile = Encoding.ASCII.GetBytes(policy == NativeRuntimePolicy.FailFast
+            ? Compilation.ProfileVersion : "native-11");
         var length = checked(HeaderSize + name.Length + profile.Length + contract.Length + image.Length + HashSize);
         if (contract.Length is < 1 or > MaximumContractBytes || image.Length == 0 || length > MaximumBytes)
         {
@@ -257,7 +287,8 @@ public static class NativeModuleCompiler
         }
         var bytes = (byte[])artifact.Clone();
         if (!bytes.AsSpan(0, 4).SequenceEqual("TNPK"u8)
-            || bytes[4] != Version || bytes[5] is not (1 or 2) || bytes[6] != (byte)NativeRuntimePolicy.FailFast
+            || bytes[4] != Version || bytes[5] is not (1 or 2)
+            || bytes[6] is not ((byte)NativeRuntimePolicy.FailFast or (byte)NativeRuntimePolicy.CheckedExceptions)
             || bytes[9] != 0)
         {
             throw new ModuleFormatException("Unknown or malformed native module package header.");
@@ -276,7 +307,8 @@ public static class NativeModuleCompiler
         }
         var name = Encoding.ASCII.GetString(bytes, HeaderSize, nameLength);
         var profile = Encoding.ASCII.GetString(bytes, HeaderSize + nameLength, profileLength);
-        if (!ValidIdentity(name) || profile != Compilation.ProfileVersion)
+        if (!ValidIdentity(name) || profile != (bytes[6] == (byte)NativeRuntimePolicy.FailFast
+            ? Compilation.ProfileVersion : "native-11"))
         {
             throw new ModuleFormatException("Invalid provider identity or semantic profile.");
         }
@@ -290,7 +322,7 @@ public static class NativeModuleCompiler
 
     private static void CheckPolicy(NativeRuntimePolicy policy)
     {
-        if (policy != NativeRuntimePolicy.FailFast)
+        if (policy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
             throw new NotSupportedException("Unsupported native module runtime policy.");
         }

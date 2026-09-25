@@ -83,4 +83,8 @@ public enum SyntaxKind
     Attribute,
     /// <summary>A structured body and its unconditional normal-exit cleanup.</summary>
     TryFinallyStatement,
+    /// <summary>An explicit unsafe context for checked-failure recovery.</summary>
+    UnsafeStatement,
+    /// <summary>A structured checked-failure handler with optional cleanup.</summary>
+    TryCatchStatement,
 }

@@ -15,6 +15,8 @@ public enum NativeRuntimePolicy
 {
     /// <summary>Terminate with 0xE0540001 for overflow, 0xE0540002 for zero division, 0xE0540003 for failed requirements, or 0xE0540004 for buffer bounds.</summary>
     FailFast,
+    /// <summary>Use the bounded, versioned native checked-failure exception contract.</summary>
+    CheckedExceptions,
 }
 
 /// <summary>Maps one verified external function declaration to a named Windows DLL export.</summary>
@@ -28,7 +30,7 @@ public static class NativeEmitter
     public static byte[] EmitWithImports(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
         NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default)
     {
-        if (runtimePolicy != NativeRuntimePolicy.FailFast)
+        if (runtimePolicy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
             throw new NotSupportedException("Unsupported native runtime policy.");
         }
@@ -36,6 +38,10 @@ public static class NativeEmitter
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(bindings);
         SemanticVerifier.VerifyReferences(program);
+        if (program.RuntimePolicy != (BoundRuntimePolicy)runtimePolicy)
+        {
+            throw new ArgumentException("Native and verified checked-failure policies differ.", nameof(program));
+        }
         if (bindings.Count is < 1 or > 1024)
         {
             throw new ArgumentException("Native consumers require 1 to 1024 explicit import bindings.", nameof(bindings));
@@ -87,13 +93,17 @@ public static class NativeEmitter
     public static byte[] EmitLibrary(BoundProgram program, IReadOnlyList<string> exports,
         NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default)
     {
-        if (runtimePolicy != NativeRuntimePolicy.FailFast)
+        if (runtimePolicy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
             throw new NotSupportedException("Unsupported native runtime policy.");
         }
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(program);
         SemanticVerifier.VerifyLibrary(program);
+        if (program.RuntimePolicy != (BoundRuntimePolicy)runtimePolicy)
+        {
+            throw new ArgumentException("Native and verified checked-failure policies differ.", nameof(program));
+        }
         ArgumentNullException.ThrowIfNull(exports);
         if (!program.Buffers.IsEmpty)
         {
@@ -181,12 +191,16 @@ public static class NativeEmitter
     /// <summary>Verifies and emits relocatable code with a callable int32(void) entry point.</summary>
     public static NativeCode EmitCode(BoundProgram program, NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default)
     {
-        if (runtimePolicy != NativeRuntimePolicy.FailFast)
+        if (runtimePolicy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
             throw new NotSupportedException("Unsupported native runtime policy.");
         }
         cancellationToken.ThrowIfCancellationRequested();
         SemanticVerifier.Verify(program);
+        if (program.RuntimePolicy != (BoundRuntimePolicy)runtimePolicy)
+        {
+            throw new ArgumentException("Native and verified checked-failure policies differ.", nameof(program));
+        }
         return new PeCompiler(program, cancellationToken).Compile();
     }
 }
@@ -218,26 +232,39 @@ internal sealed class PeCompiler
     private readonly List<NativeDataFixup> _dataFixups = [];
     private readonly int[] _bufferOffsets;
     private readonly byte[] _data;
+    private readonly bool _checkedExceptions;
+    private readonly List<NativeExceptionScope>[] _scopes;
+    private readonly List<NativeExceptionScope> _entryScopes = [];
     private readonly int _readOnlyDataLength;
     private readonly int[] _failureStarts = new int[4];
     private readonly int[] _failureEnds = new int[4];
     private int _entryStart;
     private int _entryEnd;
+    private int _exceptionHandler;
+    private int _catchFilter;
+    private int _entryFilter;
     private int _frame;
     private int _spillBase;
     private int _outBase;
     private int _returnSlot;
     private int _currentFunction;
+    private bool _emittingFunclet;
     private readonly List<int> _cleanups = [];
 
     internal PeCompiler(BoundProgram program, CancellationToken cancellationToken, bool library = false,
         IReadOnlyDictionary<int, NativeImportBinding>? imports = null)
     {
         _program = program;
+        _checkedExceptions = program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions;
         _library = library;
         _nativeImports = imports;
         _cancellationToken = cancellationToken;
         _starts = new int[program.Functions.Length];
+        _scopes = new List<NativeExceptionScope>[program.Functions.Length];
+        for (var index = 0; index < _scopes.Length; index++)
+        {
+            _scopes[index] = [];
+        }
         _ends = new int[program.Functions.Length];
         _frames = new int[program.Functions.Length];
         _slots = new int[program.Functions.Length][];
@@ -282,6 +309,84 @@ internal sealed class PeCompiler
     }
 
     internal NativeCode Compile()
+    {
+        PrepareFrames();
+        var (processEntry, processEnd) = EmitEntryAndFailureHelpers();
+        EmitSourceFunctions();
+        EmitCleanupFunclets();
+
+        foreach (var (offset, target) in _calls)
+        {
+            _code.PatchRelative(offset, _starts[target]);
+        }
+        foreach (var (offset, target) in _runtimeCalls)
+        {
+            _code.PatchRelative(offset, _failureStarts[target]);
+        }
+        foreach (var (offset, target) in _cleanupCalls)
+        {
+            _code.PatchRelative(offset, _funclets[target].Start);
+        }
+        if (_checkedExceptions)
+        {
+            _exceptionHandler = _code.Position;
+            _nativeImportFixups.Add(new NativeImportFixup(_code.ImportJump(), "NTDLL.dll", "__C_specific_handler"));
+            _catchFilter = _code.Position;
+            EmitExceptionFilter(storeReason: false);
+            _entryFilter = _code.Position;
+            EmitExceptionFilter(storeReason: true);
+        }
+        if (_code.Position > MaximumText)
+        {
+            throw new NotSupportedException("Native text exceeds the 8 MiB image ceiling.");
+        }
+        var functions = new List<NativeFunctionRange>();
+        if (!_library)
+        {
+            functions.Add(new NativeFunctionRange(_entryStart, _entryEnd, 40) {
+                ExceptionHandler = _checkedExceptions ? _exceptionHandler : 0,
+                ExceptionScopes = [.. _entryScopes.Select(scope => scope with { Handler = _entryFilter })],
+            });
+            functions.Add(new NativeFunctionRange(processEntry, processEnd, 40));
+        }
+        for (var i = 0; i < _failureStarts.Length; i++)
+        {
+            functions.Add(new NativeFunctionRange(_failureStarts[i], _failureEnds[i], _checkedExceptions ? 72 : 40));
+        }
+        for (var i = 0; i < _starts.Length; i++)
+        {
+            if (!_program.Functions[i].IsExternal)
+            {
+                functions.Add(new NativeFunctionRange(_starts[i], _ends[i], _frames[i]) {
+                    UsesFramePointer = true,
+                    ExceptionHandler = _checkedExceptions ? _exceptionHandler : 0,
+                    ExceptionScopes = [.. _scopes[i].Select(scope => scope with {
+                        Handler = scope.Target != 0 ? _catchFilter : _funclets[-scope.Handler - 1].Start,
+                    })],
+                });
+            }
+        }
+        foreach (var (_, function, start, end) in _funclets)
+        {
+            functions.Add(new NativeFunctionRange(start, end, _frames[function]) {
+                UsesFramePointer = true,
+                UsesParentFrame = true,
+            });
+        }
+
+        return new NativeCode(_code.ToArray(), _entryStart,
+            [.. functions],
+            [.. _imports]) {
+            AotEntryPoint = processEntry,
+            Data = _data,
+            ReadOnlyDataLength = _readOnlyDataLength,
+            BufferOffsets = [.. _bufferOffsets],
+            DataFixups = [.. _dataFixups],
+            NativeImports = [.. _nativeImportFixups],
+        };
+    }
+
+    private void PrepareFrames()
     {
         for (var i = 0; i < _program.Functions.Length; i++)
         {
@@ -335,43 +440,10 @@ internal sealed class PeCompiler
             }
             _frames[i] = frame;
         }
+    }
 
-        if (!_library)
-        {
-            _entryStart = _code.Position;
-            Prolog(40);
-            _calls.Add((_code.RelativeCall(), _program.EntryPoint));
-            if (_program.Functions[_program.EntryPoint].ReturnType == PrimitiveType.Void)
-            {
-                _code.Bytes(0x31, 0xC0); // xor eax,eax
-            }
-            _frame = 40;
-            Epilog();
-            _entryEnd = _code.Position;
-        }
-
-        var processEntry = _code.Position;
-        if (!_library)
-        {
-            Prolog(40);
-            _code.PatchRelative(_code.RelativeCall(), _entryStart);
-            _code.Bytes(0x89, 0xC1); // mov ecx,eax
-            _imports.Add(_code.ImportCall());
-            _code.Byte(0xCC);
-        }
-        var processEnd = _code.Position;
-
-        for (var failure = 0; failure < _failureStarts.Length; failure++)
-        {
-            _failureStarts[failure] = _code.Position;
-            Prolog(40);
-            _code.Byte(0xB9);
-            _code.Int32(unchecked((int)0xE0540001) + failure);
-            _imports.Add(_code.ImportCall());
-            _code.Byte(0xCC);
-            _failureEnds[failure] = _code.Position;
-        }
-
+    private void EmitSourceFunctions()
+    {
         for (var i = 0; i < _program.Functions.Length; i++)
         {
             _cancellationToken.ThrowIfCancellationRequested();
@@ -452,7 +524,10 @@ internal sealed class PeCompiler
                 throw new NotSupportedException("Native text exceeds the 8 MiB image ceiling.");
             }
         }
+    }
 
+    private void EmitCleanupFunclets()
+    {
         for (var index = 0; index < _funclets.Count; index++)
         {
             _cancellationToken.ThrowIfCancellationRequested();
@@ -466,7 +541,9 @@ internal sealed class PeCompiler
             _code.Byte(0x55); // push rbp
             Prolog(_frame - 8);
             _code.Bytes(0x48, 0x89, 0xD5); // mov rbp,rdx: the source function's frame base
+            _emittingFunclet = true;
             Statement(body);
+            _emittingFunclet = false;
             Epilog();
             _funclets[index] = (body, function, start, _code.Position);
             if (_code.Position > MaximumText)
@@ -474,60 +551,89 @@ internal sealed class PeCompiler
                 throw new NotSupportedException("Native text exceeds the 8 MiB image ceiling.");
             }
         }
+    }
 
-        foreach (var (offset, target) in _calls)
-        {
-            _code.PatchRelative(offset, _starts[target]);
-        }
-        foreach (var (offset, target) in _runtimeCalls)
-        {
-            _code.PatchRelative(offset, _failureStarts[target]);
-        }
-        foreach (var (offset, target) in _cleanupCalls)
-        {
-            _code.PatchRelative(offset, _funclets[target].Start);
-        }
-        var functions = new List<NativeFunctionRange>();
+    private (int ProcessEntry, int ProcessEnd) EmitEntryAndFailureHelpers()
+    {
         if (!_library)
         {
-            functions.Add(new NativeFunctionRange(_entryStart, _entryEnd, 40));
-            functions.Add(new NativeFunctionRange(processEntry, processEnd, 40));
-        }
-        for (var i = 0; i < _failureStarts.Length; i++)
-        {
-            functions.Add(new NativeFunctionRange(_failureStarts[i], _failureEnds[i], 40));
-        }
-        for (var i = 0; i < _starts.Length; i++)
-        {
-            if (!_program.Functions[i].IsExternal)
+            _entryStart = _code.Position;
+            Prolog(40);
+            var protectedStart = _code.Position;
+            _calls.Add((_code.RelativeCall(), _program.EntryPoint));
+            if (_checkedExceptions)
             {
-                functions.Add(new NativeFunctionRange(_starts[i], _ends[i], _frames[i]) { UsesFramePointer = true });
+                _code.Byte(0x90); // keep the protected call continuation outside the epilog
             }
-        }
-        foreach (var (_, function, start, end) in _funclets)
-        {
-            functions.Add(new NativeFunctionRange(start, end, _frames[function]) {
-                UsesFramePointer = true,
-                UsesParentFrame = true,
-            });
+            var protectedEnd = _code.Position;
+            if (_program.Functions[_program.EntryPoint].ReturnType == PrimitiveType.Void)
+            {
+                _code.Bytes(0x31, 0xC0); // xor eax,eax
+            }
+            _frame = 40;
+            Epilog();
+            if (_checkedExceptions)
+            {
+                var handled = _code.Position;
+                _code.Bytes(0x8B, 0x4C, 0x24, 0x20); // recorded failure reason
+                _code.Bytes(0x81, 0xC9, 0x00, 0x00, 0x54, 0xE0); // 0xE0540000 | reason
+                _imports.Add(_code.ImportCall());
+                _code.Byte(0xCC);
+                _entryScopes.Add(new NativeExceptionScope(protectedStart, protectedEnd, 0, handled));
+            }
+            _entryEnd = _code.Position;
         }
 
-        return new NativeCode(_code.ToArray(), _entryStart,
-            [.. functions],
-            [.. _imports]) {
-            AotEntryPoint = processEntry,
-            Data = _data,
-            ReadOnlyDataLength = _readOnlyDataLength,
-            BufferOffsets = [.. _bufferOffsets],
-            DataFixups = [.. _dataFixups],
-            NativeImports = [.. _nativeImportFixups],
-        };
+        var processEntry = _code.Position;
+        if (!_library)
+        {
+            Prolog(40);
+            _code.PatchRelative(_code.RelativeCall(), _entryStart);
+            _code.Bytes(0x89, 0xC1); // mov ecx,eax
+            _imports.Add(_code.ImportCall());
+            _code.Byte(0xCC);
+        }
+        var processEnd = _code.Position;
+
+        for (var failure = 0; failure < _failureStarts.Length; failure++)
+        {
+            _failureStarts[failure] = _code.Position;
+            if (_checkedExceptions)
+            {
+                Prolog(72);
+                _code.Bytes(0x48, 0xB8);
+                _code.Int64(0x54455252554D0001);
+                _code.Bytes(0x48, 0x89, 0x44, 0x24, 0x20);
+                _code.Bytes(0x48, 0xC7, 0x44, 0x24, 0x28, 0x01, 0x00, 0x00, 0x00);
+                _code.Bytes(0x48, 0xC7, 0x44, 0x24, 0x30);
+                _code.Int32(failure + 1);
+                _code.Byte(0xB9);
+                _code.Int32(unchecked((int)0xE0540092));
+                _code.Bytes(0xBA, 0x01, 0x00, 0x00, 0x00); // EXCEPTION_NONCONTINUABLE
+                _code.Bytes(0x41, 0xB8, 0x03, 0x00, 0x00, 0x00);
+                _code.Bytes(0x4C, 0x8D, 0x4C, 0x24, 0x20);
+                _nativeImportFixups.Add(new NativeImportFixup(_code.ImportCall(), "KERNEL32.dll", "RaiseException"));
+            }
+            else
+            {
+                Prolog(40);
+                _code.Byte(0xB9);
+                _code.Int32(unchecked((int)0xE0540001) + failure);
+                _imports.Add(_code.ImportCall());
+            }
+            _code.Byte(0xCC);
+            _failureEnds[failure] = _code.Position;
+        }
+        return (processEntry, processEnd);
     }
 
     private static int AlignFrame(int bytes) => ((bytes + 8 + 15) & ~15) - 8;
 
     private static bool ContainsCleanup(BoundStatement statement) => statement switch {
         BoundTryFinally => true,
+        BoundTryCatch recovery => recovery.Finally is not null || ContainsCleanup(recovery.Body)
+            || ContainsCleanup(recovery.Catch),
+        BoundUnsafe unsafeBlock => ContainsCleanup(unsafeBlock.Body),
         BoundBlock block => block.Statements.Any(ContainsCleanup),
         BoundIf conditional => ContainsCleanup(conditional.Then)
             || (conditional.Else is not null && ContainsCleanup(conditional.Else)),
@@ -569,6 +675,12 @@ internal sealed class PeCompiler
             case BoundTryFinally cleanup:
                 return Math.Max(StatementSpills(cleanup.Body, ref maximumArguments),
                     StatementSpills(cleanup.Finally, ref maximumArguments));
+            case BoundUnsafe unsafeBlock:
+                return StatementSpills(unsafeBlock.Body, ref maximumArguments);
+            case BoundTryCatch recovery:
+                return Math.Max(StatementSpills(recovery.Body, ref maximumArguments),
+                    Math.Max(StatementSpills(recovery.Catch, ref maximumArguments),
+                        recovery.Finally is null ? 0 : StatementSpills(recovery.Finally, ref maximumArguments)));
             case BoundRequire requirement:
                 return ExpressionSpills(requirement.Condition, ref maximumArguments);
             case BoundReturn result when result.Value is BoundExpression value:
@@ -712,6 +824,44 @@ internal sealed class PeCompiler
         _cleanupCalls.Add((_code.RelativeCall(), index));
     }
 
+    private void EmitExceptionFilter(bool storeReason)
+    {
+        // A leaf filter rejects everything except the private noncontinuable, versioned
+        // four-reason record. The entry filter additionally records the reason in its frame.
+        _code.Bytes(0x48, 0x8B, 0x01); // mov rax,[rcx]: ExceptionRecord
+        _code.Bytes(0x81, 0x38);
+        _code.Int32(unchecked((int)0xE0540092));
+        var reject = new List<int> { _code.JumpIf(0x85) };
+        _code.Bytes(0xF6, 0x40, 0x04, 0x01);
+        reject.Add(_code.JumpIf(0x84));
+        _code.Bytes(0x83, 0x78, 0x18, 0x03);
+        reject.Add(_code.JumpIf(0x85));
+        _code.Bytes(0x49, 0xB8);
+        _code.Int64(0x54455252554D0001);
+        _code.Byte(0x4C);
+        _code.Byte(0x39);
+        _code.Byte(0x40);
+        _code.Byte(0x20);
+        reject.Add(_code.JumpIf(0x85));
+        _code.Bytes(0x48, 0x83, 0x78, 0x28, 0x01);
+        reject.Add(_code.JumpIf(0x85));
+        _code.Bytes(0x4C, 0x8B, 0x40, 0x30); // reason
+        _code.Bytes(0x49, 0x83, 0xF8, 0x01);
+        reject.Add(_code.JumpIf(0x82));
+        _code.Bytes(0x49, 0x83, 0xF8, 0x04);
+        reject.Add(_code.JumpIf(0x87));
+        if (storeReason)
+        {
+            _code.Bytes(0x44, 0x89, 0x42, 0x20); // store reason in entry frame, outside home space
+        }
+        _code.Bytes(0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3);
+        foreach (var offset in reject)
+        {
+            _code.PatchRelative(offset, _code.Position);
+        }
+        _code.Bytes(0x31, 0xC0, 0xC3);
+    }
+
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The verifier excludes other structured statement variants.")]
     private void Statement(BoundStatement statement)
     {
@@ -818,15 +968,64 @@ internal sealed class PeCompiler
                 {
                     CommitOutParameters();
                 }
+                if (_checkedExceptions)
+                {
+                    _code.Byte(0x90); // call-site continuation must not start at an unwind epilog
+                }
                 Epilog();
                 break;
             case BoundTryFinally cleanup:
                 var funclet = _funclets.Count;
                 _funclets.Add((cleanup.Finally, _currentFunction, 0, 0));
                 _cleanups.Add(funclet);
+                var protectedBegin = _code.Position;
                 Statement(cleanup.Body);
+                if (_checkedExceptions && !_emittingFunclet)
+                {
+                    _code.Byte(0x90);
+                }
+                var protectedEnd = _code.Position;
                 _cleanups.RemoveAt(_cleanups.Count - 1);
+                if (_checkedExceptions && !_emittingFunclet && protectedBegin != protectedEnd)
+                {
+                    _scopes[_currentFunction].Add(new NativeExceptionScope(protectedBegin, protectedEnd, -funclet - 1, 0));
+                }
                 CallCleanup(funclet);
+                break;
+            case BoundUnsafe unsafeBlock:
+                Statement(unsafeBlock.Body);
+                break;
+            case BoundTryCatch recovery:
+                var cleanupIndex = -1;
+                if (recovery.Finally is not null)
+                {
+                    cleanupIndex = _funclets.Count;
+                    _funclets.Add((recovery.Finally, _currentFunction, 0, 0));
+                    _cleanups.Add(cleanupIndex);
+                }
+                var bodyBegin = _code.Position;
+                Statement(recovery.Body);
+                _code.Byte(0x90);
+                var bodyEnd = _code.Position;
+                var skipCatch = _code.Jump();
+                var landing = _code.Position;
+                Statement(recovery.Catch);
+                if (cleanupIndex >= 0)
+                {
+                    _code.Byte(0x90);
+                }
+                var catchEnd = _code.Position;
+                _code.PatchRelative(skipCatch, catchEnd);
+                if (bodyBegin != bodyEnd)
+                {
+                    _scopes[_currentFunction].Add(new NativeExceptionScope(bodyBegin, bodyEnd, 0, landing));
+                }
+                if (cleanupIndex >= 0)
+                {
+                    _cleanups.RemoveAt(_cleanups.Count - 1);
+                    _scopes[_currentFunction].Add(new NativeExceptionScope(bodyBegin, catchEnd, -cleanupIndex - 1, 0));
+                    CallCleanup(cleanupIndex);
+                }
                 break;
             case BoundIf conditional:
                 Expression(conditional.Condition, 0);
@@ -855,6 +1054,8 @@ internal sealed class PeCompiler
                 _code.PatchRelative(_code.Jump(), start);
                 _code.PatchRelative(exit, _code.Position);
                 break;
+            default:
+                throw new ArgumentException("Unknown native statement kind.", nameof(statement));
         }
     }
 
@@ -1419,6 +1620,13 @@ internal sealed class MachineCode
     internal int ImportCall()
     {
         Bytes(0xFF, 0x15); // call qword ptr [rip+disp32]
+        var offset = Position;
+        Int32(0);
+        return offset;
+    }
+    internal int ImportJump()
+    {
+        Bytes(0xFF, 0x25); // jmp qword ptr [rip+disp32]
         var offset = Position;
         Int32(0);
         return offset;

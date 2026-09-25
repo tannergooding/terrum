@@ -1,0 +1,11 @@
+int32 Main() {
+    mut int32 result = 0;
+    unsafe {
+        try {
+            result = Divide(0);
+        } catch {
+            return 42;
+        }
+    }
+    return result;
+}

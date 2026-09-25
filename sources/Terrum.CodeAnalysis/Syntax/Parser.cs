@@ -368,8 +368,29 @@ internal sealed class Parser
             }
             case TokenKind.TryKeyword:
             {
-                var children = new List<SyntaxElement> { Take(), ParseBlock(), Expect(TokenKind.FinallyKeyword), ParseBlock() };
-                node = Node(SyntaxKind.TryFinallyStatement, children);
+                var children = new List<SyntaxElement> { Take(), ParseBlock() };
+                if (Current.Kind == TokenKind.CatchKeyword)
+                {
+                    children.Add(Take());
+                    children.Add(ParseBlock());
+                    if (Current.Kind == TokenKind.FinallyKeyword)
+                    {
+                        children.Add(Take());
+                        children.Add(ParseBlock());
+                    }
+                    node = Node(SyntaxKind.TryCatchStatement, children);
+                }
+                else
+                {
+                    children.Add(Expect(TokenKind.FinallyKeyword));
+                    children.Add(ParseBlock());
+                    node = Node(SyntaxKind.TryFinallyStatement, children);
+                }
+                break;
+            }
+            case TokenKind.UnsafeKeyword:
+            {
+                node = Node(SyntaxKind.UnsafeStatement, [Take(), ParseBlock()]);
                 break;
             }
             case TokenKind.ForKeyword:

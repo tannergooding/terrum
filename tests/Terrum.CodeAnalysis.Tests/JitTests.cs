@@ -110,6 +110,87 @@ public sealed class JitTests
     }
 
     [Theory]
+    [InlineData("int32 Main() { unsafe { try { return Divide(42, 0); } catch { return 42; } } } int32 Divide(int32 a, int32 b) { return a / b; }", 42)]
+    [InlineData("int32 Main() { mut int32 value = 0; unsafe { try { try { value = Divide(42, 0); } finally { value = 1; } } catch { if (value == 1) { return 42; } return 0; } } return 0; } int32 Divide(int32 a, int32 b) { return a / b; }", 42)]
+    [InlineData("int32 Main() { mut int32 value = 0; unsafe { try { try { try { require false; } finally { value = 1; } } finally { value = 3; } } catch { return value + 39; } } return 0; }", 42)]
+    [InlineData("int32 Main() { mut int32 value = 0; unsafe { try { require false; } catch { value = 1; } finally { value = 42; } } return value; }", 42)]
+    [InlineData("int32 Main() { mut int32 value = 0; unsafe { try { try { require false; } catch { require false; } finally { value = 1; } } catch { return value + 41; } } return 0; }", 42)]
+    [InlineData("int32 Main() { mut int32 value = 0; unsafe { try { value = 41; } catch { value = 0; } finally { value = 42; } } return value; }", 42)]
+    [InlineData("int32 Main() { unsafe { try { require Fail(); } catch { return 42; } } return 0; } bool Fail() { return false; }", 42)]
+    [InlineData("int32 Main() { unsafe { try { return (int32)uint32.MaxValue; } catch { return 42; } } }", 42)]
+    [InlineData("int32 Main() { mut int64 value = 42i64; unsafe { try { return (int32)Take(value); } catch { return 0; } } } int64 Take(int64 value) { try { return value; } finally { int64 ignored = 0i64; } }", 42)]
+    [InlineData("struct V { public int32 A; public int32 B; public int32 C; [NoThrow] public V(int32 x) { A = x; B = 1; C = 2; } } V Take(V value) { mut V local = value; try { return local; } finally { local = new V(0); } } int32 Main() { V value = Take(new V(42)); return value.A; }", 42)]
+    [InlineData("struct V { public int32 A; public int32 B; public int32 C; public int32 D; [NoThrow] public V(int32 x) { A = x; B = 1; C = 2; D = 3; } } V Take(V value) { mut V local = value; try { return local; } finally { local = new V(0); } } int32 Main() { V value = Take(new V(42)); return value.A; }", 42)]
+    [InlineData("bool Take(bool fail, out int32 x) { unsafe { try { x = 42; require !fail; return true; } catch { return false; } } } int32 Main() { require Take(false, out var x); return x; }", 42)]
+    [InlineData("bool Take(bool fail, out int32 x) { unsafe { try { x = 42; require !fail; return true; } catch { return false; } } } int32 Main() { mut int32 x = 9; bool ok = Take(true, out x); if (ok) { return 0; } return 42; }", 42)]
+    [InlineData("[NoThrow] bool Initialize(out int32 value) { value = 42; return true; } bool Fail() { require false; return false; } bool Take(bool enter, out int32 value) { unsafe { try { if (enter && Initialize(out value) && Fail()) { return true; } return false; } catch { return value == 42; } } } int32 Main() { require Take(true, out var value); if (Take(false, out var absent)) { return 1; } return value; }", 42)]
+    [InlineData("[NoThrow] int32 Sixth(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { return f; } bool Take(out int32 value) { unsafe { try { try { require false; } finally { value = Sixth(1, 2, 3, 4, 5, 42); } } catch { return true; } } return false; } int32 Main() { require Take(out var value); return value; }", 42)]
+    [InlineData("struct Value { public int32 A; public int32 B; public int32 C; public Value(int32 a, bool fail) { A = a; require !fail; B = 2; C = 3; } } int32 Main() { mut Value value = new Value(42, false); unsafe { try { value = new Value(0, true); } catch { return value.A; } } return 0; }", 42)]
+    [InlineData("int32 Main() { return 2147483647 + 1; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { return 42 / 0; }", unchecked((int)0xE0540002))]
+    [InlineData("int32 Main() { require false; return 0; }", unchecked((int)0xE0540003))]
+    public async Task CheckedExceptionWorkerAndExecutableAgreeAsync(string source, int expected)
+    {
+        AssertWindowsX64();
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var directory = Path.Combine(RepositoryRoot(), "artifacts", "jit-tests");
+        _ = Directory.CreateDirectory(directory);
+        var image = Path.Combine(directory, $"checked-{Guid.NewGuid():N}.exe");
+        try
+        {
+            await File.WriteAllBytesAsync(image, NativeEmitter.Emit(program, NativeRuntimePolicy.CheckedExceptions)).ConfigureAwait(true);
+            (var nativeExit, _, _) = await RunAsync(new ProcessStartInfo(image) {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            }, []).ConfigureAwait(true);
+            (var jitExit, var output, var error) = await RunAsync(
+                CliStart("jit", "-", "--runtime", "checked-exceptions"), Encoding.UTF8.GetBytes(source)).ConfigureAwait(true);
+            Assert.Equal(expected, nativeExit);
+            Assert.Equal(nativeExit, jitExit);
+            Assert.Equal("", output);
+            Assert.Equal("", error);
+        }
+        finally
+        {
+            File.Delete(image);
+        }
+    }
+
+    [Fact]
+    public async Task CheckedBoundsFailureAgreesBetweenHostBufferPeAndJitWorkerAsync()
+    {
+        AssertWindowsX64();
+        var source = "int32 Main() { return (int32)Host.Source[42]; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            [new HostBuffer("Source", PrimitiveType.Char16, [97], false)], BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var directory = Path.Combine(RepositoryRoot(), "artifacts", "jit-tests");
+        _ = Directory.CreateDirectory(directory);
+        var image = Path.Combine(directory, $"checked-bounds-{Guid.NewGuid():N}.exe");
+        try
+        {
+            await File.WriteAllBytesAsync(image, NativeEmitter.Emit(
+                Assert.IsType<BoundProgram>(compilation.Program), NativeRuntimePolicy.CheckedExceptions)).ConfigureAwait(true);
+            (var nativeExit, _, _) = await RunAsync(new ProcessStartInfo(image) {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            }, []).ConfigureAwait(true);
+            var scanner = Path.Combine(RepositoryRoot(), "samples", "native", "checked-bounds.terrum");
+            (var jitExit, _, _) = await RunAsync(
+                CliStart("scan-component", scanner, "-", "--runtime", "checked-exceptions"),
+                Encoding.UTF8.GetBytes("a")).ConfigureAwait(true);
+            Assert.Equal(unchecked((int)0xE0540004), nativeExit);
+            Assert.Equal(nativeExit, jitExit);
+        }
+        finally
+        {
+            File.Delete(image);
+        }
+    }
+
+    [Theory]
     [InlineData("int32 Main() { return unknown; }", "TRM")]
     [InlineData("int32 Main() { mut int32 x = 9; if (Try(out x) && x == 5) { return 1; } return x; } bool Try(out int32 x) { x = 5; return false; }", "TRM3016")]
     [InlineData("int32 Main() { mut int32 y = 9; bool result = false || Try(out y); return y; } bool Try(out int32 y) { return false; }", "TRM")]

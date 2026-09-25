@@ -456,6 +456,7 @@ public sealed class Lexer
         "catch" => TokenKind.CatchKeyword,
         "finally" => TokenKind.FinallyKeyword,
         "throw" => TokenKind.ThrowKeyword,
+        "unsafe" => TokenKind.UnsafeKeyword,
         _ => TokenKind.Identifier,
     };
 }

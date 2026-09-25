@@ -30,6 +30,15 @@ public enum PrimitiveType
     UInt64,
 }
 
+/// <summary>The verified behavior of compiler-generated checked failures.</summary>
+public enum BoundRuntimePolicy
+{
+    /// <summary>Checked failures terminate the process without exceptional cleanup.</summary>
+    FailFast,
+    /// <summary>Only the four compiler-generated checked failures participate in native unwinding.</summary>
+    CheckedExceptions,
+}
+
 /// <summary>A source-mapped, structured program with resolved function and local indexes.</summary>
 /// <param name="Functions">Functions in declaration order.</param>
 /// <param name="EntryPoint">The index of the parameterless Main function, or -1 for a library requiring linking.</param>
@@ -40,6 +49,9 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 
     /// <summary>Compiler-supplied, bounded buffers; never represented as source values or raw addresses.</summary>
     public ImmutableArray<HostBuffer> Buffers { get; init; } = [];
+
+    /// <summary>The runtime behavior verified for this program and its imports.</summary>
+    public BoundRuntimePolicy RuntimePolicy { get; init; }
 }
 
 /// <summary>A compact value type of at most sixteen bytes, with no references or aliases.</summary>
@@ -160,8 +172,14 @@ public sealed record BoundIf(BoundExpression Condition, BoundStatement Then, Bou
 /// <param name="Span">The source range.</param>
 public sealed record BoundWhile(BoundExpression Condition, BoundStatement Body, TextSpan Span) : BoundStatement(Span);
 
-/// <summary>A semantic cleanup region; finally runs on normal body completion and normal returns, not fail-fast termination.</summary>
+/// <summary>A cleanup region for normal exits and checked exceptional unwinding, but not fail-fast termination.</summary>
 public sealed record BoundTryFinally(BoundBlock Body, BoundBlock Finally, TextSpan Span) : BoundStatement(Span);
+
+/// <summary>An explicit unsafe source context; only checked failures from its nested recovery regions can be caught.</summary>
+public sealed record BoundUnsafe(BoundBlock Body, TextSpan Span) : BoundStatement(Span);
+
+/// <summary>A checked-failure recovery region, with optional cleanup after body or handler completion.</summary>
+public sealed record BoundTryCatch(BoundBlock Body, BoundBlock Catch, BoundBlock? Finally, TextSpan Span) : BoundStatement(Span);
 
 /// <summary>Evaluates a boolean once and fails according to the selected runtime policy when false.</summary>
 /// <param name="Condition">The boolean success predicate.</param>

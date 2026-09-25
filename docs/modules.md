@@ -1,6 +1,7 @@
 # Bounded semantic and native modules
 
-The version 9 `.trm` format records the semantic profile and persists verified, typed, source-mapped structured IR,
+The version 11 `.trm` format records the selected native runtime policy and
+persists verified, typed, source-mapped structured IR,
 not source text or a native DLL. `CreateProducer` stores selected function bodies
 and exported contracts. `CreateConsumer` stores its own function bodies and the
 reference producer's declaration contracts, **not** producer bodies.
@@ -146,14 +147,15 @@ alongside the existing code, severity, message, span and line/character range.
 Human-readable source diagnostics include the owning path and location. Successful
 `compile-module` and `link-module` commands report the written artifact's
 path, kind, size and SHA-256. Successful `run-module` still returns the
-program's raw exit code with no JSON envelope, since fail-fast execution can
-terminate the worker. `link-module` requires an explicit `--runtime fail-fast`;
+program's raw exit code with no JSON envelope, since a checked failure can
+terminate the worker. `link-module` requires an explicit matching
+`--runtime fail-fast` or `--runtime checked-exceptions`;
 it writes only after compatibility checks and emission succeed, leaving an
 existing destination unchanged on failure.
 
-The `run-module` command is an explicitly in-process fail-fast JIT operation: a checked
-runtime failure terminates the *host process*. Use a child process for
-untrusted input. Compilation and linking keep inputs distinct from their
+The `run-module` command is an explicitly selected-policy in-process JIT
+operation: an unhandled failure terminates the *host process*. Use a child
+process for untrusted input. Compilation and linking keep inputs distinct from their
 output paths; module source and each artifact are limited to 4 MiB.
 
 Private and internal methods cannot be exported or imported. Functions transitively
@@ -186,21 +188,23 @@ be replaced by NoThrow, and MayReturn by DoesNotReturn. Weakening either
 promise is rejected without inferring effects from replacement bodies.
 `DoesNotReturn` applies only to void functions and means normal continuation
 is unreachable, including after an imported call; it does not introduce a
-public never type, exception handling or asynchronous cleanup. Producer
+public never type, general exception objects or asynchronous cleanup. Producer
 bodies claiming either promise must independently pass the verifier's
 structured-flow or conservative effect proof. NoThrow is about permitted
 operations and declared callees, not an exception handler or a claim that
-fail-fast process termination counts as NoThrow. Older versions, including
-version 9 without structured cleanup regions, are rejected;
+fail-fast process termination counts as NoThrow. Version 10 fail-fast artifacts
+remain readable; earlier versions, including version 9 without structured
+cleanup regions, are rejected;
 recreate them from source. Multi-producer identity/version resolution, dependency
 cycles and resilient public layouts remain later work.
 
 Native package validation checks both allocation-only and saved-RBP unwind
 records, their ordered `.pdata` ranges, `.xdata` bounds and corresponding
-machine-code prologs before accepting a replacement image. Source functions
-precede normal cleanup funclets; exports must point to source-function entries,
-never to funclets. The native package format is unchanged; these records do not
-enable catchable exceptions. Earlier native-10/package-1 images with
+machine-code prologs before accepting a replacement image. Checked native-11
+images additionally validate bounded scope records and handler references.
+Source functions precede cleanup funclets; exports must point to source-function
+entries, never to funclets or runtime helpers. The native package container is
+still version 1. Earlier native-10/package-1 fail-fast images with
 allocation-only source frames remain valid: the four failure helpers (plus
 two consumer entry wrappers) precede the source functions in both layouts.
 Validation still rejects exports to helpers or funclets and unwind ranges
@@ -209,8 +213,8 @@ shorter than their described prolog.
 `NativeEmitter.EmitLibrary` can instead emit a Windows x64 PE32+ DLL directly
 from a verified `Compilation.CreateLibrary` program and an explicit list of
 public function names. It has a conventional named export table, no process
-entry or initialization routine, and retains native unwind and fail-fast
-`ExitProcess` imports. Scalar, compact aggregate and conditional `out` calls
+entry or initialization routine, and retains policy-specific native unwind and
+failure imports. Scalar, compact aggregate and conditional `out` calls
 use the same Windows x64 encoder as the executable. The image contains no
 base-dependent addresses: its references are RVAs or RIP-relative, so ASLR
 needs no base relocation entries. Export names are exact and stable per
@@ -227,7 +231,7 @@ function declaration must have exactly one explicit binding from its qualified
 source identity to a DLL basename and named export. The emitted consumer has
 ordinary Windows import descriptors, lookup tables and writable IAT slots;
 its calls use RIP-relative IAT operands while local calls retain the shared
-encoder's direct relative form. `ExitProcess` remains an independent runtime
+encoder's direct relative form. Policy-specific failure imports remain independent runtime
 import. No external declaration gets a fake native body or unwind range.
 The Windows loader resolves the provider DLL before the consumer begins;
 placing a compatible replacement DLL at the same filename changes behavior
@@ -241,8 +245,9 @@ the package layer below adds that check. Neither provides a multi-provider
 contract linker, live patching or hot-unload protocol.
 
 `NativeModuleCompiler` packages each separately compiled native producer DLL
-or consumer EXE with its corresponding version 10 semantic `.trm` contract.
-Its version 1 package records the native-10 profile, fail-fast runtime policy,
+or consumer EXE with its corresponding version 11 semantic `.trm` contract
+(or a readable version 10 fail-fast contract). Its version 1 package records
+the selected native-10/fail-fast or native-11/checked-exceptions profile,
 single explicit provider identity and the exact PE and semantic bytes. The
 identity is 1–64 ASCII letters, digits or underscores, beginning with a
 letter; its loader basename is `terrum-<identity>.dll`. Artifacts are bounded
@@ -278,7 +283,7 @@ terminate that child and remove only its staged files and empty directory.
 Image deletion retries transient Windows access/sharing failures for up to one
 second per file, including delayed image-section teardown after process exit;
 persistent cleanup failures are reported rather than silently discarded.
-The child process's raw exit code includes fail-fast codes. These checks
+The child process's raw exit code includes unhandled failure codes. These checks
 assume the native images were produced and distributed by trusted parties:
 the checksum does not prove source-to-code equivalence or prevent an attacker
 from deliberately replacing executable bytes and recomputing it. This is

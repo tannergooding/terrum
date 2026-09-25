@@ -1,10 +1,10 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-7 and native-10
+## Current boundary: syntax-8 and native-10/native-11
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
-immutable and usable independently. The separate [native-10 profile](native.md)
+immutable and usable independently. The separate [native profiles](native.md)
 binds a bounded scalar/compact-value language and emits Windows x64 executables through
 verified structured operations. A clean syntax result is deliberately not a
 valid-program claim: `var x = 1;` parses but semantic analysis rejects its missing
@@ -17,7 +17,7 @@ managed graphs and standard-library execution are not implemented.
 | Lexing | Pinned Unicode identifiers, ASCII numbers/tags, comments, leading trivia, strings, diagnostics, EOF | Interpolation, raw/character/native literals, directives |
 | Declarations | Using, file-scoped namespaces, functions, compact structs with explicit fields/constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]`; library binding and one validated module reference per consumer | Classes, interfaces, enums/unions, general attributes, generic declarations/constraints, general module dependency graphs |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; repeated `?` diagnoses | General type resolution, optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
-| Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, structured `try`/`finally` normal-exit cleanup, assignment and expression statements | `foreach`, break/continue, switch/patterns, catchable exceptions, async, compound assignment |
+| Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, break/continue, switch/patterns, general exception objects/throw, async, compound assignment |
 | Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named/ref/out argument syntax | Character literals, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
@@ -41,13 +41,14 @@ type        = (qualifiedName | "void") ("<" type ("," type)* ">")? "?"?
 mode        = "ref" | "mut" "ref" | "out"
 local       = localInitializer ";"
 localInitializer = "mut"? ("var" | type) name "=" expression
-statement   = block | local | if | while | for | tryFinally | return | require | assignment | expression ";" | ";"
+statement   = block | local | if | while | for | tryStatement | unsafeStatement | return | require | assignment | expression ";" | ";"
 if          = "if" "(" expression ")" block ("else" (block | if))?
 while       = "while" "(" expression ")" block
 for         = "for" "(" initializer? ";" expression? ";" iterator? ")" block
 initializer = localInitializer | assignmentClause | expression
 iterator    = assignmentClause | expression
-tryFinally  = "try" block "finally" block
+tryStatement = "try" block ("catch" block ("finally" block)? | "finally" block)
+unsafeStatement = "unsafe" block
 return      = "return" expression? ";"
 require     = "require" expression ";"
 assignment  = assignmentClause ";"
@@ -80,10 +81,13 @@ Explicit `Option<Option<T>>` syntax is unchanged. `syntax-1` introduced this
 rejection rule; `syntax-2` added the lossless `RequireStatement` node.
 `syntax-7` includes scoped for-loops, `try`/`finally`, parameterless declaration attributes and
 checked casts for supported 32- and 64-bit integer types and `char16`.
+`syntax-8` adds `unsafe` blocks and the parameterless checked-policy `catch`,
+with optional `finally`; a try requires at least one handler or cleanup clause.
 `[NoThrow]` on functions/constructors and `[DoesNotReturn]` on void functions are
 currently bound; unknown, duplicate and misplaced attributes diagnose rather
 than becoming unchecked metadata. Attribute nodes retain their brackets and
-name as three children. The `native-10` profile supports checked
+name as three children. The `native-10` (fail-fast) and `native-11`
+(checked-exceptions) profiles support checked
 signed/unsigned 32- and 64-bit integers, raw code units, conditional outputs,
 fixed host-buffer capabilities and acyclic value layouts up to 16 bytes.
 Fields are read-only after construction unless explicitly declared `mut`.
@@ -295,9 +299,10 @@ machine instructions and PE32+ images directly, with no CIL/LLVM translation
 or linker dependency. Source functions use a saved RBP frame base for
 locals and spills, separate from the RSP-relative outgoing call area. Shared
 PE/JIT unwind metadata describes both the saved register and allocation.
-Normal cleanup has out-of-line funclets that borrow the source frame in RDX
+Cleanup has out-of-line funclets that borrow the source frame in RDX
 while reserving their own call areas; they are invoked explicitly on normal
-exits. Exceptional cleanup and catchable runtime failures are not implemented.
+exits and by Windows on checked-policy exceptional exits. Versioned scope
+records and filters admit only four compiler-generated checked failures.
 `BoundProgram` retains structured blocks, branches,
 loops, slot reads/writes and checked expressions; its verifier precedes
 machine lowering. It is not a claim to implement the complete semantic IL.

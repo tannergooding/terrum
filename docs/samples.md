@@ -7,6 +7,12 @@ through annotated value construction, widening and conditional outputs; its
 effect contracts do not require or imply the future catch/cleanup runtime.
 The [no-return example](../samples/native/no-return.terrum) returns 42 when its
 conditional output succeeds; the failure branch has no normal continuation.
+The [checked recovery sample](../samples/native/checked-recovery.terrum)
+returns 42 in both AOT and JIT with `--runtime checked-exceptions`: a
+cross-function division failure unwinds the inner `finally` before entering
+an unsafe `catch`. The separate
+[checked bounds component](../samples/native/checked-bounds.terrum) uses the
+same policy when compiled with an entry and an explicit host-buffer grant.
 
 | Program | Source | Design contract / expected behavior |
 |---|---|---|

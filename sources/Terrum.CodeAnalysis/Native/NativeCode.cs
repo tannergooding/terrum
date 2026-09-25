@@ -42,7 +42,16 @@ public readonly record struct NativeFunctionRange(int Start, int End, int StackS
 
     /// <summary>The prolog receives the source function's frame base in RDX, for an out-of-line cleanup.</summary>
     public bool UsesParentFrame { get; init; }
+
+    /// <summary>Image-relative address of the compiler-owned trampoline to the Windows language handler.</summary>
+    public int ExceptionHandler { get; init; }
+
+    /// <summary>Protected instruction ranges and their native cleanup or filter/landing addresses.</summary>
+    public ImmutableArray<NativeExceptionScope> ExceptionScopes { get; init; } = [];
 }
+
+/// <summary>A Windows x64 scope-table entry, with a zero target for cleanup funclets.</summary>
+public readonly record struct NativeExceptionScope(int Begin, int End, int Handler, int Target);
 
 /// <summary>A RIP-relative displacement in code targeting an offset in the data image.</summary>
 public readonly record struct NativeDataFixup(int DisplacementOffset, int DataOffset);

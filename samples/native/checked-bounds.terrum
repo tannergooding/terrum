@@ -1,0 +1,3 @@
+int32 Scan() {
+    return (int32)Host.Source[42];
+}

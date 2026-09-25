@@ -17,10 +17,10 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
-    private const string ModuleUsage = "Usage: terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <artifact.trm> [--json]; "
-        + "terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <artifact.trm> [--json]; "
-        + "terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime fail-fast [--json]; "
-        + "terrumc run-module <consumer.trm> <producer.trm> --runtime fail-fast [--json]";
+    private const string ModuleUsage = "Usage: terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--json]; "
+        + "terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--json]; "
+        + "terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]; "
+        + "terrumc run-module <consumer.trm> <producer.trm> --runtime <fail-fast|checked-exceptions> [--json]";
 
     // The normal source binder runs only while creating an artifact. Linking takes module bytes only.
     private static int RunModuleCommand(string[] args)
@@ -38,10 +38,11 @@ internal static partial class Program
         {
             byte[] result;
             string output;
+            var selectedPolicy = NativeRuntimePolicy.FailFast;
             if (count >= 6 && args[0] == "compile-module"
                 && (args[1] is "producer" or "consumer"))
             {
-                if (!TryReadModuleOptions(args, count, out var paths, out var exports, out output))
+                if (!TryReadModuleOptions(args, count, out var paths, out var exports, out output, out selectedPolicy))
                 {
                     WriteInputError(json, "TRM2000", ModuleUsage);
                     return 2;
@@ -56,12 +57,15 @@ internal static partial class Program
                 var snapshots = ReadModuleSources(paths);
                 var reference = args[1] == "consumer" ? ReadModuleFile(args[3]) : null;
                 var declarations = reference is null ? null : ModuleCompiler.CreateReference(reference);
+                var runtimePolicy = (BoundRuntimePolicy)selectedPolicy;
                 var compilation = snapshots.Length == 1
-                    ? declarations is null ? Compilation.CreateLibrary(snapshots[0]) : Compilation.Create(snapshots[0], declarations)
-                    : declarations is null ? Compilation.CreateLibrary(snapshots) : Compilation.Create(snapshots, declarations);
+                    ? declarations is null ? Compilation.CreateLibrary(snapshots[0], runtimePolicy)
+                        : Compilation.Create(snapshots[0], declarations, runtimePolicy)
+                    : declarations is null ? Compilation.CreateLibrary(snapshots, runtimePolicy)
+                        : Compilation.Create(snapshots, declarations, runtimePolicy);
                 if (compilation.HasErrors)
                 {
-                    WriteModuleSourceDiagnostics(compilation, json);
+                    WriteModuleSourceDiagnostics(compilation, json, selectedPolicy);
                     return 1;
                 }
                 if (compilation.Program is not BoundProgram program)
@@ -76,7 +80,7 @@ internal static partial class Program
                 };
             }
             else if (count == 7 && args[0] == "link-module" && args[3] == "-o"
-                && args[5] == "--runtime" && args[6] == "fail-fast")
+                && args[5] == "--runtime" && args[6] is "fail-fast" or "checked-exceptions")
             {
                 if (Path.GetFullPath(args[4]).Equals(Path.GetFullPath(args[1]), StringComparison.OrdinalIgnoreCase)
                     || Path.GetFullPath(args[4]).Equals(Path.GetFullPath(args[2]), StringComparison.OrdinalIgnoreCase)
@@ -85,14 +89,19 @@ internal static partial class Program
                     throw new ModuleFormatException("Linked output must be a distinct .exe path.");
                 }
                 var program = ModuleCompiler.Link(ReadModuleFile(args[1]), ReadModuleFile(args[2]));
-                result = NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast);
+                var runtimePolicy = args[6] == "fail-fast"
+                    ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+                selectedPolicy = runtimePolicy;
+                result = NativeEmitter.Emit(program, runtimePolicy);
                 output = args[4];
             }
             else if (count == 5 && args[0] == "run-module"
-                && args[3] == "--runtime" && args[4] == "fail-fast")
+                && args[3] == "--runtime" && args[4] is "fail-fast" or "checked-exceptions")
             {
                 var program = ModuleCompiler.Link(ReadModuleFile(args[1]), ReadModuleFile(args[2]));
-                return NativeJit.Execute(program, NativeRuntimePolicy.FailFast);
+                var runtimePolicy = args[4] == "fail-fast"
+                    ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+                return NativeJit.Execute(program, runtimePolicy);
             }
             else
             {
@@ -103,7 +112,7 @@ internal static partial class Program
             WriteArtifact(outputPath, result);
             if (json)
             {
-                WriteModuleArtifactJson(args[0], outputPath, result);
+                WriteModuleArtifactJson(args[0], outputPath, result, selectedPolicy);
             }
             return 0;
         }
@@ -126,12 +135,13 @@ internal static partial class Program
     }
 
     private static bool TryReadModuleOptions(string[] args, int count, out List<string> sources,
-        out List<string> exports, out string output)
+        out List<string> exports, out string output, out NativeRuntimePolicy runtimePolicy)
     {
         sources = [args[2]];
         var native = args[0] == "compile-native";
         exports = args[1] == "producer" && !native ? [args[3]] : [];
         output = "";
+        runtimePolicy = NativeRuntimePolicy.FailFast;
         var hasOutput = false;
         var hasRuntime = false;
         if ((count & 1) != 0)
@@ -155,8 +165,10 @@ internal static partial class Program
                     output = value;
                     hasOutput = true;
                     break;
-                case "--runtime" when native && !hasRuntime && value == "fail-fast":
+                case "--runtime" when !hasRuntime && value is "fail-fast" or "checked-exceptions":
                     hasRuntime = true;
+                    runtimePolicy = value == "fail-fast"
+                        ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
                     break;
                 default:
                     return false;
@@ -165,15 +177,16 @@ internal static partial class Program
         return hasOutput && (!native || (hasRuntime && (args[1] != "producer" || exports.Count != 0)));
     }
 
-    private static void WriteModuleSourceDiagnostics(Compilation compilation, bool json)
-        => WriteCompilationResult("compile-module", compilation, compilation.SourceDiagnostics, false, null, null, json);
+    private static void WriteModuleSourceDiagnostics(Compilation compilation, bool json, NativeRuntimePolicy policy)
+        => WriteCompilationResult("compile-module", compilation, compilation.SourceDiagnostics, false, null, null, json, policy);
 
-    private static void WriteModuleArtifactJson(string command, string outputPath, byte[] result)
+    private static void WriteModuleArtifactJson(string command, string outputPath, byte[] result,
+        NativeRuntimePolicy policy)
     {
         using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
         writer.WriteStartObject();
         writer.WriteNumber("schemaVersion", 1);
-        writer.WriteString("profile", Compilation.ProfileVersion);
+        writer.WriteString("profile", Profile(policy));
         writer.WriteString("command", command);
         writer.WriteBoolean("success", true);
         writer.WriteStartArray("diagnostics");
@@ -183,7 +196,7 @@ internal static partial class Program
         writer.WriteString("kind", command == "link-module" ? "windows-x64-executable" : "semantic-module");
         if (command == "link-module")
         {
-            writer.WriteString("runtimePolicy", "fail-fast");
+            writer.WriteString("runtimePolicy", PolicyName(policy));
         }
         writer.WriteNumber("length", result.Length);
         writer.WriteString("sha256", Convert.ToHexString(SHA256.HashData(result)));

@@ -81,6 +81,14 @@ public sealed class Compilation
     public static Compilation Create(SyntaxTree tree, CancellationToken cancellationToken = default) =>
         CreateCore(tree, isLibrary: false, cancellationToken);
 
+    /// <summary>Binds a source snapshot under an explicit checked-failure runtime policy.</summary>
+    public static Compilation Create(SyntaxTree tree, BoundRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
+        CreateCore([tree], [], isLibrary: false, cancellationToken, runtimePolicy: runtimePolicy);
+
+    /// <summary>Binds a library snapshot under an explicit checked-failure runtime policy.</summary>
+    public static Compilation CreateLibrary(SyntaxTree tree, BoundRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
+        CreateCore([tree], [], isLibrary: true, cancellationToken, runtimePolicy: runtimePolicy);
+
     /// <summary>Binds and verifies library definitions without requiring or selecting a Main entry point.</summary>
     /// <param name="tree">The source snapshot containing the definitions.</param>
     /// <param name="cancellationToken">Cancellation for semantic traversal.</param>
@@ -95,8 +103,16 @@ public sealed class Compilation
         return CreateCore(tree, isLibrary: false, cancellationToken, reference);
     }
 
+    /// <summary>Binds a consumer against a producer with the selected checked-failure behavior.</summary>
+    public static Compilation Create(SyntaxTree tree, CompilationReference reference, BoundRuntimePolicy runtimePolicy,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        return CreateCore(tree, isLibrary: false, cancellationToken, reference, runtimePolicy);
+    }
+
     private static Compilation CreateCore(SyntaxTree tree, bool isLibrary, CancellationToken cancellationToken,
-        CompilationReference? reference = null)
+        CompilationReference? reference = null, BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast)
     {
         ArgumentNullException.ThrowIfNull(tree);
         cancellationToken.ThrowIfCancellationRequested();
@@ -107,7 +123,7 @@ public sealed class Compilation
             return new Compilation(tree, tree.Diagnostics, null);
         }
 
-        var binder = new Binder(tree, isLibrary, cancellationToken, reference);
+        var binder = new Binder([tree], [], cancellationToken, isLibrary, reference, runtimePolicy);
         var program = binder.Bind();
         var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
         diagnostics.AddRange(tree.Diagnostics);
@@ -137,15 +153,34 @@ public sealed class Compilation
     public static Compilation Create(IEnumerable<SyntaxTree> trees, CancellationToken cancellationToken = default) =>
         CreateCore(trees, [], isLibrary: false, cancellationToken);
 
+    /// <summary>Binds multiple source snapshots under an explicit checked-failure runtime policy.</summary>
+    public static Compilation Create(IEnumerable<SyntaxTree> trees, BoundRuntimePolicy runtimePolicy,
+        CancellationToken cancellationToken = default) =>
+        CreateCore(trees, [], isLibrary: false, cancellationToken, runtimePolicy: runtimePolicy);
+
     /// <summary>Binds source snapshots with explicit, fixed-size host buffer capabilities shared by the compilation.</summary>
     public static Compilation Create(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers,
         CancellationToken cancellationToken = default) =>
         CreateCore(trees, buffers, isLibrary: false, cancellationToken);
 
+    /// <summary>Binds source snapshots and shared host buffers under an explicit checked-failure runtime policy.</summary>
+    public static Compilation Create(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers,
+        BoundRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
+        CreateCore(trees, buffers, isLibrary: false, cancellationToken, runtimePolicy: runtimePolicy);
+
+    /// <summary>Binds host buffers under the selected checked-failure runtime policy.</summary>
+    public static Compilation Create(SyntaxTree tree, ImmutableArray<HostBuffer> buffers, BoundRuntimePolicy runtimePolicy,
+        CancellationToken cancellationToken = default) =>
+        CreateCore([tree], buffers, isLibrary: false, cancellationToken, runtimePolicy: runtimePolicy);
+
     /// <summary>Binds library definitions across source snapshots, without requiring a process entry point.</summary>
     public static Compilation CreateLibrary(IEnumerable<SyntaxTree> trees, CancellationToken cancellationToken = default) =>
         CreateCore(trees, [], isLibrary: true, cancellationToken);
 
+    /// <summary>Binds multiple library snapshots under an explicit checked-failure runtime policy.</summary>
+    public static Compilation CreateLibrary(IEnumerable<SyntaxTree> trees, BoundRuntimePolicy runtimePolicy,
+        CancellationToken cancellationToken = default) =>
+        CreateCore(trees, [], isLibrary: true, cancellationToken, runtimePolicy: runtimePolicy);
     /// <summary>Binds consumer source snapshots against one validated module reference.</summary>
     public static Compilation Create(IEnumerable<SyntaxTree> trees, CompilationReference reference, CancellationToken cancellationToken = default)
     {
@@ -153,8 +188,16 @@ public sealed class Compilation
         return CreateCore(trees, [], isLibrary: false, cancellationToken, reference);
     }
 
+    /// <summary>Binds multiple consumer snapshots against the selected reference runtime policy.</summary>
+    public static Compilation Create(IEnumerable<SyntaxTree> trees, CompilationReference reference, BoundRuntimePolicy runtimePolicy,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        return CreateCore(trees, [], isLibrary: false, cancellationToken, reference, runtimePolicy);
+    }
     private static Compilation CreateCore(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers, bool isLibrary,
-        CancellationToken cancellationToken, CompilationReference? reference = null)
+        CancellationToken cancellationToken, CompilationReference? reference = null,
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast)
     {
         ArgumentNullException.ThrowIfNull(trees);
         cancellationToken.ThrowIfCancellationRequested();
@@ -180,7 +223,7 @@ public sealed class Compilation
             return new Compilation(snapshots[0], diagnostics.ToImmutable(), null,
                 snapshots.ToImmutable(), sourceDiagnostics.ToImmutable());
         }
-        var binder = new Binder(snapshots.ToImmutable(), buffers, cancellationToken, isLibrary, reference);
+        var binder = new Binder(snapshots.ToImmutable(), buffers, cancellationToken, isLibrary, reference, runtimePolicy);
         var program = binder.Bind();
         diagnostics.AddRange(binder.Diagnostics);
         sourceDiagnostics.AddRange(binder.SourceDiagnostics);

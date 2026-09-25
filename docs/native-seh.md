@@ -1,12 +1,14 @@
 # Windows x64 exception ABI probe
 
-This is an independently executed ABI prerequisite, **not implemented Terrum
-exception syntax or a catchable compiler runtime**. Current Terrum artifacts
-still require the explicit fail-fast policy. Compiler-generated source
-functions now preserve RBP with shared PE/JIT unwind metadata and keep
-outgoing stack arguments RSP-relative, but do not yet have a language handler
-or exceptional cleanup dispatch. Normal-exit cleanup funclets borrow the
-source frame through RDX and are called explicitly.
+This is an independently executed ABI check, not evidence for a general Terrum
+exception ABI. The compiler now separately emits an explicit bounded
+`checked-exceptions` profile with a private, versioned four-reason identity,
+Windows scope dispatch and exceptional cleanup; `fail-fast` retains its
+original termination behavior. Compiler-generated source functions preserve
+RBP with shared PE/JIT unwind metadata and keep outgoing stack arguments
+RSP-relative. Cleanup funclets borrow the source frame through RDX; ordinary
+exits call them explicitly, while checked exceptional exits dispatch them
+through native unwind.
 
 `dotnet run --file scripts\check-native-frame.cs` separately loads a
 compiler-generated DLL into a C caller. It checks normal cleanup, stack arguments
@@ -84,12 +86,13 @@ be modeled by eagerly running it before filter selection.
 
 ## Remaining integration
 
-This proof does not establish Terrum exception identity, allocation/low-memory
-behavior, unsafe recovery checking, exceptional cleanup and partial-output
-verification, exception-handler funclets, GC roots, module exception contracts,
-or containment at foreign callback boundaries. It also does not authorize
-catching arbitrary Windows faults as Terrum exceptions. Those semantics must
-be implemented before offering a different runtime policy. The shared AOT/JIT
-unwind writer currently emits no-handler allocation records, with saved-RBP
-entries for source functions and normal cleanup funclets; this probe remains
-separate until structured regions can supply verified handler and scope metadata.
+The compiler now has separate source verification of unsafe recovery,
+exceptional cleanup, partial-output failure edges and module policy matching.
+The shared AOT/JIT writer emits scope-bearing saved-RBP source records and
+registered handler thunks under the checked policy. The independent probe
+does not establish the compiler's source-to-code correctness: that is covered
+by bounded AOT/JIT and persisted-package execution regressions. Neither proof
+establishes general exception classes/identity, allocation or low-memory
+behavior, GC roots, ownership cleanup or containment across arbitrary foreign
+callbacks. Neither authorizes catching arbitrary Windows faults as Terrum
+exceptions.

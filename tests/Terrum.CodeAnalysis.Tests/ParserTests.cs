@@ -78,6 +78,41 @@ public sealed class ParserTests
         AssertLossless(tree);
     }
 
+    [Fact]
+    public void UnsafeRecoveryRetainsBothRegionsOptionalCleanupAndKeywordTrivia()
+    {
+        const string Source = "void F() { unsafe /* scope */ { try /* body */ { require false; } /* recovery */ catch /* block */ { ; } /* last */ finally { ; } } }";
+        var tree = SyntaxTree.Parse(Source);
+        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        var unsafeBlock = Assert.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.UnsafeStatement);
+        Assert.Equal(TokenKind.UnsafeKeyword, Assert.IsType<SyntaxTokenElement>(unsafeBlock.Children[0]).Token.Kind);
+        var scope = Assert.IsType<SyntaxNode>(unsafeBlock.Children[1]);
+        var open = Assert.IsType<SyntaxTokenElement>(scope.Children[0]).Token;
+        Assert.Contains(open.LeadingTrivia, trivia => trivia.Text == "/* scope */");
+        var region = Assert.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.TryCatchStatement);
+        Assert.Equal(6, region.Children.Length);
+        Assert.Equal(SyntaxKind.Block, Assert.IsType<SyntaxNode>(region.Children[1]).Kind);
+        Assert.Contains(Assert.IsType<SyntaxTokenElement>(region.Children[2]).Token.LeadingTrivia,
+            trivia => trivia.Text == "/* recovery */");
+        Assert.Equal(SyntaxKind.Block, Assert.IsType<SyntaxNode>(region.Children[3]).Kind);
+        Assert.Equal(TokenKind.FinallyKeyword, Assert.IsType<SyntaxTokenElement>(region.Children[4]).Token.Kind);
+        Assert.Equal(SyntaxKind.Block, Assert.IsType<SyntaxNode>(region.Children[5]).Kind);
+        AssertLossless(tree);
+    }
+
+    [Theory]
+    [InlineData("void F() { unsafe { try { } catch return; } return; }", TokenKind.OpenBrace)]
+    [InlineData("void F() { unsafe { try { } catch { } finally return; } return; }", TokenKind.OpenBrace)]
+    public void MalformedRecoveryPreservesMissingBlocksAndFollowingStatements(string source, TokenKind missingKind)
+    {
+        var tree = SyntaxTree.Parse(source);
+        Assert.True(tree.HasErrors);
+        var region = Assert.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.TryCatchStatement);
+        Assert.Contains(region.DescendantTokens(), token => token.Kind == missingKind && token.IsMissing);
+        Assert.Contains(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.ReturnStatement);
+        AssertLossless(tree);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("// only trivia\r\n")]

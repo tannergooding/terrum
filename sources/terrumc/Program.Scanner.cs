@@ -22,7 +22,8 @@ internal static partial class Program
         var count = build ? 7 : 5;
         var runtime = build ? 5 : 3;
         if ((args.Length != count && args.Length != count + 1) || args[1] == "-"
-            || (build && args[3] != "-o") || args[runtime] != "--runtime" || args[runtime + 1] != "fail-fast"
+            || (build && args[3] != "-o") || args[runtime] != "--runtime"
+            || args[runtime + 1] is not ("fail-fast" or "checked-exceptions")
             || (args.Length == count + 1 && args[count] != "--json"))
         {
             WriteInputError(json, "TRM2000", Usage);
@@ -61,12 +62,14 @@ internal static partial class Program
         }
 
         var tree = SyntaxTree.Parse(scanner + "\nint32 Main() { return Scan(); }\n", args[1]);
-        var compilation = Compilation.Create(tree, ScannerHost.CreateBuffers(source));
+        var policy = args[runtime + 1] == "fail-fast"
+            ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+        var compilation = Compilation.Create(tree, ScannerHost.CreateBuffers(source), (BoundRuntimePolicy)policy);
         if (compilation.HasErrors)
         {
             if (json)
             {
-                WriteCompilationJson(args[0], tree, compilation.Diagnostics, false, null, null);
+                WriteCompilationJson(args[0], tree, compilation.Diagnostics, false, null, null, policy);
             }
             else
             {
@@ -86,7 +89,7 @@ internal static partial class Program
         NativeExecutionResult result;
         try
         {
-            result = NativeJit.ExecuteWithData(program, NativeRuntimePolicy.FailFast);
+            result = NativeJit.ExecuteWithData(program, policy);
         }
         catch (NotSupportedException exception)
         {
@@ -112,7 +115,8 @@ internal static partial class Program
         }
         if (build)
         {
-            return CompileTree(args[0], SyntaxTree.Parse(lexResult), outputPath, json);
+            return CompileTrees(args[0], [SyntaxTree.Parse(lexResult)], outputPath, json,
+                runtimePolicy: policy);
         }
         var tokens = lexResult.Tokens;
         var diagnostics = lexResult.Diagnostics;

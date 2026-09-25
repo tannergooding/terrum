@@ -23,8 +23,8 @@ public sealed record NativeExecutionResult(int ExitCode, byte[] Data)
 
 /// <summary>Executes verified native code in the current Windows x64 process.</summary>
 /// <remarks>
-/// Runtime failures deliberately call ExitProcess and cannot be caught by the host. Run untrusted
-/// programs only in a separately supervised process; this method provides no timeout or isolation.
+/// Unhandled checked failures terminate the process; recovery occurs only within generated Terrum regions.
+/// Run untrusted programs only in a separately supervised process; this method provides no timeout or isolation.
 /// </remarks>
 public static unsafe class NativeJit
 {
@@ -134,6 +134,9 @@ public static unsafe class NativeJit
             if (function.Start < previousEnd || function.Start < 0 || function.End > text.Length
                 || function.End - function.Start < prologLength || function.StackSize is < 8 or > 0xF00
                 || (function.StackSize & 15) != 8
+                || (!function.ExceptionScopes.IsEmpty && (function.ExceptionHandler < 0
+                    || function.ExceptionHandler > text.Length - 6
+                    || function.ExceptionScopes.Length > 100_000))
                 || (function.UsesParentFrame && !function.UsesFramePointer)
                 || (function.UsesFramePointer
                     ? text[function.Start] != 0x55
@@ -147,6 +150,15 @@ public static unsafe class NativeJit
             {
                 throw new ArgumentException("Invalid native function range or prolog.", nameof(code));
             }
+            foreach (var scope in function.ExceptionScopes)
+            {
+                if (scope.Begin < function.Start || scope.End > function.End || scope.Begin >= scope.End
+                    || scope.Handler < 0 || scope.Handler >= text.Length
+                    || (scope.Target != 0 && (scope.Target < function.Start || scope.Target >= function.End)))
+                {
+                    throw new ArgumentException("Invalid native exception scope.", nameof(code));
+                }
+            }
 
             containsEntry |= code.EntryPoint >= function.Start && code.EntryPoint < function.End;
             previousEnd = function.End;
@@ -158,7 +170,7 @@ public static unsafe class NativeJit
         }
 
         var pointerOffset = Align(text.Length, 8);
-        var tableOffset = checked(pointerOffset + sizeof(nint));
+        var tableOffset = checked(pointerOffset + (sizeof(nint) * (1 + code.NativeImports.Length)));
         var unwindOffset = checked(tableOffset + (functions.Length * NativeUnwind.RuntimeFunctionSize));
         var pageSize = Environment.SystemPageSize;
         var infoSize = 0;
@@ -203,8 +215,27 @@ public static unsafe class NativeJit
                 }
             }
         }
+        foreach (var fixup in code.NativeImports)
+        {
+            if (fixup.DisplacementOffset < 0 || fixup.DisplacementOffset > text.Length - sizeof(int)
+                || !((fixup.DllName.Equals("KERNEL32.dll", StringComparison.OrdinalIgnoreCase)
+                        && fixup.ExportName == "RaiseException")
+                    || (fixup.DllName.Equals("NTDLL.dll", StringComparison.OrdinalIgnoreCase)
+                        && fixup.ExportName == "__C_specific_handler")))
+            {
+                throw new ArgumentException("Invalid JIT runtime import.", nameof(code));
+            }
+            for (var offset = fixup.DisplacementOffset; offset < fixup.DisplacementOffset + sizeof(int); offset++)
+            {
+                if (!displacementBytes.Add(offset))
+                {
+                    throw new ArgumentException("Overlapping native displacement fields.", nameof(code));
+                }
+            }
+        }
 
         var exitProcessModule = NativeLibrary.Load("kernel32.dll", typeof(NativeJit).Assembly, DllImportSearchPath.System32);
+        nint handlerModule = 0;
         nint memory = 0;
         var registered = false;
 
@@ -220,6 +251,21 @@ public static unsafe class NativeJit
             var bytes = new Span<byte>((void*)memory, size);
             text.CopyTo(bytes);
             BinaryPrimitives.WriteInt64LittleEndian(bytes.Slice(pointerOffset, sizeof(nint)), exitProcess);
+            for (var index = 0; index < code.NativeImports.Length; index++)
+            {
+                var fixup = code.NativeImports[index];
+                if (fixup.DllName.Equals("NTDLL.dll", StringComparison.OrdinalIgnoreCase) && handlerModule == 0)
+                {
+                    handlerModule = NativeLibrary.Load("ntdll.dll", typeof(NativeJit).Assembly, DllImportSearchPath.System32);
+                }
+                var module = fixup.DllName.Equals("NTDLL.dll", StringComparison.OrdinalIgnoreCase)
+                    ? handlerModule : exitProcessModule;
+                var target = NativeLibrary.GetExport(module, fixup.ExportName);
+                var pointer = pointerOffset + (sizeof(nint) * (index + 1));
+                BinaryPrimitives.WriteInt64LittleEndian(bytes.Slice(pointer, sizeof(nint)), target);
+                BinaryPrimitives.WriteInt32LittleEndian(bytes.Slice(fixup.DisplacementOffset, sizeof(int)),
+                    checked(pointer - (fixup.DisplacementOffset + sizeof(int))));
+            }
             data.AsSpan(0, code.ReadOnlyDataLength).CopyTo(bytes[readOnlyOffset..]);
             data.AsSpan(code.ReadOnlyDataLength).CopyTo(bytes[writableOffset..]);
 
@@ -291,17 +337,21 @@ public static unsafe class NativeJit
         }
         finally
         {
-            Release(memory, tableOffset, registered, exitProcessModule);
+            Release(memory, tableOffset, registered, exitProcessModule, handlerModule);
         }
     }
 
-    private static void Release(nint memory, int tableOffset, bool registered, nint module)
+    private static void Release(nint memory, int tableOffset, bool registered, nint module, nint handlerModule)
     {
         // Never free a still-registered table: another thread could unwind through its address.
         var removed = !registered || JitWindows.RtlDeleteFunctionTable(memory + tableOffset);
         var released = removed && (memory == 0 || JitWindows.VirtualFree(memory, 0, 0x8000));
         var error = Marshal.GetLastPInvokeError();
         NativeLibrary.Free(module);
+        if (handlerModule != 0)
+        {
+            NativeLibrary.Free(handlerModule);
+        }
         if (!removed)
         {
             throw new InvalidOperationException("RtlDeleteFunctionTable failed; native memory remains allocated.");

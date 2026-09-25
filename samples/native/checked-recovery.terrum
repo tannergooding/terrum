@@ -1,0 +1,22 @@
+int32 Main() {
+    mut int32 value = 0;
+    unsafe {
+        try {
+            try {
+                value = Divide(42, 0);
+            } finally {
+                value = 1;
+            }
+        } catch {
+            if (value == 1) {
+                return 42;
+            }
+            return 0;
+        }
+    }
+    return value;
+}
+
+int32 Divide(int32 dividend, int32 divisor) {
+    return dividend / divisor;
+}

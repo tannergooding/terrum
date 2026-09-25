@@ -1,6 +1,7 @@
 # Windows x64 native profile
 
-`native-10` is a deliberately bounded executable language profile, separate from
+`native-10` (explicit fail-fast) and `native-11` (explicit checked exceptions)
+are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
@@ -15,8 +16,8 @@ dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build samples\nat
 $LASTEXITCODE # 45
 ```
 
-The output directory must already exist. `build` requires explicit
-`--runtime fail-fast`; it never runs the output. Syntax, binding and native
+The output directory must already exist. `build` requires an explicit
+`--runtime fail-fast` or `--runtime checked-exceptions`; it never runs the output. Syntax, binding and native
 resource-limit failures produce no new artifact. The complete image is written
 to a unique sibling file, flushed and renamed over the destination only after
 success, so a failed compilation does not truncate an existing executable.
@@ -46,7 +47,7 @@ compiled consumer/producer contract exercised by [modules](modules.md).
 
 Native libraries use `build-library`, explicit public export names and a `.dll`
 output. They require no `Main` and have no generated initialization entry point.
-The same source-set, fail-fast and output-preservation rules apply. Library
+The same source-set, selected-runtime and output-preservation rules apply. Library
 artifact JSON additionally identifies `kind: "dynamic-library"`. Invalid native
 exports produce `TRM4002`; source visibility alone never exports a declaration.
 
@@ -59,8 +60,8 @@ dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-library sel
 `compile-native` packages the native image with its versioned semantic contract;
 it does not defer machine-code generation to launch. Producers declare an
 identity and explicit exports. Consumers bind against a producer package and
-persist their complete EXE. Both roles accept `--source` and require
-`--runtime fail-fast`. Sources remain bounded to the module profile's 4 MiB
+persist their complete EXE. Both roles accept `--source` and require the same
+explicit `--runtime` selection. Sources remain bounded to the module profile's 4 MiB
 combined input; package reads are bounded to 16 MiB.
 
 ```powershell
@@ -74,7 +75,7 @@ dotnet $cli run-native artifacts\wide-consumer.trmn artifacts\wide-provider.trmn
 `validate-native` checks the selected pair without executing it. `run-native`
 validates first, stages the persisted images together, and supervises the
 native process with a 30-second deadline. It returns the program's raw status,
-including fail-fast statuses; `--json` describes compiler/contract errors, not
+including checked-failure statuses; `--json` describes compiler/contract errors, not
 a program-success envelope. Timeout reports `TRM5004`. A compatible replacement
 changes the provider package, not the consumer image. Package checksums detect
 corruption; these are trusted native-code artifacts, not a sandbox or an
@@ -133,8 +134,7 @@ The [no-return sample](../samples/native/no-return.terrum) returns 42 on success
 Changing its entry to `Select(false)` reaches the nonreturning failure helper
 and terminates with the explicit requirement-failure status. AOT and JIT retain
 the same native call ABI; the no-return proof does not require a fabricated
-return value. Catch, root tracking and a catchable-exception runtime
-remain unimplemented.
+return value. General catch objects and GC root tracking remain unimplemented.
 
 Structured [`try`/`finally`](../samples/native/try-finally.terrum) executes
 cleanup on ordinary fallthrough and every normal return, from inner region
@@ -151,13 +151,49 @@ was true and the post-cleanup definite-assignment proof permits publication.
 Each cleanup region has one out-of-line normal-exit funclet. Its caller passes
 the owning source frame base in RDX; it preserves RBP, addresses shared slots
 through that parent frame, and reserves its own aligned ABI call area. Return
-and fallthrough edges call the funclet explicitly; no exceptional edge does.
+and fallthrough edges call the funclet explicitly. Under `checked-exceptions`,
+Windows also invokes it during exceptional unwind, inside-out; the explicit
+fail-fast policy still terminates without unwinding it.
 No owning values or destructor semantics are provided.
 
 The independent [Windows SEH ABI probe](native-seh.md) checks filter search,
 normal/exceptional finally order, frame-local access and dynamic unwind-table
-lifetime against a C reference. It is a runtime prerequisite, not an alternate
-runtime policy accepted by this compiler.
+lifetime against a C reference; the compiler now separately emits and tests the
+matching bounded native contract.
+
+## Bounded checked-failure recovery
+
+`--runtime checked-exceptions` selects `native-11` without changing fail-fast
+artifacts. `analyze` also accepts this option to check recovery without emitting
+an artifact; omission keeps its existing fail-fast profile. The reusable
+compilation API accepts the policy with single or multiple original snapshots,
+including explicit host-buffer grants. Only compiler-generated arithmetic/conversion, division-zero,
+requirement and host-buffer-bounds failures use the private noncontinuable
+Windows exception code `0xE0540092`, with three checked parameters: marker
+`0x54455252554D0001`, version 1 and reason 1 through 4. Generated filters
+check code, flag, parameter count and every payload field. `unsafe { try {
+... } catch { ... } }` recovers these failures without an exception object;
+`try`/`finally` needs no unsafe context. An unhandled owned failure exits the
+process with `0xE0540001` through `0xE0540004` in AOT and a bounded CLI JIT
+worker. Foreign faults and mismatched private records continue native search,
+not source recovery.
+
+The verifier intersects initialized state at each checked failure site,
+including left-to-right argument evaluation, invalidated out destinations and
+nested exceptional cleanup. Catch and finally bodies cannot assume the try body
+finished. Cleanup remains independently NoThrow; body-derived guarantees are
+not published as module contracts. Windows `__C_specific_handler` dispatches
+version-1 scope records shared by PE and registered JIT unwind images. Recovery
+filters are leaf machine-code thunks; exceptional cleanup calls the same
+source-frame-aware funclets used for normal exits. A native entry filter contains
+unhandled owned failures before they reach the managed JIT caller.
+
+This is not a general exception-class, throw-object or low-memory ABI. There is
+no `throw`, typed/filter catch, GC rooting, owned partial-value cleanup, async
+or arbitrary native-fault recovery. Foreign callbacks must not unwind across
+an unsupported ABI. The selected policy is part of persisted module/native
+package compatibility; an old `native-10` fail-fast package remains valid
+only with another fail-fast package.
 
 ## Executable language
 
@@ -267,8 +303,9 @@ false, even if its backing storage still contains a previous value's bits.
 Calls stage output storage separately from ordinary arguments. Aliased output
 targets and reads of not-yet-initialized outputs are rejected. Conditional
 assignment facts follow evaluated short-circuit paths, and `require` carries
-the true-path facts forward. Owning outputs and exceptional cleanup are
-rejected, not simulated by this scratch protocol.
+the true-path facts forward. Owning outputs remain unsupported. Checked-policy
+exceptional cleanup uses the same out scratch protocol and cannot publish
+partial outputs.
 
 [`self-host/SourceRange`](../self-host/SourceRange.terrum),
 [`CharacterFacts`](../self-host/CharacterFacts.terrum),
@@ -279,13 +316,13 @@ this does not implement a general span ABI or a complete lifetime checker.
 
 ## Runtime policy
 
-The language's eventual ordinary runtime uses exceptions for exceptional
-failures. This executable profile has **no exceptional unwinding or catch runtime** and accepts
-only explicit `fail-fast` selection. Checked arithmetic remains checked:
+The eventual ordinary runtime needs a general exception contract. This
+compiler instead requires explicit `fail-fast` or bounded `checked-exceptions`
+selection. Both keep arithmetic checked:
 
-`finally` handles normal control flow only; a fail-fast check terminates the
-process without executing any pending cleanup. The independent SEH experiment
-does not change this policy.
+Under fail-fast, `finally` handles normal exits only and a failure terminates
+without executing pending cleanup. Under checked exceptions, owned checked
+failures dispatch through unsafe catch and exceptional finally scopes.
 
 | Failure | Process exit status |
 |---|---|
@@ -296,24 +333,24 @@ does not change this policy.
 
 `require predicate;` evaluates its boolean once and continues only on true.
 This is executable semantic code, not a debug assertion, unchecked assumption
-or inferred public precondition. Its ordinary language exception contract is
-not yet available: **the explicit fail-fast profile terminates instead**.
-Exceptional cleanup remains unsupported rather than approximated.
+or inferred public precondition. The fail-fast profile terminates; the bounded
+checked policy raises a privately identified native exception.
 A predicate's own arithmetic failure retains that failure
 status. `samples/native/requirements.terrum` demonstrates a parameter-dependent
 requirement and returns 10.
 
 Division truncates toward zero; signed minimum remainder -1 is zero, not an
 overflow. Neither compiler-host overflow mode nor x64 `idiv` traps define these
-semantics. Failure terminates through imported `ExitProcess`, rather than
-continuing with a fabricated value or advertising a catchable Terrum exception.
+semantics. Fail-fast terminates through imported `ExitProcess`. Checked failure raises an
+owned native record and terminates at the owned entry boundary when unhandled,
+rather than continuing with a fabricated value.
 Normal `int32 Main` returns its 32-bit value as the process status; `void Main`
 returns zero. Consequently a deliberate program return can match a reserved
 failure status; exit codes are not a general language exception transport.
 
 The profile does not promise recovery from stack exhaustion, OS termination or
-resource exhaustion. It does not implement unwinding Terrum cleanup, exception
-filters or fatal-error text formatting. A future full runtime must preserve
+resource exhaustion. It does not implement general exception classes, native
+fault recovery or fatal-error text formatting. A future full runtime must preserve
 ordinary language semantics rather than silently inherit this explicit profile.
 
 ## Semantic and target boundaries
@@ -351,8 +388,8 @@ pending returns from the post-allocation RBP frame base; outgoing arguments
 remain RSP-relative in the ABI call area. Normal cleanup funclets load the
 owning function's frame base from RDX into their saved RBP and use a separate
 call area. PE and JIT share unwind records for the saved RBP and stack
-allocation; entry and failure helpers use allocation-only records. These
-records support platform stack walking, not Terrum exception handling.
+allocation. Checked source and entry functions carry Windows scope records,
+including filter and cleanup targets; fail-fast records retain the old shape.
 The independent generated-DLL probe executes cleanup from C, inspects its
 unwind record and unwinds through a foreign fault without consuming it:
 `dotnet run --file scripts\check-native-frame.cs`.
