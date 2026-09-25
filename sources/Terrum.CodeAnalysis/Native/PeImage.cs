@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Text;
 
 namespace Terrum.CodeAnalysis.Native;
@@ -14,8 +15,15 @@ internal static class PeImage
     private const int TextRva = 0x1000;
     private const ulong ImageBase = 0x140000000;
 
-    internal static byte[] Build(NativeCode native)
+    internal static byte[] Build(NativeCode native) => BuildCore(native, null, 0);
+
+    internal static byte[] BuildLibrary(NativeCode native, IReadOnlyList<(string Name, int Index)> exports,
+        int sourceFunctionCount) => BuildCore(native, exports, sourceFunctionCount);
+
+    private static byte[] BuildCore(NativeCode native, IReadOnlyList<(string Name, int Index)>? exports,
+        int sourceFunctionCount)
     {
+        var library = exports is not null;
         var code = native.Code;
         var entry = native.AotEntryPoint;
         var functions = native.Functions;
@@ -33,14 +41,25 @@ internal static class PeImage
             : readOnlyLength != 0 ? readOnlyRva + readOnlyLength : dataRva + ImportTableSize, SectionAlignment);
         var xdataSize = checked(8 * functions.Length);
         var xdataRva = Align(pdataRva + pdataSize, SectionAlignment);
-        var imageSize = Align(xdataRva + xdataSize, SectionAlignment);
+        var exportSize = 0;
+        if (exports is not null)
+        {
+            exportSize = checked(40 + (10 * exports.Count) + "terrum.dll".Length + 1);
+            foreach (var (name, _) in exports)
+            {
+                exportSize = checked(exportSize + name.Length + 1);
+            }
+        }
+        var exportRva = exportSize == 0 ? 0 : Align(xdataRva + xdataSize, SectionAlignment);
+        var imageSize = Align(exportSize == 0 ? xdataRva + xdataSize : exportRva + exportSize, SectionAlignment);
         var textFile = HeaderSize;
         var dataFile = checked(textFile + Align(code.Length, FileAlignment));
         var readOnlyFile = checked(dataFile + Align(ImportTableSize, FileAlignment));
         var writableFile = checked(readOnlyFile + Align(readOnlyLength, FileAlignment));
         var pdataFile = checked(writableFile + Align(writableLength, FileAlignment));
         var xdataFile = checked(pdataFile + Align(pdataSize, FileAlignment));
-        var fileSize = checked(xdataFile + Align(xdataSize, FileAlignment));
+        var exportFile = checked(xdataFile + Align(xdataSize, FileAlignment));
+        var fileSize = checked(exportFile + Align(exportSize, FileAlignment));
         var image = new byte[fileSize];
         code.CopyTo(image, textFile);
         native.Data.AsSpan(0, readOnlyLength).CopyTo(image.AsSpan(readOnlyFile));
@@ -72,6 +91,36 @@ internal static class PeImage
         {
             Unwind(function.Start, function.End, function.StackSize);
         }
+        if (exports is not null)
+        {
+            var count = exports.Count;
+            var functionsAt = 40;
+            var namesAt = checked(functionsAt + (4 * count));
+            var ordinalsAt = checked(namesAt + (4 * count));
+            var dllNameAt = checked(ordinalsAt + (2 * count));
+            var dllName = Encoding.ASCII.GetBytes("terrum.dll\0");
+            dllName.CopyTo(image, exportFile + dllNameAt);
+            var stringAt = dllNameAt + dllName.Length;
+            Write32(image, exportFile + 12, exportRva + dllNameAt);
+            Write32(image, exportFile + 16, 1); // ordinal base
+            Write32(image, exportFile + 20, count);
+            Write32(image, exportFile + 24, count);
+            Write32(image, exportFile + 28, exportRva + functionsAt);
+            Write32(image, exportFile + 32, exportRva + namesAt);
+            Write32(image, exportFile + 36, exportRva + ordinalsAt);
+            // The encoder appends source-function ranges after its runtime failure helpers.
+            var sourceStart = functions.Length - sourceFunctionCount;
+            for (var i = 0; i < count; i++)
+            {
+                var (name, index) = exports[i];
+                Write32(image, exportFile + functionsAt + (4 * i), textRva + functions[sourceStart + index].Start);
+                Write32(image, exportFile + namesAt + (4 * i), exportRva + stringAt);
+                Write16(image, exportFile + ordinalsAt + (2 * i), i);
+                var nameBytes = Encoding.ASCII.GetBytes(name + "\0");
+                nameBytes.CopyTo(image, exportFile + stringAt);
+                stringAt += nameBytes.Length;
+            }
+        }
 
         void Unwind(int start, int end, int frame)
         {
@@ -98,17 +147,19 @@ internal static class PeImage
         Write32(image, pe, 0x00004550);
         var coff = pe + 4;
         Write16(image, coff, 0x8664);
-        Write16(image, coff + 2, 4 + (readOnlyLength == 0 ? 0 : 1) + (writableLength == 0 ? 0 : 1));
+        Write16(image, coff + 2, 4 + (readOnlyLength == 0 ? 0 : 1)
+            + (writableLength == 0 ? 0 : 1) + (library ? 1 : 0));
         Write16(image, coff + 16, 0xF0);
-        Write16(image, coff + 18, 0x0022); // executable, large-address-aware; relocations are not stripped
+        Write16(image, coff + 18, library ? 0x2022 : 0x0022); // DLL/executable, large-address-aware
         var optional = coff + 20;
         Write16(image, optional, 0x20B);
         image[optional + 2] = 1;
         Write32(image, optional + 4, Align(code.Length, FileAlignment));
         Write32(image, optional + 8, Align(ImportTableSize, FileAlignment)
             + Align(readOnlyLength, FileAlignment) + Align(writableLength, FileAlignment)
-            + Align(pdataSize, FileAlignment) + Align(xdataSize, FileAlignment));
-        Write32(image, optional + 16, textRva + entry);
+            + Align(pdataSize, FileAlignment) + Align(xdataSize, FileAlignment)
+            + Align(exportSize, FileAlignment));
+        Write32(image, optional + 16, library ? 0 : textRva + entry);
         Write32(image, optional + 20, textRva);
         Write64(image, optional + 24, ImageBase);
         Write32(image, optional + 32, SectionAlignment);
@@ -124,6 +175,11 @@ internal static class PeImage
         Write64(image, optional + 88, 0x100000);
         Write64(image, optional + 96, 0x1000);
         Write32(image, optional + 108, 16);
+        if (library)
+        {
+            Write32(image, optional + 112, exportRva);
+            Write32(image, optional + 112 + 4, exportSize);
+        }
         Write32(image, optional + 112 + 8, dataRva); // import directory
         Write32(image, optional + 112 + 12, 40);
         Write32(image, optional + 112 + 24, pdataRva); // exception directory
@@ -144,7 +200,11 @@ internal static class PeImage
             Section(section++, ".data", writableLength, writableRva, writableFile, unchecked((int)0xC0000040));
         }
         Section(section++, ".pdata", pdataSize, pdataRva, pdataFile, 0x40000040);
-        Section(section, ".xdata", xdataSize, xdataRva, xdataFile, 0x40000040);
+        Section(section++, ".xdata", xdataSize, xdataRva, xdataFile, 0x40000040);
+        if (library)
+        {
+            Section(section, ".edata", exportSize, exportRva, exportFile, 0x40000040);
+        }
 
         void Section(int index, string name, int size, int rva, int file, int flags)
         {

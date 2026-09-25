@@ -179,3 +179,19 @@ nested layout participates in replacement checking, including field types,
 order and access. Versions 2 and 3 are rejected;
 recreate them from source. Multi-producer identity/version resolution, dependency
 cycles, resilient public layouts and native DLL import slots remain later work.
+
+`NativeEmitter.EmitLibrary` can instead emit a Windows x64 PE32+ DLL directly
+from a verified `Compilation.CreateLibrary` program and an explicit list of
+public function names. It has a conventional named export table, no process
+entry or initialization routine, and retains native unwind and fail-fast
+`ExitProcess` imports. Scalar, compact aggregate and conditional `out` calls
+use the same Windows x64 encoder as the executable. The image contains no
+base-dependent addresses: its references are RVAs or RIP-relative, so ASLR
+needs no base relocation entries. Export names are exact and stable per
+invocation; private/internal functions may be linked into their implementation
+but are not exported. Host buffer capabilities and unresolved external
+declarations are not accepted. This is an independently loadable native
+producer artifact, **not** a checked module replacement contract: there is
+no native consumer import table, live servicing, or production .NET interop
+promise. Callers must match the selected Windows x64 signatures and value
+layouts themselves; unloading invalidates function pointers.

@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using System.Threading;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
@@ -16,9 +17,97 @@ public enum NativeRuntimePolicy
     FailFast,
 }
 
-/// <summary>Emits an owned, deterministic, Windows x64 PE32+ executable from structured IR.</summary>
+/// <summary>Emits owned, deterministic Windows x64 PE32+ artifacts from verified structured IR.</summary>
 public static class NativeEmitter
 {
+    /// <summary>Verifies a library and emits a Windows x64 DLL with explicitly named public exports.</summary>
+    /// <exception cref="ArgumentException">The library, export names, or public value layouts are invalid.</exception>
+    /// <exception cref="NotSupportedException">The runtime policy or a native resource limit is unsupported.</exception>
+    public static byte[] EmitLibrary(BoundProgram program, IReadOnlyList<string> exports,
+        NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default)
+    {
+        if (runtimePolicy != NativeRuntimePolicy.FailFast)
+        {
+            throw new NotSupportedException("Unsupported native runtime policy.");
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(program);
+        SemanticVerifier.VerifyLibrary(program);
+        ArgumentNullException.ThrowIfNull(exports);
+        if (!program.Buffers.IsEmpty)
+        {
+            throw new NotSupportedException("Native DLLs do not expose host buffer capabilities.");
+        }
+        if (exports.Count is < 1 or > 1024)
+        {
+            throw new ArgumentException("A native library requires 1 to 1024 explicit exports.", nameof(exports));
+        }
+        var selected = new List<(string Name, int Index)>(exports.Count);
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var name in exports)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (string.IsNullOrEmpty(name) || !names.Add(name)
+                || name.Length > 256 || name.Any(static character => character is < '!' or > '~'))
+            {
+                throw new ArgumentException("Export names must be unique printable ASCII names of at most 256 bytes.", nameof(exports));
+            }
+            var index = -1;
+            for (var i = 0; i < program.Functions.Length; i++)
+            {
+                if (program.Functions[i].Name == name)
+                {
+                    index = i;
+                    break;
+                }
+            }
+            if (index < 0 || !Exportable(program, program.Functions[index]))
+            {
+                throw new ArgumentException($"'{name}' is not an accessible native library export.", nameof(exports));
+            }
+            selected.Add((name, index));
+        }
+        selected.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
+        var code = new PeCompiler(program, cancellationToken, library: true).Compile();
+        return PeImage.BuildLibrary(code, [.. selected], program.Functions.Length);
+    }
+
+    private static bool Exportable(BoundProgram program, BoundFunction function)
+    {
+        if (function.IsPrivate || function.IsInternal || function.IsExternal)
+        {
+            return false;
+        }
+        if (function.DeclaringStruct is string owner
+            && !program.Structures.Any(structure => structure.Name == owner && !structure.IsPrivate && !structure.IsInternal))
+        {
+            return false;
+        }
+        if (!PublicLayout(function.ReturnType))
+        {
+            return false;
+        }
+        for (var i = 0; i < function.ParameterCount; i++)
+        {
+            if (!PublicLayout(function.Variables[i + (function.IsConstructor ? 1 : 0)].Type))
+            {
+                return false;
+            }
+        }
+        return true;
+
+        bool PublicLayout(PrimitiveType type)
+        {
+            if ((int)type < 100)
+            {
+                return true;
+            }
+            var structure = program.Structures[(int)type - 100];
+            return !structure.IsPrivate && !structure.IsInternal
+                && structure.Fields.All(field => !field.IsPrivate && !field.IsInternal && PublicLayout(field.Type));
+        }
+    }
+
     /// <summary>Verifies and emits a complete executable image without accessing the filesystem.</summary>
     /// <exception cref="ArgumentException">The IR is invalid.</exception>
     /// <exception cref="NotSupportedException">The runtime policy or an IR, frame, or image resource limit is unsupported.</exception>
@@ -48,6 +137,7 @@ internal sealed class PeCompiler
     private const int MaximumFrame = 0xF00;
     private const int MaximumText = 8 * 1024 * 1024;
     private readonly BoundProgram _program;
+    private readonly bool _library;
     private readonly CancellationToken _cancellationToken;
     private readonly MachineCode _code = new();
     private readonly int[] _starts;
@@ -74,9 +164,10 @@ internal sealed class PeCompiler
     private int _returnSlot;
     private int _currentFunction;
 
-    internal PeCompiler(BoundProgram program, CancellationToken cancellationToken)
+    internal PeCompiler(BoundProgram program, CancellationToken cancellationToken, bool library = false)
     {
         _program = program;
+        _library = library;
         _cancellationToken = cancellationToken;
         _starts = new int[program.Functions.Length];
         _ends = new int[program.Functions.Length];
@@ -168,23 +259,29 @@ internal sealed class PeCompiler
             _frames[i] = frame;
         }
 
-        _entryStart = _code.Position;
-        Prolog(40);
-        _calls.Add((_code.RelativeCall(), _program.EntryPoint));
-        if (_program.Functions[_program.EntryPoint].ReturnType == PrimitiveType.Void)
+        if (!_library)
         {
-            _code.Bytes(0x31, 0xC0); // xor eax,eax
+            _entryStart = _code.Position;
+            Prolog(40);
+            _calls.Add((_code.RelativeCall(), _program.EntryPoint));
+            if (_program.Functions[_program.EntryPoint].ReturnType == PrimitiveType.Void)
+            {
+                _code.Bytes(0x31, 0xC0); // xor eax,eax
+            }
+            _frame = 40;
+            Epilog();
+            _entryEnd = _code.Position;
         }
-        _frame = 40;
-        Epilog();
-        _entryEnd = _code.Position;
 
         var processEntry = _code.Position;
-        Prolog(40);
-        _code.PatchRelative(_code.RelativeCall(), _entryStart);
-        _code.Bytes(0x89, 0xC1); // mov ecx,eax
-        _imports.Add(_code.ImportCall());
-        _code.Byte(0xCC);
+        if (!_library)
+        {
+            Prolog(40);
+            _code.PatchRelative(_code.RelativeCall(), _entryStart);
+            _code.Bytes(0x89, 0xC1); // mov ecx,eax
+            _imports.Add(_code.ImportCall());
+            _code.Byte(0xCC);
+        }
         var processEnd = _code.Position;
 
         for (var failure = 0; failure < _failureStarts.Length; failure++)
@@ -279,11 +376,12 @@ internal sealed class PeCompiler
         {
             _code.PatchRelative(offset, _failureStarts[target]);
         }
-        var functions = new List<(int Start, int End, int Frame)>
+        var functions = new List<(int Start, int End, int Frame)>();
+        if (!_library)
         {
-            (_entryStart, _entryEnd, 40),
-            (processEntry, processEnd, 40),
-        };
+            functions.Add((_entryStart, _entryEnd, 40));
+            functions.Add((processEntry, processEnd, 40));
+        }
         for (var i = 0; i < _failureStarts.Length; i++)
         {
             functions.Add((_failureStarts[i], _failureEnds[i], 40));
