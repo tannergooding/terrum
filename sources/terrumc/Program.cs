@@ -20,8 +20,8 @@ internal static partial class Program
         + "       terrumc build <path|-> -o <output.exe> --runtime fail-fast [--json]\n"
         + "       terrumc jit <path|-> --runtime fail-fast [--json]\n"
         + "       terrumc scan-component <scanner.terrum> <input|-> --runtime fail-fast [--json]\n"
-        + "       terrumc compile-module producer <source> <export> -o <output.trm> [--json]\n"
-        + "       terrumc compile-module consumer <source> <producer.trm> -o <output.trm> [--json]\n"
+        + "       terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <output.trm> [--json]\n"
+        + "       terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <output.trm> [--json]\n"
         + "       terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime fail-fast [--json]\n"
         + "       terrumc run-module <consumer.trm> <producer.trm> --runtime fail-fast [--json]\n"
         + "check/tokens/tree inspect syntax; analyze binds the native profile; build emits Windows x64 PE.\n"
@@ -296,21 +296,26 @@ internal static partial class Program
 
         foreach (var diagnostic in diagnostics)
         {
-            var start = source.GetLinePosition(diagnostic.Span.Start);
-            var end = source.GetLinePosition(diagnostic.Span.End);
             writer.WriteStartObject();
-            writer.WriteString("code", diagnostic.Code);
-            writer.WriteString("severity", GetSeverityText(diagnostic.Severity));
-            writer.WriteString("message", diagnostic.Message);
-            WriteSpan(writer, "span", diagnostic.Span);
-            writer.WriteStartObject("range");
-            WritePosition(writer, "start", start);
-            WritePosition(writer, "end", end);
-            writer.WriteEndObject();
+            WriteDiagnosticProperties(writer, source, diagnostic);
             writer.WriteEndObject();
         }
 
         writer.WriteEndArray();
+    }
+
+    private static void WriteDiagnosticProperties(Utf8JsonWriter writer, SourceText source, Diagnostic diagnostic)
+    {
+        var start = source.GetLinePosition(diagnostic.Span.Start);
+        var end = source.GetLinePosition(diagnostic.Span.End);
+        writer.WriteString("code", diagnostic.Code);
+        writer.WriteString("severity", GetSeverityText(diagnostic.Severity));
+        writer.WriteString("message", diagnostic.Message);
+        WriteSpan(writer, "span", diagnostic.Span);
+        writer.WriteStartObject("range");
+        WritePosition(writer, "start", start);
+        WritePosition(writer, "end", end);
+        writer.WriteEndObject();
     }
 
     private static void WriteSpan(Utf8JsonWriter writer, string name, TextSpan span)

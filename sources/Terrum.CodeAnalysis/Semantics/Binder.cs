@@ -44,10 +44,8 @@ internal sealed class Binder
     }
 
     internal Binder(SyntaxTree tree, bool isLibrary, CancellationToken cancellationToken, CompilationReference? reference = null)
-        : this([tree], [], cancellationToken)
+        : this([tree], [], cancellationToken, isLibrary, reference)
     {
-        _isLibrary = isLibrary;
-        _reference = reference;
     }
 
     internal Binder(ImmutableArray<SyntaxTree> trees, CancellationToken cancellationToken)
@@ -55,12 +53,15 @@ internal sealed class Binder
     {
     }
 
-    internal Binder(ImmutableArray<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers, CancellationToken cancellationToken)
+    internal Binder(ImmutableArray<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers, CancellationToken cancellationToken,
+        bool isLibrary = false, CompilationReference? reference = null)
     {
         _tree = trees[0];
         _trees = trees;
         _buffers = buffers;
         _cancellationToken = cancellationToken;
+        _isLibrary = isLibrary;
+        _reference = reference;
     }
 
     internal IReadOnlyList<Diagnostic> Diagnostics => _diagnostics;

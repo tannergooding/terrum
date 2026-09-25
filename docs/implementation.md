@@ -244,6 +244,11 @@ without producer source; private implementation layouts and helpers can evolve
 without changing the persisted consumer. This is not the general LMOD design or
 native DLL servicing. Unsupported runtime/ABI capabilities diagnose rather than
 inherit accidental CLR behavior.
+Multi-source library and artifact-reference compilations are available through
+the API and `compile-module --source`; repeatable producer `--export` options
+select the public surface. Multi-source source-error JSON uses schema 2 with
+per-snapshot identities and diagnostic source indexes, while existing
+single-source and artifact response schemas remain unchanged.
 
 ## Design references and tradeoffs
 

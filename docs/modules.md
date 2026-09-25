@@ -76,6 +76,17 @@ The module linker supplies real, verified bodies before native lowering.
 For existing API callers, `CreateConsumer` also accepts an already bound combined
 program and extracts selected producer definitions. The CLI uses independent
 consumer source and the validated artifact-reference path.
+Both library and reference compilation accept multiple `SyntaxTree` snapshots;
+source diagnostics retain the originating snapshot. The self-host module test
+builds `SourceRange` and `CharacterFacts` into a producer, then independently
+binds `RangeTests` and an entry harness against its exported declarations.
+Those persisted modules execute through AOT and JIT, including range boundaries,
+conditional-output failure, character classification and repeated calls.
+The CLI accepts repeatable `--source <path>` options and, for producers,
+`--export <qualified-name>` options. It rejects duplicate source paths or exports,
+more than 256 sources or 1,024 exports, and more than 4 MiB of combined UTF-8
+source. Each input remains a separate syntax snapshot; no source concatenation
+changes namespace scope or locations.
 
 From the repository root after building, compile the reference source and
 replacement source independently, then persist each artifact:
@@ -90,14 +101,26 @@ dotnet $cli run-module artifacts\consumer.trm artifacts\producer-v2.trm --runtim
 dotnet $cli link-module artifacts\consumer.trm artifacts\producer-v2.trm -o artifacts\linked.exe --runtime fail-fast
 ```
 
+The actual compiler candidates can be built separately from their tests:
+
+```powershell
+dotnet $cli compile-module producer self-host\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source self-host\CharacterFacts.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export Terrum.CodeAnalysis.IsAsciiDigit --export Terrum.CodeAnalysis.IsLineBreak --export Terrum.CodeAnalysis.GetDecimalDigit -o artifacts\compiler-values.trm
+dotnet $cli compile-module consumer self-host\RangeTests.terrum artifacts\compiler-values.trm --source samples\native\modules\range-entry.terrum -o artifacts\range-tests.trm
+dotnet $cli run-module artifacts\range-tests.trm artifacts\compiler-values.trm --runtime fail-fast # exits 0
+```
+
 `samples/native/modules/incompatible.terrum` changes `Helper` to return `bool`.
 Its producer artifact can be compiled, but loading it with this consumer reports
 `TRM5002` before execution. The two compatible runs above use identical consumer
 bytes; no consumer source is required at load time.
 
 Each command accepts an optional trailing `--json`. Usage, artifact and
-contract errors then use schema 1 `diagnostics` on stdout; invalid module
-source uses the compiler's source-mapped schema 1 diagnostics. Successful
+contract errors then use schema 1 `diagnostics` on stdout. Invalid single-source
+compilations retain the source-mapped schema 1 response. Multi-source compilation
+failures use schema 2: `sources` records each path, content ID and UTF-16 length
+in input order; each `diagnostics` entry includes a zero-based `sourceIndex`
+alongside the existing code, severity, message, span and line/character range.
+Human-readable source diagnostics include the owning path and location. Successful
 `compile-module` and `link-module` commands report the written artifact's
 path, kind, size and SHA-256. Successful `run-module` still returns the
 program's raw exit code with no JSON envelope, since fail-fast execution can

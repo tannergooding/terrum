@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -19,6 +20,205 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class ModuleTests
 {
+    [Fact]
+    public async Task SelfHostRangeTestsExecuteAgainstAnIndependentMultiSourceLibraryAsync()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var rangePath = Path.Combine(root, "self-host", "SourceRange.terrum");
+        var factsPath = Path.Combine(root, "self-host", "CharacterFacts.terrum");
+        var testsPath = Path.Combine(root, "self-host", "RangeTests.terrum");
+        var range = SyntaxTree.Parse(await File.ReadAllTextAsync(rangePath).ConfigureAwait(true), rangePath);
+        var facts = SyntaxTree.Parse(await File.ReadAllTextAsync(factsPath).ConfigureAwait(true), factsPath);
+        var library = Compilation.CreateLibrary([range, facts]);
+        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
+            "Terrum.CodeAnalysis.SourceRange.TryCreate",
+            "Terrum.CodeAnalysis.SourceRange.GetEnd",
+            "Terrum.CodeAnalysis.IsAsciiDigit",
+            "Terrum.CodeAnalysis.IsLineBreak",
+            "Terrum.CodeAnalysis.GetDecimalDigit",
+        ]);
+        var tests = SyntaxTree.Parse(await File.ReadAllTextAsync(testsPath).ConfigureAwait(true), testsPath);
+        var entryPath = Path.Combine(root, "samples", "native", "modules", "range-entry.terrum");
+        var entry = SyntaxTree.Parse(await File.ReadAllTextAsync(entryPath).ConfigureAwait(true), entryPath);
+        var compilation = Compilation.Create([tests, entry], ModuleCompiler.CreateReference(producer));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Collection(compilation.SyntaxTrees, tree => Assert.Same(tests, tree), tree => Assert.Same(entry, tree));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.DoesNotContain("#ctor", Encoding.UTF8.GetString(consumer), StringComparison.Ordinal);
+        var consumerPath = Path.Combine(AppContext.BaseDirectory, $"self-host-module-{Guid.NewGuid():N}.trm");
+        var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");
+        try
+        {
+            await File.WriteAllBytesAsync(consumerPath, consumer).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(producerPath, producer).ConfigureAwait(true);
+            var (exit, error) = await RunJitWorkerAsync(consumerPath, producerPath).ConfigureAwait(true);
+            Assert.Equal(0, exit);
+            Assert.Empty(error);
+            Assert.Equal(0, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, producer),
+                NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+            Assert.Equal(consumer, await File.ReadAllBytesAsync(consumerPath).ConfigureAwait(true));
+        }
+        finally
+        {
+            File.Delete(consumerPath);
+            File.Delete(producerPath);
+        }
+    }
+
+    [Fact]
+    public async Task CliBuildsMultiSourceSelfHostLibraryAndConsumerAsync()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var prefix = Path.Combine(AppContext.BaseDirectory, $"self-host-cli-{Guid.NewGuid():N}");
+        var producer = prefix + "-producer.trm";
+        var consumer = prefix + "-consumer.trm";
+        var image = prefix + ".exe";
+        try
+        {
+            var (libraryExit, libraryError) = await RunCliAsync("compile-module", "producer",
+                Path.Combine(root, "self-host", "SourceRange.terrum"), "Terrum.CodeAnalysis.SourceRange.TryCreate",
+                "--source", Path.Combine(root, "self-host", "CharacterFacts.terrum"),
+                "--export", "Terrum.CodeAnalysis.SourceRange.GetEnd",
+                "--export", "Terrum.CodeAnalysis.IsAsciiDigit", "--export", "Terrum.CodeAnalysis.IsLineBreak",
+                "--export", "Terrum.CodeAnalysis.GetDecimalDigit", "-o", producer).ConfigureAwait(true);
+            Assert.Equal(0, libraryExit);
+            Assert.Empty(libraryError);
+            var (consumerExit, consumerError) = await RunCliAsync("compile-module", "consumer",
+                Path.Combine(root, "self-host", "RangeTests.terrum"), producer,
+                "--source", Path.Combine(root, "samples", "native", "modules", "range-entry.terrum"),
+                "-o", consumer).ConfigureAwait(true);
+            Assert.Equal(0, consumerExit);
+            Assert.Empty(consumerError);
+            Assert.Equal(0, (await RunJitWorkerAsync(consumer, producer).ConfigureAwait(true)).ExitCode);
+            Assert.Equal(0, (await RunCliAsync("link-module", consumer, producer, "-o", image, "--runtime", "fail-fast")
+                .ConfigureAwait(true)).ExitCode);
+            Assert.Equal(0, await ExecuteAsync(await File.ReadAllBytesAsync(image).ConfigureAwait(true)).ConfigureAwait(true));
+        }
+        finally
+        {
+            File.Delete(producer);
+            File.Delete(consumer);
+            File.Delete(image);
+        }
+    }
+
+    [Fact]
+    public async Task CliMultiSourceDiagnosticsIdentifySnapshotsAndPreserveArtifactsAsync()
+    {
+        var prefix = Path.Combine(AppContext.BaseDirectory, $"module-diagnostics-{Guid.NewGuid():N}");
+        var first = prefix + "-first.terrum";
+        var second = prefix + "-second.terrum";
+        var artifact = prefix + ".trm";
+        try
+        {
+            await File.WriteAllTextAsync(first, "public int32 A() { return B(); }").ConfigureAwait(true);
+            await File.WriteAllTextAsync(second, "int32 B() { return 42; }").ConfigureAwait(true);
+            Assert.Equal(0, (await RunCliAsync("compile-module", "producer", first, "A",
+                "--source", second, "-o", artifact).ConfigureAwait(true)).ExitCode);
+            var original = await File.ReadAllBytesAsync(artifact).ConfigureAwait(true);
+            const string InvalidSource = "// \U00010400\nint32 B() { return Missing; }";
+            await File.WriteAllTextAsync(second, InvalidSource).ConfigureAwait(true);
+            var (exit, error, output) = await RunCliWithOutputAsync("compile-module", "producer", first, "A",
+                "--source", second, "-o", artifact, "--json").ConfigureAwait(true);
+            Assert.Equal(1, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+            Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+            var sources = document.RootElement.GetProperty("sources");
+            Assert.Equal(first, sources[0].GetProperty("path").GetString());
+            Assert.Equal(second, sources[1].GetProperty("path").GetString());
+            Assert.Equal(InvalidSource.Length, sources[1].GetProperty("sourceLength").GetInt32());
+            Assert.Equal(SyntaxTree.Parse(InvalidSource).ContentId, sources[1].GetProperty("contentId").GetString());
+            var diagnostic = Assert.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray());
+            Assert.Equal(1, diagnostic.GetProperty("sourceIndex").GetInt32());
+            Assert.Equal(InvalidSource.IndexOf("Missing", StringComparison.Ordinal),
+                diagnostic.GetProperty("span").GetProperty("start").GetInt32());
+            Assert.Equal(original, await File.ReadAllBytesAsync(artifact).ConfigureAwait(true));
+            Assert.Equal(2, (await RunCliAsync("compile-module", "producer", first, "A",
+                "--source", first, "-o", artifact).ConfigureAwait(true)).ExitCode);
+            Assert.Equal(2, (await RunCliAsync("compile-module", "producer", first, "A",
+                "--export", "A", "-o", artifact).ConfigureAwait(true)).ExitCode);
+            Assert.Equal(original, await File.ReadAllBytesAsync(artifact).ConfigureAwait(true));
+        }
+        finally
+        {
+            File.Delete(first);
+            File.Delete(second);
+            File.Delete(artifact);
+        }
+    }
+
+    [Fact]
+    public async Task CliRejectsCombinedUtf8SourceBudgetBeforePublishingAsync()
+    {
+        var prefix = Path.Combine(AppContext.BaseDirectory, $"module-source-limit-{Guid.NewGuid():N}");
+        var first = prefix + "-first.terrum";
+        var second = prefix + "-second.terrum";
+        var artifact = prefix + ".trm";
+        try
+        {
+            var source = "/*" + new string('\u00E9', 1_048_576) + "*/ public int32 A() { return 1; }";
+            Assert.True(Encoding.UTF8.GetByteCount(source) <= 4 * 1024 * 1024);
+            Assert.True(Encoding.UTF8.GetByteCount(source) * 2 > 4 * 1024 * 1024);
+            await File.WriteAllTextAsync(first, source).ConfigureAwait(true);
+            await File.WriteAllTextAsync(second, source).ConfigureAwait(true);
+            var original = Produce("public int32 A() { return 1; }", "A");
+            await File.WriteAllBytesAsync(artifact, original).ConfigureAwait(true);
+            var (exit, error, output) = await RunCliWithOutputAsync("compile-module", "producer", first, "A",
+                "--source", second, "-o", artifact, "--json").ConfigureAwait(true);
+            Assert.Equal(1, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.Equal("TRM5001", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+            Assert.Equal(original, await File.ReadAllBytesAsync(artifact).ConfigureAwait(true));
+        }
+        finally
+        {
+            File.Delete(first);
+            File.Delete(second);
+            File.Delete(artifact);
+        }
+    }
+
+    [Theory]
+    [InlineData("--source", 256)]
+    [InlineData("--export", 1024)]
+    public async Task CliRejectsExcessiveModuleInputCountsBeforeReadingFilesAsync(string option, int maximum)
+    {
+        var arguments = new List<string> { "compile-module", "producer", "absent.terrum", "A" };
+        for (var index = 0; index < maximum; index++)
+        {
+            arguments.Add(option);
+            arguments.Add("V" + index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        arguments.AddRange(["-o", "unused.trm", "--json"]);
+        var (exit, error, output) = await RunCliWithOutputAsync([.. arguments]).ConfigureAwait(true);
+        Assert.Equal(2, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        Assert.Equal("TRM2000", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public void MultiSourceReferencesPreserveDiagnosticSnapshotOwnership()
+    {
+        var reference = ModuleCompiler.CreateReference(Produce("public int32 Value() { return 9; }", "Value"));
+        var entry = SyntaxTree.Parse("int32 Main() { return Bad(); }", "entry.terrum");
+        var invalid = SyntaxTree.Parse("int32 Bad() { return Value(true); }", "invalid.terrum");
+        var compilation = Compilation.Create([entry, invalid], reference);
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+        Assert.NotEmpty(compilation.SourceDiagnostics);
+        Assert.All(compilation.SourceDiagnostics, located => Assert.Same(invalid, located.SyntaxTree));
+        var library = Compilation.CreateLibrary([entry, invalid]);
+        Assert.True(library.HasErrors);
+        Assert.All(library.SourceDiagnostics, located => Assert.Same(invalid, located.SyntaxTree));
+        _ = Assert.Throws<ArgumentException>(() => Compilation.CreateLibrary(Array.Empty<SyntaxTree>()));
+        _ = Assert.Throws<ArgumentException>(() => Compilation.Create(Array.Empty<SyntaxTree>(), reference));
+    }
+
     [Fact]
     public async Task ConsumerBindsOnlyImportedDeclarationsAndExecutesValuesAndOutputsAsync()
     {

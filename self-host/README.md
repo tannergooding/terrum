@@ -7,6 +7,10 @@ The host test runner remains C#, even when it compiles and executes a candidate.
 
 Host fixtures retain syntax round trips and add native execution of
 `SourceRange`, `CharacterFacts` and `RangeTests` with entry wrappers.
+The [module fixture](../docs/modules.md) also compiles the range and character
+definitions into a producer, then binds the tests and a separate entry snapshot
+using only that artifact's declarations. Both AOT and JIT execute the linked
+result; no producer source is rebound while compiling the consumer.
 The cursor and general host-interface sketches still require later language
 slices. Executing these components is not a self-hosted compiler bootstrap.
 
@@ -35,10 +39,10 @@ state machines. A read cursor may forward backing dependencies; retaining its
 descriptor alone cannot extend an external allocation lease. `[Captures]` is
 working contract notation, not an unchecked annotation accepted by the MVP.
 
-The scanner shares the host's generated Unicode ranges; classification and
-token-boundary decisions execute in Terrum. Comments, strings, full numeric
-grammar, lossless trivia, diagnostic production and parser routines remain
-future components. Keep shared
+The scanner shares the host's generated Unicode ranges; classification,
+token boundaries and lexical diagnostic decisions execute in Terrum.
+Lossless trivia, keyword classification, decoded values and parser routines
+remain future components. Keep shared
 fixture expectations about observable ranges and contracts, not host object
 layouts. An independent compiler bootstrap requires rebuilding and comparing
 outputs, not merely parsing these files.

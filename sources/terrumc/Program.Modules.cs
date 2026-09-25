@@ -1,7 +1,10 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -14,8 +17,8 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
-    private const string ModuleUsage = "Usage: terrumc compile-module producer <source> <export> -o <artifact.trm> [--json]; "
-        + "terrumc compile-module consumer <source> <producer.trm> -o <artifact.trm> [--json]; "
+    private const string ModuleUsage = "Usage: terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <artifact.trm> [--json]; "
+        + "terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <artifact.trm> [--json]; "
         + "terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime fail-fast [--json]; "
         + "terrumc run-module <consumer.trm> <producer.trm> --runtime fail-fast [--json]";
 
@@ -35,33 +38,42 @@ internal static partial class Program
         {
             byte[] result;
             string output;
-            if (count == 6 && args[0] == "compile-module" && args[4] == "-o"
+            if (count >= 6 && args[0] == "compile-module"
                 && (args[1] is "producer" or "consumer"))
             {
-                if (Path.GetFullPath(args[2]).Equals(Path.GetFullPath(args[5]), StringComparison.OrdinalIgnoreCase)
-                    || ((args[1] == "consumer") && Path.GetFullPath(args[3]).Equals(Path.GetFullPath(args[5]), StringComparison.OrdinalIgnoreCase))
-                    || !Path.GetExtension(args[5]).Equals(".trm", StringComparison.OrdinalIgnoreCase))
+                if (!TryReadModuleOptions(args, count, out var paths, out var exports, out output))
+                {
+                    WriteInputError(json, "TRM2000", ModuleUsage);
+                    return 2;
+                }
+                var requestedPath = Path.GetFullPath(output);
+                if (paths.Any(path => Path.GetFullPath(path).Equals(requestedPath, StringComparison.OrdinalIgnoreCase))
+                    || ((args[1] == "consumer") && Path.GetFullPath(args[3]).Equals(requestedPath, StringComparison.OrdinalIgnoreCase))
+                    || !Path.GetExtension(output).Equals(".trm", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new ModuleFormatException("Module output must be a distinct .trm artifact.");
                 }
-                var source = ReadModuleSource(args[2]);
-                var tree = SyntaxTree.Parse(source, args[2]);
+                var trees = ImmutableArray.CreateBuilder<SyntaxTree>(paths.Count);
+                var sourceBytes = 0;
+                foreach (var path in paths)
+                {
+                    var source = ReadModuleSource(path);
+                    sourceBytes += Encoding.UTF8.GetByteCount(source);
+                    if (sourceBytes > 4 * 1024 * 1024)
+                    {
+                        throw new ModuleFormatException("Combined module source exceeds the 4 MiB limit.");
+                    }
+                    trees.Add(SyntaxTree.Parse(source, path));
+                }
                 var reference = args[1] == "consumer" ? ReadModuleFile(args[3]) : null;
-                var compilation = reference is null ? Compilation.CreateLibrary(tree)
-                    : Compilation.Create(tree, ModuleCompiler.CreateReference(reference));
+                var declarations = reference is null ? null : ModuleCompiler.CreateReference(reference);
+                var snapshots = trees.ToImmutable();
+                var compilation = snapshots.Length == 1
+                    ? declarations is null ? Compilation.CreateLibrary(snapshots[0]) : Compilation.Create(snapshots[0], declarations)
+                    : declarations is null ? Compilation.CreateLibrary(snapshots) : Compilation.Create(snapshots, declarations);
                 if (compilation.HasErrors)
                 {
-                    if (json)
-                    {
-                        WriteCompilationJson(args[0], tree, compilation.Diagnostics, false, null, null);
-                    }
-                    else
-                    {
-                        foreach (var diagnostic in compilation.Diagnostics)
-                        {
-                            Console.Error.WriteLine($"{diagnostic.Code}: {diagnostic.Message}");
-                        }
-                    }
+                    WriteModuleSourceDiagnostics(compilation, json);
                     return 1;
                 }
                 if (compilation.Program is not BoundProgram program)
@@ -69,12 +81,11 @@ internal static partial class Program
                     throw new InvalidOperationException("A successful compilation must contain a bound program.");
                 }
                 result = args[1] switch {
-                    "producer" => ModuleCompiler.CreateProducer(program, [args[3]]),
+                    "producer" => ModuleCompiler.CreateProducer(program, exports),
                     "consumer" => ModuleCompiler.CreateConsumer(program,
                         reference ?? throw new InvalidOperationException("Consumer reference is missing.")),
                     _ => throw new InvalidOperationException("Unknown module kind."),
                 };
-                output = args[5];
             }
             else if (count == 7 && args[0] == "link-module" && args[3] == "-o"
                 && args[5] == "--runtime" && args[6] == "fail-fast")
@@ -124,6 +135,88 @@ internal static partial class Program
             WriteInputError(json, "TRM5003", exception.Message);
             return 2;
         }
+    }
+
+    private static bool TryReadModuleOptions(string[] args, int count, out List<string> sources,
+        out List<string> exports, out string output)
+    {
+        sources = [args[2]];
+        exports = args[1] == "producer" ? [args[3]] : [];
+        output = "";
+        var hasOutput = false;
+        if ((count & 1) != 0)
+        {
+            return false;
+        }
+        var sourcePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Path.GetFullPath(args[2]) };
+        var exportNames = new HashSet<string>(exports, StringComparer.Ordinal);
+        for (var index = 4; index < count; index += 2)
+        {
+            var value = args[index + 1];
+            switch (args[index])
+            {
+                case "--source" when sources.Count < 256 && sourcePaths.Add(Path.GetFullPath(value)):
+                    sources.Add(value);
+                    break;
+                case "--export" when args[1] == "producer" && exports.Count < 1024 && exportNames.Add(value):
+                    exports.Add(value);
+                    break;
+                case "-o" when !hasOutput:
+                    output = value;
+                    hasOutput = true;
+                    break;
+                default:
+                    return false;
+            }
+        }
+        return hasOutput;
+    }
+
+    private static void WriteModuleSourceDiagnostics(Compilation compilation, bool json)
+    {
+        if (!json)
+        {
+            foreach (var located in compilation.SourceDiagnostics)
+            {
+                var position = located.SyntaxTree.Source.GetLinePosition(located.Diagnostic.Span.Start);
+                Console.Error.WriteLine(FormattableString.Invariant(
+                    $"{located.SyntaxTree.Source.Path}({position.Line + 1},{position.Character + 1}): {located.Diagnostic.Code}: {located.Diagnostic.Message}"));
+            }
+            return;
+        }
+        if (compilation.SyntaxTrees.Length == 1)
+        {
+            WriteCompilationJson("compile-module", compilation.SyntaxTree, compilation.Diagnostics, false, null, null);
+            return;
+        }
+        using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
+        writer.WriteStartObject();
+        writer.WriteNumber("schemaVersion", 2);
+        writer.WriteString("languageVersion", SyntaxTree.LanguageVersion);
+        writer.WriteString("profile", Compilation.ProfileVersion);
+        writer.WriteString("command", "compile-module");
+        writer.WriteString("coordinateSystem", "utf-16");
+        writer.WriteBoolean("success", false);
+        writer.WriteStartArray("sources");
+        foreach (var tree in compilation.SyntaxTrees)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("path", tree.Source.Path);
+            writer.WriteString("contentId", tree.ContentId);
+            writer.WriteNumber("sourceLength", tree.Source.Length);
+            writer.WriteEndObject();
+        }
+        writer.WriteEndArray();
+        writer.WriteStartArray("diagnostics");
+        foreach (var located in compilation.SourceDiagnostics)
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("sourceIndex", compilation.SyntaxTrees.IndexOf(located.SyntaxTree));
+            WriteDiagnosticProperties(writer, located.SyntaxTree.Source, located.Diagnostic);
+            writer.WriteEndObject();
+        }
+        writer.WriteEndArray();
+        writer.WriteEndObject();
     }
 
     private static void WriteModuleArtifactJson(string command, string outputPath, byte[] result)

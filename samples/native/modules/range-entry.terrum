@@ -1,0 +1,19 @@
+namespace Terrum.CodeAnalysis.Tests;
+
+int32 Main()
+{
+    mut int32 iteration = 0;
+    while (iteration < 3)
+    {
+        require CheckSourceRange();
+        require IsAsciiDigit((char16)48) && !IsAsciiDigit((char16)47);
+        require IsLineBreak((char16)8232) && !IsLineBreak((char16)32);
+        require GetDecimalDigit((char16)57) == 9;
+        require !SourceRange.TryCreate(0, -1, out var invalid);
+        require SourceRange.TryCreate(0, int32.MaxValue, out var boundary);
+        require boundary.GetEnd() == int32.MaxValue;
+        iteration = iteration + 1;
+    }
+
+    return 0;
+}
