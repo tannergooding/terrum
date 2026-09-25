@@ -78,10 +78,13 @@ internal static partial class Program
         }
 
         ImmutableArray<ScannerToken> tokens;
+        ImmutableArray<ScannerDiagnostic> diagnostics;
         try
         {
             var words = result.Data.AsSpan(result.BufferOffsets[3], program.Buffers[3].Values.Length * 4);
             tokens = ScannerHost.ReadTokens(source, result.ExitCode, words);
+            var diagnosticWords = result.Data.AsSpan(result.BufferOffsets[4], program.Buffers[4].Values.Length * 4);
+            diagnostics = ScannerHost.ReadDiagnostics(source, diagnosticWords);
         }
         catch (ArgumentException exception)
         {
@@ -92,8 +95,9 @@ internal static partial class Program
         {
             using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
             writer.WriteStartObject();
-            writer.WriteNumber("schemaVersion", 1);
-            writer.WriteString("component", "scanner-1");
+            writer.WriteNumber("schemaVersion", 2);
+            writer.WriteString("component", "scanner-2");
+            writer.WriteBoolean("success", diagnostics.IsEmpty);
             writer.WriteString("unicodeVersion", UnicodeIdentifierProfile.Version);
             writer.WriteString("coordinateSystem", "utf-16");
             writer.WriteNumber("sourceLength", source.Length);
@@ -107,6 +111,16 @@ internal static partial class Program
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();
+            writer.WriteStartArray("diagnostics");
+            foreach (var diagnostic in diagnostics)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("code", diagnostic.Code);
+                writer.WriteNumber("start", diagnostic.Span.Start);
+                writer.WriteNumber("length", diagnostic.Span.Length);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
             writer.WriteEndObject();
         }
         else
@@ -115,8 +129,13 @@ internal static partial class Program
             {
                 Console.WriteLine(FormattableString.Invariant($"{token.Kind} [{token.Span.Start}..{token.Span.End})"));
             }
+            foreach (var diagnostic in diagnostics)
+            {
+                Console.Error.WriteLine(FormattableString.Invariant(
+                    $"{diagnostic.Code} [{diagnostic.Span.Start}..{diagnostic.Span.End})"));
+            }
         }
 
-        return 0;
+        return diagnostics.IsEmpty ? 0 : 1;
     }
 }

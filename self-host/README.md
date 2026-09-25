@@ -17,7 +17,7 @@ slices. Executing these components is not a self-hosted compiler bootstrap.
 | [CharacterFacts](CharacterFacts.terrum) | Shared ASCII numeric and newline decisions | Executed with `char16` comparisons and checked numeric casts |
 | [TokenCursor](TokenCursor.terrum) | Read-view traversal without copying backing storage or cleanup | Span indexing, matched access, stored backing dependencies, capture contract, constructor initialization |
 | [RangeTests](RangeTests.terrum) | Small success/failure and overflow boundary cases | Executed with a host-supplied entry wrapper; a Terrum test runner remains future work |
-| [Scanner](Scanner.terrum) | UTF-16 decoding, pinned Unicode identifiers, decimal integers and punctuation | Executed through fixed checked host buffers; see the [precise subset](../docs/scanner.md) |
+| [Scanner](Scanner.terrum) | UTF-16 decoding, pinned Unicode identifiers, numeric spellings, quoted strings/escapes, comments and lexical diagnostics | Executed through fixed checked host buffers; see the [precise subset](../docs/scanner.md) |
 | [Host APIs](host.api.terrum) | Explicit source acquisition, cancellation, digest and output boundary | Interfaces, immutable publication, operation failures; host adapters |
 
 `SourceRange` deliberately mirrors the current host's signed 32-bit UTF-16

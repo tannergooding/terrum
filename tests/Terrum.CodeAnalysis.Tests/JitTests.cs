@@ -7,9 +7,11 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Text;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -120,6 +122,10 @@ public sealed class JitTests
         Assert.Equal(0, exit);
         Assert.Equal("", error);
         using var document = JsonDocument.Parse(output);
+        Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("scanner-2", document.RootElement.GetProperty("component").GetString());
+        Assert.True(document.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(0, document.RootElement.GetProperty("diagnostics").GetArrayLength());
         var tokens = document.RootElement.GetProperty("tokens");
         Assert.Equal(3, tokens.GetArrayLength());
         Assert.Equal("Identifier", tokens[0].GetProperty("kind").GetString());
@@ -130,6 +136,41 @@ public sealed class JitTests
         Assert.Equal(2, tokens[1].GetProperty("length").GetInt32());
         Assert.Equal("EndOfFile", tokens[2].GetProperty("kind").GetString());
         Assert.Equal(sourceLength, tokens[2].GetProperty("start").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("/* comment */ 1.25e+3f64 \"a\\U00010400\" // end")]
+    [InlineData("1e+ \"\\q\"")]
+    [InlineData("/* unterminated")]
+    [InlineData("\"unterminated")]
+    [InlineData("name \0 42")]
+    public async Task ScannerWorkerReportsLexicalDiagnosticsAndTokenSpansAsync(string source)
+    {
+        var expected = Lexer.Lex(SourceText.From(source));
+        var scanner = Path.Combine(RepositoryRoot(), "self-host", "Scanner.terrum");
+        var (exit, output, error) = await RunAsync(
+            CliStart("scan-component", scanner, "-", "--runtime", "fail-fast", "--json"),
+            Encoding.UTF8.GetBytes(source)).ConfigureAwait(true);
+        Assert.Equal(expected.Diagnostics.IsEmpty ? 0 : 1, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(expected.Diagnostics.IsEmpty, document.RootElement.GetProperty("success").GetBoolean());
+        var diagnostics = document.RootElement.GetProperty("diagnostics");
+        Assert.Equal(expected.Diagnostics.Length, diagnostics.GetArrayLength());
+        for (var index = 0; index < expected.Diagnostics.Length; index++)
+        {
+            Assert.Equal(expected.Diagnostics[index].Code, diagnostics[index].GetProperty("code").GetString());
+            Assert.Equal(expected.Diagnostics[index].Span.Start, diagnostics[index].GetProperty("start").GetInt32());
+            Assert.Equal(expected.Diagnostics[index].Span.Length, diagnostics[index].GetProperty("length").GetInt32());
+        }
+        var tokens = document.RootElement.GetProperty("tokens");
+        Assert.Equal(expected.Tokens.Length, tokens.GetArrayLength());
+        for (var index = 0; index < expected.Tokens.Length; index++)
+        {
+            Assert.Equal(expected.Tokens[index].Span.Start, tokens[index].GetProperty("start").GetInt32());
+            Assert.Equal(expected.Tokens[index].Span.Length, tokens[index].GetProperty("length").GetInt32());
+        }
     }
 
     private static void AssertWindowsX64()

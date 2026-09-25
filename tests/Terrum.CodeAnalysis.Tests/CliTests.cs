@@ -21,10 +21,16 @@ public sealed class CliTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("\u03B12 + 42 \U00010400 \U0001F600"),
             "scan-component", Path.Combine(root, "self-host", "Scanner.terrum"), "-", "--runtime", "fail-fast", "--json");
-        Assert.Equal(0, exit);
+        Assert.Equal(1, exit);
         Assert.Equal("", error);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal("scanner-1", document.RootElement.GetProperty("component").GetString());
+        Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("scanner-2", document.RootElement.GetProperty("component").GetString());
+        Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+        var diagnostic = Assert.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray());
+        Assert.Equal("TRM0001", diagnostic.GetProperty("code").GetString());
+        Assert.Equal(11, diagnostic.GetProperty("start").GetInt32());
+        Assert.Equal(2, diagnostic.GetProperty("length").GetInt32());
         var tokens = document.RootElement.GetProperty("tokens").EnumerateArray().ToArray();
         string[] kinds = ["Identifier", "Punctuation", "Integer", "Identifier", "Invalid", "EndOfFile"];
         int[] starts = [0, 3, 5, 8, 11, 13];

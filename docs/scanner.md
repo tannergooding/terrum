@@ -2,19 +2,27 @@
 
 `self-host/Scanner.terrum` is a small executable scanner component, not a second
 complete front end or a bootstrapped compiler. It implements scalar decoding,
-Unicode identifier classification, decimal-integer scanning, whitespace
-recognition and punctuation boundaries in Terrum. The C# host supplies buffers
-and the pinned data; it does not make token-boundary decisions for this component.
+Unicode identifier classification, numeric token boundaries, quoted strings
+and escapes, comment/whitespace skipping, punctuation and lexical diagnostics
+in Terrum. The C# host supplies buffers and the pinned data; it does not make
+token-boundary decisions for this component.
 
 ```powershell
 dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll scan-component self-host\Scanner.terrum input.txt --runtime fail-fast --json
 ```
 
 The command executes compiled code in its own process. Supervising clients must
-apply a deadline and treat abnormal termination as a runtime failure. Successful
-JSON uses schema 1 and component `scanner-1`; it includes the pinned Unicode
-version and token records. Invalid source and invalid result records produce
-diagnostics rather than a successful token response.
+apply a deadline and treat abnormal termination as a runtime failure. When
+scanning completes, JSON uses `schemaVersion: 2`, `component: "scanner-2"`,
+`coordinateSystem: "utf-16"`, the pinned `unicodeVersion`, `sourceLength`,
+`success`, and arrays of `tokens` and `diagnostics`. Each token has `kind`,
+`start`, and `length`; each diagnostic has `code`, `start`, and `length`.
+Lexically valid input returns `success: true` and exit code 0. Lexical errors
+return `success: false` and exit code 1 but still publish the full token stream
+and diagnostics on stdout. Without `--json`, token rows go to stdout and
+diagnostic code/spans go to stderr. Input, compilation, or invalid-result
+failures retain the standard schema-1 error response rather than producing a
+scanner-2 token response.
 
 ## Storage and host boundary
 
@@ -27,6 +35,7 @@ The compilation host explicitly grants named fixed-buffer capabilities through
 | `Host.XidStart` | `int32` | Read-only | Sorted inclusive range pairs from the host lexer's pinned XID_Start table |
 | `Host.XidContinue` | `int32` | Read-only | The corresponding XID_Continue ranges |
 | `Host.Tokens` | `int32` | Read/write | Initialized words for token records |
+| `Host.Diagnostics` | `int32` | Read/write | Initialized count and lexical diagnostic records |
 
 An index is evaluated once, must be `int32`, and is checked against the fixed
 length before access. Negative indices fail as well as indices past the end.
@@ -52,15 +61,21 @@ storage ABI. Code units are not assumed to be valid Unicode scalars.
 
 Each output record is three initialized `int32` words: kind, UTF-16 start,
 UTF-16 length. `Scan` returns the number of published records, including EOF.
-Words beyond that count are not token records.
+Words beyond that count are not token records. `Host.Diagnostics[0]` contains
+the diagnostic count; subsequent triples are numeric code (1–5 maps to
+`TRM0001`–`TRM0005`), UTF-16 start and UTF-16 length, in reporting order.
+The adapter validates published counts, codes, ranges and nonempty diagnostic
+spans before returning them. A malformed token remains a token with its raw
+source span; diagnostics do not replace source characters.
 
 | Kind | Meaning |
 |---|---|
 | 0 | Zero-width EOF at source length |
 | 1 | Identifier spelling, including keyword spellings without keyword classification |
-| 2 | Untagged ASCII decimal-integer spelling |
+| 2 | ASCII numeric spelling, including fractions, exponents and defined width tags |
 | 3 | Punctuation/operator, including `== != <= >= && ||` |
 | 4 | Unrecognized source scalar or malformed single surrogate unit |
+| 5 | Raw quoted string spelling, including malformed/unterminated strings |
 
 Identifiers use Unicode 17.0.0 XID_Start/XID_Continue plus underscore, including
 supplementary scalars and the established Join_Control continuation policy.
@@ -69,17 +84,21 @@ the same generated `UnicodeXid` ranges as the host lexer; the public read-only
 `UnicodeIdentifierProfile` carries the version and pinned input SHA-256.
 No normalization, case folding or ambient host Unicode categories are involved.
 
-Whitespace uses the host source-whitespace profile and is skipped. Spans retain
-their positions in the original source. This component does not emit lossless
-trivia, classify keywords, recognize comments or strings, parse numeric tags,
-fractions or exponents, or emit the host lexer's diagnostic objects. Those
-inputs are outside its tokenization contract, not evidence that the full lexer
-is self-hosted. Malformed surrogates and otherwise disallowed scalars are within
-the contract and produce invalid records without replacing the input.
+Whitespace, newlines and non-nesting `//` and `/* ... */` comments follow the
+host lexer and are skipped; malformed surrogates within comments and unterminated
+block comments are diagnosed. Strings preserve raw spans across escapes;
+unterminated strings stop before a newline, and invalid/incomplete escapes and
+malformed surrogates produce matching diagnostic codes and spans. Numeric
+fractions require a digit after `.`, exponents follow the host lexer's
+identifier-disambiguation and incomplete-exponent rules, and defined primitive
+width tags attach only at an identifier boundary. Spans retain original source
+positions. This component still does not emit lossless trivia, classify
+keywords, decode string values, type numeric values or construct the host's
+full diagnostic objects/messages. It is not a full self-hosted lexer.
 
-Shared fixtures compare the native scanner's output against normalized host
-lexer token kinds and exact spans **only within this documented subset**.
-Fixtures include pinned-range boundaries, supplementary identifiers, combining
-marks, non-ASCII digits, Join_Control, whitespace, malformed surrogate pairs and
-operator boundaries. The scanner's output-capacity requirement is checked; it
-does not silently truncate records.
+Shared fixtures compare the native scanner's token categories, exact spans and
+lexical diagnostic codes/spans against the host lexer. They cover pinned-range
+boundaries, supplementary identifiers, combining marks, non-ASCII digits,
+Join_Control, comments, quoted escapes, malformed strings, numeric boundaries,
+whitespace, malformed surrogate pairs and operators. Output-capacity
+requirements are checked; the scanner does not silently truncate records.

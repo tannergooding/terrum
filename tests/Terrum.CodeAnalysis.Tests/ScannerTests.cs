@@ -62,7 +62,22 @@ public sealed class ScannerTests
     [InlineData("a\u200Cb a\u200Db \u200C \u200D \u0661 a\u06612")]
     [InlineData("a\u00E9 ae\u0301 \U0001F600x")]
     [InlineData("if while require int32 2147483648")]
-    public async Task CompiledScannerAgreesWithHostOnItsTokenSubsetAsync(string source)
+    [InlineData("// trailing comment")]
+    [InlineData("alpha/* inner // ignored */+// line\r\n\"quoted\\ntext\"")]
+    [InlineData("1.25e-10f64 2e+3 3i128 4u8 0.5 6. 7efoo 8i32extra")]
+    [InlineData("0i8 0i16 0i32 0i64 0i128 0u8 0u16 0u32 0u64 0u128 0f16 0f32 0f64 0f128")]
+    [InlineData("1f8 2u128x 3i64\u200D 4f128\uD800 5E+6f32 7e+8 9e-0 10e\u00E9")]
+    [InlineData("1e 2e+ 3E-; 4e. 5e_ 6e\uD800 7e+f64")]
+    [InlineData("\"\" \"\\u0041\" \"\\U0001F600\" \"\\\"\" \"\\\\\"")]
+    [InlineData("\"\\uD800\" \"\\U00110000\" \"\\u12x\" \"\\q\"")]
+    [InlineData("\"\\UFFFFFFFF\" \"\\U0000DFFF\" \"\\U0010FFFF\" \"\\uFFFF\" \"\\u0000\"")]
+    [InlineData("\"\\U1234567\" \"\\u\" \"\\z\uD800\" \"\uDC00\"")]
+    [InlineData("\"bad\uD800\uDC00\uD800\" //\uDC00\r\n/*\uD800*/")]
+    [InlineData("\"unterminated\nsecond \"ok\"")]
+    [InlineData("\"incomplete\\\r\nnext")]
+    [InlineData("/* unterminated \uD800")]
+    [InlineData("/*a*/ / /*b*/ * / //\U0001F600\uDC00\nx")]
+    public async Task CompiledScannerAgreesWithHostOnTokenBoundariesAndDiagnosticsAsync(string source)
     {
         await CheckScannerAsync(source).ConfigureAwait(true);
     }
@@ -71,6 +86,18 @@ public sealed class ScannerTests
     public async Task MalformedSurrogatesRetainExactCodeUnitBoundariesAsync()
     {
         await CheckScannerAsync("\uD800x \uDC00 \uD800\uD800 \uDC00\uDC00 \U00010400").ConfigureAwait(true);
+    }
+
+    [Fact]
+    public async Task DiagnosticAndTokenBuffersHandleDenseInvalidInputAsync()
+    {
+        await CheckScannerAsync(new string('\uDC00', 256)).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public async Task RepeatedScanReplacesPublishedDiagnosticsAsync()
+    {
+        await CheckScannerAsync("\"\\q\" /*\uD800*/ 1e+ \uDC00", repeat: true).ConfigureAwait(true);
     }
 
     [Fact]
@@ -100,6 +127,7 @@ public sealed class ScannerTests
         Assert.Equal(UnicodeIdentifierProfile.ContinueRanges.ToArray(), buffers[2].Values.ToArray());
         Assert.False(buffers[0].IsWritable);
         Assert.True(buffers[3].IsWritable);
+        Assert.True(buffers[4].IsWritable);
         _ = Assert.Throws<ArgumentException>(() => ScannerHost.CreateBuffers(
             SourceText.From(new string('x', ScannerHost.MaximumSourceLength + 1))));
     }
@@ -120,7 +148,41 @@ public sealed class ScannerTests
         _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadTokens(SourceText.From("x"), 2, bytes));
     }
 
-    private static async Task CheckScannerAsync(string source)
+    [Theory]
+    [InlineData(2, 1, 0, 1)]
+    [InlineData(1, 0, 0, 1)]
+    [InlineData(1, 6, 0, 1)]
+    [InlineData(1, 1, -1, 1)]
+    [InlineData(1, 1, 0, 0)]
+    [InlineData(1, 1, 0, 2)]
+    public void ResultAdapterRejectsInvalidDiagnosticRecords(int count, int code, int start, int length)
+    {
+        var bytes = new byte[16];
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, count);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(4), code);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(8), start);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(12), length);
+        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadDiagnostics(SourceText.From("x"), bytes));
+    }
+
+    [Fact]
+    public void ResultAdapterAcceptsStringRecordsAndLexicalDiagnostics()
+    {
+        var bytes = new byte[24];
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, 5);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(8), 1);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16), 1);
+        Assert.Equal(ScannerTokenKind.String, ScannerHost.ReadTokens(SourceText.From("\""), 2, bytes)[0].Kind);
+
+        var diagnostics = new byte[16];
+        BinaryPrimitives.WriteInt32LittleEndian(diagnostics, 1);
+        BinaryPrimitives.WriteInt32LittleEndian(diagnostics.AsSpan(4), 2);
+        BinaryPrimitives.WriteInt32LittleEndian(diagnostics.AsSpan(12), 1);
+        Assert.Equal(new ScannerDiagnostic("TRM0002", new TextSpan(0, 1)),
+            ScannerHost.ReadDiagnostics(SourceText.From("\""), diagnostics)[0]);
+    }
+
+    private static async Task CheckScannerAsync(string source, bool repeat = false)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var scanner = await File.ReadAllTextAsync(Path.Combine(root, "self-host", "Scanner.terrum")).ConfigureAwait(true);
@@ -131,30 +193,73 @@ public sealed class ScannerTests
             var kind = token.Kind == TokenKind.EndOfFile ? 0
                 : token.Kind == TokenKind.Bad ? 4
                 : token.Kind == TokenKind.NumericLiteral ? 2
+                : token.Kind == TokenKind.StringLiteral ? 5
                 : token.Kind == TokenKind.Identifier || token.Kind.ToString().EndsWith("Keyword", StringComparison.Ordinal) ? 1 : 3;
             expected.Add(kind);
             expected.Add(token.Span.Start);
             expected.Add(token.Span.Length);
         }
 
+        var expectedDiagnostics = ImmutableArray.CreateBuilder<int>();
+        foreach (var diagnostic in lexed.Diagnostics)
+        {
+            expectedDiagnostics.Add(int.Parse(diagnostic.Code.AsSpan(3), System.Globalization.CultureInfo.InvariantCulture));
+            expectedDiagnostics.Add(diagnostic.Span.Start);
+            expectedDiagnostics.Add(diagnostic.Span.Length);
+        }
+
         var buffers = ScannerHost.CreateBuffers(SourceText.From(source))
-            .Add(new HostBuffer("Expected", PrimitiveType.Int32, expected.ToImmutable(), false));
+            .Add(new HostBuffer("Expected", PrimitiveType.Int32, expected.ToImmutable(), false))
+            .Add(new HostBuffer("ExpectedDiagnostics", PrimitiveType.Int32, expectedDiagnostics.ToImmutable(), false));
         const string Harness = """
 
-            int32 Main()
+            int32 CheckScan()
             {
                 int32 count = Scan();
-                require count * 3 == Host.Expected.Length;
+                if (count * 3 != Host.Expected.Length)
+                {
+                    return 100;
+                }
                 mut int32 index = 0;
                 while (index < count * 3)
                 {
-                    require Host.Tokens[index] == Host.Expected[index];
+                    if (Host.Tokens[index] != Host.Expected[index])
+                    {
+                        return 101;
+                    }
+                    index = index + 1;
+                }
+                if (Host.Diagnostics[0] * 3 != Host.ExpectedDiagnostics.Length)
+                {
+                    return 102;
+                }
+                index = 0;
+                while (index < Host.ExpectedDiagnostics.Length)
+                {
+                    if (Host.Diagnostics[index + 1] != Host.ExpectedDiagnostics[index])
+                    {
+                        return 103;
+                    }
                     index = index + 1;
                 }
                 return 0;
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(scanner + Harness), buffers);
+        const string Once = "int32 Main() { return CheckScan(); }";
+        const string Twice = """
+
+            int32 Main()
+            {
+                int32 first = CheckScan();
+                if (first != 0)
+                {
+                    return first;
+                }
+
+                return CheckScan();
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(scanner + Harness + (repeat ? Twice : Once)), buffers);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), 0).ConfigureAwait(true);
     }
@@ -162,7 +267,10 @@ public sealed class ScannerTests
     private static async Task ExecuteAsync(BoundProgram program, int expected)
     {
         var image = NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast);
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-scanner-{Guid.NewGuid():N}.exe");
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var directory = Path.Combine(root, "artifacts", "scanner-tests");
+        _ = Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, $"terrum-scanner-{Guid.NewGuid():N}.exe");
         try
         {
             await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
