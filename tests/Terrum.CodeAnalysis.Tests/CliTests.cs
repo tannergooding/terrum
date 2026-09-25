@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
@@ -15,6 +16,200 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class CliTests
 {
+    [Theory]
+    [InlineData("analyze")]
+    [InlineData("build")]
+    [InlineData("jit")]
+    public async Task SourceSetsResolveNamespacesAndValueMembersAcrossFilesAsync(string command)
+    {
+        const string Entry = "using Parts; int32 Main() { Box value = new Box(10); return value.Total(32); }";
+        const string Library = "namespace Parts; public struct Box { public int32 Value; public Box(int32 value) { Value = value; } public int32 Total(int32 extra) { return Value + extra; } }";
+        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-source-set-{Guid.NewGuid():N}");
+        var library = prefix + ".terrum";
+        var image = prefix + ".exe";
+        try
+        {
+            await File.WriteAllTextAsync(library, Library);
+            List<string> arguments = [command, "-", "--source", library];
+            if (command == "build")
+            {
+                arguments.AddRange(["-o", image]);
+            }
+            if (command != "analyze")
+            {
+                arguments.AddRange(["--runtime", "fail-fast"]);
+            }
+            arguments.Add("--json");
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Entry), [.. arguments]);
+            Assert.Empty(error);
+            Assert.Equal(command == "jit" ? 42 : 0, exit);
+            if (command == "jit")
+            {
+                Assert.Empty(output);
+                return;
+            }
+
+            using var json = JsonDocument.Parse(output);
+            Assert.Equal(2, json.RootElement.GetProperty("schemaVersion").GetInt32());
+            Assert.True(json.RootElement.GetProperty("success").GetBoolean());
+            Assert.Equal(command, json.RootElement.GetProperty("command").GetString());
+            var sources = json.RootElement.GetProperty("sources");
+            Assert.Equal(2, sources.GetArrayLength());
+            Assert.Equal("<stdin>", sources[0].GetProperty("path").GetString());
+            Assert.Equal(library, sources[1].GetProperty("path").GetString());
+            Assert.Equal(Entry.Length, sources[0].GetProperty("sourceLength").GetInt32());
+            Assert.Equal(Library.Length, sources[1].GetProperty("sourceLength").GetInt32());
+            Assert.False(json.RootElement.TryGetProperty("contentId", out _));
+            if (command == "build")
+            {
+                var bytes = await File.ReadAllBytesAsync(image);
+                Assert.Equal(Convert.ToHexString(SHA256.HashData(bytes)),
+                    json.RootElement.GetProperty("artifact").GetProperty("sha256").GetString());
+                using var process = Process.Start(new ProcessStartInfo(image) { UseShellExecute = false, CreateNoWindow = true })
+                    ?? throw new InvalidOperationException("Could not start source-set artifact.");
+                try
+                {
+                    await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                }
+                catch (TimeoutException)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync();
+                    throw;
+                }
+                Assert.Equal(42, process.ExitCode);
+            }
+        }
+        finally
+        {
+            File.Delete(library);
+            File.Delete(image);
+        }
+    }
+
+    [Theory]
+    [InlineData("analyze", true)]
+    [InlineData("build", true)]
+    [InlineData("jit", true)]
+    [InlineData("analyze", false)]
+    public async Task SourceSetErrorsKeepTheirOwningSnapshotAndPreserveOutputAsync(string command, bool json)
+    {
+        const string Invalid = "int32 Helper() { return missing; }";
+        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-source-errors-{Guid.NewGuid():N}");
+        var helper = prefix + ".terrum";
+        var image = prefix + ".exe";
+        byte[] original = [1, 2, 3];
+        try
+        {
+            await File.WriteAllTextAsync(helper, Invalid);
+            await File.WriteAllBytesAsync(image, original);
+            List<string> arguments = [command, "-", "--source", helper];
+            if (command == "build")
+            {
+                arguments.AddRange(["-o", image]);
+            }
+            if (command != "analyze")
+            {
+                arguments.AddRange(["--runtime", "fail-fast"]);
+            }
+            if (json)
+            {
+                arguments.Add("--json");
+            }
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("int32 Main() { return Helper(); }"), [.. arguments]);
+            Assert.Equal(1, exit);
+            Assert.Equal(original, await File.ReadAllBytesAsync(image));
+            if (json)
+            {
+                Assert.Empty(error);
+                using var document = JsonDocument.Parse(output);
+                Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+                Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+                Assert.Equal(helper, document.RootElement.GetProperty("sources")[1].GetProperty("path").GetString());
+                var diagnostic = Assert.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray());
+                Assert.Equal(1, diagnostic.GetProperty("sourceIndex").GetInt32());
+                Assert.Equal(Invalid.IndexOf("missing", StringComparison.Ordinal),
+                    diagnostic.GetProperty("span").GetProperty("start").GetInt32());
+                Assert.False(document.RootElement.TryGetProperty("artifact", out _));
+            }
+            else
+            {
+                Assert.Empty(output);
+                Assert.Contains(helper + "(1,", error, StringComparison.Ordinal);
+                Assert.Contains("missing", error, StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            File.Delete(helper);
+            File.Delete(image);
+        }
+    }
+
+    [Fact]
+    public async Task SourceSetOptionsRejectDuplicatesAndProtectEveryInputAsync()
+    {
+        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-source-input-{Guid.NewGuid():N}");
+        var entry = prefix + ".terrum";
+        var helper = prefix + ".exe";
+        const string Helper = "int32 Helper() { return 42; }";
+        try
+        {
+            await File.WriteAllTextAsync(entry, "int32 Main() { return Helper(); }");
+            await File.WriteAllTextAsync(helper, Helper);
+            var (exit, output, _) = await RunAsync([], "build", entry, "--source", helper, "-o", helper, "--runtime", "fail-fast", "--json");
+            Assert.Equal(2, exit);
+            Assert.Equal(Helper, await File.ReadAllTextAsync(helper));
+            using var document = JsonDocument.Parse(output);
+            Assert.Equal("TRM2002", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+
+            var alias = Path.Combine(Path.GetDirectoryName(entry) ?? throw new InvalidOperationException(), ".", Path.GetFileName(entry));
+            var (duplicate, duplicateOutput, _) = await RunAsync([], "analyze", entry, "--source", alias, "--json");
+            Assert.Equal(2, duplicate);
+            using var duplicateDocument = JsonDocument.Parse(duplicateOutput);
+            Assert.Equal("TRM2000", duplicateDocument.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+        }
+        finally
+        {
+            File.Delete(entry);
+            File.Delete(helper);
+        }
+    }
+
+    [Theory]
+    [InlineData("analyze - --source - --json")]
+    [InlineData("analyze - --source --json")]
+    [InlineData("analyze - --json --json")]
+    [InlineData("analyze - --runtime fail-fast --json")]
+    [InlineData("jit - --source another.terrum --json")]
+    [InlineData("jit - -o output.exe --runtime fail-fast --json")]
+    [InlineData("build - --runtime fail-fast --json")]
+    [InlineData("build - -o output.exe --runtime fail-fast --runtime fail-fast --json")]
+    public async Task SourceSetCommandsRejectMalformedOptionsBeforeReadingInputsAsync(string arguments)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        var (exit, output, error) = await RunAsync([], arguments.Split(' '));
+        Assert.Equal(2, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        Assert.Equal("TRM2000", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task SourceSetsBoundInputCountBeforeReadingFilesAsync()
+    {
+        List<string> arguments = ["analyze", "-"];
+        for (var index = 0; index < 256; index++)
+        {
+            arguments.AddRange(["--source", $"missing-{index}.terrum"]);
+        }
+        arguments.Add("--json");
+        var (exit, output, _) = await RunAsync([], [.. arguments]);
+        Assert.Equal(2, exit);
+        using var document = JsonDocument.Parse(output);
+        Assert.Equal("TRM2000", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+    }
+
     [Fact]
     public async Task ScannerPublishesExactIntegerMagnitudesWithoutDefaultTypesOrPrecisionLossAsync()
     {

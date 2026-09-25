@@ -14,6 +14,11 @@ program's raw `int32` status, or zero for a void entry. `--json` formats compile
 diagnostics; a successfully executed program does not produce a success envelope
 that could be confused with its own output. A caller running untrusted or
 possibly nonterminating source must supervise the worker with a deadline.
+Repeatable `--source <path>` options use the same source-set binding as `build`
+and `analyze`. Additional inputs must be distinct file paths; only the first
+input may use stdin. Multi-source compiler errors use schema 2 and identify
+the owning input snapshot. Successful execution still returns only the program
+status, not a JSON envelope.
 
 ## Code and memory contract
 

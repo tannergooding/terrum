@@ -173,51 +173,7 @@ internal static partial class Program
     }
 
     private static void WriteModuleSourceDiagnostics(Compilation compilation, bool json)
-    {
-        if (!json)
-        {
-            foreach (var located in compilation.SourceDiagnostics)
-            {
-                var position = located.SyntaxTree.Source.GetLinePosition(located.Diagnostic.Span.Start);
-                Console.Error.WriteLine(FormattableString.Invariant(
-                    $"{located.SyntaxTree.Source.Path}({position.Line + 1},{position.Character + 1}): {located.Diagnostic.Code}: {located.Diagnostic.Message}"));
-            }
-            return;
-        }
-        if (compilation.SyntaxTrees.Length == 1)
-        {
-            WriteCompilationJson("compile-module", compilation.SyntaxTree, compilation.Diagnostics, false, null, null);
-            return;
-        }
-        using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
-        writer.WriteStartObject();
-        writer.WriteNumber("schemaVersion", 2);
-        writer.WriteString("languageVersion", SyntaxTree.LanguageVersion);
-        writer.WriteString("profile", Compilation.ProfileVersion);
-        writer.WriteString("command", "compile-module");
-        writer.WriteString("coordinateSystem", "utf-16");
-        writer.WriteBoolean("success", false);
-        writer.WriteStartArray("sources");
-        foreach (var tree in compilation.SyntaxTrees)
-        {
-            writer.WriteStartObject();
-            writer.WriteString("path", tree.Source.Path);
-            writer.WriteString("contentId", tree.ContentId);
-            writer.WriteNumber("sourceLength", tree.Source.Length);
-            writer.WriteEndObject();
-        }
-        writer.WriteEndArray();
-        writer.WriteStartArray("diagnostics");
-        foreach (var located in compilation.SourceDiagnostics)
-        {
-            writer.WriteStartObject();
-            writer.WriteNumber("sourceIndex", compilation.SyntaxTrees.IndexOf(located.SyntaxTree));
-            WriteDiagnosticProperties(writer, located.SyntaxTree.Source, located.Diagnostic);
-            writer.WriteEndObject();
-        }
-        writer.WriteEndArray();
-        writer.WriteEndObject();
-    }
+        => WriteCompilationResult("compile-module", compilation, compilation.SourceDiagnostics, false, null, null, json);
 
     private static void WriteModuleArtifactJson(string command, string outputPath, byte[] result)
     {

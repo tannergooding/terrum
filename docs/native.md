@@ -29,11 +29,26 @@ Successful builds add an `artifact` containing its path, target, explicit runtim
 policy, byte length and SHA-256. A successful syntax check alone does not
 authorize emission.
 
+`analyze`, `build` and `jit` accept repeatable `--source <path>` options.
+All files participate in one declaration/binding pass, so file order does not
+restrict forward references. At most 256 distinct canonical paths are accepted;
+only the first input may be stdin. A build output cannot replace any input.
+Single-source JSON remains schema 1. Source sets use schema 2 with input-ordered
+`sources` (path, content ID and UTF-16 length) and a `sourceIndex` on every
+diagnostic; a successful build adds the same `artifact` object.
+
+```powershell
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build samples\native\modules\wide-entry.terrum --source self-host\WideIntegerFacts.terrum --source self-host\WideIntegerTests.terrum -o artifacts\wide.exe --runtime fail-fast
+```
+
+This compiles source together; it does not replace the persisted, independently
+compiled consumer/producer contract exercised by [modules](modules.md).
+
 ## Executable language
 
 | Area | Supported |
 |---|---|
-| Program | File-scoped namespaces, using directives, top-level/static/instance functions; parameterless `int32 Main()` or `void Main()`; multi-source library compilation |
+| Program | File-scoped namespaces, using directives, top-level/static/instance functions; parameterless `int32 Main()` or `void Main()`; multi-source executable/library compilation |
 | Types | `int32`, `uint32`, `int64`, `uint64`, `char16`, `bool`, `void` results; compact reference-free structs |
 | Literals/constants | Contextual integers, explicit `i32`/`u32`/`i64`/`u64` tags, primitive `MinValue`/`MaxValue`; booleans; unit `()` |
 | Variables | Initialized typed/inferred locals; immutable bindings by default, explicit `mut` assignments; lexical scopes |

@@ -16,9 +16,10 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
-    private const string Usage = "Usage: terrumc <check|tokens|tree|analyze> <path|-> [--json]\n"
-        + "       terrumc build <path|-> -o <output.exe> --runtime fail-fast [--json]\n"
-        + "       terrumc jit <path|-> --runtime fail-fast [--json]\n"
+    private const string Usage = "Usage: terrumc <check|tokens|tree> <path|-> [--json]\n"
+        + "       terrumc analyze <path|-> [--source <path>] [--json]\n"
+        + "       terrumc build <path|-> [--source <path>] -o <output.exe> --runtime fail-fast [--json]\n"
+        + "       terrumc jit <path|-> [--source <path>] --runtime fail-fast [--json]\n"
         + "       terrumc scan-component <scanner.terrum> <input|-> --runtime fail-fast [--json]\n"
         + "       terrumc build-component <scanner.terrum> <input|-> -o <output.exe> --runtime fail-fast [--json]\n"
         + "       terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <output.trm> [--json]\n"
@@ -52,12 +53,7 @@ internal static partial class Program
             return RunModuleCommand(args);
         }
 
-        if (args.Length != 0 && args[0] == "jit")
-        {
-            return RunJit(args, json);
-        }
-
-        if (args.Length != 0 && args[0] is "analyze" or "build")
+        if (args.Length != 0 && args[0] is "analyze" or "build" or "jit")
         {
             return RunCompilation(args, json);
         }
