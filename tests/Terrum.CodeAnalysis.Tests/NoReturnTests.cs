@@ -124,4 +124,27 @@ public sealed class NoReturnTests
         Assert.True(invalid.HasErrors);
         Assert.Contains(invalid.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
     }
+
+    [Theory]
+    [InlineData("if (!false) { return 42; }", true)]
+    [InlineData("if (true && !false) { return 42; }", true)]
+    [InlineData("if (false || true) { return 42; }", true)]
+    [InlineData("while (!false) { }", true)]
+    [InlineData("require true && false;", true)]
+    [InlineData("if (!true) { return 42; }", false)]
+    [InlineData("while (!true) { return 42; }", false)]
+    [InlineData("require !false;", false)]
+    public void BinderAndVerifierUseTheSameBooleanContinuationProof(string body, bool valid)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { " + body + " }"));
+        Assert.Equal(!valid, compilation.HasErrors);
+        if (valid)
+        {
+            SemanticVerifier.Verify(Assert.IsType<BoundProgram>(compilation.Program));
+        }
+        else
+        {
+            Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3012");
+        }
+    }
 }

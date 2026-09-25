@@ -106,6 +106,9 @@ continuation. Its implementation must have no reachable return or fallthrough
 nonreturning calls can establish that proof. Unreachable syntax and IR still
 undergo type and initialization checks; an unreachable return is not evidence
 of normal completion. Catch/cleanup and other effect annotations remain unsupported.
+Source return diagnostics use that same mandatory continuation analysis,
+including boolean negation and short-circuit constant feasibility; the binder
+does not maintain a second, narrower return-path proof.
 Existing single-source compiler JSON remains schema 1;
 scanner and multi-source diagnostic schemas are versioned separately below.
 

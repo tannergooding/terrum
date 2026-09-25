@@ -275,7 +275,7 @@ public static class SemanticVerifier
                 }
                 if (function.ReturnType != PrimitiveType.Void && !returns)
                 {
-                    throw Invalid();
+                    throw InvalidEffect(function.Body.Span, "NormalReturn");
                 }
                 for (var i = function.ParameterCount + (function.IsConstructor ? 1 : 0); i < function.Variables.Length; i++)
                 {

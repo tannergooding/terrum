@@ -281,16 +281,11 @@ internal sealed class Binder
                     new BoundRead(0, _returnType, end), end))
                 };
             }
-            else if (_returnType == PrimitiveType.Void && !signature.DoesNotReturn && !DoesNotFallThrough(body))
+            else if (_returnType == PrimitiveType.Void && !signature.DoesNotReturn)
             {
                 var end = new TextSpan(syntaxBody.Span.End, 0);
                 body = body with { Statements = body.Statements.Add(new BoundReturn(null, end)) };
             }
-            else if (_returnType != PrimitiveType.Void && !DoesNotFallThrough(body))
-            {
-                Report("TRM3012", $"Not all paths in '{signature.Name}' return a value.", syntaxBody.Span);
-            }
-
             bound.Add(new BoundFunction(signature.Name, signature.ReturnType, [.. _variables],
                 signature.Parameters.Length + (signature.StructName is not null && !signature.IsStatic && !signature.IsConstructor ? 1 : 0),
                 body, declaration.Span) {
@@ -319,6 +314,7 @@ internal sealed class Binder
             var (code, message) = invalidEffect switch {
                 "NoThrow" => ("TRM3017", "NoThrow declarations cannot perform potentially throwing operations or call functions without a NoThrow contract."),
                 "DoesNotReturn" => ("TRM3018", "DoesNotReturn declarations must have no reachable normal return or fallthrough."),
+                "NormalReturn" => ("TRM3012", "Not all normally completing paths return a value."),
                 _ => ("TRM3016", exceededWorkLimit
                     ? "Source exceeds the semantic verification work limit."
                     : "Source violates definite assignment, initialization, or executable type rules."),
@@ -1712,41 +1708,6 @@ internal sealed class Binder
         }
         function = -1;
         return false;
-    }
-
-    private bool DoesNotFallThrough(BoundStatement statement)
-    {
-        switch (statement)
-        {
-            case BoundReturn:
-                return true;
-            case BoundExpressionStatement { Expression: BoundCall call }:
-                return _signatures[call.Function].DoesNotReturn;
-            case BoundRequire { Condition: BoundConstant { Type: PrimitiveType.Bool, Value: 0 } }:
-                return true;
-            case BoundWhile { Condition: BoundConstant { Type: PrimitiveType.Bool, Value: 1 } }:
-                return true;
-            case BoundIf conditional:
-                if (conditional.Condition is BoundConstant { Type: PrimitiveType.Bool } condition)
-                {
-                    return condition.Value != 0 ? DoesNotFallThrough(conditional.Then)
-                        : conditional.Else is not null && DoesNotFallThrough(conditional.Else);
-                }
-                return conditional.Else is not null && DoesNotFallThrough(conditional.Then) && DoesNotFallThrough(conditional.Else);
-            case BoundBlock block:
-                foreach (var child in block.Statements)
-                {
-                    if (DoesNotFallThrough(child))
-                    {
-                        return true;
-                    }
-                }
-
-                return false;
-            default:
-                // A loop is not presumed to execute or terminate.
-                return false;
-        }
     }
 
     private static BoundConstant ErrorExpression(TextSpan span) => new(0, PrimitiveType.Int32, span);
