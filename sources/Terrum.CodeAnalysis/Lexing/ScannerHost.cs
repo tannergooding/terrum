@@ -17,11 +17,11 @@ public static class ScannerHost
     /// <summary>The maximum source length accepted by this bounded scanner adapter.</summary>
     public const int MaximumSourceLength = 16_384;
 
-    /// <summary>The version of the exact-kind, lossless token/trivia interchange.</summary>
-    public const int SchemaVersion = 3;
+    /// <summary>The version of the lossless scanner and integer-decoder interchange.</summary>
+    public const int SchemaVersion = 4;
 
-    /// <summary>The component identity for the exact-kind, lossless scanner protocol.</summary>
-    public const string ComponentName = "scanner-3";
+    /// <summary>The component identity for the lossless scanner and integer-decoder protocol.</summary>
+    public const string ComponentName = "scanner-4";
 
     // Lexemes are packed as (kind, UTF-16 length, code units...) and terminated by kind -1.
     private static readonly (TokenKind Kind, string Text)[] s_operatorSpellings =
@@ -46,7 +46,7 @@ public static class ScannerHost
 
     /// <summary>Creates fixed buffers containing source code units, shared pinned tables and vacant token records.</summary>
     /// <param name="source">The immutable source snapshot, including any malformed UTF-16 units.</param>
-    /// <returns>Initialized buffers exposed as Host.Source, Host.XidStart, Host.XidContinue, Host.Tokens, Host.Diagnostics, Host.Trivia, Host.Keywords and Host.Operators.</returns>
+    /// <returns>Initialized buffers exposed as Host.Source, Host.XidStart, Host.XidContinue, Host.Tokens, Host.Diagnostics, Host.Trivia, Host.Keywords, Host.Operators and Host.IntegerValues.</returns>
     /// <exception cref="ArgumentNullException">The source is null.</exception>
     /// <exception cref="ArgumentException">The source exceeds this component's resource limit.</exception>
     public static ImmutableArray<HostBuffer> CreateBuffers(SourceText source)
@@ -66,6 +66,7 @@ public static class ScannerHost
             new HostBuffer("Trivia", PrimitiveType.Int32, [.. new int[1 + (source.Length * 4)]], true),
             new HostBuffer("Keywords", PrimitiveType.Int32, s_keywords, false),
             new HostBuffer("Operators", PrimitiveType.Int32, s_operators, false),
+            new HostBuffer("IntegerValues", PrimitiveType.Int32, [.. new int[1 + (source.Length * 5)]], true),
         ];
     }
 
@@ -213,6 +214,111 @@ public static class ScannerHost
         return trivia.MoveToImmutable();
     }
 
+    /// <summary>Validates published integer-decoder records without repeating the native magnitude computation.</summary>
+    /// <param name="source">The source scanned by the component.</param>
+    /// <param name="tokens">Token records from the same scan, including EOF.</param>
+    /// <param name="bytes">Little-endian words: count, then (token index, status, low 32 bits, high 32 bits, explicit tag) records.</param>
+    /// <returns>Decoded unsigned magnitudes for integer-form numeric tokens; omitted noninteger tokens have no record.</returns>
+    /// <exception cref="ArgumentNullException">The source is null.</exception>
+    /// <exception cref="ArgumentException">A count, record, numeric spelling, tag, or canonical overflow payload is invalid.</exception>
+    public static ImmutableArray<ScannerIntegerValue> ReadIntegerValues(SourceText source,
+        ImmutableArray<ScannerToken> tokens, ReadOnlySpan<byte> bytes)
+        => ReadIntegerValuesCore(source, tokens, bytes, static token => token.Kind, static token => token.Span);
+
+    /// <summary>Validates integer-decoder records against tokens already materialized for the official parser.</summary>
+    /// <param name="source">The source scanned by the component.</param>
+    /// <param name="tokens">The scanner's adapted lexical tokens, including EOF.</param>
+    /// <param name="bytes">Little-endian words: count, then (token index, status, low 32 bits, high 32 bits, explicit tag) records.</param>
+    /// <returns>Decoded integer magnitudes without re-lexing or rematerializing token records.</returns>
+    /// <exception cref="ArgumentNullException">The source is null.</exception>
+    /// <exception cref="ArgumentException">A count, record, numeric spelling, tag, or canonical overflow payload is invalid.</exception>
+    public static ImmutableArray<ScannerIntegerValue> ReadIntegerValues(SourceText source,
+        ImmutableArray<SyntaxToken> tokens, ReadOnlySpan<byte> bytes)
+        => ReadIntegerValuesCore(source, tokens, bytes, static token => token.Kind, static token => token.Span);
+
+    private static ImmutableArray<ScannerIntegerValue> ReadIntegerValuesCore<TToken>(SourceText source,
+        ImmutableArray<TToken> tokens, ReadOnlySpan<byte> bytes, Func<TToken, TokenKind> getKind,
+        Func<TToken, TextSpan> getSpan) where TToken : class
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (tokens.IsDefaultOrEmpty || bytes.Length < 4)
+        {
+            throw new ArgumentException("Missing scanner tokens or integer-value count.", nameof(bytes));
+        }
+
+        var count = BinaryPrimitives.ReadInt32LittleEndian(bytes);
+        if (count < 0 || count > source.Length || count >= tokens.Length || count > (bytes.Length - 4) / 20)
+        {
+            throw new ArgumentException("Invalid scanner integer-value count.", nameof(bytes));
+        }
+
+        var values = ImmutableArray.CreateBuilder<ScannerIntegerValue>(count);
+        var previousIndex = -1;
+        for (var index = 0; index < count; index++)
+        {
+            var record = bytes.Slice(4 + (index * 20), 20);
+            var tokenIndex = BinaryPrimitives.ReadInt32LittleEndian(record);
+            var status = (ScannerIntegerStatus)BinaryPrimitives.ReadInt32LittleEndian(record[4..]);
+            var low = (uint)BinaryPrimitives.ReadInt32LittleEndian(record[8..]);
+            var high = (uint)BinaryPrimitives.ReadInt32LittleEndian(record[12..]);
+            var tag = (ScannerIntegerTag)BinaryPrimitives.ReadInt32LittleEndian(record[16..]);
+            if (tokenIndex <= previousIndex || tokenIndex >= tokens.Length - 1
+                || !Enum.IsDefined(status) || !Enum.IsDefined(tag)
+                || (status == ScannerIntegerStatus.MagnitudeOverflow && (low != 0 || high != 0)))
+            {
+                throw new ArgumentException("Invalid scanner integer-value record.", nameof(bytes));
+            }
+
+            if (tokens[tokenIndex] is not TToken token)
+            {
+                throw new ArgumentException("Missing integer token reference.", nameof(bytes));
+            }
+
+            var span = getSpan(token);
+            var suffix = tag switch {
+                ScannerIntegerTag.None => "",
+                ScannerIntegerTag.I8 => "i8",
+                ScannerIntegerTag.I16 => "i16",
+                ScannerIntegerTag.I32 => "i32",
+                ScannerIntegerTag.I64 => "i64",
+                ScannerIntegerTag.I128 => "i128",
+                ScannerIntegerTag.U8 => "u8",
+                ScannerIntegerTag.U16 => "u16",
+                ScannerIntegerTag.U32 => "u32",
+                ScannerIntegerTag.U64 => "u64",
+                ScannerIntegerTag.U128 => "u128",
+                _ => throw new ArgumentException("Invalid scanner integer tag.", nameof(bytes)),
+            };
+            if (getKind(token) != TokenKind.NumericLiteral || span.Start > source.Length
+                || span.Length > source.Length - span.Start
+                || span.Length <= suffix.Length)
+            {
+                throw new ArgumentException("Invalid integer token reference.", nameof(bytes));
+            }
+
+            var spelling = source.Text.AsSpan(span.Start, span.Length);
+            var digits = spelling[..^suffix.Length];
+            if (!spelling.EndsWith(suffix, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Integer tag does not match its source token.", nameof(bytes));
+            }
+            foreach (var digit in digits)
+            {
+                if (digit is < '0' or > '9')
+                {
+                    throw new ArgumentException("Integer record refers to a noninteger token.", nameof(bytes));
+                }
+            }
+
+            values.Add(new ScannerIntegerValue(tokenIndex, suffix,
+                status == ScannerIntegerStatus.MagnitudeOverflow,
+                status == ScannerIntegerStatus.Decoded ? ((ulong)high << 32) | low : null));
+            previousIndex = tokenIndex;
+        }
+
+        return values.MoveToImmutable();
+    }
+
     /// <summary>Validates and reads the published diagnostic prefix from the compiled scanner.</summary>
     /// <param name="source">The original source snapshot.</param>
     /// <param name="bytes">Little-endian words containing a count followed by (code, start, length) records.</param>
@@ -304,7 +410,7 @@ public static class ScannerHost
     }
 }
 
-/// <summary>Legacy scanner-2 categories. Scanner-3 publishes exact <see cref="TokenKind"/> values.</summary>
+/// <summary>Legacy scanner-2 categories. Current scans publish exact <see cref="TokenKind"/> values.</summary>
 public enum ScannerTokenKind
 {
     /// <summary>The end of the source snapshot.</summary>
@@ -333,6 +439,49 @@ public sealed record ScannerToken(TokenKind Kind, TextSpan Span);
 /// <param name="Span">The half-open UTF-16 source range.</param>
 /// <param name="TokenIndex">The owning token's zero-based index.</param>
 public sealed record ScannerTrivia(TriviaKind Kind, TextSpan Span, int TokenIndex);
+
+/// <summary>Whether an integer-form numeric token's unsigned magnitude fits in 64 bits.</summary>
+public enum ScannerIntegerStatus
+{
+    /// <summary>The exact unsigned magnitude is available.</summary>
+    Decoded,
+    /// <summary>The magnitude exceeds <see cref="ulong.MaxValue"/>; the payload is zero.</summary>
+    MagnitudeOverflow,
+}
+
+/// <summary>The explicit integer-width suffix of a numeric token, without applying range typing.</summary>
+public enum ScannerIntegerTag
+{
+    /// <summary>No integer-width suffix.</summary>
+    None,
+    /// <summary>The i8 suffix.</summary>
+    I8,
+    /// <summary>The i16 suffix.</summary>
+    I16,
+    /// <summary>The i32 suffix.</summary>
+    I32,
+    /// <summary>The i64 suffix.</summary>
+    I64,
+    /// <summary>The i128 suffix.</summary>
+    I128,
+    /// <summary>The u8 suffix.</summary>
+    U8,
+    /// <summary>The u16 suffix.</summary>
+    U16,
+    /// <summary>The u32 suffix.</summary>
+    U32,
+    /// <summary>The u64 suffix.</summary>
+    U64,
+    /// <summary>The u128 suffix.</summary>
+    U128,
+}
+
+/// <summary>A native-decoded unsigned integer magnitude, without a default or target type.</summary>
+/// <param name="TokenIndex">The owning numeric token's zero-based index.</param>
+/// <param name="Tag">The exact lowercase integer-width suffix, or an empty string when untagged.</param>
+/// <param name="IsOverflow">Whether the magnitude exceeds <see cref="ulong.MaxValue"/>.</param>
+/// <param name="Magnitude">The exact unsigned value when available; null on overflow.</param>
+public sealed record ScannerIntegerValue(int TokenIndex, string Tag, bool IsOverflow, ulong? Magnitude);
 
 /// <summary>A compiled scanner lexical diagnostic with its exact source range.</summary>
 /// <param name="Code">The host lexer diagnostic code.</param>

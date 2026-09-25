@@ -1,6 +1,8 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Collections.Immutable;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -93,12 +95,15 @@ internal static partial class Program
         }
 
         LexResult lexResult;
+        ImmutableArray<ScannerIntegerValue> integers;
         try
         {
             var words = result.Data.AsSpan(result.BufferOffsets[3], program.Buffers[3].Values.Length * 4);
             var triviaWords = result.Data.AsSpan(result.BufferOffsets[5], program.Buffers[5].Values.Length * 4);
             var diagnosticWords = result.Data.AsSpan(result.BufferOffsets[4], program.Buffers[4].Values.Length * 4);
             lexResult = ScannerHost.ReadLexResult(source, result.ExitCode, words, triviaWords, diagnosticWords);
+            var integerWords = result.Data.AsSpan(result.BufferOffsets[8], program.Buffers[8].Values.Length * 4);
+            integers = ScannerHost.ReadIntegerValues(source, lexResult.Tokens, integerWords);
         }
         catch (ArgumentException exception)
         {
@@ -121,6 +126,20 @@ internal static partial class Program
             writer.WriteString("unicodeVersion", UnicodeIdentifierProfile.Version);
             writer.WriteString("coordinateSystem", "utf-16");
             writer.WriteNumber("sourceLength", source.Length);
+            writer.WriteStartArray("integerValues");
+            foreach (var integer in integers)
+            {
+                writer.WriteStartObject();
+                writer.WriteNumber("tokenIndex", integer.TokenIndex);
+                writer.WriteString("tag", integer.Tag);
+                writer.WriteString("status", integer.IsOverflow ? "overflow" : "exact");
+                if (integer.Magnitude is ulong magnitude)
+                {
+                    writer.WriteString("magnitude", magnitude.ToString(CultureInfo.InvariantCulture));
+                }
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
             writer.WriteStartArray("tokens");
             foreach (var token in tokens)
             {
@@ -162,6 +181,13 @@ internal static partial class Program
                     Console.WriteLine(FormattableString.Invariant($"  {item.Kind} [{item.Span.Start}..{item.Span.End})"));
                 }
                 Console.WriteLine(FormattableString.Invariant($"{token.Kind} [{token.Span.Start}..{token.Span.End})"));
+            }
+            foreach (var integer in integers)
+            {
+                var magnitude = integer.Magnitude is ulong value
+                    ? value.ToString(CultureInfo.InvariantCulture) : "overflow";
+                Console.WriteLine(FormattableString.Invariant(
+                    $"  integer token {integer.TokenIndex}: {magnitude} (tag: {integer.Tag})"));
             }
             foreach (var diagnostic in diagnostics)
             {

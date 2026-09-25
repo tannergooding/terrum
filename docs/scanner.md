@@ -16,18 +16,21 @@ Both are execution-worker commands: compiled scanner code runs inside that CLI
 process. Supervising clients must launch a bounded subprocess and treat abnormal
 termination as a runtime failure. Ordinary `build` still uses the host lexer.
 When `scan-component`
-scanning completes, JSON uses `schemaVersion: 3`, `component: "scanner-3"`,
+scanning completes, JSON uses `schemaVersion: 4`, `component: "scanner-4"`,
 `coordinateSystem: "utf-16"`, the pinned `unicodeVersion`, `sourceLength`,
-`success`, and arrays of `tokens` and `diagnostics`. Each token has an exact
+`success`, and arrays of `tokens`, `integerValues`, and `diagnostics`. Each token has an exact
 lexical `kind`, `start`, `length` and its ordered `leadingTrivia` array.
 Each trivia has `kind`, `start`, `length`; each diagnostic has `code`,
 `start`, `length`. EOF owns any trailing trivia.
+Each `integerValues` entry has `tokenIndex`, `tag` (an empty string when
+untagged), and `status` (`"exact"` or `"overflow"`). Exact entries also include
+`magnitude` as a decimal string; overflow entries omit it.
 Lexically valid input returns `success: true` and exit code 0. Lexical errors
 return `success: false` and exit code 1 but still publish the full token stream
 and diagnostics on stdout. Without `--json`, token rows go to stdout and
 diagnostic code/spans go to stderr. Input, compilation, or invalid-result
 failures retain the standard schema-1 error response rather than producing a
-scanner-3 token response.
+scanner-4 token response.
 
 `build-component` instead adapts the native records to `LexResult`, feeds that
 result into the official lossless parser, binds and verifies the resulting tree,
@@ -65,6 +68,7 @@ The compilation host explicitly grants named fixed-buffer capabilities through
 | `Host.Trivia` | `int32` | Read/write | Initialized count and leading-trivia records |
 | `Host.Keywords` | `int32` | Read-only | Keyword spellings and exact `TokenKind` values generated from the host catalog |
 | `Host.Operators` | `int32` | Read-only | Punctuation/operator spellings and exact `TokenKind` values |
+| `Host.IntegerValues` | `int32` | Read/write | Initialized count and unsigned integer-magnitude decoder records |
 
 An index is evaluated once, must be `int32`, and is checked against the fixed
 length before access. Negative indices fail as well as indices past the end.
@@ -97,6 +101,38 @@ Leading trivia remains attached to EOF when there is no following token.
 `Host.Diagnostics[0]` contains
 the diagnostic count; subsequent triples are numeric code (1–5 maps to
 `TRM0001`–`TRM0005`), UTF-16 start and UTF-16 length, in reporting order.
+`Host.IntegerValues[0]` contains a count followed by five-word records:
+zero-based numeric-token index, status (0 = decoded; 1 = exceeds `uint64`),
+unsigned magnitude low 32 bits, high 32 bits, explicit integer-width tag.
+The magnitude is exactly zero on overflow, not a truncated value. Tag 0 means
+no explicit suffix; 1–5 map to `i8`, `i16`, `i32`, `i64`, `i128`, and 6–10 to
+`u8`, `u16`, `u32`, `u64`, `u128`. The low/high buffer words retain raw unsigned
+bits even when represented by negative `int32` values. Integer records are
+strictly ordered by token index; fractional, exponent, floating-suffix and
+malformed-exponent numeric tokens have no record.
+
+`ScannerHost.ReadIntegerValues(source, tokens, bytes)` returns
+`ImmutableArray<ScannerIntegerValue>` with `int TokenIndex`, `string Tag`,
+`bool IsOverflow`, and `ulong? Magnitude`. `Tag` is the lowercase suffix or
+`""`; `Magnitude` is null when `IsOverflow` is true. It verifies capacity,
+ordering, referenced token
+kind, integer-form source spelling and suffix, defined status/tag, and the
+canonical overflow payload. This is structural validation, **not** host-side
+magnitude decoding. The compiled Terrum scanner determines numeric form and
+performs each checked decimal accumulation. Values above `ulong.MaxValue`,
+including otherwise valid `i128`/`u128` spellings, get an overflow record
+without a lexical diagnostic. The exact `2^63` magnitude is preserved for
+unary-minus contexts, `ulong.MaxValue` is preserved, and an explicit tag is
+recorded regardless of whether its target type could hold the magnitude.
+Untagged integer magnitudes are not assigned a default type; minus remains a
+separate operator. `ReadLexResult` does not consume this optional side table,
+and semantic binding still independently constructs numeric values. It is an
+executable scanner-decoder milestone, not binding from decoded values or full
+self-hosting.
+The reader accepts either `ImmutableArray<ScannerToken>` or the
+`ImmutableArray<SyntaxToken>` already produced by `ReadLexResult`; neither
+overload re-lexes or duplicates the token stream.
+
 The adapter validates published counts, kinds, ranges, owner ordering,
 nonempty diagnostic/trivia spans, and exact contiguous coverage by token and
 trivia records. No source unit may be omitted, duplicated or reordered.
@@ -110,7 +146,7 @@ covering the entire punctuation/operator catalog. Packed lexeme records contain
 compares source code units against these readonly records and selects the
 longest matching operator. The host never chooses a token from the source.
 Output capacities are bounded by `sourceLength + 1` tokens, at most
-`sourceLength` trivia records, and at most `sourceLength` diagnostics; the
+`sourceLength` trivia, integer-value, and diagnostic records; the
 native scanner requires capacity before publishing each record.
 
 Identifiers use Unicode 17.0.0 XID_Start/XID_Continue plus underscore, including
@@ -144,3 +180,7 @@ requirements are checked; the scanner does not silently truncate records.
 End-to-end build fixtures compare the native-scanned and host-scanned emitted
 images, execute generated programs, and verify that scanner failures neither
 fall back nor replace prior artifacts.
+Native integer-decoder fixtures compare every published index, status, magnitude
+half, and suffix against a test-only independent `BigInteger` oracle, including
+zero padding, `2^63`, `ulong.MaxValue`, overflow, width tags, and noninteger
+numeric forms; repeated scans reset the published count.

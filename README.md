@@ -73,7 +73,8 @@ The [JIT proof](docs/jit.md) covers executable-memory and unwind lifetimes;
 [modules](docs/modules.md) demonstrate process-start compatible producer
 replacement against an unchanged persisted consumer. Neither is a production
 runtime or hot-servicing implementation. The [compiled scanner](docs/scanner.md)
-executes bounded Terrum tokenization against shared pinned Unicode data.
+executes bounded Terrum tokenization against shared pinned Unicode data and
+decodes integer magnitudes without imposing a default numeric type.
 The `build-component` worker can use those native token/trivia records as the
 lexical phase of the real parser/binder/native-emission pipeline, without
 re-lexing the target source in C#.

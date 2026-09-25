@@ -6,6 +6,8 @@ using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Globalization;
+using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Lexing;
@@ -149,6 +151,19 @@ public sealed class ScannerTests
         await CheckScannerAsync(string.Concat(Enumerable.Repeat(" \n", 512))).ConfigureAwait(true);
     }
 
+    [Theory]
+    [InlineData("0 00 000000000000000000000000000000000000000001 256u8")]
+    [InlineData("9223372036854775807 9223372036854775808i64 -9223372036854775808i64")]
+    [InlineData("18446744073709551615 18446744073709551615u64 18446744073709551616")]
+    [InlineData("18446744073709551616i128 340282366920938463463374607431768211455u128")]
+    [InlineData("1i8 2i16 3i32 4i64 5i128 6u8 7u16 8u32 9u64 10u128")]
+    [InlineData("1.25 2e+3 3E- 4e 5f32 6f128 7efoo 8i64extra 9i128\u200D")]
+    [InlineData("12345678901234567890123456789012345678901234567890u128 // trailing")]
+    public async Task CompiledIntegerDecoderMatchesBigIntegerOracleAsync(string source)
+    {
+        await CheckScannerAsync(source, repeat: true).ConfigureAwait(true);
+    }
+
     [Fact]
     public async Task RepeatedScanReplacesPublishedDiagnosticsAsync()
     {
@@ -186,7 +201,9 @@ public sealed class ScannerTests
         Assert.True(buffers[5].IsWritable);
         Assert.False(buffers[6].IsWritable);
         Assert.False(buffers[7].IsWritable);
+        Assert.True(buffers[8].IsWritable);
         Assert.Equal(1 + (4 * 3), buffers[5].Values.Length);
+        Assert.Equal(1 + (5 * 3), buffers[8].Values.Length);
         _ = Assert.Throws<ArgumentException>(() => ScannerHost.CreateBuffers(
             SourceText.From(new string('x', ScannerHost.MaximumSourceLength + 1))));
     }
@@ -290,6 +307,48 @@ public sealed class ScannerTests
             ScannerHost.ReadTrivia(source, tokens, bytes));
     }
 
+    [Theory]
+    [InlineData(-1, 0, 0, 0, 1)]
+    [InlineData(1, 0, 0, 0, 1)]
+    [InlineData(0, 2, 0, 0, 1)]
+    [InlineData(0, 1, 1, 0, 1)]
+    [InlineData(0, 0, 0, 0, 6)]
+    public void IntegerResultAdapterRejectsMalformedRecords(int tokenIndex, int status, int low, int high, int tag)
+    {
+        var source = SourceText.From("12i8");
+        ImmutableArray<ScannerToken> tokens =
+        [
+            new(TokenKind.NumericLiteral, new TextSpan(0, source.Length)),
+            new(TokenKind.EndOfFile, new TextSpan(source.Length, 0)),
+        ];
+        var bytes = new byte[24];
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, 1);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(4), tokenIndex);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(8), status);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(12), low);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16), high);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(20), tag);
+        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadIntegerValues(source, tokens, bytes));
+    }
+
+    [Fact]
+    public void IntegerResultAdapterPreservesAll64MagnitudeBits()
+    {
+        var source = SourceText.From("18446744073709551615u64");
+        ImmutableArray<ScannerToken> tokens =
+        [
+            new(TokenKind.NumericLiteral, new TextSpan(0, source.Length)),
+            new(TokenKind.EndOfFile, new TextSpan(source.Length, 0)),
+        ];
+        var bytes = new byte[24];
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, 1);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(12), -1);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16), -1);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(20), (int)ScannerIntegerTag.U64);
+        Assert.Equal(new ScannerIntegerValue(0, "u64", false, ulong.MaxValue),
+            Assert.Single(ScannerHost.ReadIntegerValues(source, tokens, bytes)));
+    }
+
     private static async Task CheckScannerAsync(string source, bool repeat = false)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -326,6 +385,55 @@ public sealed class ScannerTests
             expectedDiagnostics.Add(diagnostic.Span.Length);
         }
 
+        var expectedIntegers = ImmutableArray.CreateBuilder<int>();
+        var integerValues = ImmutableArray.CreateBuilder<ScannerIntegerValue>();
+        for (var index = 0; index < lexed.Tokens.Length - 1; index++)
+        {
+            var token = lexed.Tokens[index];
+            if (token.Kind != TokenKind.NumericLiteral)
+            {
+                continue;
+            }
+
+            var text = token.Text;
+            var tag = ScannerIntegerTag.None;
+            var tagText = "";
+            foreach (var candidate in Enum.GetValues<ScannerIntegerTag>().Skip(1))
+            {
+                var name = candidate.ToString();
+                var suffix = char.ToLowerInvariant(name[0]) + name[1..];
+                if (text.EndsWith(suffix, StringComparison.Ordinal))
+                {
+                    tag = candidate;
+                    tagText = suffix;
+                    text = text[..^suffix.Length];
+                    break;
+                }
+            }
+
+            if (text.Length == 0 || !text.All(ch => ch is >= '0' and <= '9'))
+            {
+                continue;
+            }
+
+            var value = BigInteger.Parse(text, NumberStyles.None, CultureInfo.InvariantCulture);
+            var overflow = value > ulong.MaxValue;
+            var magnitude = overflow ? 0UL : (ulong)value;
+            var status = overflow ? ScannerIntegerStatus.MagnitudeOverflow : ScannerIntegerStatus.Decoded;
+            integerValues.Add(new ScannerIntegerValue(index, tagText, overflow, overflow ? null : magnitude));
+            expectedIntegers.Add(index);
+            expectedIntegers.Add((int)status);
+            expectedIntegers.Add(unchecked((int)(uint)magnitude));
+            expectedIntegers.Add(unchecked((int)(uint)(magnitude >> 32)));
+            expectedIntegers.Add((int)tag);
+        }
+        var records = lexed.Tokens.Select(token => new ScannerToken(token.Kind, token.Span)).ToImmutableArray();
+        var integerBytes = EncodeWords(expectedIntegers.ToImmutable().Insert(0, integerValues.Count));
+        Assert.Equal<ScannerIntegerValue>(integerValues,
+            ScannerHost.ReadIntegerValues(lexed.Source, records, integerBytes));
+        Assert.Equal<ScannerIntegerValue>(integerValues,
+            ScannerHost.ReadIntegerValues(lexed.Source, lexed.Tokens, integerBytes));
+
         var adapted = ScannerHost.ReadLexResult(lexed.Source, lexed.Tokens.Length,
             EncodeWords(expected.ToImmutable()),
             EncodeWords(expectedTrivia.ToImmutable().Insert(0, expectedTrivia.Count / 4)),
@@ -343,7 +451,8 @@ public sealed class ScannerTests
         var buffers = ScannerHost.CreateBuffers(SourceText.From(source))
             .Add(new HostBuffer("Expected", PrimitiveType.Int32, expected.ToImmutable(), false))
             .Add(new HostBuffer("ExpectedTrivia", PrimitiveType.Int32, expectedTrivia.ToImmutable(), false))
-            .Add(new HostBuffer("ExpectedDiagnostics", PrimitiveType.Int32, expectedDiagnostics.ToImmutable(), false));
+            .Add(new HostBuffer("ExpectedDiagnostics", PrimitiveType.Int32, expectedDiagnostics.ToImmutable(), false))
+            .Add(new HostBuffer("ExpectedIntegers", PrimitiveType.Int32, expectedIntegers.ToImmutable(), false));
         const string Harness = """
 
             int32 CheckScan()
@@ -372,6 +481,19 @@ public sealed class ScannerTests
                     if (Host.Trivia[index + 1] != Host.ExpectedTrivia[index])
                     {
                         return 105;
+                    }
+                    index = index + 1;
+                }
+                if (Host.IntegerValues[0] * 5 != Host.ExpectedIntegers.Length)
+                {
+                    return 106;
+                }
+                index = 0;
+                while (index < Host.ExpectedIntegers.Length)
+                {
+                    if (Host.IntegerValues[index + 1] != Host.ExpectedIntegers[index])
+                    {
+                        return 107;
                     }
                     index = index + 1;
                 }

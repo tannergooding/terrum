@@ -16,6 +16,39 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class CliTests
 {
     [Fact]
+    public async Task ScannerPublishesExactIntegerMagnitudesWithoutDefaultTypesOrPrecisionLossAsync()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        const string Source = "0 9223372036854775808i64 18446744073709551615u64 18446744073709551616u128 256u8 1.0 2e3 3f64";
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), "scan-component",
+            Path.Combine(root, "self-host", "Scanner.terrum"), "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(0, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        Assert.Equal(4, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("scanner-4", document.RootElement.GetProperty("component").GetString());
+        var integers = document.RootElement.GetProperty("integerValues");
+        Assert.Equal(5, integers.GetArrayLength());
+        string[] tags = ["", "i64", "u64", "u128", "u8"];
+        string?[] magnitudes = ["0", "9223372036854775808", "18446744073709551615", null, "256"];
+        for (var index = 0; index < tags.Length; index++)
+        {
+            Assert.Equal(index, integers[index].GetProperty("tokenIndex").GetInt32());
+            Assert.Equal(tags[index], integers[index].GetProperty("tag").GetString());
+            Assert.Equal(magnitudes[index] is null ? "overflow" : "exact", integers[index].GetProperty("status").GetString());
+            if (magnitudes[index] is string magnitude)
+            {
+                Assert.Equal(JsonValueKind.String, integers[index].GetProperty("magnitude").ValueKind);
+                Assert.Equal(magnitude, integers[index].GetProperty("magnitude").GetString());
+            }
+            else
+            {
+                Assert.False(integers[index].TryGetProperty("magnitude", out _));
+            }
+        }
+    }
+
+    [Fact]
     public async Task ScannerWorkerPublishesCompiledTokenRecordsAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -24,8 +57,8 @@ public sealed class CliTests
         Assert.Equal(1, exit);
         Assert.Equal("", error);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal(3, document.RootElement.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("scanner-3", document.RootElement.GetProperty("component").GetString());
+        Assert.Equal(4, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("scanner-4", document.RootElement.GetProperty("component").GetString());
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
         var diagnostic = Assert.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray());
         Assert.Equal("TRM0001", diagnostic.GetProperty("code").GetString());
@@ -201,6 +234,36 @@ public sealed class CliTests
         {
             File.Delete(component);
             File.Delete(artifact);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ComponentBuildCannotOverwriteEitherSourceAsync(bool scannerIsDestination)
+    {
+        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-component-input-{Guid.NewGuid():N}");
+        var scanner = prefix + "-scanner.exe";
+        var input = prefix + "-source.exe";
+        const string Scanner = "int32 Scan() { require false; return 0; }";
+        const string Source = "int32 Main() { return 42; }";
+        try
+        {
+            await File.WriteAllTextAsync(scanner, Scanner);
+            await File.WriteAllTextAsync(input, Source);
+            var (exit, output, error) = await RunAsync([], "build-component", scanner, input,
+                "-o", scannerIsDestination ? scanner : input, "--runtime", "fail-fast", "--json");
+            Assert.Equal(2, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.Equal("TRM2002", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+            Assert.Equal(Scanner, await File.ReadAllTextAsync(scanner));
+            Assert.Equal(Source, await File.ReadAllTextAsync(input));
+        }
+        finally
+        {
+            File.Delete(scanner);
+            File.Delete(input);
         }
     }
 

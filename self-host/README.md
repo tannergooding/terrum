@@ -29,7 +29,7 @@ remain hosted in C#.
 | [TokenCursor](TokenCursor.terrum) | Read-view traversal without copying backing storage or cleanup | Span indexing, matched access, stored backing dependencies, capture contract, constructor initialization |
 | [RangeTests](RangeTests.terrum) | Small success/failure and overflow boundary cases | Executed with a host-supplied entry wrapper; a Terrum test runner remains future work |
 | [TokenTests](TokenTests.terrum) | Nested value copies, range replacement and nested field updates | Executed through the Windows indirect aggregate ABI; no retained backing views |
-| [Scanner](Scanner.terrum) | UTF-16 decoding, pinned Unicode identifiers, exact token kinds, lossless trivia and lexical diagnostics | Executed through fixed checked host buffers; see the [precise subset](../docs/scanner.md) |
+| [Scanner](Scanner.terrum) | UTF-16 decoding, pinned Unicode identifiers, exact token kinds, lossless trivia, lexical diagnostics and bounded integer magnitudes | Executed through fixed checked host buffers; see the [precise subset](../docs/scanner.md) |
 | [Host APIs](host.api.terrum) | Explicit source acquisition, cancellation, digest and output boundary | Interfaces, immutable publication, operation failures; host adapters |
 
 `SourceRange` deliberately mirrors the current host's signed 32-bit UTF-16
@@ -49,7 +49,10 @@ working contract notation, not an unchecked annotation accepted by the MVP.
 
 The scanner shares the host's generated Unicode ranges; classification,
 token boundaries, keywords, leading trivia and lexical diagnostic decisions execute in Terrum.
-Decoded values and parser routines remain future components. Keep shared
+Integer magnitudes through the unsigned 64-bit range and explicit integer tags
+are decoded natively without assigning a default numeric type; larger magnitudes
+are reported as beyond the decoder's range, not lexical errors. Contextual
+literal binding, decoded strings and parser routines remain hosted. Keep shared
 fixture expectations about observable ranges and contracts, not host object
 layouts. An independent compiler bootstrap requires rebuilding and comparing
 outputs, not merely parsing these files.
