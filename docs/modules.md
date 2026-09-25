@@ -177,7 +177,7 @@ The proof supports one producer reference per consumer, compact acyclic value
 layouts and the existing native value profile. Nested field types are retained
 transitively and remapped across artifact-local type indexes. Every imported
 nested layout participates in replacement checking, including field types,
-order, access and declared mutation authority. Version 9 retains the checked
+order, access and declared mutation authority. Version 10 retains the checked
 `IsMutable` flag per field; changing it in either direction changes the
 published value contract and is rejected during replacement. Function bodies
 and public contracts store the checked `IsNoThrow` and `DoesNotReturn`
@@ -191,7 +191,7 @@ bodies claiming either promise must independently pass the verifier's
 structured-flow or conservative effect proof. NoThrow is about permitted
 operations and declared callees, not an exception handler or a claim that
 fail-fast process termination counts as NoThrow. Older versions, including
-version 8 without the non-return contract, are rejected;
+version 9 without structured cleanup regions, are rejected;
 recreate them from source. Multi-producer identity/version resolution, dependency
 cycles and resilient public layouts remain later work.
 
@@ -230,8 +230,8 @@ the package layer below adds that check. Neither provides a multi-provider
 contract linker, live patching or hot-unload protocol.
 
 `NativeModuleCompiler` packages each separately compiled native producer DLL
-or consumer EXE with its corresponding version 9 semantic `.trm` contract.
-Its version 1 package records the native-9 profile, fail-fast runtime policy,
+or consumer EXE with its corresponding version 10 semantic `.trm` contract.
+Its version 1 package records the native-10 profile, fail-fast runtime policy,
 single explicit provider identity and the exact PE and semantic bytes. The
 identity is 1–64 ASCII letters, digits or underscores, beginning with a
 letter; its loader basename is `terrum-<identity>.dll`. Artifacts are bounded

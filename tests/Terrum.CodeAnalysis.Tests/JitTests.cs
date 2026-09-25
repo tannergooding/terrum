@@ -63,6 +63,21 @@ public sealed class JitTests
     [InlineData("struct S { public int32 Value; public S() { Value = 1; this.Value = 42; } } int32 Main() { S value = new S(); return value.Value; }", 42)]
     [InlineData("struct Inner { public mut int32 Value; public Inner() { Value = 1; } } struct Outer { public Inner Value; public Outer() { Value = new Inner(); Value.Value = 42; } } int32 Main() { Outer value = new Outer(); return value.Value.Value; }", 42)]
     [InlineData("struct S { public int32 Value; public S(int32 value) { Value = value; } } int32 Main() { mut S value = new S(1); S copy = value; value = new S(41); return value.Value + copy.Value; }", 42)]
+    [InlineData("int32 Main() { mut int32 x = 1; try { x = 42; } finally { x = 43; } return x; }", 43)]
+    [InlineData("int32 Main() { mut int32 x = 42; try { return x; } finally { x = 0; } }", 42)]
+    [InlineData("int32 Main() { mut int32 x = 42; try { try { return x; } finally { x = 1; } } finally { x = 2; } }", 42)]
+    [InlineData("int32 Main() { mut int32 x = 42; try { if (x == 42) { return x; } x = 1; } finally { x = 0; } return x; }", 42)]
+    [InlineData("int32 Choose(bool first) { mut int32 x = 42; try { if (first) { return x; } x = 7; return x; } finally { int32 local = 1; x = local; } } int32 Main() { return Choose(true) & 42; }", 42)]
+    [InlineData("int32 Main() { int64 result = Read(4294967338i64); if (result == 4294967338i64) { return 42; } return 0; } int64 Read(int64 x) { mut int64 local = x; try { return local; } finally { local = 0i64; Clobber(); } } [NoThrow] void Clobber() { mut int64 x = 1i64; x = 2i64; }", 42)]
+    [InlineData("struct V { public int32 A; public int32 B; public int32 C; [NoThrow] public V(int32 a) { A = a; B = 2; C = 3; } } V Take(V v) { mut V local = v; try { return local; } finally { local = new V(0); } } int32 Main() { V v = Take(new V(42)); return v.A; }", 42)]
+    [InlineData("struct V { public int32 A; public int32 B; public int32 C; public int32 D; [NoThrow] public V(int32 a) { A = a; B = 2; C = 3; D = 4; } } V Take(V v) { mut V local = v; try { return local; } finally { local = new V(0); } } int32 Main() { V v = Take(new V(42)); return v.A; }", 42)]
+    [InlineData("struct V { public mut int32 A; public int32 B; public int32 C; public int32 D; [NoThrow] public V(int32 a) { A = a; B = 2; C = 3; D = 4; } } V Take(V v) { mut V local = v; try { return local; } finally { local.A = 0; Clobber(1, 2, 3, 4, 5, 6); } } [NoThrow] void Clobber(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { } int32 Main() { V v = Take(new V(42)); return v.A; }", 42)]
+    [InlineData("struct V { public int32 A; public int32 B; public V() { try { A = 42; } finally { B = 0; } } } int32 Main() { V value = new V(); return value.A; }", 42)]
+    [InlineData("int32 Main() { mut int32 state = 0; try { try { state = 0; } finally { state = 1; } } finally { if (state == 1) { state = 42; } else { state = 0; } } return state; }", 42)]
+    [InlineData("bool Take(out int32 x) { x = 42; try { return true; } finally { Clobber(); } } [NoThrow] void Clobber() { mut int32 x = 1; x = 0; } int32 Main() { require Take(out var x); return x; }", 42)]
+    [InlineData("bool Take(out int32 x) { try { return true; } finally { x = 42; } } int32 Main() { require Take(out var x); return x; }", 42)]
+    [InlineData("bool Take(out int32 x) { try { return false; } finally { x = 42; } } int32 Main() { mut int32 x = 9; bool ok = Take(out x); if (ok) { return 0; } return 42; }", 42)]
+    [InlineData("bool Take(out int32 x) { x = 42; mut bool ok = true; try { return ok; } finally { ok = false; } } int32 Main() { require Take(out var x); return x; }", 42)]
     public async Task WorkerAndNativeExecutableAgreeAsync(string source, int expected)
     {
         AssertWindowsX64();

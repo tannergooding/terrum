@@ -81,4 +81,6 @@ public enum SyntaxKind
     OmittedExpression,
     /// <summary>A parameterless declaration attribute, including its brackets.</summary>
     Attribute,
+    /// <summary>A structured body and its unconditional normal-exit cleanup.</summary>
+    TryFinallyStatement,
 }

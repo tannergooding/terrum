@@ -1,0 +1,36 @@
+// Normal-exit cleanup is structured; checked failures still terminate the process.
+[NoThrow] void Touch() {
+    mut int32 marker = 1;
+    marker = 2;
+}
+
+int32 Early() {
+    mut int32 value = 42;
+    try {
+        try {
+            return value;
+        }
+        finally {
+            value = 1;
+            Touch();
+        }
+    }
+    finally {
+        value = 0;
+    }
+}
+
+int32 Fallthrough() {
+    mut int32 value = 1;
+    try {
+        value = 0;
+    }
+    finally {
+        value = 42;
+    }
+    return value;
+}
+
+int32 Main() {
+    return Early() & Fallthrough();
+}

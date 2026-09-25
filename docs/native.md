@@ -1,6 +1,6 @@
 # Windows x64 native profile
 
-`native-9` is a deliberately bounded executable language profile, separate from
+`native-10` is a deliberately bounded executable language profile, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
@@ -133,8 +133,22 @@ The [no-return sample](../samples/native/no-return.terrum) returns 42 on success
 Changing its entry to `Select(false)` reaches the nonreturning failure helper
 and terminates with the explicit requirement-failure status. AOT and JIT retain
 the same native call ABI; the no-return proof does not require a fabricated
-return value. Catch/cleanup, root tracking and a catchable-exception runtime
+return value. Catch, root tracking and a catchable-exception runtime
 remain unimplemented.
+
+Structured [`try`/`finally`](../samples/native/try-finally.terrum) executes
+cleanup on ordinary fallthrough and every normal return, from inner region
+to outer. Body locals are not in scope in the cleanup block; shared outer
+locals remain accessible. Cleanup independently obeys NoThrow even within a
+MayThrow function: calls need declared NoThrow contracts, and potentially
+failing arithmetic, conversions and host-buffer access diagnose. A return
+from cleanup diagnoses. This bounded profile also rejects potentially executing
+cleanup loops and reachable calls declared `DoesNotReturn`; it does not infer
+termination from the bodies or contracts of other NoThrow callees.
+The backend snapshots scalar and compact aggregate pending results before
+cleanup, then commits bool/out outputs only when the earlier return predicate
+was true and the post-cleanup definite-assignment proof permits publication.
+No owning values or destructor semantics are provided.
 
 The independent [Windows SEH ABI probe](native-seh.md) checks filter search,
 normal/exceptional finally order, frame-local access and dynamic unwind-table
@@ -262,8 +276,12 @@ this does not implement a general span ABI or a complete lifetime checker.
 ## Runtime policy
 
 The language's eventual ordinary runtime uses exceptions for exceptional
-failures. This executable profile has **no catch/cleanup runtime** and accepts
+failures. This executable profile has **no exceptional unwinding or catch runtime** and accepts
 only explicit `fail-fast` selection. Checked arithmetic remains checked:
+
+`finally` handles normal control flow only; a fail-fast check terminates the
+process without executing any pending cleanup. The independent SEH experiment
+does not change this policy.
 
 | Failure | Process exit status |
 |---|---|

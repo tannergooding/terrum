@@ -315,6 +315,8 @@ internal sealed class Binder
                 "NoThrow" => ("TRM3017", "NoThrow declarations cannot perform potentially throwing operations or call functions without a NoThrow contract."),
                 "DoesNotReturn" => ("TRM3018", "DoesNotReturn declarations must have no reachable normal return or fallthrough."),
                 "NormalReturn" => ("TRM3012", "Not all normally completing paths return a value."),
+                "FinallyReturn" => ("TRM3019", "A finally block cannot return or transfer control out of cleanup."),
+                "FinallyNoReturn" => ("TRM3020", "Potentially nonreturning finally cleanup is unsupported in this bounded profile."),
                 _ => ("TRM3016", exceededWorkLimit
                     ? "Source exceeds the semantic verification work limit."
                     : "Source violates definite assignment, initialization, or executable type rules."),
@@ -681,6 +683,13 @@ internal sealed class Binder
         {
             case SyntaxKind.Block:
                 return BindBlock(node);
+
+            case SyntaxKind.TryFinallyStatement:
+            {
+                var body = BindBlock((SyntaxNode)node.Children[1]);
+                var cleanup = BindBlock((SyntaxNode)node.Children[3]);
+                return new BoundTryFinally(body, cleanup, node.Span);
+            }
 
             case SyntaxKind.VariableDeclaration:
             {

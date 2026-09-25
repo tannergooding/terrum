@@ -226,6 +226,7 @@ internal sealed class PeCompiler
     private int _outBase;
     private int _returnSlot;
     private int _currentFunction;
+    private readonly List<BoundBlock> _cleanups = [];
 
     internal PeCompiler(BoundProgram program, CancellationToken cancellationToken, bool library = false,
         IReadOnlyDictionary<int, NativeImportBinding>? imports = null)
@@ -316,6 +317,10 @@ internal sealed class PeCompiler
             _outBases[i] = _spillBases[i] + (16 * spillSlots);
             _returnSlots[i] = _outBases[i] + (16 * outParameters);
             var required = _returnSlots[i] + (IsIndirect(function.ReturnType) ? 8L : 0L);
+            if (ContainsCleanup(function.Body))
+            {
+                required = ((required + 15) & ~15L) + 16;
+            }
             if (required > MaximumFrame)
             {
                 throw new NotSupportedException("Native frame exceeds the 3840-byte page-safe ceiling.");
@@ -378,6 +383,7 @@ internal sealed class PeCompiler
             _spillBase = _spillBases[i];
             _outBase = _outBases[i];
             _returnSlot = _returnSlots[i];
+            _cleanups.Clear();
             Prolog(_frame);
             var hidden = IsIndirect(function.ReturnType) ? 1 : 0;
             if (hidden != 0)
@@ -481,6 +487,17 @@ internal sealed class PeCompiler
 
     private static int AlignFrame(int bytes) => ((bytes + 8 + 15) & ~15) - 8;
 
+    private static bool ContainsCleanup(BoundStatement statement) => statement switch {
+        BoundTryFinally => true,
+        BoundBlock block => block.Statements.Any(ContainsCleanup),
+        BoundIf conditional => ContainsCleanup(conditional.Then)
+            || (conditional.Else is not null && ContainsCleanup(conditional.Else)),
+        BoundWhile loop => ContainsCleanup(loop.Body),
+        _ => false,
+    };
+
+    private int PendingReturnSlot() => (_returnSlot + (IsIndirect(_program.Functions[_currentFunction].ReturnType) ? 8 : 0) + 15) & ~15;
+
     private int StatementSpills(BoundStatement statement, ref int maximumArguments)
     {
         switch (statement)
@@ -510,6 +527,9 @@ internal sealed class PeCompiler
             case BoundWhile loop:
                 return Math.Max(ExpressionSpills(loop.Condition, ref maximumArguments),
                     StatementSpills(loop.Body, ref maximumArguments));
+            case BoundTryFinally cleanup:
+                return Math.Max(StatementSpills(cleanup.Body, ref maximumArguments),
+                    StatementSpills(cleanup.Finally, ref maximumArguments));
             case BoundRequire requirement:
                 return ExpressionSpills(requirement.Condition, ref maximumArguments);
             case BoundReturn result when result.Value is BoundExpression value:
@@ -647,6 +667,10 @@ internal sealed class PeCompiler
     private void Statement(BoundStatement statement)
     {
         _cancellationToken.ThrowIfCancellationRequested();
+        if (_code.Position > MaximumText)
+        {
+            throw new NotSupportedException("Native text exceeds the 8 MiB image ceiling.");
+        }
         switch (statement)
         {
             case BoundRequire requirement:
@@ -719,6 +743,21 @@ internal sealed class PeCompiler
                 if (result.Value is not null)
                 {
                     Expression(result.Value, 0);
+                    if (_cleanups.Count != 0)
+                    {
+                        StoreValue(PendingReturnSlot(), result.Value.Type);
+                    }
+                }
+                for (var index = _cleanups.Count - 1; index >= 0; index--)
+                {
+                    Statement(_cleanups[index]);
+                }
+                if (result.Value is not null)
+                {
+                    if (_cleanups.Count != 0)
+                    {
+                        LoadValue(PendingReturnSlot(), result.Value.Type);
+                    }
                     if (IsIndirect(result.Value.Type))
                     {
                         _code.Load64(_returnSlot, destinationRegister: true);
@@ -731,6 +770,12 @@ internal sealed class PeCompiler
                     CommitOutParameters();
                 }
                 Epilog();
+                break;
+            case BoundTryFinally cleanup:
+                _cleanups.Add(cleanup.Finally);
+                Statement(cleanup.Body);
+                _cleanups.RemoveAt(_cleanups.Count - 1);
+                Statement(cleanup.Finally);
                 break;
             case BoundIf conditional:
                 Expression(conditional.Condition, 0);

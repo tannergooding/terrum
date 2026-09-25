@@ -43,6 +43,41 @@ public sealed class ParserTests
         AssertLossless(tree);
     }
 
+    [Fact]
+    public void TryFinallyRetainsBothBlocksAndKeywordTrivia()
+    {
+        const string Source = "void F() { /* before */ try /* body */ { return; } /* keyword */ finally /* cleanup */ { ; } }";
+        var tree = SyntaxTree.Parse(Source);
+        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        var region = Assert.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.TryFinallyStatement);
+        Assert.Equal(4, region.Children.Length);
+        Assert.Equal(TokenKind.TryKeyword, Assert.IsType<SyntaxTokenElement>(region.Children[0]).Token.Kind);
+        Assert.Equal(SyntaxKind.Block, Assert.IsType<SyntaxNode>(region.Children[1]).Kind);
+        var keyword = Assert.IsType<SyntaxTokenElement>(region.Children[2]).Token;
+        Assert.Equal(TokenKind.FinallyKeyword, keyword.Kind);
+        Assert.Contains(keyword.LeadingTrivia, trivia => trivia.Text == "/* keyword */");
+        Assert.Equal(SyntaxKind.Block, Assert.IsType<SyntaxNode>(region.Children[3]).Kind);
+        Assert.Equal(Source.IndexOf("try", StringComparison.Ordinal), region.Span.Start);
+        Assert.Equal(Source.LastIndexOf("} }", StringComparison.Ordinal) + 1, region.Span.End);
+        AssertLossless(tree);
+    }
+
+    [Theory]
+    [InlineData("void F() { try { return; } return; }", TokenKind.FinallyKeyword, 2)]
+    [InlineData("void F() { try { return; } finally return; }", TokenKind.OpenBrace, 2)]
+    [InlineData("void F() { try finally { } return; }", TokenKind.OpenBrace, 1)]
+    public void MalformedTryFinallyPreservesMissingSyntaxAndFollowingStatements(string source, TokenKind missingKind, int returns)
+    {
+        var tree = SyntaxTree.Parse(source);
+        Assert.True(tree.HasErrors);
+        var region = Assert.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.TryFinallyStatement);
+        Assert.Equal(4, region.Children.Length);
+        Assert.Contains(region.DescendantTokens(), token => token.Kind == missingKind && token.IsMissing
+            && token.Text.Length == 0 && token.Span.Length == 0);
+        Assert.Equal(returns, tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.ReturnStatement));
+        AssertLossless(tree);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("// only trivia\r\n")]

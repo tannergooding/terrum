@@ -366,6 +366,12 @@ internal sealed class Parser
                 node = Node(SyntaxKind.RequireStatement, [Take(), ParseExpression(), Expect(TokenKind.Semicolon)]);
                 break;
             }
+            case TokenKind.TryKeyword:
+            {
+                var children = new List<SyntaxElement> { Take(), ParseBlock(), Expect(TokenKind.FinallyKeyword), ParseBlock() };
+                node = Node(SyntaxKind.TryFinallyStatement, children);
+                break;
+            }
             case TokenKind.ForKeyword:
             {
                 var children = new List<SyntaxElement> { Take(), Expect(TokenKind.OpenParen) };

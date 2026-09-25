@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public static class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 9;
+    private const int Version = 10;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -436,6 +436,10 @@ public static class ModuleCompiler
                     VisitExpression(loop.Condition);
                     VisitStatement(loop.Body);
                     break;
+                case BoundTryFinally cleanup:
+                    VisitStatement(cleanup.Body);
+                    VisitStatement(cleanup.Finally);
+                    break;
                 case BoundRequire requirement:
                     VisitExpression(requirement.Condition);
                     break;
@@ -696,6 +700,7 @@ public static class ModuleCompiler
                     Else = conditional.Else is null ? null : Statement(conditional.Else),
                 },
                 BoundWhile loop => loop with { Condition = Expression(loop.Condition), Body = Statement(loop.Body) },
+                BoundTryFinally cleanup => cleanup with { Body = (BoundBlock)Statement(cleanup.Body), Finally = (BoundBlock)Statement(cleanup.Finally) },
                 BoundRequire requirement => requirement with { Condition = Expression(requirement.Condition) },
                 BoundReturn result => result with { Value = result.Value is null ? null : Expression(result.Value) },
                 _ => throw new ModuleFormatException("Unknown producer statement kind."),
@@ -961,6 +966,7 @@ public static class ModuleCompiler
             BoundRequire => (byte)7,
             BoundReturn => (byte)8,
             BoundFieldAssignment => (byte)9,
+            BoundTryFinally => (byte)10,
             _ => throw new ModuleFormatException("Unknown statement kind."),
         });
         PutSpan(writer, statement.Span);
@@ -1007,6 +1013,10 @@ public static class ModuleCompiler
             case BoundWhile loop:
                 PutExpression(writer, loop.Condition, names, ref remaining, depth + 1);
                 PutStatement(writer, loop.Body, names, ref remaining, depth + 1);
+                break;
+            case BoundTryFinally cleanup:
+                PutStatement(writer, cleanup.Body, names, ref remaining, depth + 1);
+                PutStatement(writer, cleanup.Finally, names, ref remaining, depth + 1);
                 break;
             case BoundRequire requirement:
                 PutExpression(writer, requirement.Condition, names, ref remaining, depth + 1);
@@ -1067,6 +1077,11 @@ public static class ModuleCompiler
                 return new BoundFieldAssignment(variable, field, GetExpression(reader, ref remaining, depth + 1), span) {
                     NestedFields = fields.ToImmutable(),
                 };
+            case 10:
+                return new BoundTryFinally(GetStatement(reader, ref remaining, depth + 1) as BoundBlock
+                    ?? throw new ModuleFormatException("Expected try block."),
+                    GetStatement(reader, ref remaining, depth + 1) as BoundBlock
+                    ?? throw new ModuleFormatException("Expected finally block."), span);
             default:
                 throw new ModuleFormatException("Unknown statement kind.");
         }
@@ -1191,6 +1206,7 @@ public static class ModuleCompiler
             Else = conditional.Else is null ? null : ResolveStatement(conditional.Else, names),
         },
         BoundWhile loop => loop with { Condition = ResolveExpression(loop.Condition, names), Body = ResolveStatement(loop.Body, names) },
+        BoundTryFinally cleanup => cleanup with { Body = (BoundBlock)ResolveStatement(cleanup.Body, names), Finally = (BoundBlock)ResolveStatement(cleanup.Finally, names) },
         BoundRequire requirement => requirement with { Condition = ResolveExpression(requirement.Condition, names) },
         BoundReturn result => result with { Value = result.Value is null ? null : ResolveExpression(result.Value, names) },
         _ => throw new ModuleFormatException("Unknown statement kind."),

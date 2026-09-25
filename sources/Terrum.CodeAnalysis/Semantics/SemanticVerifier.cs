@@ -317,9 +317,11 @@ public static class SemanticVerifier
     }
 
     private static bool Statement(BoundStatement statement, bool[] initialized, uint[] fieldMasks, HashSet<int> declarations,
-        BoundFunction function, BoundProgram program, ref int remaining, int depth, bool reachable = true)
+        BoundFunction function, BoundProgram program, ref int remaining, int depth, bool reachable = true,
+        List<BoundBlock>? cleanups = null, bool inCleanup = false)
     {
         Count(ref remaining, depth);
+        cleanups ??= [];
         switch (statement)
         {
             case BoundBlock block:
@@ -335,7 +337,7 @@ public static class SemanticVerifier
                         throw Invalid();
                     }
                     var childReturns = Statement(child, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1,
-                        reachable && !returns);
+                        reachable && !returns, cleanups, inCleanup);
                     returns |= childReturns;
                 }
                 return returns;
@@ -469,13 +471,13 @@ public static class SemanticVerifier
                 var thenMasks = (uint[])fieldMasks.Clone();
                 MarkOutMasks(thenState, thenMasks, function, program);
                 var thenReturns = Statement(conditional.Then, thenState, thenMasks, declarations, function, program, ref remaining, depth + 1,
-                    reachable && thenReachable);
+                    reachable && thenReachable, cleanups, inCleanup);
                 var elseState = Outcome(conditional.Condition, beforeCondition, false, ref remaining);
                 var elseMasks = (uint[])fieldMasks.Clone();
                 MarkOutMasks(elseState, elseMasks, function, program);
                 var elseReturns = conditional.Else is not null
                     && Statement(conditional.Else, elseState, elseMasks, declarations, function, program, ref remaining, depth + 1,
-                        reachable && elseReachable);
+                        reachable && elseReachable, cleanups, inCleanup);
                 for (var i = 0; i < initialized.Length; i++)
                 {
                     initialized[i] = !thenReachable || thenReturns ? elseState[i]
@@ -507,7 +509,7 @@ public static class SemanticVerifier
                     var bodyReachable = CanBe(loop.Condition, true, ref remaining);
                     var exitReachable = CanBe(loop.Condition, false, ref remaining);
                     var bodyReturns = Statement(loop.Body, bodyState, bodyMasks, iterationDeclarations, function, program, ref remaining, depth + 1,
-                        reachable && bodyReachable);
+                        reachable && bodyReachable, cleanups, inCleanup);
                     var exitState = Outcome(loop.Condition, conditionInput, false, ref remaining);
                     var exitMasks = (uint[])conditionMasks.Clone();
                     MarkOutMasks(exitState, exitMasks, function, program);
@@ -536,6 +538,37 @@ public static class SemanticVerifier
                     }
                 }
                 throw Limit();
+            case BoundTryFinally cleanup:
+                if (cleanup.Body is null || cleanup.Finally is null)
+                {
+                    throw Invalid(cleanup.Span);
+                }
+                cleanups.Add(cleanup.Finally);
+                var tryReturns = Statement(cleanup.Body, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, reachable, cleanups, inCleanup);
+                cleanups.RemoveAt(cleanups.Count - 1);
+                if (tryReturns)
+                {
+                    var unreachableState = (bool[])initialized.Clone();
+                    var unreachableMasks = (uint[])fieldMasks.Clone();
+                    for (var index = 0; index < unreachableMasks.Length; index++)
+                    {
+                        unreachableState[index] = index < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                            || declarations.Contains(index);
+                        if (unreachableState[index] && (int)function.Variables[index].Type >= 100)
+                        {
+                            unreachableMasks[index] = FullMask(program, function.Variables[index].Type);
+                        }
+                    }
+                    VerifyCleanup(cleanup.Finally, unreachableState, unreachableMasks, declarations, function,
+                        program, ref remaining, depth + 1, reachable: false);
+                }
+                else
+                {
+                    VerifyCleanup(cleanup.Finally, initialized, fieldMasks, declarations, function, program,
+                        ref remaining, depth + 1, reachable);
+                }
+                return tryReturns;
             case BoundRequire requirement:
                 var beforeRequirement = (bool[])initialized.Clone();
                 Expression(requirement.Condition, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1);
@@ -552,6 +585,10 @@ public static class SemanticVerifier
                 MarkOutMasks(initialized, fieldMasks, function, program);
                 return !CanBe(requirement.Condition, true, ref remaining);
             case BoundReturn result:
+                if (inCleanup)
+                {
+                    throw InvalidEffect(result.Span, "FinallyReturn");
+                }
                 if (function.DoesNotReturn && reachable)
                 {
                     throw InvalidEffect(result.Span, "DoesNotReturn");
@@ -572,21 +609,91 @@ public static class SemanticVerifier
                         throw Invalid();
                     }
                 }
-                if (function.ReturnType == PrimitiveType.Bool && result.Value is BoundExpression boolResult
-                    && CanBe(boolResult, true, ref remaining))
+                if (function.ReturnType == PrimitiveType.Bool && result.Value is BoundExpression boolResult)
                 {
-                    var trueState = Outcome(boolResult, beforeReturn, true, ref remaining);
-                    for (var i = 0; i < function.ParameterCount; i++)
+                    foreach (var predicate in new[] { true, false })
                     {
-                        if (function.Variables[i].IsOut && !trueState[i])
+                        if (!CanBe(boolResult, predicate, ref remaining))
                         {
-                            throw Invalid(result.Span);
+                            continue;
                         }
+                        var returnState = Outcome(boolResult, beforeReturn, predicate, ref remaining);
+                        var returnMasks = (uint[])fieldMasks.Clone();
+                        MarkOutMasks(returnState, returnMasks, function, program);
+                        var returnDeclarations = new HashSet<int>(declarations);
+                        for (var index = cleanups.Count - 1; index >= 0; index--)
+                        {
+                            VerifyCleanup(cleanups[index], returnState, returnMasks, returnDeclarations,
+                                function, program, ref remaining, depth + 1, reachable);
+                        }
+                        if (predicate)
+                        {
+                            for (var i = 0; i < function.ParameterCount; i++)
+                            {
+                                if (function.Variables[i].IsOut && !returnState[i])
+                                {
+                                    throw Invalid(result.Span);
+                                }
+                            }
+                        }
+                    }
+                }
+                else if (cleanups.Count != 0)
+                {
+                    var returnState = (bool[])initialized.Clone();
+                    var returnMasks = (uint[])fieldMasks.Clone();
+                    var returnDeclarations = new HashSet<int>(declarations);
+                    for (var index = cleanups.Count - 1; index >= 0; index--)
+                    {
+                        VerifyCleanup(cleanups[index], returnState, returnMasks, returnDeclarations,
+                            function, program, ref remaining, depth + 1, reachable);
                     }
                 }
                 return true;
             default:
                 throw Invalid();
+        }
+    }
+
+    private static void VerifyCleanup(BoundBlock cleanup, bool[] initialized, uint[] fieldMasks,
+        HashSet<int> declarations, BoundFunction function, BoundProgram program, ref int remaining, int depth, bool reachable)
+    {
+        if (Statement(cleanup, initialized, fieldMasks, declarations, function with { IsNoThrow = true },
+            program, ref remaining, depth, reachable, inCleanup: true)
+            || HasUnsupportedCleanupFlow(cleanup, program, ref remaining, depth))
+        {
+            throw InvalidEffect(cleanup.Span, "FinallyNoReturn");
+        }
+    }
+
+    private static bool HasUnsupportedCleanupFlow(BoundStatement statement, BoundProgram program, ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        switch (statement)
+        {
+            case BoundBlock block:
+                foreach (var child in block.Statements)
+                {
+                    if (HasUnsupportedCleanupFlow(child, program, ref remaining, depth + 1))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            case BoundExpressionStatement { Expression: BoundCall call }:
+                return program.Functions[call.Function].DoesNotReturn;
+            case BoundIf conditional:
+                return (CanBe(conditional.Condition, true, ref remaining)
+                    && HasUnsupportedCleanupFlow(conditional.Then, program, ref remaining, depth + 1))
+                    || (conditional.Else is not null && CanBe(conditional.Condition, false, ref remaining)
+                        && HasUnsupportedCleanupFlow(conditional.Else, program, ref remaining, depth + 1));
+            case BoundWhile loop:
+                return CanBe(loop.Condition, true, ref remaining);
+            case BoundTryFinally nested:
+                return HasUnsupportedCleanupFlow(nested.Body, program, ref remaining, depth + 1)
+                    || HasUnsupportedCleanupFlow(nested.Finally, program, ref remaining, depth + 1);
+            default:
+                return false;
         }
     }
 

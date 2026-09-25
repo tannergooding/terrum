@@ -1,10 +1,10 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-6 and native-9
+## Current boundary: syntax-7 and native-10
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
-immutable and usable independently. The separate [native-9 profile](native.md)
+immutable and usable independently. The separate [native-10 profile](native.md)
 binds a bounded scalar/compact-value language and emits Windows x64 executables through
 verified structured operations. A clean syntax result is deliberately not a
 valid-program claim: `var x = 1;` parses but semantic analysis rejects its missing
@@ -17,7 +17,7 @@ managed graphs and standard-library execution are not implemented.
 | Lexing | Pinned Unicode identifiers, ASCII numbers/tags, comments, leading trivia, strings, diagnostics, EOF | Interpolation, raw/character/native literals, directives |
 | Declarations | Using, file-scoped namespaces, functions, compact structs with explicit fields/constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]`; library binding and one validated module reference per consumer | Classes, interfaces, enums/unions, general attributes, generic declarations/constraints, general module dependency graphs |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; repeated `?` diagnoses | General type resolution, optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
-| Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, assignment and expression statements | `foreach`, break/continue, switch/patterns, exceptions, cleanup, async, compound assignment |
+| Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, structured `try`/`finally` normal-exit cleanup, assignment and expression statements | `foreach`, break/continue, switch/patterns, catchable exceptions, async, compound assignment |
 | Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named/ref/out argument syntax | Character literals, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
@@ -41,12 +41,13 @@ type        = (qualifiedName | "void") ("<" type ("," type)* ">")? "?"?
 mode        = "ref" | "mut" "ref" | "out"
 local       = localInitializer ";"
 localInitializer = "mut"? ("var" | type) name "=" expression
-statement   = block | local | if | while | for | return | require | assignment | expression ";" | ";"
+statement   = block | local | if | while | for | tryFinally | return | require | assignment | expression ";" | ";"
 if          = "if" "(" expression ")" block ("else" (block | if))?
 while       = "while" "(" expression ")" block
 for         = "for" "(" initializer? ";" expression? ";" iterator? ")" block
 initializer = localInitializer | assignmentClause | expression
 iterator    = assignmentClause | expression
+tryFinally  = "try" block "finally" block
 return      = "return" expression? ";"
 require     = "require" expression ";"
 assignment  = assignmentClause ";"
@@ -77,12 +78,12 @@ for precise number, string, identifier and newline rules.
 optional and normalizing its substituted type is future binder work.
 Explicit `Option<Option<T>>` syntax is unchanged. `syntax-1` introduced this
 rejection rule; `syntax-2` added the lossless `RequireStatement` node.
-`syntax-6` includes scoped for-loops, parameterless declaration attributes and
+`syntax-7` includes scoped for-loops, `try`/`finally`, parameterless declaration attributes and
 checked casts for supported 32- and 64-bit integer types and `char16`.
 `[NoThrow]` on functions/constructors and `[DoesNotReturn]` on void functions are
 currently bound; unknown, duplicate and misplaced attributes diagnose rather
 than becoming unchecked metadata. Attribute nodes retain their brackets and
-name as three children. The `native-9` profile supports checked
+name as three children. The `native-10` profile supports checked
 signed/unsigned 32- and 64-bit integers, raw code units, conditional outputs,
 fixed host-buffer capabilities and acyclic value layouts up to 16 bytes.
 Fields are read-only after construction unless explicitly declared `mut`.
@@ -105,7 +106,15 @@ continuation. Its implementation must have no reachable return or fallthrough
 (`TRM3018`). Constant-true loops, statically false requirements and declared
 nonreturning calls can establish that proof. Unreachable syntax and IR still
 undergo type and initialization checks; an unreachable return is not evidence
-of normal completion. Catch/cleanup and other effect annotations remain unsupported.
+of normal completion. `BoundTryFinally` retains both regions, verifies NoThrow
+cleanup independently of the function's own effect, and runs it on normal
+fallthrough and returns, inside-out. `TRM3019` rejects returns inside cleanup;
+`TRM3020` conservatively rejects cleanup loops that may execute and reachable
+`DoesNotReturn` calls. This is not a termination proof for other NoThrow
+callees. Return values are
+snapshotted before cleanup; bool/out publication is checked after all cleanup.
+Fail-fast checked failures do not unwind or run cleanup. Catch and other
+effect annotations remain unsupported.
 Source return diagnostics use that same mandatory continuation analysis,
 including boolean negation and short-circuit constant feasibility; the binder
 does not maintain a second, narrower return-path proof.

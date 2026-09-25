@@ -160,6 +160,9 @@ public sealed record BoundIf(BoundExpression Condition, BoundStatement Then, Bou
 /// <param name="Span">The source range.</param>
 public sealed record BoundWhile(BoundExpression Condition, BoundStatement Body, TextSpan Span) : BoundStatement(Span);
 
+/// <summary>A semantic cleanup region; finally runs on normal body completion and normal returns, not fail-fast termination.</summary>
+public sealed record BoundTryFinally(BoundBlock Body, BoundBlock Finally, TextSpan Span) : BoundStatement(Span);
+
 /// <summary>Evaluates a boolean once and fails according to the selected runtime policy when false.</summary>
 /// <param name="Condition">The boolean success predicate.</param>
 /// <param name="Span">The source range.</param>

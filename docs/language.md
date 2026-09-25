@@ -62,8 +62,10 @@ Allocation, GC, rooted reads/writes, blocking, suspension, I/O, atomics, throwin
 
 The current native profile implements conservative checked `[NoThrow]` and
 `[DoesNotReturn]` bounds and their versioned declaration contracts. Other
-effect bounds, exception identity and cleanup execution remain later implementation work;
-see the [native proof limits](native.md).
+effect bounds, exception identity and exceptional cleanup remain later implementation work.
+Structured `try`/`finally` currently handles normal exits in the explicit
+fail-fast profile; process termination deliberately skips pending cleanup.
+See the [native proof limits](native.md).
 
 ### Storage, concurrency, entry and boundaries
 
