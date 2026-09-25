@@ -1,6 +1,6 @@
 # Windows x64 native profile
 
-`native-7` is a deliberately bounded executable language profile, separate from
+`native-8` is a deliberately bounded executable language profile, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
@@ -80,6 +80,36 @@ changes the provider package, not the consumer image. Package checksums detect
 corruption; these are trusted native-code artifacts, not a sandbox or an
 authenticated distribution format. See [modules](modules.md) for the precise
 identity, compatibility, loader and runtime boundaries.
+
+## Checked no-throw declarations
+
+`[NoThrow]` on a function or constructor declares a bound on language-level
+throwing effects. Binding preserves it in `BoundFunction.IsNoThrow`; mandatory
+verification rejects a violating implementation, including publicly constructed
+IR. Calls depend on the callee's declaration, not its current body. Module
+contracts preserve that guarantee: adding it is compatible, removing it is not.
+The attribute neither disables runtime checks nor treats fail-fast termination
+as a proof of no throwing effects.
+
+The current conservative proof accepts initialized value/field reads and writes,
+constants, comparisons, boolean and integer bitwise operations, unary plus and
+complement, and calls to other NoThrow declarations. Numeric casts are total
+for identity conversions, `char16` to the supported integers, `int32` to `int64`,
+and `uint32` to `int64`/`uint64`. Negation of a constant operand is accepted
+when its result is representable, including ordinary negative literals.
+Other conversions, checked arithmetic and general negation
+and host-buffer accesses remain potentially throwing. A `require` needs a
+boolean condition whose false outcome is statically impossible. There is no
+numeric range or user-invariant inference; unreachable operations are still
+checked conservatively. NoThrow says nothing about termination or fatal
+operating-system faults.
+
+The [no-throw sample](../samples/native/no-throw.terrum) returns 42 through
+checked constructors, methods, widening conversion and conditional output
+publication, using the same AOT/JIT encoder. `CharacterFacts` publishes
+NoThrow on its two comparison-only classification helpers. General attributes,
+`[DoesNotReturn]`, catch/cleanup and a catchable-exception runtime are not
+implemented by this contract increment.
 
 ## Executable language
 

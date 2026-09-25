@@ -1,0 +1,46 @@
+struct Scalar
+{
+    public int64 Value;
+
+    [NoThrow]
+    public Scalar(uint32 value)
+    {
+        Value = (int64)value;
+    }
+
+    [NoThrow]
+    public int64 Read()
+    {
+        return Value;
+    }
+}
+
+[NoThrow]
+bool TrySelect(bool success, int32 input, out int32 value)
+{
+    if (!success)
+    {
+        return false;
+    }
+    value = input & 255;
+    return true;
+}
+
+[NoThrow]
+int32 Main()
+{
+    Scalar scalar = new Scalar(uint32.MaxValue);
+    if (scalar.Read() != 4294967295)
+    {
+        return -1;
+    }
+    if (TrySelect(false, 0, out var unpublished))
+    {
+        return -2;
+    }
+    if (TrySelect(true, 298, out var result))
+    {
+        return result;
+    }
+    return -3;
+}

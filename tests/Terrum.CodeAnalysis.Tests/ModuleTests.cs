@@ -624,7 +624,7 @@ public sealed class ModuleTests
         Assert.True(functionName >= sizeof(int));
         Assert.Equal(name.Length, BinaryPrimitives.ReadInt32LittleEndian(
             modified.AsSpan(functionName - sizeof(int), sizeof(int))));
-        var ownerLengthOffset = functionName + name.Length + sizeof(int) + 5;
+        var ownerLengthOffset = functionName + name.Length + sizeof(int) + 6;
         var ownerLength = BinaryPrimitives.ReadInt32LittleEndian(modified.AsSpan(ownerLengthOffset, sizeof(int)));
         Assert.Equal("Box", Encoding.UTF8.GetString(modified, ownerLengthOffset + sizeof(int), ownerLength));
         var parameterOffset = ownerLengthOffset + sizeof(int) + ownerLength;
@@ -872,19 +872,13 @@ public sealed class ModuleTests
         var producer = ModuleCompiler.CreateProducer(initial, ["Helper"]);
         var consumer = ModuleCompiler.CreateConsumer(initial, producer);
         var version = (byte[])consumer.Clone();
-        version[4] = 8;
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
-        version[4] = 1;
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
-        version[4] = 2;
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
-        version[4] = 3;
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
-        version[4] = 4;
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
-        version[4] = 5;
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
-        version[4] = 6;
+        var currentVersion = BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4));
+        for (var unsupported = 0; unsupported < currentVersion; unsupported++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(version.AsSpan(4, 4), unsupported);
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
+        }
+        BinaryPrimitives.WriteInt32LittleEndian(version.AsSpan(4, 4), int.MaxValue);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(consumer[..^1], producer));
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(new byte[(4 * 1024 * 1024) + 1], producer));

@@ -106,6 +106,11 @@ internal sealed class Parser
         Enter();
         var children = new List<SyntaxElement>();
 
+        while (Current.Kind == TokenKind.OpenBracket)
+        {
+            children.Add(Node(SyntaxKind.Attribute, [Take(), Expect(TokenKind.Identifier), Expect(TokenKind.CloseBracket)]));
+        }
+
         while (IsModifier(Current.Kind))
         {
             children.Add(Take());

@@ -1,6 +1,6 @@
 # Bounded semantic and native modules
 
-The version 7 `.trm` format records the semantic profile and persists verified, typed, source-mapped structured IR,
+The version 8 `.trm` format records the semantic profile and persists verified, typed, source-mapped structured IR,
 not source text or a native DLL. `CreateProducer` stores selected function bodies
 and exported contracts. `CreateConsumer` stores its own function bodies and the
 reference producer's declaration contracts, **not** producer bodies.
@@ -177,10 +177,18 @@ The proof supports one producer reference per consumer, compact acyclic value
 layouts and the existing native value profile. Nested field types are retained
 transitively and remapped across artifact-local type indexes. Every imported
 nested layout participates in replacement checking, including field types,
-order, access and declared mutation authority. Version 7 stores a checked
+order, access and declared mutation authority. Version 8 retains the checked
 `IsMutable` flag per field; changing it in either direction changes the
-published value contract and is rejected during replacement. Older versions,
-including version 6 without field mutation contracts, are rejected;
+published value contract and is rejected during replacement. It also stores
+the checked `IsNoThrow` declaration on functions and constructors in their
+serialized bodies and public contracts. A consumer expecting MayThrow accepts
+a replacement that strengthens the promise to NoThrow; a consumer expecting
+NoThrow rejects a MayThrow replacement, without inferring effects from
+replacement bodies. Producer bodies claiming NoThrow must independently pass
+the verifier's conservative effect proof. This promise is about permitted
+operations and declared callees, not an exception handler or a claim that
+fail-fast process termination counts as NoThrow. Older versions, including
+version 7 without the function effect contract, are rejected;
 recreate them from source. Multi-producer identity/version resolution, dependency
 cycles and resilient public layouts remain later work.
 
@@ -219,8 +227,8 @@ the package layer below adds that check. Neither provides a multi-provider
 contract linker, live patching or hot-unload protocol.
 
 `NativeModuleCompiler` packages each separately compiled native producer DLL
-or consumer EXE with its corresponding version 7 semantic `.trm` contract.
-Its version 1 package records the native-7 profile, fail-fast runtime policy,
+or consumer EXE with its corresponding version 8 semantic `.trm` contract.
+Its version 1 package records the native-8 profile, fail-fast runtime policy,
 single explicit provider identity and the exact PE and semantic bytes. The
 identity is 1–64 ASCII letters, digits or underscores, beginning with a
 letter; its loader basename is `terrum-<identity>.dll`. Artifacts are bounded
@@ -234,10 +242,11 @@ are rejected.
 
 `CreateReference` exposes only the producer package's verified semantic
 declarations to independent consumer binding. `CreateConsumer` emits the
-consumer PE once, with an import for every external declaration from the
-reference, named exactly after that declaration. At validation and launch,
+consumer PE once, binding every external declaration from the reference and
+emitting IAT entries for calls actually present in consumer bodies, named
+exactly after their declarations. At validation and launch,
 `ModuleCompiler.Link` checks the persisted declaration, value layout,
-conditional output, field mutability and visibility contracts and verifies
+conditional output, field mutability, NoThrow promises and visibility contracts and verifies
 the linked IR. It does **not** emit code: the native consumer image is
 unchanged when a compatible producer package is selected for another
 launch. The consumer's exact imported call targets come from its bounded `.trm` reader,

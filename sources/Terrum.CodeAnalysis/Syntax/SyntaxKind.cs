@@ -79,4 +79,6 @@ public enum SyntaxKind
     ForStatement,
     /// <summary>An intentionally omitted optional expression, such as a for-loop condition.</summary>
     OmittedExpression,
+    /// <summary>A parameterless declaration attribute, including its brackets.</summary>
+    Attribute,
 }

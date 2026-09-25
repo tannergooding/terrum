@@ -107,7 +107,7 @@ internal sealed class Binder
                 }
                 _signatures.Add(new Signature(function.Name, function.ReturnType, parameters.ToImmutable(),
                     null, null, _trees[0], function.DeclaringStruct, function.IsConstructor,
-                    false, false, false, function.IsStatic, function));
+                    false, false, false, function.IsStatic, function.IsNoThrow, function));
             }
         }
         foreach (var tree in _trees)
@@ -298,6 +298,7 @@ internal sealed class Binder
                 IsPrivate = signature.IsPrivate,
                 IsInternal = signature.IsInternal,
                 IsStatic = signature.IsStatic,
+                IsNoThrow = signature.IsNoThrow,
                 DeclaringStruct = signature.StructName is null ? null
                    : (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".") + signature.StructName,
             });
@@ -311,10 +312,12 @@ internal sealed class Binder
             Structures = [.. _structs],
             Buffers = _buffers,
         };
-        if (!SemanticVerifier.TryVerifySource(program, out var functionIndex, out var span, out var exceededWorkLimit))
+        if (!SemanticVerifier.TryVerifySource(program, out var functionIndex, out var span, out var exceededWorkLimit, out var invalidEffect))
         {
             _tree = _signatures.Count == 0 ? _trees[0] : _signatures[functionIndex].Tree;
-            Report("TRM3016", exceededWorkLimit
+            Report(invalidEffect ? "TRM3017" : "TRM3016", invalidEffect
+                ? "NoThrow declarations cannot perform potentially throwing operations or call functions without a NoThrow contract."
+                : exceededWorkLimit
                 ? "Source exceeds the semantic verification work limit."
                 : "Source violates definite assignment, initialization, or executable type rules.", span);
             return null;
@@ -361,6 +364,10 @@ internal sealed class Binder
         var visibilityCount = 0;
         foreach (var element in declaration.Children)
         {
+            if (element is SyntaxNode { Kind: SyntaxKind.Attribute } attribute)
+            {
+                Report("TRM3001", "Attributes on structs are not supported.", attribute.Span);
+            }
             if (element is SyntaxTokenElement modifier)
             {
                 isPublic |= modifier.Token.Kind == TokenKind.PublicKeyword;
@@ -416,6 +423,10 @@ internal sealed class Binder
             var accessModifiers = 0;
             foreach (var child in field.Children)
             {
+                if (child is SyntaxNode { Kind: SyntaxKind.Attribute } attribute)
+                {
+                    Report("TRM3001", "Attributes on fields are not supported.", attribute.Span);
+                }
                 if (child is SyntaxTokenElement modifier)
                 {
                     fieldIsPublic |= modifier.Token.Kind == TokenKind.PublicKeyword;
@@ -478,9 +489,22 @@ internal sealed class Binder
         var isPrivate = false;
         var isInternal = false;
         var isStatic = false;
+        var isNoThrow = false;
         var accessModifiers = 0;
         for (var index = 0; index < modifierCount; index++)
         {
+            if (declaration.Children[index] is SyntaxNode { Kind: SyntaxKind.Attribute } attribute)
+            {
+                if (attribute.Children[1] is SyntaxTokenElement { Token.Text: "NoThrow" } && !isNoThrow)
+                {
+                    isNoThrow = true;
+                }
+                else
+                {
+                    Report("TRM3001", "Only one parameterless NoThrow attribute is supported on a function or constructor.", attribute.Span);
+                }
+                continue;
+            }
             if (declaration.Children[index] is SyntaxTokenElement modifier &&
                 modifier.Token.Kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword or TokenKind.PrivateKeyword or TokenKind.StaticKeyword)
             {
@@ -563,7 +587,7 @@ internal sealed class Binder
         }
 
         _signatures.Add(new Signature(qualifiedName, returnType, declared.ToImmutable(), body, declaration, _tree,
-            containingType, constructor, isPrivate, isInternal, isMutable, isStatic));
+            containingType, constructor, isPrivate, isInternal, isMutable, isStatic, isNoThrow));
     }
 
     private PrimitiveType BindType(SyntaxNode node, bool allowVoid)
@@ -1726,5 +1750,5 @@ internal sealed class Binder
 
     private sealed record Signature(string Name, PrimitiveType ReturnType, ImmutableArray<Parameter> Parameters,
         SyntaxNode? Body, SyntaxNode? Declaration, SyntaxTree Tree, string? StructName, bool IsConstructor, bool IsPrivate,
-        bool IsInternal, bool IsMutable, bool IsStatic, BoundFunction? External = null);
+        bool IsInternal, bool IsMutable, bool IsStatic, bool IsNoThrow, BoundFunction? External = null);
 }

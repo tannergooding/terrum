@@ -580,7 +580,7 @@ public sealed partial class CliTests
         var (semanticExit, output, _) = await RunAsync(source, "analyze", "-", "--json");
         Assert.Equal(1, semanticExit);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal("native-7", document.RootElement.GetProperty("profile").GetString());
+        Assert.Equal("native-8", document.RootElement.GetProperty("profile").GetString());
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
     }
 
@@ -596,7 +596,7 @@ public sealed partial class CliTests
         using var document = JsonDocument.Parse(output);
         var root = document.RootElement;
         Assert.False(root.GetProperty("success").GetBoolean());
-        Assert.Equal("syntax-5", root.GetProperty("languageVersion").GetString());
+        Assert.Equal("syntax-6", root.GetProperty("languageVersion").GetString());
         var diagnostic = Assert.Single(root.GetProperty("diagnostics").EnumerateArray());
         Assert.Equal("TRM1005", diagnostic.GetProperty("code").GetString());
         Assert.Equal(Source.LastIndexOf('?', StringComparison.Ordinal), diagnostic.GetProperty("span").GetProperty("start").GetInt32());

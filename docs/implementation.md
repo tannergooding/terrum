@@ -1,10 +1,10 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-5 and native-7
+## Current boundary: syntax-6 and native-8
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
-immutable and usable independently. The separate [native-7 profile](native.md)
+immutable and usable independently. The separate [native-8 profile](native.md)
 binds a bounded scalar/compact-value language and emits Windows x64 executables through
 verified structured operations. A clean syntax result is deliberately not a
 valid-program claim: `var x = 1;` parses but semantic analysis rejects its missing
@@ -15,7 +15,7 @@ managed graphs and standard-library execution are not implemented.
 |---|---|---|
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
 | Lexing | Pinned Unicode identifiers, ASCII numbers/tags, comments, leading trivia, strings, diagnostics, EOF | Interpolation, raw/character/native literals, directives |
-| Declarations | Using, file-scoped namespaces, functions, compact structs with explicit fields/constructors/methods; library binding and one validated module reference per consumer | Classes, interfaces, enums/unions, attributes, generic declarations/constraints, general module dependency graphs |
+| Declarations | Using, file-scoped namespaces, functions, compact structs with explicit fields/constructors/methods, checked `[NoThrow]`; library binding and one validated module reference per consumer | Classes, interfaces, enums/unions, general attributes, generic declarations/constraints, general module dependency graphs |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; repeated `?` diagnoses | General type resolution, optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, assignment and expression statements | `foreach`, break/continue, switch/patterns, exceptions, cleanup, async, compound assignment |
 | Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named/ref/out argument syntax | Character literals, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
@@ -29,11 +29,13 @@ recover every later declaration optimally.
 file        = using* namespace? declaration* EOF
 using       = "using" qualifiedName ";"
 namespace   = "namespace" qualifiedName ";"
-declaration = modifiers (function | struct)
+declaration = attributes modifiers (function | struct)
+attributes  = ("[" name "]")*
 function    = type name parameters block
-struct      = "struct" name "{" (field | constructor | function)* "}"
-field       = modifiers type name ("=" expression)? ";"
-constructor = modifiers containingTypeName parameters block
+struct      = "struct" name "{" member* "}"
+member      = attributes modifiers (field | constructor | function)
+field       = type name ("=" expression)? ";"
+constructor = containingTypeName parameters block
 parameters  = "(" (mode? type name ("," mode? type name)*)? ")"
 type        = (qualifiedName | "void") ("<" type ("," type)* ">")? "?"?
 mode        = "ref" | "mut" "ref" | "out"
@@ -75,8 +77,12 @@ for precise number, string, identifier and newline rules.
 optional and normalizing its substituted type is future binder work.
 Explicit `Option<Option<T>>` syntax is unchanged. `syntax-1` introduced this
 rejection rule; `syntax-2` added the lossless `RequireStatement` node.
-`syntax-5` adds scoped for-loop syntax to checked casts for the supported 32- and
-64-bit integer types and `char16`. The `native-7` profile supports checked
+`syntax-6` includes scoped for-loops, parameterless declaration attributes and
+checked casts for supported 32- and 64-bit integer types and `char16`.
+Only `[NoThrow]` on functions and constructors is currently bound; unknown,
+duplicate and misplaced attributes diagnose rather than becoming unchecked
+metadata. Attribute nodes retain their brackets and name as three children.
+The `native-8` profile supports checked
 signed/unsigned 32- and 64-bit integers, raw code units, conditional outputs,
 fixed host-buffer capabilities and acyclic value layouts up to 16 bytes.
 Fields are read-only after construction unless explicitly declared `mut`.
@@ -87,6 +93,14 @@ preserve those layouts. Statically rooted writable field paths enforce
 initialization and visibility at every level. Larger aggregates, general
 borrowed references and mutation through returned temporary values still
 diagnose before emission.
+`BoundFunction.IsNoThrow` is an explicit declaration guarantee checked by the
+mandatory verifier, not inferred from a body for consumers. `TRM3017` locates
+an operation whose throwing effect violates that bound. The bounded proof
+accepts comparisons, bitwise operations, fields, total numeric conversions
+and calls to other declared NoThrow functions. It conservatively rejects
+checked arithmetic, potentially failing conversions and buffer access without
+range or invariant inference. The [native contract](native.md) describes
+these limits; catch/cleanup and other effect annotations remain unsupported.
 Existing single-source compiler JSON remains schema 1;
 scanner and multi-source diagnostic schemas are versioned separately below.
 

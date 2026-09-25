@@ -84,6 +84,7 @@ public sealed class NativeTests
     [InlineData("stack-arguments.terrum", 91)]
     [InlineData("requirements.terrum", 10)]
     [InlineData("for-loops.terrum", 285)]
+    [InlineData("no-throw.terrum", 42)]
     public async Task PublishedNativeExamplesExecuteAsync(string name, int expected)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));

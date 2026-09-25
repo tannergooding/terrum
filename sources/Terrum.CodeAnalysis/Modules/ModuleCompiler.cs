@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public static class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 7;
+    private const int Version = 8;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -229,7 +229,7 @@ public static class ModuleCompiler
                 {
                     throw new ModuleContractException($"Declaration '{function.Name}' is not a public module import.");
                 }
-                if (Contract(function, program.Structures) != imported.Contract)
+                if (!CompatibleContract(Contract(function, program.Structures), imported.Contract))
                 {
                     throw new ModuleContractException($"Reference declaration for '{function.Name}' differs from the producer.");
                 }
@@ -334,7 +334,7 @@ public static class ModuleCompiler
             if (declaration.Import)
             {
                 if (!available.TryGetValue(declaration.Name, out var replacement)
-                    || declaration.Contract != replacement.Contract)
+                    || !CompatibleContract(declaration.Contract, replacement.Contract))
                 {
                     throw new ModuleContractException($"Incompatible or missing producer contract for '{declaration.Name}'.");
                 }
@@ -492,8 +492,16 @@ public static class ModuleCompiler
             _ = result.Append('|').Append(parameter.IsOut ? "out:" : "in:")
                 .Append(ContractType(parameter.Type, structures));
         }
+        _ = result.Append(function.IsNoThrow ? "|NoThrow" : "|MayThrow");
         return result.ToString();
     }
+
+    private static bool CompatibleContract(string expected, string actual) =>
+        expected == actual
+        || (expected.EndsWith("|MayThrow", StringComparison.Ordinal)
+            && actual.EndsWith("|NoThrow", StringComparison.Ordinal)
+            && expected.AsSpan(0, expected.Length - "|MayThrow".Length)
+                .SequenceEqual(actual.AsSpan(0, actual.Length - "|NoThrow".Length)));
 
     private static char Visibility(BoundStruct structure) =>
         structure.IsPrivate ? 'P' : structure.IsInternal ? 'N' : 'E';
@@ -846,6 +854,7 @@ public static class ModuleCompiler
         writer.Write(function.IsPrivate);
         writer.Write(function.IsInternal);
         writer.Write(function.IsStatic);
+        writer.Write(function.IsNoThrow);
         writer.Write(function.DeclaringStruct is not null);
         if (function.DeclaringStruct is string declaringStruct)
         {
@@ -873,6 +882,7 @@ public static class ModuleCompiler
         var isPrivate = GetBool(reader);
         var isInternal = GetBool(reader);
         var isStatic = GetBool(reader);
+        var isNoThrow = GetBool(reader);
         var declaringStruct = GetBool(reader) ? GetString(reader) : null;
         var parameters = reader.ReadInt32();
         var count = Count(reader, MaximumSlots);
@@ -897,6 +907,7 @@ public static class ModuleCompiler
             IsPrivate = isPrivate,
             IsInternal = isInternal,
             IsStatic = isStatic,
+            IsNoThrow = isNoThrow,
             DeclaringStruct = declaringStruct,
         };
     }

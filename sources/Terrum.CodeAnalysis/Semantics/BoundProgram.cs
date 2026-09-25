@@ -75,6 +75,9 @@ public sealed record BoundStructField(string Name, PrimitiveType Type, int Offse
 public sealed record BoundFunction(string Name, PrimitiveType ReturnType, ImmutableArray<BoundVariable> Variables,
     int ParameterCount, BoundBlock Body, TextSpan Span)
 {
+    /// <summary>Whether the declaration guarantees no language-level throwing effects; implementations must prove this bound.</summary>
+    public bool IsNoThrow { get; init; }
+
     /// <summary>Whether this is an imported declaration with no implementation. Native emission requires it to be resolved.</summary>
     public bool IsExternal { get; init; }
 

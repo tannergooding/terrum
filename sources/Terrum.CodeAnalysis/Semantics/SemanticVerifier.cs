@@ -13,6 +13,7 @@ public static class SemanticVerifier
 {
     private const string FunctionIndexKey = "Terrum.FunctionIndex";
     private const string SourceSpanKey = "Terrum.SourceSpan";
+    private const string InvalidEffectKey = "Terrum.InvalidEffect";
     internal const int MaximumFunctions = 1024;
     internal const int MaximumVariables = 256;
     internal const int MaximumArguments = 64;
@@ -287,7 +288,8 @@ public static class SemanticVerifier
         }
     }
 
-    internal static bool TryVerifySource(BoundProgram program, out int functionIndex, out TextSpan span, out bool exceededWorkLimit)
+    internal static bool TryVerifySource(BoundProgram program, out int functionIndex, out TextSpan span, out bool exceededWorkLimit,
+        out bool invalidEffect)
     {
         try
         {
@@ -295,6 +297,7 @@ public static class SemanticVerifier
             functionIndex = -1;
             span = default;
             exceededWorkLimit = false;
+            invalidEffect = false;
             return true;
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
@@ -303,6 +306,7 @@ public static class SemanticVerifier
             span = exception.Data[SourceSpanKey] is TextSpan sourceSpan
                 ? sourceSpan : program.Functions.IsDefaultOrEmpty ? default : program.Functions[functionIndex].Span;
             exceededWorkLimit = exception is NotSupportedException;
+            invalidEffect = exception.Data[InvalidEffectKey] is true;
             return false;
         }
     }
@@ -422,6 +426,10 @@ public static class SemanticVerifier
                     == FullMask(program, function.Variables[fieldAssignment.Variable].Type);
                 return false;
             case BoundBufferAssignment bufferWrite:
+                if (function.IsNoThrow)
+                {
+                    throw InvalidEffect(bufferWrite.Span);
+                }
                 if (bufferWrite.Buffer < 0 || bufferWrite.Buffer >= program.Buffers.Length
                     || !program.Buffers[bufferWrite.Buffer].IsWritable)
                 {
@@ -524,6 +532,10 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                if (function.IsNoThrow && CanBe(requirement.Condition, false, ref remaining))
+                {
+                    throw InvalidEffect(requirement.Span);
+                }
                 var accepted = Outcome(requirement.Condition, beforeRequirement, true, ref remaining);
                 Array.Copy(accepted, initialized, initialized.Length);
                 MarkOutMasks(initialized, fieldMasks, function, program);
@@ -592,6 +604,10 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                if (function.IsNoThrow && !IsTotalConversion(cast.Operand.Type, cast.Type))
+                {
+                    throw InvalidEffect(cast.Span);
+                }
                 break;
             case BoundFieldRead fieldRead:
                 if (fieldRead.Receiver is null)
@@ -628,6 +644,10 @@ public static class SemanticVerifier
             case BoundOutArgument:
                 throw Invalid();
             case BoundBufferRead bufferRead:
+                if (function.IsNoThrow)
+                {
+                    throw InvalidEffect(bufferRead.Span);
+                }
                 if (bufferRead.Buffer < 0 || bufferRead.Buffer >= program.Buffers.Length
                     || bufferRead.Type != program.Buffers[bufferRead.Buffer].ElementType)
                 {
@@ -651,6 +671,12 @@ public static class SemanticVerifier
                 if (!unaryValid)
                 {
                     throw Invalid();
+                }
+                if (function.IsNoThrow && unary.Operator == TokenKind.Minus
+                    && (unary.Operand is not BoundConstant operand
+                        || operand.Value == (unary.Type == PrimitiveType.Int32 ? int.MinValue : long.MinValue)))
+                {
+                    throw InvalidEffect(unary.Span);
                 }
                 break;
             case BoundBinary binary:
@@ -702,6 +728,11 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                if (function.IsNoThrow && binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star
+                    or TokenKind.Slash or TokenKind.Percent)
+                {
+                    throw InvalidEffect(binary.Span);
+                }
                 break;
             case BoundCall call:
                 if (call.Function < 0 || call.Function >= program.Functions.Length || call.Arguments.IsDefault)
@@ -713,6 +744,10 @@ public static class SemanticVerifier
                     throw Limit();
                 }
                 var target = program.Functions[call.Function];
+                if (function.IsNoThrow && !target.IsNoThrow)
+                {
+                    throw InvalidEffect(call.Span);
+                }
                 if (call.Arguments.Length != target.ParameterCount || call.Type != target.ReturnType)
                 {
                     throw Invalid();
@@ -767,6 +802,11 @@ public static class SemanticVerifier
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool
             || (allowVoid && type == PrimitiveType.Void)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length);
+
+    private static bool IsTotalConversion(PrimitiveType source, PrimitiveType destination) =>
+        source == destination || source == PrimitiveType.Char16
+            || (source == PrimitiveType.Int32 && destination == PrimitiveType.Int64)
+            || (source == PrimitiveType.UInt32 && destination is PrimitiveType.Int64 or PrimitiveType.UInt64);
 
     private static uint FullMask(BoundProgram program, PrimitiveType type) =>
         (1u << program.Structures[(int)type - 100].Fields.Length) - 1;
@@ -936,6 +976,12 @@ public static class SemanticVerifier
     {
         var exception = Invalid();
         exception.Data[SourceSpanKey] = span;
+        return exception;
+    }
+    private static ArgumentException InvalidEffect(TextSpan span)
+    {
+        var exception = Invalid(span);
+        exception.Data[InvalidEffectKey] = true;
         return exception;
     }
     private static NotSupportedException Limit() => new("Bound program exceeds native resource limits.");
