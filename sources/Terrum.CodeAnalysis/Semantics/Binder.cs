@@ -38,6 +38,7 @@ internal sealed class Binder
     private PrimitiveType _returnType;
     private string? _currentStruct;
     private bool _constructor;
+    private bool _hasReceiver;
     private readonly bool _isLibrary;
     private readonly CompilationReference? _reference;
 
@@ -254,8 +255,9 @@ internal sealed class Binder
             _returnType = signature.ReturnType;
             _currentStruct = signature.StructName;
             _constructor = signature.IsConstructor;
+            _hasReceiver = signature.StructName is not null && !signature.IsStatic;
 
-            if (signature.StructName is not null && !signature.IsStatic)
+            if (signature.StructName is not null && _hasReceiver)
             {
                 var receiverType = ResolveStruct(signature.StructName);
                 _ = AddVariable("this", receiverType, signature.IsConstructor || signature.IsMutable, declaration.Span);
@@ -662,6 +664,10 @@ internal sealed class Binder
             {
                 var target = (SyntaxNode)node.Children[0];
                 var valueNode = (SyntaxNode)node.Children[2];
+                while (target.Kind == SyntaxKind.ParenthesizedExpression)
+                {
+                    target = (SyntaxNode)target.Children[1];
+                }
 
                 if (target.Kind == SyntaxKind.IndexExpression
                     && TryFindBuffer((SyntaxNode)target.Children[0], out var buffer))
@@ -674,22 +680,9 @@ internal sealed class Binder
                         BindExpression((SyntaxNode)target.Children[2], PrimitiveType.Int32),
                         BindExpression(valueNode, _buffers[buffer].ElementType), node.Span);
                 }
-                if (target.Kind == SyntaxKind.MemberAccessExpression
-                    && (SyntaxNode)target.Children[0] is { Kind: SyntaxKind.NameExpression } receiver)
+                if (target.Kind == SyntaxKind.MemberAccessExpression)
                 {
-                    var receiverName = ((SyntaxTokenElement)receiver.Children[0]).Token.Text;
-                    var memberName = ((SyntaxTokenElement)target.Children[2]).Token.Text;
-                    if (TryFindVariable(receiverName, out var variable)
-                        && TryFindField(_variables[variable].Type, memberName, out var field))
-                    {
-                        CheckFieldAccess(_variables[variable].Type, field, target.Span);
-                        if (!_variables[variable].IsMutable)
-                        {
-                            Report("TRM3008", $"Variable '{receiverName}' is immutable.", target.Span);
-                        }
-                        return new BoundFieldAssignment(variable, field,
-                            BindExpression(valueNode, GetField(_variables[variable].Type, field).Type), node.Span);
-                    }
+                    return BindFieldAssignment(target, valueNode, node.Span);
                 }
                 if (target.Kind != SyntaxKind.NameExpression)
                 {
@@ -701,7 +694,7 @@ internal sealed class Binder
                 var token = ((SyntaxTokenElement)target.Children[0]).Token;
                 if (!TryFindVariable(token.Text, out var slot))
                 {
-                    if (_currentStruct is not null
+                    if (_hasReceiver && _currentStruct is not null
                         && TryFindField(ResolveStruct(_currentStruct), token.Text, out var ownField))
                     {
                         if (!_variables[0].IsMutable)
@@ -800,6 +793,68 @@ internal sealed class Binder
         }
     }
 
+    private BoundStatement BindFieldAssignment(SyntaxNode target, SyntaxNode value, TextSpan span)
+    {
+        var members = new Stack<SyntaxToken>();
+        var root = target;
+        while (root.Kind is SyntaxKind.MemberAccessExpression or SyntaxKind.ParenthesizedExpression)
+        {
+            if (root.Kind == SyntaxKind.ParenthesizedExpression)
+            {
+                root = (SyntaxNode)root.Children[1];
+            }
+            else
+            {
+                members.Push(((SyntaxTokenElement)root.Children[2]).Token);
+                root = (SyntaxNode)root.Children[0];
+            }
+        }
+        var fields = ImmutableArray.CreateBuilder<int>();
+        var variable = -1;
+        if (root.Kind == SyntaxKind.NameExpression)
+        {
+            var name = ((SyntaxTokenElement)root.Children[0]).Token;
+            if (!TryFindVariable(name.Text, out variable)
+                && _hasReceiver && _currentStruct is not null
+                && TryFindField(ResolveStruct(_currentStruct), name.Text, out var ownField))
+            {
+                variable = 0;
+                fields.Add(ownField);
+            }
+        }
+        if (variable < 0)
+        {
+            Report("TRM3008", "Field assignment requires a mutable local or receiver, not a temporary value.", target.Span);
+            _ = BindExpression(value, null);
+            return new BoundBlock([], span);
+        }
+        var type = _variables[variable].Type;
+        if (fields.Count != 0)
+        {
+            type = GetField(type, fields[0]).Type;
+        }
+        foreach (var member in members)
+        {
+            if (!TryFindField(type, member.Text, out var field))
+            {
+                Report("TRM3008", $"Unknown field '{member.Text}' in assignment target.", member.Span);
+                _ = BindExpression(value, null);
+                return new BoundBlock([], span);
+            }
+            CheckFieldAccess(type, field, member.Span);
+            fields.Add(field);
+            type = GetField(type, field).Type;
+        }
+        if (!_variables[variable].IsMutable)
+        {
+            Report("TRM3008", $"Variable '{_variables[variable].Name}' is immutable.", target.Span);
+        }
+        var path = fields.ToImmutable();
+        return new BoundFieldAssignment(variable, path[0], BindExpression(value, type), span) {
+            NestedFields = path.RemoveAt(0),
+        };
+    }
+
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unsupported syntax kinds are rejected by the default branch.")]
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Runtime struct IDs are represented by enum values outside the declared primitive range.")]
     private BoundExpression BindExpression(SyntaxNode node, PrimitiveType? expected)
@@ -828,7 +883,7 @@ internal sealed class Binder
                 {
                     expression = new BoundRead(slot, _variables[slot].Type, node.Span);
                 }
-                else if (_currentStruct is not null && TryFindField(ResolveStruct(_currentStruct), token.Text, out var field))
+                else if (_hasReceiver && _currentStruct is not null && TryFindField(ResolveStruct(_currentStruct), token.Text, out var field))
                 {
                     var structure = ResolveStruct(_currentStruct);
                     expression = new BoundFieldRead(new BoundRead(0, structure, node.Span),
@@ -1381,7 +1436,7 @@ internal sealed class Binder
                 {
                     return _variables[slot].Type;
                 }
-                return _currentStruct is not null && TryFindField(ResolveStruct(_currentStruct), name, out var field)
+                return _hasReceiver && _currentStruct is not null && TryFindField(ResolveStruct(_currentStruct), name, out var field)
                     ? GetField(ResolveStruct(_currentStruct), field).Type : null;
             }
             case SyntaxKind.LiteralExpression:

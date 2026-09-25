@@ -512,6 +512,11 @@ internal sealed class PeCompiler
                 var fieldType = variable.Type;
                 var field = _program.Structures[(int)fieldType - 100].Fields[fieldAssignment.Field];
                 var destination = (variable.IsOut ? OutSlot(fieldAssignment.Variable) : Slot(fieldAssignment.Variable)) + field.Offset;
+                foreach (var nestedField in fieldAssignment.NestedFields)
+                {
+                    field = _program.Structures[(int)field.Type - 100].Fields[nestedField];
+                    destination += field.Offset;
+                }
                 if (IsIndirect(field.Type))
                 {
                     CopyToFrame(destination, field.Size);

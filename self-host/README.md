@@ -22,7 +22,7 @@ slices. Executing these components is not a self-hosted compiler bootstrap.
 | [Token](Token.terrum) | Token category and nested source range | Executed as a 12-byte aggregate with independent producer/consumer artifacts |
 | [TokenCursor](TokenCursor.terrum) | Read-view traversal without copying backing storage or cleanup | Span indexing, matched access, stored backing dependencies, capture contract, constructor initialization |
 | [RangeTests](RangeTests.terrum) | Small success/failure and overflow boundary cases | Executed with a host-supplied entry wrapper; a Terrum test runner remains future work |
-| [TokenTests](TokenTests.terrum) | Nested value copies and range replacement | Executed through the Windows indirect aggregate ABI; no retained backing views |
+| [TokenTests](TokenTests.terrum) | Nested value copies, range replacement and nested field updates | Executed through the Windows indirect aggregate ABI; no retained backing views |
 | [Scanner](Scanner.terrum) | UTF-16 decoding, pinned Unicode identifiers, exact token kinds, lossless trivia and lexical diagnostics | Executed through fixed checked host buffers; see the [precise subset](../docs/scanner.md) |
 | [Host APIs](host.api.terrum) | Explicit source acquisition, cancellation, digest and output boundary | Interfaces, immutable publication, operation failures; host adapters |
 

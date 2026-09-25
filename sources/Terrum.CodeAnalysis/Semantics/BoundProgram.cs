@@ -118,7 +118,11 @@ public sealed record BoundLocal(int Variable, BoundExpression Initializer, TextS
 public sealed record BoundAssignment(int Variable, BoundExpression Value, TextSpan Span) : BoundStatement(Span);
 
 /// <summary>Writes a field in a mutable local value, without aliasing its storage.</summary>
-public sealed record BoundFieldAssignment(int Variable, int Field, BoundExpression Value, TextSpan Span) : BoundStatement(Span);
+public sealed record BoundFieldAssignment(int Variable, int Field, BoundExpression Value, TextSpan Span) : BoundStatement(Span)
+{
+    /// <summary>Additional field indexes descending through the initialized value of <see cref="Field"/>.</summary>
+    public ImmutableArray<int> NestedFields { get; init; } = [];
+}
 
 /// <summary>A checked write to a compiler-supplied writable buffer.</summary>
 public sealed record BoundBufferAssignment(int Buffer, BoundExpression Index, BoundExpression Value, TextSpan Span) : BoundStatement(Span);
@@ -195,7 +199,7 @@ public sealed record BoundCall(int Function, ImmutableArray<BoundExpression> Arg
 /// <summary>A checked conversion between supported scalar types.</summary>
 public sealed record BoundCast(BoundExpression Operand, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
-/// <summary>Reads a scalar field from a copied struct value.</summary>
+/// <summary>Reads a field from a copied struct value.</summary>
 public sealed record BoundFieldRead(BoundExpression Receiver, int Field, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
 /// <summary>A caller-owned output slot passed through private callee scratch storage.</summary>

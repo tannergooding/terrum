@@ -1,6 +1,6 @@
 # Bounded semantic modules
 
-The version 4 `.trm` format records the semantic profile and persists verified, typed, source-mapped structured IR,
+The version 5 `.trm` format records the semantic profile and persists verified, typed, source-mapped structured IR,
 not source text or a native DLL. `CreateProducer` stores selected function bodies
 and exported contracts. `CreateConsumer` stores its own function bodies and the
 reference producer's declaration contracts, **not** producer bodies.
@@ -51,6 +51,9 @@ public layout evolution. Producer-only layouts and helpers have module-local
 identities at linking and may change independently. Private names can coincide
 with consumer-local names without binding to the wrong implementation.
 Compatible replacements may also add exports not requested by the consumer.
+Nested writes persist their root slot and field-index path, not an unchecked
+byte offset or pointer. The linker remaps value identities and verifies every
+path against the selected layouts before native address calculation.
 
 The binary reader rejects unknown versions, malformed/truncated records,
 trailing bytes, unknown nodes, invalid graph depth, excessive symbols, strings

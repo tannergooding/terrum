@@ -370,7 +370,8 @@ public static class SemanticVerifier
                 return false;
             case BoundFieldAssignment fieldAssignment:
                 if (fieldAssignment.Variable < 0 || fieldAssignment.Variable >= initialized.Length
-                    || !function.Variables[fieldAssignment.Variable].IsMutable)
+                    || !function.Variables[fieldAssignment.Variable].IsMutable
+                    || fieldAssignment.NestedFields.IsDefault)
                 {
                     throw Invalid();
                 }
@@ -383,8 +384,28 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                var targetField = program.Structures[structType].Fields[fieldAssignment.Field];
+                var nestedWrite = !fieldAssignment.NestedFields.IsEmpty;
+                if (nestedWrite && (fieldMasks[fieldAssignment.Variable] & (1u << fieldAssignment.Field)) == 0)
+                {
+                    throw Invalid();
+                }
+                for (var index = 0; index < fieldAssignment.NestedFields.Length; index++)
+                {
+                    Count(ref remaining, depth + index + 1);
+                    var nestedType = (int)targetField.Type - 100;
+                    var nestedField = fieldAssignment.NestedFields[index];
+                    if (nestedType < 0 || nestedType >= program.Structures.Length
+                        || nestedField < 0 || nestedField >= program.Structures[nestedType].Fields.Length
+                        || !CanAccessField(function, program.Structures[nestedType], nestedField))
+                    {
+                        throw Invalid();
+                    }
+                    targetField = program.Structures[nestedType].Fields[nestedField];
+                }
                 Expression(fieldAssignment.Value, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1);
-                if (fieldAssignment.Value.Type != program.Structures[structType].Fields[fieldAssignment.Field].Type)
+                if (fieldAssignment.Value.Type != targetField.Type
+                    || (nestedWrite && (fieldMasks[fieldAssignment.Variable] & (1u << fieldAssignment.Field)) == 0))
                 {
                     throw Invalid();
                 }

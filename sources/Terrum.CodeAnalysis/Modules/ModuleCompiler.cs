@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public static class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 4;
+    private const int Version = 5;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -912,6 +912,12 @@ public static class ModuleCompiler
             case BoundFieldAssignment field:
                 writer.Write(field.Variable);
                 writer.Write(field.Field);
+                writer.Write(field.NestedFields.Length);
+                foreach (var nestedField in field.NestedFields)
+                {
+                    Step(ref remaining, depth + 1);
+                    writer.Write(nestedField);
+                }
                 PutExpression(writer, field.Value, names, ref remaining, depth + 1);
                 break;
             case BoundExpressionStatement expression:
@@ -977,7 +983,18 @@ public static class ModuleCompiler
             case 8:
                 return new BoundReturn(GetBool(reader) ? GetExpression(reader, ref remaining, depth + 1) : null, span);
             case 9:
-                return new BoundFieldAssignment(reader.ReadInt32(), reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1), span);
+                var variable = reader.ReadInt32();
+                var field = reader.ReadInt32();
+                var pathLength = Count(reader, MaximumDepth);
+                var fields = ImmutableArray.CreateBuilder<int>(pathLength);
+                for (var index = 0; index < pathLength; index++)
+                {
+                    Step(ref remaining, depth + index + 1);
+                    fields.Add(reader.ReadInt32());
+                }
+                return new BoundFieldAssignment(variable, field, GetExpression(reader, ref remaining, depth + 1), span) {
+                    NestedFields = fields.ToImmutable(),
+                };
             default:
                 throw new ModuleFormatException("Unknown statement kind.");
         }

@@ -1,6 +1,6 @@
 # Windows x64 native profile
 
-`native-3` is a deliberately bounded executable language profile, separate from
+`native-4` is a deliberately bounded executable language profile, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
@@ -75,7 +75,13 @@ preserve value copies, visibility and constructor initialization. A nested
 aggregate's alignment is its maximum field alignment, not its byte size.
 Sizes other than 1, 2, 4 and 8 require the Windows indirect aggregate ABI;
 the compiler owns argument copies and result storage, not source-visible pointers.
-Chained subfield mutation, aggregates over 16 bytes, reference-containing aggregates and implicit
+Nested field paths can be assigned through a mutable local or constructor
+receiver. Every containing value must already be initialized, including after
+evaluating the right-hand side; a call cannot vacate an enclosing output and
+leave a partially valid nested write. Each field's visibility is checked.
+Only whole top-level fields establish constructor initialization. Writes
+through temporary values or immutable receivers are rejected.
+Aggregates over 16 bytes, reference-containing aggregates and implicit
 construction are not implemented.
 
 Top-level functions and types default to `internal`; struct members,

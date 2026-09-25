@@ -1,10 +1,10 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-3 and native-3
+## Current boundary: syntax-3 and native-4
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
-immutable and usable independently. The separate [native-3 profile](native.md)
+immutable and usable independently. The separate [native-4 profile](native.md)
 binds a bounded scalar/compact-value language and emits Windows x64 executables through
 verified structured operations. A clean syntax result is deliberately not a
 valid-program claim: `var x = 1;` parses but semantic analysis rejects its missing
@@ -68,7 +68,10 @@ profile with unsigned/code-unit values, compact structs, conditional outputs and
 host-buffer capabilities. `native-3` adds acyclic compact nested value layouts
 and transitive layout contracts, with Windows x64 indirect argument/result
 storage for aggregates up to 16 bytes. Larger aggregates still diagnose before
-emission. Existing single-source compiler JSON remains schema 1;
+emission. `native-4` adds statically rooted nested writable field paths, with
+initialization and visibility checked at each level. It does not add borrowed
+references or mutation through returned temporary values.
+Existing single-source compiler JSON remains schema 1;
 scanner and multi-source diagnostic schemas are versioned separately below.
 
 ## Public syntax API

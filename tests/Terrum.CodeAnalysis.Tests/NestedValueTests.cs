@@ -36,11 +36,153 @@ public sealed class NestedValueTests
     [InlineData("mut Pair pair = new Pair(1, 2); pair.First = new Unit(40); return pair.First.Value + pair.Second.Value;", 42)]
     [InlineData("Pair pair = new Pair(-2147483648, 2147483647); return pair.First.Value + pair.Second.Value;", -1)]
     [InlineData("Pair pair = new Pair(1, 77); Pair copy = pair; return copy.Second.Value;", 77)]
+    [InlineData("mut Pair pair = new Pair(1, 2); pair.First.Value = 40; return pair.First.Value + pair.Second.Value;", 42)]
+    [InlineData("mut Pair pair = new Pair(1, 2); (pair.Second).Value = 41; return pair.First.Value + pair.Second.Value;", 42)]
+    [InlineData("Pair pair = new Pair(1, 2); mut Pair copy = pair; copy.Second.Value = 39; return pair.Second.Value + copy.First.Value + copy.Second.Value;", 42)]
     public async Task NestedValuesExecuteThroughAotAndJitAsync(string body, int expected)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values + "int32 Main() { " + body + " }"));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         await ExecuteBothAsync(Assert.IsType<BoundProgram>(compilation.Program), expected).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public async Task ConstructorsAndOutputsMutateOnlyInitializedNestedValuesAsync()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
+            public struct Box {
+                public Pair Value;
+                public int32 Tail;
+                public Box() {
+                    Value = new Pair(1, 2);
+                    Value.First.Value = 19;
+                    this.Value.Second.Value = 21;
+                    Tail = 2;
+                }
+            }
+            bool Try(bool success, out Box box) {
+                if (!success) { return false; }
+                box = new Box();
+                box.Value.First.Value = box.Value.First.Value + 1;
+                box.Value.Second.Value = 20;
+                return true;
+            }
+            bool Forward(bool success, out Box box) { return Try(success, out box); }
+            int32 Main() {
+                require Forward(true, out var value);
+                mut Box copy = value;
+                copy.Value.Second = new Unit(0);
+                require value.Value.Second.Value == 20;
+                if (Forward(false, out var invalid)) { return 99; }
+                return value.Value.First.Value + value.Value.Second.Value + value.Tail;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteBothAsync(Assert.IsType<BoundProgram>(compilation.Program), 42).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public async Task NestedCodeUnitAndBooleanWritesPreserveAdjacentFieldsAsync()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Bits {
+                public bool First; public char16 Middle; public bool Last;
+                public Bits() { First = true; Middle = (char16)1; Last = false; }
+            }
+            struct Box {
+                public bool Head; public Bits Value; public char16 Tail;
+                public Box() { Head = true; Value = new Bits(); Tail = (char16)2; }
+            }
+            int32 Main() {
+                mut Box box = new Box();
+                box.Value.Middle = (char16)40;
+                box.Value.Last = true;
+                box.Value.First = false;
+                require box.Head && !box.Value.First && box.Value.Last;
+                return (int32)box.Value.Middle + (int32)box.Tail;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteBothAsync(Assert.IsType<BoundProgram>(compilation.Program), 42).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData("Pair value = new Pair(1, 2); value.First.Value = 3;")]
+    [InlineData("new Pair(1, 2).First.Value = 3;")]
+    [InlineData("mut Pair value = new Pair(1, 2); value.Missing.Value = 3;")]
+    [InlineData("mut Pair value = new Pair(1, 2); value.First.Value.Missing = 3;")]
+    public void InvalidNestedPlacesAreRejected(string body)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(Values + "int32 Main() { " + body + " return 0; }"));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData("Value.First.Value = 1; Value.Second.Value = 2;")]
+    [InlineData("Value.First = new Unit(1); Value.Second = new Unit(2);")]
+    public void NestedWritesCannotPublishIncompleteValues(string constructor)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
+            struct Box { public Pair Value; public Box() {
+            """ + constructor + """
+            } }
+            int32 Main() { Box value = new Box(); return 0; }
+            """));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void RightHandSideCannotVacateTheContainingValue()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Inner { public bool Flag; public int32 Other;
+                public Inner() { Flag = true; Other = 42; } }
+            struct Outer { public Inner Value; public Outer() { Value = new Inner(); } }
+            bool Clear(out Outer value) { return false; }
+            int32 Main() {
+                mut Outer value = new Outer();
+                value.Value.Flag = Clear(out value);
+                return 0;
+            }
+            """));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData("Value = 1; return 0;")]
+    [InlineData("return Value;")]
+    public void StaticMembersCannotUseAnImplicitInstanceField(string body)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "struct S { public int32 Value; public static int32 Read() { " + body
+            + " } } int32 Main() { return S.Read(); }"));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void ForgedNestedFieldPathsCannotReachNativeCode()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(Values
+            + "int32 Main() { mut Pair value = new Pair(1, 2); value.First.Value = 40; return value.First.Value; }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var function = program.Functions[program.EntryPoint];
+        var assignment = Assert.IsType<BoundFieldAssignment>(function.Body.Statements[1]);
+        foreach (var path in new ImmutableArray<int>[] { default, [-1], [int.MaxValue], [0, 0] })
+        {
+            var malformed = function with {
+                Body = function.Body with {
+                    Statements = function.Body.Statements.SetItem(1, assignment with { NestedFields = path }),
+                },
+            };
+            _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(
+                program with { Functions = program.Functions.SetItem(program.EntryPoint, malformed) },
+                NativeRuntimePolicy.FailFast));
+        }
     }
 
     [Fact]
