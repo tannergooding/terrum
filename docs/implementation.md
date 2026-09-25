@@ -274,7 +274,7 @@ without changing the persisted consumer. This is not the general LMOD design or
 native DLL servicing. Unsupported runtime/ABI capabilities diagnose rather than
 inherit accidental CLR behavior.
 Multi-source compilations are available through the API and repeatable
-`--source` options on `analyze`, `build`, `jit` and `compile-module`.
+`--source` options on `analyze`, `build`, `build-library`, `jit` and `compile-module`.
 Repeatable producer `--export` options select the module public surface.
 Multi-source compiler JSON uses schema 2 with input-ordered snapshot identities,
 diagnostic source indexes and, for successful builds, the native artifact.

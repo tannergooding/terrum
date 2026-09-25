@@ -29,7 +29,7 @@ Successful builds add an `artifact` containing its path, target, explicit runtim
 policy, byte length and SHA-256. A successful syntax check alone does not
 authorize emission.
 
-`analyze`, `build` and `jit` accept repeatable `--source <path>` options.
+`analyze`, `build`, `build-library` and `jit` accept repeatable `--source <path>` options.
 All files participate in one declaration/binding pass, so file order does not
 restrict forward references. At most 256 distinct canonical paths are accepted;
 only the first input may be stdin. A build output cannot replace any input.
@@ -43,6 +43,16 @@ dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build samples\nat
 
 This compiles source together; it does not replace the persisted, independently
 compiled consumer/producer contract exercised by [modules](modules.md).
+
+Native libraries use `build-library`, explicit public export names and a `.dll`
+output. They require no `Main` and have no generated initialization entry point.
+The same source-set, fail-fast and output-preservation rules apply. Library
+artifact JSON additionally identifies `kind: "dynamic-library"`. Invalid native
+exports produce `TRM4002`; source visibility alone never exports a declaration.
+
+```powershell
+dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll build-library self-host\SourceRange.terrum --export Terrum.CodeAnalysis.SourceRange.TryCreate --export Terrum.CodeAnalysis.SourceRange.GetEnd -o artifacts\ranges.dll --runtime fail-fast
+```
 
 ## Executable language
 

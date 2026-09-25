@@ -20,21 +20,23 @@ internal static partial class Program
     private static int RunCompilation(string[] args, bool json)
     {
         ImmutableArray<SyntaxTree> snapshots;
+        List<string> exports;
         string? outputPath;
         try
         {
-            if (!TryReadCompilationOptions(args, out var paths, out outputPath))
+            if (!TryReadCompilationOptions(args, out var paths, out exports, out outputPath))
             {
                 WriteInputError(json, "TRM2000", Usage);
 
                 return 2;
             }
 
+            var extension = args[0] == "build-library" ? ".dll" : ".exe";
             if (outputPath is not null
-                && (!string.Equals(Path.GetExtension(outputPath), ".exe", StringComparison.OrdinalIgnoreCase)
+                && (!string.Equals(Path.GetExtension(outputPath), extension, StringComparison.OrdinalIgnoreCase)
                     || paths.Any(path => path != "-" && string.Equals(outputPath, Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase))))
             {
-                WriteInputError(json, "TRM2002", "Output must be a distinct .exe path, not any input source.");
+                WriteInputError(json, "TRM2002", $"Output must be a distinct {extension} path, not any input source.");
 
                 return 2;
             }
@@ -54,12 +56,13 @@ internal static partial class Program
             return 2;
         }
 
-        return CompileTrees(args[0], snapshots, outputPath, json);
+        return CompileTrees(args[0], snapshots, outputPath, json, [.. exports]);
     }
 
-    private static bool TryReadCompilationOptions(string[] args, out List<string> paths, out string? outputPath)
+    private static bool TryReadCompilationOptions(string[] args, out List<string> paths, out List<string> exports, out string? outputPath)
     {
         paths = [];
+        exports = [];
         outputPath = null;
         var count = args.Length - (args.Length != 0 && args[^1] == "--json" ? 1 : 0);
         if (count < 2 || args[1] == "--json" || (count & 1) != 0)
@@ -74,6 +77,7 @@ internal static partial class Program
             _ = knownPaths.Add(Path.GetFullPath(args[1]));
         }
         var hasRuntime = false;
+        var exportNames = new HashSet<string>(StringComparer.Ordinal);
         for (var index = 2; index < count; index += 2)
         {
             var value = args[index + 1];
@@ -82,10 +86,13 @@ internal static partial class Program
                 case "--source" when value != "-" && paths.Count < 256 && knownPaths.Add(Path.GetFullPath(value)):
                     paths.Add(value);
                     break;
-                case "-o" when args[0] == "build" && outputPath is null:
+                case "--export" when args[0] == "build-library" && exports.Count < 1024 && exportNames.Add(value):
+                    exports.Add(value);
+                    break;
+                case "-o" when args[0] is "build" or "build-library" && outputPath is null:
                     outputPath = Path.GetFullPath(value);
                     break;
-                case "--runtime" when args[0] is "build" or "jit" && !hasRuntime && value == "fail-fast":
+                case "--runtime" when args[0] is "build" or "build-library" or "jit" && !hasRuntime && value == "fail-fast":
                     hasRuntime = true;
                     break;
                 default:
@@ -93,16 +100,22 @@ internal static partial class Program
             }
         }
 
-        return args[0] == "analyze" || (hasRuntime && (args[0] != "build" || outputPath is not null));
+        return args[0] == "analyze"
+            || (hasRuntime && (args[0] == "jit" || outputPath is not null)
+                && (args[0] != "build-library" || exports.Count != 0));
     }
 
     private static int CompileTree(string command, SyntaxTree tree, string? outputPath, bool json) =>
         CompileTrees(command, [tree], outputPath, json);
 
-    private static int CompileTrees(string command, ImmutableArray<SyntaxTree> trees, string? outputPath, bool json)
+    private static int CompileTrees(string command, ImmutableArray<SyntaxTree> trees, string? outputPath, bool json,
+        ImmutableArray<string> exports = default)
     {
         var build = outputPath is not null;
-        var compilation = trees.Length == 1 ? Compilation.Create(trees[0]) : Compilation.Create(trees);
+        var library = command == "build-library";
+        var compilation = library
+            ? trees.Length == 1 ? Compilation.CreateLibrary(trees[0]) : Compilation.CreateLibrary(trees)
+            : trees.Length == 1 ? Compilation.Create(trees[0]) : Compilation.Create(trees);
         var diagnostics = compilation.SourceDiagnostics;
         byte[]? image = null;
 
@@ -122,12 +135,18 @@ internal static partial class Program
                     return NativeJit.Execute(program, NativeRuntimePolicy.FailFast);
                 }
 
-                image = NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast);
+                image = library ? NativeEmitter.EmitLibrary(program, exports, NativeRuntimePolicy.FailFast)
+                    : NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast);
             }
             catch (NotSupportedException exception)
             {
                 diagnostics = diagnostics.Add(new SourceDiagnostic(trees[0],
                     new Diagnostic("TRM4001", DiagnosticSeverity.Error, exception.Message, trees[0].Root.Span)));
+            }
+            catch (ArgumentException exception) when (library)
+            {
+                diagnostics = diagnostics.Add(new SourceDiagnostic(trees[0],
+                    new Diagnostic("TRM4002", DiagnosticSeverity.Error, exception.Message, trees[0].Root.Span)));
             }
         }
 
@@ -234,7 +253,7 @@ internal static partial class Program
 
         if (success && image is not null)
         {
-            WriteNativeArtifactJson(writer, outputPath, image);
+            WriteNativeArtifactJson(writer, outputPath, image, command == "build-library");
         }
 
         writer.WriteEndObject();
@@ -272,17 +291,21 @@ internal static partial class Program
         writer.WriteEndArray();
         if (success && image is not null)
         {
-            WriteNativeArtifactJson(writer, outputPath, image);
+            WriteNativeArtifactJson(writer, outputPath, image, command == "build-library");
         }
 
         writer.WriteEndObject();
     }
 
-    private static void WriteNativeArtifactJson(Utf8JsonWriter writer, string? outputPath, byte[] image)
+    private static void WriteNativeArtifactJson(Utf8JsonWriter writer, string? outputPath, byte[] image, bool library)
     {
         writer.WriteStartObject("artifact");
         writer.WriteString("path", outputPath);
         writer.WriteString("target", "windows-x64");
+        if (library)
+        {
+            writer.WriteString("kind", "dynamic-library");
+        }
         writer.WriteString("runtimePolicy", "fail-fast");
         writer.WriteNumber("length", image.Length);
         writer.WriteString("sha256", Convert.ToHexString(SHA256.HashData(image)));

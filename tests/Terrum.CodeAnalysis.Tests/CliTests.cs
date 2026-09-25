@@ -6,16 +6,96 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Native;
+using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class CliTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LibraryBuildPublishesSelectedExportsWithoutAnEntryPointAsync(bool multipleSources)
+    {
+        const string Entry = "public int32 Value() { return Helper(); }";
+        const string Helper = "int32 Helper() { return 42; }";
+        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-library-cli-{Guid.NewGuid():N}");
+        var outputPath = prefix + ".dll";
+        var helperPath = prefix + ".terrum";
+        try
+        {
+            List<string> arguments = ["build-library", "-", "--export", "Value", "-o", outputPath, "--runtime", "fail-fast"];
+            if (multipleSources)
+            {
+                await File.WriteAllTextAsync(helperPath, Helper);
+                arguments.AddRange(["--source", helperPath]);
+            }
+            arguments.Add("--json");
+            var input = multipleSources ? Entry : Entry + Helper;
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(input), [.. arguments]);
+            Assert.Equal(0, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.Equal(multipleSources ? 2 : 1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+            Assert.Equal("dynamic-library", document.RootElement.GetProperty("artifact").GetProperty("kind").GetString());
+            var bytes = await File.ReadAllBytesAsync(outputPath);
+            var compilation = multipleSources
+                ? Compilation.CreateLibrary([SyntaxTree.Parse(Entry, "<stdin>"), SyntaxTree.Parse(Helper, helperPath)])
+                : Compilation.CreateLibrary(SyntaxTree.Parse(input, "<stdin>"));
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.Equal(NativeEmitter.EmitLibrary(Assert.IsType<BoundProgram>(compilation.Program),
+                ["Value"], NativeRuntimePolicy.FailFast), bytes);
+            using var stream = new MemoryStream(bytes);
+            using var reader = new PEReader(stream);
+            var header = Assert.IsType<PEHeader>(reader.PEHeaders.PEHeader);
+            Assert.Equal(0, header.AddressOfEntryPoint);
+            Assert.True(reader.PEHeaders.IsDll);
+            Assert.NotEqual(0, header.ExportTableDirectory.Size);
+        }
+        finally
+        {
+            File.Delete(outputPath);
+            File.Delete(helperPath);
+        }
+    }
+
+    [Theory]
+    [InlineData("Unknown")]
+    [InlineData("Hidden")]
+    [InlineData("\u03B1")]
+    public async Task InvalidLibraryExportsPreservePriorArtifactsAsync(string export)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-library-export-{Guid.NewGuid():N}.dll");
+        const string Source = "public int32 Value() { return 42; } int32 Hidden() { return 1; } public int32 \u03B1() { return 2; }";
+        try
+        {
+            var (exit, _, _) = await RunAsync(Encoding.UTF8.GetBytes(Source), "build-library", "-", "--export", "Value",
+                "-o", path, "--runtime", "fail-fast", "--json");
+            Assert.Equal(0, exit);
+            var original = await File.ReadAllBytesAsync(path);
+            var (failed, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), "build-library", "-", "--export", export,
+                "-o", path, "--runtime", "fail-fast", "--json");
+            Assert.Equal(1, failed);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.Equal("TRM4002", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+            Assert.False(document.RootElement.TryGetProperty("artifact", out _));
+            Assert.Equal(original, await File.ReadAllBytesAsync(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     [Theory]
     [InlineData("analyze")]
     [InlineData("build")]
@@ -146,18 +226,26 @@ public sealed class CliTests
         }
     }
 
-    [Fact]
-    public async Task SourceSetOptionsRejectDuplicatesAndProtectEveryInputAsync()
+    [Theory]
+    [InlineData("build", ".exe")]
+    [InlineData("build-library", ".dll")]
+    public async Task SourceSetOptionsRejectDuplicatesAndProtectEveryInputAsync(string command, string extension)
     {
         var prefix = Path.Combine(Path.GetTempPath(), $"terrum-source-input-{Guid.NewGuid():N}");
         var entry = prefix + ".terrum";
-        var helper = prefix + ".exe";
+        var helper = prefix + extension;
         const string Helper = "int32 Helper() { return 42; }";
         try
         {
             await File.WriteAllTextAsync(entry, "int32 Main() { return Helper(); }");
             await File.WriteAllTextAsync(helper, Helper);
-            var (exit, output, _) = await RunAsync([], "build", entry, "--source", helper, "-o", helper, "--runtime", "fail-fast", "--json");
+            List<string> arguments = [command, entry, "--source", helper, "-o", helper, "--runtime", "fail-fast"];
+            if (command == "build-library")
+            {
+                arguments.AddRange(["--export", "Helper"]);
+            }
+            arguments.Add("--json");
+            var (exit, output, _) = await RunAsync([], [.. arguments]);
             Assert.Equal(2, exit);
             Assert.Equal(Helper, await File.ReadAllTextAsync(helper));
             using var document = JsonDocument.Parse(output);
@@ -185,6 +273,11 @@ public sealed class CliTests
     [InlineData("jit - -o output.exe --runtime fail-fast --json")]
     [InlineData("build - --runtime fail-fast --json")]
     [InlineData("build - -o output.exe --runtime fail-fast --runtime fail-fast --json")]
+    [InlineData("build-library - --export Value --runtime fail-fast --json")]
+    [InlineData("build-library - -o output.dll --runtime fail-fast --json")]
+    [InlineData("build-library - -o output.dll --export Value --json")]
+    [InlineData("build-library - -o output.dll --export Value --export Value --runtime fail-fast --json")]
+    [InlineData("build - -o output.exe --export Value --runtime fail-fast --json")]
     public async Task SourceSetCommandsRejectMalformedOptionsBeforeReadingInputsAsync(string arguments)
     {
         ArgumentNullException.ThrowIfNull(arguments);
