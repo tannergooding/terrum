@@ -75,4 +75,8 @@ public enum SyntaxKind
     SkippedSyntax,
     /// <summary>A checked boolean requirement statement.</summary>
     RequireStatement,
+    /// <summary>A scoped <c>for</c> loop with optional initializer, condition and iterator.</summary>
+    ForStatement,
+    /// <summary>An intentionally omitted optional expression, such as a for-loop condition.</summary>
+    OmittedExpression,
 }

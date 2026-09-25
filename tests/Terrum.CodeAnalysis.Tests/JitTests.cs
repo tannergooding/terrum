@@ -50,6 +50,16 @@ public sealed class JitTests
     [InlineData("int32 Main() { require Try(out var x) && x == 7; return x; } bool Try(out int32 x) { x = 7; return true; }", 7)]
     [InlineData("int32 Main() { require Try(out var x); return x; } bool Try(out int32 x) { x = 7; return false; }", unchecked((int)0xE0540003))]
     [InlineData("int32 Main() { if (Try(out var x) || false) { return x; } return 0; } bool Try(out int32 x) { x = 7; return true; }", 7)]
+    [InlineData("int32 Main() { mut int32 sum = 0; for (mut int32 i = 0; i < 10; i = i + 1) { sum = sum + i; } return sum; }", 45)]
+    [InlineData("int32 Main() { mut int32 i = 0; for (; i < 7;) { i = i + 1; } return i; }", 7)]
+    [InlineData("int32 Main() { for (;;) { return 42; } return 0; }", 42)]
+    [InlineData("int32 Main() { mut int32 i = 3; for (i = 9; false; i = i / 0) { require false; } return i; }", 9)]
+    [InlineData("int32 Main() { for (mut int32 i = 0; i < 1; i = i / 0) { return 42; } return 0; }", 42)]
+    [InlineData("int32 Main() { mut int32 sum = 0; for (mut int32 i = 1; i < 4; i = i + 1) { for (mut int32 j = 1; j < 4; j = j + 1) { sum = sum + i * j; } } return sum; }", 36)]
+    [InlineData("int32 Main() { for (mut int32 i = 0; i < 3; i = i + 1) { } int32 i = 42; return i; }", 42)]
+    [InlineData("int32 Main() { mut int32 sum = 0; for (mut int32 i = 0; Next(i, out var value); i = i + 1) { sum = sum + value; } return sum; } bool Next(int32 i, out int32 value) { if (i == 4) { return false; } value = i; return true; }", 6)]
+    [InlineData("int32 Main() { for (mut int32 i = 0; i < 1; i = i / 0) { } return 0; }", unchecked((int)0xE0540002))]
+    [InlineData("int32 Main() { for (mut int32 i = int32.MaxValue; i > 0; i = i + 1) { } return 0; }", unchecked((int)0xE0540001))]
     public async Task WorkerAndNativeExecutableAgreeAsync(string source, int expected)
     {
         AssertWindowsX64();

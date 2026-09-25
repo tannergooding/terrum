@@ -361,6 +361,22 @@ internal sealed class Parser
                 node = Node(SyntaxKind.RequireStatement, [Take(), ParseExpression(), Expect(TokenKind.Semicolon)]);
                 break;
             }
+            case TokenKind.ForKeyword:
+            {
+                var children = new List<SyntaxElement> { Take(), Expect(TokenKind.OpenParen) };
+                children.Add(Current.Kind == TokenKind.Semicolon ? Node(SyntaxKind.EmptyStatement, [])
+                    : Current.Kind is TokenKind.VarKeyword or TokenKind.MutKeyword || LooksLikeLocal()
+                        ? ParseLocal(semicolon: false) : ParseExpressionStatement(semicolon: false));
+                children.Add(Expect(TokenKind.Semicolon));
+                children.Add(Current.Kind == TokenKind.Semicolon ? Node(SyntaxKind.OmittedExpression, []) : ParseExpression());
+                children.Add(Expect(TokenKind.Semicolon));
+                children.Add(Current.Kind == TokenKind.CloseParen ? Node(SyntaxKind.EmptyStatement, [])
+                    : ParseExpressionStatement(semicolon: false));
+                children.Add(Expect(TokenKind.CloseParen));
+                children.Add(ParseBlock());
+                node = Node(SyntaxKind.ForStatement, children);
+                break;
+            }
             case TokenKind.ReturnKeyword:
             {
                 var children = new List<SyntaxElement> { Take() };
@@ -387,17 +403,7 @@ internal sealed class Parser
                 }
                 else
                 {
-                    var children = new List<SyntaxElement> { ParseExpression() };
-                    var assignment = Current.Kind == TokenKind.Equals;
-
-                    if (assignment)
-                    {
-                        children.Add(Take());
-                        children.Add(ParseExpression());
-                    }
-
-                    children.Add(Expect(TokenKind.Semicolon));
-                    node = Node(assignment ? SyntaxKind.AssignmentStatement : SyntaxKind.ExpressionStatement, children);
+                    node = ParseExpressionStatement();
                 }
 
                 break;
@@ -409,7 +415,26 @@ internal sealed class Parser
         return node;
     }
 
-    private SyntaxNode ParseLocal()
+    private SyntaxNode ParseExpressionStatement(bool semicolon = true)
+    {
+        var children = new List<SyntaxElement> { ParseExpression() };
+        var assignment = Current.Kind == TokenKind.Equals;
+
+        if (assignment)
+        {
+            children.Add(Take());
+            children.Add(ParseExpression());
+        }
+
+        if (semicolon)
+        {
+            children.Add(Expect(TokenKind.Semicolon));
+        }
+
+        return Node(assignment ? SyntaxKind.AssignmentStatement : SyntaxKind.ExpressionStatement, children);
+    }
+
+    private SyntaxNode ParseLocal(bool semicolon = true)
     {
         var children = new List<SyntaxElement>();
 
@@ -422,7 +447,11 @@ internal sealed class Parser
         children.Add(Expect(TokenKind.Identifier));
         children.Add(Expect(TokenKind.Equals));
         children.Add(ParseExpression());
-        children.Add(Expect(TokenKind.Semicolon));
+
+        if (semicolon)
+        {
+            children.Add(Expect(TokenKind.Semicolon));
+        }
 
         return Node(SyntaxKind.VariableDeclaration, children);
     }

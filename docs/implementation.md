@@ -1,10 +1,10 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-4 and native-5
+## Current boundary: syntax-5 and native-6
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
-immutable and usable independently. The separate [native-5 profile](native.md)
+immutable and usable independently. The separate [native-6 profile](native.md)
 binds a bounded scalar/compact-value language and emits Windows x64 executables through
 verified structured operations. A clean syntax result is deliberately not a
 valid-program claim: `var x = 1;` parses but semantic analysis rejects its missing
@@ -17,7 +17,7 @@ managed graphs and standard-library execution are not implemented.
 | Lexing | Pinned Unicode identifiers, ASCII numbers/tags, comments, leading trivia, strings, diagnostics, EOF | Interpolation, raw/character/native literals, directives |
 | Declarations | Using, file-scoped namespaces, functions, compact structs with explicit fields/constructors/methods; library binding and one validated module reference per consumer | Classes, interfaces, enums/unions, attributes, generic declarations/constraints, general module dependency graphs |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; repeated `?` diagnoses | General type resolution, optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
-| Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, return, `require`, assignment and expression statements | `for`/`foreach`, switch/patterns, exceptions, cleanup, async, compound assignment |
+| Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, assignment and expression statements | `foreach`, break/continue, switch/patterns, exceptions, cleanup, async, compound assignment |
 | Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named/ref/out argument syntax | Character literals, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
@@ -37,19 +37,31 @@ constructor = modifiers containingTypeName parameters block
 parameters  = "(" (mode? type name ("," mode? type name)*)? ")"
 type        = (qualifiedName | "void") ("<" type ("," type)* ">")? "?"?
 mode        = "ref" | "mut" "ref" | "out"
-local       = "mut"? ("var" | type) name "=" expression ";"
-statement   = block | local | if | while | return | require | assignment | expression ";" | ";"
+local       = localInitializer ";"
+localInitializer = "mut"? ("var" | type) name "=" expression
+statement   = block | local | if | while | for | return | require | assignment | expression ";" | ";"
 if          = "if" "(" expression ")" block ("else" (block | if))?
 while       = "while" "(" expression ")" block
+for         = "for" "(" initializer? ";" expression? ";" iterator? ")" block
+initializer = localInitializer | assignmentClause | expression
+iterator    = assignmentClause | expression
 return      = "return" expression? ";"
 require     = "require" expression ";"
-assignment  = expression "=" expression ";"
+assignment  = assignmentClause ";"
+assignmentClause = expression "=" expression
 ```
 
 Assignment is a statement, not an expression. Native places include initialized
 mutable locals, accessible fields of mutable compact values, constructor fields,
 conditional output scratch slots and checked writable host-buffer elements.
 General borrowed references and owning places remain unsupported.
+For-loop initialization runs once, followed by condition, body and iterator;
+the iterator does not run after a returning body. An omitted condition is true.
+Initializer locals remain in scope through the header and body, not afterward.
+The iterator cannot reference body locals. Multiple comma-separated clauses,
+increment/compound-assignment operators and break/continue are not implemented.
+The binder lowers the scoped loop to existing verified blocks and `while`
+operations; there is no separate machine-code or module-IR loop variant.
 Braces are required on control bodies. Supported precedence, strongest
 first: postfix; unary `+ - ! ~`; `* / %`; `+ -`; `< <= > >=`; `== !=`; `&`; `^`;
 `|`; `&&`; `||`. Binary operators associate left. Lexing does not fuse angle
@@ -63,8 +75,8 @@ for precise number, string, identifier and newline rules.
 optional and normalizing its substituted type is future binder work.
 Explicit `Option<Option<T>>` syntax is unchanged. `syntax-1` introduced this
 rejection rule; `syntax-2` added the lossless `RequireStatement` node.
-`syntax-4` includes checked cast syntax for the supported 32- and 64-bit
-integer types and `char16`. The `native-5` profile supports checked
+`syntax-5` adds scoped for-loop syntax to checked casts for the supported 32- and
+64-bit integer types and `char16`. The `native-6` profile supports checked
 signed/unsigned 32- and 64-bit integers, raw code units, conditional outputs,
 fixed host-buffer capabilities and acyclic value layouts up to 16 bytes.
 Transitive module contracts and Windows x64 indirect argument/result storage

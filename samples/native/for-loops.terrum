@@ -1,0 +1,15 @@
+int32 SumSquares(int32 count)
+{
+    mut int32 sum = 0;
+    for (mut int32 index = 0; index < count; index = index + 1)
+    {
+        sum = sum + index * index;
+    }
+
+    return sum;
+}
+
+int32 Main()
+{
+    return SumSquares(10);
+}

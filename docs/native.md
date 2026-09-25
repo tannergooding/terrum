@@ -1,6 +1,6 @@
 # Windows x64 native profile
 
-`native-5` is a deliberately bounded executable language profile, separate from
+`native-6` is a deliberately bounded executable language profile, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
@@ -39,7 +39,7 @@ authorize emission.
 | Variables | Initialized typed/inferred locals; immutable bindings by default, explicit `mut` assignments; lexical scopes |
 | Expressions | Direct calls, forward calls/recursion, constructors, field reads, checked numeric casts; unary `+`, signed checked `-`, `~`, `!` |
 | Operators | Checked signed/unsigned `+ - * / %`, bitwise operations, signed/unsigned comparisons, same-type scalar equality, boolean operations; code-unit comparison but no `char16` arithmetic |
-| Flow | Blocks, `if`/`else`, `while`, return, boolean `require`; left-to-right argument/operand evaluation and short-circuit `&&`/`||` |
+| Flow | Blocks, `if`/`else`, `while`, scoped `for`, return, boolean `require`; left-to-right argument/operand evaluation and short-circuit `&&`/`||` |
 | Outputs | Bool/out true-only publication and definite assignment through branches, `!`, `&&`, `||` and `require` |
 | Storage | Explicitly granted, initialized fixed host buffers with checked indexing and read/write access; capabilities are not first-class source values |
 
@@ -56,6 +56,14 @@ conditions must be boolean and non-void functions must return on all validated
 paths (loops are conservatively allowed to execute zero times). Function
 overloading, active-scope local shadowing, named arguments, `ref`/`mut ref`
 passing and mutating instance methods are not supported.
+
+For loops accept an optional initializer, boolean condition and iterator,
+with a braced body. Initialization runs once; each successful condition is
+followed by the body and then the iterator. Returning from the body skips the
+iterator. An omitted condition is true. Header locals are scoped to the loop;
+the iterator cannot access body locals. Use assignments such as `i = i + 1`:
+increment operators, comma-separated clauses, break and continue are not
+implemented. [The loop sample](../samples/native/for-loops.terrum) returns 285.
 
 Other integer widths, floating point, character/text literals, shifts, classes,
 optional/generic/family binding, general borrowed references, ownership/cleanup,

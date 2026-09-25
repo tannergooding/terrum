@@ -789,6 +789,22 @@ internal sealed class Binder
                 return new BoundWhile(BindExpression((SyntaxNode)node.Children[2], PrimitiveType.Bool),
                     BindBlock((SyntaxNode)node.Children[4]), node.Span);
 
+            case SyntaxKind.ForStatement:
+            {
+                _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
+                var initializer = BindStatement((SyntaxNode)node.Children[2]);
+                var conditionNode = (SyntaxNode)node.Children[4];
+                var condition = conditionNode.Kind == SyntaxKind.OmittedExpression
+                    ? new BoundConstant(1, PrimitiveType.Bool, conditionNode.Span)
+                    : BindExpression(conditionNode, PrimitiveType.Bool);
+                var iterator = BindStatement((SyntaxNode)node.Children[6]);
+                var body = BindBlock((SyntaxNode)node.Children[8]);
+                _scopes.RemoveAt(_scopes.Count - 1);
+                var loopBody = new BoundBlock([body, iterator], node.Span);
+
+                return new BoundBlock([initializer, new BoundWhile(condition, loopBody, node.Span)], node.Span);
+            }
+
             default:
                 Report("TRM3001", "This statement is not supported.", node.Span);
                 return new BoundBlock([], node.Span);
