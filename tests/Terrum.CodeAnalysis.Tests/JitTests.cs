@@ -122,8 +122,8 @@ public sealed class JitTests
         Assert.Equal(0, exit);
         Assert.Equal("", error);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("scanner-2", document.RootElement.GetProperty("component").GetString());
+        Assert.Equal(3, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("scanner-3", document.RootElement.GetProperty("component").GetString());
         Assert.True(document.RootElement.GetProperty("success").GetBoolean());
         Assert.Equal(0, document.RootElement.GetProperty("diagnostics").GetArrayLength());
         var tokens = document.RootElement.GetProperty("tokens");
@@ -131,7 +131,7 @@ public sealed class JitTests
         Assert.Equal("Identifier", tokens[0].GetProperty("kind").GetString());
         Assert.Equal(0, tokens[0].GetProperty("start").GetInt32());
         Assert.Equal(identifierLength, tokens[0].GetProperty("length").GetInt32());
-        Assert.Equal("Integer", tokens[1].GetProperty("kind").GetString());
+        Assert.Equal("NumericLiteral", tokens[1].GetProperty("kind").GetString());
         Assert.Equal(integerStart, tokens[1].GetProperty("start").GetInt32());
         Assert.Equal(2, tokens[1].GetProperty("length").GetInt32());
         Assert.Equal("EndOfFile", tokens[2].GetProperty("kind").GetString());
@@ -144,6 +144,8 @@ public sealed class JitTests
     [InlineData("/* unterminated")]
     [InlineData("\"unterminated")]
     [InlineData("name \0 42")]
+    [InlineData("public bool Scan() { /* first */ return true && false; }\r\n// eof")]
+    [InlineData(" \t// only trivia\r\n/* end */")]
     public async Task ScannerWorkerReportsLexicalDiagnosticsAndTokenSpansAsync(string source)
     {
         var expected = Lexer.Lex(SourceText.From(source));
@@ -154,7 +156,7 @@ public sealed class JitTests
         Assert.Equal(expected.Diagnostics.IsEmpty ? 0 : 1, exit);
         Assert.Empty(error);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(3, document.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Equal(expected.Diagnostics.IsEmpty, document.RootElement.GetProperty("success").GetBoolean());
         var diagnostics = document.RootElement.GetProperty("diagnostics");
         Assert.Equal(expected.Diagnostics.Length, diagnostics.GetArrayLength());
@@ -168,8 +170,18 @@ public sealed class JitTests
         Assert.Equal(expected.Tokens.Length, tokens.GetArrayLength());
         for (var index = 0; index < expected.Tokens.Length; index++)
         {
+            Assert.Equal(expected.Tokens[index].Kind.ToString(), tokens[index].GetProperty("kind").GetString());
             Assert.Equal(expected.Tokens[index].Span.Start, tokens[index].GetProperty("start").GetInt32());
             Assert.Equal(expected.Tokens[index].Span.Length, tokens[index].GetProperty("length").GetInt32());
+            var leading = tokens[index].GetProperty("leadingTrivia");
+            Assert.Equal(expected.Tokens[index].LeadingTrivia.Length, leading.GetArrayLength());
+            for (var triviaIndex = 0; triviaIndex < expected.Tokens[index].LeadingTrivia.Length; triviaIndex++)
+            {
+                var trivia = expected.Tokens[index].LeadingTrivia[triviaIndex];
+                Assert.Equal(trivia.Kind.ToString(), leading[triviaIndex].GetProperty("kind").GetString());
+                Assert.Equal(trivia.Span.Start, leading[triviaIndex].GetProperty("start").GetInt32());
+                Assert.Equal(trivia.Span.Length, leading[triviaIndex].GetProperty("length").GetInt32());
+            }
         }
     }
 

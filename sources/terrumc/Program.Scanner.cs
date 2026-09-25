@@ -78,11 +78,14 @@ internal static partial class Program
         }
 
         ImmutableArray<ScannerToken> tokens;
+        ImmutableArray<ScannerTrivia> trivia;
         ImmutableArray<ScannerDiagnostic> diagnostics;
         try
         {
             var words = result.Data.AsSpan(result.BufferOffsets[3], program.Buffers[3].Values.Length * 4);
             tokens = ScannerHost.ReadTokens(source, result.ExitCode, words);
+            var triviaWords = result.Data.AsSpan(result.BufferOffsets[5], program.Buffers[5].Values.Length * 4);
+            trivia = ScannerHost.ReadTrivia(source, tokens, triviaWords);
             var diagnosticWords = result.Data.AsSpan(result.BufferOffsets[4], program.Buffers[4].Values.Length * 4);
             diagnostics = ScannerHost.ReadDiagnostics(source, diagnosticWords);
         }
@@ -95,19 +98,32 @@ internal static partial class Program
         {
             using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
             writer.WriteStartObject();
-            writer.WriteNumber("schemaVersion", 2);
-            writer.WriteString("component", "scanner-2");
+            writer.WriteNumber("schemaVersion", ScannerHost.SchemaVersion);
+            writer.WriteString("component", ScannerHost.ComponentName);
             writer.WriteBoolean("success", diagnostics.IsEmpty);
             writer.WriteString("unicodeVersion", UnicodeIdentifierProfile.Version);
             writer.WriteString("coordinateSystem", "utf-16");
             writer.WriteNumber("sourceLength", source.Length);
             writer.WriteStartArray("tokens");
-            foreach (var token in tokens)
+            var triviaIndex = 0;
+            for (var tokenIndex = 0; tokenIndex < tokens.Length; tokenIndex++)
             {
+                var token = tokens[tokenIndex];
                 writer.WriteStartObject();
                 writer.WriteString("kind", token.Kind.ToString());
                 writer.WriteNumber("start", token.Span.Start);
                 writer.WriteNumber("length", token.Span.Length);
+                writer.WriteStartArray("leadingTrivia");
+                while (triviaIndex < trivia.Length && trivia[triviaIndex].TokenIndex == tokenIndex)
+                {
+                    var item = trivia[triviaIndex++];
+                    writer.WriteStartObject();
+                    writer.WriteString("kind", item.Kind.ToString());
+                    writer.WriteNumber("start", item.Span.Start);
+                    writer.WriteNumber("length", item.Span.Length);
+                    writer.WriteEndObject();
+                }
+                writer.WriteEndArray();
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();
@@ -125,8 +141,15 @@ internal static partial class Program
         }
         else
         {
-            foreach (var token in tokens)
+            var triviaIndex = 0;
+            for (var tokenIndex = 0; tokenIndex < tokens.Length; tokenIndex++)
             {
+                while (triviaIndex < trivia.Length && trivia[triviaIndex].TokenIndex == tokenIndex)
+                {
+                    var item = trivia[triviaIndex++];
+                    Console.WriteLine(FormattableString.Invariant($"  {item.Kind} [{item.Span.Start}..{item.Span.End})"));
+                }
+                var token = tokens[tokenIndex];
                 Console.WriteLine(FormattableString.Invariant($"{token.Kind} [{token.Span.Start}..{token.Span.End})"));
             }
             foreach (var diagnostic in diagnostics)

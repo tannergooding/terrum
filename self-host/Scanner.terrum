@@ -103,16 +103,6 @@ bool IsSourceWhitespace(int32 unit)
         || unit == 8239 || unit == 8287 || unit == 12288;
 }
 
-bool IsPunctuation(int32 unit)
-{
-    return unit == 40 || unit == 41 || unit == 123 || unit == 125
-        || unit == 91 || unit == 93 || unit == 59 || unit == 44
-        || unit == 46 || unit == 58 || unit == 63 || unit == 43
-        || unit == 45 || unit == 42 || unit == 47 || unit == 37
-        || unit == 126 || unit == 94 || unit == 33 || unit == 61
-        || unit == 60 || unit == 62 || unit == 38 || unit == 124;
-}
-
 int32 PeekUnit(int32 at)
 {
     if (at >= Host.Source.Length)
@@ -157,16 +147,42 @@ void AdvanceCommentScalar(int32 at)
     }
 }
 
-int32 SkipTrivia(int32 initial)
+void PublishTrivia(int32 kind, int32 start, int32 end, int32 owner)
+{
+    int32 count = Host.Trivia[0];
+    require count * 4 + 5 <= Host.Trivia.Length;
+    Host.Trivia[count * 4 + 1] = kind;
+    Host.Trivia[count * 4 + 2] = start;
+    Host.Trivia[count * 4 + 3] = end - start;
+    Host.Trivia[count * 4 + 4] = owner;
+    Host.Trivia[0] = count + 1;
+}
+
+int32 SkipTrivia(int32 initial, int32 owner)
 {
     mut int32 at = initial;
     mut bool scanning = true;
     while (at < Host.Source.Length && scanning)
     {
         int32 current = PeekUnit(at);
-        if (IsSourceWhitespace(current))
+        int32 start = at;
+        if (IsNewline(current))
         {
             at = at + 1;
+            if (current == 13 && PeekUnit(at) == 10)
+            {
+                at = at + 1;
+            }
+            PublishTrivia(1, start, at, owner);
+        }
+        else if (IsSourceWhitespace(current))
+        {
+            at = at + 1;
+            while (IsSourceWhitespace(PeekUnit(at)) && !IsNewline(PeekUnit(at)))
+            {
+                at = at + 1;
+            }
+            PublishTrivia(0, start, at, owner);
         }
         else if (current == 47 && PeekUnit(at + 1) == 47)
         {
@@ -176,10 +192,10 @@ int32 SkipTrivia(int32 initial)
                 AdvanceCommentScalar(at);
                 at = at + ScalarWidth(ReadScalar(at));
             }
+            PublishTrivia(2, start, at, owner);
         }
         else if (current == 47 && PeekUnit(at + 1) == 42)
         {
-            int32 start = at;
             at = at + 2;
             while (at < Host.Source.Length
                 && !(PeekUnit(at) == 42 && PeekUnit(at + 1) == 47))
@@ -196,7 +212,9 @@ int32 SkipTrivia(int32 initial)
             {
                 at = at + 2;
             }
+            PublishTrivia(3, start, at, owner);
         }
+
         else
         {
             scanning = false;
@@ -204,6 +222,58 @@ int32 SkipTrivia(int32 initial)
     }
 
     return at;
+}
+
+int32 KeywordKind(int32 start, int32 length)
+{
+    mut int32 entry = 0;
+    while (Host.Keywords[entry] != -1)
+    {
+        int32 kind = Host.Keywords[entry];
+        int32 size = Host.Keywords[entry + 1];
+        if (size == length)
+        {
+            mut int32 offset = 0;
+            while (offset < size && (int32)Host.Source[start + offset] == Host.Keywords[entry + 2 + offset])
+            {
+                offset = offset + 1;
+            }
+            if (offset == size)
+            {
+                return kind;
+            }
+        }
+        entry = entry + size + 2;
+    }
+    return 2;
+}
+
+// A matched operator packs kind and width, retaining the longest match.
+int32 OperatorMatch(int32 start)
+{
+    mut int32 entry = 0;
+    mut int32 best = -1;
+    mut int32 width = 0;
+    while (Host.Operators[entry] != -1)
+    {
+        int32 kind = Host.Operators[entry];
+        int32 size = Host.Operators[entry + 1];
+        if (size > width && size <= Host.Source.Length - start)
+        {
+            mut int32 offset = 0;
+            while (offset < size && (int32)Host.Source[start + offset] == Host.Operators[entry + 2 + offset])
+            {
+                offset = offset + 1;
+            }
+            if (offset == size)
+            {
+                width = size;
+                best = kind * 4 + size;
+            }
+        }
+        entry = entry + size + 2;
+    }
+    return best;
 }
 
 int32 ReadNumericTag(int32 at)
@@ -416,26 +486,26 @@ int32 ScanString(int32 initial)
     return at;
 }
 
-// Records are (kind, UTF-16 start, UTF-16 length). Kind 0 is EOF, 1 is an
-// identifier/keyword spelling, 2 is a numeric literal, 3 punctuation,
-// 4 invalid and 5 a raw string literal. Diagnostics have a separate buffer.
+// Token kinds use the host TokenKind catalog. Trivia words contain a count
+// followed by (TriviaKind, start, length, owning token index) records.
 int32 Scan()
 {
     Host.Diagnostics[0] = 0;
+    Host.Trivia[0] = 0;
     mut int32 position = 0;
     mut int32 count = 0;
     while (position < Host.Source.Length)
     {
-        position = SkipTrivia(position);
+        position = SkipTrivia(position, count);
         if (position < Host.Source.Length)
         {
             int32 start = position;
             int32 scalar = ReadScalar(position);
-            mut int32 kind = 4;
+            mut int32 kind = 1;
             position = position + ScalarWidth(scalar);
             if (IsIdentifierStart(scalar))
             {
-                kind = 1;
+                kind = 2;
                 mut bool scanning = true;
                 while (position < Host.Source.Length && scanning)
                 {
@@ -449,33 +519,30 @@ int32 Scan()
                         scanning = false;
                     }
                 }
+                kind = KeywordKind(start, position - start);
             }
             else if (scalar >= 48 && scalar <= 57)
             {
-                kind = 2;
+                kind = 3;
                 position = ScanNumber(start);
             }
             else if (scalar == 34)
             {
-                kind = 5;
+                kind = 4;
                 position = ScanString(start);
-            }
-            else if (IsPunctuation(scalar))
-            {
-                kind = 3;
-                if (position < Host.Source.Length)
-                {
-                    int32 next = (int32)Host.Source[position];
-                    if (((scalar == 33 || scalar == 61 || scalar == 60 || scalar == 62) && next == 61)
-                        || (scalar == 38 && next == 38) || (scalar == 124 && next == 124))
-                    {
-                        position = position + 1;
-                    }
-                }
             }
             else
             {
-                Report(1, start, position - start);
+                int32 matched = OperatorMatch(start);
+                if (matched != -1)
+                {
+                    kind = matched / 4;
+                    position = start + matched % 4;
+                }
+                else
+                {
+                    Report(1, start, position - start);
+                }
             }
 
             require count * 3 + 3 <= Host.Tokens.Length;

@@ -15,9 +15,36 @@ public static class ScannerHost
     /// <summary>The maximum source length accepted by this bounded scanner adapter.</summary>
     public const int MaximumSourceLength = 16_384;
 
+    /// <summary>The version of the exact-kind, lossless token/trivia interchange.</summary>
+    public const int SchemaVersion = 3;
+
+    /// <summary>The component identity for the exact-kind, lossless scanner protocol.</summary>
+    public const string ComponentName = "scanner-3";
+
+    // Lexemes are packed as (kind, UTF-16 length, code units...) and terminated by kind -1.
+    private static readonly (TokenKind Kind, string Text)[] s_operatorSpellings =
+    [
+        (TokenKind.OpenParen, "("), (TokenKind.CloseParen, ")"),
+        (TokenKind.OpenBrace, "{"), (TokenKind.CloseBrace, "}"),
+        (TokenKind.OpenBracket, "["), (TokenKind.CloseBracket, "]"),
+        (TokenKind.Semicolon, ";"), (TokenKind.Comma, ","), (TokenKind.Dot, "."),
+        (TokenKind.Colon, ":"), (TokenKind.Question, "?"), (TokenKind.Plus, "+"),
+        (TokenKind.Minus, "-"), (TokenKind.Star, "*"), (TokenKind.Slash, "/"),
+        (TokenKind.Percent, "%"), (TokenKind.Bang, "!"), (TokenKind.Tilde, "~"),
+        (TokenKind.Equals, "="), (TokenKind.EqualsEquals, "=="),
+        (TokenKind.BangEquals, "!="), (TokenKind.Less, "<"),
+        (TokenKind.LessEquals, "<="), (TokenKind.Greater, ">"),
+        (TokenKind.GreaterEquals, ">="), (TokenKind.Ampersand, "&"),
+        (TokenKind.AmpersandAmpersand, "&&"), (TokenKind.Pipe, "|"),
+        (TokenKind.PipePipe, "||"), (TokenKind.Caret, "^"),
+    ];
+
+    private static readonly ImmutableArray<int> s_keywords = CreateKeywords();
+    private static readonly ImmutableArray<int> s_operators = CreateOperators();
+
     /// <summary>Creates fixed buffers containing source code units, shared pinned tables and vacant token records.</summary>
     /// <param name="source">The immutable source snapshot, including any malformed UTF-16 units.</param>
-    /// <returns>Initialized buffers exposed as Host.Source, Host.XidStart, Host.XidContinue, Host.Tokens and Host.Diagnostics.</returns>
+    /// <returns>Initialized buffers exposed as Host.Source, Host.XidStart, Host.XidContinue, Host.Tokens, Host.Diagnostics, Host.Trivia, Host.Keywords and Host.Operators.</returns>
     /// <exception cref="ArgumentNullException">The source is null.</exception>
     /// <exception cref="ArgumentException">The source exceeds this component's resource limit.</exception>
     public static ImmutableArray<HostBuffer> CreateBuffers(SourceText source)
@@ -34,7 +61,48 @@ public static class ScannerHost
             new HostBuffer("XidContinue", PrimitiveType.Int32, [.. UnicodeIdentifierProfile.ContinueRanges], false),
             new HostBuffer("Tokens", PrimitiveType.Int32, [.. new int[(source.Length + 1) * 3]], true),
             new HostBuffer("Diagnostics", PrimitiveType.Int32, [.. new int[1 + (source.Length * 3)]], true),
+            new HostBuffer("Trivia", PrimitiveType.Int32, [.. new int[1 + (source.Length * 4)]], true),
+            new HostBuffer("Keywords", PrimitiveType.Int32, s_keywords, false),
+            new HostBuffer("Operators", PrimitiveType.Int32, s_operators, false),
         ];
+    }
+
+    private static ImmutableArray<int> CreateKeywords()
+    {
+        var words = ImmutableArray.CreateBuilder<int>();
+        foreach (var kind in Enum.GetValues<TokenKind>())
+        {
+            var name = kind.ToString();
+            if (name.EndsWith("Keyword", StringComparison.Ordinal))
+            {
+                AddLexeme(words, kind, char.ToLowerInvariant(name[0]) + name[1..^"Keyword".Length]);
+            }
+        }
+
+        words.Add(-1);
+        return words.ToImmutable();
+    }
+
+    private static ImmutableArray<int> CreateOperators()
+    {
+        var words = ImmutableArray.CreateBuilder<int>();
+        foreach (var (kind, text) in s_operatorSpellings)
+        {
+            AddLexeme(words, kind, text);
+        }
+
+        words.Add(-1);
+        return words.ToImmutable();
+    }
+
+    private static void AddLexeme(ImmutableArray<int>.Builder words, TokenKind kind, string text)
+    {
+        words.Add((int)kind);
+        words.Add(text.Length);
+        foreach (var unit in text)
+        {
+            words.Add(unit);
+        }
     }
 
     /// <summary>Validates and reads the published prefix of the scanner's token buffer.</summary>
@@ -60,18 +128,87 @@ public static class ScannerHost
             var kind = BinaryPrimitives.ReadInt32LittleEndian(record);
             var start = BinaryPrimitives.ReadInt32LittleEndian(record[4..]);
             var length = BinaryPrimitives.ReadInt32LittleEndian(record[8..]);
-            if (kind is < 0 or > 5 || start < previousEnd || start > source.Length
+            if (!Enum.IsDefined((TokenKind)kind) || start < previousEnd || start > source.Length
                 || length < 0 || length > source.Length - start
-                || (index == count - 1 ? kind != 0 || start != source.Length || length != 0 : kind == 0 || length == 0))
+                || (index == count - 1
+                    ? kind != (int)TokenKind.EndOfFile || start != source.Length || length != 0
+                    : kind == (int)TokenKind.EndOfFile || length == 0))
             {
                 throw new ArgumentException("Invalid scanner token record.", nameof(bytes));
             }
 
-            tokens.Add(new ScannerToken((ScannerTokenKind)kind, new TextSpan(start, length)));
+            tokens.Add(new ScannerToken((TokenKind)kind, new TextSpan(start, length)));
             previousEnd = start + length;
         }
 
         return tokens.MoveToImmutable();
+    }
+
+    /// <summary>Reads and validates trivia assigned to each token, including EOF, and verifies lossless source coverage.</summary>
+    /// <param name="source">The original source snapshot.</param>
+    /// <param name="tokens">The token records read from the same scan.</param>
+    /// <param name="bytes">Little-endian trivia words: count followed by (kind, start, length, token index) records.</param>
+    /// <returns>Leading trivia records in source order.</returns>
+    /// <exception cref="ArgumentNullException">The source is null.</exception>
+    /// <exception cref="ArgumentException">The result violates the lossless scanner interchange contract.</exception>
+    public static ImmutableArray<ScannerTrivia> ReadTrivia(SourceText source, ImmutableArray<ScannerToken> tokens, ReadOnlySpan<byte> bytes)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (tokens.IsDefaultOrEmpty || bytes.Length < 4)
+        {
+            throw new ArgumentException("Missing scanner tokens or trivia count.", nameof(bytes));
+        }
+
+        var count = BinaryPrimitives.ReadInt32LittleEndian(bytes);
+        if (count < 0 || count > source.Length || count > (bytes.Length - 4) / 16)
+        {
+            throw new ArgumentException("Invalid scanner trivia count.", nameof(bytes));
+        }
+
+        var trivia = ImmutableArray.CreateBuilder<ScannerTrivia>(count);
+        var position = 0;
+        var tokenIndex = 0;
+        for (var index = 0; index < count; index++)
+        {
+            var record = bytes.Slice(4 + (index * 16), 16);
+            var kind = BinaryPrimitives.ReadInt32LittleEndian(record);
+            var start = BinaryPrimitives.ReadInt32LittleEndian(record[4..]);
+            var length = BinaryPrimitives.ReadInt32LittleEndian(record[8..]);
+            var owner = BinaryPrimitives.ReadInt32LittleEndian(record[12..]);
+            if (!Enum.IsDefined((TriviaKind)kind) || owner < tokenIndex || owner >= tokens.Length
+                || start < 0 || length <= 0 || length > source.Length - start)
+            {
+                throw new ArgumentException("Invalid scanner trivia record.", nameof(bytes));
+            }
+
+            while (tokenIndex < owner)
+            {
+                if (tokens[tokenIndex].Span.Start != position)
+                {
+                    throw new ArgumentException("Scanner records do not cover the source.", nameof(bytes));
+                }
+                position = tokens[tokenIndex++].Span.End;
+            }
+
+            if (start != position || start + length > tokens[owner].Span.Start)
+            {
+                throw new ArgumentException("Scanner trivia overlaps its token.", nameof(bytes));
+            }
+
+            trivia.Add(new ScannerTrivia((TriviaKind)kind, new TextSpan(start, length), owner));
+            position += length;
+        }
+
+        while (tokenIndex < tokens.Length)
+        {
+            if (tokens[tokenIndex].Span.Start != position)
+            {
+                throw new ArgumentException("Scanner records do not cover the source.", nameof(bytes));
+            }
+            position = tokens[tokenIndex++].Span.End;
+        }
+
+        return trivia.MoveToImmutable();
     }
 
     /// <summary>Validates and reads the published diagnostic prefix from the compiled scanner.</summary>
@@ -114,7 +251,7 @@ public static class ScannerHost
     }
 }
 
-/// <summary>A category in the bounded compiled scanner interchange, not the complete host lexer grammar.</summary>
+/// <summary>Legacy scanner-2 categories. Scanner-3 publishes exact <see cref="TokenKind"/> values.</summary>
 public enum ScannerTokenKind
 {
     /// <summary>The end of the source snapshot.</summary>
@@ -134,9 +271,15 @@ public enum ScannerTokenKind
 }
 
 /// <summary>A compiled scanner token with an exact source range.</summary>
-/// <param name="Kind">The bounded scanner category.</param>
+/// <param name="Kind">The exact host lexical token kind.</param>
 /// <param name="Span">The half-open UTF-16 range in the original input.</param>
-public sealed record ScannerToken(ScannerTokenKind Kind, TextSpan Span);
+public sealed record ScannerToken(TokenKind Kind, TextSpan Span);
+
+/// <summary>A leading trivia record associated with a token (including EOF).</summary>
+/// <param name="Kind">The host lexical trivia kind.</param>
+/// <param name="Span">The half-open UTF-16 source range.</param>
+/// <param name="TokenIndex">The owning token's zero-based index.</param>
+public sealed record ScannerTrivia(TriviaKind Kind, TextSpan Span, int TokenIndex);
 
 /// <summary>A compiled scanner lexical diagnostic with its exact source range.</summary>
 /// <param name="Code">The host lexer diagnostic code.</param>

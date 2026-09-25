@@ -24,15 +24,15 @@ public sealed class CliTests
         Assert.Equal(1, exit);
         Assert.Equal("", error);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal(2, document.RootElement.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("scanner-2", document.RootElement.GetProperty("component").GetString());
+        Assert.Equal(3, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("scanner-3", document.RootElement.GetProperty("component").GetString());
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
         var diagnostic = Assert.Single(document.RootElement.GetProperty("diagnostics").EnumerateArray());
         Assert.Equal("TRM0001", diagnostic.GetProperty("code").GetString());
         Assert.Equal(11, diagnostic.GetProperty("start").GetInt32());
         Assert.Equal(2, diagnostic.GetProperty("length").GetInt32());
         var tokens = document.RootElement.GetProperty("tokens").EnumerateArray().ToArray();
-        string[] kinds = ["Identifier", "Punctuation", "Integer", "Identifier", "Invalid", "EndOfFile"];
+        string[] kinds = ["Identifier", "Plus", "NumericLiteral", "Identifier", "Bad", "EndOfFile"];
         int[] starts = [0, 3, 5, 8, 11, 13];
         int[] lengths = [2, 1, 2, 2, 2, 0];
         Assert.Equal(kinds, tokens.Select(static token => token.GetProperty("kind").GetString()));

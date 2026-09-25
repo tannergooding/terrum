@@ -2,11 +2,11 @@
 
 These files are parallel design candidates, not a bootstrapped compiler.
 They are not linked into the C# implementation. The native profile executes
-the range, character and integer components and a bounded token scanner.
+the range, character, integer and nested token components and a bounded token scanner.
 The host test runner remains C#, even when it compiles and executes a candidate.
 
 Host fixtures retain syntax round trips and add native execution of
-`SourceRange`, `CharacterFacts` and `RangeTests` with entry wrappers.
+`SourceRange`, `CharacterFacts`, `RangeTests`, `Token` and `TokenTests` with entry wrappers.
 The [module fixture](../docs/modules.md) also compiles the range and character
 definitions into a producer, then binds the tests and a separate entry snapshot
 using only that artifact's declarations. Both AOT and JIT execute the linked
@@ -19,9 +19,11 @@ slices. Executing these components is not a self-hosted compiler bootstrap.
 | [IntegerFacts](IntegerFacts.terrum) | Overflow-free signed-addition range predicate | Supported by the native profile; tested with native entry wrappers, not a full compiler bootstrap |
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and conditional bool/out publication |
 | [CharacterFacts](CharacterFacts.terrum) | Shared ASCII numeric and newline decisions | Executed with `char16` comparisons and checked numeric casts |
+| [Token](Token.terrum) | Token category and nested source range | Executed as a 12-byte aggregate with independent producer/consumer artifacts |
 | [TokenCursor](TokenCursor.terrum) | Read-view traversal without copying backing storage or cleanup | Span indexing, matched access, stored backing dependencies, capture contract, constructor initialization |
 | [RangeTests](RangeTests.terrum) | Small success/failure and overflow boundary cases | Executed with a host-supplied entry wrapper; a Terrum test runner remains future work |
-| [Scanner](Scanner.terrum) | UTF-16 decoding, pinned Unicode identifiers, numeric spellings, quoted strings/escapes, comments and lexical diagnostics | Executed through fixed checked host buffers; see the [precise subset](../docs/scanner.md) |
+| [TokenTests](TokenTests.terrum) | Nested value copies and range replacement | Executed through the Windows indirect aggregate ABI; no retained backing views |
+| [Scanner](Scanner.terrum) | UTF-16 decoding, pinned Unicode identifiers, exact token kinds, lossless trivia and lexical diagnostics | Executed through fixed checked host buffers; see the [precise subset](../docs/scanner.md) |
 | [Host APIs](host.api.terrum) | Explicit source acquisition, cancellation, digest and output boundary | Interfaces, immutable publication, operation failures; host adapters |
 
 `SourceRange` deliberately mirrors the current host's signed 32-bit UTF-16
@@ -40,9 +42,8 @@ descriptor alone cannot extend an external allocation lease. `[Captures]` is
 working contract notation, not an unchecked annotation accepted by the MVP.
 
 The scanner shares the host's generated Unicode ranges; classification,
-token boundaries and lexical diagnostic decisions execute in Terrum.
-Lossless trivia, keyword classification, decoded values and parser routines
-remain future components. Keep shared
+token boundaries, keywords, leading trivia and lexical diagnostic decisions execute in Terrum.
+Decoded values and parser routines remain future components. Keep shared
 fixture expectations about observable ranges and contracts, not host object
 layouts. An independent compiler bootstrap requires rebuilding and comparing
 outputs, not merely parsing these files.

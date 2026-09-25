@@ -89,9 +89,53 @@ public sealed class ScannerTests
     }
 
     [Fact]
+    public async Task EveryKeywordClassifiesNativelyAsync()
+    {
+        var keywords = Enum.GetValues<TokenKind>()
+            .Where(kind => kind.ToString().EndsWith("Keyword", StringComparison.Ordinal))
+            .Select(kind => {
+                var name = kind.ToString();
+                return (Kind: kind, Text: char.ToLowerInvariant(name[0]) + name[1..^"Keyword".Length]);
+            }).ToArray();
+        var source = string.Join(' ', keywords.Select(keyword => keyword.Text)) + " namespace_extra Namespace";
+        var lexed = Lexer.Lex(SourceText.From(source));
+        Assert.Equal(keywords.Select(keyword => keyword.Kind).Append(TokenKind.Identifier).Append(TokenKind.Identifier)
+            .Append(TokenKind.EndOfFile), lexed.Tokens.Select(token => token.Kind));
+        await CheckScannerAsync(source).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public async Task EveryOperatorAndTriviaFormExecutesNativelyAsync()
+    {
+        const string Operators = "( ) { } [ ] ; , . : ? + - * / % ! ~ = == != < <= > >= & && | || ^";
+        var lexed = Lexer.Lex(SourceText.From(Operators));
+        var actual = lexed.Tokens.Select(token => token.Kind).ToHashSet();
+        foreach (var kind in Enum.GetValues<TokenKind>())
+        {
+            if (kind is TokenKind.Bad or TokenKind.Identifier or TokenKind.NumericLiteral or TokenKind.StringLiteral
+                || kind.ToString().EndsWith("Keyword", StringComparison.Ordinal))
+            {
+                continue;
+            }
+            Assert.Contains(kind, actual);
+        }
+
+        await CheckScannerAsync(Operators).ConfigureAwait(true);
+        await CheckScannerAsync(" \t\u00A0\u1680\u2000\u202F\u205F\u3000\n\r\r\n\u0085\u2028\u2029// line\n/* block */"
+            + "x \t// eof", repeat: true).ConfigureAwait(true);
+        await CheckScannerAsync("/* unterminated \uDC00").ConfigureAwait(true);
+    }
+
+    [Fact]
     public async Task DiagnosticAndTokenBuffersHandleDenseInvalidInputAsync()
     {
         await CheckScannerAsync(new string('\uDC00', 256)).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public async Task TriviaBufferHandlesDenseAlternatingRunsAsync()
+    {
+        await CheckScannerAsync(string.Concat(Enumerable.Repeat(" \n", 512))).ConfigureAwait(true);
     }
 
     [Fact]
@@ -128,13 +172,17 @@ public sealed class ScannerTests
         Assert.False(buffers[0].IsWritable);
         Assert.True(buffers[3].IsWritable);
         Assert.True(buffers[4].IsWritable);
+        Assert.True(buffers[5].IsWritable);
+        Assert.False(buffers[6].IsWritable);
+        Assert.False(buffers[7].IsWritable);
+        Assert.Equal(1 + (4 * 3), buffers[5].Values.Length);
         _ = Assert.Throws<ArgumentException>(() => ScannerHost.CreateBuffers(
             SourceText.From(new string('x', ScannerHost.MaximumSourceLength + 1))));
     }
 
     [Theory]
     [InlineData(0, 0, 0)]
-    [InlineData(7, 0, 1)]
+    [InlineData(100, 0, 1)]
     [InlineData(1, -1, 1)]
     [InlineData(1, 0, 2)]
     [InlineData(1, 0, 0)]
@@ -146,6 +194,30 @@ public sealed class ScannerTests
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(8), length);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16), 1);
         _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadTokens(SourceText.From("x"), 2, bytes));
+    }
+
+    [Theory]
+    [InlineData(2, 0, 0, 1, 0)]
+    [InlineData(1, 4, 0, 1, 0)]
+    [InlineData(1, 0, 1, 0, 0)]
+    [InlineData(1, 0, 0, 3, 0)]
+    [InlineData(1, 0, 0, 2, 0)]
+    [InlineData(1, 0, 0, 1, 1)]
+    public void ResultAdapterRejectsInvalidTriviaRecords(int count, int kind, int start, int length, int owner)
+    {
+        var source = SourceText.From(" x");
+        ImmutableArray<ScannerToken> tokens =
+        [
+            new(TokenKind.Identifier, new TextSpan(1, 1)),
+            new(TokenKind.EndOfFile, new TextSpan(2, 0)),
+        ];
+        var bytes = new byte[20];
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, count);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(4), kind);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(8), start);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(12), length);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16), owner);
+        _ = Assert.Throws<ArgumentException>(() => ScannerHost.ReadTrivia(source, tokens, bytes));
     }
 
     [Theory]
@@ -169,10 +241,10 @@ public sealed class ScannerTests
     public void ResultAdapterAcceptsStringRecordsAndLexicalDiagnostics()
     {
         var bytes = new byte[24];
-        BinaryPrimitives.WriteInt32LittleEndian(bytes, 5);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, (int)TokenKind.StringLiteral);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(8), 1);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16), 1);
-        Assert.Equal(ScannerTokenKind.String, ScannerHost.ReadTokens(SourceText.From("\""), 2, bytes)[0].Kind);
+        Assert.Equal(TokenKind.StringLiteral, ScannerHost.ReadTokens(SourceText.From("\""), 2, bytes)[0].Kind);
 
         var diagnostics = new byte[16];
         BinaryPrimitives.WriteInt32LittleEndian(diagnostics, 1);
@@ -182,23 +254,58 @@ public sealed class ScannerTests
             ScannerHost.ReadDiagnostics(SourceText.From("\""), diagnostics)[0]);
     }
 
+    [Fact]
+    public void ResultAdapterAcceptsTrailingTriviaOwnedByEof()
+    {
+        var source = SourceText.From("x /*end*/");
+        ImmutableArray<ScannerToken> tokens =
+        [
+            new(TokenKind.Identifier, new TextSpan(0, 1)),
+            new(TokenKind.EndOfFile, new TextSpan(source.Length, 0)),
+        ];
+        var bytes = new byte[36];
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, 2);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(4), (int)TriviaKind.Whitespace);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(8), 1);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(12), 1);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16), 1);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(20), (int)TriviaKind.MultiLineComment);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(24), 2);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(28), 7);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(32), 1);
+        Assert.Equal<ScannerTrivia>(
+            [new ScannerTrivia(TriviaKind.Whitespace, new TextSpan(1, 1), 1),
+                new ScannerTrivia(TriviaKind.MultiLineComment, new TextSpan(2, 7), 1)],
+            ScannerHost.ReadTrivia(source, tokens, bytes));
+    }
+
     private static async Task CheckScannerAsync(string source, bool repeat = false)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var scanner = await File.ReadAllTextAsync(Path.Combine(root, "self-host", "Scanner.terrum")).ConfigureAwait(true);
         var lexed = Lexer.Lex(SourceText.From(source));
         var expected = ImmutableArray.CreateBuilder<int>();
+        var expectedTrivia = ImmutableArray.CreateBuilder<int>();
+        var reconstructed = new StringBuilder();
+        var tokenIndex = 0;
         foreach (var token in lexed.Tokens)
         {
-            var kind = token.Kind == TokenKind.EndOfFile ? 0
-                : token.Kind == TokenKind.Bad ? 4
-                : token.Kind == TokenKind.NumericLiteral ? 2
-                : token.Kind == TokenKind.StringLiteral ? 5
-                : token.Kind == TokenKind.Identifier || token.Kind.ToString().EndsWith("Keyword", StringComparison.Ordinal) ? 1 : 3;
-            expected.Add(kind);
+            foreach (var trivia in token.LeadingTrivia)
+            {
+                expectedTrivia.Add((int)trivia.Kind);
+                expectedTrivia.Add(trivia.Span.Start);
+                expectedTrivia.Add(trivia.Span.Length);
+                expectedTrivia.Add(tokenIndex);
+                _ = reconstructed.Append(trivia.Text);
+            }
+
+            expected.Add((int)token.Kind);
             expected.Add(token.Span.Start);
             expected.Add(token.Span.Length);
+            _ = reconstructed.Append(token.Text);
+            tokenIndex++;
         }
+        Assert.Equal(source, reconstructed.ToString());
 
         var expectedDiagnostics = ImmutableArray.CreateBuilder<int>();
         foreach (var diagnostic in lexed.Diagnostics)
@@ -210,6 +317,7 @@ public sealed class ScannerTests
 
         var buffers = ScannerHost.CreateBuffers(SourceText.From(source))
             .Add(new HostBuffer("Expected", PrimitiveType.Int32, expected.ToImmutable(), false))
+            .Add(new HostBuffer("ExpectedTrivia", PrimitiveType.Int32, expectedTrivia.ToImmutable(), false))
             .Add(new HostBuffer("ExpectedDiagnostics", PrimitiveType.Int32, expectedDiagnostics.ToImmutable(), false));
         const string Harness = """
 
@@ -226,6 +334,19 @@ public sealed class ScannerTests
                     if (Host.Tokens[index] != Host.Expected[index])
                     {
                         return 101;
+                    }
+                    index = index + 1;
+                }
+                if (Host.Trivia[0] * 4 != Host.ExpectedTrivia.Length)
+                {
+                    return 104;
+                }
+                index = 0;
+                while (index < Host.ExpectedTrivia.Length)
+                {
+                    if (Host.Trivia[index + 1] != Host.ExpectedTrivia[index])
+                    {
+                        return 105;
                     }
                     index = index + 1;
                 }

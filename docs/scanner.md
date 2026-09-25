@@ -1,11 +1,11 @@
 # Compiled Terrum scanner component
 
-`self-host/Scanner.terrum` is a small executable scanner component, not a second
-complete front end or a bootstrapped compiler. It implements scalar decoding,
-Unicode identifier classification, numeric token boundaries, quoted strings
-and escapes, comment/whitespace skipping, punctuation and lexical diagnostics
-in Terrum. The C# host supplies buffers and the pinned data; it does not make
-token-boundary decisions for this component.
+`self-host/Scanner.terrum` is an executable lossless scanner component, not a
+bootstrapped compiler. It implements scalar decoding, Unicode identifier
+classification, keyword and operator selection, numeric token boundaries,
+quoted strings and escapes, leading trivia and lexical diagnostics in Terrum.
+The C# host supplies buffers and pinned lexical data; it does not pretokenize
+or make source-dependent classification decisions for the component.
 
 ```powershell
 dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll scan-component self-host\Scanner.terrum input.txt --runtime fail-fast --json
@@ -13,16 +13,18 @@ dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll scan-component se
 
 The command executes compiled code in its own process. Supervising clients must
 apply a deadline and treat abnormal termination as a runtime failure. When
-scanning completes, JSON uses `schemaVersion: 2`, `component: "scanner-2"`,
+scanning completes, JSON uses `schemaVersion: 3`, `component: "scanner-3"`,
 `coordinateSystem: "utf-16"`, the pinned `unicodeVersion`, `sourceLength`,
-`success`, and arrays of `tokens` and `diagnostics`. Each token has `kind`,
-`start`, and `length`; each diagnostic has `code`, `start`, and `length`.
+`success`, and arrays of `tokens` and `diagnostics`. Each token has an exact
+lexical `kind`, `start`, `length` and its ordered `leadingTrivia` array.
+Each trivia has `kind`, `start`, `length`; each diagnostic has `code`,
+`start`, `length`. EOF owns any trailing trivia.
 Lexically valid input returns `success: true` and exit code 0. Lexical errors
 return `success: false` and exit code 1 but still publish the full token stream
 and diagnostics on stdout. Without `--json`, token rows go to stdout and
 diagnostic code/spans go to stderr. Input, compilation, or invalid-result
 failures retain the standard schema-1 error response rather than producing a
-scanner-2 token response.
+scanner-3 token response.
 
 ## Storage and host boundary
 
@@ -36,6 +38,9 @@ The compilation host explicitly grants named fixed-buffer capabilities through
 | `Host.XidContinue` | `int32` | Read-only | The corresponding XID_Continue ranges |
 | `Host.Tokens` | `int32` | Read/write | Initialized words for token records |
 | `Host.Diagnostics` | `int32` | Read/write | Initialized count and lexical diagnostic records |
+| `Host.Trivia` | `int32` | Read/write | Initialized count and leading-trivia records |
+| `Host.Keywords` | `int32` | Read-only | Keyword spellings and exact `TokenKind` values generated from the host catalog |
+| `Host.Operators` | `int32` | Read-only | Punctuation/operator spellings and exact `TokenKind` values |
 
 An index is evaluated once, must be `int32`, and is checked against the fixed
 length before access. Negative indices fail as well as indices past the end.
@@ -59,23 +64,30 @@ storage ABI. Code units are not assumed to be valid Unicode scalars.
 
 ## Observable scanning contract
 
-Each output record is three initialized `int32` words: kind, UTF-16 start,
-UTF-16 length. `Scan` returns the number of published records, including EOF.
-Words beyond that count are not token records. `Host.Diagnostics[0]` contains
+Each token record is three initialized `int32` words: exact `TokenKind` numeric
+value, UTF-16 start, UTF-16 length. `Scan` returns the number of published
+records, including EOF. Words beyond that count are not token records.
+`Host.Trivia[0]` contains a count, followed by quadruples of exact `TriviaKind`
+numeric value, UTF-16 start, UTF-16 length, and zero-based owning token index.
+Leading trivia remains attached to EOF when there is no following token.
+`Host.Diagnostics[0]` contains
 the diagnostic count; subsequent triples are numeric code (1–5 maps to
 `TRM0001`–`TRM0005`), UTF-16 start and UTF-16 length, in reporting order.
-The adapter validates published counts, codes, ranges and nonempty diagnostic
-spans before returning them. A malformed token remains a token with its raw
-source span; diagnostics do not replace source characters.
+The adapter validates published counts, kinds, ranges, owner ordering,
+nonempty diagnostic/trivia spans, and exact contiguous coverage by token and
+trivia records. No source unit may be omitted, duplicated or reordered.
+A malformed token remains a `Bad`, `NumericLiteral`, or `StringLiteral` token
+with its raw source span; diagnostics do not replace source characters.
 
-| Kind | Meaning |
-|---|---|
-| 0 | Zero-width EOF at source length |
-| 1 | Identifier spelling, including keyword spellings without keyword classification |
-| 2 | ASCII numeric spelling, including fractions, exponents and defined width tags |
-| 3 | Punctuation/operator, including `== != <= >= && ||` |
-| 4 | Unrecognized source scalar or malformed single surrogate unit |
-| 5 | Raw quoted string spelling, including malformed/unterminated strings |
+Keyword records are generated from the host `TokenKind` catalog's `*Keyword`
+members. Operator records use their lexical spellings, with fixture comparisons
+covering the entire punctuation/operator catalog. Packed lexeme records contain
+`(kind, UTF-16 length, code units...)` and end with kind `-1`; native code
+compares source code units against these readonly records and selects the
+longest matching operator. The host never chooses a token from the source.
+Output capacities are bounded by `sourceLength + 1` tokens, at most
+`sourceLength` trivia records, and at most `sourceLength` diagnostics; the
+native scanner requires capacity before publishing each record.
 
 Identifiers use Unicode 17.0.0 XID_Start/XID_Continue plus underscore, including
 supplementary scalars and the established Join_Control continuation policy.
@@ -84,20 +96,22 @@ the same generated `UnicodeXid` ranges as the host lexer; the public read-only
 `UnicodeIdentifierProfile` carries the version and pinned input SHA-256.
 No normalization, case folding or ambient host Unicode categories are involved.
 
-Whitespace, newlines and non-nesting `//` and `/* ... */` comments follow the
-host lexer and are skipped; malformed surrogates within comments and unterminated
+Whitespace runs, individual line breaks (with CRLF as one trivia item), and
+non-nesting `//` and `/* ... */` comments follow the host lexer and are
+preserved as leading trivia; malformed surrogates within comments and unterminated
 block comments are diagnosed. Strings preserve raw spans across escapes;
 unterminated strings stop before a newline, and invalid/incomplete escapes and
 malformed surrogates produce matching diagnostic codes and spans. Numeric
 fractions require a digit after `.`, exponents follow the host lexer's
 identifier-disambiguation and incomplete-exponent rules, and defined primitive
 width tags attach only at an identifier boundary. Spans retain original source
-positions. This component still does not emit lossless trivia, classify
-keywords, decode string values, type numeric values or construct the host's
-full diagnostic objects/messages. It is not a full self-hosted lexer.
+positions. The component does not decode string values, type numeric values or
+construct the host's full diagnostic objects/messages. It is not a complete
+self-hosted front end.
 
-Shared fixtures compare the native scanner's token categories, exact spans and
-lexical diagnostic codes/spans against the host lexer. They cover pinned-range
+Shared fixtures compare native exact token kinds, trivia kinds/ownership/spans,
+reconstruction and lexical diagnostic codes/spans against the host lexer.
+They cover every keyword and operator spelling, every trivia kind, pinned-range
 boundaries, supplementary identifiers, combining marks, non-ASCII digits,
 Join_Control, comments, quoted escapes, malformed strings, numeric boundaries,
 whitespace, malformed surrogate pairs and operators. Output-capacity
