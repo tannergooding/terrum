@@ -29,6 +29,9 @@ public sealed record NativeCode(byte[] Code, int EntryPoint, ImmutableArray<Nati
 
     /// <summary>Code displacements targeting locations in Data.</summary>
     public ImmutableArray<NativeDataFixup> DataFixups { get; init; } = [];
+
+    /// <summary>RIP-relative call displacements targeting named native imports; executable images only.</summary>
+    internal ImmutableArray<NativeImportFixup> NativeImports { get; init; } = [];
 }
 
 /// <summary>A machine-code range with an rsp allocation in its prolog.</summary>
@@ -36,3 +39,5 @@ public readonly record struct NativeFunctionRange(int Start, int End, int StackS
 
 /// <summary>A RIP-relative displacement in code targeting an offset in the data image.</summary>
 public readonly record struct NativeDataFixup(int DisplacementOffset, int DataOffset);
+
+internal readonly record struct NativeImportFixup(int DisplacementOffset, string DllName, string ExportName);

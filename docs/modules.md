@@ -198,3 +198,21 @@ producer artifact, **not** a checked module replacement contract: there is
 no native consumer import table, live servicing, or production .NET interop
 promise. Callers must match the selected Windows x64 signatures and value
 layouts themselves; unloading invalidates function pointers.
+
+`NativeEmitter.EmitWithImports` emits a separately persisted Windows x64
+consumer executable from a verified reference-bearing program. Every external
+function declaration must have exactly one explicit binding from its qualified
+source identity to a DLL basename and named export. The emitted consumer has
+ordinary Windows import descriptors, lookup tables and writable IAT slots;
+its calls use RIP-relative IAT operands while local calls retain the shared
+encoder's direct relative form. `ExitProcess` remains an independent runtime
+import. No external declaration gets a fake native body or unwind range.
+The Windows loader resolves the provider DLL before the consumer begins;
+placing a compatible replacement DLL at the same filename changes behavior
+on the next launch without rewriting the consumer image. Ordinary `Emit`
+and in-memory JIT execution still reject external declarations. These
+bindings assert **names only**, not signature or value-layout compatibility,
+module provenance, or safe DLL search location: the caller must ensure the
+selected provider has the expected ABI contract and trusted load path before
+launch. There is no runtime contract validator, multi-provider contract linker,
+live patching or hot-unload protocol in this artifact layer.

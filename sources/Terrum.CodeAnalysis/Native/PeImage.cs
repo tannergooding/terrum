@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 
 namespace Terrum.CodeAnalysis.Native;
@@ -30,15 +31,17 @@ internal static class PeImage
         var importOffsets = native.ExitProcessFixups;
         var readOnlyLength = native.ReadOnlyDataLength;
         var writableLength = native.Data.Length - readOnlyLength;
-        const int ImportTableSize = 104;
+        var imports = BuildImports(native);
+        var importTableSize = imports.Bytes.Length;
         var textRva = TextRva;
         var dataRva = Align(textRva + code.Length, SectionAlignment);
-        var readOnlyRva = readOnlyLength == 0 ? 0 : Align(dataRva + ImportTableSize, SectionAlignment);
+        imports.Relocate(dataRva);
+        var readOnlyRva = readOnlyLength == 0 ? 0 : Align(dataRva + importTableSize, SectionAlignment);
         var writableRva = writableLength == 0 ? 0 : Align(
-            readOnlyLength == 0 ? dataRva + ImportTableSize : readOnlyRva + readOnlyLength, SectionAlignment);
+            readOnlyLength == 0 ? dataRva + importTableSize : readOnlyRva + readOnlyLength, SectionAlignment);
         var pdataSize = checked(12 * functions.Length);
         var pdataRva = Align(writableLength != 0 ? writableRva + writableLength
-            : readOnlyLength != 0 ? readOnlyRva + readOnlyLength : dataRva + ImportTableSize, SectionAlignment);
+            : readOnlyLength != 0 ? readOnlyRva + readOnlyLength : dataRva + importTableSize, SectionAlignment);
         var xdataSize = checked(8 * functions.Length);
         var xdataRva = Align(pdataRva + pdataSize, SectionAlignment);
         var exportSize = 0;
@@ -54,7 +57,7 @@ internal static class PeImage
         var imageSize = Align(exportSize == 0 ? xdataRva + xdataSize : exportRva + exportSize, SectionAlignment);
         var textFile = HeaderSize;
         var dataFile = checked(textFile + Align(code.Length, FileAlignment));
-        var readOnlyFile = checked(dataFile + Align(ImportTableSize, FileAlignment));
+        var readOnlyFile = checked(dataFile + Align(importTableSize, FileAlignment));
         var writableFile = checked(readOnlyFile + Align(readOnlyLength, FileAlignment));
         var pdataFile = checked(writableFile + Align(writableLength, FileAlignment));
         var xdataFile = checked(pdataFile + Align(pdataSize, FileAlignment));
@@ -62,12 +65,19 @@ internal static class PeImage
         var fileSize = checked(exportFile + Align(exportSize, FileAlignment));
         var image = new byte[fileSize];
         code.CopyTo(image, textFile);
+        imports.Bytes.CopyTo(image, dataFile);
         native.Data.AsSpan(0, readOnlyLength).CopyTo(image.AsSpan(readOnlyFile));
         native.Data.AsSpan(readOnlyLength).CopyTo(image.AsSpan(writableFile));
 
         foreach (var offset in importOffsets)
         {
-            Write32(image, textFile + offset, dataRva + 56 - (textRva + offset + 4));
+            Write32(image, textFile + offset, imports.Displacement("KERNEL32.dll", "ExitProcess",
+                dataRva, textRva, offset));
+        }
+        foreach (var fixup in native.NativeImports)
+        {
+            Write32(image, textFile + fixup.DisplacementOffset, imports.Displacement(fixup.DllName,
+                fixup.ExportName, dataRva, textRva, fixup.DisplacementOffset));
         }
         foreach (var fixup in native.DataFixups)
         {
@@ -77,15 +87,6 @@ internal static class PeImage
             Write32(image, textFile + fixup.DisplacementOffset,
                 checked(targetRva - (textRva + fixup.DisplacementOffset + 4)));
         }
-        // A single import descriptor, null terminator, ILT, IAT, hint/name, and DLL name.
-        Write32(image, dataFile, dataRva + 40);
-        Write32(image, dataFile + 12, dataRva + 88);
-        Write32(image, dataFile + 16, dataRva + 56);
-        Write64(image, dataFile + 40, (ulong)(dataRva + 72));
-        Write64(image, dataFile + 56, (ulong)(dataRva + 72));
-        Encoding.ASCII.GetBytes("ExitProcess\0").CopyTo(image, dataFile + 74);
-        Encoding.ASCII.GetBytes("KERNEL32.dll\0").CopyTo(image, dataFile + 88);
-
         var range = 0;
         foreach (var function in functions)
         {
@@ -155,7 +156,7 @@ internal static class PeImage
         Write16(image, optional, 0x20B);
         image[optional + 2] = 1;
         Write32(image, optional + 4, Align(code.Length, FileAlignment));
-        Write32(image, optional + 8, Align(ImportTableSize, FileAlignment)
+        Write32(image, optional + 8, Align(importTableSize, FileAlignment)
             + Align(readOnlyLength, FileAlignment) + Align(writableLength, FileAlignment)
             + Align(pdataSize, FileAlignment) + Align(xdataSize, FileAlignment)
             + Align(exportSize, FileAlignment));
@@ -181,15 +182,15 @@ internal static class PeImage
             Write32(image, optional + 112 + 4, exportSize);
         }
         Write32(image, optional + 112 + 8, dataRva); // import directory
-        Write32(image, optional + 112 + 12, 40);
+        Write32(image, optional + 112 + 12, imports.DescriptorSize);
         Write32(image, optional + 112 + 24, pdataRva); // exception directory
         Write32(image, optional + 112 + 28, pdataSize);
-        Write32(image, optional + 112 + 96, dataRva + 56); // IAT directory
-        Write32(image, optional + 112 + 100, 16);
+        Write32(image, optional + 112 + 96, dataRva + imports.IatStart); // IAT directory
+        Write32(image, optional + 112 + 100, imports.IatSize);
 
         var sections = optional + 0xF0;
         Section(0, ".text", code.Length, textRva, textFile, 0x60000020);
-        Section(1, ".idata", ImportTableSize, dataRva, dataFile, unchecked((int)0xC0000040));
+        Section(1, ".idata", importTableSize, dataRva, dataFile, unchecked((int)0xC0000040));
         var section = 2;
         if (readOnlyLength != 0)
         {
@@ -217,6 +218,129 @@ internal static class PeImage
             Write32(image, at + 36, flags);
         }
         return image;
+    }
+
+    private static ImportTable BuildImports(NativeCode native)
+    {
+        var groups = new List<ImportGroup> { new("KERNEL32.dll") };
+        groups[0].Symbols.Add(new ImportSymbol("ExitProcess"));
+        foreach (var fixup in native.NativeImports.OrderBy(static item => item.DllName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(static item => item.DllName, StringComparer.Ordinal)
+            .ThenBy(static item => item.ExportName, StringComparer.Ordinal))
+        {
+            var group = groups.Find(item => string.Equals(item.DllName, fixup.DllName, StringComparison.OrdinalIgnoreCase));
+            if (group is null)
+            {
+                group = new ImportGroup(fixup.DllName);
+                groups.Add(group);
+            }
+            if (!group.Symbols.Any(item => item.Name == fixup.ExportName))
+            {
+                group.Symbols.Add(new ImportSymbol(fixup.ExportName));
+            }
+        }
+        foreach (var group in groups)
+        {
+            group.Symbols.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
+        }
+        var descriptors = checked(20 * (groups.Count + 1));
+        var at = Align(descriptors, 8);
+        foreach (var group in groups)
+        {
+            group.Ilt = at;
+            at = checked(at + (8 * (group.Symbols.Count + 1)));
+        }
+        var iatStart = at;
+        foreach (var group in groups)
+        {
+            group.Iat = at;
+            for (var index = 0; index < group.Symbols.Count; index++)
+            {
+                group.Symbols[index].Iat = at + (8 * index);
+            }
+            at = checked(at + (8 * (group.Symbols.Count + 1)));
+        }
+        var iatSize = at - iatStart;
+        foreach (var group in groups)
+        {
+            foreach (var symbol in group.Symbols)
+            {
+                symbol.HintName = at;
+                at = Align(checked(at + 2 + symbol.Name.Length + 1), 2);
+            }
+        }
+        at = Align(at, 8);
+        foreach (var group in groups)
+        {
+            group.Name = at;
+            at = checked(at + group.DllName.Length + 1);
+        }
+        var bytes = new byte[Align(at, 8)];
+        for (var index = 0; index < groups.Count; index++)
+        {
+            var group = groups[index];
+            for (var symbolIndex = 0; symbolIndex < group.Symbols.Count; symbolIndex++)
+            {
+                var symbol = group.Symbols[symbolIndex];
+                Encoding.ASCII.GetBytes(symbol.Name + "\0").CopyTo(bytes, symbol.HintName + 2);
+            }
+            Encoding.ASCII.GetBytes(group.DllName + "\0").CopyTo(bytes, group.Name);
+        }
+        var targets = new Dictionary<(string DllName, string ExportName), int>();
+        foreach (var group in groups)
+        {
+            foreach (var symbol in group.Symbols)
+            {
+                targets.Add((group.DllName.ToUpperInvariant(), symbol.Name), symbol.Iat);
+            }
+        }
+        return new ImportTable(bytes, groups, targets, descriptors, iatStart, iatSize);
+    }
+
+    private sealed class ImportGroup(string dllName)
+    {
+        internal string DllName { get; } = dllName;
+        internal List<ImportSymbol> Symbols { get; } = [];
+        internal int Ilt { get; set; }
+        internal int Iat { get; set; }
+        internal int Name { get; set; }
+    }
+
+    private sealed class ImportSymbol(string name)
+    {
+        internal string Name { get; } = name;
+        internal int HintName { get; set; }
+        internal int Iat { get; set; }
+    }
+
+    private sealed record ImportTable(byte[] Bytes, List<ImportGroup> Groups,
+        Dictionary<(string DllName, string ExportName), int> Targets, int DescriptorSize, int IatStart, int IatSize)
+    {
+        internal void Relocate(int dataRva)
+        {
+            for (var index = 0; index < Groups.Count; index++)
+            {
+                var group = Groups[index];
+                Write32(Bytes, index * 20, checked(dataRva + group.Ilt));
+                Write32(Bytes, (index * 20) + 12, checked(dataRva + group.Name));
+                Write32(Bytes, (index * 20) + 16, checked(dataRva + group.Iat));
+                for (var symbolIndex = 0; symbolIndex < group.Symbols.Count; symbolIndex++)
+                {
+                    var symbol = group.Symbols[symbolIndex];
+                    Write64(Bytes, group.Ilt + (symbolIndex * 8), (ulong)checked(dataRva + symbol.HintName));
+                    Write64(Bytes, group.Iat + (symbolIndex * 8), (ulong)checked(dataRva + symbol.HintName));
+                }
+            }
+        }
+
+        internal int Displacement(string dllName, string exportName, int dataRva, int textRva, int offset)
+        {
+            if (!Targets.TryGetValue((dllName.ToUpperInvariant(), exportName), out var iat))
+            {
+                throw new InvalidOperationException("Missing native import target.");
+            }
+            return checked(dataRva + iat - (textRva + offset + 4));
+        }
     }
 
     private static int Align(int value, int alignment) => checked((value + alignment - 1) & -alignment);

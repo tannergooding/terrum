@@ -17,9 +17,70 @@ public enum NativeRuntimePolicy
     FailFast,
 }
 
+/// <summary>Maps one verified external function declaration to a named Windows DLL export.</summary>
+public sealed record NativeImportBinding(string FunctionName, string DllName, string ExportName);
+
 /// <summary>Emits owned, deterministic Windows x64 PE32+ artifacts from verified structured IR.</summary>
 public static class NativeEmitter
 {
+    /// <summary>Emits a native consumer executable with explicit bindings for every external declaration.</summary>
+    /// <remarks>Bindings specify ABI identities, not verified provider contracts; callers must validate provider compatibility.</remarks>
+    public static byte[] EmitWithImports(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
+        NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default)
+    {
+        if (runtimePolicy != NativeRuntimePolicy.FailFast)
+        {
+            throw new NotSupportedException("Unsupported native runtime policy.");
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(bindings);
+        SemanticVerifier.VerifyReferences(program);
+        if (bindings.Count is < 1 or > 1024)
+        {
+            throw new ArgumentException("Native consumers require 1 to 1024 explicit import bindings.", nameof(bindings));
+        }
+        var externals = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            if (program.Functions[index].IsExternal)
+            {
+                externals.Add(program.Functions[index].Name, index);
+            }
+        }
+        if (bindings.Count != externals.Count)
+        {
+            throw new ArgumentException("Every external function needs exactly one native import binding.", nameof(bindings));
+        }
+        var selected = new Dictionary<int, NativeImportBinding>();
+        var importNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var binding in bindings)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (binding is null || string.IsNullOrEmpty(binding.FunctionName)
+                || !externals.TryGetValue(binding.FunctionName, out var index)
+                || !ValidDllName(binding.DllName) || !ValidImportName(binding.ExportName)
+                || !importNames.Add(binding.DllName.ToUpperInvariant() + "\0" + binding.ExportName))
+            {
+                throw new ArgumentException("Import bindings must uniquely identify external declarations and DLL exports.", nameof(bindings));
+            }
+            if (!selected.TryAdd(index, binding))
+            {
+                throw new ArgumentException("An external function has multiple native import bindings.", nameof(bindings));
+            }
+        }
+        var code = new PeCompiler(program, cancellationToken, imports: selected).Compile();
+        return PeImage.Build(code);
+    }
+
+    private static bool ValidImportName(string? name) => name is { Length: >= 1 and <= 256 }
+        && name.All(static character => character is >= '!' and <= '~');
+
+    private static bool ValidDllName(string? name) => name is { Length: >= 5 and <= 256 }
+        && name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+        && name.All(static character => character is (>= '0' and <= '9') or (>= 'A' and <= 'Z')
+            or (>= 'a' and <= 'z') or '_' or '-' or '.');
+
     /// <summary>Verifies a library and emits a Windows x64 DLL with explicitly named public exports.</summary>
     /// <exception cref="ArgumentException">The library, export names, or public value layouts are invalid.</exception>
     /// <exception cref="NotSupportedException">The runtime policy or a native resource limit is unsupported.</exception>
@@ -138,6 +199,7 @@ internal sealed class PeCompiler
     private const int MaximumText = 8 * 1024 * 1024;
     private readonly BoundProgram _program;
     private readonly bool _library;
+    private readonly IReadOnlyDictionary<int, NativeImportBinding>? _nativeImports;
     private readonly CancellationToken _cancellationToken;
     private readonly MachineCode _code = new();
     private readonly int[] _starts;
@@ -150,6 +212,7 @@ internal sealed class PeCompiler
     private readonly List<(int Offset, int Target)> _calls = new();
     private readonly List<(int Offset, int Target)> _runtimeCalls = new();
     private readonly List<int> _imports = new();
+    private readonly List<NativeImportFixup> _nativeImportFixups = [];
     private readonly List<NativeDataFixup> _dataFixups = [];
     private readonly int[] _bufferOffsets;
     private readonly byte[] _data;
@@ -164,10 +227,12 @@ internal sealed class PeCompiler
     private int _returnSlot;
     private int _currentFunction;
 
-    internal PeCompiler(BoundProgram program, CancellationToken cancellationToken, bool library = false)
+    internal PeCompiler(BoundProgram program, CancellationToken cancellationToken, bool library = false,
+        IReadOnlyDictionary<int, NativeImportBinding>? imports = null)
     {
         _program = program;
         _library = library;
+        _nativeImports = imports;
         _cancellationToken = cancellationToken;
         _starts = new int[program.Functions.Length];
         _ends = new int[program.Functions.Length];
@@ -219,6 +284,10 @@ internal sealed class PeCompiler
         {
             _cancellationToken.ThrowIfCancellationRequested();
             var function = _program.Functions[i];
+            if (function.IsExternal)
+            {
+                continue;
+            }
             var maximumArguments = 0;
             var spillSlots = StatementSpills(function.Body, ref maximumArguments);
             var outParameters = 0;
@@ -299,6 +368,10 @@ internal sealed class PeCompiler
         {
             _cancellationToken.ThrowIfCancellationRequested();
             var function = _program.Functions[i];
+            if (function.IsExternal)
+            {
+                continue;
+            }
             _starts[i] = _code.Position;
             _currentFunction = i;
             _frame = _frames[i];
@@ -388,7 +461,10 @@ internal sealed class PeCompiler
         }
         for (var i = 0; i < _starts.Length; i++)
         {
-            functions.Add((_starts[i], _ends[i], _frames[i]));
+            if (!_program.Functions[i].IsExternal)
+            {
+                functions.Add((_starts[i], _ends[i], _frames[i]));
+            }
         }
 
         return new NativeCode(_code.ToArray(), _entryStart,
@@ -399,6 +475,7 @@ internal sealed class PeCompiler
             ReadOnlyDataLength = _readOnlyDataLength,
             BufferOffsets = [.. _bufferOffsets],
             DataFixups = [.. _dataFixups],
+            NativeImports = [.. _nativeImportFixups],
         };
     }
 
@@ -906,7 +983,18 @@ internal sealed class PeCompiler
                     _code.Address(Spill(spill));
                     _code.MoveArgument(0, true);
                 }
-                _calls.Add((_code.RelativeCall(), call.Function));
+                if (_program.Functions[call.Function].IsExternal)
+                {
+                    if (_nativeImports is null || !_nativeImports.TryGetValue(call.Function, out var import))
+                    {
+                        throw new InvalidOperationException("External call has no verified native import binding.");
+                    }
+                    _nativeImportFixups.Add(new NativeImportFixup(_code.ImportCall(), import.DllName, import.ExportName));
+                }
+                else
+                {
+                    _calls.Add((_code.RelativeCall(), call.Function));
+                }
                 if (hidden != 0)
                 {
                     _code.Address(Spill(spill));
