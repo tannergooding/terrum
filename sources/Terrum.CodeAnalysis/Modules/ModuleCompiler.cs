@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public static class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 8;
+    private const int Version = 9;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -492,16 +492,48 @@ public static class ModuleCompiler
             _ = result.Append('|').Append(parameter.IsOut ? "out:" : "in:")
                 .Append(ContractType(parameter.Type, structures));
         }
-        _ = result.Append(function.IsNoThrow ? "|NoThrow" : "|MayThrow");
+        _ = result.Append(function.IsNoThrow ? "|NoThrow" : "|MayThrow")
+            .Append(function.DoesNotReturn ? "|DoesNotReturn" : "|MayReturn");
         return result.ToString();
     }
 
     private static bool CompatibleContract(string expected, string actual) =>
-        expected == actual
-        || (expected.EndsWith("|MayThrow", StringComparison.Ordinal)
-            && actual.EndsWith("|NoThrow", StringComparison.Ordinal)
-            && expected.AsSpan(0, expected.Length - "|MayThrow".Length)
-                .SequenceEqual(actual.AsSpan(0, actual.Length - "|NoThrow".Length)));
+        TryContractPromises(expected.AsSpan(), out var expectedSignature, out var expectedNoThrow, out var expectedNoReturn)
+        && TryContractPromises(actual.AsSpan(), out var actualSignature, out var actualNoThrow, out var actualNoReturn)
+        && expectedSignature.SequenceEqual(actualSignature)
+        && (!expectedNoThrow || actualNoThrow)
+        && (!expectedNoReturn || actualNoReturn);
+
+    private static bool TryContractPromises(ReadOnlySpan<char> contract, out ReadOnlySpan<char> signature,
+        out bool noThrow, out bool noReturn)
+    {
+        signature = default;
+        noThrow = false;
+        noReturn = false;
+        if (contract.EndsWith("|DoesNotReturn".AsSpan(), StringComparison.Ordinal))
+        {
+            noReturn = true;
+            contract = contract[..^"|DoesNotReturn".Length];
+        }
+        else if (contract.EndsWith("|MayReturn".AsSpan(), StringComparison.Ordinal))
+        {
+            contract = contract[..^"|MayReturn".Length];
+        }
+        else
+        {
+            return false;
+        }
+        if (contract.EndsWith("|NoThrow".AsSpan(), StringComparison.Ordinal))
+        {
+            noThrow = true;
+            signature = contract[..^"|NoThrow".Length];
+        }
+        else if (contract.EndsWith("|MayThrow".AsSpan(), StringComparison.Ordinal))
+        {
+            signature = contract[..^"|MayThrow".Length];
+        }
+        return !signature.IsEmpty;
+    }
 
     private static char Visibility(BoundStruct structure) =>
         structure.IsPrivate ? 'P' : structure.IsInternal ? 'N' : 'E';
@@ -855,6 +887,7 @@ public static class ModuleCompiler
         writer.Write(function.IsInternal);
         writer.Write(function.IsStatic);
         writer.Write(function.IsNoThrow);
+        writer.Write(function.DoesNotReturn);
         writer.Write(function.DeclaringStruct is not null);
         if (function.DeclaringStruct is string declaringStruct)
         {
@@ -883,6 +916,7 @@ public static class ModuleCompiler
         var isInternal = GetBool(reader);
         var isStatic = GetBool(reader);
         var isNoThrow = GetBool(reader);
+        var doesNotReturn = GetBool(reader);
         var declaringStruct = GetBool(reader) ? GetString(reader) : null;
         var parameters = reader.ReadInt32();
         var count = Count(reader, MaximumSlots);
@@ -908,6 +942,7 @@ public static class ModuleCompiler
             IsInternal = isInternal,
             IsStatic = isStatic,
             IsNoThrow = isNoThrow,
+            DoesNotReturn = doesNotReturn,
             DeclaringStruct = declaringStruct,
         };
     }

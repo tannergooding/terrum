@@ -5,6 +5,8 @@ The catalog below describes **design sketches, not executable tests or compiled 
 The runnable [NoThrow example](../samples/native/no-throw.terrum) returns 42
 through annotated value construction, widening and conditional outputs; its
 effect contracts do not require or imply the future catch/cleanup runtime.
+The [no-return example](../samples/native/no-return.terrum) returns 42 when its
+conditional output succeeds; the failure branch has no normal continuation.
 
 | Program | Source | Design contract / expected behavior |
 |---|---|---|

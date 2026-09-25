@@ -580,7 +580,7 @@ public sealed partial class CliTests
         var (semanticExit, output, _) = await RunAsync(source, "analyze", "-", "--json");
         Assert.Equal(1, semanticExit);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal("native-8", document.RootElement.GetProperty("profile").GetString());
+        Assert.Equal("native-9", document.RootElement.GetProperty("profile").GetString());
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
     }
 

@@ -162,6 +162,7 @@ public static class SemanticVerifier
             var function = program.Functions[i];
             if (function is null || string.IsNullOrEmpty(function.Name) || !names.Add(function.Name)
                 || (function.IsPrivate && function.IsInternal)
+                || (function.DoesNotReturn && function.ReturnType != PrimitiveType.Void)
                 || !ValidType(function.ReturnType, allowVoid: true, program) || function.Variables.IsDefault
                 || function.ParameterCount < 0 || function.ParameterCount > function.Variables.Length
                 || function.Body is null)
@@ -268,6 +269,10 @@ public static class SemanticVerifier
             try
             {
                 var returns = Statement(function.Body, initialized, fieldMasks, declarations, function, program, ref remaining, 0);
+                if (function.DoesNotReturn && !returns)
+                {
+                    throw InvalidEffect(function.Body.Span, "DoesNotReturn");
+                }
                 if (function.ReturnType != PrimitiveType.Void && !returns)
                 {
                     throw Invalid();
@@ -289,7 +294,7 @@ public static class SemanticVerifier
     }
 
     internal static bool TryVerifySource(BoundProgram program, out int functionIndex, out TextSpan span, out bool exceededWorkLimit,
-        out bool invalidEffect)
+        out string? invalidEffect)
     {
         try
         {
@@ -297,7 +302,7 @@ public static class SemanticVerifier
             functionIndex = -1;
             span = default;
             exceededWorkLimit = false;
-            invalidEffect = false;
+            invalidEffect = null;
             return true;
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
@@ -306,13 +311,13 @@ public static class SemanticVerifier
             span = exception.Data[SourceSpanKey] is TextSpan sourceSpan
                 ? sourceSpan : program.Functions.IsDefaultOrEmpty ? default : program.Functions[functionIndex].Span;
             exceededWorkLimit = exception is NotSupportedException;
-            invalidEffect = exception.Data[InvalidEffectKey] is true;
+            invalidEffect = exception.Data[InvalidEffectKey] is string effect ? effect : null;
             return false;
         }
     }
 
     private static bool Statement(BoundStatement statement, bool[] initialized, uint[] fieldMasks, HashSet<int> declarations,
-        BoundFunction function, BoundProgram program, ref int remaining, int depth)
+        BoundFunction function, BoundProgram program, ref int remaining, int depth, bool reachable = true)
     {
         Count(ref remaining, depth);
         switch (statement)
@@ -329,7 +334,8 @@ public static class SemanticVerifier
                     {
                         throw Invalid();
                     }
-                    var childReturns = Statement(child, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1);
+                    var childReturns = Statement(child, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1,
+                        reachable && !returns);
                     returns |= childReturns;
                 }
                 return returns;
@@ -444,12 +450,12 @@ public static class SemanticVerifier
                 }
                 return false;
             case BoundExpressionStatement expressionStatement:
-                if (expressionStatement.Expression is not BoundCall)
+                if (expressionStatement.Expression is not BoundCall statementCall)
                 {
                     throw Invalid();
                 }
                 Expression(expressionStatement.Expression, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1);
-                return false;
+                return program.Functions[statementCall.Function].DoesNotReturn;
             case BoundIf conditional:
                 var beforeCondition = (bool[])initialized.Clone();
                 Expression(conditional.Condition, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1);
@@ -457,17 +463,19 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                var thenReachable = CanBe(conditional.Condition, true, ref remaining);
+                var elseReachable = CanBe(conditional.Condition, false, ref remaining);
                 var thenState = Outcome(conditional.Condition, beforeCondition, true, ref remaining);
                 var thenMasks = (uint[])fieldMasks.Clone();
                 MarkOutMasks(thenState, thenMasks, function, program);
-                var thenReturns = Statement(conditional.Then, thenState, thenMasks, declarations, function, program, ref remaining, depth + 1);
+                var thenReturns = Statement(conditional.Then, thenState, thenMasks, declarations, function, program, ref remaining, depth + 1,
+                    reachable && thenReachable);
                 var elseState = Outcome(conditional.Condition, beforeCondition, false, ref remaining);
                 var elseMasks = (uint[])fieldMasks.Clone();
                 MarkOutMasks(elseState, elseMasks, function, program);
                 var elseReturns = conditional.Else is not null
-                    && Statement(conditional.Else, elseState, elseMasks, declarations, function, program, ref remaining, depth + 1);
-                var thenReachable = CanBe(conditional.Condition, true, ref remaining);
-                var elseReachable = CanBe(conditional.Condition, false, ref remaining);
+                    && Statement(conditional.Else, elseState, elseMasks, declarations, function, program, ref remaining, depth + 1,
+                        reachable && elseReachable);
                 for (var i = 0; i < initialized.Length; i++)
                 {
                     initialized[i] = !thenReachable || thenReturns ? elseState[i]
@@ -496,16 +504,19 @@ public static class SemanticVerifier
                     var bodyState = Outcome(loop.Condition, conditionInput, true, ref remaining);
                     var bodyMasks = (uint[])conditionMasks.Clone();
                     MarkOutMasks(bodyState, bodyMasks, function, program);
-                    var bodyReturns = Statement(loop.Body, bodyState, bodyMasks, iterationDeclarations, function, program, ref remaining, depth + 1);
+                    var bodyReachable = CanBe(loop.Condition, true, ref remaining);
+                    var exitReachable = CanBe(loop.Condition, false, ref remaining);
+                    var bodyReturns = Statement(loop.Body, bodyState, bodyMasks, iterationDeclarations, function, program, ref remaining, depth + 1,
+                        reachable && bodyReachable);
                     var exitState = Outcome(loop.Condition, conditionInput, false, ref remaining);
                     var exitMasks = (uint[])conditionMasks.Clone();
                     MarkOutMasks(exitState, exitMasks, function, program);
-                    if (!CanBe(loop.Condition, true, ref remaining) || bodyReturns)
+                    if (!bodyReachable || bodyReturns)
                     {
                         Array.Copy(exitState, initialized, initialized.Length);
                         Array.Copy(exitMasks, fieldMasks, fieldMasks.Length);
                         declarations.UnionWith(iterationDeclarations);
-                        return false;
+                        return !exitReachable;
                     }
                     var changed = false;
                     for (var i = 0; i < headState.Length; i++)
@@ -521,7 +532,7 @@ public static class SemanticVerifier
                         Array.Copy(exitState, initialized, initialized.Length);
                         Array.Copy(exitMasks, fieldMasks, fieldMasks.Length);
                         declarations.UnionWith(iterationDeclarations);
-                        return false;
+                        return !exitReachable;
                     }
                 }
                 throw Limit();
@@ -539,8 +550,12 @@ public static class SemanticVerifier
                 var accepted = Outcome(requirement.Condition, beforeRequirement, true, ref remaining);
                 Array.Copy(accepted, initialized, initialized.Length);
                 MarkOutMasks(initialized, fieldMasks, function, program);
-                return false;
+                return !CanBe(requirement.Condition, true, ref remaining);
             case BoundReturn result:
+                if (function.DoesNotReturn && reachable)
+                {
+                    throw InvalidEffect(result.Span, "DoesNotReturn");
+                }
                 var beforeReturn = (bool[])initialized.Clone();
                 if (result.Value is null)
                 {
@@ -978,10 +993,10 @@ public static class SemanticVerifier
         exception.Data[SourceSpanKey] = span;
         return exception;
     }
-    private static ArgumentException InvalidEffect(TextSpan span)
+    private static ArgumentException InvalidEffect(TextSpan span, string contract = "NoThrow")
     {
         var exception = Invalid(span);
-        exception.Data[InvalidEffectKey] = true;
+        exception.Data[InvalidEffectKey] = contract;
         return exception;
     }
     private static NotSupportedException Limit() => new("Bound program exceeds native resource limits.");

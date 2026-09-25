@@ -624,7 +624,7 @@ public sealed class ModuleTests
         Assert.True(functionName >= sizeof(int));
         Assert.Equal(name.Length, BinaryPrimitives.ReadInt32LittleEndian(
             modified.AsSpan(functionName - sizeof(int), sizeof(int))));
-        var ownerLengthOffset = functionName + name.Length + sizeof(int) + 6;
+        var ownerLengthOffset = functionName + name.Length + sizeof(int) + 7;
         var ownerLength = BinaryPrimitives.ReadInt32LittleEndian(modified.AsSpan(ownerLengthOffset, sizeof(int)));
         Assert.Equal("Box", Encoding.UTF8.GetString(modified, ownerLengthOffset + sizeof(int), ownerLength));
         var parameterOffset = ownerLengthOffset + sizeof(int) + ownerLength;

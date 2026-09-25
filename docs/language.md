@@ -60,9 +60,9 @@ Formatting uses one `IFormattable` → `ITextWriter` protocol with typed fragmen
 
 Allocation, GC, rooted reads/writes, blocking, suspension, I/O, atomics, throwing/no-throw, normal/no-return, cleanup and retirement are independently expressible effect bounds, finer-grained than Core/Foundation/Application dependency layers. `void` is the single zero-data result type, with value `()`, usable as `Func<void>` and `Task<void>`; `Option<void>` still represents two states. A checked `[DoesNotReturn]` on a `void` call removes its normal continuation but retains exception/cleanup edges; `[NoThrow]` is separate. A verified implementation cannot normally return, including by completing a task that terminates *later*. There is no public `unit` or `never` primitive; the compiler may use internal bottom flow. Removing an exported no-return guarantee breaks callers that rely on it.
 
-The current native profile implements a conservative checked `[NoThrow]` bound
-and its versioned declaration contract. No-return and other effect bounds,
-exception identity and cleanup execution remain later implementation work;
+The current native profile implements conservative checked `[NoThrow]` and
+`[DoesNotReturn]` bounds and their versioned declaration contracts. Other
+effect bounds, exception identity and cleanup execution remain later implementation work;
 see the [native proof limits](native.md).
 
 ### Storage, concurrency, entry and boundaries

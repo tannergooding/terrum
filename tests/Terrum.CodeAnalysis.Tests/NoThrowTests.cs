@@ -38,7 +38,6 @@ public sealed class NoThrowTests
     [Theory]
     [InlineData("[NoThrow] [NoThrow] int32 F() { return 0; }")]
     [InlineData("[Unknown] int32 F() { return 0; }")]
-    [InlineData("[DoesNotReturn] void F() { }")]
     [InlineData("[NoThrow] struct S { public int32 Value; }")]
     [InlineData("struct S { [NoThrow] public int32 Value; }")]
     public void UnknownDuplicateAndMisplacedContractsAreRejected(string source)

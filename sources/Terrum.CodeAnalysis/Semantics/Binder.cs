@@ -107,7 +107,7 @@ internal sealed class Binder
                 }
                 _signatures.Add(new Signature(function.Name, function.ReturnType, parameters.ToImmutable(),
                     null, null, _trees[0], function.DeclaringStruct, function.IsConstructor,
-                    false, false, false, function.IsStatic, function.IsNoThrow, function));
+                    false, false, false, function.IsStatic, function.IsNoThrow, function.DoesNotReturn, function));
             }
         }
         foreach (var tree in _trees)
@@ -281,12 +281,12 @@ internal sealed class Binder
                     new BoundRead(0, _returnType, end), end))
                 };
             }
-            else if (_returnType == PrimitiveType.Void && !AlwaysReturns(body))
+            else if (_returnType == PrimitiveType.Void && !signature.DoesNotReturn && !DoesNotFallThrough(body))
             {
                 var end = new TextSpan(syntaxBody.Span.End, 0);
                 body = body with { Statements = body.Statements.Add(new BoundReturn(null, end)) };
             }
-            else if (_returnType != PrimitiveType.Void && !AlwaysReturns(body))
+            else if (_returnType != PrimitiveType.Void && !DoesNotFallThrough(body))
             {
                 Report("TRM3012", $"Not all paths in '{signature.Name}' return a value.", syntaxBody.Span);
             }
@@ -299,6 +299,7 @@ internal sealed class Binder
                 IsInternal = signature.IsInternal,
                 IsStatic = signature.IsStatic,
                 IsNoThrow = signature.IsNoThrow,
+                DoesNotReturn = signature.DoesNotReturn,
                 DeclaringStruct = signature.StructName is null ? null
                    : (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".") + signature.StructName,
             });
@@ -315,11 +316,14 @@ internal sealed class Binder
         if (!SemanticVerifier.TryVerifySource(program, out var functionIndex, out var span, out var exceededWorkLimit, out var invalidEffect))
         {
             _tree = _signatures.Count == 0 ? _trees[0] : _signatures[functionIndex].Tree;
-            Report(invalidEffect ? "TRM3017" : "TRM3016", invalidEffect
-                ? "NoThrow declarations cannot perform potentially throwing operations or call functions without a NoThrow contract."
-                : exceededWorkLimit
-                ? "Source exceeds the semantic verification work limit."
-                : "Source violates definite assignment, initialization, or executable type rules.", span);
+            var (code, message) = invalidEffect switch {
+                "NoThrow" => ("TRM3017", "NoThrow declarations cannot perform potentially throwing operations or call functions without a NoThrow contract."),
+                "DoesNotReturn" => ("TRM3018", "DoesNotReturn declarations must have no reachable normal return or fallthrough."),
+                _ => ("TRM3016", exceededWorkLimit
+                    ? "Source exceeds the semantic verification work limit."
+                    : "Source violates definite assignment, initialization, or executable type rules."),
+            };
+            Report(code, message, span);
             return null;
         }
         return program;
@@ -490,6 +494,7 @@ internal sealed class Binder
         var isInternal = false;
         var isStatic = false;
         var isNoThrow = false;
+        var doesNotReturn = false;
         var accessModifiers = 0;
         for (var index = 0; index < modifierCount; index++)
         {
@@ -499,9 +504,13 @@ internal sealed class Binder
                 {
                     isNoThrow = true;
                 }
+                else if (attribute.Children[1] is SyntaxTokenElement { Token.Text: "DoesNotReturn" } && !doesNotReturn)
+                {
+                    doesNotReturn = true;
+                }
                 else
                 {
-                    Report("TRM3001", "Only one parameterless NoThrow attribute is supported on a function or constructor.", attribute.Span);
+                    Report("TRM3001", "Only distinct parameterless NoThrow and DoesNotReturn contracts are supported.", attribute.Span);
                 }
                 continue;
             }
@@ -544,6 +553,10 @@ internal sealed class Binder
         var parameters = (SyntaxNode)declaration.Children[^2];
         var body = (SyntaxNode)declaration.Children[^1];
         var returnType = constructor ? ResolveStruct(containingType!) : BindType(returnNode!, allowVoid: true);
+        if (doesNotReturn && returnType != PrimitiveType.Void)
+        {
+            Report("TRM3018", "DoesNotReturn requires a void function.", declaration.Span);
+        }
         var declared = ImmutableArray.CreateBuilder<Parameter>();
         var names = new HashSet<string>(StringComparer.Ordinal);
 
@@ -587,7 +600,7 @@ internal sealed class Binder
         }
 
         _signatures.Add(new Signature(qualifiedName, returnType, declared.ToImmutable(), body, declaration, _tree,
-            containingType, constructor, isPrivate, isInternal, isMutable, isStatic, isNoThrow));
+            containingType, constructor, isPrivate, isInternal, isMutable, isStatic, isNoThrow, doesNotReturn));
     }
 
     private PrimitiveType BindType(SyntaxNode node, bool allowVoid)
@@ -1701,18 +1714,29 @@ internal sealed class Binder
         return false;
     }
 
-    private static bool AlwaysReturns(BoundStatement statement)
+    private bool DoesNotFallThrough(BoundStatement statement)
     {
         switch (statement)
         {
             case BoundReturn:
                 return true;
+            case BoundExpressionStatement { Expression: BoundCall call }:
+                return _signatures[call.Function].DoesNotReturn;
+            case BoundRequire { Condition: BoundConstant { Type: PrimitiveType.Bool, Value: 0 } }:
+                return true;
+            case BoundWhile { Condition: BoundConstant { Type: PrimitiveType.Bool, Value: 1 } }:
+                return true;
             case BoundIf conditional:
-                return conditional.Else is not null && AlwaysReturns(conditional.Then) && AlwaysReturns(conditional.Else);
+                if (conditional.Condition is BoundConstant { Type: PrimitiveType.Bool } condition)
+                {
+                    return condition.Value != 0 ? DoesNotFallThrough(conditional.Then)
+                        : conditional.Else is not null && DoesNotFallThrough(conditional.Else);
+                }
+                return conditional.Else is not null && DoesNotFallThrough(conditional.Then) && DoesNotFallThrough(conditional.Else);
             case BoundBlock block:
                 foreach (var child in block.Statements)
                 {
-                    if (AlwaysReturns(child))
+                    if (DoesNotFallThrough(child))
                     {
                         return true;
                     }
@@ -1750,5 +1774,5 @@ internal sealed class Binder
 
     private sealed record Signature(string Name, PrimitiveType ReturnType, ImmutableArray<Parameter> Parameters,
         SyntaxNode? Body, SyntaxNode? Declaration, SyntaxTree Tree, string? StructName, bool IsConstructor, bool IsPrivate,
-        bool IsInternal, bool IsMutable, bool IsStatic, bool IsNoThrow, BoundFunction? External = null);
+        bool IsInternal, bool IsMutable, bool IsStatic, bool IsNoThrow, bool DoesNotReturn, BoundFunction? External = null);
 }

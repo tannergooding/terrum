@@ -1,6 +1,6 @@
 # Windows x64 native profile
 
-`native-8` is a deliberately bounded executable language profile, separate from
+`native-9` is a deliberately bounded executable language profile, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
@@ -107,9 +107,34 @@ operating-system faults.
 The [no-throw sample](../samples/native/no-throw.terrum) returns 42 through
 checked constructors, methods, widening conversion and conditional output
 publication, using the same AOT/JIT encoder. `CharacterFacts` publishes
-NoThrow on its two comparison-only classification helpers. General attributes,
-`[DoesNotReturn]`, catch/cleanup and a catchable-exception runtime are not
-implemented by this contract increment.
+NoThrow on its two comparison-only classification helpers.
+
+## Checked normal-continuation contracts
+
+`[DoesNotReturn]` is a separate declaration guarantee on a `void` function,
+including a void instance/static method. It does not introduce a public bottom
+type or apply to a value-returning constructor or an asynchronously completed
+operation. The verifier rejects reachable returns and possible fallthrough;
+constant-true loops, statically false requirements and calls to other declared
+nonreturning functions can prove the bound. Unreachable statements still receive
+ordinary type/initialization checks, but an unreachable return does not violate
+the guarantee. Caller analysis uses the declaration, never the callee's current
+body.
+
+Such a call removes only its normal continuation. For example, a bool/out
+failure branch ending in a nonreturning call leaves only the successful,
+initialized output path at the join. It neither manufactures a false-path
+value nor removes potential failure effects. `[NoThrow]` and `[DoesNotReturn]`
+may be combined for an infallible nonterminating body, while `require false`
+satisfies only the no-normal-return guarantee. Both promises persist in module
+contracts and may independently strengthen, but not weaken, during replacement.
+
+The [no-return sample](../samples/native/no-return.terrum) returns 42 on success.
+Changing its entry to `Select(false)` reaches the nonreturning failure helper
+and terminates with the explicit requirement-failure status. AOT and JIT retain
+the same native call ABI; the no-return proof does not require a fabricated
+return value. Catch/cleanup, root tracking and a catchable-exception runtime
+remain unimplemented.
 
 ## Executable language
 
@@ -134,8 +159,9 @@ operand, not an implicit `int32` fallback. `var x = 1` is rejected; `var x = 1i3
 and `int32 x = 1` are accepted. A signed minimum literal can be constructed
 directly, without first overflowing its positive magnitude. Locals cannot be
 read before declaration/initialization, immutable bindings cannot be assigned,
-conditions must be boolean and non-void functions must return on all validated
-paths (loops are conservatively allowed to execute zero times). Function
+conditions must be boolean and non-void functions must return on every normally
+completing path. Constant-true loops and declared nonreturning calls can remove
+that continuation; other loop conditions remain conservative. Function
 overloading, active-scope local shadowing, named arguments, `ref`/`mut ref`
 passing and mutating instance methods are not supported.
 

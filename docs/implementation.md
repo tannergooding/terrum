@@ -1,10 +1,10 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-6 and native-8
+## Current boundary: syntax-6 and native-9
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
-immutable and usable independently. The separate [native-8 profile](native.md)
+immutable and usable independently. The separate [native-9 profile](native.md)
 binds a bounded scalar/compact-value language and emits Windows x64 executables through
 verified structured operations. A clean syntax result is deliberately not a
 valid-program claim: `var x = 1;` parses but semantic analysis rejects its missing
@@ -15,7 +15,7 @@ managed graphs and standard-library execution are not implemented.
 |---|---|---|
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
 | Lexing | Pinned Unicode identifiers, ASCII numbers/tags, comments, leading trivia, strings, diagnostics, EOF | Interpolation, raw/character/native literals, directives |
-| Declarations | Using, file-scoped namespaces, functions, compact structs with explicit fields/constructors/methods, checked `[NoThrow]`; library binding and one validated module reference per consumer | Classes, interfaces, enums/unions, general attributes, generic declarations/constraints, general module dependency graphs |
+| Declarations | Using, file-scoped namespaces, functions, compact structs with explicit fields/constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]`; library binding and one validated module reference per consumer | Classes, interfaces, enums/unions, general attributes, generic declarations/constraints, general module dependency graphs |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; repeated `?` diagnoses | General type resolution, optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, assignment and expression statements | `foreach`, break/continue, switch/patterns, exceptions, cleanup, async, compound assignment |
 | Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named/ref/out argument syntax | Character literals, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
@@ -79,10 +79,10 @@ Explicit `Option<Option<T>>` syntax is unchanged. `syntax-1` introduced this
 rejection rule; `syntax-2` added the lossless `RequireStatement` node.
 `syntax-6` includes scoped for-loops, parameterless declaration attributes and
 checked casts for supported 32- and 64-bit integer types and `char16`.
-Only `[NoThrow]` on functions and constructors is currently bound; unknown,
-duplicate and misplaced attributes diagnose rather than becoming unchecked
-metadata. Attribute nodes retain their brackets and name as three children.
-The `native-8` profile supports checked
+`[NoThrow]` on functions/constructors and `[DoesNotReturn]` on void functions are
+currently bound; unknown, duplicate and misplaced attributes diagnose rather
+than becoming unchecked metadata. Attribute nodes retain their brackets and
+name as three children. The `native-9` profile supports checked
 signed/unsigned 32- and 64-bit integers, raw code units, conditional outputs,
 fixed host-buffer capabilities and acyclic value layouts up to 16 bytes.
 Fields are read-only after construction unless explicitly declared `mut`.
@@ -100,7 +100,12 @@ accepts comparisons, bitwise operations, fields, total numeric conversions
 and calls to other declared NoThrow functions. It conservatively rejects
 checked arithmetic, potentially failing conversions and buffer access without
 range or invariant inference. The [native contract](native.md) describes
-these limits; catch/cleanup and other effect annotations remain unsupported.
+these limits. `BoundFunction.DoesNotReturn` separately removes a call's normal
+continuation. Its implementation must have no reachable return or fallthrough
+(`TRM3018`). Constant-true loops, statically false requirements and declared
+nonreturning calls can establish that proof. Unreachable syntax and IR still
+undergo type and initialization checks; an unreachable return is not evidence
+of normal completion. Catch/cleanup and other effect annotations remain unsupported.
 Existing single-source compiler JSON remains schema 1;
 scanner and multi-source diagnostic schemas are versioned separately below.
 

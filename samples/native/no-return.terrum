@@ -1,0 +1,29 @@
+[DoesNotReturn]
+void Reject()
+{
+    require false;
+}
+
+bool TrySelect(bool success, out int32 value)
+{
+    if (!success)
+    {
+        return false;
+    }
+    value = 42;
+    return true;
+}
+
+int32 Select(bool success)
+{
+    if (!TrySelect(success, out var value))
+    {
+        Reject();
+    }
+    return value;
+}
+
+int32 Main()
+{
+    return Select(true);
+}

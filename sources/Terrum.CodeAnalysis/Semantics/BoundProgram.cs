@@ -78,6 +78,9 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     /// <summary>Whether the declaration guarantees no language-level throwing effects; implementations must prove this bound.</summary>
     public bool IsNoThrow { get; init; }
 
+    /// <summary>Whether this void declaration guarantees no normal continuation; exceptional or fatal failure remains possible.</summary>
+    public bool DoesNotReturn { get; init; }
+
     /// <summary>Whether this is an imported declaration with no implementation. Native emission requires it to be resolved.</summary>
     public bool IsExternal { get; init; }
 
