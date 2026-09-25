@@ -2,7 +2,22 @@
 
 This is an independently executed ABI prerequisite, **not implemented Terrum
 exception syntax or a catchable compiler runtime**. Current Terrum artifacts
-still require the explicit fail-fast policy.
+still require the explicit fail-fast policy. Compiler-generated source
+functions now preserve RBP with shared PE/JIT unwind metadata and keep
+outgoing stack arguments RSP-relative, but do not yet have a language handler
+or exceptional cleanup dispatch. Normal-exit cleanup funclets borrow the
+source frame through RDX and are called explicitly.
+
+`dotnet run --file scripts\check-native-frame.cs` separately loads a
+compiler-generated DLL into a C caller. It checks normal cleanup, stack arguments
+and published outputs, then inspects and unwinds foreign faults in both a source
+function and a cleanup funclet. The latter deliberately receives an invalid parent
+address: `RtlVirtualUnwind` must use the funclet's own RSP-based frame and restore
+the caller's saved RBP, not treat its borrowed parent address as the unwind frame.
+The enclosing C handlers, not Terrum, contain these test-only foreign faults.
+Synthetic contexts additionally check both prologs before the RBP push, after
+the push, after stack allocation and after setting the frame base. Each unwind
+must recover the original return address, RSP and saved RBP.
 
 From the repository root, with Visual Studio x64 C++ build tools installed:
 
@@ -70,11 +85,11 @@ be modeled by eagerly running it before filter selection.
 ## Remaining integration
 
 This proof does not establish Terrum exception identity, allocation/low-memory
-behavior, unsafe recovery checking, structured cleanup and partial-output
-verification, compiler-generated funclets, GC roots, module exception contracts,
+behavior, unsafe recovery checking, exceptional cleanup and partial-output
+verification, exception-handler funclets, GC roots, module exception contracts,
 or containment at foreign callback boundaries. It also does not authorize
 catching arbitrary Windows faults as Terrum exceptions. Those semantics must
 be implemented before offering a different runtime policy. The shared AOT/JIT
-unwind writer currently emits the existing no-handler allocation record only;
-this probe remains separate until structured regions can supply verified
-handler and scope metadata.
+unwind writer currently emits no-handler allocation records, with saved-RBP
+entries for source functions and normal cleanup funclets; this probe remains
+separate until structured regions can supply verified handler and scope metadata.

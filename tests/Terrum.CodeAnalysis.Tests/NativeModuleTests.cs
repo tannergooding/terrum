@@ -5,6 +5,7 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
@@ -107,6 +108,88 @@ public sealed class NativeModuleTests
             StringComparison.Ordinal));
         Assert.Equal(unchecked((int)0xE0540003),
             await NativeModuleCompiler.RunAsync(failed, original, TimeSpan.FromSeconds(10)).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public async Task PersistedConsumerExecutesReplacementCleanupFuncletsAsync()
+    {
+        const string Source = """
+            [NoThrow] int32 Value() { return 42; }
+            public bool Take(out int32 result) {
+                try { return true; }
+                finally { result = Value(); }
+            }
+            """;
+        var original = Producer(Source, exports: ["Take"]);
+        var replacement = Producer(Source.Replace("return 42;", "return 43;", StringComparison.Ordinal),
+            exports: ["Take"]);
+        var consumer = ConsumerPackage(original, "int32 Main() { require Take(out var value); return value; }");
+        NativeModuleCompiler.Validate(consumer, original);
+        NativeModuleCompiler.Validate(consumer, replacement);
+        Assert.Equal(42, await NativeModuleCompiler.RunAsync(consumer, original, TimeSpan.FromSeconds(10)));
+        Assert.Equal(43, await NativeModuleCompiler.RunAsync(consumer, replacement, TimeSpan.FromSeconds(10)));
+
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(
+            RedirectFirstExport(original, lastRange: true)));
+    }
+
+    [Fact]
+    public async Task OriginalNativeProfileConsumerRunsOriginalAndSavedFrameProducerAsync()
+    {
+        // These native-10/package-1 artifacts were produced by f6f410c before saved-RBP lowering.
+        var directory = Path.Combine(AppContext.BaseDirectory, "Fixtures", "Native");
+        var consumer = await File.ReadAllBytesAsync(Path.Combine(directory, "cleanup-consumer.trmn"));
+        var original = await File.ReadAllBytesAsync(Path.Combine(directory, "cleanup-provider-v1.trmn"));
+        Assert.Equal("AE7DC18A017D27D97E6022A0139294FA98CB0810AFA470FD5CD3B8E031A88C0B",
+            Convert.ToHexString(SHA256.HashData(consumer)));
+        Assert.Equal("236BFF61904E3C18DE5632B38E8D340539859A634B2B634C67185D4FCD6ECF80",
+            Convert.ToHexString(SHA256.HashData(original)));
+        const string Replacement = """
+            [NoThrow] void Disturb() { }
+            public int32 Read() {
+                mut int32 value = 43;
+                try { return value; }
+                finally { value = 0; Disturb(); }
+            }
+            """;
+        var updated = Producer(Replacement, identity: "Cleanup", exports: ["Read"]);
+        NativeModuleCompiler.Validate(consumer, original);
+        NativeModuleCompiler.Validate(consumer, updated);
+        Assert.Equal(42, await NativeModuleCompiler.RunAsync(consumer, original, TimeSpan.FromSeconds(10)));
+        Assert.Equal(43, await NativeModuleCompiler.RunAsync(consumer, updated, TimeSpan.FromSeconds(10)));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(
+            RedirectFirstExport(original, lastRange: false)));
+        var shortSource = (byte[])original.Clone();
+        var image = 18 + shortSource[7] + shortSource[8]
+            + BinaryPrimitives.ReadInt32LittleEndian(shortSource.AsSpan(10, 4));
+        using var reader = new PEReader(new MemoryStream(shortSource, image,
+            BinaryPrimitives.ReadInt32LittleEndian(shortSource.AsSpan(14, 4))));
+        var pdata = Assert.Single(reader.PEHeaders.SectionHeaders, section => section.Name == ".pdata");
+        var entry = image + pdata.PointerToRawData + (4 * 12);
+        var begin = BinaryPrimitives.ReadInt32LittleEndian(shortSource.AsSpan(entry, 4));
+        BinaryPrimitives.WriteInt32LittleEndian(shortSource.AsSpan(entry + 4, 4), begin + 6);
+        SHA256.HashData(shortSource.AsSpan(0, shortSource.Length - 32)).CopyTo(shortSource, shortSource.Length - 32);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(shortSource));
+    }
+
+    private static byte[] RedirectFirstExport(byte[] original, bool lastRange)
+    {
+        var changed = (byte[])original.Clone();
+        var image = 18 + changed[7] + changed[8]
+            + BinaryPrimitives.ReadInt32LittleEndian(changed.AsSpan(10, 4));
+        using var reader = new PEReader(new MemoryStream(changed, image,
+            BinaryPrimitives.ReadInt32LittleEndian(changed.AsSpan(14, 4))));
+        var header = Assert.IsType<PEHeader>(reader.PEHeaders.PEHeader);
+        var pdata = Assert.Single(reader.PEHeaders.SectionHeaders, section => section.Name == ".pdata");
+        var edata = Assert.Single(reader.PEHeaders.SectionHeaders, section => section.Name == ".edata");
+        var at = image + pdata.PointerToRawData + (lastRange ? header.ExceptionTableDirectory.Size - 12 : 0);
+        var targetRva = BinaryPrimitives.ReadInt32LittleEndian(changed.AsSpan(at, 4));
+        var exportDirectory = image + edata.PointerToRawData;
+        var tableRva = BinaryPrimitives.ReadInt32LittleEndian(changed.AsSpan(exportDirectory + 28, 4));
+        var table = exportDirectory + tableRva - edata.VirtualAddress;
+        BinaryPrimitives.WriteInt32LittleEndian(changed.AsSpan(table, 4), targetRva);
+        SHA256.HashData(changed.AsSpan(0, changed.Length - 32)).CopyTo(changed, changed.Length - 32);
+        return changed;
     }
 
     [Fact]
@@ -220,6 +303,72 @@ public sealed class NativeModuleTests
         wrongImport[importImage + importName + 7] = (byte)'X';
         Rehash(wrongImport);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Validate(wrongImport, original));
+        var wrongUnwind = (byte[])original.Clone();
+        var xdata = -1;
+        var pdata = -1;
+        var text = -1;
+        var textRva = -1;
+        var edata = -1;
+        var edataRva = -1;
+        var sections = pe + 24 + 0xF0;
+        for (var section = 0; section < 5; section++)
+        {
+            var at = image + sections + (section * 40);
+            if (wrongUnwind.AsSpan(at, 6).SequenceEqual(".xdata"u8))
+            {
+                xdata = BinaryPrimitives.ReadInt32LittleEndian(wrongUnwind.AsSpan(at + 20, 4));
+            }
+            else if (wrongUnwind.AsSpan(at, 6).SequenceEqual(".pdata"u8))
+            {
+                pdata = BinaryPrimitives.ReadInt32LittleEndian(wrongUnwind.AsSpan(at + 20, 4));
+            }
+            else if (wrongUnwind.AsSpan(at, 5).SequenceEqual(".text"u8))
+            {
+                textRva = BinaryPrimitives.ReadInt32LittleEndian(wrongUnwind.AsSpan(at + 12, 4));
+                text = BinaryPrimitives.ReadInt32LittleEndian(wrongUnwind.AsSpan(at + 20, 4));
+            }
+            else if (wrongUnwind.AsSpan(at, 6).SequenceEqual(".edata"u8))
+            {
+                edataRva = BinaryPrimitives.ReadInt32LittleEndian(wrongUnwind.AsSpan(at + 12, 4));
+                edata = BinaryPrimitives.ReadInt32LittleEndian(wrongUnwind.AsSpan(at + 20, 4));
+            }
+        }
+        Assert.True(xdata >= 0 && pdata >= 0 && text >= 0 && edata >= 0);
+        var savedFrameInfo = image + xdata + (4 * 8); // Four process-failure helpers precede DLL source functions.
+        Assert.Equal(3, wrongUnwind[savedFrameInfo + 2]);
+        wrongUnwind[savedFrameInfo + 9] ^= 1; // Corrupt the saved-RBP unwind operation.
+        Rehash(wrongUnwind);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongUnwind));
+        var wrongBasicUnwind = (byte[])original.Clone();
+        wrongBasicUnwind[image + xdata + 5] ^= 1;
+        Rehash(wrongBasicUnwind);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongBasicUnwind));
+        var wrongRange = (byte[])original.Clone();
+        wrongRange[image + pdata + 8] ^= 1; // The first .pdata record no longer points into .xdata.
+        Rehash(wrongRange);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongRange));
+        var wrongProlog = (byte[])original.Clone();
+        var sourceRva = BinaryPrimitives.ReadInt32LittleEndian(wrongProlog.AsSpan(image + pdata + (4 * 12), 4));
+        Assert.Equal((byte)0x55, wrongProlog[image + text + sourceRva - textRva]);
+        wrongProlog[image + text + sourceRva - textRva] = 0x90;
+        Rehash(wrongProlog);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(wrongProlog));
+        var shortBasic = (byte[])original.Clone();
+        var helperRva = BinaryPrimitives.ReadInt32LittleEndian(shortBasic.AsSpan(image + pdata, 4));
+        BinaryPrimitives.WriteInt32LittleEndian(shortBasic.AsSpan(image + pdata + 4, 4), helperRva + 6);
+        Rehash(shortBasic);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(shortBasic));
+        var shortSaved = (byte[])original.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(shortSaved.AsSpan(image + pdata + (4 * 12) + 4, 4), sourceRva + 10);
+        Rehash(shortSaved);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(shortSaved));
+        var helperExport = (byte[])original.Clone();
+        var directory = image + edata;
+        var exportTableRva = BinaryPrimitives.ReadInt32LittleEndian(helperExport.AsSpan(directory + 28, 4));
+        BinaryPrimitives.WriteInt32LittleEndian(helperExport.AsSpan(
+            directory + exportTableRva - edataRva, 4), helperRva);
+        Rehash(helperExport);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(helperExport));
 
         static void Rehash(byte[] artifact)
         {

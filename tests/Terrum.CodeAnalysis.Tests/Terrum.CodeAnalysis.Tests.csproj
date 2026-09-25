@@ -9,6 +9,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\sources\Terrum.CodeAnalysis\Terrum.CodeAnalysis.csproj" />
     <ProjectReference Include="..\..\sources\terrumc\terrumc.csproj" ReferenceOutputAssembly="false" />
+    <None Include="Fixtures\Native\*.trmn" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -42,7 +42,11 @@ internal static class PeImage
         var pdataSize = checked(NativeUnwind.RuntimeFunctionSize * functions.Length);
         var pdataRva = Align(writableLength != 0 ? writableRva + writableLength
             : readOnlyLength != 0 ? readOnlyRva + readOnlyLength : dataRva + importTableSize, SectionAlignment);
-        var xdataSize = checked(NativeUnwind.InfoSize * functions.Length);
+        var xdataSize = 0;
+        foreach (var function in functions)
+        {
+            xdataSize = checked(xdataSize + NativeUnwind.InfoSize(function));
+        }
         var xdataRva = Align(pdataRva + pdataSize, SectionAlignment);
         var exportSize = 0;
         if (exports is not null)
@@ -87,12 +91,14 @@ internal static class PeImage
             Write32(image, textFile + fixup.DisplacementOffset,
                 checked(targetRva - (textRva + fixup.DisplacementOffset + 4)));
         }
+        var infoOffset = 0;
         for (var range = 0; range < functions.Length; range++)
         {
             var function = functions[range];
             NativeUnwind.WriteFunction(image.AsSpan(pdataFile + (range * NativeUnwind.RuntimeFunctionSize)),
-                function, textRva, xdataRva + (range * NativeUnwind.InfoSize));
-            NativeUnwind.WriteInfo(image.AsSpan(xdataFile + (range * NativeUnwind.InfoSize)), function.StackSize);
+                function, textRva, xdataRva + infoOffset);
+            NativeUnwind.WriteInfo(image.AsSpan(xdataFile + infoOffset, NativeUnwind.InfoSize(function)), function);
+            infoOffset += NativeUnwind.InfoSize(function);
         }
         if (exports is not null)
         {
@@ -111,8 +117,9 @@ internal static class PeImage
             Write32(image, exportFile + 28, exportRva + functionsAt);
             Write32(image, exportFile + 32, exportRva + namesAt);
             Write32(image, exportFile + 36, exportRva + ordinalsAt);
-            // The encoder appends source-function ranges after its runtime failure helpers.
-            var sourceStart = functions.Length - sourceFunctionCount;
+            // Cleanup funclets follow the source functions and must never become exports.
+            var sourceStart = functions.Length - sourceFunctionCount
+                - functions.Count(static function => function.UsesParentFrame);
             for (var i = 0; i < count; i++)
             {
                 var (name, index) = exports[i];

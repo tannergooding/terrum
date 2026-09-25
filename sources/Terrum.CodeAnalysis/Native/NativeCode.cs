@@ -34,8 +34,15 @@ public sealed record NativeCode(byte[] Code, int EntryPoint, ImmutableArray<Nati
     internal ImmutableArray<NativeImportFixup> NativeImports { get; init; } = [];
 }
 
-/// <summary>A machine-code range with an rsp allocation in its prolog.</summary>
-public readonly record struct NativeFunctionRange(int Start, int End, int StackSize);
+/// <summary>A machine-code range with a bounded stack frame and matching Windows x64 unwind metadata.</summary>
+public readonly record struct NativeFunctionRange(int Start, int End, int StackSize)
+{
+    /// <summary>The prolog saves RBP and addresses frame slots relative to its stable post-allocation value.</summary>
+    public bool UsesFramePointer { get; init; }
+
+    /// <summary>The prolog receives the source function's frame base in RDX, for an out-of-line cleanup.</summary>
+    public bool UsesParentFrame { get; init; }
+}
 
 /// <summary>A RIP-relative displacement in code targeting an offset in the data image.</summary>
 public readonly record struct NativeDataFixup(int DisplacementOffset, int DataOffset);

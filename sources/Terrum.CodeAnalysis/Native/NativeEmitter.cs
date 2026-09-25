@@ -211,6 +211,8 @@ internal sealed class PeCompiler
     private readonly int[] _returnSlots;
     private readonly List<(int Offset, int Target)> _calls = new();
     private readonly List<(int Offset, int Target)> _runtimeCalls = new();
+    private readonly List<(int Offset, int Target)> _cleanupCalls = [];
+    private readonly List<(BoundBlock Body, int Function, int Start, int End)> _funclets = [];
     private readonly List<int> _imports = new();
     private readonly List<NativeImportFixup> _nativeImportFixups = [];
     private readonly List<NativeDataFixup> _dataFixups = [];
@@ -226,7 +228,7 @@ internal sealed class PeCompiler
     private int _outBase;
     private int _returnSlot;
     private int _currentFunction;
-    private readonly List<BoundBlock> _cleanups = [];
+    private readonly List<int> _cleanups = [];
 
     internal PeCompiler(BoundProgram program, CancellationToken cancellationToken, bool library = false,
         IReadOnlyDictionary<int, NativeImportBinding>? imports = null)
@@ -321,6 +323,7 @@ internal sealed class PeCompiler
             {
                 required = ((required + 15) & ~15L) + 16;
             }
+            required += 8; // Saved RBP lives above the addressable frame slots.
             if (required > MaximumFrame)
             {
                 throw new NotSupportedException("Native frame exceeds the 3840-byte page-safe ceiling.");
@@ -384,7 +387,10 @@ internal sealed class PeCompiler
             _outBase = _outBases[i];
             _returnSlot = _returnSlots[i];
             _cleanups.Clear();
-            Prolog(_frame);
+            _code.Byte(0x55); // push rbp
+            Prolog(_frame - 8);
+            _code.Bytes(0x48, 0x89, 0xE5); // mov rbp,rsp
+            _code.UseFramePointer = true;
             var hidden = IsIndirect(function.ReturnType) ? 1 : 0;
             if (hidden != 0)
             {
@@ -447,6 +453,28 @@ internal sealed class PeCompiler
             }
         }
 
+        for (var index = 0; index < _funclets.Count; index++)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            var (body, function, _, _) = _funclets[index];
+            _currentFunction = function;
+            _frame = _frames[function];
+            _spillBase = _spillBases[function];
+            _outBase = _outBases[function];
+            _returnSlot = _returnSlots[function];
+            var start = _code.Position;
+            _code.Byte(0x55); // push rbp
+            Prolog(_frame - 8);
+            _code.Bytes(0x48, 0x89, 0xD5); // mov rbp,rdx: the source function's frame base
+            Statement(body);
+            Epilog();
+            _funclets[index] = (body, function, start, _code.Position);
+            if (_code.Position > MaximumText)
+            {
+                throw new NotSupportedException("Native text exceeds the 8 MiB image ceiling.");
+            }
+        }
+
         foreach (var (offset, target) in _calls)
         {
             _code.PatchRelative(offset, _starts[target]);
@@ -455,26 +483,37 @@ internal sealed class PeCompiler
         {
             _code.PatchRelative(offset, _failureStarts[target]);
         }
-        var functions = new List<(int Start, int End, int Frame)>();
+        foreach (var (offset, target) in _cleanupCalls)
+        {
+            _code.PatchRelative(offset, _funclets[target].Start);
+        }
+        var functions = new List<NativeFunctionRange>();
         if (!_library)
         {
-            functions.Add((_entryStart, _entryEnd, 40));
-            functions.Add((processEntry, processEnd, 40));
+            functions.Add(new NativeFunctionRange(_entryStart, _entryEnd, 40));
+            functions.Add(new NativeFunctionRange(processEntry, processEnd, 40));
         }
         for (var i = 0; i < _failureStarts.Length; i++)
         {
-            functions.Add((_failureStarts[i], _failureEnds[i], 40));
+            functions.Add(new NativeFunctionRange(_failureStarts[i], _failureEnds[i], 40));
         }
         for (var i = 0; i < _starts.Length; i++)
         {
             if (!_program.Functions[i].IsExternal)
             {
-                functions.Add((_starts[i], _ends[i], _frames[i]));
+                functions.Add(new NativeFunctionRange(_starts[i], _ends[i], _frames[i]) { UsesFramePointer = true });
             }
+        }
+        foreach (var (_, function, start, end) in _funclets)
+        {
+            functions.Add(new NativeFunctionRange(start, end, _frames[function]) {
+                UsesFramePointer = true,
+                UsesParentFrame = true,
+            });
         }
 
         return new NativeCode(_code.ToArray(), _entryStart,
-            [.. functions.ConvertAll(static range => new NativeFunctionRange(range.Start, range.End, range.Frame))],
+            [.. functions],
             [.. _imports]) {
             AotEntryPoint = processEntry,
             Data = _data,
@@ -650,7 +689,11 @@ internal sealed class PeCompiler
     private void Epilog()
     {
         _code.Bytes(0x48, 0x81, 0xC4);
-        _code.Int32(_frame);
+        _code.Int32(_frame - (_code.UseFramePointer ? 8 : 0));
+        if (_code.UseFramePointer)
+        {
+            _code.Byte(0x5D); // pop rbp
+        }
         _code.Byte(0xC3);
     }
 
@@ -661,6 +704,12 @@ internal sealed class PeCompiler
         var skip = _code.JumpIf((byte)(condition ^ 1));
         _runtimeCalls.Add((_code.RelativeCall(), target));
         _code.PatchRelative(skip, _code.Position);
+    }
+
+    private void CallCleanup(int index)
+    {
+        _code.Bytes(0x48, 0x89, 0xEA); // mov rdx,rbp: pass the owning function's frame base
+        _cleanupCalls.Add((_code.RelativeCall(), index));
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The verifier excludes other structured statement variants.")]
@@ -750,7 +799,7 @@ internal sealed class PeCompiler
                 }
                 for (var index = _cleanups.Count - 1; index >= 0; index--)
                 {
-                    Statement(_cleanups[index]);
+                    CallCleanup(_cleanups[index]);
                 }
                 if (result.Value is not null)
                 {
@@ -772,10 +821,12 @@ internal sealed class PeCompiler
                 Epilog();
                 break;
             case BoundTryFinally cleanup:
-                _cleanups.Add(cleanup.Finally);
+                var funclet = _funclets.Count;
+                _funclets.Add((cleanup.Finally, _currentFunction, 0, 0));
+                _cleanups.Add(funclet);
                 Statement(cleanup.Body);
                 _cleanups.RemoveAt(_cleanups.Count - 1);
-                Statement(cleanup.Finally);
+                CallCleanup(funclet);
                 break;
             case BoundIf conditional:
                 Expression(conditional.Condition, 0);
@@ -1008,7 +1059,7 @@ internal sealed class PeCompiler
                     {
                         LoadValue(Spill(argumentsBase + i), call.Arguments[i].Type);
                     }
-                    _code.Store64(32 + (8 * (i + hidden - 4)));
+                    _code.StoreOutgoing64(32 + (8 * (i + hidden - 4)));
                 }
                 for (var i = 0; i < Math.Min(4 - hidden, call.Arguments.Length); i++)
                 {
@@ -1318,6 +1369,7 @@ internal sealed class PeCompiler
 internal sealed class MachineCode
 {
     private readonly List<byte> _bytes = new();
+    internal bool UseFramePointer { get; set; }
     internal int Position => _bytes.Count;
     internal void Byte(byte value) => _bytes.Add(value);
     internal void Bytes(params byte[] values) => _bytes.AddRange(values);
@@ -1380,14 +1432,28 @@ internal sealed class MachineCode
     }
     internal void Load(int offset)
     {
-        Bytes(0x8B, 0x84, 0x24);
+        if (UseFramePointer)
+        {
+            Bytes(0x8B, 0x85);
+        }
+        else
+        {
+            Bytes(0x8B, 0x84, 0x24);
+        }
         Int32(offset);
     }
     internal void Load64(int offset, bool destinationRegister = false)
     {
         if (destinationRegister)
         {
-            Bytes(0x48, 0x8B, 0x94, 0x24);
+            if (UseFramePointer)
+            {
+                Bytes(0x48, 0x8B, 0x95);
+            }
+            else
+            {
+                Bytes(0x48, 0x8B, 0x94, 0x24);
+            }
             Int32(offset);
         }
         else
@@ -1398,17 +1464,29 @@ internal sealed class MachineCode
     }
     internal void LoadUnsigned(int offset, int width)
     {
-        Bytes(0x0F, width == 1 ? (byte)0xB6 : (byte)0xB7, 0x84, 0x24);
+        Bytes(0x0F, width == 1 ? (byte)0xB6 : (byte)0xB7, UseFramePointer ? (byte)0x85 : (byte)0x84);
+        if (!UseFramePointer)
+        {
+            Byte(0x24);
+        }
         Int32(offset);
     }
     internal void Address(int offset)
     {
-        Bytes(0x48, 0x8D, 0x84, 0x24);
+        Bytes(0x48, 0x8D, UseFramePointer ? (byte)0x85 : (byte)0x84);
+        if (!UseFramePointer)
+        {
+            Byte(0x24);
+        }
         Int32(offset);
     }
     internal void AddressToRdx(int offset)
     {
-        Bytes(0x48, 0x8D, 0x94, 0x24);
+        Bytes(0x48, 0x8D, UseFramePointer ? (byte)0x95 : (byte)0x94);
+        if (!UseFramePointer)
+        {
+            Byte(0x24);
+        }
         Int32(offset);
     }
     internal void PointerOffset(int offset)
@@ -1472,7 +1550,19 @@ internal sealed class MachineCode
     }
     internal void Store(int offset)
     {
-        Bytes(0x89, 0x84, 0x24);
+        if (UseFramePointer)
+        {
+            Bytes(0x89, 0x85);
+        }
+        else
+        {
+            Bytes(0x89, 0x84, 0x24);
+        }
+        Int32(offset);
+    }
+    internal void StoreOutgoing64(int offset)
+    {
+        Bytes(0x48, 0x89, 0x84, 0x24);
         Int32(offset);
     }
     internal void Store64(int offset)
@@ -1492,11 +1582,15 @@ internal sealed class MachineCode
         }
         if (width == 1)
         {
-            Bytes(0x88, 0x84, 0x24);
+            Bytes(0x88, UseFramePointer ? (byte)0x85 : (byte)0x84);
         }
         else
         {
-            Bytes(0x89, 0x84, 0x24);
+            Bytes(0x89, UseFramePointer ? (byte)0x85 : (byte)0x84);
+        }
+        if (!UseFramePointer)
+        {
+            Byte(0x24);
         }
         Int32(offset);
     }
@@ -1510,11 +1604,16 @@ internal sealed class MachineCode
         {
             Byte(0x48);
         }
-        Bytes(0x89, argument switch {
+        var register = argument switch {
             0 or 3 => 0x8C,
             1 => 0x94,
             _ => 0x84,
-        }, 0x24);
+        };
+        Bytes(0x89, (byte)(register + (UseFramePointer ? 1 : 0)));
+        if (!UseFramePointer)
+        {
+            Byte(0x24);
+        }
         Int32(offset);
     }
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Stack arguments are handled by the caller; only the first four use registers.")]

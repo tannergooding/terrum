@@ -78,6 +78,10 @@ public sealed class JitTests
     [InlineData("bool Take(out int32 x) { try { return true; } finally { x = 42; } } int32 Main() { require Take(out var x); return x; }", 42)]
     [InlineData("bool Take(out int32 x) { try { return false; } finally { x = 42; } } int32 Main() { mut int32 x = 9; bool ok = Take(out x); if (ok) { return 0; } return 42; }", 42)]
     [InlineData("bool Take(out int32 x) { x = 42; mut bool ok = true; try { return ok; } finally { ok = false; } } int32 Main() { require Take(out var x); return x; }", 42)]
+    [InlineData("int32 Main() { mut int32 value = 0; try { try { value = 1; } finally { value = Sixth(1, 2, 3, 4, 5, 42); } } finally { value = Sixth(1, 2, 3, 4, 5, value); } return value; } [NoThrow] int32 Sixth(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { return f; }", 42)]
+    [InlineData("struct Value { public int32 A; public int32 B; public int32 C; public Value(int32 a) { A = a; B = 2; C = 3; } } int32 Mix(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { return a + b + c + d + e + f; } int32 Main() { Value value = new Value(42); return Mix(value.A, 2, 3, 4, 5, 6); }", 62)]
+    [InlineData("[NoThrow] int32 Value() { return 42; } bool Take(out int32 result) { try { return true; } finally { result = Value(); } } int32 Main() { require Take(out var result); return result; }", 42)]
+    [InlineData("int32 Main() { mut int32 value = 0; try { value = 1; } finally { try { value = 2; } finally { value = 42; } } return value; }", 42)]
     public async Task WorkerAndNativeExecutableAgreeAsync(string source, int expected)
     {
         AssertWindowsX64();

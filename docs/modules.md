@@ -195,6 +195,17 @@ version 9 without structured cleanup regions, are rejected;
 recreate them from source. Multi-producer identity/version resolution, dependency
 cycles and resilient public layouts remain later work.
 
+Native package validation checks both allocation-only and saved-RBP unwind
+records, their ordered `.pdata` ranges, `.xdata` bounds and corresponding
+machine-code prologs before accepting a replacement image. Source functions
+precede normal cleanup funclets; exports must point to source-function entries,
+never to funclets. The native package format is unchanged; these records do not
+enable catchable exceptions. Earlier native-10/package-1 images with
+allocation-only source frames remain valid: the four failure helpers (plus
+two consumer entry wrappers) precede the source functions in both layouts.
+Validation still rejects exports to helpers or funclets and unwind ranges
+shorter than their described prolog.
+
 `NativeEmitter.EmitLibrary` can instead emit a Windows x64 PE32+ DLL directly
 from a verified `Compilation.CreateLibrary` program and an explicit list of
 public function names. It has a conventional named export table, no process

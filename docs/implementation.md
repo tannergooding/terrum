@@ -292,7 +292,13 @@ are optional/versioned; validating structure is not optional.
 LMOD is the future independently versioned Terrum module/contract artifact, not
 a renamed CLI assembly or a PE file. The current backend emits Windows x64
 machine instructions and PE32+ images directly, with no CIL/LLVM translation
-or linker dependency. `BoundProgram` retains structured blocks, branches,
+or linker dependency. Source functions use a saved RBP frame base for
+locals and spills, separate from the RSP-relative outgoing call area. Shared
+PE/JIT unwind metadata describes both the saved register and allocation.
+Normal cleanup has out-of-line funclets that borrow the source frame in RDX
+while reserving their own call areas; they are invoked explicitly on normal
+exits. Exceptional cleanup and catchable runtime failures are not implemented.
+`BoundProgram` retains structured blocks, branches,
 loops, slot reads/writes and checked expressions; its verifier precedes
 machine lowering. It is not a claim to implement the complete semantic IL.
 Target-specific encodings, import fixups and unwind records live under `Native`,

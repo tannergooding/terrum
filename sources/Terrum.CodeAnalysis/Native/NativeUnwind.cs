@@ -7,20 +7,32 @@ namespace Terrum.CodeAnalysis.Native;
 
 internal static class NativeUnwind
 {
-    internal const int InfoSize = 8;
+    internal const int BasicInfoSize = 8;
+    internal const int FramePointerInfoSize = 12;
     internal const int RuntimeFunctionSize = 12;
 
-    internal static void WriteInfo(Span<byte> destination, int stackSize)
+    internal static int InfoSize(NativeFunctionRange function) =>
+        function.UsesFramePointer ? FramePointerInfoSize : BasicInfoSize;
+
+    internal static void WriteInfo(Span<byte> destination, NativeFunctionRange function)
     {
-        // UNWIND_INFO v1 for the shared seven-byte sub rsp, imm32 prolog.
-        // UWOP_ALLOC_LARGE (opinfo 0) uses two slots, with allocation in units of eight.
+        // UWOP_ALLOC_LARGE records the sub rsp operand. Saved-RBP functions also
+        // record the preceding push; RBP holds the post-allocation frame base.
         destination[0] = 1;
-        destination[1] = 7;
-        destination[2] = 2;
+        destination[1] = function.UsesFramePointer ? (byte)11 : (byte)7;
+        destination[2] = function.UsesFramePointer ? (byte)3 : (byte)2;
         destination[3] = 0;
-        destination[4] = 7;
+        destination[4] = function.UsesFramePointer ? (byte)8 : (byte)7;
         destination[5] = 1;
-        BinaryPrimitives.WriteUInt16LittleEndian(destination[6..], checked((ushort)(stackSize / 8)));
+        BinaryPrimitives.WriteUInt16LittleEndian(destination[6..],
+            checked((ushort)((function.StackSize - (function.UsesFramePointer ? 8 : 0)) / 8)));
+        if (function.UsesFramePointer)
+        {
+            destination[8] = 1;
+            destination[9] = 0x50; // UWOP_PUSH_NONVOL RBP, preceding the allocation
+            destination[10] = 0;
+            destination[11] = 0;
+        }
     }
 
     internal static void WriteFunction(Span<byte> destination, NativeFunctionRange function, int textRva, int unwindRva)

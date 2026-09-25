@@ -1,0 +1,10 @@
+public int32 Mix(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f)
+{
+    return a + b + c + d + e + f + 21;
+}
+
+public bool TryWrite(out int32 value)
+{
+    try { return true; }
+    finally { value = 42; }
+}

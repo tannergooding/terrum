@@ -7,11 +7,16 @@ using System.IO;
 using System.Linq;
 using System.Reflection.PortableExecutable;
 using System.Text;
+using Terrum.CodeAnalysis.Native;
 
 namespace Terrum.CodeAnalysis.Modules;
 
 internal static class NativeModuleImageValidator
 {
+    // The semantic verifier limits visited function/region nodes to 100,000;
+    // allow eight additional entry and process-failure helpers.
+    private const int MaximumUnwindRecords = 100_008;
+
     internal static void Validate(byte[] image, bool isConsumer, string providerDll, IReadOnlyList<string> exports)
     {
         try
@@ -101,7 +106,9 @@ internal static class NativeModuleImageValidator
                     throw Invalid();
                 }
             }
+            var sourceFunctionStarts = new HashSet<int>();
             CheckImports();
+            CheckUnwind();
             if (!isConsumer)
             {
                 CheckExports(exports);
@@ -261,6 +268,114 @@ internal static class NativeModuleImageValidator
                 }
             }
 
+            void CheckUnwind()
+            {
+                var table = header.ExceptionTableDirectory;
+                var infoSection = sections.Single(static section => section.Name == ".xdata");
+                if (table.Size % 12 != 0 || table.Size < 12
+                    || table.Size > MaximumUnwindRecords * NativeUnwind.RuntimeFunctionSize)
+                {
+                    throw Invalid();
+                }
+                // Both the original allocation-only images and the saved-frame images
+                // place four failure helpers (and two consumer entry wrappers) first.
+                var sourceStart = isConsumer ? 6 : 4;
+                if (table.Size / NativeUnwind.RuntimeFunctionSize <= sourceStart)
+                {
+                    throw Invalid();
+                }
+                var nextInfo = infoSection.VirtualAddress;
+                var previousEnd = sections.Single(static section => section.Name == ".text").VirtualAddress;
+                var sawSourceFrame = false;
+                var sawCleanupFrame = false;
+                var sawLegacySource = false;
+                for (var index = 0; index < table.Size / 12; index++)
+                {
+                    var at = Offset(table.RelativeVirtualAddress + (index * 12), 12, ".pdata");
+                    var begin = Read32(at);
+                    var end = Read32(at + 4);
+                    var unwind = Read32(at + 8);
+                    if (begin < previousEnd || end <= begin || unwind != nextInfo)
+                    {
+                        throw Invalid();
+                    }
+                    var info = Offset(unwind, 8, ".xdata");
+                    var savedFrame = image[info + 2] == 3;
+                    var size = savedFrame ? 12 : 8;
+                    if (end - begin < (savedFrame ? 11 : 7))
+                    {
+                        throw Invalid();
+                    }
+                    _ = Offset(begin, end - begin, ".text");
+                    info = Offset(unwind, size, ".xdata");
+                    if (image[info] != 1 || image[info + 1] != (savedFrame ? 11 : 7)
+                        || image[info + 2] != (savedFrame ? 3 : 2) || image[info + 3] != 0
+                        || image[info + 4] != (savedFrame ? 8 : 7) || image[info + 5] != 1
+                        || (savedFrame && (image[info + 8] != 1 || image[info + 9] != 0x50
+                            || image[info + 10] != 0 || image[info + 11] != 0)))
+                    {
+                        throw Invalid();
+                    }
+                    var allocation = 8 * BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(info + 6, 2));
+                    var stackSize = allocation + (savedFrame ? 8 : 0);
+                    if (stackSize is < 8 or > 0xF00 || (stackSize & 15) != 8)
+                    {
+                        throw Invalid();
+                    }
+                    var code = Offset(begin, savedFrame ? 11 : 7, ".text");
+                    if (savedFrame
+                        ? image[code] != 0x55 || image[code + 1] != 0x48 || image[code + 2] != 0x81
+                            || image[code + 3] != 0xEC
+                            || Read32(code + 4) != allocation
+                            || image[code + 8] != 0x48 || image[code + 9] != 0x89
+                            || image[code + 10] is not (0xE5 or 0xD5)
+                        : image[code] != 0x48 || image[code + 1] != 0x81 || image[code + 2] != 0xEC
+                            || Read32(code + 3) != allocation)
+                    {
+                        throw Invalid();
+                    }
+                    if (savedFrame)
+                    {
+                        if (index < sourceStart || sawLegacySource)
+                        {
+                            throw Invalid();
+                        }
+                        if (image[code + 10] == 0xD5)
+                        {
+                            if (!sawSourceFrame)
+                            {
+                                throw Invalid();
+                            }
+                            sawCleanupFrame = true;
+                        }
+                        else
+                        {
+                            if (sawCleanupFrame)
+                            {
+                                throw Invalid();
+                            }
+                            sawSourceFrame = true;
+                            _ = sourceFunctionStarts.Add(begin);
+                        }
+                    }
+                    else if (index >= sourceStart)
+                    {
+                        if (sawSourceFrame || sawCleanupFrame)
+                        {
+                            throw Invalid();
+                        }
+                        sawLegacySource = true;
+                        _ = sourceFunctionStarts.Add(begin);
+                    }
+                    previousEnd = end;
+                    nextInfo = checked(nextInfo + size);
+                }
+                if (nextInfo != infoSection.VirtualAddress + infoSection.VirtualSize)
+                {
+                    throw Invalid();
+                }
+            }
+
             void CheckExports(IReadOnlyList<string> expected)
             {
                 var table = header.ExportTableDirectory;
@@ -281,7 +396,8 @@ internal static class NativeModuleImageValidator
                     var ordinal = BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(Offset(ordinals + (index * 2), 2), 2));
                     var address = Rva32(functions + (index * 4));
                     _ = Offset(address, 1, ".text");
-                    if (ordinal != index || Name(Rva32(names + (index * 4))) != sorted[index])
+                    if (ordinal != index || !sourceFunctionStarts.Contains(address)
+                        || Name(Rva32(names + (index * 4))) != sorted[index])
                     {
                         throw Invalid();
                     }

@@ -148,6 +148,10 @@ termination from the bodies or contracts of other NoThrow callees.
 The backend snapshots scalar and compact aggregate pending results before
 cleanup, then commits bool/out outputs only when the earlier return predicate
 was true and the post-cleanup definite-assignment proof permits publication.
+Each cleanup region has one out-of-line normal-exit funclet. Its caller passes
+the owning source frame base in RDX; it preserves RBP, addresses shared slots
+through that parent frame, and reserves its own aligned ABI call area. Return
+and fallthrough edges call the funclet explicitly; no exceptional edge does.
 No owning values or destructor semantics are provided.
 
 The independent [Windows SEH ABI probe](native-seh.md) checks filter search,
@@ -342,9 +346,16 @@ initialized storage to 1,048,576 32-bit words.
 The x64 backend uses fixed stack frames, caller shadow space and aligned calls.
 The first four scalar arguments use RCX, RDX, R8 and R9; later arguments
 occupy stack slots. Live intermediate values and arguments are spilled across
-nested calls. Functions preserve nonvolatile registers and publish Windows
-unwind metadata for stack adjustment; those records support platform stack
-walking, not Terrum exception handling.
+nested calls. Source functions preserve RBP and address locals, spills and
+pending returns from the post-allocation RBP frame base; outgoing arguments
+remain RSP-relative in the ABI call area. Normal cleanup funclets load the
+owning function's frame base from RDX into their saved RBP and use a separate
+call area. PE and JIT share unwind records for the saved RBP and stack
+allocation; entry and failure helpers use allocation-only records. These
+records support platform stack walking, not Terrum exception handling.
+The independent generated-DLL probe executes cleanup from C, inspects its
+unwind record and unwinds through a foreign fault without consuming it:
+`dotnet run --file scripts\check-native-frame.cs`.
 
 Aggregate sizes of 1, 2, 4 and 8 bytes use integer carriers. Other supported
 sizes use pointers to caller-owned 16-byte-aligned copies. Indirect results

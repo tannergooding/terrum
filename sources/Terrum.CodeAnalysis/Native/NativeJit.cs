@@ -130,11 +130,20 @@ public static unsafe class NativeJit
         var containsEntry = false;
         foreach (var function in functions)
         {
+            var prologLength = function.UsesFramePointer ? 11 : 7;
             if (function.Start < previousEnd || function.Start < 0 || function.End > text.Length
-                || function.End - function.Start < 7 || function.StackSize is < 8 or > 0xF00
+                || function.End - function.Start < prologLength || function.StackSize is < 8 or > 0xF00
                 || (function.StackSize & 15) != 8
-                || text[function.Start] != 0x48 || text[function.Start + 1] != 0x81 || text[function.Start + 2] != 0xEC
-                || BinaryPrimitives.ReadInt32LittleEndian(text.AsSpan(function.Start + 3, 4)) != function.StackSize)
+                || (function.UsesParentFrame && !function.UsesFramePointer)
+                || (function.UsesFramePointer
+                    ? text[function.Start] != 0x55
+                        || text[function.Start + 1] != 0x48 || text[function.Start + 2] != 0x81
+                        || text[function.Start + 3] != 0xEC
+                        || BinaryPrimitives.ReadInt32LittleEndian(text.AsSpan(function.Start + 4, 4)) != function.StackSize - 8
+                        || text[function.Start + 8] != 0x48 || text[function.Start + 9] != 0x89
+                        || text[function.Start + 10] != (function.UsesParentFrame ? 0xD5 : 0xE5)
+                    : text[function.Start] != 0x48 || text[function.Start + 1] != 0x81 || text[function.Start + 2] != 0xEC
+                        || BinaryPrimitives.ReadInt32LittleEndian(text.AsSpan(function.Start + 3, 4)) != function.StackSize))
             {
                 throw new ArgumentException("Invalid native function range or prolog.", nameof(code));
             }
@@ -152,7 +161,12 @@ public static unsafe class NativeJit
         var tableOffset = checked(pointerOffset + sizeof(nint));
         var unwindOffset = checked(tableOffset + (functions.Length * NativeUnwind.RuntimeFunctionSize));
         var pageSize = Environment.SystemPageSize;
-        var codeSize = Align(checked(unwindOffset + (functions.Length * NativeUnwind.InfoSize)), pageSize);
+        var infoSize = 0;
+        foreach (var function in functions)
+        {
+            infoSize = checked(infoSize + NativeUnwind.InfoSize(function));
+        }
+        var codeSize = Align(checked(unwindOffset + infoSize), pageSize);
         var readOnlyOffset = codeSize;
         var writableOffset = Align(checked(readOnlyOffset + code.ReadOnlyDataLength), pageSize);
         var writableLength = data.Length - code.ReadOnlyDataLength;
@@ -223,13 +237,15 @@ public static unsafe class NativeJit
                     checked(target - (fixup.DisplacementOffset + sizeof(int))));
             }
 
+            var infoOffset = 0;
             for (var index = 0; index < functions.Length; index++)
             {
                 var function = functions[index];
                 var table = bytes.Slice(tableOffset + (index * NativeUnwind.RuntimeFunctionSize), NativeUnwind.RuntimeFunctionSize);
-                var unwindRva = unwindOffset + (index * NativeUnwind.InfoSize);
+                var unwindRva = unwindOffset + infoOffset;
                 NativeUnwind.WriteFunction(table, function, 0, unwindRva);
-                NativeUnwind.WriteInfo(bytes.Slice(unwindRva, NativeUnwind.InfoSize), function.StackSize);
+                NativeUnwind.WriteInfo(bytes.Slice(unwindRva, NativeUnwind.InfoSize(function)), function);
+                infoOffset += NativeUnwind.InfoSize(function);
             }
 
             if (!JitWindows.VirtualProtect(memory, (nuint)codeSize, 0x20, out _))
