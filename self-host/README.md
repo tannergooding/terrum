@@ -26,6 +26,8 @@ remain hosted in C#.
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and conditional bool/out publication |
 | [SourceLines](SourceLines.terrum) | Streaming line ranges and UTF-16 line/character mapping over an immutable source grant | Executed with conditional outputs; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
 | [SourceLineTests](SourceLineTests.terrum) | Shared line-range/position fixtures, invalid offsets and repeated queries | Executed natively with host-supplied expected records; no source normalization or default output values |
+| [StringLiteral](StringLiteral.terrum) | Validated quoted spelling and scalar decoding from the immutable UTF-16 source grant | Executed with conditional creation/reads, all supported escapes and exact source boundaries; not a runtime text representation |
+| [StringLiteralTests](StringLiteralTests.terrum) | Quoted-form validation, scalar values and rejection of offsets inside escapes or surrogate pairs | Shared host-lexer/compiled fixtures under both native runtime policies; failed calls publish no output |
 | [CharacterFacts](CharacterFacts.terrum) | Shared ASCII numeric and newline decisions | Executed with `char16` comparisons, checked numeric casts and verified NoThrow classification contracts |
 | [Token](Token.terrum) | Token category and nested source range | Executed as a 12-byte aggregate with independent producer/consumer artifacts |
 | [TokenCursor](TokenCursor.terrum) | Read-view traversal without copying backing storage or cleanup | Span indexing, matched access, stored backing dependencies, capture contract, constructor initialization |
@@ -55,6 +57,17 @@ using the host's allocated binary-search index. Break units belong to the preced
 line, and a trailing break creates a final empty line. This is an executed bounded
 component, not an implemented `SourceText` collection or an efficient indexed replacement.
 
+`StringLiteral.TryCreate` validates a complete quoted source range before
+publishing its spelling and scalar count. `TryReadScalar` reports a Unicode
+scalar as `int32` and the next absolute UTF-16 offset, rejecting offsets inside
+an escape or surrogate pair. Arbitrary-position reads rescan the prefix.
+`StringLiteralCursor` instead advances through verified boundaries in linear
+total time, publishing the scalar and next immutable cursor together.
+Neither form allocates an index or decoded buffer. The private construction invariant
+depends on the fixed immutable `Host.Source` grant, not on a retained pointer
+or a general text-view lifetime contract. The candidate does not allocate decoded
+text, normalize it, select a runtime encoding, or add native string expressions.
+
 The candidates reuse `Span<Token>`/`TextSpan` rather than imitating C# strings,
 `IEnumerator`, `ImmutableArray`, reflection, GC handles or compiler-generated
 state machines. A read cursor may forward backing dependencies; retaining its
@@ -66,7 +79,9 @@ token boundaries, keywords, leading trivia and lexical diagnostic decisions exec
 Integer magnitudes through the unsigned 64-bit range and explicit integer tags
 are decoded natively without assigning a default numeric type; larger magnitudes
 are reported as beyond the decoder's range, not lexical errors. Contextual
-literal binding, decoded strings and parser routines remain hosted. Keep shared
+literal binding and parser routines remain hosted. The string-literal candidate
+decodes scalars independently; it is not wired into the scanner side tables or
+the hosted semantic binder. Keep shared
 fixture expectations about observable ranges and contracts, not host object
 layouts. An independent compiler bootstrap requires rebuilding and comparing
 outputs, not merely parsing these files.

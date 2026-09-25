@@ -184,3 +184,32 @@ Native integer-decoder fixtures compare every published index, status, magnitude
 half, and suffix against a test-only independent `BigInteger` oracle, including
 zero padding, `2^63`, `ulong.MaxValue`, overflow, width tags, and noninteger
 numeric forms; repeated scans reset the published count.
+
+## Quoted-literal decoding candidate
+
+`self-host/StringLiteral.terrum` separately validates and decodes quoted source
+spelling against the same fixed immutable `Host.Source` grant. It is not a new
+scanner side table or a runtime `Text` implementation. `StringLiteral.TryCreate`
+checks the complete range, delimiters, raw scalars and escapes before publishing
+a compact spelling/count value. `TryReadScalar(position, out scalar, out next)`
+returns an `int32` Unicode scalar and the next absolute UTF-16 offset only at a
+scalar boundary. Opening/closing quotes, offsets inside escapes or surrogate
+pairs, and out-of-range positions fail without publishing outputs.
+
+The supported escapes are exactly `\n`, `\r`, `\t`, `\\`, `\"`, `\0`, four-digit
+`\u` and eight-digit `\U`. Both Unicode escape forms must individually denote
+scalars; two escaped surrogate values cannot form a valid pair. Raw paired UTF-16
+surrogates decode to one scalar. Embedded zero, noncharacters and combining
+sequences retain their values, without normalization. Invalid wide escapes
+are rejected without overflowing the native unsigned accumulator.
+
+The shared fixtures compare whole-literal acceptance with the host lexer and
+native decoded values/offsets with explicit spelling/scalar pairs under both
+runtime policies. They inspect every offset, repeat construction and reading,
+and check failed-output use is rejected. Arbitrary-position reads rescan the
+prefix to establish boundaries. `StringLiteralCursor.Create(literal)` and
+`cursor.TryRead(out scalar, out next)` provide linear sequential traversal;
+each next cursor is constructed only from a validated scalar boundary. Both
+forms agree on every scalar and source offset. This bounded compiler component
+is not an indexed or allocated string library. It retains no borrowed address
+and cannot change the immutable source grant on which its validation depends.

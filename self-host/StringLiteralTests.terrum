@@ -1,0 +1,81 @@
+namespace Terrum.CodeAnalysis;
+
+int32 CheckStringLiterals()
+{
+    mut int32 fixture = 0;
+    while (fixture < Host.ExpectedLiterals.Length / 4)
+    {
+        int32 start = Host.ExpectedLiterals[fixture * 4];
+        int32 length = Host.ExpectedLiterals[fixture * 4 + 1];
+        int32 count = Host.ExpectedLiterals[fixture * 4 + 2];
+        int32 firstScalar = Host.ExpectedLiterals[fixture * 4 + 3];
+        require SourceRange.TryCreate(start, length, out var spelling);
+        if (StringLiteral.TryCreate(spelling, out var literal))
+        {
+            if (count < 0 || literal.ScalarCount != count
+                || literal.Spelling.Start != start || literal.Spelling.Length != length)
+            {
+                return 1;
+            }
+            mut int32 seen = 0;
+            mut int32 at = start - 1;
+            while (at <= spelling.GetEnd())
+            {
+                if (literal.TryReadScalar(at, out var scalar, out var next))
+                {
+                    if (seen >= count) { return 2; }
+                    int32 record = (firstScalar + seen) * 3;
+                    if (at != Host.ExpectedScalars[record]
+                        || scalar != Host.ExpectedScalars[record + 1]
+                        || next != Host.ExpectedScalars[record + 2])
+                    {
+                        return 3;
+                    }
+                    seen = seen + 1;
+                }
+                at = at + 1;
+            }
+            if (seen != count) { return 4; }
+            if (literal.TryReadScalar(int32.MinValue, out var before, out var beforeNext)
+                || literal.TryReadScalar(int32.MaxValue, out var after, out var afterNext))
+            {
+                return 5;
+            }
+            mut StringLiteralCursor cursor = StringLiteralCursor.Create(literal);
+            mut int32 streamed = 0;
+            while (cursor.TryRead(out var scalar, out var next))
+            {
+                if (streamed >= count) { return 8; }
+                int32 record = (firstScalar + streamed) * 3;
+                if (cursor.Position != Host.ExpectedScalars[record]
+                    || scalar != Host.ExpectedScalars[record + 1]
+                    || next.Position != Host.ExpectedScalars[record + 2])
+                {
+                    return 9;
+                }
+                cursor = next;
+                streamed = streamed + 1;
+            }
+            if (streamed != count || cursor.Position != spelling.GetEnd() - 1)
+            {
+                return 10;
+            }
+        }
+        else if (count >= 0)
+        {
+            return 6;
+        }
+        fixture = fixture + 1;
+    }
+
+    require SourceRange.TryCreate(int32.MaxValue, 0, out var distant);
+    require SourceRange.TryCreate(0, int32.MaxValue, out var excessive);
+    require SourceRange.TryCreate(Host.Source.Length, 2, out var past);
+    if (StringLiteral.TryCreate(distant, out var distantLiteral)
+        || StringLiteral.TryCreate(excessive, out var excessiveLiteral)
+        || StringLiteral.TryCreate(past, out var pastLiteral))
+    {
+        return 7;
+    }
+    return 0;
+}
