@@ -1,0 +1,41 @@
+using Terrum.CodeAnalysis.Numerics64;
+namespace Terrum.CodeAnalysis.Tests;
+
+public static bool CheckWideAddition()
+{
+    if (TryAdd(int64.MaxValue, 1, out var tooLarge)
+        || TryAdd(int64.MinValue, -1, out var tooSmall))
+    {
+        return false;
+    }
+
+    require TryAdd(int64.MinValue, int64.MaxValue, out var negative);
+    require TryAdd(int64.MaxValue, 0, out var maximum);
+    require TryAdd(int64.MinValue, 0, out var minimum);
+
+    return negative == -1 && maximum == int64.MaxValue && minimum == int64.MinValue;
+}
+
+public static bool CheckWideDecimalAccumulation()
+{
+    mut uint64 value = 1844674407370955161;
+    require TryAccumulateDecimal(value, 5, uint64.MaxValue, out value);
+    require value == uint64.MaxValue;
+
+    if (TryAccumulateDecimal(value, 0, uint64.MaxValue, out value))
+    {
+        return false;
+    }
+
+    if (TryAccumulateDecimal(0, 10, uint64.MaxValue, out var notADigit)
+        || TryAccumulateDecimal(0, 1, 0, out var exceedsLimit)
+        || TryAccumulateDecimal(922337203685477580, 8, (uint64)int64.MaxValue, out var signedOverflow))
+    {
+        return false;
+    }
+
+    require TryAccumulateDecimal(922337203685477580, 7, (uint64)int64.MaxValue, out var maximumSigned);
+    require TryAccumulateDecimal(0, 0, 0, out value);
+
+    return maximumSigned == (uint64)int64.MaxValue && value == 0;
+}

@@ -484,7 +484,7 @@ internal sealed class Parser
         {
             left = Node(SyntaxKind.UnaryExpression, [Take(), ParseExpression(unaryPrecedence)]);
         }
-        else if (Current.Kind == TokenKind.OpenParen && Peek(1).Text is "int32" or "uint32" or "char16"
+        else if (Current.Kind == TokenKind.OpenParen && Peek(1).Text is "int32" or "uint32" or "int64" or "uint64" or "char16"
             && Peek(2).Kind == TokenKind.CloseParen)
         {
             left = Node(SyntaxKind.CastExpression, [Take(), Take(), Take(), ParseExpression(11)]);

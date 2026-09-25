@@ -113,6 +113,8 @@ public sealed class CliTests
     [InlineData("/* first */ int32 Main() { int32 \u03B1 = 17; return \u03B1 + 25; } // end")]
     [InlineData("int32 F(int32 value) { if (value == 0) { return 1; } return value * F(value - 1); } int32 Main() { return F(5); }")]
     [InlineData("struct S { public int32 Value; public S(int32 value) { Value = value; } } int32 Main() { S value = new S(42); return value.Value; }")]
+    [InlineData("int32 Main() { uint64 value = 18446744073709551615u64; return (int32)(value % 1000); }")]
+    [InlineData("int32 Main() { int64 minimum = -9223372036854775808; return (int32)(minimum % -1); }")]
     public async Task NativeScannerFeedsTheOfficialCompilerWithoutChangingEmissionAsync(string source)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
@@ -226,7 +228,7 @@ public sealed class CliTests
         var (semanticExit, output, _) = await RunAsync(source, "analyze", "-", "--json");
         Assert.Equal(1, semanticExit);
         using var document = JsonDocument.Parse(output);
-        Assert.Equal("native-4", document.RootElement.GetProperty("profile").GetString());
+        Assert.Equal("native-5", document.RootElement.GetProperty("profile").GetString());
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
     }
 
@@ -242,7 +244,7 @@ public sealed class CliTests
         using var document = JsonDocument.Parse(output);
         var root = document.RootElement;
         Assert.False(root.GetProperty("success").GetBoolean());
-        Assert.Equal("syntax-3", root.GetProperty("languageVersion").GetString());
+        Assert.Equal("syntax-4", root.GetProperty("languageVersion").GetString());
         var diagnostic = Assert.Single(root.GetProperty("diagnostics").EnumerateArray());
         Assert.Equal("TRM1005", diagnostic.GetProperty("code").GetString());
         Assert.Equal(Source.LastIndexOf('?', StringComparison.Ordinal), diagnostic.GetProperty("span").GetProperty("start").GetInt32());

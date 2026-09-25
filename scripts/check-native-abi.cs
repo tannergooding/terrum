@@ -39,6 +39,7 @@ foreach (var name in new[] {
     "MakeThree", "ReadThree", "MakeSix", "ReadSix", "MakeTwelve", "ReadMixed",
     "MakeWide", "ReadWide", "EchoWide", "RecurseWide", "TryWide", "ForwardWide",
     "TryThree", "TrySix", "TryTwelve", "MakeShiftedWide",
+    "SumInt64", "EchoUInt64", "MakeWideIntegerPair", "ReadWideIntegerPair", "TryWideIntegerPair",
 })
 {
     var index = -1;

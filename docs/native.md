@@ -1,6 +1,6 @@
 # Windows x64 native profile
 
-`native-4` is a deliberately bounded executable language profile, separate from
+`native-5` is a deliberately bounded executable language profile, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
@@ -34,14 +34,18 @@ authorize emission.
 | Area | Supported |
 |---|---|
 | Program | File-scoped namespaces, using directives, top-level/static/instance functions; parameterless `int32 Main()` or `void Main()`; multi-source library compilation |
-| Types | `int32`, `uint32`, `char16`, `bool`, `void` results; compact reference-free structs |
-| Literals/constants | Contextual integers, explicit `i32`/`u32` tags, primitive `MinValue`/`MaxValue`; booleans; unit `()` |
+| Types | `int32`, `uint32`, `int64`, `uint64`, `char16`, `bool`, `void` results; compact reference-free structs |
+| Literals/constants | Contextual integers, explicit `i32`/`u32`/`i64`/`u64` tags, primitive `MinValue`/`MaxValue`; booleans; unit `()` |
 | Variables | Initialized typed/inferred locals; immutable bindings by default, explicit `mut` assignments; lexical scopes |
 | Expressions | Direct calls, forward calls/recursion, constructors, field reads, checked numeric casts; unary `+`, signed checked `-`, `~`, `!` |
 | Operators | Checked signed/unsigned `+ - * / %`, bitwise operations, signed/unsigned comparisons, same-type scalar equality, boolean operations; code-unit comparison but no `char16` arithmetic |
 | Flow | Blocks, `if`/`else`, `while`, return, boolean `require`; left-to-right argument/operand evaluation and short-circuit `&&`/`||` |
 | Outputs | Bool/out true-only publication and definite assignment through branches, `!`, `&&`, `||` and `require` |
 | Storage | Explicitly granted, initialized fixed host buffers with checked indexing and read/write access; capabilities are not first-class source values |
+
+Fixed host buffers still use the explicit 32-bit-word interchange described in
+the [scanner contract](scanner.md). Adding 64-bit scalar values does not enlarge
+that storage contract: `int64`/`uint64` buffer descriptors are rejected.
 
 Literal context comes from declarations, parameters, return types or a known
 operand, not an implicit `int32` fallback. `var x = 1` is rejected; `var x = 1i32`
@@ -58,6 +62,9 @@ optional/generic/family binding, general borrowed references, ownership/cleanup,
 exceptions, GC, async, arbitrary interop and the standard library are outside the
 profile. Their syntax may be inspectable, but a build
 must diagnose unsupported semantics. No source library is silently assumed.
+The 64-bit types are fixed-width integers, not aliases for `nint`, `nuint` or
+native pointers. Entry-point process statuses remain `int32`; a wider return
+value requires an explicit checked conversion before returning from `Main`.
 
 ## Values, places and conditional publication
 
@@ -94,6 +101,15 @@ Checked casts preserve a numeric value or fail for range overflow. Raw
 `char16` values include surrogate code units: a successful cast is not Unicode
 scalar validation. The profile has no implicit conversion between typed numeric
 values and no implicit text encoding.
+
+The signed/unsigned 32- and 64-bit types retain their full range through calls,
+fields, conditional outputs and persisted modules. Widening a signed negative
+value preserves its sign; narrowing or crossing signedness checks the numeric
+range rather than reinterpreting bits. The same signed-minimum division and
+remainder rules apply at both signed widths. The
+[wide integer candidate](../self-host/WideIntegerFacts.terrum) uses these rules
+for non-overflowing signed-addition checks and bounded decimal accumulation
+through `uint64.MaxValue`, with true-only output publication.
 
 A bool-returning declaration with `out` parameters promises initialized outputs
 on true. Callees construct outputs in private scratch storage and publish only

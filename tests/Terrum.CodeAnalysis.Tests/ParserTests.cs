@@ -12,6 +12,24 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class ParserTests
 {
     [Theory]
+    [InlineData("int32")]
+    [InlineData("uint32")]
+    [InlineData("int64")]
+    [InlineData("uint64")]
+    [InlineData("char16")]
+    public void CastsPreserveTypeSpellingAndBindMoreTightlyThanAddition(string type)
+    {
+        var tree = SyntaxTree.Parse("void F() { return (" + type + ") /* cast */ value + 1; }");
+        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        var cast = Assert.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.CastExpression);
+        Assert.Equal(type, Assert.IsType<SyntaxTokenElement>(cast.Children[1]).Token.Text);
+        Assert.Equal(SyntaxKind.NameExpression, Assert.IsType<SyntaxNode>(cast.Children[3]).Kind);
+        var addition = Assert.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.BinaryExpression);
+        Assert.Same(cast, addition.Children[0]);
+        AssertLossless(tree);
+    }
+
+    [Theory]
     [InlineData("void F() { require /* \u03B1 */ ready; }")]
     [InlineData("void F() { require TryRead(out var value) && value > 0; }")]
     public void ParsesRequirementsWithoutLosingTriviaOrSourceShape(string source)

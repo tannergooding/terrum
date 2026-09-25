@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public static class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 5;
+    private const int Version = 6;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1070,7 +1070,7 @@ public static class ModuleCompiler
         switch (kind)
         {
             case 1:
-                return new BoundConstant(reader.ReadInt32(), type, span);
+                return new BoundConstant(reader.ReadInt64(), type, span);
             case 2:
                 return new BoundRead(reader.ReadInt32(), type, span);
             case 3:

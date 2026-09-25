@@ -299,3 +299,50 @@ public bool ForwardWide(bool success, out Wide value)
 {
     return TryWide(success, out value);
 }
+
+public int64 SumInt64(int64 first, int64 second, int64 third, int64 fourth, int64 fifth, int64 sixth)
+{
+    return first + second + third + fourth + fifth + sixth;
+}
+
+public uint64 EchoUInt64(uint64 value)
+{
+    return value;
+}
+
+public struct WideIntegerPair
+{
+    public int64 Signed;
+    public uint64 Unsigned;
+    public WideIntegerPair(int64 signed, uint64 unsigned)
+    {
+        Signed = signed;
+        Unsigned = unsigned;
+    }
+}
+
+public WideIntegerPair MakeWideIntegerPair(int64 signed, uint64 unsigned)
+{
+    return new WideIntegerPair(signed, unsigned);
+}
+
+public int32 ReadWideIntegerPair(WideIntegerPair value, int64 second, int64 third, int64 fourth, int64 fifth)
+{
+    if (value.Signed == int64.MinValue && value.Unsigned == uint64.MaxValue
+        && second == -2147483649i64 && third == 2147483648i64
+        && fourth == 1i64 && fifth == 42i64)
+    {
+        return 42;
+    }
+    return -1;
+}
+
+public bool TryWideIntegerPair(bool success, out WideIntegerPair value)
+{
+    if (!success)
+    {
+        return false;
+    }
+    value = MakeWideIntegerPair(int64.MinValue, uint64.MaxValue);
+    return true;
+}

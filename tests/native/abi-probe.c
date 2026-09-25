@@ -46,6 +46,13 @@ typedef uint8_t (*TrySix)(uint8_t, Six*);
 typedef uint8_t (*TryTwelve)(uint8_t, Twelve*);
 typedef Wide (*MakeShiftedWide)(int32_t, int32_t, int32_t, int32_t, int32_t);
 typedef void* (*RawIndirectReturn)(void*, int32_t, int32_t, int32_t);
+typedef void* (*RawWideIntegerReturn)(void*, int64_t, uint64_t);
+typedef int64_t (*SumInt64)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
+typedef uint64_t (*EchoUInt64)(uint64_t);
+typedef struct WideIntegerPair { int64_t Signed; uint64_t Unsigned; } WideIntegerPair;
+typedef WideIntegerPair (*MakeWideIntegerPair)(int64_t, uint64_t);
+typedef int32_t (*ReadWideIntegerPair)(WideIntegerPair, int64_t, int64_t, int64_t, int64_t);
+typedef uint8_t (*TryWideIntegerPair)(uint8_t, WideIntegerPair*);
 extern int32_t CallWithCarrier(const void*, uint64_t);
 
 // Exercise the machine ABI directly: RCX is the hidden result pointer and RAX returns it.
@@ -68,11 +75,32 @@ static int CheckGuardedReturn(const void* function, int size, int32_t first, int
     return 1;
 }
 
+static int CheckWideIntegerReturn(const void* function)
+{
+    __declspec(align(16)) uint8_t guarded[48];
+    memset(guarded, 0xA5, sizeof(guarded));
+    RawWideIntegerReturn invoke = (RawWideIntegerReturn)function;
+    if (invoke(guarded + 16, INT64_MIN, UINT64_MAX) != guarded + 16)
+    {
+        return 0;
+    }
+    for (int index = 0; index < 48; index++)
+    {
+        if ((index < 16 || index >= 32) && guarded[index] != 0xA5)
+        {
+            return 0;
+        }
+    }
+    WideIntegerPair result;
+    memcpy(&result, guarded + 16, sizeof(result));
+    return result.Signed == INT64_MIN && result.Unsigned == UINT64_MAX;
+}
+
 // The fixture supplies source-function RVAs from the emitted unwind
 // table. Loading an EXE as a library does not execute its process entrypoint.
 int main(int argc, char** argv)
 {
-    if (argc != 31)
+    if (argc != 36)
     {
         return 90;
     }
@@ -245,6 +273,33 @@ int main(int argc, char** argv)
         || readWide(makeShiftedWide(1, 2, 3, 1, 2)) != 42)
     {
         result = 107;
+    }
+
+    SumInt64 sumInt64 = (SumInt64)((uint8_t*)image + strtoul(argv[31], NULL, 10));
+    EchoUInt64 echoUInt64 = (EchoUInt64)((uint8_t*)image + strtoul(argv[32], NULL, 10));
+    MakeWideIntegerPair makeWideIntegerPair = (MakeWideIntegerPair)((uint8_t*)image + strtoul(argv[33], NULL, 10));
+    ReadWideIntegerPair readWideIntegerPair = (ReadWideIntegerPair)((uint8_t*)image + strtoul(argv[34], NULL, 10));
+    TryWideIntegerPair tryWideIntegerPair = (TryWideIntegerPair)((uint8_t*)image + strtoul(argv[35], NULL, 10));
+    WideIntegerPair integersWide = makeWideIntegerPair(INT64_MIN, UINT64_MAX);
+    if (sumInt64(INT64_C(-2147483649), INT64_C(2147483648), 1, 2, 3, 37) != 42
+        || echoUInt64(UINT64_MAX) != UINT64_MAX
+        || integersWide.Signed != INT64_MIN || integersWide.Unsigned != UINT64_MAX
+        || !CheckWideIntegerReturn((const void*)makeWideIntegerPair)
+        || readWideIntegerPair(integersWide, INT64_C(-2147483649), INT64_C(2147483648), 1, 42) != 42)
+    {
+        result = 109;
+    }
+    __declspec(align(16)) WideIntegerPair guardedInteger[3] = {
+        {-1, 2}, {-3, 4}, {-5, 6}
+    };
+    if (!tryWideIntegerPair(1, &guardedInteger[1])
+        || guardedInteger[1].Signed != INT64_MIN || guardedInteger[1].Unsigned != UINT64_MAX
+        || guardedInteger[0].Signed != -1 || guardedInteger[0].Unsigned != 2
+        || guardedInteger[2].Signed != -5 || guardedInteger[2].Unsigned != 6
+        || tryWideIntegerPair(0, &guardedInteger[1])
+        || guardedInteger[1].Signed != INT64_MIN || guardedInteger[1].Unsigned != UINT64_MAX)
+    {
+        result = 110;
     }
 
     if (!FreeLibrary(image))

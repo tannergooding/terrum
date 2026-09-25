@@ -234,7 +234,7 @@ internal sealed class PeCompiler
                 if (abiArgument < 4)
                 {
                     _code.StoreRegister(abiArgument, Slot(slot),
-                        IsStruct(type) || function.Variables[slot].IsOut);
+                        IsStruct(type) || IsWide(type) || function.Variables[slot].IsOut);
                 }
                 else
                 {
@@ -389,6 +389,7 @@ internal sealed class PeCompiler
         return _outBase + (16 * ordinal);
     }
     private static bool IsStruct(PrimitiveType type) => (int)type >= 100;
+    private static bool IsWide(PrimitiveType type) => type is PrimitiveType.Int64 or PrimitiveType.UInt64;
     private int Size(PrimitiveType type) => ValueLayout.Size(type, _program.Structures);
     private bool IsIndirect(PrimitiveType type) => IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8);
     private void StoreValue(int offset, PrimitiveType type)
@@ -397,7 +398,7 @@ internal sealed class PeCompiler
         {
             CopyToFrame(offset, Size(type));
         }
-        else if (IsStruct(type))
+        else if (IsStruct(type) || IsWide(type))
         {
             _code.Store64(offset);
         }
@@ -412,7 +413,7 @@ internal sealed class PeCompiler
         {
             _code.Address(offset);
         }
-        else if (IsStruct(type))
+        else if (IsStruct(type) || IsWide(type))
         {
             _code.Load64(offset);
         }
@@ -654,8 +655,16 @@ internal sealed class PeCompiler
         switch (expression)
         {
             case BoundConstant constant:
-                _code.Byte(0xB8);
-                _code.Int32(constant.Value);
+                if (IsWide(constant.Type))
+                {
+                    _code.Bytes(0x48, 0xB8);
+                    _code.Int64(constant.Value);
+                }
+                else
+                {
+                    _code.Byte(0xB8);
+                    _code.Int32(checked((int)constant.Value));
+                }
                 break;
             case BoundRead read:
                 LoadValue(_program.Functions[_currentFunction].Variables[read.Variable].IsOut
@@ -704,10 +713,18 @@ internal sealed class PeCompiler
                 switch (unary.Operator)
                 {
                     case TokenKind.Minus:
+                        if (IsWide(unary.Type))
+                        {
+                            _code.Byte(0x48);
+                        }
                         _code.Bytes(0xF7, 0xD8);
                         RuntimeBranch(0x80, 0);
                         break;
                     case TokenKind.Tilde:
+                        if (IsWide(unary.Type))
+                        {
+                            _code.Byte(0x48);
+                        }
                         _code.Bytes(0xF7, 0xD0);
                         break;
                     case TokenKind.Bang:
@@ -717,18 +734,7 @@ internal sealed class PeCompiler
                 break;
             case BoundCast cast:
                 Expression(cast.Operand, spill);
-                if ((cast.Type == PrimitiveType.UInt32 && cast.Operand.Type == PrimitiveType.Int32)
-                    || (cast.Type == PrimitiveType.Int32 && cast.Operand.Type == PrimitiveType.UInt32))
-                {
-                    _code.Bytes(0x85, 0xC0);
-                    RuntimeBranch(0x88, 0);
-                }
-                else if (cast.Type == PrimitiveType.Char16 && cast.Operand.Type != PrimitiveType.Char16)
-                {
-                    _code.Byte(0x3D);
-                    _code.Int32(ushort.MaxValue);
-                    RuntimeBranch(0x87, 0);
-                }
+                Cast(cast.Operand.Type, cast.Type);
                 break;
             case BoundBinary binary:
                 if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe)
@@ -743,7 +749,14 @@ internal sealed class PeCompiler
                 Expression(binary.Left, spill);
                 StoreValue(Spill(spill), binary.Left.Type);
                 Expression(binary.Right, spill + 1);
-                _code.Bytes(0x89, 0xC1); // mov ecx, eax
+                if (IsWide(binary.Left.Type))
+                {
+                    _code.Bytes(0x48, 0x89, 0xC1); // mov rcx,rax
+                }
+                else
+                {
+                    _code.Bytes(0x89, 0xC1); // mov ecx,eax
+                }
                 LoadValue(Spill(spill), binary.Left.Type);
                 Binary(binary.Operator, binary.Left.Type);
                 break;
@@ -787,7 +800,8 @@ internal sealed class PeCompiler
                     {
                         LoadValue(Spill(argumentsBase + i), call.Arguments[i].Type);
                     }
-                    _code.MoveArgument(i + hidden, call.Arguments[i] is BoundOutArgument || IsStruct(call.Arguments[i].Type));
+                    _code.MoveArgument(i + hidden,
+                        call.Arguments[i] is BoundOutArgument || IsStruct(call.Arguments[i].Type) || IsWide(call.Arguments[i].Type));
                 }
                 if (hidden != 0)
                 {
@@ -842,10 +856,58 @@ internal sealed class PeCompiler
         }
     }
 
+    private void Cast(PrimitiveType source, PrimitiveType target)
+    {
+        if (source == PrimitiveType.Int32 && IsWide(target))
+        {
+            _code.Bytes(0x48, 0x63, 0xC0); // movsxd rax,eax
+        }
+        if (target == PrimitiveType.Char16 && source != PrimitiveType.Char16)
+        {
+            if (IsWide(source))
+            {
+                _code.Byte(0x48);
+            }
+            _code.Byte(0x3D);
+            _code.Int32(ushort.MaxValue);
+            RuntimeBranch(0x87, 0);
+        }
+        else if ((target is PrimitiveType.UInt32 or PrimitiveType.UInt64
+            && source is PrimitiveType.Int32 or PrimitiveType.Int64)
+            || (target == PrimitiveType.Int32 && source is PrimitiveType.UInt32 or PrimitiveType.UInt64)
+            || (target == PrimitiveType.Int64 && source == PrimitiveType.UInt64))
+        {
+            if (IsWide(source) || IsWide(target))
+            {
+                _code.Byte(0x48);
+            }
+            _code.Bytes(0x85, 0xC0);
+            RuntimeBranch(0x88, 0);
+        }
+        if (IsWide(source) && target is PrimitiveType.Int32 or PrimitiveType.UInt32)
+        {
+            if (target == PrimitiveType.Int32)
+            {
+                _code.Bytes(0x48, 0x63, 0xC8); // movsxd rcx,eax
+            }
+            else
+            {
+                _code.Bytes(0x89, 0xC1); // mov ecx,eax; zero-extends rcx
+            }
+            _code.Bytes(0x48, 0x39, 0xC8); // cmp rax,rcx
+            RuntimeBranch(0x85, 0);
+        }
+    }
+
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The verifier restricts binary operators to the supported native profile.")]
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "The verifier excludes other token kinds before reaching the comparison encoder.")]
     private void Binary(TokenKind op, PrimitiveType type)
     {
+        if (IsWide(type))
+        {
+            BinaryWide(op, type == PrimitiveType.UInt64);
+            return;
+        }
         var unsigned = type is PrimitiveType.UInt32 or PrimitiveType.Char16;
         switch (op)
         {
@@ -931,6 +993,95 @@ internal sealed class PeCompiler
                 break;
         }
     }
+
+    [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The verifier restricts binary operators to the supported native profile.")]
+    [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "The verifier excludes unsupported token kinds before reaching this encoder.")]
+    private void BinaryWide(TokenKind op, bool unsigned)
+    {
+        switch (op)
+        {
+            case TokenKind.Plus:
+            case TokenKind.Minus:
+                _code.Bytes(0x48, op == TokenKind.Plus ? (byte)0x01 : (byte)0x29, 0xC8);
+                RuntimeBranch(unsigned ? (byte)0x82 : (byte)0x80, 0);
+                break;
+            case TokenKind.Star:
+                if (unsigned)
+                {
+                    _code.Bytes(0x48, 0xF7, 0xE1); // mul rcx; the upper product must be zero
+                    _code.Bytes(0x48, 0x85, 0xD2);
+                    RuntimeBranch(0x85, 0);
+                }
+                else
+                {
+                    _code.Bytes(0x48, 0x0F, 0xAF, 0xC1);
+                    RuntimeBranch(0x80, 0);
+                }
+                break;
+            case TokenKind.Slash:
+            case TokenKind.Percent:
+                _code.Bytes(0x48, 0x85, 0xC9);
+                RuntimeBranch(0x84, 1);
+                if (unsigned)
+                {
+                    _code.Bytes(0x31, 0xD2, 0x48, 0xF7, 0xF1); // xor edx,edx; div rcx
+                }
+                else
+                {
+                    _code.Bytes(0x48, 0xBA);
+                    _code.Int64(long.MinValue);
+                    _code.Bytes(0x48, 0x39, 0xD0); // cmp rax,rdx
+                    var normal = _code.JumpIf(0x85);
+                    _code.Bytes(0x48, 0x83, 0xF9, 0xFF); // cmp rcx,-1
+                    var normalAgain = _code.JumpIf(0x85);
+                    if (op == TokenKind.Slash)
+                    {
+                        _runtimeCalls.Add((_code.RelativeCall(), 0));
+                    }
+                    else
+                    {
+                        _code.Bytes(0x31, 0xC0); // min % -1 is zero
+                        var done = _code.Jump();
+                        _code.PatchRelative(normal, _code.Position);
+                        _code.PatchRelative(normalAgain, _code.Position);
+                        _code.Bytes(0x48, 0x99, 0x48, 0xF7, 0xF9); // cqo; idiv rcx
+                        _code.Bytes(0x48, 0x89, 0xD0);
+                        _code.PatchRelative(done, _code.Position);
+                        break;
+                    }
+                    _code.PatchRelative(normal, _code.Position);
+                    _code.PatchRelative(normalAgain, _code.Position);
+                    _code.Bytes(0x48, 0x99, 0x48, 0xF7, 0xF9);
+                }
+                if (op == TokenKind.Percent)
+                {
+                    _code.Bytes(0x48, 0x89, 0xD0); // mov rax,rdx
+                }
+                break;
+            case TokenKind.Ampersand:
+            case TokenKind.Pipe:
+            case TokenKind.Caret:
+                _code.Bytes(0x48, op switch {
+                    TokenKind.Ampersand => 0x21,
+                    TokenKind.Pipe => 0x09,
+                    _ => 0x31,
+                }, 0xC8);
+                break;
+            default:
+                _code.Bytes(0x48, 0x39, 0xC8);
+                _code.Bytes(0x0F, (byte)(op switch {
+                    TokenKind.EqualsEquals => 0x94,
+                    TokenKind.BangEquals => 0x95,
+                    TokenKind.Less => unsigned ? 0x92 : 0x9C,
+                    TokenKind.LessEquals => unsigned ? 0x96 : 0x9E,
+                    TokenKind.Greater => unsigned ? 0x97 : 0x9F,
+                    TokenKind.GreaterEquals => unsigned ? 0x93 : 0x9D,
+                    _ => throw new InvalidOperationException(),
+                }), 0xC0);
+                _code.Bytes(0x0F, 0xB6, 0xC0);
+                break;
+        }
+    }
 }
 
 internal sealed class MachineCode
@@ -942,6 +1093,13 @@ internal sealed class MachineCode
     internal void Int32(int value)
     {
         for (var i = 0; i < 4; i++)
+        {
+            Byte(unchecked((byte)(value >> (8 * i))));
+        }
+    }
+    internal void Int64(long value)
+    {
+        for (var i = 0; i < 8; i++)
         {
             Byte(unchecked((byte)(value >> (8 * i))));
         }

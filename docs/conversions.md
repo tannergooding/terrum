@@ -1,7 +1,7 @@
 # Literal construction and numeric conversion
 
 The native profile implements contextual literals and checked casts between
-`int32`, `uint32` and `char16`. The broader binding/library contracts below
+`int32`, `uint32`, `int64`, `uint64` and `char16`. The broader binding/library contracts below
 remain design direction, not implemented floating-point or generic execution.
 Cast spelling follows C#; conversion-protocol names and declaration lookup
 remain provisional. Numeric operators are checked by default in every build.

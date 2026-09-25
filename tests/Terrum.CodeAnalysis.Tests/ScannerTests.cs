@@ -20,6 +20,17 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class ScannerTests
 {
     [Theory]
+    [InlineData(PrimitiveType.Int64)]
+    [InlineData(PrimitiveType.UInt64)]
+    public void WideValuesDoNotImplyWideHostBufferStorage(PrimitiveType type)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return 0; }"),
+            [new HostBuffer("Wide", type, [0], true)]);
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
     [InlineData("void Main() { Host.Source[0] = (char16)65; }")]
     [InlineData("int32 Main() { return Host.Missing[0]; }")]
     [InlineData("int32 Main() { return (int32)Host.Source[true]; }")]

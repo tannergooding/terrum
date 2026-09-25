@@ -1,0 +1,142 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System;
+using System.Collections.Immutable;
+using System.Diagnostics;
+using System.IO;
+using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Native;
+using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
+using Xunit;
+
+namespace Terrum.CodeAnalysis.Tests;
+
+public sealed class WideCandidateTests
+{
+    [Fact]
+    public async Task WideCompilerCandidatesExecuteFromIndependentModulesAsync()
+    {
+        var producer = CreateCandidateLibrary();
+        var reference = ModuleCompiler.CreateReference(producer);
+        var root = RepositoryRoot();
+        var tests = ReadTree(Path.Combine(root, "self-host", "WideIntegerTests.terrum"));
+        var entry = ReadTree(Path.Combine(root, "samples", "native", "modules", "wide-entry.terrum"));
+        var compilation = Compilation.Create([tests, entry], reference);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        await ExecuteBothAsync(consumer, producer, 0).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData("TryAdd(int64.MaxValue, 1, out var value); return (int32)value;")]
+    [InlineData("if (TryAdd(int64.MaxValue, 1, out var value)) { return 0; } return (int32)value;")]
+    [InlineData("uint32 value = 1; require TryAdd(value, 2, out var sum); return (int32)sum;")]
+    [InlineData("require TryAccumulateDecimal(18446744073709551616, 0, uint64.MaxValue, out var value); return 0;")]
+    public void WideCandidateContractsRejectInvalidUse(string body)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "using Terrum.CodeAnalysis.Numerics64; int32 Main() { " + body + " }"),
+            ModuleCompiler.CreateReference(CreateCandidateLibrary()));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public async Task WideModuleContractsPermitImplementationReplacementButNotSignednessChangesAsync()
+    {
+        var original = Compilation.CreateLibrary(SyntaxTree.Parse("public int64 Echo(int64 value) { return value; }"));
+        Assert.False(original.HasErrors, string.Join(Environment.NewLine, original.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(original.Program), ["Echo"]);
+        var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return (int32)Echo(42); }"),
+            ModuleCompiler.CreateReference(producer));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        var preserved = (byte[])consumer.Clone();
+        await ExecuteBothAsync(consumer, producer, 42).ConfigureAwait(true);
+        var changed = Compilation.CreateLibrary(SyntaxTree.Parse("public int64 Echo(int64 value) { return value + 1; }"));
+        Assert.False(changed.HasErrors, string.Join(Environment.NewLine, changed.Diagnostics));
+        var replacement = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(changed.Program), ["Echo"]);
+        await ExecuteBothAsync(consumer, replacement, 43).ConfigureAwait(true);
+        Assert.Equal(preserved, consumer);
+
+        var incompatible = Compilation.CreateLibrary(SyntaxTree.Parse("public uint64 Echo(uint64 value) { return value; }"));
+        Assert.False(incompatible.HasErrors, string.Join(Environment.NewLine, incompatible.Diagnostics));
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer,
+            ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(incompatible.Program), ["Echo"])));
+    }
+
+    private static byte[] CreateCandidateLibrary()
+    {
+        var path = Path.Combine(RepositoryRoot(), "self-host", "WideIntegerFacts.terrum");
+        var compilation = Compilation.CreateLibrary(ReadTree(path));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), [
+            "Terrum.CodeAnalysis.Numerics64.TryAdd",
+            "Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal",
+        ]);
+    }
+
+    private static SyntaxTree ReadTree(string path) => SyntaxTree.Parse(File.ReadAllText(path), path);
+
+    private static string RepositoryRoot() =>
+        Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+
+    private static async Task ExecuteBothAsync(byte[] consumer, byte[] producer, int expected)
+    {
+        var prefix = Path.Combine(AppContext.BaseDirectory, $"wide-candidate-{Guid.NewGuid():N}");
+        var image = prefix + ".exe";
+        var consumerPath = prefix + "-consumer.trm";
+        var producerPath = prefix + "-producer.trm";
+        try
+        {
+            var program = ModuleCompiler.Link(consumer, producer);
+            await File.WriteAllBytesAsync(image, NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true);
+            await RunAsync(image, [], expected).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(consumerPath, consumer).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(producerPath, producer).ConfigureAwait(true);
+            var framework = new DirectoryInfo(AppContext.BaseDirectory);
+            var configuration = framework.Parent?.Name ?? throw new InvalidOperationException("Missing configuration.");
+            var cli = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc", configuration, framework.Name, "terrumc.dll");
+            await RunAsync("dotnet", [cli, "run-module", consumerPath, producerPath, "--runtime", "fail-fast"], expected).ConfigureAwait(true);
+            Assert.Equal(consumer, await File.ReadAllBytesAsync(consumerPath).ConfigureAwait(true));
+        }
+        finally
+        {
+            File.Delete(image);
+            File.Delete(consumerPath);
+            File.Delete(producerPath);
+        }
+    }
+
+    private static async Task RunAsync(string path, ImmutableArray<string> arguments, int expected)
+    {
+        var start = new ProcessStartInfo(path) {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardError = true,
+        };
+        foreach (var argument in arguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start wide-integer worker.");
+        var error = process.StandardError.ReadToEndAsync();
+        try
+        {
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(true);
+        }
+        catch (TimeoutException)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync().ConfigureAwait(true);
+            }
+            throw;
+        }
+        Assert.Equal(expected, process.ExitCode);
+        Assert.Empty(await error.ConfigureAwait(true));
+    }
+}

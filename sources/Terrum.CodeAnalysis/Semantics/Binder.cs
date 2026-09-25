@@ -565,6 +565,8 @@ internal sealed class Binder
         var type = name switch {
             "int32" => PrimitiveType.Int32,
             "uint32" => PrimitiveType.UInt32,
+            "int64" => PrimitiveType.Int64,
+            "uint64" => PrimitiveType.UInt64,
             "char16" => PrimitiveType.Char16,
             "bool" => PrimitiveType.Bool,
             "void" when allowVoid => PrimitiveType.Void,
@@ -903,6 +905,8 @@ internal sealed class Binder
                 var target = ((SyntaxTokenElement)node.Children[1]).Token.Text switch {
                     "int32" => PrimitiveType.Int32,
                     "uint32" => PrimitiveType.UInt32,
+                    "int64" => PrimitiveType.Int64,
+                    "uint64" => PrimitiveType.UInt64,
                     "char16" => PrimitiveType.Char16,
                     _ => throw new InvalidOperationException(),
                 };
@@ -912,9 +916,11 @@ internal sealed class Binder
                 var literalContext = literal is { Kind: TokenKind.NumericLiteral }
                     && !literal.Text.EndsWith("i32", StringComparison.Ordinal)
                     && !literal.Text.EndsWith("u32", StringComparison.Ordinal)
+                    && !literal.Text.EndsWith("i64", StringComparison.Ordinal)
+                    && !literal.Text.EndsWith("u64", StringComparison.Ordinal)
                     ? target : (PrimitiveType?)null;
                 var operand = BindExpression(castOperand, literalContext);
-                if (operand.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Char16))
+                if (operand.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16))
                 {
                     Report("TRM3007", "A checked cast requires a numeric operand.", operand.Span);
                 }
@@ -941,17 +947,21 @@ internal sealed class Binder
                     break;
                 }
                 var typeName = NameText(receiverNode);
-                if (member is "MinValue" or "MaxValue" && typeName is "int32" or "uint32" or "char16")
+                if (member is "MinValue" or "MaxValue" && typeName is "int32" or "uint32" or "int64" or "uint64" or "char16")
                 {
                     var type = typeName switch {
                         "int32" => PrimitiveType.Int32,
                         "uint32" => PrimitiveType.UInt32,
+                        "int64" => PrimitiveType.Int64,
+                        "uint64" => PrimitiveType.UInt64,
                         "char16" => PrimitiveType.Char16,
                         _ => throw new InvalidOperationException(),
                     };
                     var value = type switch {
                         PrimitiveType.Int32 => member == "MinValue" ? int.MinValue : int.MaxValue,
                         PrimitiveType.UInt32 => member == "MinValue" ? 0 : -1,
+                        PrimitiveType.Int64 => member == "MinValue" ? long.MinValue : long.MaxValue,
+                        PrimitiveType.UInt64 => member == "MinValue" ? 0L : -1L,
                         PrimitiveType.Char16 => member == "MinValue" ? 0 : ushort.MaxValue,
                         _ => throw new InvalidOperationException(),
                     };
@@ -972,22 +982,26 @@ internal sealed class Binder
                 var operandType = op.Kind == TokenKind.Bang ? PrimitiveType.Bool
                     : KnownType(operandNode) ?? expected ?? PrimitiveType.Int32;
 
-                // The spelling of the negative minimum is a single checked int32 constant.
+                // The negative minimum cannot be represented as a positive operand of its signed type.
                 if (op.Kind == TokenKind.Minus && operandNode.Kind == SyntaxKind.LiteralExpression &&
-                    TryMinimumLiteral(((SyntaxTokenElement)operandNode.Children[0]).Token))
+                    operandType is PrimitiveType.Int32 or PrimitiveType.Int64 &&
+                    TryMinimumLiteral(((SyntaxTokenElement)operandNode.Children[0]).Token, operandType))
                 {
                     var literal = ((SyntaxTokenElement)operandNode.Children[0]).Token;
-                    if (!literal.Text.EndsWith("i32", StringComparison.Ordinal) && expected != PrimitiveType.Int32)
+                    if (!literal.Text.EndsWith(operandType == PrimitiveType.Int32 ? "i32" : "i64", StringComparison.Ordinal)
+                        && expected != operandType)
                     {
-                        Report("TRM3014", "An unsuffixed integer literal requires an int32 context.", literal.Span);
+                        Report("TRM3014", "An unsuffixed integer literal requires a signed integer context.", literal.Span);
                     }
 
-                    expression = new BoundConstant(int.MinValue, PrimitiveType.Int32, node.Span);
+                    expression = new BoundConstant(operandType == PrimitiveType.Int32 ? int.MinValue : long.MinValue,
+                        operandType, node.Span);
                     break;
                 }
 
                 var operandContext = operandType == PrimitiveType.Bool ? operandType
-                    : expected is PrimitiveType.Int32 or PrimitiveType.UInt32 || KnownType(operandNode) is PrimitiveType.Int32 or PrimitiveType.UInt32
+                    : expected is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                        || KnownType(operandNode) is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
                         ? operandType : (PrimitiveType?)null;
                 var operand = BindExpression(operandNode, operandContext);
                 if (operand.Type != operandType)
@@ -995,8 +1009,8 @@ internal sealed class Binder
                     Report("TRM3007", $"Unary operator requires {TypeName(operandType)}.", op.Span);
                 }
                 if (op.Kind is not (TokenKind.Plus or TokenKind.Minus or TokenKind.Tilde or TokenKind.Bang)
-                    || (op.Kind == TokenKind.Minus && operandType != PrimitiveType.Int32)
-                    || (op.Kind is TokenKind.Plus or TokenKind.Tilde && operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32)))
+                    || (op.Kind == TokenKind.Minus && operandType is not (PrimitiveType.Int32 or PrimitiveType.Int64))
+                    || (op.Kind is TokenKind.Plus or TokenKind.Tilde && operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)))
                 {
                     Report("TRM3001", "Unsupported unary operator.", op.Span);
                 }
@@ -1082,9 +1096,9 @@ internal sealed class Binder
             case TokenKind.Star:
             case TokenKind.Slash:
             case TokenKind.Percent:
-                operandType = leftKnown ?? rightKnown ?? (expected is PrimitiveType.Int32 or PrimitiveType.UInt32 ? expected : null);
+                operandType = leftKnown ?? rightKnown ?? (expected is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 ? expected : null);
                 resultType = operandType ?? PrimitiveType.Int32;
-                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32))
+                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64))
                 {
                     Report("TRM3007", "Arithmetic requires int32 or uint32 operands with a known context.", op.Span);
                 }
@@ -1096,7 +1110,7 @@ internal sealed class Binder
             case TokenKind.GreaterEquals:
                 operandType = leftKnown ?? rightKnown;
                 resultType = PrimitiveType.Bool;
-                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Char16))
+                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16))
                 {
                     Report("TRM3007", "Comparison requires numeric operands with a known context.", op.Span);
                 }
@@ -1113,7 +1127,7 @@ internal sealed class Binder
             case TokenKind.Caret:
                 operandType = leftKnown ?? rightKnown ?? expected;
                 resultType = operandType ?? PrimitiveType.Int32;
-                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Bool))
+                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Bool))
                 {
                     Report("TRM3007", "Bitwise operands must both be int32 or both be bool.", op.Span);
                 }
@@ -1123,7 +1137,7 @@ internal sealed class Binder
             case TokenKind.BangEquals:
                 operandType = leftKnown ?? rightKnown;
                 resultType = PrimitiveType.Bool;
-                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Char16 or PrimitiveType.Bool))
+                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool))
                 {
                     Report("TRM3007", "Equality requires two operands of the same known int32 or bool type.", op.Span);
                 }
@@ -1353,31 +1367,35 @@ internal sealed class Binder
 
         if (token.Kind != TokenKind.NumericLiteral)
         {
-            Report("TRM3001", "Only boolean and int32 literals are supported.", token.Span);
+            Report("TRM3001", "Only boolean and integer literals are supported.", token.Span);
             return ErrorExpression(token.Span);
         }
 
         var text = _tree.Source.GetSubText(token.Span);
         var suffix = text.EndsWith("i32", StringComparison.Ordinal) ? PrimitiveType.Int32
-            : text.EndsWith("u32", StringComparison.Ordinal) ? PrimitiveType.UInt32 : (PrimitiveType?)null;
+            : text.EndsWith("u32", StringComparison.Ordinal) ? PrimitiveType.UInt32
+            : text.EndsWith("i64", StringComparison.Ordinal) ? PrimitiveType.Int64
+            : text.EndsWith("u64", StringComparison.Ordinal) ? PrimitiveType.UInt64 : (PrimitiveType?)null;
         var digits = suffix is not null ? text.AsSpan(0, text.Length - 3) : text.AsSpan();
 
         if (digits.IndexOfAny('.', 'e', 'E') >= 0 || digits.IsEmpty || !AllDigits(digits))
         {
-            Report("TRM3013", "Floating-point literals and numeric tags other than i32 are not supported.", token.Span);
+            Report("TRM3013", "Floating-point literals and unsupported numeric tags are not supported.", token.Span);
             return ErrorExpression(token.Span);
         }
 
         var type = suffix ?? expected;
-        if (suffix is null && type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Char16))
+        if (suffix is null && type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16))
         {
             Report("TRM3014", "An unsuffixed integer literal requires a numeric context.", token.Span);
         }
 
-        var max = type switch {
+        ulong max = type switch {
             PrimitiveType.UInt32 => uint.MaxValue,
+            PrimitiveType.Int64 => long.MaxValue,
+            PrimitiveType.UInt64 => ulong.MaxValue,
             PrimitiveType.Char16 => ushort.MaxValue,
-            _ => (uint)int.MaxValue,
+            _ => int.MaxValue,
         };
         if (!ulong.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) || parsed > max)
         {
@@ -1385,10 +1403,15 @@ internal sealed class Binder
             return ErrorExpression(token.Span);
         }
 
-        return new BoundConstant(unchecked((int)parsed), type ?? PrimitiveType.Int32, token.Span);
+        var value = type switch {
+            PrimitiveType.UInt64 => unchecked((long)parsed),
+            PrimitiveType.Int64 => (long)parsed,
+            _ => unchecked((int)parsed),
+        };
+        return new BoundConstant(value, type ?? PrimitiveType.Int32, token.Span);
     }
 
-    private bool TryMinimumLiteral(SyntaxToken token)
+    private bool TryMinimumLiteral(SyntaxToken token, PrimitiveType type)
     {
         if (token.Kind != TokenKind.NumericLiteral)
         {
@@ -1396,9 +1419,16 @@ internal sealed class Binder
         }
 
         var text = _tree.Source.GetSubText(token.Span);
-        var digits = text.EndsWith("i32", StringComparison.Ordinal) ? text.AsSpan(0, text.Length - 3) : text.AsSpan();
+        var tag = type == PrimitiveType.Int32 ? "i32" : "i64";
+        if (text.EndsWith(type == PrimitiveType.Int32 ? "i64" : "i32", StringComparison.Ordinal)
+            || text.EndsWith("u32", StringComparison.Ordinal) || text.EndsWith("u64", StringComparison.Ordinal))
+        {
+            return false;
+        }
+        var digits = text.EndsWith(tag, StringComparison.Ordinal) ? text.AsSpan(0, text.Length - 3) : text.AsSpan();
         if (digits.IsEmpty || !AllDigits(digits) ||
-            !long.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var value) || value != 2147483648L)
+            !ulong.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var value)
+            || value != (type == PrimitiveType.Int32 ? 2147483648UL : 9223372036854775808UL))
         {
             return false;
         }
@@ -1446,6 +1476,8 @@ internal sealed class Binder
                     TokenKind.TrueKeyword or TokenKind.FalseKeyword => PrimitiveType.Bool,
                     TokenKind.NumericLiteral when token.Text.EndsWith("i32", StringComparison.Ordinal) => PrimitiveType.Int32,
                     TokenKind.NumericLiteral when token.Text.EndsWith("u32", StringComparison.Ordinal) => PrimitiveType.UInt32,
+                    TokenKind.NumericLiteral when token.Text.EndsWith("i64", StringComparison.Ordinal) => PrimitiveType.Int64,
+                    TokenKind.NumericLiteral when token.Text.EndsWith("u64", StringComparison.Ordinal) => PrimitiveType.UInt64,
                     _ => null,
                 };
             }
@@ -1480,6 +1512,8 @@ internal sealed class Binder
                 return ((SyntaxTokenElement)node.Children[1]).Token.Text switch {
                     "int32" => PrimitiveType.Int32,
                     "uint32" => PrimitiveType.UInt32,
+                    "int64" => PrimitiveType.Int64,
+                    "uint64" => PrimitiveType.UInt64,
                     _ => PrimitiveType.Char16,
                 };
             case SyntaxKind.MemberAccessExpression:
@@ -1504,6 +1538,14 @@ internal sealed class Binder
                 if (text is "uint32.MinValue" or "uint32.MaxValue")
                 {
                     return PrimitiveType.UInt32;
+                }
+                if (text is "int64.MinValue" or "int64.MaxValue")
+                {
+                    return PrimitiveType.Int64;
+                }
+                if (text is "uint64.MinValue" or "uint64.MaxValue")
+                {
+                    return PrimitiveType.UInt64;
                 }
                 if (text is "char16.MinValue" or "char16.MaxValue")
                 {
@@ -1629,6 +1671,8 @@ internal sealed class Binder
     private string TypeName(PrimitiveType type) => type switch {
         PrimitiveType.Int32 => "int32",
         PrimitiveType.UInt32 => "uint32",
+        PrimitiveType.Int64 => "int64",
+        PrimitiveType.UInt64 => "uint64",
         PrimitiveType.Char16 => "char16",
         PrimitiveType.Bool => "bool",
         PrimitiveType.Void => "void",

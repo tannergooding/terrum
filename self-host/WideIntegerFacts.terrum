@@ -1,0 +1,37 @@
+namespace Terrum.CodeAnalysis.Numerics64;
+
+public static bool TryAdd(int64 left, int64 right, out int64 result)
+{
+    if (right > 0 && left > int64.MaxValue - right)
+    {
+        return false;
+    }
+
+    if (right < 0 && left < int64.MinValue - right)
+    {
+        return false;
+    }
+
+    result = left + right;
+
+    return true;
+}
+
+public static bool TryAccumulateDecimal(uint64 value, uint32 digit, uint64 maximum, out uint64 result)
+{
+    uint64 widenedDigit = (uint64)digit;
+    if (digit > 9 || maximum < widenedDigit)
+    {
+        return false;
+    }
+
+    // Rearranging the bound keeps both the check and the accepted update in range.
+    if (value > (maximum - widenedDigit) / 10)
+    {
+        return false;
+    }
+
+    result = value * 10 + widenedDigit;
+
+    return true;
+}

@@ -28,6 +28,8 @@ public sealed class FixtureTests
     [InlineData("RangeTests.terrum")]
     [InlineData("Token.terrum")]
     [InlineData("TokenTests.terrum")]
+    [InlineData("WideIntegerFacts.terrum")]
+    [InlineData("WideIntegerTests.terrum")]
     public void InitialSelfHostCandidateHasSupportedSyntaxOnly(string name)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));

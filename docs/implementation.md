@@ -1,10 +1,10 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-3 and native-4
+## Current boundary: syntax-4 and native-5
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
-immutable and usable independently. The separate [native-4 profile](native.md)
+immutable and usable independently. The separate [native-5 profile](native.md)
 binds a bounded scalar/compact-value language and emits Windows x64 executables through
 verified structured operations. A clean syntax result is deliberately not a
 valid-program claim: `var x = 1;` parses but semantic analysis rejects its missing
@@ -63,14 +63,15 @@ for precise number, string, identifier and newline rules.
 optional and normalizing its substituted type is future binder work.
 Explicit `Option<Option<T>>` syntax is unchanged. `syntax-1` introduced this
 rejection rule; `syntax-2` added the lossless `RequireStatement` node.
-`syntax-3` adds checked cast syntax. `native-2` expands the original integer/bool
-profile with unsigned/code-unit values, compact structs, conditional outputs and
-host-buffer capabilities. `native-3` adds acyclic compact nested value layouts
-and transitive layout contracts, with Windows x64 indirect argument/result
-storage for aggregates up to 16 bytes. Larger aggregates still diagnose before
-emission. `native-4` adds statically rooted nested writable field paths, with
-initialization and visibility checked at each level. It does not add borrowed
-references or mutation through returned temporary values.
+`syntax-4` includes checked cast syntax for the supported 32- and 64-bit
+integer types and `char16`. The `native-5` profile supports checked
+signed/unsigned 32- and 64-bit integers, raw code units, conditional outputs,
+fixed host-buffer capabilities and acyclic value layouts up to 16 bytes.
+Transitive module contracts and Windows x64 indirect argument/result storage
+preserve those layouts. Statically rooted writable field paths enforce
+initialization and visibility at every level. Larger aggregates, general
+borrowed references and mutation through returned temporary values still
+diagnose before emission.
 Existing single-source compiler JSON remains schema 1;
 scanner and multi-source diagnostic schemas are versioned separately below.
 

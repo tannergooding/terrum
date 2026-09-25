@@ -22,6 +22,12 @@ public enum PrimitiveType
     UInt32,
     /// <summary>A UTF-16 code unit, including surrogate code units.</summary>
     Char16,
+    /// <summary>A signed, checked 64-bit integer.</summary>
+    [SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Names the Terrum primitive type represented by the compiler.")]
+    Int64,
+    /// <summary>An unsigned, checked 64-bit integer.</summary>
+    [SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Names the Terrum primitive type represented by the compiler.")]
+    UInt64,
 }
 
 /// <summary>A source-mapped, structured program with resolved function and local indexes.</summary>
@@ -161,10 +167,10 @@ public sealed record BoundReturn(BoundExpression? Value, TextSpan Span) : BoundS
 public abstract record BoundExpression(PrimitiveType Type, TextSpan Span);
 
 /// <summary>An integer or canonical boolean constant.</summary>
-/// <param name="Value">The 32-bit payload; uint32 uses its bit pattern, char16 uses 0..65535, and booleans use zero or one.</param>
+/// <param name="Value">The 64-bit payload; uint64 uses its unchecked bit pattern, int32/uint32 retain their signed 32-bit bit-pattern payload, char16 uses 0..65535, and booleans use zero or one.</param>
 /// <param name="Type">The constant type.</param>
 /// <param name="Span">The source range.</param>
-public sealed record BoundConstant(int Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+public sealed record BoundConstant(long Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
 /// <summary>A read of an initialized slot.</summary>
 /// <param name="Variable">The slot index.</param>

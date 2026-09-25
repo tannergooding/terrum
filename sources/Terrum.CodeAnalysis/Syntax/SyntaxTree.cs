@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Syntax;
 public sealed class SyntaxTree
 {
     /// <summary>Identifies the syntax contract used by this parser.</summary>
-    public const string LanguageVersion = "syntax-3";
+    public const string LanguageVersion = "syntax-4";
 
     private SyntaxTree(SourceText source, LexResult lexResult, SyntaxNode root, ImmutableArray<Diagnostic> diagnostics, CancellationToken cancellationToken)
     {

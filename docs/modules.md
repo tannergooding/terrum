@@ -1,6 +1,6 @@
 # Bounded semantic modules
 
-The version 5 `.trm` format records the semantic profile and persists verified, typed, source-mapped structured IR,
+The version 6 `.trm` format records the semantic profile and persists verified, typed, source-mapped structured IR,
 not source text or a native DLL. `CreateProducer` stores selected function bodies
 and exported contracts. `CreateConsumer` stores its own function bodies and the
 reference producer's declaration contracts, **not** producer bodies.
@@ -120,6 +120,15 @@ the scalar-register-only profile:
 dotnet $cli compile-module producer self-host\SourceRange.terrum Terrum.CodeAnalysis.SourceRange.TryCreate --source self-host\Token.terrum --export Terrum.CodeAnalysis.SourceRange.GetEnd --export Terrum.CodeAnalysis.Token.#ctor -o artifacts\token-values.trm
 dotnet $cli compile-module consumer self-host\TokenTests.terrum artifacts\token-values.trm --source samples\native\modules\token-entry.terrum -o artifacts\token-tests.trm
 dotnet $cli run-module artifacts\token-tests.trm artifacts\token-values.trm --runtime fail-fast # exits 0
+```
+
+The wide-integer helpers exercise full-range signed and unsigned values across
+the same independent module boundary:
+
+```powershell
+dotnet $cli compile-module producer self-host\WideIntegerFacts.terrum Terrum.CodeAnalysis.Numerics64.TryAdd --export Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal -o artifacts\wide-values.trm
+dotnet $cli compile-module consumer self-host\WideIntegerTests.terrum artifacts\wide-values.trm --source samples\native\modules\wide-entry.terrum -o artifacts\wide-tests.trm
+dotnet $cli run-module artifacts\wide-tests.trm artifacts\wide-values.trm --runtime fail-fast # exits 0
 ```
 
 `samples/native/modules/incompatible.terrum` changes `Helper` to return `bool`.

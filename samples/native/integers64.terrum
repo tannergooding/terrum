@@ -1,0 +1,49 @@
+struct WideNumber
+{
+    public int64 Signed;
+    public uint64 Unsigned;
+
+    public WideNumber(int64 signed, uint64 unsigned)
+    {
+        Signed = signed;
+        Unsigned = unsigned;
+    }
+}
+
+int64 Sum(int64 first, int64 second, int64 third, int64 fourth, int64 fifth)
+{
+    return first + second + third + fourth + fifth;
+}
+
+bool TryWide(bool success, out WideNumber result)
+{
+    if (!success)
+    {
+        return false;
+    }
+    result = new WideNumber(int64.MinValue, uint64.MaxValue);
+    return true;
+}
+
+bool ForwardWide(bool success, out WideNumber result)
+{
+    return TryWide(success, out result);
+}
+
+int32 Main()
+{
+    require ForwardWide(true, out var value);
+    if (ForwardWide(false, out var ignored))
+    {
+        return 1;
+    }
+    if (value.Signed != -9223372036854775808i64 || value.Unsigned != 18446744073709551615u64)
+    {
+        return 2;
+    }
+    if (Sum(1i64, 2i64, 3i64, 4i64, 32i64) != 42i64)
+    {
+        return 3;
+    }
+    return 42;
+}

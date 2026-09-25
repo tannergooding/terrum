@@ -872,7 +872,7 @@ public sealed class ModuleTests
         var producer = ModuleCompiler.CreateProducer(initial, ["Helper"]);
         var consumer = ModuleCompiler.CreateConsumer(initial, producer);
         var version = (byte[])consumer.Clone();
-        version[4] = 6;
+        version[4] = 7;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
         version[4] = 1;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
@@ -881,6 +881,8 @@ public sealed class ModuleTests
         version[4] = 3;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
         version[4] = 4;
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
+        version[4] = 5;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(consumer[..^1], producer));
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(new byte[(4 * 1024 * 1024) + 1], producer));

@@ -568,7 +568,9 @@ public static class SemanticVerifier
         switch (expression)
         {
             case BoundConstant constant:
-                if (constant.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Char16 or PrimitiveType.Bool)
+                if (constant.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool)
+                    || (constant.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
+                        && constant.Value is < int.MinValue or > int.MaxValue)
                     || (constant.Type == PrimitiveType.Bool && constant.Value is not (0 or 1))
                     || (constant.Type == PrimitiveType.Char16 && constant.Value is < 0 or > ushort.MaxValue))
                 {
@@ -577,8 +579,8 @@ public static class SemanticVerifier
                 break;
             case BoundCast cast:
                 Expression(cast.Operand, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1);
-                if (cast.Operand.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Char16)
-                    || cast.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Char16))
+                if (cast.Operand.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16)
+                    || cast.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16))
                 {
                     throw Invalid();
                 }
@@ -633,8 +635,8 @@ public static class SemanticVerifier
                 Expression(unary.Operand, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1);
                 var unaryValid = unary.Operator switch {
                     TokenKind.Plus or TokenKind.Tilde =>
-                        unary.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 && unary.Type == unary.Operand.Type,
-                    TokenKind.Minus => unary.Operand.Type == PrimitiveType.Int32 && unary.Type == PrimitiveType.Int32,
+                        unary.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 && unary.Type == unary.Operand.Type,
+                    TokenKind.Minus => unary.Operand.Type is PrimitiveType.Int32 or PrimitiveType.Int64 && unary.Type == unary.Operand.Type,
                     TokenKind.Bang => unary.Operand.Type == PrimitiveType.Bool && unary.Type == PrimitiveType.Bool,
                     _ => false,
                 };
@@ -673,16 +675,16 @@ public static class SemanticVerifier
                 var operands = binary.Left.Type == binary.Right.Type && binary.Left.Type != PrimitiveType.Void;
                 var binaryValid = binary.Operator switch {
                     TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent =>
-                        operands && binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
+                        operands && binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
                             && binary.Type == binary.Left.Type,
                     TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals =>
-                        operands && binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Char16
+                        operands && binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16
                             && binary.Type == PrimitiveType.Bool,
                     TokenKind.EqualsEquals or TokenKind.BangEquals =>
-                        operands && binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Char16 or PrimitiveType.Bool
+                        operands && binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool
                             && binary.Type == PrimitiveType.Bool,
                     TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret =>
-                        operands && binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Bool
+                        operands && binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Bool
                             && binary.Type == binary.Left.Type,
                     TokenKind.AmpersandAmpersand or TokenKind.PipePipe =>
                         operands && binary.Left.Type == PrimitiveType.Bool && binary.Type == PrimitiveType.Bool,
@@ -754,7 +756,7 @@ public static class SemanticVerifier
     }
 
     private static bool ValidType(PrimitiveType type, bool allowVoid, BoundProgram program) =>
-        type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Char16 or PrimitiveType.Bool
+        type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool
             || (allowVoid && type == PrimitiveType.Void)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length);
 
