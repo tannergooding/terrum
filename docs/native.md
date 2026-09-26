@@ -519,7 +519,12 @@ The [module proof](modules.md) persists typed semantic bodies and normalized
 contracts, supports source binding against artifact declarations, verifies replacements,
 then lowers at process start. Producer libraries need no artificial entry point;
 imported declarations require explicit validated DLL/export bindings at the
-encoder boundary. Static AOT
+encoder boundary. `Compilation.CreateLibrary` can bind one or more source
+snapshots against a validated `CompilationReference` under the selected runtime
+policy. `NativeEmitter.EmitLibraryWithImports` shares the DLL export and
+executable import-binding checks; it verifies external declaration shapes and
+bindings, not provider contract compatibility. A bounded execution test loads
+an EXE through a dependent DLL into a leaf DLL using these raw APIs. Static AOT
 linking from these artifacts is separate from replacement of an unchanged PE.
 There is no optimizer, debug-symbol format, general source interop, managed
 root map, production runtime or hot replacement. The broader LMOD design

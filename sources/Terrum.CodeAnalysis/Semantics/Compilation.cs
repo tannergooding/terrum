@@ -163,6 +163,22 @@ public sealed class Compilation
     public static Compilation CreateLibrary(SyntaxTree tree, CancellationToken cancellationToken = default) =>
         CreateCore(tree, isLibrary: true, cancellationToken);
 
+    /// <summary>Binds a library against validated external declarations without a process entry point.</summary>
+    public static Compilation CreateLibrary(SyntaxTree tree, CompilationReference reference,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        return CreateCore(tree, isLibrary: true, cancellationToken, reference);
+    }
+
+    /// <summary>Binds a library against a reference under the selected checked-failure policy.</summary>
+    public static Compilation CreateLibrary(SyntaxTree tree, CompilationReference reference,
+        BoundRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        return CreateCore(tree, isLibrary: true, cancellationToken, reference, runtimePolicy);
+    }
+
     /// <summary>Binds consumer source against validated module declarations, without reading producer source or binding its bodies.</summary>
     public static Compilation Create(SyntaxTree tree, CompilationReference reference, CancellationToken cancellationToken = default)
     {
@@ -248,6 +264,23 @@ public sealed class Compilation
     public static Compilation CreateLibrary(IEnumerable<SyntaxTree> trees, BoundRuntimePolicy runtimePolicy,
         CancellationToken cancellationToken = default) =>
         CreateCore(trees, [], isLibrary: true, cancellationToken, runtimePolicy: runtimePolicy);
+
+    /// <summary>Binds multiple library source snapshots against validated external declarations.</summary>
+    public static Compilation CreateLibrary(IEnumerable<SyntaxTree> trees, CompilationReference reference,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        return CreateCore(trees, [], isLibrary: true, cancellationToken, reference);
+    }
+
+    /// <summary>Binds multiple library source snapshots against a reference under the selected runtime policy.</summary>
+    public static Compilation CreateLibrary(IEnumerable<SyntaxTree> trees, CompilationReference reference,
+        BoundRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        return CreateCore(trees, [], isLibrary: true, cancellationToken, reference, runtimePolicy);
+    }
+
     /// <summary>Binds consumer source snapshots against one validated module reference.</summary>
     public static Compilation Create(IEnumerable<SyntaxTree> trees, CompilationReference reference, CancellationToken cancellationToken = default)
     {

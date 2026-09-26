@@ -42,6 +42,14 @@ public static class NativeEmitter
         {
             throw new ArgumentException("Native and verified checked-failure policies differ.", nameof(program));
         }
+        var selected = SelectImports(program, bindings, cancellationToken);
+        var code = new PeCompiler(program, cancellationToken, imports: selected).Compile();
+        return PeImage.Build(code);
+    }
+
+    private static Dictionary<int, NativeImportBinding> SelectImports(BoundProgram program,
+        IReadOnlyList<NativeImportBinding> bindings, CancellationToken cancellationToken)
+    {
         if (bindings.Count is < 1 or > 1024)
         {
             throw new ArgumentException("Native consumers require 1 to 1024 explicit import bindings.", nameof(bindings));
@@ -75,8 +83,7 @@ public static class NativeEmitter
                 throw new ArgumentException("An external function has multiple native import bindings.", nameof(bindings));
             }
         }
-        var code = new PeCompiler(program, cancellationToken, imports: selected).Compile();
-        return PeImage.Build(code);
+        return selected;
     }
 
     private static bool ValidImportName(string? name) => name is { Length: >= 1 and <= 256 }
@@ -91,7 +98,21 @@ public static class NativeEmitter
     /// <exception cref="ArgumentException">The library, export names, or public value layouts are invalid.</exception>
     /// <exception cref="NotSupportedException">The runtime policy or a native resource limit is unsupported.</exception>
     public static byte[] EmitLibrary(BoundProgram program, IReadOnlyList<string> exports,
-        NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default)
+        NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
+        EmitLibraryCore(program, exports, null, runtimePolicy, cancellationToken);
+
+    /// <summary>Emits a library whose verified external declarations have explicit DLL import bindings.</summary>
+    /// <remarks>Bindings specify ABI identities, not provider compatibility; callers must validate dependency contracts.</remarks>
+    public static byte[] EmitLibraryWithImports(BoundProgram program, IReadOnlyList<string> exports,
+        IReadOnlyList<NativeImportBinding> bindings, NativeRuntimePolicy runtimePolicy,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(bindings);
+        return EmitLibraryCore(program, exports, bindings, runtimePolicy, cancellationToken);
+    }
+
+    private static byte[] EmitLibraryCore(BoundProgram program, IReadOnlyList<string> exports,
+        IReadOnlyList<NativeImportBinding>? bindings, NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken)
     {
         if (runtimePolicy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
@@ -99,7 +120,14 @@ public static class NativeEmitter
         }
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(program);
-        SemanticVerifier.VerifyLibrary(program);
+        if (bindings is null)
+        {
+            SemanticVerifier.VerifyLibrary(program);
+        }
+        else
+        {
+            SemanticVerifier.VerifyLibraryReferences(program);
+        }
         if (program.RuntimePolicy != (BoundRuntimePolicy)runtimePolicy)
         {
             throw new ArgumentException("Native and verified checked-failure policies differ.", nameof(program));
@@ -139,7 +167,8 @@ public static class NativeEmitter
             selected.Add((name, index));
         }
         selected.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
-        var code = new PeCompiler(program, cancellationToken, library: true).Compile();
+        var imports = bindings is null ? null : SelectImports(program, bindings, cancellationToken);
+        var code = new PeCompiler(program, cancellationToken, library: true, imports: imports).Compile();
         return PeImage.BuildLibrary(code, [.. selected], program.Functions.Length);
     }
 

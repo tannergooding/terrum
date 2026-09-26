@@ -40,6 +40,12 @@ public static class SemanticVerifier
         VerifyCore(program, requireEntryPoint: true, allowExternal: true);
     }
 
+    internal static void VerifyLibraryReferences(BoundProgram program)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        VerifyCore(program, requireEntryPoint: false, allowExternal: true);
+    }
+
     private static void VerifyCore(BoundProgram program, bool requireEntryPoint, bool allowExternal = false)
     {
         ArgumentNullException.ThrowIfNull(program);
