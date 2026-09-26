@@ -88,7 +88,9 @@ identity, compatibility, loader and runtime boundaries.
 sixteen independently produced leaf DLLs. The persisted `.tnset` consumer keeps
 its original PE bytes while either selected provider is compatibly replaced;
 validation checks every dependency and the exact PE import ownership. This is
-not transitive dependency resolution or multi-provider JIT loading.
+not transitive dependency resolution or multi-provider JIT loading. The separate
+[native graph commands](native-graph.md) validate explicit acyclic dependencies
+between DLLs while retaining the original consumer and intermediate images.
 
 ## Checked no-throw declarations
 

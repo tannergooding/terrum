@@ -1,0 +1,1 @@
+int32 Main() { return Middle() + 1; }

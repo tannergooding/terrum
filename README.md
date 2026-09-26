@@ -75,6 +75,8 @@ The [JIT proof](docs/jit.md) covers executable-memory and unwind lifetimes;
 replacement against unchanged persisted semantic or native consumers, with
 contract checks before execution. [Native module sets](docs/module-sets.md) extend
 the persisted native consumer proof to multiple independent leaf DLLs.
+The [native graph proof](docs/native-graph.md) additionally supports dependencies
+between DLLs and validates the complete selected closure before execution.
 Neither is a production
 runtime or hot-servicing implementation. The [compiled scanner](docs/scanner.md)
 executes bounded Terrum tokenization against shared pinned Unicode data and

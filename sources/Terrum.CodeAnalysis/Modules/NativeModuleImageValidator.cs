@@ -207,7 +207,7 @@ internal static class NativeModuleImageValidator
             void CheckImports()
             {
                 var table = header.ImportTableDirectory;
-                var count = 1 + (isConsumer ? providerImports.Count : 0) + (checkedExceptions ? 1 : 0);
+                var count = 1 + providerImports.Count + (checkedExceptions ? 1 : 0);
                 if (table.Size != 20 * (count + 1))
                 {
                     throw Invalid();
@@ -284,8 +284,8 @@ internal static class NativeModuleImageValidator
                 {
                     throw Invalid();
                 }
-                if (isConsumer && (names.Count != providerImports.Count
-                    || names.Any(pair => !pair.Value.SequenceEqual(providerImports[pair.Key].Order(StringComparer.Ordinal)))))
+                if (names.Count != providerImports.Count
+                    || names.Any(pair => !pair.Value.SequenceEqual(providerImports[pair.Key].Order(StringComparer.Ordinal))))
                 {
                     throw Invalid();
                 }

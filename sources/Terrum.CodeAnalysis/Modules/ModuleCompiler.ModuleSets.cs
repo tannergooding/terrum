@@ -87,14 +87,21 @@ public static partial class ModuleCompiler
     /// <summary>Persists only the consumer and selected imports; no provider implementation is embedded.</summary>
     internal static byte[] CreateConsumerSet(BoundProgram program, IReadOnlyList<byte[]> producers)
     {
+        _ = ReadSet(producers);
+        var reference = CreateReferenceSet(producers);
+        var result = CreateConsumerAgainstReference(program, reference);
+        ValidateConsumerSet(result, producers);
+        return result;
+    }
+
+    internal static byte[] CreateConsumerAgainstReference(BoundProgram program, CompilationReference reference)
+    {
         ArgumentNullException.ThrowIfNull(program);
         SemanticVerifier.VerifyReferences(program);
         if (!program.Buffers.IsDefaultOrEmpty)
         {
             throw new ModuleFormatException("Host buffers are not serializable module dependencies.");
         }
-        _ = ReadSet(producers);
-        var reference = CreateReferenceSet(producers);
         if (program.RuntimePolicy != reference.RuntimePolicy)
         {
             throw new ModuleContractException("Consumer and producer checked-failure policies differ.");
@@ -151,7 +158,7 @@ public static partial class ModuleCompiler
             RuntimePolicy = program.RuntimePolicy,
         };
         var result = Write(module, program);
-        ValidateConsumerSet(result, producers);
+        ValidateConsumerAgainstReference(result, reference);
         return result;
     }
 
@@ -160,6 +167,11 @@ public static partial class ModuleCompiler
     {
         _ = ReadSet(producerBytes);
         var reference = CreateReferenceSet(producerBytes);
+        ValidateConsumerAgainstReference(consumerBytes, reference);
+    }
+
+    internal static void ValidateConsumerAgainstReference(byte[] consumerBytes, CompilationReference reference)
+    {
         var consumer = Read(consumerBytes, expectedConsumer: true);
         if (consumer.RuntimePolicy != reference.RuntimePolicy)
         {
@@ -193,7 +205,8 @@ public static partial class ModuleCompiler
         var names = consumer.Functions.Select((item, index) => (item.Name, index))
             .ToDictionary(static item => item.Name, static item => item.index, StringComparer.Ordinal);
         var program = new BoundProgram([.. consumer.Functions.Select(item => item.Import
-            ? RemapFunction(exports[item.Name], reference.Structures, consumer.Structures)
+            ? RemapFunction(RecordedImportPromises(item.Contract, exports[item.Name]),
+                reference.Structures, consumer.Structures)
             : item.Function ?? throw new ModuleFormatException("Missing consumer body."))], consumer.EntryPoint) {
             Structures = consumer.Structures,
             RuntimePolicy = consumer.RuntimePolicy,

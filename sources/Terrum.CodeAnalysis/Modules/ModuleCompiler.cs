@@ -31,6 +31,11 @@ public static partial class ModuleCompiler
     {
         var producer = Read(producerBytes, expectedConsumer: false);
         ValidateProducer(producer);
+        return CreateReference(producer);
+    }
+
+    private static CompilationReference CreateReference(Module producer)
+    {
         var declarations = producer.Functions.Where(static function => function.Import)
             .Select(static item => Declaration(item.Function ?? throw new ModuleFormatException("Missing export declaration.")))
             .ToImmutableArray();
@@ -341,6 +346,7 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Consumer and producer checked-failure policies differ.");
         }
+        ValidateConsumerAgainstReference(consumerBytes, CreateReference(producer));
         var sharedTypes = consumer.ImportedStructures.ToHashSet(StringComparer.Ordinal);
         var producerTypes = producer.Structures.ToDictionary(static structure => structure.Name, StringComparer.Ordinal);
         foreach (var structure in consumer.Structures)
