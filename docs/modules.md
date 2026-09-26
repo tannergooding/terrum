@@ -1,6 +1,6 @@
 # Bounded semantic and native modules
 
-The version 16 `.trm` format records the selected native runtime policy and
+The version 18 `.trm` format records the selected native runtime policy and
 persists verified, typed, source-mapped structured IR,
 not source text or a native DLL. `CreateProducer` stores selected function bodies
 and exported contracts. `CreateConsumer` stores its own function bodies and the
@@ -251,6 +251,15 @@ writable view or used clear operation selects `native-17`; an unused intrinsic
 declaration does not promote an existing buffer-only program. Version 16
 readonly-view modules retain their original wire layout and profile. Neither
 view type can appear in a field or exported/imported function contract.
+Version 18 also retains lexical managed-root scope and retirement metadata.
+It admits image-private `ManagedNode` operations in a leaf producer with
+scalar/void, by-value-only public exports. The DLL owns and explicitly collects
+its own unreachable graph; no managed handle crosses a module or native DLL
+boundary. The package reader verifies the retained `native-18` profile, roots
+and node operations before permitting the DLL's bounded heap imports.
+Previously stored modules remain readable under their original versions.
+Source-defined classes, managed imports and managed values in public layouts
+or signatures remain unsupported; no DLL-unload heap cleanup is promised.
 A consumer importing a unique type must also import the exported NoThrow
 cleanup methods of that type and its owning children. Their cleanup identities
 and Copy/unique distinctions participate in layout and signature compatibility;

@@ -1,0 +1,15 @@
+int32 MakeValue() {
+    require ManagedNode.TryCreate(40, out var head);
+    require ManagedNode.TryCreate(2, out var tail);
+    head.SetNext(tail);
+    tail.SetNext(head);
+    return head.Value + tail.Value;
+}
+
+public int32 Leaf() {
+    int32 first = MakeValue();
+    require ManagedHeap.Collect() == 2;
+    int32 second = MakeValue();
+    require ManagedHeap.Collect() == 2;
+    return second;
+}

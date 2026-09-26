@@ -126,6 +126,13 @@ not source defaults. Class payloads are bounded to 128 bytes; readonly/mutable
 field access, visibility and partial-construction checks remain mandatory.
 Classes have no inheritance, optional edges, inline-struct storage or managed
 module ABI; `new C(...)` is rejected rather than inventing an allocation exception.
+Version 18 semantic modules separately admit private `ManagedNode` code in a
+leaf producer whose exported declarations are scalar and by-value only.
+Native packages validate its managed profile, heap imports and root metadata.
+The leaf's collection is image-local and explicit; neither public managed
+contracts nor DLL-unload collection are implemented. Unchanged persisted
+consumer/intermediate images accept a compatible replacement under AOT and
+root-only JIT.
 The [source-line index candidate](../self-host/SourceLineIndex.terrum) uses `OwnedInt32Buffer`
 to build and own a line-start table, with binary-searched UTF-16 positions checked
 against host fixtures under both native failure policies.

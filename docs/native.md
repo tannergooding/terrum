@@ -91,6 +91,15 @@ return snapshots, and a native C handler that validates the private versioned
 exception record before collecting after both Terrum frames have departed.
 That fixture is evidence for frame cleanup, not a public exception ABI.
 
+Semantic module version 18 also permits a leaf producer to use private
+`ManagedNode` storage behind scalar, by-value exports. Its exact roots and
+collector remain inside the producer DLL. A compatible replacement can add this
+private runtime without changing persisted consumer or intermediate images,
+under either AOT or root-only JIT. The leaf must explicitly collect unreachable
+objects; unloading a DLL does not run managed-heap teardown. Managed signatures,
+cross-image roots and source-class metadata remain unsupported
+([replacement proof](native-graph.md)).
+
 `native-19` adds up to 256 source-defined classes with explicit constructors and
 at most 16 scalar or non-null managed-reference fields in a payload of at most
 128 bytes. Constructor arguments are limited to three scalars or managed handles;

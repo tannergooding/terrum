@@ -24,7 +24,7 @@ public sealed class NativeLegacyReadonlyViewCompatibilityTests
         "6EA5309F3C645E481A22B0AB25954738134D5275BDE3F4C8A16D98EE15BC4C7C",
         "2DCDEE14F3F8DBDEA6107A9004D0C4397947B466A0BB42DF937269B13966CC1C",
         "B25697180BB47E0BA6C9A535D6A1064927BA28A7A0E55FD1DED5CB856EC877A9")]
-    public async Task FrozenV16GraphAcceptsV17WritableLeafAsync(NativeRuntimePolicy policy, string name,
+    public async Task FrozenV16GraphAcceptsNewWritableLeafAsync(NativeRuntimePolicy policy, string name,
         string rootHash, string middleHash, string readonlyHash)
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "Fixtures", "Native");
@@ -53,7 +53,7 @@ public sealed class NativeLegacyReadonlyViewCompatibilityTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var writableLeaf = NativeModuleCompiler.CreateProducer(
             Assert.IsType<BoundProgram>(compilation.Program), ["Leaf"], "NodeB", policy);
-        Assert.Equal(17, SemanticVersion(writableLeaf));
+        Assert.Equal(18, SemanticVersion(writableLeaf));
         Assert.Equal("native-17", NativeModuleCompiler.Inspect(writableLeaf).NativeProfileVersion);
 
         var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);

@@ -132,7 +132,7 @@ public sealed class NativeManagedNodeTests
     }
 
     [Fact]
-    public void AcceptsCheckedPolicyButRejectsPersistedModules()
+    public void AcceptsCheckedPolicyAndPrivateNodeProducerModules()
     {
         var checkedCompilation = Compilation.Create(SyntaxTree.Parse(Cycle), BoundRuntimePolicy.CheckedExceptions);
         Assert.False(checkedCompilation.HasErrors, string.Join(Environment.NewLine, checkedCompilation.Diagnostics));
@@ -146,7 +146,8 @@ public sealed class NativeManagedNodeTests
             """));
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var program = Assert.IsType<BoundProgram>(library.Program);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateProducer(program, ["Proof"]));
+        var module = ModuleCompiler.CreateProducer(program, ["Proof"]);
+        Assert.Equal("native-18", ModuleCompiler.GetNativeProfileVersion(module, false));
         Assert.NotEmpty(NativeEmitter.EmitLibrary(program, ["Proof"], NativeRuntimePolicy.FailFast));
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program,
             ["ManagedNode.TryCreate"], NativeRuntimePolicy.FailFast));
@@ -207,7 +208,7 @@ public sealed class NativeManagedNodeTests
             """), BoundRuntimePolicy.CheckedExceptions);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateProducer(program, ["Proof"]));
+        Assert.NotEmpty(ModuleCompiler.CreateProducer(program, ["Proof"]));
         var functionIndex = program.Functions.IndexOf(Assert.Single(program.Functions, static item => item.Name == "Proof"));
         var function = program.Functions[functionIndex];
         var forged = program with {
@@ -215,6 +216,7 @@ public sealed class NativeManagedNodeTests
                 function with { Body = function.Body with { RetiredManagedLocals = [] } }),
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(forged));
+        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forged, ["Proof"]));
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(forged,
             ["Proof"], NativeRuntimePolicy.CheckedExceptions));
     }

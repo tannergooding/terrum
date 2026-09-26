@@ -18,15 +18,17 @@ internal static class NativeModuleImageValidator
     private const int MaximumUnwindRecords = 100_008;
 
     internal static void Validate(byte[] image, bool isConsumer, string providerDll, IReadOnlyList<string> exports,
-        NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast, bool allowOwnedBufferRuntime = false)
+        NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast, bool allowOwnedBufferRuntime = false,
+        bool allowManagedRuntimeData = false)
         => Validate(image, isConsumer, isConsumer
             ? new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal) { [providerDll] = exports }
             : new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal), exports, policy,
-            allowOwnedBufferRuntime);
+            allowOwnedBufferRuntime, allowManagedRuntimeData);
 
     internal static void Validate(byte[] image, bool isConsumer,
         IReadOnlyDictionary<string, IReadOnlyList<string>> providerImports, IReadOnlyList<string> exports,
-        NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast, bool allowOwnedBufferRuntime = false)
+        NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast, bool allowOwnedBufferRuntime = false,
+        bool allowManagedRuntimeData = false)
     {
         if (policy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
@@ -52,10 +54,12 @@ internal static class NativeModuleImageValidator
                 throw Invalid();
             }
             var sections = headers.SectionHeaders;
-            if (sections.Length != (isConsumer ? 4 : 5)
+            var managedData = !isConsumer && allowManagedRuntimeData;
+            if (sections.Length != (isConsumer ? 4 : managedData ? 6 : 5)
                 || !sections.Select(static section => section.Name).SequenceEqual(isConsumer
                     ? [".text", ".idata", ".pdata", ".xdata"]
-                    : [".text", ".idata", ".pdata", ".xdata", ".edata"]))
+                    : managedData ? [".text", ".idata", ".data", ".pdata", ".xdata", ".edata"]
+                        : [".text", ".idata", ".pdata", ".xdata", ".edata"]))
             {
                 throw Invalid();
             }
@@ -68,7 +72,8 @@ internal static class NativeModuleImageValidator
                 var writable = (flags & unchecked((int)0x80000000)) != 0;
                 var executable = (flags & 0x20000000) != 0;
                 var expectedFlags = index == 0 ? 0x60000020
-                    : index == 1 ? unchecked((int)0xC0000040) : 0x40000040;
+                    : index == 1 || (managedData && index == 2)
+                        ? unchecked((int)0xC0000040) : 0x40000040;
                 if (section.VirtualSize <= 0 || section.SizeOfRawData < section.VirtualSize
                     || section.PointerToRawData < previousRaw || section.VirtualAddress < previousRva
                     || section.PointerToRawData % header.FileAlignment != 0
@@ -317,6 +322,7 @@ internal static class NativeModuleImageValidator
                 var sawSourceFrame = false;
                 var sawCleanupFrame = false;
                 var sawLegacySource = false;
+                var sawManagedCollector = false;
                 var cleanupStarts = new HashSet<int>();
                 var exceptionalCleanups = new List<int>();
                 for (var index = 0; index < table.Size / 12; index++)
@@ -437,17 +443,27 @@ internal static class NativeModuleImageValidator
                     }
                     else if (index >= sourceStart)
                     {
-                        if (sawSourceFrame || sawCleanupFrame)
+                        // The image-private collector is emitted last with a 120-byte frame.
+                        if (managedData && index == (table.Size / 12) - 1
+                            && (sawSourceFrame || sawCleanupFrame) && allocation == 120)
+                        {
+                            sawManagedCollector = true;
+                        }
+                        else if (sawSourceFrame || sawCleanupFrame)
                         {
                             throw Invalid();
                         }
-                        sawLegacySource = true;
-                        _ = sourceFunctionStarts.Add(begin);
+                        else
+                        {
+                            sawLegacySource = true;
+                            _ = sourceFunctionStarts.Add(begin);
+                        }
                     }
                     previousEnd = end;
                     nextInfo = checked(nextInfo + size);
                 }
-                if (exceptionalCleanups.Any(handler => !cleanupStarts.Contains(handler)))
+                if ((managedData && !sawManagedCollector)
+                    || exceptionalCleanups.Any(handler => !cleanupStarts.Contains(handler)))
                 {
                     throw Invalid();
                 }

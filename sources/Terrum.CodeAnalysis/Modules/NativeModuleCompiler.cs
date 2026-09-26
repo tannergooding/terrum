@@ -235,7 +235,9 @@ public static partial class NativeModuleCompiler
             .ToArray();
         NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, DllName(producer.Identity), exports,
             producer.Policy, allowOwnedBufferRuntime:
-                AllowsOwnedBufferRuntime(ModuleCompiler.GetNativeProfileVersion(producer.Contract, false)));
+                AllowsOwnedBufferRuntime(ModuleCompiler.GetNativeProfileVersion(producer.Contract, false)),
+            allowManagedRuntimeData:
+                AllowsManagedRuntimeData(ModuleCompiler.GetNativeProfileVersion(producer.Contract, false)));
         ValidateConsumerImage(consumer);
     }
 
@@ -267,7 +269,9 @@ public static partial class NativeModuleCompiler
         NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, DllName(producer.Identity),
             [.. reference.Functions.Select(static function => function.Name)], producer.Policy,
             allowOwnedBufferRuntime:
-                AllowsOwnedBufferRuntime(ModuleCompiler.GetNativeProfileVersion(producer.Contract, false)));
+                AllowsOwnedBufferRuntime(ModuleCompiler.GetNativeProfileVersion(producer.Contract, false)),
+            allowManagedRuntimeData:
+                AllowsManagedRuntimeData(ModuleCompiler.GetNativeProfileVersion(producer.Contract, false)));
     }
 
     private static byte[] Write(bool isConsumer, string identity, NativeRuntimePolicy policy, byte[] contract,

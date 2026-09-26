@@ -37,6 +37,10 @@ under both policies. It constructs source-defined classes with multiple managed
 edges, collects during partial construction without publishing it, and updates
 a shared writable referent through an alias. This is not inheritance, optional
 reference fields, a public managed ABI or a general collection library.
+The [private managed-node leaf](../samples/native/graph/managed-node-leaf.terrum)
+replaces a scalar-only producer without changing its persisted consumer or
+intermediate DLL. Its cycle allocation and explicit collection stay inside the
+leaf under AOT and root-only JIT; see the [graph commands](native-graph.md).
 The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
 returns 46 through AOT and JIT. Two nominal Copy wrappers explicitly implement
 source-defined addition/multiplication protocols used by one constrained

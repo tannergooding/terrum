@@ -22,7 +22,8 @@ public static partial class ModuleCompiler
     private const int CompositeVersion = 14;
     private const int BufferVersion = 15;
     private const int ReadonlyViewVersion = 16;
-    private const int Version = 17;
+    private const int WritableViewVersion = 17;
+    private const int Version = 18;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -95,6 +96,10 @@ public static partial class ModuleCompiler
         {
             throw new ModuleFormatException("Readonly buffer views cannot cross module value contracts.");
         }
+        if (HasManagedNodes(module.Functions))
+        {
+            return "native-18";
+        }
         var profile = Compilation.GetNativeProfileVersion(module.RuntimePolicy,
             module.Structures.Any(static structure => structure.IsUnique),
             module.Functions.Any(static function => function.HasOwnershipTransfer),
@@ -110,20 +115,43 @@ public static partial class ModuleCompiler
 
     private static void RejectManagedNodes(BoundProgram program)
     {
-        if (!program.Classes.IsDefaultOrEmpty)
-        {
-            throw new ModuleFormatException("Source classes have no persisted module runtime or ABI.");
-        }
-        if (program.Functions.Any(static function =>
-                function.Intrinsic >= BoundIntrinsic.NodeTryCreate
-                || function.ReturnType == PrimitiveType.ManagedNode
-                || function.Variables.Any(static variable => variable.Type == PrimitiveType.ManagedNode))
+        RejectManagedClasses(program);
+        if (HasManagedNodes(program)
             || program.Structures.Any(static structure =>
                 structure.Fields.Any(static field => field.Type == PrimitiveType.ManagedNode)))
         {
             throw new ModuleFormatException("Managed nodes have no persisted module runtime or ABI.");
         }
     }
+
+    private static void RejectManagedClasses(BoundProgram program)
+    {
+        if (!program.Classes.IsDefaultOrEmpty)
+        {
+            throw new ModuleFormatException("Source classes have no persisted module runtime or ABI.");
+        }
+    }
+
+    private static bool HasManagedNodes(IEnumerable<ModuleFunction> functions) =>
+        functions.Any(static item => item.Function is BoundFunction function
+            && UsesManagedNode(function));
+
+    private static bool HasManagedNodes(BoundProgram program) =>
+        program.Functions.Any(UsesManagedNode);
+
+    private static bool UsesManagedNode(BoundFunction function) =>
+        function.Intrinsic is >= BoundIntrinsic.NodeTryCreate and <= BoundIntrinsic.NodeCollect
+        || function.ReturnType == PrimitiveType.ManagedNode
+        || function.Variables.Any(static variable => variable.Type == PrimitiveType.ManagedNode);
+
+    private static bool ScalarManagedExport(BoundFunction function) =>
+        (function.ReturnType == PrimitiveType.Void || ScalarManagedType(function.ReturnType))
+        && function.Variables.Skip(function.IsConstructor ? 1 : 0).Take(function.ParameterCount)
+            .All(static variable => !variable.IsOut && ScalarManagedType(variable.Type));
+
+    private static bool ScalarManagedType(PrimitiveType type) =>
+        type is PrimitiveType.Bool or PrimitiveType.Int32 or PrimitiveType.UInt32
+            or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16;
 
     private static bool HasOwnedNativeBuffer(ImmutableArray<BoundStruct> structures,
         ImmutableArray<ModuleFunction> functions) =>
@@ -222,7 +250,9 @@ public static partial class ModuleCompiler
                 Add(variable.Type);
             }
             if (function.DeclaringStruct is string declaring
-                && declaring != NativeBufferIntrinsics.TypeName)
+                && declaring != NativeBufferIntrinsics.TypeName
+                && declaring != NativeManagedNodeIntrinsics.TypeName
+                && declaring != NativeManagedNodeIntrinsics.HeapName)
             {
                 var index = 0;
                 while (index < structures.Length && structures[index].Name != declaring)
@@ -291,7 +321,7 @@ public static partial class ModuleCompiler
         {
             SemanticVerifier.Verify(program);
         }
-        RejectManagedNodes(program);
+        RejectManagedClasses(program);
         if (!program.Buffers.IsDefaultOrEmpty)
         {
             throw new ModuleFormatException("Host buffers are not serializable module dependencies.");
@@ -313,9 +343,11 @@ public static partial class ModuleCompiler
         {
             throw new ModuleFormatException("An exported function is missing.");
         }
-        if (indexes.Any(index => !Exportable(program.Functions[index], program.Structures)))
+        if (indexes.Any(index => !Exportable(program.Functions[index], program.Structures))
+            || (HasManagedNodes(program)
+                && indexes.Any(index => !ScalarManagedExport(program.Functions[index]))))
         {
-            throw new ModuleContractException("Producer exports must have public declarations and public value layouts.");
+            throw new ModuleContractException("Producer exports must have public, supported native declarations.");
         }
         var exportedTypes = RequiredStructures(indexes.Select(index => Declaration(program.Functions[index])), program.Structures);
         foreach (var structure in program.Structures)
@@ -325,6 +357,14 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleContractException($"Exported unique type '{structure.Name}' requires its cleanup method to be exported.");
             }
+        }
+        if (HasManagedNodes(program))
+        {
+            if (program.Functions.Any(static function => function.IsExternal))
+            {
+                throw new ModuleContractException("Managed-node leaf implementations cannot import other providers.");
+            }
+            indexes.UnionWith(Enumerable.Range(0, program.Functions.Length));
         }
         var pending = new Queue<int>(indexes);
         var functionIndexes = program.Functions.Select((function, index) => (function.Name, index))
@@ -828,7 +868,8 @@ public static partial class ModuleCompiler
             var index = (int)type - 100;
             if (index < 0)
             {
-                return type is not (PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView);
+                return type is not (PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
+                    or PrimitiveType.ManagedNode);
             }
             if (index >= structures.Length)
             {
@@ -1053,7 +1094,14 @@ public static partial class ModuleCompiler
 
     private static byte[] Write(Module module, BoundProgram program)
     {
-        RejectManagedNodes(program);
+        if (module.Consumer)
+        {
+            RejectManagedNodes(program);
+        }
+        else
+        {
+            RejectManagedClasses(program);
+        }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         writer.Write(Magic);
@@ -1146,6 +1194,11 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Module semantic profile does not match its retained contracts.");
             }
+            if (HasManagedNodes(module.Functions) && (expectedConsumer || module.Functions.Any(static item =>
+                    item.Import && (item.Function is not BoundFunction function || !ScalarManagedExport(function)))))
+            {
+                throw new ModuleFormatException("Managed-node references require scalar-only leaf exports.");
+            }
             if (stream.Position != stream.Length || (expectedConsumer && items[entry].Import))
             {
                 throw new ModuleFormatException("Module has trailing data or an imported entry point.");
@@ -1166,7 +1219,7 @@ public static partial class ModuleCompiler
         }
         var version = reader.ReadInt32();
         if (version is not (10 or 11 or OwnershipVersion or TransferVersion or CompositeVersion
-            or BufferVersion or ReadonlyViewVersion or Version))
+            or BufferVersion or ReadonlyViewVersion or WritableViewVersion or Version))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -1183,7 +1236,8 @@ public static partial class ModuleCompiler
                 && (version < CompositeVersion || profile != "native-14")
                 && (version < BufferVersion || profile != "native-15")
                 && (version < ReadonlyViewVersion || profile != "native-16")
-                && (version < Version || profile != "native-17")))
+                && (version < WritableViewVersion || profile != "native-17")
+                && (version < Version || profile != "native-18")))
         {
             throw new ModuleFormatException("Unsupported module semantic profile or checked-failure policy.");
         }
@@ -1275,6 +1329,14 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Producer export has a nonpublic declaration or value layout.");
             }
+            if (import && ContractContainsType(contract, PrimitiveType.ManagedNode))
+            {
+                throw new ModuleFormatException("Managed-node handles cannot cross a module declaration.");
+            }
+            if (expectedConsumer && function is BoundFunction body && UsesManagedNode(body))
+            {
+                throw new ModuleFormatException("Managed-node bodies require an image-private leaf.");
+            }
             if (expectedConsumer && import
                 && (contract.Split('|') is not { Length: > 3 } parts || parts[3] != "E"))
             {
@@ -1327,12 +1389,12 @@ public static partial class ModuleCompiler
     {
         var name = GetString(reader);
         var type = (PrimitiveType)reader.ReadInt32();
-        if (type == PrimitiveType.ManagedNode)
+        if (version < Version && type == PrimitiveType.ManagedNode)
         {
             throw new ModuleFormatException("Managed nodes have no persisted module ABI.");
         }
         if ((version < ReadonlyViewVersion && type == PrimitiveType.ReadonlyInt32BufferView)
-            || (version < Version && type == PrimitiveType.MutableInt32BufferView))
+            || (version < WritableViewVersion && type == PrimitiveType.MutableInt32BufferView))
         {
             throw new ModuleFormatException("Native buffer view type requires a newer semantic module version.");
         }
@@ -1344,11 +1406,12 @@ public static partial class ModuleCompiler
         var doesNotReturn = GetBool(reader);
         var isCleanup = version >= OwnershipVersion && GetBool(reader);
         var intrinsic = version >= BufferVersion ? (BoundIntrinsic)reader.ReadByte() : BoundIntrinsic.None;
-        if (intrinsic >= BoundIntrinsic.NodeTryCreate)
+        if (intrinsic >= BoundIntrinsic.NodeTryCreate
+            && (version < Version || intrinsic > BoundIntrinsic.NodeCollect))
         {
             throw new ModuleFormatException("Managed nodes have no persisted module runtime.");
         }
-        if (version < Version && intrinsic == BoundIntrinsic.BufferClear)
+        if (version < WritableViewVersion && intrinsic == BoundIntrinsic.BufferClear)
         {
             throw new ModuleFormatException("Buffer.Clear requires semantic module version 17.");
         }
@@ -1365,12 +1428,12 @@ public static partial class ModuleCompiler
         {
             var variableName = GetString(reader);
             var variableType = (PrimitiveType)reader.ReadInt32();
-            if (variableType == PrimitiveType.ManagedNode)
+            if (version < Version && variableType == PrimitiveType.ManagedNode)
             {
                 throw new ModuleFormatException("Managed nodes have no persisted module ABI.");
             }
             if ((version < ReadonlyViewVersion && variableType == PrimitiveType.ReadonlyInt32BufferView)
-                || (version < Version && variableType == PrimitiveType.MutableInt32BufferView))
+                || (version < WritableViewVersion && variableType == PrimitiveType.MutableInt32BufferView))
             {
                 throw new ModuleFormatException("Native buffer view type requires a newer semantic module version.");
             }
@@ -1421,6 +1484,13 @@ public static partial class ModuleCompiler
         switch (statement)
         {
             case BoundBlock block:
+                writer.Write(block.IsManagedLexicalScope);
+                writer.Write(block.RetiredManagedLocals.Length);
+                foreach (var slot in block.RetiredManagedLocals)
+                {
+                    Step(ref remaining, depth + 1);
+                    writer.Write(slot);
+                }
                 writer.Write(block.Statements.Length);
                 foreach (var child in block.Statements)
                 {
@@ -1542,13 +1612,29 @@ public static partial class ModuleCompiler
         switch (kind)
         {
             case 1:
+                var managedScope = version >= Version && GetBool(reader);
+                var retired = ImmutableArray<int>.Empty;
+                if (version >= Version)
+                {
+                    var retiredCount = Count(reader, MaximumSlots);
+                    var slots = ImmutableArray.CreateBuilder<int>(retiredCount);
+                    for (var i = 0; i < retiredCount; i++)
+                    {
+                        Step(ref remaining, depth + 1);
+                        slots.Add(reader.ReadInt32());
+                    }
+                    retired = slots.MoveToImmutable();
+                }
                 var count = Count(reader, MaximumNodes);
                 var statements = ImmutableArray.CreateBuilder<BoundStatement>(count);
                 for (var i = 0; i < count; i++)
                 {
                     statements.Add(GetStatement(reader, ref remaining, depth + 1, version));
                 }
-                return new BoundBlock(statements.ToImmutable(), span);
+                return new BoundBlock(statements.ToImmutable(), span) {
+                    IsManagedLexicalScope = managedScope,
+                    RetiredManagedLocals = retired,
+                };
             case 2:
                 return new BoundLocal(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1, version), span);
             case 3:
@@ -1616,7 +1702,7 @@ public static partial class ModuleCompiler
                 return new BoundDropConstructedFields(constructedOwner, order.ToImmutable(), span);
             case 16 when version >= ReadonlyViewVersion:
                 var viewVariable = reader.ReadInt32();
-                var mutable = version >= Version && GetBool(reader);
+                var mutable = version >= WritableViewVersion && GetBool(reader);
                 var viewOwner = GetExpression(reader, ref remaining, depth + 1, version);
                 var start = GetExpression(reader, ref remaining, depth + 1, version);
                 var length = GetExpression(reader, ref remaining, depth + 1, version);
@@ -1625,7 +1711,7 @@ public static partial class ModuleCompiler
                 return new BoundViewScope(viewVariable, viewOwner, start, length, viewBody, span) {
                     IsMutable = mutable,
                 };
-            case 17 when version >= Version:
+            case 17 when version >= WritableViewVersion:
                 return new BoundViewSet(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1, version),
                     GetExpression(reader, ref remaining, depth + 1, version), span);
             default:
@@ -1724,6 +1810,10 @@ public static partial class ModuleCompiler
         Step(ref remaining, depth);
         var kind = reader.ReadByte();
         var type = (PrimitiveType)reader.ReadInt32();
+        if (version < Version && type == PrimitiveType.ManagedNode)
+        {
+            throw new ModuleFormatException("Managed-node expressions require semantic module version 18.");
+        }
         var span = GetSpan(reader);
         switch (kind)
         {

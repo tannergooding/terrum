@@ -203,7 +203,9 @@ public static partial class NativeModuleCompiler
                 .Select(static item => item.Name).ToArray();
             NativeModuleImageValidator.Validate(providers[i].Image, false, DllName(providers[i].Identity),
                 exports, providers[i].Policy, allowOwnedBufferRuntime:
-                    AllowsOwnedBufferRuntime(ModuleCompiler.GetNativeProfileVersion(providers[i].Contract, false)));
+                    AllowsOwnedBufferRuntime(ModuleCompiler.GetNativeProfileVersion(providers[i].Contract, false)),
+                allowManagedRuntimeData:
+                    AllowsManagedRuntimeData(ModuleCompiler.GetNativeProfileVersion(providers[i].Contract, false)));
         }
         ModuleCompiler.ValidateConsumerSet(set.Contract, [.. providers.Select(static item => item.Contract)]);
         var actual = ModuleCompiler.GetConsumerSetDeclarations(set.Contract).ToHashSet(StringComparer.Ordinal);

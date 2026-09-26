@@ -142,6 +142,27 @@ $LASTEXITCODE # 46
 $LASTEXITCODE # 46
 ```
 
+A leaf may use image-private `ManagedNode` allocation and explicit collection
+behind the same scalar `Leaf()` declaration. The persisted root and intermediate
+still import only `Leaf`; replacing the leaf does not re-emit either machine
+image. The replacement selects `native-18` and carries checked lexical root
+metadata. Its native heap imports are accepted only for the matching verified
+profile. The example calls `ManagedHeap.Collect()` inside the leaf after its
+unreachable cycles retire, so repeated calls do not depend on roots in another
+image. It does not export managed handles, transfer roots across DLLs, or
+promise cleanup of live heap objects on DLL unload.
+
+```powershell
+& $c compile-native producer samples\native\graph\managed-node-leaf-original.terrum NodeB --export Leaf -o node-original.trmn --runtime fail-fast
+& $c compile-native-graph producer samples\native\graph\middle.terrum NodeA --provider node-original.trmn --export Middle -o node-middle.trng --runtime fail-fast
+& $c compile-native-graph consumer samples\native\graph\consumer.terrum --provider node-middle.trng -o node-root.trng --runtime fail-fast
+& $c compile-native producer samples\native\graph\managed-node-leaf.terrum NodeB --export Leaf -o node-new.trmn --runtime fail-fast
+& $c run-native-graph node-root.trng --provider node-middle.trng --provider node-new.trmn --runtime fail-fast
+$LASTEXITCODE # 44
+& $c run-native-graph-jit node-root.trng --provider node-middle.trng --provider node-new.trmn --runtime fail-fast
+$LASTEXITCODE # 44
+```
+
 Graph v2 packages carry the declared origin and cleanup owner of every
 retained type, separately from the actual PE imports reported by the same
 native emission. A graph DLL may return or bool/out-publish a dependency-owned
