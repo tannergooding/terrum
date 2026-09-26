@@ -186,9 +186,9 @@ internal sealed class Binder
                 {
                     var name = StructName(structure).Text;
                     var qualified = string.IsNullOrEmpty(_namespace) ? name : _namespace + "." + name;
-                    if (qualified == NativeBufferIntrinsics.TypeName)
+                    if (qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView")
                     {
-                        Report("TRM3003", "The compiler-owned native buffer type cannot be redeclared.", structure.Span);
+                        Report("TRM3003", "A compiler-owned native buffer or view type cannot be redeclared.", structure.Span);
                         continue;
                     }
                     var index = _structs.Count;
@@ -212,6 +212,7 @@ internal sealed class Binder
         {
             _ = _structNames.TryAdd(NativeBufferIntrinsics.TypeName, PrimitiveType.OwnedInt32Buffer);
         }
+        _ = _structNames.TryAdd("ReadonlyInt32BufferView", PrimitiveType.ReadonlyInt32BufferView);
         foreach (var index in _structDeclarations.Keys)
         {
             DeclareStruct(index);
@@ -487,6 +488,10 @@ internal sealed class Binder
             var typeNode = (SyntaxNode)field.Children[^3];
             var fieldName = ((SyntaxTokenElement)field.Children[^2]).Token;
             var type = BindType(typeNode, allowVoid: false);
+            if (type == PrimitiveType.ReadonlyInt32BufferView)
+            {
+                Report("TRM3023", "A readonly native buffer view cannot be stored in a field.", field.Span);
+            }
             if ((int)type >= 100 && !_laidOut.Contains((int)type - 100))
             {
                 DeclareStruct((int)type - 100);
@@ -649,6 +654,10 @@ internal sealed class Binder
         var parameters = (SyntaxNode)declaration.Children[^2];
         var body = (SyntaxNode)declaration.Children[^1];
         var returnType = constructor ? ResolveStruct(containingType!) : BindType(returnNode!, allowVoid: true);
+        if (returnType == PrimitiveType.ReadonlyInt32BufferView)
+        {
+            Report("TRM3023", "A readonly native buffer view cannot be returned.", returnNode!.Span);
+        }
         if (isCleanup)
         {
             var structure = containingType is null ? null : _structs[(int)ResolveStruct(containingType) - 100];
@@ -682,6 +691,10 @@ internal sealed class Binder
             var typeNode = (SyntaxNode)parameter.Children[^2];
             var token = ((SyntaxTokenElement)parameter.Children[^1]).Token;
             var type = BindType(typeNode, allowVoid: false);
+            if (type == PrimitiveType.ReadonlyInt32BufferView)
+            {
+                Report("TRM3023", "A readonly native buffer view cannot be a parameter.", parameter.Span);
+            }
 
             var isOut = parameter.Children.Length == 3
                 && parameter.Children[0] is SyntaxTokenElement passing
@@ -727,6 +740,7 @@ internal sealed class Binder
             "uint64" => PrimitiveType.UInt64,
             "char16" => PrimitiveType.Char16,
             "bool" => PrimitiveType.Bool,
+            "ReadonlyInt32BufferView" => PrimitiveType.ReadonlyInt32BufferView,
             "void" when allowVoid => PrimitiveType.Void,
             _ => TryResolveStruct(name, out var structure) ? structure : (PrimitiveType?)null,
         };
@@ -785,6 +799,52 @@ internal sealed class Binder
         }
         Report("TRM3023", "Native buffer mutation requires a named mutable owner.", span);
         return ErrorExpression(span);
+    }
+
+    private BoundViewScope BindViewScope(SyntaxToken name, bool isMutable, SyntaxNode initializer, TextSpan span)
+    {
+        if (isMutable || initializer.Kind != SyntaxKind.InvocationExpression
+            || initializer.Children[0] is not SyntaxNode { Kind: SyntaxKind.MemberAccessExpression } callee
+            || ((SyntaxTokenElement)callee.Children[2]).Token.Text != "Slice"
+            || KnownType((SyntaxNode)callee.Children[0]) != PrimitiveType.OwnedInt32Buffer)
+        {
+            Report("TRM3023", "A readonly native buffer view requires a readonly local initialized by owner.Slice(start, length).", span);
+            var invalid = AddVariable(name.Text, PrimitiveType.ReadonlyInt32BufferView, false, name.Span);
+            return new BoundViewScope(invalid, ErrorExpression(span), ErrorExpression(span), ErrorExpression(span),
+                new BoundBlock([], span), span);
+        }
+
+        var arguments = ((SyntaxNode)initializer.Children[1]).Children.OfType<SyntaxNode>().ToArray();
+        if (arguments.Length != 2 || arguments.Any(static argument =>
+            argument.Children.Length != 1 || argument.Children[0] is not SyntaxNode))
+        {
+            Report("TRM3011", "Slice requires two positional int32 arguments.", initializer.Span);
+            var invalid = AddVariable(name.Text, PrimitiveType.ReadonlyInt32BufferView, false, name.Span);
+            return new BoundViewScope(invalid, ErrorExpression(span), ErrorExpression(span), ErrorExpression(span),
+                new BoundBlock([], span), span);
+        }
+
+        var owner = BindReceiverLoan((SyntaxNode)callee.Children[0], PrimitiveType.OwnedInt32Buffer);
+        var start = BindExpression((SyntaxNode)arguments[0].Children[0], PrimitiveType.Int32);
+        var length = BindExpression((SyntaxNode)arguments[1].Children[0], PrimitiveType.Int32);
+        var variable = AddVariable(name.Text, PrimitiveType.ReadonlyInt32BufferView, false, name.Span);
+        return new BoundViewScope(variable, owner, start, length, new BoundBlock([], span), span);
+    }
+
+    private int BindViewVariable(SyntaxNode receiver)
+    {
+        while (receiver.Kind == SyntaxKind.ParenthesizedExpression)
+        {
+            receiver = (SyntaxNode)receiver.Children[1];
+        }
+        if (receiver.Kind == SyntaxKind.NameExpression
+            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token.Text, out var slot)
+            && _variables[slot].Type == PrimitiveType.ReadonlyInt32BufferView)
+        {
+            return slot;
+        }
+        Report("TRM3023", "A readonly native buffer view requires a named lexical local.", receiver.Span);
+        return -1;
     }
 
     private bool TryResolveStruct(string name, out PrimitiveType type)
@@ -847,6 +907,10 @@ internal sealed class Binder
         var bound = statements.ToImmutable();
         for (var index = bound.Length - 1; index >= 0; index--)
         {
+            if (bound[index] is BoundViewScope view)
+            {
+                bound = bound[..index].Add(view with { Body = new BoundBlock(bound[(index + 1)..], block.Span) });
+            }
             if (bound[index] is BoundLocal local && IsUnique(local.Initializer.Type))
             {
                 var method = CleanupMethod(local.Initializer.Type);
@@ -920,6 +984,10 @@ internal sealed class Binder
                 var name = ((SyntaxTokenElement)node.Children[offset + 1]).Token;
                 var initializerNode = (SyntaxNode)node.Children[offset + 3];
                 var declaredType = typeElement is SyntaxNode typeNode ? BindType(typeNode, allowVoid: false) : (PrimitiveType?)null;
+                if (declaredType == PrimitiveType.ReadonlyInt32BufferView)
+                {
+                    return BindViewScope(name, isMutable, initializerNode, node.Span);
+                }
                 var initializer = BindExpression(initializerNode, declaredType);
 
                 if (declaredType is null && initializer.Type == PrimitiveType.Void)
@@ -1065,6 +1133,11 @@ internal sealed class Binder
                 _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
                 var firstVariable = _variables.Count;
                 var initializer = BindStatement((SyntaxNode)node.Children[2]);
+                if (initializer is BoundViewScope)
+                {
+                    Report("TRM3023", "Declare a readonly native buffer view in a braced lexical block, not a for initializer.",
+                        initializer.Span);
+                }
                 var conditionNode = (SyntaxNode)node.Children[4];
                 var condition = conditionNode.Kind == SyntaxKind.OmittedExpression
                     ? new BoundConstant(1, PrimitiveType.Bool, conditionNode.Span)
@@ -1328,6 +1401,11 @@ internal sealed class Binder
                 var member = ((SyntaxTokenElement)node.Children[2]).Token.Text;
                 var receiverNode = (SyntaxNode)node.Children[0];
                 var receiverType = KnownType(receiverNode);
+                if (receiverType == PrimitiveType.ReadonlyInt32BufferView && member == "Length")
+                {
+                    expression = new BoundViewLength(BindViewVariable(receiverNode), node.Span);
+                    break;
+                }
                 if (receiverType == PrimitiveType.OwnedInt32Buffer && member is "Count" or "Capacity"
                     && TryFindFunction(NativeBufferIntrinsics.TypeName + "." + member, out var intrinsic))
                 {
@@ -1575,7 +1653,7 @@ internal sealed class Binder
         return new BoundBinary(op.Kind, left, right, resultType, node.Span);
     }
 
-    private BoundCall BindCall(SyntaxNode node)
+    private BoundExpression BindCall(SyntaxNode node)
     {
         var callee = (SyntaxNode)node.Children[0];
         var function = -1;
@@ -1597,6 +1675,23 @@ internal sealed class Binder
             var left = (SyntaxNode)callee.Children[0];
             var member = ((SyntaxTokenElement)callee.Children[2]).Token.Text;
             var type = KnownType(left);
+            if (type == PrimitiveType.ReadonlyInt32BufferView)
+            {
+                var arguments = ((SyntaxNode)node.Children[1]).Children.OfType<SyntaxNode>().ToArray();
+                if (member != "Read" || arguments.Length != 1 || arguments[0].Children is not [SyntaxNode index])
+                {
+                    Report("TRM3011", "A readonly native buffer view supports Read(index) with one positional int32 argument.",
+                        node.Span);
+                    return ErrorExpression(node.Span);
+                }
+                return new BoundViewRead(BindViewVariable(left), BindExpression(index, PrimitiveType.Int32), node.Span);
+            }
+            if (type == PrimitiveType.OwnedInt32Buffer && member == "Slice")
+            {
+                Report("TRM3023", "A readonly native buffer slice can only initialize a lexical ReadonlyInt32BufferView local.",
+                    node.Span);
+                return ErrorExpression(node.Span);
+            }
             if (type == PrimitiveType.OwnedInt32Buffer)
             {
                 receiver = left;
@@ -1930,6 +2025,14 @@ internal sealed class Binder
                     var left = (SyntaxNode)callee.Children[0];
                     var member = ((SyntaxTokenElement)callee.Children[2]).Token.Text;
                     var receiverType = KnownType(left);
+                    if (receiverType == PrimitiveType.OwnedInt32Buffer && member == "Slice")
+                    {
+                        return PrimitiveType.ReadonlyInt32BufferView;
+                    }
+                    if (receiverType == PrimitiveType.ReadonlyInt32BufferView && member == "Read")
+                    {
+                        return PrimitiveType.Int32;
+                    }
                     var name = receiverType switch {
                         PrimitiveType.OwnedInt32Buffer => NativeBufferIntrinsics.TypeName + "." + member,
                         PrimitiveType type when IsStruct(type) => _structs[(int)type - 100].Name + "." + member,
@@ -1960,6 +2063,10 @@ internal sealed class Binder
                 var receiver = (SyntaxNode)node.Children[0];
                 var member = ((SyntaxTokenElement)node.Children[2]).Token.Text;
                 var receiverType = KnownType(receiver);
+                if (receiverType == PrimitiveType.ReadonlyInt32BufferView && member == "Length")
+                {
+                    return PrimitiveType.Int32;
+                }
                 if (receiverType == PrimitiveType.OwnedInt32Buffer && member is "Count" or "Capacity")
                 {
                     return PrimitiveType.Int32;
@@ -2091,6 +2198,7 @@ internal sealed class Binder
         PrimitiveType.Bool => "bool",
         PrimitiveType.Void => "void",
         PrimitiveType.OwnedInt32Buffer => NativeBufferIntrinsics.TypeName,
+        PrimitiveType.ReadonlyInt32BufferView => "ReadonlyInt32BufferView",
         _ when IsStruct(type) => _structs[(int)type - 100].Name,
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };

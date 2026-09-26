@@ -47,13 +47,14 @@ public unique struct SourceLineIndex
             return false;
         }
 
+        ReadonlyInt32BufferView starts = _starts.Slice(0, _starts.Count);
         // The first start is zero; find the last start not greater than the position.
         mut int32 low = 0;
-        mut int32 high = _starts.Count;
+        mut int32 high = starts.Length;
         while (low + 1 < high)
         {
             int32 middle = low + (high - low) / 2;
-            if (_starts.Read(middle) <= position)
+            if (starts.Read(middle) <= position)
             {
                 low = middle;
             }
@@ -64,7 +65,7 @@ public unique struct SourceLineIndex
         }
 
         line = low;
-        character = position - _starts.Read(low);
+        character = position - starts.Read(low);
         return true;
     }
 }

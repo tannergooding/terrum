@@ -14,6 +14,7 @@ internal static class ValueLayout
         PrimitiveType.Char16 => 2,
         PrimitiveType.Int32 or PrimitiveType.UInt32 => 4,
         PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.OwnedInt32Buffer => 8,
+        PrimitiveType.ReadonlyInt32BufferView => 16,
         PrimitiveType.Void => 0,
         _ when (int)type >= 100 && (int)type - 100 < structures.Count => structures[(int)type - 100].Size,
         _ => 0,
@@ -24,7 +25,7 @@ internal static class ValueLayout
     {
         if ((int)type < 100)
         {
-            return Size(type, structures);
+            return type == PrimitiveType.ReadonlyInt32BufferView ? 8 : Size(type, structures);
         }
         var alignment = 1;
         foreach (var field in structures[(int)type - 100].Fields)

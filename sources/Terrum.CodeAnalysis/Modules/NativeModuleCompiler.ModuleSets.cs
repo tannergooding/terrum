@@ -85,7 +85,8 @@ public static partial class NativeModuleCompiler
             throw new ModuleFormatException("Native set import mapping differs from its semantic declarations.");
         }
         NativeModuleImageValidator.Validate(set.Image, true, Imports(set), [], set.Policy,
-            allowOwnedBufferRuntime: ModuleCompiler.GetNativeProfileVersion(set.Contract, true) == "native-15");
+            allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(
+                ModuleCompiler.GetNativeProfileVersion(set.Contract, true)));
         return new NativeModuleSetInfo(ModuleCompiler.GetNativeProfileVersion(set.Contract, true), set.Policy,
             Convert.ToHexString(SHA256.HashData(set.Image)), [.. set.Dependencies.Select(static item => item.Identity)]);
     }
@@ -202,7 +203,7 @@ public static partial class NativeModuleCompiler
                 .Select(static item => item.Name).ToArray();
             NativeModuleImageValidator.Validate(providers[i].Image, false, DllName(providers[i].Identity),
                 exports, providers[i].Policy, allowOwnedBufferRuntime:
-                    ModuleCompiler.GetNativeProfileVersion(providers[i].Contract, false) == "native-15");
+                    AllowsOwnedBufferRuntime(ModuleCompiler.GetNativeProfileVersion(providers[i].Contract, false)));
         }
         ModuleCompiler.ValidateConsumerSet(set.Contract, [.. providers.Select(static item => item.Contract)]);
         var actual = ModuleCompiler.GetConsumerSetDeclarations(set.Contract).ToHashSet(StringComparer.Ordinal);
@@ -231,7 +232,8 @@ public static partial class NativeModuleCompiler
             }
         }
         NativeModuleImageValidator.Validate(set.Image, true, Imports(set), [], set.Policy,
-            allowOwnedBufferRuntime: ModuleCompiler.GetNativeProfileVersion(set.Contract, true) == "native-15");
+            allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(
+                ModuleCompiler.GetNativeProfileVersion(set.Contract, true)));
     }
 
     private static Dictionary<string, IReadOnlyList<string>> Imports(SetPackage set) =>

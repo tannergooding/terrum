@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-9 and native-10 through native-15
+## Current boundary: syntax-9 and native-10 through native-16
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -18,7 +18,7 @@ managed graphs and standard-library execution are not implemented.
 | Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Classes, interfaces, enums/unions, owning fields in Copy structs, general attributes, generic declarations/constraints, cyclic dependencies, automatic version resolution and resilient module layouts |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; repeated `?` diagnoses | General type resolution, optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, break/continue, switch/patterns, general exception objects/throw, async, compound assignment |
-| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, named/ref/out argument syntax, and checked synchronous `OwnedInt32Buffer` operations | Character literals, partial owning-field moves, owning field replacement, general expression temporaries, stored loans, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
+| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations and lexical readonly buffer slices | Character literals, partial owning-field moves, owning field replacement, general expression temporaries, general stored loans, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
 Only the grammar below is supported. Unsupported constructs diagnose rather than
@@ -70,7 +70,16 @@ mutable named owner. The latter reserve that original receiver before evaluating
 arguments: moving or replacing it within an argument is rejected even if its
 slot becomes live again. Readonly nested queries remain possible. An `out var`
 binding is readonly; explicitly move it into a `mut OwnedInt32Buffer` binding
-to append or set. There is no resize, aliasable view, stored loan, generic
+to append or set. `ReadonlyInt32BufferView starts = buffer.Slice(start, length);`
+checks that the range lies in the initialized prefix once, then permits
+`starts.Length` and checked `starts.Read(index)` within its braced lexical
+scope. The owner (including an owning field's root) cannot be moved, replaced,
+dropped or mutated while any of its readonly slices is active; multiple
+readonly slices and completed readonly queries may coexist. Slice start and
+length are evaluated once before capturing the owner place; calls in these
+expressions cannot invalidate that owner. A view cannot be copied, assigned,
+passed, returned, stored in a field, declared as a for initializer or used
+as a temporary expression. There is no resize, general aliasable view or generic
 buffer or user-defined buffer representation. `TryAppend` is a bounded
 initialized-prefix adapter for compiler components, not an implementation of
 the proposed general `Buffer<T>`/`TryAdd` library contracts.

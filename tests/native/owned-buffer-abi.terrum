@@ -15,9 +15,10 @@ public OwnedInt32Buffer Build() {
 }
 
 public int32 Consume(OwnedInt32Buffer buffer) {
+    ReadonlyInt32BufferView view = buffer.Slice(0, buffer.Count);
     mut int32 sum = 0;
-    for (mut int32 index = 0; index < buffer.Count; index = index + 1) {
-        sum = sum + buffer.Read(index);
+    for (mut int32 index = 0; index < view.Length; index = index + 1) {
+        sum = sum + view.Read(index);
     }
     return sum;
 }
@@ -51,5 +52,6 @@ public unique struct Envelope {
 
 public int32 Composite() {
     Envelope value = new Envelope(true);
-    return value.Data.Read(0);
+    ReadonlyInt32BufferView view = value.Data.Slice(0, value.Data.Count);
+    return view.Read(0);
 }

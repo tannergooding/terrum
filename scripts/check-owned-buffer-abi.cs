@@ -60,7 +60,7 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     execute.ArgumentList.Add(policy == "checked-exceptions" ? "checked" : "fail-fast");
     var proof = await Run(execute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
     await File.WriteAllTextAsync(Path.Combine(artifacts, $"owned-buffer-abi-proof-{policy}.log"), proof).ConfigureAwait(false);
-    if (proof.Trim() != "owned-buffer-abi opaque=8 publication=checked heap=tracked live=0")
+    if (proof.Trim() != "owned-buffer-abi opaque=8 publication=checked views=scoped heap=tracked live=0")
     {
         throw new InvalidOperationException("The independent owned-buffer ABI proof did not complete.");
     }

@@ -31,8 +31,31 @@ public sealed class JitTests
         }
         """;
 
+    private const string ReadonlyBufferViewProgram = """
+        int32 Main() {
+            require OwnedInt32Buffer.TryCreate(2, out var raw);
+            mut OwnedInt32Buffer buffer = move raw;
+            require buffer.TryAppend(20);
+            require buffer.TryAppend(22);
+            ReadonlyInt32BufferView slice = buffer.Slice(0, buffer.Count);
+            return slice.Read(0) + slice.Read(1);
+        }
+        """;
+
+    private const string ReadonlyBufferViewFailure = """
+        int32 Main() {
+            require OwnedInt32Buffer.TryCreate(1, out var raw);
+            mut OwnedInt32Buffer buffer = move raw;
+            require buffer.TryAppend(42);
+            ReadonlyInt32BufferView slice = buffer.Slice(0, buffer.Count);
+            return slice.Read(1);
+        }
+        """;
+
     [Theory]
     [InlineData(OwnedBufferProgram, 42)]
+    [InlineData(ReadonlyBufferViewProgram, 42)]
+    [InlineData(ReadonlyBufferViewFailure, unchecked((int)0xE0540003))]
     [InlineData("int32 Main() { return 42; }", 42)]
     [InlineData("void Main() { }", 0)]
     [InlineData("int32 Main() { mut int32 y = 9; bool result = true || Try(out y); return y; } bool Try(out int32 y) { return false; }", 9)]
@@ -183,6 +206,23 @@ public sealed class JitTests
     [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} [NoThrow] public int32 Read() { return Value; } } bool Fill(out Item output) { output = new Item(42); return output.Value == 42 && output.Read() == 42; } int32 Main() { require Fill(out var item); return item.Value; }", 42)]
     [InlineData("unique struct Item { public int32 A; public int32 B; public int32 C; public Item(int32 a) { A = a; B = a + 1; C = a + 2; } [NoThrow] [Cleanup] public void Close() {} [NoThrow] public int32 Read() { return C; } } bool Refill(out Item output) { output = new Item(7); Item moved = move output; output = new Item(40); return output.C == 42 && output.Read() == 42; } int32 Main() { require Refill(out var item); return item.C; }", 42)]
     [InlineData(OwnedBufferProgram, 42)]
+    [InlineData(ReadonlyBufferViewProgram, 42)]
+    [InlineData(ReadonlyBufferViewFailure, unchecked((int)0xE0540003))]
+    [InlineData("""
+        int32 Read() {
+            require OwnedInt32Buffer.TryCreate(1, out var raw);
+            mut OwnedInt32Buffer buffer = move raw;
+            require buffer.TryAppend(42);
+            ReadonlyInt32BufferView slice = buffer.Slice(0, buffer.Count);
+            return slice.Read(1);
+        }
+        int32 Main() {
+            unsafe {
+                try { return Read(); }
+                catch { return 42; }
+            }
+        }
+        """, 42)]
     public async Task CheckedExceptionWorkerAndExecutableAgreeAsync(string source, int expected)
     {
         AssertWindowsX64();

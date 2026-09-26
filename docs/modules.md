@@ -1,6 +1,6 @@
 # Bounded semantic and native modules
 
-The version 15 `.trm` format records the selected native runtime policy and
+The version 16 `.trm` format records the selected native runtime policy and
 persists verified, typed, source-mapped structured IR,
 not source text or a native DLL. `CreateProducer` stores selected function bodies
 and exported contracts. `CreateConsumer` stores its own function bodies and the
@@ -232,6 +232,15 @@ an imported owning buffer as a plain eight-byte integer. Native packages keep
 their existing container version; the resource contract and selected runtime
 policy remain in the embedded semantic profile. Versions 10 through 14 remain
 readable under their original profiles.
+Version 16 adds lexical `BoundViewScope`, `BoundViewLength` and `BoundViewRead`
+nodes, retaining the owner place and range expressions through serialization,
+remapping and linking. A function with a readonly buffer-view local selects
+`native-16` even when that view does not appear in an exported declaration;
+no view crosses a call or module ABI boundary. Version 15 modules remain
+readable with their original intrinsic and mutable-loan wire tags.
+Readers also preserve v15's historical `native-15` label caused solely by
+a seven-parameter declaration; current writers classify actual value types,
+not parameter counts.
 A consumer importing a unique type must also import the exported NoThrow
 cleanup methods of that type and its owning children. Their cleanup identities
 and Copy/unique distinctions participate in layout and signature compatibility;
@@ -301,7 +310,7 @@ contract linker, live patching or hot-unload protocol.
 or consumer EXE with its corresponding semantic `.trm` contract. Producer
 containers remain version 1; new consumer containers use version 2, and version
 1 consumers remain readable. The container records the exact native profile
-(native-10 through native-15), runtime policy,
+(native-10 through native-16), runtime policy,
 single explicit provider identity and the exact PE and semantic bytes. The
 identity is 1–64 ASCII letters, digits or underscores, beginning with a
 letter; its loader basename is `terrum-<identity>.dll`. Artifacts are bounded

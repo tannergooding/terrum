@@ -60,7 +60,9 @@ component, not an implemented `SourceText` collection or an efficient indexed re
 
 `SourceLineIndex` builds on that streaming reader. It owns a fixed-capacity native
 table of line starts, publishes the completed index through a conditional output,
-and answers position queries by binary search. It retains only copied offsets
+and answers position queries by binary search over a scoped readonly slice of
+the initialized table. The slice borrows the owning field only for that query;
+it is not returned or stored in the index. The index retains only copied offsets
 and the source length; queries do not retain or reread the source grant. Construction
 reserves one word per source code unit plus one for the final line, a conservative
 single-pass bound rather than a resizing collection. Capacity and allocation

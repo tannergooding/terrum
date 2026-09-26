@@ -3,8 +3,9 @@
 `native-10` (explicit fail-fast), `native-11` (explicit checked exceptions),
 `native-12` (compact unique locals/returns), `native-13` (owned
 by-value arguments and conditional outputs), `native-14` (composite unique
-fields, including nested Copy fields, under either runtime policy), and
-`native-15` (compiler-defined owned native `int32` buffer)
+fields, including nested Copy fields, under either runtime policy),
+`native-15` (compiler-defined owned native `int32` buffer) and `native-16`
+(lexical readonly slices of its initialized prefix)
 are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
@@ -23,6 +24,15 @@ obligation; lexical and recursive composite cleanup release it exactly once.
 `HeapFree` failure is a fatal process invariant error (`0xE0540005`), not a
 recoverable checked failure or a fabricated successful release. The buffer
 operations do not store receiver loans or resize backing memory.
+`ReadonlyInt32BufferView` captures a checked pointer/length descriptor in a
+16-byte local frame slot, with its root retained only in structured semantic
+IR. `Slice(start, length)` rejects negative or out-of-prefix ranges without
+overflowing the count subtraction; zero-length slices at the initialized end
+are valid but cannot be read. The verifier rejects root moves, replacements,
+mutating loans and cleanup while a slice is active, including in branches,
+loops and nested cleanup. `Read(index)` checks the slice length using the same
+selected checked-failure policy. The view has no call/return ABI and cannot
+extend owner lifetime; neither GC rooting nor writable aliasing is implied.
 Allocation-failure and exactly-once-release behavior can be checked with
 the trusted native ABI probe in `scripts/check-owned-buffer-abi.cs`, which
 replaces the fixture DLL's `HeapAlloc`/`HeapFree` imports to inject a
@@ -260,8 +270,8 @@ matching bounded native contract.
 `--runtime checked-exceptions` selects `native-11` for Copy-only programs,
 `native-12` for compact unique locals/returns, `native-13` where
 function declarations transfer ownership through parameters, `native-14`
-for retained composite unique layouts, and `native-15` for owned native buffers,
-without changing
+for retained composite unique layouts, `native-15` for owned native buffers,
+and `native-16` for their lexical readonly views, without changing
 older fail-fast artifacts. `analyze` also accepts this option to check recovery without emitting
 an artifact; omission keeps its existing fail-fast profile. The reusable
 compilation API accepts the policy with single or multiple original snapshots,

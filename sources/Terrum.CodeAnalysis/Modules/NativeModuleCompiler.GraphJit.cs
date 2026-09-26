@@ -304,14 +304,14 @@ public static partial class NativeModuleCompiler
                 {
                     throw new InvalidOperationException("Native graph JIT continuation rollback failed; worker must be terminated.");
                 }
-                await responses.WriteAsync(new byte[] { 0 }, cancellationToken).ConfigureAwait(false);
+                await WriteGraphRegistrationResponseAsync(responses, 0, cancellationToken).ConfigureAwait(false);
                 if (!added)
                 {
                     throw new Win32Exception(error);
                 }
                 throw new InvalidOperationException("Native graph JIT continuation registration did not process every target.");
             }
-            await responses.WriteAsync(new byte[] { 1 }, cancellationToken).ConfigureAwait(false);
+            await WriteGraphRegistrationResponseAsync(responses, 1, cancellationToken).ConfigureAwait(false);
             await responses.FlushAsync(cancellationToken).ConfigureAwait(false);
             var removalRequest = await requests.ReadAsync(header.AsMemory(0, 1), cancellationToken)
                 .ConfigureAwait(false);
@@ -334,7 +334,7 @@ public static partial class NativeModuleCompiler
             {
                 throw new Win32Exception(Marshal.GetLastPInvokeError());
             }
-            await responses.WriteAsync(new byte[] { 1 }, cancellationToken).ConfigureAwait(false);
+            await WriteGraphRegistrationResponseAsync(responses, 1, cancellationToken).ConfigureAwait(false);
             await responses.FlushAsync(cancellationToken).ConfigureAwait(false);
             if (await requests.ReadAsync(header.AsMemory(0, 1), cancellationToken).ConfigureAwait(false) != 0)
             {
@@ -346,6 +346,9 @@ public static partial class NativeModuleCompiler
             _ = JitWindows.CloseHandle(handle);
         }
     }
+
+    private static ValueTask WriteGraphRegistrationResponseAsync(Stream responses, byte status,
+        CancellationToken cancellationToken) => responses.WriteAsync(new byte[] { status }, cancellationToken);
 
     private static byte[] ReadGraphSnapshot(string path)
     {

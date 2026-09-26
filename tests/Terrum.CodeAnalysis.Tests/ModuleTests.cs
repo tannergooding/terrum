@@ -5,6 +5,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -20,6 +21,77 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class ModuleTests
 {
+    [Theory]
+    [InlineData(7, BoundRuntimePolicy.FailFast, "native-10")]
+    [InlineData(8, BoundRuntimePolicy.FailFast, "native-10")]
+    [InlineData(7, BoundRuntimePolicy.CheckedExceptions, "native-11")]
+    [InlineData(8, BoundRuntimePolicy.CheckedExceptions, "native-11")]
+    public async Task ScalarParameterArityDoesNotDeclareNativeBufferOrViewAsync(
+        int count, BoundRuntimePolicy policy, string profile)
+    {
+        var parameters = string.Join(", ", Enumerable.Range(0, count).Select(index => $"int32 arg{index}"));
+        var arguments = string.Join(", ", Enumerable.Range(0, count).Select(index =>
+            index == 0 ? "41" : index == count - 1 ? "1" : "0"));
+        var library = Compilation.CreateLibrary(SyntaxTree.Parse(
+            $"public int32 Sum({parameters}) {{ return arg0 + arg{count - 1}; }}"), policy);
+        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Sum"]);
+        Assert.Equal(profile, ModuleCompiler.GetNativeProfileVersion(producer, isConsumer: false));
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            $"int32 Main() {{ return Sum({arguments}); }}"), ModuleCompiler.CreateReference(producer),
+            runtimePolicy: policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(profile, ModuleCompiler.GetNativeProfileVersion(consumer, isConsumer: true));
+        var nativePolicy = policy == BoundRuntimePolicy.FailFast
+            ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(
+            ModuleCompiler.Link(consumer, producer), nativePolicy)).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public async Task ReadsVersion15SevenScalarArgumentsWithHistoricalProfileAsync()
+    {
+        // Independently encoded version-15 scalar bodies, including the old arity-derived native-15 profile.
+        const string Producer = "VFJSTQ8AAAAJAAAAbmF0aXZlLTE1AAD/////AAAAAAAAAAABAAAAAwAAAFN1bUcAAABTdW18MnxGfEV8SXwtfC18N3xpbjoyfGluOjJ8aW46MnxpbjoyfGluOjJ8aW46MnxpbjoyfE1heVRocm93fE1heVJldHVybgEBAAMAAABTdW0CAAAAAAAAAAAAAAAABwAAAAcAAAAAAAAAAAAAAAQAAABhcmcwAgAAAAAAAAAAAAAAAAAEAAAAYXJnMQIAAAAAAAAAAAAAAAAABAAAAGFyZzICAAAAAAAAAAAAAAAAAAQAAABhcmczAgAAAAAAAAAAAAAAAAAEAAAAYXJnNAIAAAAAAAAAAAAAAAAABAAAAGFyZzUCAAAAAAAAAAAAAAAAAAQAAABhcmc2AgAAAAAAAAAAAAAAAAABAAAAAAAAAAABAAAACAAAAAAAAAAAAQICAAAAAAAAAAAAAAAAAAAA";
+        const string Consumer = "VFJSTQ8AAAAJAAAAbmF0aXZlLTE1AQAAAAAAAAAAAAAAAAACAAAABAAAAE1haW4lAAAATWFpbnwyfEZ8TnxJfC18LXwwfE1heVRocm93fE1heVJldHVybgABAAQAAABNYWluAgAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAABAAAACAAAAAAAAAAAAQUCAAAAAAAAAAAAAAADAAAAU3VtBwAAAAECAAAAAAAAAAAAAAAqAAAAAAAAAAECAAAAAAAAAAAAAAAAAAAAAAAAAAECAAAAAAAAAAAAAAAAAAAAAAAAAAECAAAAAAAAAAAAAAAAAAAAAAAAAAECAAAAAAAAAAAAAAAAAAAAAAAAAAECAAAAAAAAAAAAAAAAAAAAAAAAAAECAAAAAAAAAAAAAAAAAAAAAAAAAAMAAABTdW1HAAAAU3VtfDJ8RnxFfEl8LXwtfDd8aW46MnxpbjoyfGluOjJ8aW46MnxpbjoyfGluOjJ8aW46MnxNYXlUaHJvd3xNYXlSZXR1cm4BAAA=";
+        var producer = Convert.FromBase64String(Producer);
+        var consumer = Convert.FromBase64String(Consumer);
+        Assert.Equal("native-15", ModuleCompiler.GetNativeProfileVersion(producer, isConsumer: false));
+        Assert.Equal("native-15", ModuleCompiler.GetNativeProfileVersion(consumer, isConsumer: true));
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(
+            ModuleCompiler.Link(consumer, producer), NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(13, false)]
+    [InlineData(14, false)]
+    [InlineData(13, true)]
+    [InlineData(14, true)]
+    public async Task EarlierSevenScalarArgumentsKeepScalarProfileAsync(int version, bool checkedFailures)
+    {
+        // Version-13 and version-14 scalar bodies share this independently encoded version-14 layout.
+        const string Producer = "VFJSTQ4AAAAJAAAAbmF0aXZlLTEwAAD/////AAAAAAAAAAABAAAAAwAAAFN1bUcAAABTdW18MnxGfEV8SXwtfC18N3xpbjoyfGluOjJ8aW46MnxpbjoyfGluOjJ8aW46MnxpbjoyfE1heVRocm93fE1heVJldHVybgEBAAMAAABTdW0CAAAAAAAAAAAAAAAHAAAABwAAAAAAAAAAAAAABAAAAGFyZzACAAAAAAAAAAAAAAAAAAQAAABhcmcxAgAAAAAAAAAAAAAAAAAEAAAAYXJnMgIAAAAAAAAAAAAAAAAABAAAAGFyZzMCAAAAAAAAAAAAAAAAAAQAAABhcmc0AgAAAAAAAAAAAAAAAAAEAAAAYXJnNQIAAAAAAAAAAAAAAAAABAAAAGFyZzYCAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAEAAAAIAAAAAAAAAAABAgIAAAAAAAAAAAAAAAAAAAA=";
+        const string Consumer = "VFJSTQ4AAAAJAAAAbmF0aXZlLTEwAQAAAAAAAAAAAAAAAAACAAAABAAAAE1haW4lAAAATWFpbnwyfEZ8TnxJfC18LXwwfE1heVRocm93fE1heVJldHVybgABAAQAAABNYWluAgAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAEAAAAIAAAAAAAAAAABBQIAAAAAAAAAAAAAAAMAAABTdW0HAAAAAQIAAAAAAAAAAAAAACoAAAAAAAAAAQIAAAAAAAAAAAAAAAAAAAAAAAAAAQIAAAAAAAAAAAAAAAAAAAAAAAAAAQIAAAAAAAAAAAAAAAAAAAAAAAAAAQIAAAAAAAAAAAAAAAAAAAAAAAAAAQIAAAAAAAAAAAAAAAAAAAAAAAAAAQIAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAFN1bUcAAABTdW18MnxGfEV8SXwtfC18N3xpbjoyfGluOjJ8aW46MnxpbjoyfGluOjJ8aW46MnxpbjoyfE1heVRocm93fE1heVJldHVybgEAAA==";
+        var producer = Convert.FromBase64String(Producer);
+        var consumer = Convert.FromBase64String(Consumer);
+        foreach (var artifact in new[] { producer, consumer })
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(artifact.AsSpan(4, 4), version);
+            if (checkedFailures)
+            {
+                artifact[12 + "native-10".Length - 1] = (byte)'1';
+                artifact[12 + "native-10".Length + 1] = (byte)BoundRuntimePolicy.CheckedExceptions;
+            }
+        }
+        var profile = checkedFailures ? "native-11" : "native-10";
+        Assert.Equal(profile, ModuleCompiler.GetNativeProfileVersion(producer, isConsumer: false));
+        Assert.Equal(profile, ModuleCompiler.GetNativeProfileVersion(consumer, isConsumer: true));
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, producer),
+            checkedFailures ? NativeRuntimePolicy.CheckedExceptions : NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+    }
+
     [Fact]
     public async Task SelfHostRangeTestsExecuteAgainstAnIndependentMultiSourceLibraryAsync()
     {

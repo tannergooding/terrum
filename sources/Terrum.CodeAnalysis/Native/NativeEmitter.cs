@@ -511,12 +511,16 @@ internal sealed class PeCompiler
             var slots = new int[function.Variables.Length];
             for (var variable = 0; variable < slots.Length; variable++)
             {
-                if (IsIndirect(function.Variables[variable].Type) && !function.Variables[variable].IsOut)
+                if ((IsIndirect(function.Variables[variable].Type)
+                    || function.Variables[variable].Type == PrimitiveType.ReadonlyInt32BufferView)
+                    && !function.Variables[variable].IsOut)
                 {
                     at = (at + 15) & ~15;
                 }
                 slots[variable] = at;
-                at += IsIndirect(function.Variables[variable].Type) && !function.Variables[variable].IsOut ? 16 : 8;
+                at += (IsIndirect(function.Variables[variable].Type)
+                    || function.Variables[variable].Type == PrimitiveType.ReadonlyInt32BufferView)
+                    && !function.Variables[variable].IsOut ? 16 : 8;
                 at = (at + 7) & ~7;
             }
             _slots[i] = slots;
@@ -819,6 +823,7 @@ internal sealed class PeCompiler
         BoundIf conditional => ContainsCleanup(conditional.Then)
             || (conditional.Else is not null && ContainsCleanup(conditional.Else)),
         BoundWhile loop => ContainsCleanup(loop.Body),
+        BoundViewScope view => ContainsCleanup(view.Body),
         _ => false,
     };
 
@@ -837,6 +842,10 @@ internal sealed class PeCompiler
                 return maximum;
             case BoundLocal local:
                 return ExpressionSpills(local.Initializer, ref maximumArguments);
+            case BoundViewScope view:
+                return Math.Max(2, Math.Max(ExpressionSpills(view.Start, ref maximumArguments),
+                    Math.Max(1 + ExpressionSpills(view.Length, ref maximumArguments),
+                        StatementSpills(view.Body, ref maximumArguments))));
             case BoundAssignment assignment:
                 return Math.Max(ExpressionSpills(assignment.Value, ref maximumArguments),
                     HasDeclaredCleanup(assignment.Value.Type)
@@ -887,6 +896,8 @@ internal sealed class PeCompiler
                 return ExpressionSpills(field.Receiver, ref maximumArguments);
             case BoundBufferRead buffer:
                 return ExpressionSpills(buffer.Index, ref maximumArguments);
+            case BoundViewRead view:
+                return ExpressionSpills(view.Index, ref maximumArguments);
             case BoundBinary binary:
                 return Math.Max(ExpressionSpills(binary.Left, ref maximumArguments),
                     1 + ExpressionSpills(binary.Right, ref maximumArguments));
@@ -1296,6 +1307,31 @@ internal sealed class PeCompiler
                     _code.Set(_liveSlots[_currentFunction][local.Variable]);
                 }
                 break;
+            case BoundViewScope view:
+                Expression(view.Start, 0);
+                _code.Store(Spill(0));
+                Expression(view.Length, 1);
+                _code.Store(Spill(1));
+                Expression(view.Owner, 2);
+                _code.Bytes(0x48, 0x8B, 0x10); // rdx = heap header through the reserved owner place
+                _code.Load(Spill(0));
+                _code.Bytes(0x85, 0xC0);
+                RuntimeBranch(0x88, 2);
+                _code.Bytes(0x3B, 0x02); // start <= initialized count
+                RuntimeBranch(0x87, 2);
+                _code.Bytes(0x89, 0xC1); // rcx = checked start
+                _code.Load(Spill(1));
+                _code.Bytes(0x85, 0xC0);
+                RuntimeBranch(0x88, 2);
+                _code.Bytes(0x44, 0x8B, 0x02, 0x41, 0x29, 0xC8); // r8d = count - start
+                _code.Bytes(0x44, 0x39, 0xC0); // length <= remaining initialized elements
+                RuntimeBranch(0x87, 2);
+                _code.Bytes(0x48, 0x8D, 0x44, 0x8A, 0x08); // pointer to first element of the slice
+                _code.Store64(Slot(view.Variable));
+                _code.Load(Spill(1));
+                _code.Store(Slot(view.Variable) + 8);
+                Statement(view.Body);
+                break;
             case BoundOwnerDeclaration:
                 break;
             case BoundAssignment assignment:
@@ -1602,6 +1638,18 @@ internal sealed class PeCompiler
             case BoundRead read:
                 LoadValue(_program.Functions[_currentFunction].Variables[read.Variable].IsOut
                     ? OutSlot(read.Variable) : Slot(read.Variable), read.Type);
+                break;
+            case BoundViewLength length:
+                _code.Load(Slot(length.Variable) + 8);
+                break;
+            case BoundViewRead viewRead:
+                Expression(viewRead.Index, spill);
+                _code.Bytes(0x89, 0xC1); // ecx = index
+                _code.Load(Slot(viewRead.Variable) + 8);
+                _code.Bytes(0x39, 0xC1); // unsigned index >= length also rejects negative indexes
+                RuntimeBranch(0x83, 2);
+                _code.Load64(Slot(viewRead.Variable), destinationRegister: true);
+                _code.Bytes(0x8B, 0x04, 0x8A);
                 break;
             case BoundMove move:
                 LoadValue(OwnerPlace(move.Variable), move.Type);
@@ -2092,11 +2140,12 @@ internal sealed class PeCompiler
             case TokenKind.Ampersand:
             case TokenKind.Pipe:
             case TokenKind.Caret:
-                _code.Bytes(0x48, op switch {
+                byte opcode = op switch {
                     TokenKind.Ampersand => 0x21,
                     TokenKind.Pipe => 0x09,
                     _ => 0x31,
-                }, 0xC8);
+                };
+                _code.Bytes(0x48, opcode, 0xC8);
                 break;
             default:
                 _code.Bytes(0x48, 0x39, 0xC8);
@@ -2121,7 +2170,7 @@ internal sealed class MachineCode
     internal bool UseFramePointer { get; set; }
     internal int Position => _bytes.Count;
     internal void Byte(byte value) => _bytes.Add(value);
-    internal void Bytes(params byte[] values) => _bytes.AddRange(values);
+    internal void Bytes(params ReadOnlySpan<byte> values) => _bytes.AddRange(values);
     internal void Int32(int value)
     {
         for (var i = 0; i < 4; i++)

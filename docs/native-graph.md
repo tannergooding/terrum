@@ -67,6 +67,32 @@ single-provider and independent leaf-set APIs still accept their v1 packages;
 new consumer packages use v2 metadata to record emitted imports separately
 from retained declarations. Existing leaf producer packages remain v1.
 
+An implementation may use lexical readonly views over an owned native buffer
+without changing its exported declaration. Such a producer carries the
+`native-16` semantic profile, while an unchanged root and intermediate retain
+their original profiles and machine images when the implementation is replaced.
+Views cannot escape through public parameters, returns or fields. The checked
+package reader rejects unknown or inconsistent profiles before loading a DLL;
+the native image validator permits owned-buffer heap imports only for the
+`native-15` and `native-16` profiles.
+
+To replace a leaf without changing the root or intermediate, use the scalar
+`Leaf()` package first, then compile the implementation with an internal view:
+
+```powershell
+& $c compile-native producer samples\native\graph\scoped-view-leaf.terrum NodeB --export Leaf -o scoped-leaf.trmn --runtime fail-fast
+& $c compile-native-graph producer samples\native\graph\middle.terrum NodeA --provider scoped-leaf.trmn --export Middle -o scoped-middle.trng --runtime fail-fast
+& $c compile-native-graph consumer samples\native\graph\consumer.terrum --provider scoped-middle.trng -o scoped-root.trng --runtime fail-fast
+& $c run-native-graph-jit scoped-root.trng --provider scoped-middle.trng --provider scoped-leaf.trmn --runtime fail-fast
+$LASTEXITCODE # 42
+& $c compile-native producer samples\native\graph\scoped-view-leaf-replacement.terrum NodeB --export Leaf -o scoped-leaf-new.trmn --runtime fail-fast
+& $c validate-native-graph scoped-root.trng --provider scoped-middle.trng --provider scoped-leaf-new.trmn
+& $c run-native-graph scoped-root.trng --provider scoped-middle.trng --provider scoped-leaf-new.trmn --runtime fail-fast
+$LASTEXITCODE # 44
+& $c run-native-graph-jit scoped-root.trng --provider scoped-middle.trng --provider scoped-leaf-new.trmn --runtime fail-fast
+$LASTEXITCODE # 44
+```
+
 Graph v2 packages carry the declared origin and cleanup owner of every
 retained type, separately from the actual PE imports reported by the same
 native emission. A graph DLL may return or bool/out-publish a dependency-owned

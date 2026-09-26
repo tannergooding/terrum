@@ -30,6 +30,8 @@ public enum PrimitiveType
     UInt64,
     /// <summary>An opaque, uniquely owned native allocation of initialized int32 elements.</summary>
     OwnedInt32Buffer,
+    /// <summary>A lexical, nonescaping readonly range of an owned int32 buffer.</summary>
+    ReadonlyInt32BufferView,
 }
 
 /// <summary>Compiler-defined native buffer operations; user functions cannot declare these implementations.</summary>
@@ -211,6 +213,10 @@ public sealed record BoundWhile(BoundExpression Condition, BoundStatement Body, 
 /// <summary>A cleanup region for normal exits and checked exceptional unwinding, but not fail-fast termination.</summary>
 public sealed record BoundTryFinally(BoundBlock Body, BoundBlock Finally, TextSpan Span) : BoundStatement(Span);
 
+/// <summary>A lexical readonly view retaining its owner place and checked initialized-prefix range.</summary>
+public sealed record BoundViewScope(int Variable, BoundExpression Owner, BoundExpression Start,
+    BoundExpression Length, BoundBlock Body, TextSpan Span) : BoundStatement(Span);
+
 /// <summary>Ends a lexical unique owner if it remains live; a moved owner is vacant.</summary>
 public sealed record BoundDrop(int Variable, int CleanupFunction, TextSpan Span) : BoundStatement(Span)
 {
@@ -262,6 +268,12 @@ public sealed record BoundReceiverLoan(int Variable, PrimitiveType Type, TextSpa
 
 /// <summary>A reserved, nonescaping exclusive loan of a named mutable native buffer owner.</summary>
 public sealed record BoundMutableReceiverLoan(int Variable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
+/// <summary>Reads the fixed length of an active lexical native buffer view.</summary>
+public sealed record BoundViewLength(int Variable, TextSpan Span) : BoundExpression(PrimitiveType.Int32, Span);
+
+/// <summary>Reads a checked element from an active lexical native buffer view.</summary>
+public sealed record BoundViewRead(int Variable, BoundExpression Index, TextSpan Span) : BoundExpression(PrimitiveType.Int32, Span);
 
 /// <summary>A synchronous readonly loan of an initialized owning field place.</summary>
 public sealed record BoundFieldLoan(BoundFieldRead Place, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);

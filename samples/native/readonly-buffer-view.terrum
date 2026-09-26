@@ -1,0 +1,16 @@
+int32 Main()
+{
+    require OwnedInt32Buffer.TryCreate(3, out var created);
+    mut OwnedInt32Buffer values = move created;
+    require values.TryAppend(40);
+    require values.TryAppend(41);
+    require values.TryAppend(42);
+
+    ReadonlyInt32BufferView tail = values.Slice(1, values.Count - 1);
+    mut int32 sum = 0;
+    for (mut int32 i = 0; i < tail.Length; i = i + 1)
+    {
+        sum = sum + tail.Read(i);
+    }
+    return sum - 41;
+}

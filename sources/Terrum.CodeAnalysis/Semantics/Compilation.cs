@@ -52,6 +52,14 @@ public sealed class Compilation
         return ownedNativeBuffer ? "native-15" : baseline;
     }
 
+    /// <summary>Includes nonescaping lexical readonly views over initialized native buffer ranges.</summary>
+    public static string GetNativeProfileVersion(BoundRuntimePolicy policy, bool uniqueValues,
+        bool ownershipTransfer, bool compositeUnique, bool ownedNativeBuffer, bool readonlyNativeView)
+    {
+        var baseline = GetNativeProfileVersion(policy, uniqueValues, ownershipTransfer, compositeUnique, ownedNativeBuffer);
+        return readonlyNativeView ? "native-16" : baseline;
+    }
+
     internal static bool HasOwnedNativeBuffer(ImmutableArray<BoundStruct> structures,
         IEnumerable<BoundFunction> functions)
     {
@@ -129,16 +137,20 @@ public sealed class Compilation
         }
         var composite = HasCompositeUnique(program.Structures);
         var ownedBuffer = HasOwnedNativeBuffer(program.Structures, program.Functions);
+        var readonlyView = program.Functions.Any(static function =>
+            function.Variables.Any(static variable => variable.Type == PrimitiveType.ReadonlyInt32BufferView));
         foreach (var function in program.Functions)
         {
             if (HasOwnershipTransfer(function, program.Structures))
             {
                 return GetNativeProfileVersion(program.RuntimePolicy, unique,
-                    ownershipTransfer: true, compositeUnique: composite, ownedNativeBuffer: ownedBuffer);
+                    ownershipTransfer: true, compositeUnique: composite, ownedNativeBuffer: ownedBuffer,
+                    readonlyNativeView: readonlyView);
             }
         }
         return GetNativeProfileVersion(program.RuntimePolicy, unique,
-            ownershipTransfer: false, compositeUnique: composite, ownedNativeBuffer: ownedBuffer);
+            ownershipTransfer: false, compositeUnique: composite, ownedNativeBuffer: ownedBuffer,
+            readonlyNativeView: readonlyView);
     }
 
     private Compilation(SyntaxTree syntaxTree, ImmutableArray<Diagnostic> diagnostics, BoundProgram? program,

@@ -235,7 +235,7 @@ public static partial class NativeModuleCompiler
             .ToArray();
         NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, DllName(producer.Identity), exports,
             producer.Policy, allowOwnedBufferRuntime:
-                ModuleCompiler.GetNativeProfileVersion(producer.Contract, false) == "native-15");
+                AllowsOwnedBufferRuntime(ModuleCompiler.GetNativeProfileVersion(producer.Contract, false)));
         ValidateConsumerImage(consumer);
     }
 
@@ -249,7 +249,8 @@ public static partial class NativeModuleCompiler
             groups.Add(DllName(consumer.Identity), imports);
         }
         NativeModuleImageValidator.Validate(consumer.Image, isConsumer: true, groups, [], consumer.Policy,
-            allowOwnedBufferRuntime: ModuleCompiler.GetNativeProfileVersion(consumer.Contract, true) == "native-15");
+            allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(
+                ModuleCompiler.GetNativeProfileVersion(consumer.Contract, true)));
     }
 
     private static void ValidateProducer(Package producer)
@@ -266,7 +267,7 @@ public static partial class NativeModuleCompiler
         NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, DllName(producer.Identity),
             [.. reference.Functions.Select(static function => function.Name)], producer.Policy,
             allowOwnedBufferRuntime:
-                ModuleCompiler.GetNativeProfileVersion(producer.Contract, false) == "native-15");
+                AllowsOwnedBufferRuntime(ModuleCompiler.GetNativeProfileVersion(producer.Contract, false)));
     }
 
     private static byte[] Write(bool isConsumer, string identity, NativeRuntimePolicy policy, byte[] contract,

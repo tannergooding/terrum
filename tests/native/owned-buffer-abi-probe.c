@@ -271,7 +271,7 @@ int main(int argc, char** argv)
     }
     if (result == 0)
     {
-        puts("owned-buffer-abi opaque=8 publication=checked heap=tracked live=0");
+        puts("owned-buffer-abi opaque=8 publication=checked views=scoped heap=tracked live=0");
     }
     return result;
 }

@@ -4,6 +4,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Modules;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -264,6 +265,61 @@ public sealed partial class CliTests
                 "run-native-graph-jit", root, "--provider", leaf, "--runtime", "checked-exceptions");
             Assert.Equal(expected, apphostExit);
             Assert.Empty(apphostError);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task NativeGraphJitServicesInternalReadonlyViewLeafAsync(string policy)
+    {
+        var directory = Path.Combine(Environment.CurrentDirectory, "artifacts",
+            "native-graph-view-" + Guid.NewGuid().ToString("N"));
+        _ = Directory.CreateDirectory(directory);
+        var original = Path.Combine(directory, "leaf.trmn");
+        var replacement = Path.Combine(directory, "leaf-view.trmn");
+        var middle = Path.Combine(directory, "middle.trng");
+        var root = Path.Combine(directory, "root.trng");
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", ".."));
+        var fixtures = Path.Combine(repository, "samples", "native", "graph");
+        try
+        {
+            Assert.Equal(0, (await RunAsync([], "compile-native", "producer",
+                Path.Combine(fixtures, "scoped-view-leaf.terrum"), "NodeB", "--export", "Leaf",
+                "-o", original, "--runtime", policy)).ExitCode);
+            Assert.Equal(0, (await RunAsync([], "compile-native-graph", "producer",
+                Path.Combine(fixtures, "middle.terrum"), "NodeA", "--provider", original,
+                "--export", "Middle", "-o", middle, "--runtime", policy)).ExitCode);
+            Assert.Equal(0, (await RunAsync([], "compile-native-graph", "consumer",
+                Path.Combine(fixtures, "consumer.terrum"), "--provider", middle,
+                "-o", root, "--runtime", policy)).ExitCode);
+            var originalRoot = await File.ReadAllBytesAsync(root);
+            var originalMiddle = await File.ReadAllBytesAsync(middle);
+            Assert.Equal(42, (await RunAsync([], "run-native-graph-jit", root,
+                "--provider", original, "--provider", middle, "--runtime", policy)).ExitCode);
+            Assert.Equal(0, (await RunAsync([], "compile-native", "producer",
+                Path.Combine(fixtures, "scoped-view-leaf-replacement.terrum"), "NodeB",
+                "--export", "Leaf", "-o", replacement, "--runtime", policy)).ExitCode);
+            Assert.Equal("native-16", NativeModuleCompiler.Inspect(await File.ReadAllBytesAsync(replacement))
+                .NativeProfileVersion);
+            Assert.Equal(0, (await RunAsync([], "validate-native-graph", root,
+                "--provider", middle, "--provider", replacement)).ExitCode);
+            Assert.Equal(44, (await RunAsync([], "run-native-graph", root,
+                "--provider", replacement, "--provider", middle, "--runtime", policy)).ExitCode);
+            Assert.Equal(44, (await RunAsync([], "run-native-graph-jit", root,
+                "--provider", middle, "--provider", replacement, "--runtime", policy)).ExitCode);
+            var (apphostExit, apphostError) = await RunGraphJitApphostAsync(
+                "run-native-graph-jit", root, "--provider", replacement, "--provider", middle,
+                "--runtime", policy);
+            Assert.Equal(44, apphostExit);
+            Assert.Empty(apphostError);
+            Assert.Equal(originalRoot, await File.ReadAllBytesAsync(root));
+            Assert.Equal(originalMiddle, await File.ReadAllBytesAsync(middle));
         }
         finally
         {
