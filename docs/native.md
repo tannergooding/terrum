@@ -177,12 +177,14 @@ uses source-declared `+` and `*` constraints and two nominal Copy wrappers,
 returning 46 through AOT and JIT. Closed specialization emits ordinary concrete
 calls through this backend; there is no second evaluator or generic runtime.
 The [integer-power sample](../samples/native/static-protocol-power.terrum)
-returns 42 using a structured generic body, scalar exponent and constrained
-multiplication. Its repeated-squaring loop skips the final unused square:
+returns 42 using a structured generic body, scalar exponent and a separately
+specialized constrained square helper. Its repeated-squaring loop skips the final unused square:
 that operation could overflow even when the requested result is representable.
 An exponent of zero returns the supplied identity without multiplying.
 Templates and witnesses are compilation-local, while an exported concrete
-wrapper can use the existing separately compiled contract format. See the
+wrapper and its transitive private helpers use the existing separately compiled
+contract format. No additional runtime generic dispatch or wire version is needed.
+See the
 [bounded grammar and constraints](implementation.md); this does not implement
 the proposed generic standard library or replaceable generic witnesses.
 

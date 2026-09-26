@@ -94,7 +94,7 @@ public sealed class StaticProtocolControlFlowTests
     [InlineData("{ mut T local = value; } return local;", "TRM3006")]
     [InlineData("break; return one;", "TRM3008")]
     [InlineData("if (exponent == 0u32) { return one; }", "TRM3012")]
-    [InlineData("return Power<T>(value, one, exponent);", "TRM3007")]
+    [InlineData("return Power<Meters>(value, one, exponent);", "TRM3007")]
     [InlineData("require (exponent == 0u32); return Missing(value);", "TRM3011")]
     [InlineData("mut T result = one; for (mut uint32 i = 0u32; i < exponent; i = i + 1u32) { if (i == 0u32) { continue; } result = result / value; } return result;", "TRM3007")]
     public void InvalidDefinitionRejectsEvenWithoutInstantiation(string body, string expected)

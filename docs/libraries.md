@@ -21,9 +21,14 @@ The executable [static-protocol sample](../samples/native/static-protocol-quadra
 now exercises a bounded part of this direction: source-defined addition and
 multiplication protocols, explicit nominal Copy conformance and one constrained
 algorithm specialized for two wrappers. The [integer-power sample](../samples/native/static-protocol-power.terrum)
-extends this to initialized generic locals, scalar loop control and constrained
-multiplication, with an explicit identity argument rather than implicit
-construction of a generic literal or default value. Templates and witnesses remain
+extends this to initialized generic locals, scalar loop control and a constrained
+square helper, with an explicit identity argument rather than implicit
+construction of a generic literal or default value.
+Helpers require only their declared constraints: the
+[Copy selection candidate](../self-host/CopyAlgorithms.terrum) needs no operator
+witness and composes over nested token/range values. Calls cannot acquire
+undeclared protocols from a concrete specialization or a callee's body.
+Templates and witnesses remain
 compilation-local; the [implementation limits](implementation.md) do not extend
 to these complete inventories, primitive numeric conformance, mixed-result
 operators, families or generic collection algorithms.

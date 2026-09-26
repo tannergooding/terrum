@@ -64,6 +64,10 @@ public sealed class GenericControlFlowModuleTests
             function.Name.StartsWith("$producer.Power<", StringComparison.Ordinal)));
         Assert.Contains(linked.Functions, static function => function.Name == "$producer.Power<Int32Value>");
         Assert.Contains(linked.Functions, static function => function.Name == "$producer.Power<Int64Value>");
+        Assert.Equal(2, linked.Functions.Count(static function =>
+            function.Name.StartsWith("$producer.Square<", StringComparison.Ordinal)));
+        Assert.Contains(linked.Functions, static function => function.Name == "$producer.Square<Int32Value>");
+        Assert.Contains(linked.Functions, static function => function.Name == "$producer.Square<Int64Value>");
         Assert.Contains(linked.Functions, static function => function.Name == "$producer.Int32Value.op_Multiply");
         Assert.Contains(linked.Functions, static function => function.Name == "$producer.Int64Value.op_Multiply");
         Assert.DoesNotContain(linked.Functions, static function => function.Name == "$producer.Power");

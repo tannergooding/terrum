@@ -30,9 +30,13 @@ T Power<T>(T value, T one, uint32 exponent)
         remaining = remaining / 2u32;
         // A final unused square could overflow even when the result fits.
         if (remaining == 0u32) { break; }
-        factor = factor * factor;
+        factor = Square<T>(factor);
     }
     return result;
+}
+
+T Square<T>(T value) where T : Multiplication<T, T, T>, [Copy] {
+    return value * value;
 }
 
 public int32 PowerProbe() {

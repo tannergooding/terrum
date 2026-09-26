@@ -1,0 +1,11 @@
+namespace Terrum;
+
+[NoThrow] T SelectCopy<T>(bool takeFirst, T first, T second) where T : [Copy]
+{
+    if (takeFirst)
+    {
+        return first;
+    }
+
+    return second;
+}

@@ -38,8 +38,7 @@ internal sealed partial class Binder
     private readonly List<Dictionary<string, int>> _scopes = [];
     private readonly List<LoopBinding> _loops = [];
     private int _finallyLoopDepth;
-    private string? _genericTypeParameter;
-    private PrimitiveType _genericType;
+    private GenericInstantiation? _genericContext;
     private PrimitiveType _returnType;
     private string? _currentStruct;
     private bool _constructor;
@@ -846,9 +845,9 @@ internal sealed partial class Binder
     private PrimitiveType BindType(SyntaxNode node, bool allowVoid)
     {
         var name = NameText(node);
-        if (_genericTypeParameter == name)
+        if (_genericContext is GenericInstantiation generic && generic.Template.TypeParameter == name)
         {
-            return _genericType;
+            return generic.Type;
         }
         var optional = node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.Question };
         if (optional)
@@ -1946,14 +1945,7 @@ internal sealed partial class Binder
         }
         else if (callee.Kind == SyntaxKind.GenericNameExpression)
         {
-            if (_genericTypeParameter is not null)
-            {
-                Report("TRM3007", "A constrained generic body cannot call another generic function.", callee.Span);
-            }
-            else
-            {
-                function = InstantiateGeneric(callee);
-            }
+            function = InstantiateGeneric(callee);
         }
         else if (callee.Kind == SyntaxKind.MemberAccessExpression)
         {

@@ -204,15 +204,27 @@ function has one `[Copy]` type parameter and returns that type. By-value
 parameters and initialized locals may mix that type with supported scalars.
 Structured bodies use assignments, blocks, `if`, `while`, scoped `for`,
 `break`/`continue`, `require` and return; operations on the type parameter
-must come from its declared operator constraints. The definition is checked
+must come from its declared operator constraints. `[Copy]` alone suffices for
+helpers that only copy or select values; it grants no operators. The definition is checked
 even when never instantiated. Concrete capabilities cannot make an undeclared
-generic operation valid. Calls require
-an explicit concrete struct type; at most 32 closed specializations lower to
-ordinary verified calls. The [quadratic example](../samples/native/static-protocol-quadratic.terrum)
+generic operation valid. Outside a template, calls require an explicit concrete
+Copy struct type. Inside a template, calls pass its current type parameter
+explicitly, and every nominal protocol required by the callee must already be
+declared by the caller. Identical operator signatures do not make distinct
+protocols interchangeable. Each callee is checked independently, and callers
+use its declared effects, not stronger facts inferred from its body.
+Forward calls, imported local templates, and direct/mutual recursion reuse
+closed specializations; recursion has the ordinary native call/stack behavior,
+not a compile-time evaluator or a termination guarantee. At most 32 templates
+and 32 total closed specializations, including transitively reached helpers,
+are admitted. These lower to ordinary verified calls.
+The [quadratic example](../samples/native/static-protocol-quadratic.terrum)
 executes for two distinct wrappers. The [integer-power example](../samples/native/static-protocol-power.terrum)
-combines scalar loop control with constrained multiplication and explicit
-caller-supplied identity. General interface dispatch, primitive
-conformance, generic inference, generic helper calls, member access on a
+combines scalar loop control with a constrained square helper and explicit
+caller-supplied identity. The [Copy selection candidate](../self-host/CopyAlgorithms.terrum)
+selects complete values without requiring operator conformance.
+General interface dispatch, primitive conformance, generic inference,
+concrete type arguments inside templates, member access on a
 type parameter and public
 generic/witness metadata remain unsupported. A public concrete wrapper may
 use a private specialization without publishing its template or witnesses.

@@ -72,7 +72,7 @@ public sealed class StaticProtocolTests
     [InlineData("T EvaluateQuadratic<T>", "[NoThrow] T EvaluateQuadratic<T>", "TRM3007")]
     [InlineData("operator +(Meters left, Meters right)", "op_Addition(Meters left, Meters right)", "TRM3007")]
     [InlineData("static abstract TResult operator +(TSelf left, TOther right)", "static abstract TOther operator +(TSelf left, TOther right)", "TRM3001")]
-    [InlineData("return (a * x + b) * x + c;", "return EvaluateQuadratic<T>(x, a, b, c);", "TRM3007")]
+    [InlineData("return (a * x + b) * x + c;", "return EvaluateQuadratic<Meters>(x, a, b, c);", "TRM3007")]
     public void RejectsMissingOrFalseProtocolPromises(string before, string after, string expected)
     {
         Assert.True(s_sample.Contains(before, StringComparison.Ordinal));

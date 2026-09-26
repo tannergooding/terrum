@@ -13,8 +13,9 @@ using only that artifact's declarations. Both AOT and JIT execute the linked
 result; no producer source is rebound while compiling the consumer.
 The cursor and general host-interface sketches still require later language
 slices. Executing these components is not a self-hosted compiler bootstrap.
-Compilation-local static operator protocols now support bounded closed numeric
-algorithms with scalar control flow, but not the generic spans, stored dependencies or host interfaces
+Compilation-local constrained functions support bounded closed helper composition,
+Copy-only selection and numeric algorithms with scalar control flow, but not the
+generic spans, stored dependencies or host interfaces
 required by those sketches. The scanner consumes the shared host keyword catalog,
 including `abstract`, `operator` and `where`, without a second keyword table.
 `build-component` uses the compiled scanner's records as the lexical input to
@@ -25,6 +26,7 @@ remain hosted in C#.
 
 | Candidate | Purpose | Gates before execution |
 |---|---|---|
+| [CopyAlgorithms](CopyAlgorithms.terrum) | NoThrow selection of complete Copy values without operator witnesses | Composed AOT/JIT calls select nested tokens and ranges under both policies; no primitive conformance, borrowed views or generic runtime dispatch |
 | [IntegerFacts](IntegerFacts.terrum) | Overflow-free signed-addition range predicate | Supported by the native profile; tested with native entry wrappers, not a full compiler bootstrap |
 | [WideIntegerFacts](WideIntegerFacts.terrum) | Checked signed addition and bounded decimal accumulation through the full unsigned 64-bit range | Executed as a separately compiled module with conditional wide outputs |
 | [WideIntegerTests](WideIntegerTests.terrum) | Signed extrema, invalid digits, decimal overflow and repeated output publication | Executed through AOT and JIT with a shared entry wrapper |
@@ -52,6 +54,15 @@ schema change. Source file UTF-8 decoding remains separate from coordinates.
 
 `CharacterFacts` uses `(int32)value` instead of a per-source conversion hook.
 Raw `char16` values are code units, not automatically validated Unicode scalars.
+
+`SelectCopy<T>` selects one of two already-evaluated by-value arguments. Both
+arguments are evaluated under ordinary call rules; this is not a lazy conditional
+expression. Its `[Copy]` constraint is enough for whole-value returns without
+operator conformance, construction, field inspection or a default value.
+The caller can compose it through another Copy-constrained helper while retaining
+the declared NoThrow contract. Token/range fixtures verify independent nested
+copies after the original local values are replaced. The function remains a
+compilation-local template, not a separately published generic library contract.
 
 `SourceLines` reads the same immutable `Host.Source` capability as the scanner,
 without retaining a pointer, borrowing writable storage or allocating a line table.
