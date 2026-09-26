@@ -60,6 +60,16 @@ public sealed class Compilation
         return readonlyNativeView ? "native-16" : baseline;
     }
 
+    /// <summary>Includes exclusive lexical writable views and in-place native buffer prefix reset.</summary>
+    public static string GetNativeProfileVersion(BoundRuntimePolicy policy, bool uniqueValues,
+        bool ownershipTransfer, bool compositeUnique, bool ownedNativeBuffer, bool readonlyNativeView,
+        bool mutableNativeViewOrClear)
+    {
+        var baseline = GetNativeProfileVersion(policy, uniqueValues, ownershipTransfer, compositeUnique,
+            ownedNativeBuffer, readonlyNativeView);
+        return mutableNativeViewOrClear ? "native-17" : baseline;
+    }
+
     internal static bool HasOwnedNativeBuffer(ImmutableArray<BoundStruct> structures,
         IEnumerable<BoundFunction> functions)
     {
@@ -139,18 +149,152 @@ public sealed class Compilation
         var ownedBuffer = HasOwnedNativeBuffer(program.Structures, program.Functions);
         var readonlyView = program.Functions.Any(static function =>
             function.Variables.Any(static variable => variable.Type == PrimitiveType.ReadonlyInt32BufferView));
+        var mutableViewOrClear = program.Functions.Any(static function =>
+            function.Variables.Any(static variable => variable.Type == PrimitiveType.MutableInt32BufferView))
+            || UsesBufferClear(program);
         foreach (var function in program.Functions)
         {
             if (HasOwnershipTransfer(function, program.Structures))
             {
                 return GetNativeProfileVersion(program.RuntimePolicy, unique,
                     ownershipTransfer: true, compositeUnique: composite, ownedNativeBuffer: ownedBuffer,
-                    readonlyNativeView: readonlyView);
+                    readonlyNativeView: readonlyView, mutableNativeViewOrClear: mutableViewOrClear);
             }
         }
         return GetNativeProfileVersion(program.RuntimePolicy, unique,
             ownershipTransfer: false, compositeUnique: composite, ownedNativeBuffer: ownedBuffer,
-            readonlyNativeView: readonlyView);
+            readonlyNativeView: readonlyView, mutableNativeViewOrClear: mutableViewOrClear);
+    }
+
+    private static bool UsesBufferClear(BoundProgram program)
+    {
+        var statements = new Stack<BoundStatement>();
+        var expressions = new Stack<BoundExpression>();
+        foreach (var function in program.Functions)
+        {
+            statements.Push(function.Body);
+            while (statements.Count != 0 || expressions.Count != 0)
+            {
+                if (expressions.TryPop(out var expression))
+                {
+                    switch (expression)
+                    {
+                        case BoundCall call:
+                            if (program.Functions[call.Function].Intrinsic == BoundIntrinsic.BufferClear)
+                            {
+                                return true;
+                            }
+                            foreach (var argument in call.Arguments)
+                            {
+                                expressions.Push(argument);
+                            }
+                            break;
+                        case BoundBinary binary:
+                            expressions.Push(binary.Left);
+                            expressions.Push(binary.Right);
+                            break;
+                        case BoundUnary unary:
+                            expressions.Push(unary.Operand);
+                            break;
+                        case BoundCast cast:
+                            expressions.Push(cast.Operand);
+                            break;
+                        case BoundFieldRead field:
+                            expressions.Push(field.Receiver);
+                            break;
+                        case BoundFieldLoan loan:
+                            expressions.Push(loan.Place);
+                            break;
+                        case BoundViewRead view:
+                            expressions.Push(view.Index);
+                            break;
+                        case BoundBufferRead buffer:
+                            expressions.Push(buffer.Index);
+                            break;
+                        case BoundConstant or BoundRead or BoundMove or BoundReceiverLoan
+                            or BoundMutableReceiverLoan or BoundViewLength or BoundOutArgument:
+                            break;
+                        default:
+                            throw new ArgumentException("Unknown bound expression.", nameof(program));
+                    }
+                    continue;
+                }
+                var statement = statements.Pop();
+                switch (statement)
+                {
+                    case BoundBlock block:
+                        foreach (var child in block.Statements)
+                        {
+                            statements.Push(child);
+                        }
+                        break;
+                    case BoundLocal local:
+                        expressions.Push(local.Initializer);
+                        break;
+                    case BoundAssignment assignment:
+                        expressions.Push(assignment.Value);
+                        break;
+                    case BoundFieldAssignment field:
+                        expressions.Push(field.Value);
+                        break;
+                    case BoundBufferAssignment write:
+                        expressions.Push(write.Index);
+                        expressions.Push(write.Value);
+                        break;
+                    case BoundViewSet viewWrite:
+                        expressions.Push(viewWrite.Index);
+                        expressions.Push(viewWrite.Value);
+                        break;
+                    case BoundExpressionStatement effects:
+                        expressions.Push(effects.Expression);
+                        break;
+                    case BoundIf conditional:
+                        expressions.Push(conditional.Condition);
+                        statements.Push(conditional.Then);
+                        if (conditional.Else is not null)
+                        {
+                            statements.Push(conditional.Else);
+                        }
+                        break;
+                    case BoundWhile loop:
+                        expressions.Push(loop.Condition);
+                        statements.Push(loop.Body);
+                        break;
+                    case BoundTryFinally cleanup:
+                        statements.Push(cleanup.Body);
+                        statements.Push(cleanup.Finally);
+                        break;
+                    case BoundViewScope view:
+                        expressions.Push(view.Owner);
+                        expressions.Push(view.Start);
+                        expressions.Push(view.Length);
+                        statements.Push(view.Body);
+                        break;
+                    case BoundUnsafe unsafeBlock:
+                        statements.Push(unsafeBlock.Body);
+                        break;
+                    case BoundTryCatch recovery:
+                        statements.Push(recovery.Body);
+                        statements.Push(recovery.Catch);
+                        if (recovery.Finally is not null)
+                        {
+                            statements.Push(recovery.Finally);
+                        }
+                        break;
+                    case BoundRequire requirement:
+                        expressions.Push(requirement.Condition);
+                        break;
+                    case BoundReturn { Value: BoundExpression value }:
+                        expressions.Push(value);
+                        break;
+                    case BoundOwnerDeclaration or BoundDrop or BoundDropConstructedFields or BoundReturn:
+                        break;
+                    default:
+                        throw new ArgumentException("Unknown bound statement.", nameof(program));
+                }
+            }
+        }
+        return false;
     }
 
     private Compilation(SyntaxTree syntaxTree, ImmutableArray<Diagnostic> diagnostics, BoundProgram? program,

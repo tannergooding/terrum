@@ -216,9 +216,10 @@ public static class SemanticVerifier
             {
                 var variable = function.Variables[variableIndex];
                 if (variable is null || string.IsNullOrEmpty(variable.Name)
-                    || (variable.Type == PrimitiveType.ReadonlyInt32BufferView
+                    || (variable.Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
                         ? variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
-                            || variable.IsMutable || variable.IsOut || function.IsExternal
+                            || variable.IsMutable != (variable.Type == PrimitiveType.MutableInt32BufferView)
+                            || variable.IsOut || function.IsExternal
                         : !ValidType(variable.Type, allowVoid: false, program)))
                 {
                     throw Invalid();
@@ -552,11 +553,12 @@ public static class SemanticVerifier
     private static void VerifyViewScopes(BoundBlock body, BoundFunction function)
     {
         var roots = new int[function.Variables.Length];
+        var exclusive = new bool[roots.Length];
         var active = new bool[roots.Length];
         var declared = new HashSet<int>();
         var remaining = MaximumAnalysisVisits;
 
-        void Expression(BoundExpression expression, int depth)
+        void Expression(BoundExpression expression, int depth, int acquiringRoot = -1)
         {
             Count(ref remaining, depth);
             if (expression is null)
@@ -567,20 +569,38 @@ public static class SemanticVerifier
             {
                 case BoundMove move:
                     if (move.Variable < 0 || move.Variable >= roots.Length
-                        || roots[move.Variable] != 0 || move.Type == PrimitiveType.ReadonlyInt32BufferView)
+                        || roots[move.Variable] != 0 || exclusive[move.Variable]
+                        || move.Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
                     {
                         throw InvalidEffect(move.Span, "Ownership");
                     }
                     break;
                 case BoundOutArgument output:
                     if (output.Variable < 0 || output.Variable >= roots.Length
-                        || roots[output.Variable] != 0 || output.Type == PrimitiveType.ReadonlyInt32BufferView)
+                        || roots[output.Variable] != 0 || exclusive[output.Variable]
+                        || output.Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
                     {
                         throw InvalidEffect(output.Span, "Ownership");
                     }
                     break;
                 case BoundMutableReceiverLoan loan:
-                    if (loan.Variable < 0 || loan.Variable >= roots.Length || roots[loan.Variable] != 0)
+                    if (loan.Variable < 0 || loan.Variable >= roots.Length
+                        || roots[loan.Variable] != 0 || exclusive[loan.Variable])
+                    {
+                        throw InvalidEffect(loan.Span, "Ownership");
+                    }
+                    break;
+                case BoundReceiverLoan loan:
+                    if (loan.Variable < 0 || loan.Variable >= roots.Length
+                        || (exclusive[loan.Variable] && loan.Variable != acquiringRoot))
+                    {
+                        throw InvalidEffect(loan.Span, "Ownership");
+                    }
+                    break;
+                case BoundFieldLoan loan:
+                    var loanRoot = LoanRoot(loan, ref remaining, depth + 1);
+                    if (loanRoot < 0 || loanRoot >= roots.Length
+                        || (exclusive[loanRoot] && loanRoot != acquiringRoot))
                     {
                         throw InvalidEffect(loan.Span, "Ownership");
                     }
@@ -596,9 +616,10 @@ public static class SemanticVerifier
                     {
                         throw InvalidEffect(viewRead.Span, "Ownership");
                     }
-                    Expression(viewRead.Index, depth + 1);
+                    Expression(viewRead.Index, depth + 1, acquiringRoot);
                     break;
-                case BoundRead localRead when localRead.Type == PrimitiveType.ReadonlyInt32BufferView:
+                case BoundRead localRead when localRead.Type is PrimitiveType.ReadonlyInt32BufferView
+                    or PrimitiveType.MutableInt32BufferView:
                     throw InvalidEffect(localRead.Span, "Ownership");
                 case BoundCall call:
                     if (call.Arguments.IsDefault)
@@ -607,26 +628,26 @@ public static class SemanticVerifier
                     }
                     foreach (var argument in call.Arguments)
                     {
-                        Expression(argument, depth + 1);
+                        Expression(argument, depth + 1, acquiringRoot);
                     }
                     break;
                 case BoundUnary unary:
-                    Expression(unary.Operand, depth + 1);
+                    Expression(unary.Operand, depth + 1, acquiringRoot);
                     break;
                 case BoundCast cast:
-                    Expression(cast.Operand, depth + 1);
+                    Expression(cast.Operand, depth + 1, acquiringRoot);
                     break;
                 case BoundBinary binary:
-                    Expression(binary.Left, depth + 1);
-                    Expression(binary.Right, depth + 1);
+                    Expression(binary.Left, depth + 1, acquiringRoot);
+                    Expression(binary.Right, depth + 1, acquiringRoot);
                     break;
                 case BoundFieldRead field:
-                    Expression(field.Receiver, depth + 1);
+                    Expression(field.Receiver, depth + 1, acquiringRoot);
                     break;
                 case BoundBufferRead buffer:
-                    Expression(buffer.Index, depth + 1);
+                    Expression(buffer.Index, depth + 1, acquiringRoot);
                     break;
-                case BoundConstant or BoundRead or BoundReceiverLoan or BoundFieldLoan:
+                case BoundConstant or BoundRead:
                     break;
                 default:
                     throw Invalid();
@@ -655,7 +676,9 @@ public static class SemanticVerifier
                 case BoundViewScope view:
                     if (view.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                         || view.Variable >= roots.Length || view.Variable < 0
-                        || function.Variables[view.Variable].Type != PrimitiveType.ReadonlyInt32BufferView
+                        || function.Variables[view.Variable].Type != (view.IsMutable
+                            ? PrimitiveType.MutableInt32BufferView : PrimitiveType.ReadonlyInt32BufferView)
+                        || function.Variables[view.Variable].IsMutable != view.IsMutable
                         || !declared.Add(view.Variable) || active[view.Variable]
                         || view.Body is null || view.Owner is null)
                     {
@@ -666,17 +689,36 @@ public static class SemanticVerifier
                     {
                         throw InvalidEffect(view.Owner.Span, "Ownership");
                     }
-                    roots[root]++;
-                    Expression(view.Start, depth + 1);
-                    Expression(view.Length, depth + 1);
+                    if (exclusive[root] || (view.IsMutable && roots[root] != 0))
+                    {
+                        throw InvalidEffect(view.Span, "Ownership");
+                    }
+                    if (view.IsMutable)
+                    {
+                        exclusive[root] = true;
+                    }
+                    else
+                    {
+                        roots[root]++;
+                    }
+                    Expression(view.Start, depth + 1, view.IsMutable ? root : -1);
+                    Expression(view.Length, depth + 1, view.IsMutable ? root : -1);
                     active[view.Variable] = true;
                     Statement(view.Body, depth + 1);
                     active[view.Variable] = false;
-                    roots[root]--;
+                    if (view.IsMutable)
+                    {
+                        exclusive[root] = false;
+                    }
+                    else
+                    {
+                        roots[root]--;
+                    }
                     break;
                 case BoundLocal local:
                     if (local.Variable < 0 || local.Variable >= roots.Length
-                        || function.Variables[local.Variable].Type == PrimitiveType.ReadonlyInt32BufferView)
+                        || function.Variables[local.Variable].Type is PrimitiveType.ReadonlyInt32BufferView
+                            or PrimitiveType.MutableInt32BufferView)
                     {
                         throw InvalidEffect(local.Span, "Ownership");
                     }
@@ -684,22 +726,25 @@ public static class SemanticVerifier
                     break;
                 case BoundAssignment assignment:
                     if (assignment.Variable < 0 || assignment.Variable >= roots.Length
-                        || roots[assignment.Variable] != 0
-                        || function.Variables[assignment.Variable].Type == PrimitiveType.ReadonlyInt32BufferView)
+                        || roots[assignment.Variable] != 0 || exclusive[assignment.Variable]
+                        || function.Variables[assignment.Variable].Type is PrimitiveType.ReadonlyInt32BufferView
+                            or PrimitiveType.MutableInt32BufferView)
                     {
                         throw InvalidEffect(assignment.Span, "Ownership");
                     }
                     Expression(assignment.Value, depth + 1);
                     break;
                 case BoundFieldAssignment field:
-                    if (field.Variable < 0 || field.Variable >= roots.Length || roots[field.Variable] != 0)
+                    if (field.Variable < 0 || field.Variable >= roots.Length
+                        || roots[field.Variable] != 0 || exclusive[field.Variable])
                     {
                         throw InvalidEffect(field.Span, "Ownership");
                     }
                     Expression(field.Value, depth + 1);
                     break;
                 case BoundDrop drop:
-                    if (drop.Variable < 0 || drop.Variable >= roots.Length || roots[drop.Variable] != 0)
+                    if (drop.Variable < 0 || drop.Variable >= roots.Length
+                        || roots[drop.Variable] != 0 || exclusive[drop.Variable])
                     {
                         throw InvalidEffect(drop.Span, "Ownership");
                     }
@@ -707,6 +752,15 @@ public static class SemanticVerifier
                 case BoundBufferAssignment write:
                     Expression(write.Index, depth + 1);
                     Expression(write.Value, depth + 1);
+                    break;
+                case BoundViewSet viewWrite:
+                    if (viewWrite.Variable < 0 || viewWrite.Variable >= active.Length || !active[viewWrite.Variable]
+                        || function.Variables[viewWrite.Variable].Type != PrimitiveType.MutableInt32BufferView)
+                    {
+                        throw InvalidEffect(viewWrite.Span, "Ownership");
+                    }
+                    Expression(viewWrite.Index, depth + 1);
+                    Expression(viewWrite.Value, depth + 1);
                     break;
                 case BoundExpressionStatement effects:
                     Expression(effects.Expression, depth + 1);
@@ -757,7 +811,8 @@ public static class SemanticVerifier
         Statement(body, 0);
         for (var slot = function.ParameterCount + (function.IsConstructor ? 1 : 0); slot < roots.Length; slot++)
         {
-            if (function.Variables[slot].Type == PrimitiveType.ReadonlyInt32BufferView && !declared.Contains(slot))
+            if (!declared.Contains(slot) && function.Variables[slot].Type is
+                PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
             {
                 throw Invalid();
             }
@@ -771,10 +826,15 @@ public static class SemanticVerifier
         {
             throw InvalidEffect(owner.Span, "Ownership");
         }
-        if (owner is BoundReceiverLoan named)
+        if (owner is BoundReceiverLoan or BoundMutableReceiverLoan)
         {
-            return named.Variable;
+            return owner is BoundReceiverLoan named ? named.Variable : ((BoundMutableReceiverLoan)owner).Variable;
         }
+        return LoanRoot(owner, ref remaining, depth + 1);
+    }
+
+    private static int LoanRoot(BoundExpression owner, ref int remaining, int depth)
+    {
         if (owner is not BoundFieldLoan field)
         {
             throw InvalidEffect(owner.Span, "Ownership");
@@ -1077,6 +1137,27 @@ public static class SemanticVerifier
                     throw Invalid();
                 }
                 return false;
+            case BoundViewSet viewSet:
+                if (viewSet.Variable < 0 || viewSet.Variable >= initialized.Length
+                    || !initialized[viewSet.Variable]
+                    || function.Variables[viewSet.Variable].Type != PrimitiveType.MutableInt32BufferView)
+                {
+                    throw InvalidEffect(viewSet.Span, "Ownership");
+                }
+                Expression(viewSet.Index, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+                Expression(viewSet.Value, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+                if (viewSet.Index.Type != PrimitiveType.Int32 || viewSet.Value.Type != PrimitiveType.Int32)
+                {
+                    throw Invalid();
+                }
+                if (function.IsNoThrow)
+                {
+                    throw InvalidEffect(viewSet.Span);
+                }
+                failures?.Add(initialized, fieldMasks);
+                return false;
             case BoundExpressionStatement expressionStatement:
                 if (expressionStatement.Expression is not (BoundCall or BoundViewRead))
                 {
@@ -1175,7 +1256,9 @@ public static class SemanticVerifier
             case BoundViewScope view:
                 if (view.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                     || view.Variable >= initialized.Length || view.Variable < 0
-                    || function.Variables[view.Variable].Type != PrimitiveType.ReadonlyInt32BufferView
+                    || function.Variables[view.Variable].Type != (view.IsMutable
+                        ? PrimitiveType.MutableInt32BufferView : PrimitiveType.ReadonlyInt32BufferView)
+                    || function.Variables[view.Variable].IsMutable != view.IsMutable
                     || !declarations.Add(view.Variable) || initialized[view.Variable]
                     || view.Owner is null || view.Body is null)
                 {
@@ -1183,7 +1266,7 @@ public static class SemanticVerifier
                 }
                 if (view.Owner is BoundReceiverLoan named)
                 {
-                    if (named.Type != PrimitiveType.OwnedInt32Buffer
+                    if (view.IsMutable || named.Type != PrimitiveType.OwnedInt32Buffer
                         || named.Variable < 0 || named.Variable >= initialized.Length
                         || function.Variables[named.Variable].Type != named.Type
                         || !initialized[named.Variable])
@@ -1191,9 +1274,19 @@ public static class SemanticVerifier
                         throw InvalidEffect(named.Span, "Ownership");
                     }
                 }
+                else if (view.Owner is BoundMutableReceiverLoan mutable)
+                {
+                    if (!view.IsMutable || mutable.Type != PrimitiveType.OwnedInt32Buffer
+                        || mutable.Variable < 0 || mutable.Variable >= initialized.Length
+                        || function.Variables[mutable.Variable].Type != mutable.Type
+                        || !function.Variables[mutable.Variable].IsMutable || !initialized[mutable.Variable])
+                    {
+                        throw InvalidEffect(mutable.Span, "Ownership");
+                    }
+                }
                 else if (view.Owner is BoundFieldLoan fieldLoan)
                 {
-                    if (fieldLoan.Type != PrimitiveType.OwnedInt32Buffer
+                    if (view.IsMutable || fieldLoan.Type != PrimitiveType.OwnedInt32Buffer
                         || fieldLoan.Place is null || fieldLoan.Place.Type != fieldLoan.Type)
                     {
                         throw InvalidEffect(fieldLoan.Span, "Ownership");
@@ -1695,7 +1788,8 @@ public static class SemanticVerifier
             case BoundViewLength length:
                 if (length.Variable < 0 || length.Variable >= initialized.Length
                     || !initialized[length.Variable]
-                    || function.Variables[length.Variable].Type != PrimitiveType.ReadonlyInt32BufferView)
+                    || function.Variables[length.Variable].Type is not (PrimitiveType.ReadonlyInt32BufferView
+                        or PrimitiveType.MutableInt32BufferView))
                 {
                     throw InvalidEffect(length.Span, "Ownership");
                 }
@@ -1703,7 +1797,8 @@ public static class SemanticVerifier
             case BoundViewRead viewRead:
                 if (viewRead.Variable < 0 || viewRead.Variable >= initialized.Length
                     || !initialized[viewRead.Variable]
-                    || function.Variables[viewRead.Variable].Type != PrimitiveType.ReadonlyInt32BufferView)
+                    || function.Variables[viewRead.Variable].Type is not (PrimitiveType.ReadonlyInt32BufferView
+                        or PrimitiveType.MutableInt32BufferView))
                 {
                     throw InvalidEffect(viewRead.Span, "Ownership");
                 }
@@ -1902,7 +1997,8 @@ public static class SemanticVerifier
                     {
                         if (argument is BoundMutableReceiverLoan mutableLoan)
                         {
-                            if (i != 0 || target.Intrinsic is not (BoundIntrinsic.BufferSet or BoundIntrinsic.BufferTryAppend)
+                            if (i != 0 || target.Intrinsic is not (BoundIntrinsic.BufferSet
+                                or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear)
                                 || mutableLoan.Variable < 0 || mutableLoan.Variable >= initialized.Length
                                 || mutableLoan.Type != PrimitiveType.OwnedInt32Buffer
                                 || function.Variables[mutableLoan.Variable].Type != mutableLoan.Type

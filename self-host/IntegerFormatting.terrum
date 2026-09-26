@@ -1,0 +1,58 @@
+namespace Terrum.CodeAnalysis.Numerics64;
+
+public static OwnedInt32Buffer FormatUInt64(uint64 value, OwnedInt32Buffer workspace)
+{
+    mut OwnedInt32Buffer buffer = move workspace;
+    // uint64.MaxValue has twenty decimal digits.
+    require buffer.Capacity >= 20;
+    buffer.Clear();
+
+    mut uint64 remaining = value;
+    while (remaining >= 10)
+    {
+        require buffer.TryAppend((int32)(remaining % 10) + 48);
+        remaining = remaining / 10;
+    }
+    require buffer.TryAppend((int32)remaining + 48);
+
+    {
+        mut MutableInt32BufferView digits = buffer.SliceMutable(0, buffer.Count);
+        mut int32 first = 0;
+        mut int32 last = digits.Length - 1;
+        while (first < last)
+        {
+            int32 saved = digits.Read(first);
+            digits.Set(first, digits.Read(last));
+            digits.Set(last, saved);
+            first = first + 1;
+            last = last - 1;
+        }
+    }
+
+    return move buffer;
+}
+
+public static OwnedInt32Buffer FormatInt64(int64 value, OwnedInt32Buffer workspace)
+{
+    if (value >= 0)
+    {
+        return FormatUInt64((uint64)value, move workspace);
+    }
+
+    // Avoid negating int64.MinValue in the signed domain.
+    uint64 magnitude = (uint64)(-(value + 1)) + 1;
+    mut OwnedInt32Buffer buffer = FormatUInt64(magnitude, move workspace);
+    require buffer.TryAppend(0);
+    {
+        mut MutableInt32BufferView digits = buffer.SliceMutable(0, buffer.Count);
+        mut int32 index = digits.Length - 1;
+        while (index > 0)
+        {
+            digits.Set(index, digits.Read(index - 1));
+            index = index - 1;
+        }
+        digits.Set(0, 45);
+    }
+
+    return move buffer;
+}

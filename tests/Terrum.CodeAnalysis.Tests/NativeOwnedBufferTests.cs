@@ -86,7 +86,7 @@ public sealed class NativeOwnedBufferTests
             Assert.Equal(0x5D, code.Code[emitted.End - 2]);
             Assert.Equal(0xC3, code.Code[emitted.End - 1]);
         }
-        Assert.Equal(6, intrinsicCount);
+        Assert.Equal(Enum.GetValues<BoundIntrinsic>().Length - 1, intrinsicCount);
     }
 
     [Theory]

@@ -21,7 +21,8 @@ public static partial class ModuleCompiler
     private const int TransferVersion = 13;
     private const int CompositeVersion = 14;
     private const int BufferVersion = 15;
-    private const int Version = 16;
+    private const int ReadonlyViewVersion = 16;
+    private const int Version = 17;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -87,9 +88,10 @@ public static partial class ModuleCompiler
     private static string RetainedNativeProfile(Module module)
     {
         if (module.Structures.Any(static structure => structure.Fields.Any(
-            static field => field.Type == PrimitiveType.ReadonlyInt32BufferView))
+            static field => field.Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView))
             || module.Functions.Any(static item => item.Import
-                && ContractContainsType(item.Contract, PrimitiveType.ReadonlyInt32BufferView)))
+                && (ContractContainsType(item.Contract, PrimitiveType.ReadonlyInt32BufferView)
+                    || ContractContainsType(item.Contract, PrimitiveType.MutableInt32BufferView))))
         {
             throw new ModuleFormatException("Readonly buffer views cannot cross module value contracts.");
         }
@@ -98,10 +100,10 @@ public static partial class ModuleCompiler
             module.Functions.Any(static function => function.HasOwnershipTransfer),
             Compilation.HasCompositeUnique(module.Structures),
             HasOwnedNativeBuffer(module.Structures, module.Functions),
-            HasReadonlyNativeView(module.Functions));
+            HasReadonlyNativeView(module.Functions), HasMutableNativeViewOrClear(module.Functions));
         // Version 15 mistook a seven-parameter count for the owned-buffer type ID.
         return module.SerializedVersion == BufferVersion && module.SerializedProfile == "native-15"
-            && profile is not ("native-15" or "native-16")
+            && profile is not ("native-15" or "native-16" or "native-17")
             && module.Functions.Any(static item => ContractParameterCount(item.Contract) == 7)
                 ? "native-15" : profile;
     }
@@ -132,6 +134,27 @@ public static partial class ModuleCompiler
         return false;
     }
 
+    private static bool HasMutableNativeViewOrClear(ImmutableArray<ModuleFunction> functions)
+    {
+        foreach (var item in functions)
+        {
+            if (item.Function is BoundFunction function)
+            {
+                if (function.Intrinsic == BoundIntrinsic.BufferClear)
+                {
+                    return true;
+                }
+                var found = false;
+                _ = Calls(function.Body, visitView: view => found |= view.IsMutable);
+                if (found)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static int ContractParameterCount(string contract) => ContractParameterCount(contract.Split('|'));
 
     private static int ContractParameterCount(string[] parts)
@@ -152,7 +175,7 @@ public static partial class ModuleCompiler
             if (item.Function is BoundFunction function)
             {
                 var found = false;
-                _ = Calls(function.Body, visitView: () => found = true);
+                _ = Calls(function.Body, visitView: view => found |= !view.IsMutable);
                 if (found)
                 {
                     return true;
@@ -355,6 +378,11 @@ public static partial class ModuleCompiler
         for (var i = 0; i < program.Functions.Length; i++)
         {
             var function = program.Functions[i];
+            if (function.Intrinsic == BoundIntrinsic.BufferClear
+                && !program.Functions.Any(candidate => Calls(candidate.Body).Contains(i)))
+            {
+                continue;
+            }
             if (!hasExternalDeclarations && implementationFunctions.Contains(function.Name))
             {
                 continue;
@@ -558,7 +586,8 @@ public static partial class ModuleCompiler
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Only nodes with nested expressions or statements need traversal.")]
-    private static List<int> Calls(BoundStatement body, Action<PrimitiveType>? visitType = null, Action? visitView = null)
+    private static List<int> Calls(BoundStatement body, Action<PrimitiveType>? visitType = null,
+        Action<BoundViewScope>? visitView = null)
     {
         var calls = new List<int>();
         VisitStatement(body);
@@ -603,11 +632,15 @@ public static partial class ModuleCompiler
                     VisitStatement(cleanup.Finally);
                     break;
                 case BoundViewScope view:
-                    visitView?.Invoke();
+                    visitView?.Invoke(view);
                     VisitExpression(view.Owner);
                     VisitExpression(view.Start);
                     VisitExpression(view.Length);
                     VisitStatement(view.Body);
+                    break;
+                case BoundViewSet write:
+                    VisitExpression(write.Index);
+                    VisitExpression(write.Value);
                     break;
                 case BoundDrop drop when drop.CleanupFunction >= 0:
                     calls.Add(drop.CleanupFunction);
@@ -776,7 +809,7 @@ public static partial class ModuleCompiler
             var index = (int)type - 100;
             if (index < 0)
             {
-                return type != PrimitiveType.ReadonlyInt32BufferView;
+                return type is not (PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView);
             }
             if (index >= structures.Length)
             {
@@ -962,6 +995,10 @@ public static partial class ModuleCompiler
                 Length = RemapExpression(view.Length, source, destination),
                 Body = (BoundBlock)RemapStatement(view.Body, source, destination),
             },
+            BoundViewSet write => write with {
+                Index = RemapExpression(write.Index, source, destination),
+                Value = RemapExpression(write.Value, source, destination),
+            },
             BoundDrop => statement,
             BoundDropConstructedFields => statement,
             SymbolicDrop => statement,
@@ -1108,7 +1145,8 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Unknown module format or version.");
         }
         var version = reader.ReadInt32();
-        if (version is not (10 or 11 or OwnershipVersion or TransferVersion or CompositeVersion or BufferVersion or Version))
+        if (version is not (10 or 11 or OwnershipVersion or TransferVersion or CompositeVersion
+            or BufferVersion or ReadonlyViewVersion or Version))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -1124,7 +1162,8 @@ public static partial class ModuleCompiler
                 && (version < TransferVersion || profile != "native-13")
                 && (version < CompositeVersion || profile != "native-14")
                 && (version < BufferVersion || profile != "native-15")
-                && (version < Version || profile != "native-16")))
+                && (version < ReadonlyViewVersion || profile != "native-16")
+                && (version < Version || profile != "native-17")))
         {
             throw new ModuleFormatException("Unsupported module semantic profile or checked-failure policy.");
         }
@@ -1262,9 +1301,10 @@ public static partial class ModuleCompiler
     {
         var name = GetString(reader);
         var type = (PrimitiveType)reader.ReadInt32();
-        if (version < Version && type == PrimitiveType.ReadonlyInt32BufferView)
+        if ((version < ReadonlyViewVersion && type == PrimitiveType.ReadonlyInt32BufferView)
+            || (version < Version && type == PrimitiveType.MutableInt32BufferView))
         {
-            throw new ModuleFormatException("Readonly buffer views require semantic module version 16.");
+            throw new ModuleFormatException("Native buffer view type requires a newer semantic module version.");
         }
         var constructor = GetBool(reader);
         var isPrivate = GetBool(reader);
@@ -1274,6 +1314,10 @@ public static partial class ModuleCompiler
         var doesNotReturn = GetBool(reader);
         var isCleanup = version >= OwnershipVersion && GetBool(reader);
         var intrinsic = version >= BufferVersion ? (BoundIntrinsic)reader.ReadByte() : BoundIntrinsic.None;
+        if (version < Version && intrinsic == BoundIntrinsic.BufferClear)
+        {
+            throw new ModuleFormatException("Buffer.Clear requires semantic module version 17.");
+        }
         var declaringStruct = GetBool(reader) ? GetString(reader) : null;
         var parameters = reader.ReadInt32();
         var count = Count(reader, MaximumSlots);
@@ -1287,9 +1331,10 @@ public static partial class ModuleCompiler
         {
             var variableName = GetString(reader);
             var variableType = (PrimitiveType)reader.ReadInt32();
-            if (version < Version && variableType == PrimitiveType.ReadonlyInt32BufferView)
+            if ((version < ReadonlyViewVersion && variableType == PrimitiveType.ReadonlyInt32BufferView)
+                || (version < Version && variableType == PrimitiveType.MutableInt32BufferView))
             {
-                throw new ModuleFormatException("Readonly buffer views require semantic module version 16.");
+                throw new ModuleFormatException("Native buffer view type requires a newer semantic module version.");
             }
             var mutable = GetBool(reader);
             var isOut = GetBool(reader);
@@ -1331,6 +1376,7 @@ public static partial class ModuleCompiler
             BoundOwnerDeclaration => (byte)14,
             BoundDropConstructedFields => (byte)15,
             BoundViewScope => (byte)16,
+            BoundViewSet => (byte)17,
             _ => throw new ModuleFormatException("Unknown statement kind."),
         });
         PutSpan(writer, statement.Span);
@@ -1349,10 +1395,16 @@ public static partial class ModuleCompiler
                 break;
             case BoundViewScope view:
                 writer.Write(view.Variable);
+                writer.Write(view.IsMutable);
                 PutExpression(writer, view.Owner, names, ref remaining, depth + 1);
                 PutExpression(writer, view.Start, names, ref remaining, depth + 1);
                 PutExpression(writer, view.Length, names, ref remaining, depth + 1);
                 PutStatement(writer, view.Body, names, ref remaining, depth + 1);
+                break;
+            case BoundViewSet write:
+                writer.Write(write.Variable);
+                PutExpression(writer, write.Index, names, ref remaining, depth + 1);
+                PutExpression(writer, write.Value, names, ref remaining, depth + 1);
                 break;
             case BoundOwnerDeclaration declaration:
                 writer.Write(declaration.Variable);
@@ -1524,14 +1576,20 @@ public static partial class ModuleCompiler
                     order.Add(reader.ReadInt32());
                 }
                 return new BoundDropConstructedFields(constructedOwner, order.ToImmutable(), span);
-            case 16 when version >= Version:
+            case 16 when version >= ReadonlyViewVersion:
                 var viewVariable = reader.ReadInt32();
+                var mutable = version >= Version && GetBool(reader);
                 var viewOwner = GetExpression(reader, ref remaining, depth + 1, version);
                 var start = GetExpression(reader, ref remaining, depth + 1, version);
                 var length = GetExpression(reader, ref remaining, depth + 1, version);
                 var viewBody = GetStatement(reader, ref remaining, depth + 1, version) as BoundBlock
                     ?? throw new ModuleFormatException("Expected lexical view block.");
-                return new BoundViewScope(viewVariable, viewOwner, start, length, viewBody, span);
+                return new BoundViewScope(viewVariable, viewOwner, start, length, viewBody, span) {
+                    IsMutable = mutable,
+                };
+            case 17 when version >= Version:
+                return new BoundViewSet(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1, version),
+                    GetExpression(reader, ref remaining, depth + 1, version), span);
             default:
                 throw new ModuleFormatException("Unknown statement kind.");
         }
@@ -1667,9 +1725,9 @@ public static partial class ModuleCompiler
                     as BoundFieldRead ?? throw new ModuleFormatException("Expected owning field place."), type, span);
             case 12 when version >= BufferVersion:
                 return new BoundMutableReceiverLoan(reader.ReadInt32(), type, span);
-            case 13 when version >= Version && type == PrimitiveType.Int32:
+            case 13 when version >= ReadonlyViewVersion && type == PrimitiveType.Int32:
                 return new BoundViewLength(reader.ReadInt32(), span);
-            case 14 when version >= Version && type == PrimitiveType.Int32:
+            case 14 when version >= ReadonlyViewVersion && type == PrimitiveType.Int32:
                 var variable = reader.ReadInt32();
                 return new BoundViewRead(variable, GetExpression(reader, ref remaining, depth + 1, version), span);
             default:
@@ -1702,6 +1760,10 @@ public static partial class ModuleCompiler
             Start = ResolveExpression(view.Start, names),
             Length = ResolveExpression(view.Length, names),
             Body = (BoundBlock)ResolveStatement(view.Body, names),
+        },
+        BoundViewSet write => write with {
+            Index = ResolveExpression(write.Index, names),
+            Value = ResolveExpression(write.Value, names),
         },
         SymbolicDrop drop => drop.Name is null
             ? new BoundDrop(drop.Variable, -1, drop.Span) { IsOutput = drop.IsOutput }

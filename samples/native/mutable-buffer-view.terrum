@@ -1,0 +1,17 @@
+int32 Main()
+{
+    require OwnedInt32Buffer.TryCreate(2, out var created);
+    mut OwnedInt32Buffer values = move created;
+    require values.TryAppend(40);
+    require values.TryAppend(1);
+
+    {
+        mut MutableInt32BufferView window = values.SliceMutable(0, values.Count);
+        window.Set(1, window.Read(1) + 1);
+    }
+
+    int32 answer = values.Read(0) + values.Read(1);
+    values.Clear();
+    require values.TryAppend(answer);
+    return values.Read(0);
+}

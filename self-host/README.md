@@ -23,6 +23,7 @@ remain hosted in C#.
 | [IntegerFacts](IntegerFacts.terrum) | Overflow-free signed-addition range predicate | Supported by the native profile; tested with native entry wrappers, not a full compiler bootstrap |
 | [WideIntegerFacts](WideIntegerFacts.terrum) | Checked signed addition and bounded decimal accumulation through the full unsigned 64-bit range | Executed as a separately compiled module with conditional wide outputs |
 | [WideIntegerTests](WideIntegerTests.terrum) | Signed extrema, invalid digits, decimal overflow and repeated output publication | Executed through AOT and JIT with a shared entry wrapper |
+| [IntegerFormatting](IntegerFormatting.terrum) | Invariant signed/unsigned decimal digits in reusable owned storage | AOT/JIT boundary and repeated-use fixtures; native heap checks cover same-allocation transfer and failure cleanup |
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and conditional bool/out publication |
 | [SourceLines](SourceLines.terrum) | Streaming line ranges and UTF-16 line/character mapping over an immutable source grant | Executed with conditional outputs; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
 | [SourceLineIndex](SourceLineIndex.terrum) | Owned line-start table and binary-searched UTF-16 positions | Executed as AOT under both failure policies; every position matches host fixtures, with invalid outputs and owner copies rejected |
@@ -68,6 +69,13 @@ reserves one word per source code unit plus one for the final line, a conservati
 single-pass bound rather than a resizing collection. Capacity and allocation
 failure follow the bounded `OwnedInt32Buffer` contract. This is not a stored
 source view, managed line collection, or general allocator API.
+
+`IntegerFormatting` consumes and returns a unique workspace of at least twenty
+`int32` words. It clears the initialized prefix without reallocating, then uses
+exclusive lexical views to reverse digits or insert a minus sign. The signed
+minimum is handled without negating it in the signed domain. Output words hold
+explicit ASCII decimal code values; this component does not select a default
+runtime text encoding or implement general format strings.
 
 `StringLiteral.TryCreate` validates a complete quoted source range before
 publishing its spelling and scalar count. `TryReadScalar` reports a Unicode

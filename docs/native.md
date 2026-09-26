@@ -4,8 +4,9 @@
 `native-12` (compact unique locals/returns), `native-13` (owned
 by-value arguments and conditional outputs), `native-14` (composite unique
 fields, including nested Copy fields, under either runtime policy),
-`native-15` (compiler-defined owned native `int32` buffer) and `native-16`
-(lexical readonly slices of its initialized prefix)
+`native-15` (compiler-defined owned native `int32` buffer), `native-16`
+(lexical readonly slices of its initialized prefix), and `native-17`
+(lexical exclusive writable slices and in-place prefix reset)
 are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
@@ -23,7 +24,9 @@ Whole-owner move, by-value call/return and true-only output transfer the
 obligation; lexical and recursive composite cleanup release it exactly once.
 `HeapFree` failure is a fatal process invariant error (`0xE0540005`), not a
 recoverable checked failure or a fabricated successful release. The buffer
-operations do not store receiver loans or resize backing memory.
+operations do not store receiver loans or resize backing memory. `Clear()`
+is NoThrow for a live named mutable owner: it sets count to zero without
+freeing or reallocating the fixed-capacity storage.
 `ReadonlyInt32BufferView` captures a checked pointer/length descriptor in a
 16-byte local frame slot, with its root retained only in structured semantic
 IR. `Slice(start, length)` rejects negative or out-of-prefix ranges without
@@ -32,7 +35,13 @@ are valid but cannot be read. The verifier rejects root moves, replacements,
 mutating loans and cleanup while a slice is active, including in branches,
 loops and nested cleanup. `Read(index)` checks the slice length using the same
 selected checked-failure policy. The view has no call/return ABI and cannot
-extend owner lifetime; neither GC rooting nor writable aliasing is implied.
+extend owner lifetime; neither GC rooting nor general aliasing is implied.
+`mut MutableInt32BufferView view = owner.SliceMutable(start, length);` reserves
+a named mutable owner exclusively. Its `Length`, `Read(index)` and checked
+`Set(index, value)` access the captured initialized prefix, with index and
+value expressions each evaluated once. No owner reads, mutation, move,
+replacement or drop, or another view of that owner, can overlap this lexical
+scope. A mutable view cannot be copied, passed, stored or returned.
 Allocation-failure and exactly-once-release behavior can be checked with
 the trusted native ABI probe in `scripts/check-owned-buffer-abi.cs`, which
 replaces the fixture DLL's `HeapAlloc`/`HeapFree` imports to inject a
@@ -271,7 +280,8 @@ matching bounded native contract.
 `native-12` for compact unique locals/returns, `native-13` where
 function declarations transfer ownership through parameters, `native-14`
 for retained composite unique layouts, `native-15` for owned native buffers,
-and `native-16` for their lexical readonly views, without changing
+`native-16` for their lexical readonly views, and `native-17` for
+exclusive writable views or `Clear`, without changing
 older fail-fast artifacts. `analyze` also accepts this option to check recovery without emitting
 an artifact; omission keeps its existing fail-fast profile. The reusable
 compilation API accepts the policy with single or multiple original snapshots,

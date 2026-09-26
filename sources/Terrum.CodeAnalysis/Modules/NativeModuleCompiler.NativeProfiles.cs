@@ -5,5 +5,5 @@ namespace Terrum.CodeAnalysis.Modules;
 public static partial class NativeModuleCompiler
 {
     private static bool AllowsOwnedBufferRuntime(string profile) =>
-        profile is "native-15" or "native-16";
+        profile is "native-15" or "native-16" or "native-17";
 }

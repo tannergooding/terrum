@@ -3,7 +3,9 @@
 This document specifies the accepted direction for checked loans, views and published member contracts, with **provisional notation** where the grammar is unresolved. It refines [language](language.md); [libraries](libraries.md) illustrates the span/text/collection protocols. Compact unique locals, explicit named moves, synchronous readonly receiver loans,
 the exclusive, call-bounded receiver loan of `OwnedInt32Buffer.Set` and
 `TryAppend`, and nonescaping lexical `ReadonlyInt32BufferView` locals obtained
-through `OwnedInt32Buffer.Slice` have executable ownership checks today
+through `OwnedInt32Buffer.Slice`, and exclusive lexical
+`mut MutableInt32BufferView` locals obtained through `SliceMutable`, have
+executable ownership checks today
 ([implementation](implementation.md)); a slice cannot be copied, passed,
 stored or returned, and is not the proposed generic `Span<T>`.
 The remaining lifetime constructs are rejected for execution.

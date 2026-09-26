@@ -16,7 +16,7 @@ using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
 
-public sealed class JitTests
+public sealed partial class JitTests
 {
     private const string OwnedBufferProgram = """
         int32 Main() {
@@ -152,7 +152,10 @@ public sealed class JitTests
         bool Fill(out Result value) { value = Relay(new Result(40)); return true; }
         int32 Main() { require Fill(out var result); return result.Read() + result.Data.Offset; }
         """, 42)]
-    public async Task WorkerAndNativeExecutableAgreeAsync(string source, int expected)
+    public Task WorkerAndNativeExecutableAgreeAsync(string source, int expected) =>
+        AssertFailFastExecutionAsync(source, expected);
+
+    private static async Task AssertFailFastExecutionAsync(string source, int expected)
     {
         AssertWindowsX64();
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
@@ -223,7 +226,10 @@ public sealed class JitTests
             }
         }
         """, 42)]
-    public async Task CheckedExceptionWorkerAndExecutableAgreeAsync(string source, int expected)
+    public Task CheckedExceptionWorkerAndExecutableAgreeAsync(string source, int expected) =>
+        AssertCheckedExecutionAsync(source, expected);
+
+    private static async Task AssertCheckedExecutionAsync(string source, int expected)
     {
         AssertWindowsX64();
         var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);

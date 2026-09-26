@@ -55,3 +55,16 @@ public int32 Composite() {
     ReadonlyInt32BufferView view = value.Data.Slice(0, value.Data.Count);
     return view.Read(0);
 }
+
+public OwnedInt32Buffer FormattingWorkspace() {
+    require OwnedInt32Buffer.TryCreate(24, out var buffer);
+    return move buffer;
+}
+
+public OwnedInt32Buffer FormatDigits(uint64 value, OwnedInt32Buffer buffer) {
+    return Terrum.CodeAnalysis.Numerics64.FormatUInt64(value, move buffer);
+}
+
+public OwnedInt32Buffer FormatSignedDigits(int64 value, OwnedInt32Buffer buffer) {
+    return Terrum.CodeAnalysis.Numerics64.FormatInt64(value, move buffer);
+}

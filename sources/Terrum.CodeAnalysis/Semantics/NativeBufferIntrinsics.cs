@@ -24,6 +24,8 @@ internal static class NativeBufferIntrinsics
         Function(BoundIntrinsic.BufferTryAppend, "TryAppend", PrimitiveType.Bool, false,
             [Variable("this", PrimitiveType.OwnedInt32Buffer, isMutable: true),
                 Variable("value", PrimitiveType.Int32)]),
+        Function(BoundIntrinsic.BufferClear, "Clear", PrimitiveType.Void, false,
+            [Variable("this", PrimitiveType.OwnedInt32Buffer, isMutable: true)]),
     ];
 
     internal static bool Matches(BoundFunction function)
@@ -67,7 +69,8 @@ internal static class NativeBufferIntrinsics
             DeclaringStruct = TypeName,
             IsStatic = isStatic,
             IsInternal = true,
-            IsNoThrow = intrinsic is BoundIntrinsic.BufferCount or BoundIntrinsic.BufferCapacity or BoundIntrinsic.BufferTryAppend,
+            IsNoThrow = intrinsic is BoundIntrinsic.BufferCount or BoundIntrinsic.BufferCapacity
+                or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear,
             Intrinsic = intrinsic,
         };
 }

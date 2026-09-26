@@ -25,6 +25,9 @@ initialized prefix of a fixed-capacity native buffer.
 The [readonly buffer-view sample](../samples/native/readonly-buffer-view.terrum)
 returns 42 after checking a lexical slice of the initialized prefix and
 reading it in a loop; the owner remains live until the view's scope ends.
+The [writable buffer-view sample](../samples/native/mutable-buffer-view.terrum)
+returns 42 after an exclusive scoped update and a NoThrow in-place `Clear`
+followed by reuse of the same fixed-capacity owner.
 
 | Program | Source | Design contract / expected behavior |
 |---|---|---|

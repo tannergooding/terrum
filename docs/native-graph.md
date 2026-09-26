@@ -74,7 +74,7 @@ their original profiles and machine images when the implementation is replaced.
 Views cannot escape through public parameters, returns or fields. The checked
 package reader rejects unknown or inconsistent profiles before loading a DLL;
 the native image validator permits owned-buffer heap imports only for the
-`native-15` and `native-16` profiles.
+`native-15`, `native-16` and `native-17` profiles.
 
 To replace a leaf without changing the root or intermediate, use the scalar
 `Leaf()` package first, then compile the implementation with an internal view:
@@ -91,6 +91,33 @@ $LASTEXITCODE # 42
 $LASTEXITCODE # 44
 & $c run-native-graph-jit scoped-root.trng --provider scoped-middle.trng --provider scoped-leaf-new.trmn --runtime fail-fast
 $LASTEXITCODE # 44
+```
+
+An internal exclusive writable view and `OwnedInt32Buffer.Clear()` may likewise
+replace a leaf implementation without changing its exported `Leaf()` contract.
+The new leaf uses `native-17`; previously persisted `native-15` and `native-16`
+packages remain readable. Writable views cannot appear in public value
+contracts or escape their lexical scopes. The package reader checks profiles
+and contracts before loading any native image.
+
+```powershell
+& $c compile-native producer samples\native\graph\writable-view-leaf-original.terrum NodeB --export Leaf -o writable-old.trmn --runtime fail-fast
+& $c compile-native-graph producer samples\native\graph\middle.terrum NodeA --provider writable-old.trmn --export Middle -o writable-middle.trng --runtime fail-fast
+& $c compile-native-graph consumer samples\native\graph\consumer.terrum --provider writable-middle.trng -o writable-root.trng --runtime fail-fast
+& $c run-native-graph writable-root.trng --provider writable-middle.trng --provider writable-old.trmn --runtime fail-fast
+$LASTEXITCODE # 42
+& $c compile-native producer samples\native\graph\scoped-view-leaf-replacement.terrum NodeB --export Leaf -o writable-readonly.trmn --runtime fail-fast
+& $c run-native-graph writable-root.trng --provider writable-middle.trng --provider writable-readonly.trmn --runtime fail-fast
+$LASTEXITCODE # 44
+& $c compile-native producer samples\native\graph\writable-view-leaf.terrum NodeB --export Leaf -o writable-new.trmn --runtime fail-fast
+& $c validate-native-graph writable-root.trng --provider writable-middle.trng --provider writable-new.trmn
+& $c run-native-graph writable-root.trng --provider writable-middle.trng --provider writable-new.trmn --runtime fail-fast
+$LASTEXITCODE # 46
+& $c run-native-graph-jit writable-root.trng --provider writable-middle.trng --provider writable-new.trmn --runtime fail-fast
+$LASTEXITCODE # 46
+& $c compile-native-graph producer samples\native\graph\writable-view-middle.terrum NodeA --provider writable-old.trmn --export Middle -o writable-middle-new.trng --runtime fail-fast
+& $c run-native-graph-jit writable-root.trng --provider writable-middle-new.trng --provider writable-new.trmn --runtime fail-fast
+$LASTEXITCODE # 46
 ```
 
 Graph v2 packages carry the declared origin and cleanup owner of every

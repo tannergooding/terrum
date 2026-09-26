@@ -243,12 +243,7 @@ public static partial class ModuleCompiler
     internal static string GetGraphProfile(byte[] contract)
     {
         var module = ReadGraphLibrary(contract);
-        return Compilation.GetNativeProfileVersion(module.RuntimePolicy,
-            module.Structures.Any(static item => item.IsUnique),
-            module.Functions.Any(static item => item.HasOwnershipTransfer),
-            Compilation.HasCompositeUnique(module.Structures),
-            HasOwnedNativeBuffer(module.Structures, module.Functions),
-            HasReadonlyNativeView(module.Functions));
+        return RetainedNativeProfile(module);
     }
 
     private static BoundFunction RecordedImportPromises(string contract, BoundFunction replacement)
@@ -317,20 +312,17 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Graph library has no functions.");
             }
             var functions = ReadFunctions(reader, count, expectedConsumer: true, version, structures);
-            if (stream.Position != stream.Length
-                || profile != Compilation.GetNativeProfileVersion(policy,
-                    structures.Any(static item => item.IsUnique),
-                    functions.Any(static item => item.HasOwnershipTransfer),
-                    Compilation.HasCompositeUnique(structures),
-                    HasOwnedNativeBuffer(structures, functions),
-                    HasReadonlyNativeView(functions)))
+            var module = new Module(true, -1, structures, functions) {
+                ImportedStructures = imported,
+                RuntimePolicy = policy,
+                SerializedVersion = version,
+                SerializedProfile = profile,
+            };
+            if (stream.Position != stream.Length || profile != RetainedNativeProfile(module))
             {
                 throw new ModuleFormatException("Graph semantic profile or payload is invalid.");
             }
-            return new Module(true, -1, structures, functions) {
-                ImportedStructures = imported,
-                RuntimePolicy = policy,
-            };
+            return module;
         }
         catch (Exception exception) when (exception is EndOfStreamException or DecoderFallbackException
             or OverflowException or ArgumentOutOfRangeException or IOException)

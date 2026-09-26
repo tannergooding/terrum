@@ -32,6 +32,8 @@ public enum PrimitiveType
     OwnedInt32Buffer,
     /// <summary>A lexical, nonescaping readonly range of an owned int32 buffer.</summary>
     ReadonlyInt32BufferView,
+    /// <summary>A lexical, nonescaping exclusive writable range of an owned int32 buffer.</summary>
+    MutableInt32BufferView,
 }
 
 /// <summary>Compiler-defined native buffer operations; user functions cannot declare these implementations.</summary>
@@ -51,6 +53,8 @@ public enum BoundIntrinsic
     BufferSet,
     /// <summary>Appends through an exclusive mutable receiver loan, returning false without mutation when full.</summary>
     BufferTryAppend,
+    /// <summary>Resets the initialized prefix of a live owner without freeing its allocation.</summary>
+    BufferClear,
 }
 
 /// <summary>The verified behavior of compiler-generated checked failures.</summary>
@@ -213,9 +217,16 @@ public sealed record BoundWhile(BoundExpression Condition, BoundStatement Body, 
 /// <summary>A cleanup region for normal exits and checked exceptional unwinding, but not fail-fast termination.</summary>
 public sealed record BoundTryFinally(BoundBlock Body, BoundBlock Finally, TextSpan Span) : BoundStatement(Span);
 
-/// <summary>A lexical readonly view retaining its owner place and checked initialized-prefix range.</summary>
+/// <summary>A lexical view retaining its owner place and checked initialized-prefix range.</summary>
 public sealed record BoundViewScope(int Variable, BoundExpression Owner, BoundExpression Start,
-    BoundExpression Length, BoundBlock Body, TextSpan Span) : BoundStatement(Span);
+    BoundExpression Length, BoundBlock Body, TextSpan Span) : BoundStatement(Span)
+{
+    /// <summary>Whether the view holds exclusive writable access to its named mutable owner.</summary>
+    public bool IsMutable { get; init; }
+}
+
+/// <summary>Writes a checked element through an active exclusive lexical view.</summary>
+public sealed record BoundViewSet(int Variable, BoundExpression Index, BoundExpression Value, TextSpan Span) : BoundStatement(Span);
 
 /// <summary>Ends a lexical unique owner if it remains live; a moved owner is vacant.</summary>
 public sealed record BoundDrop(int Variable, int CleanupFunction, TextSpan Span) : BoundStatement(Span)

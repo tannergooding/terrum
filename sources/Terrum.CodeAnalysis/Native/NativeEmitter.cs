@@ -512,14 +512,16 @@ internal sealed class PeCompiler
             for (var variable = 0; variable < slots.Length; variable++)
             {
                 if ((IsIndirect(function.Variables[variable].Type)
-                    || function.Variables[variable].Type == PrimitiveType.ReadonlyInt32BufferView)
+                    || function.Variables[variable].Type is PrimitiveType.ReadonlyInt32BufferView
+                        or PrimitiveType.MutableInt32BufferView)
                     && !function.Variables[variable].IsOut)
                 {
                     at = (at + 15) & ~15;
                 }
                 slots[variable] = at;
                 at += (IsIndirect(function.Variables[variable].Type)
-                    || function.Variables[variable].Type == PrimitiveType.ReadonlyInt32BufferView)
+                    || function.Variables[variable].Type is PrimitiveType.ReadonlyInt32BufferView
+                        or PrimitiveType.MutableInt32BufferView)
                     && !function.Variables[variable].IsOut ? 16 : 8;
                 at = (at + 7) & ~7;
             }
@@ -846,6 +848,9 @@ internal sealed class PeCompiler
                 return Math.Max(2, Math.Max(ExpressionSpills(view.Start, ref maximumArguments),
                     Math.Max(1 + ExpressionSpills(view.Length, ref maximumArguments),
                         StatementSpills(view.Body, ref maximumArguments))));
+            case BoundViewSet write:
+                return Math.Max(2, Math.Max(ExpressionSpills(write.Index, ref maximumArguments),
+                    1 + ExpressionSpills(write.Value, ref maximumArguments)));
             case BoundAssignment assignment:
                 return Math.Max(ExpressionSpills(assignment.Value, ref maximumArguments),
                     HasDeclaredCleanup(assignment.Value.Type)
@@ -1068,6 +1073,11 @@ internal sealed class PeCompiler
                 _code.PatchRelative(full, _code.Position);
                 _code.Bytes(0x31, 0xC0);
                 _code.PatchRelative(appended, _code.Position);
+                break;
+            case BoundIntrinsic.BufferClear:
+                _code.Load64(Slot(0));
+                _code.Bytes(0x48, 0x8B, 0x00, 0xC7, 0x00);
+                _code.Int32(0);
                 break;
             case BoundIntrinsic.None:
             default:
@@ -1331,6 +1341,20 @@ internal sealed class PeCompiler
                 _code.Load(Spill(1));
                 _code.Store(Slot(view.Variable) + 8);
                 Statement(view.Body);
+                break;
+            case BoundViewSet write:
+                Expression(write.Index, 0);
+                _code.Store(Spill(0));
+                Expression(write.Value, 1);
+                _code.Store(Spill(1));
+                _code.Load(Spill(0));
+                _code.Bytes(0x89, 0xC1);
+                _code.Load(Slot(write.Variable) + 8);
+                _code.Bytes(0x39, 0xC1);
+                RuntimeBranch(0x83, 2);
+                _code.Load64(Slot(write.Variable), destinationRegister: true);
+                _code.Load(Spill(1));
+                _code.Bytes(0x89, 0x04, 0x8A);
                 break;
             case BoundOwnerDeclaration:
                 break;

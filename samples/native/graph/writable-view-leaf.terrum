@@ -1,0 +1,15 @@
+public int32 Leaf() {
+    require OwnedInt32Buffer.TryCreate(2, out var created);
+    mut OwnedInt32Buffer buffer = move created;
+    require buffer.TryAppend(20);
+    require buffer.TryAppend(22);
+    mut int32 value = 0;
+    {
+        mut MutableInt32BufferView view = buffer.SliceMutable(0, buffer.Count);
+        view.Set(0, view.Read(0) + 2);
+        value = view.Read(0) + view.Read(1);
+    }
+    buffer.Clear();
+    require buffer.TryAppend(value);
+    return buffer.Read(0);
+}

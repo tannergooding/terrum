@@ -10,6 +10,8 @@ typedef uint64_t Buffer;
 typedef uint8_t (*TryAcquire)(Buffer*);
 typedef Buffer (*Build)(void);
 typedef Buffer (*Relay)(Buffer);
+typedef Buffer (*Format)(uint64_t, Buffer);
+typedef Buffer (*FormatSigned)(int64_t, Buffer);
 typedef int32_t (*Consume)(Buffer);
 typedef int32_t (*Check)(void);
 typedef uint8_t (*TryRebuild)(void);
@@ -139,6 +141,24 @@ static void Reset(void)
     vacantAttempt = 0;
 }
 
+static int MatchesDigits(Buffer buffer, const char* expected)
+{
+    const int32_t* words = (const int32_t*)(uintptr_t)buffer;
+    int length = (int)strlen(expected);
+    if (words[0] != length || words[1] != 24)
+    {
+        return 0;
+    }
+    for (int index = 0; index < length; index++)
+    {
+        if (words[index + 2] != (unsigned char)expected[index])
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 #define VERIFY(condition, code) do { \
     if (!(condition)) { \
         fprintf(stderr, "Owned-buffer ABI check failed at line %d.\n", __LINE__); \
@@ -156,8 +176,13 @@ static int RunChecks(HMODULE image, int checked)
     TryRebuild tryRebuild = (TryRebuild)GetProcAddress(image, "TryRebuild");
     Check composite = (Check)GetProcAddress(image, "Composite");
     Check recover = (Check)GetProcAddress(image, "Recover");
+    Build workspace = (Build)GetProcAddress(image, "FormattingWorkspace");
+    Format format = (Format)GetProcAddress(image, "FormatDigits");
+    FormatSigned formatSigned = (FormatSigned)GetProcAddress(image, "FormatSignedDigits");
+    Check recoverFormatting = (Check)GetProcAddress(image, "RecoverFormatting");
     VERIFY(acquire && build && relay && consume && rebuild && tryRebuild && composite, 10);
-    VERIFY(!checked || recover, 11);
+    VERIFY(workspace && format && formatSigned, 14);
+    VERIFY(!checked || (recover && recoverFormatting), 11);
     VERIFY(ReplaceImport(image, "HeapAlloc", (void*)TrackedAllocate), 12);
     VERIFY(ReplaceImport(image, "HeapFree", (void*)TrackedRelease), 13);
 
@@ -215,6 +240,29 @@ static int RunChecks(HMODULE image, int checked)
         VERIFY(recover() == 42, 60);
         VERIFY(attempts == 1 && releases == 1 && LiveCount() == 0 && !invalid, 61);
     }
+
+    Reset();
+    buffer = workspace();
+    Buffer original = buffer;
+    VERIFY(attempts == 1 && releases == 0 && LiveCount() == 1
+        && (void*)(uintptr_t)buffer == live[0] && !invalid, 70);
+    buffer = format(UINT64_MAX, buffer);
+    VERIFY(buffer == original && MatchesDigits(buffer, "18446744073709551615"), 71);
+    buffer = formatSigned(INT64_MIN, buffer);
+    VERIFY(buffer == original && MatchesDigits(buffer, "-9223372036854775808"), 77);
+    buffer = format(42, buffer);
+    VERIFY(buffer == original && MatchesDigits(buffer, "42"), 72);
+    buffer = format(0, buffer);
+    VERIFY(buffer == original && MatchesDigits(buffer, "0"), 73);
+    VERIFY(attempts == 1 && releases == 0 && LiveCount() == 1 && !invalid, 74);
+    VERIFY(consume(buffer) == 48, 75);
+    VERIFY(attempts == 1 && releases == 1 && LiveCount() == 0 && !invalid, 76);
+    if (checked)
+    {
+        Reset();
+        VERIFY(recoverFormatting() == 42, 80);
+        VERIFY(attempts == 1 && releases == 1 && LiveCount() == 0 && !invalid, 81);
+    }
     return 0;
 }
 
@@ -271,7 +319,7 @@ int main(int argc, char** argv)
     }
     if (result == 0)
     {
-        puts("owned-buffer-abi opaque=8 publication=checked views=scoped heap=tracked live=0");
+        puts("owned-buffer-abi opaque=8 publication=checked views=scoped reuse=checked heap=tracked live=0");
     }
     return result;
 }

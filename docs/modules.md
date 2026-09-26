@@ -241,6 +241,12 @@ readable with their original intrinsic and mutable-loan wire tags.
 Readers also preserve v15's historical `native-15` label caused solely by
 a seven-parameter declaration; current writers classify actual value types,
 not parameter counts.
+Version 17 retains the view scope's exclusivity, its checked `BoundViewSet`
+effects, and the canonical `OwnedInt32Buffer.Clear` intrinsic. A retained
+writable view or used clear operation selects `native-17`; an unused intrinsic
+declaration does not promote an existing buffer-only program. Version 16
+readonly-view modules retain their original wire layout and profile. Neither
+view type can appear in a field or exported/imported function contract.
 A consumer importing a unique type must also import the exported NoThrow
 cleanup methods of that type and its owning children. Their cleanup identities
 and Copy/unique distinctions participate in layout and signature compatibility;
@@ -310,7 +316,7 @@ contract linker, live patching or hot-unload protocol.
 or consumer EXE with its corresponding semantic `.trm` contract. Producer
 containers remain version 1; new consumer containers use version 2, and version
 1 consumers remain readable. The container records the exact native profile
-(native-10 through native-16), runtime policy,
+(native-10 through native-17), runtime policy,
 single explicit provider identity and the exact PE and semantic bytes. The
 identity is 1–64 ASCII letters, digits or underscores, beginning with a
 letter; its loader basename is `terrum-<identity>.dll`. Artifacts are bounded

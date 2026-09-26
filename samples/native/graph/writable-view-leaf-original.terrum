@@ -1,0 +1,7 @@
+public int32 Leaf() {
+    require OwnedInt32Buffer.TryCreate(2, out var created);
+    mut OwnedInt32Buffer buffer = move created;
+    require buffer.TryAppend(20);
+    require buffer.TryAppend(20);
+    return buffer.Read(0) + buffer.Read(1);
+}

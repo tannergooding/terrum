@@ -114,4 +114,128 @@ public sealed class NativeScopedViewModuleTests
             (BoundRuntimePolicy)policy);
         Assert.True(escaping.HasErrors);
     }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task WritableViewReplacementServicesPersistedNative15And16ConsumersAsync(NativeRuntimePolicy policy)
+    {
+        var original = NativeModuleCompiler.CreateProducer(
+            Compile(Fixture("writable-view-leaf-original.terrum"), policy), ["Leaf"], "NodeB", policy);
+        var readonlyReplacement = NativeModuleCompiler.CreateProducer(
+            Compile(Fixture("scoped-view-leaf-replacement.terrum"), policy), ["Leaf"], "NodeB", policy);
+        var writableReplacement = NativeModuleCompiler.CreateProducer(
+            Compile(Fixture("writable-view-leaf.terrum"), policy), ["Leaf"], "NodeB", policy);
+        Assert.Equal("native-15", NativeModuleCompiler.Inspect(original).NativeProfileVersion);
+        Assert.Equal("native-16", NativeModuleCompiler.Inspect(readonlyReplacement).NativeProfileVersion);
+        Assert.Equal("native-17", NativeModuleCompiler.Inspect(writableReplacement).NativeProfileVersion);
+
+        var single = NativeModuleCompiler.CreateConsumer(
+            Compile("int32 Main() { return Leaf() + 2; }", policy,
+                NativeModuleCompiler.CreateReference(original), library: false), original, policy);
+        var persistedSingle = (byte[])single.Clone();
+        var middle = NativeModuleCompiler.CreateGraphProducer(
+            Compile(Fixture("middle.terrum"), policy, NativeModuleCompiler.CreateGraphReference([original])),
+            ["Middle"], "NodeA", [original], policy);
+        var root = NativeModuleCompiler.CreateGraphConsumer(
+            Compile(Fixture("consumer.terrum"), policy, NativeModuleCompiler.CreateGraphReference([middle]),
+                library: false), [middle], policy);
+        var persistedMiddle = (byte[])middle.Clone();
+        var persistedRoot = (byte[])root.Clone();
+        var originalGraphProfile = policy == NativeRuntimePolicy.FailFast ? "native-10" : "native-11";
+        Assert.Equal(originalGraphProfile, NativeModuleCompiler.InspectGraphArtifact(middle).NativeProfileVersion);
+        Assert.Equal(originalGraphProfile, NativeModuleCompiler.InspectGraphArtifact(root).NativeProfileVersion);
+
+        var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = frameworkDirectory.Parent?.Name
+            ?? throw new InvalidOperationException("Missing test configuration directory.");
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", ".."));
+        var apphost = Path.Combine(repository, "artifacts", "bin", "sources", "terrumc",
+            configuration, frameworkDirectory.Name, "terrumc.exe");
+        foreach (var (provider, expected) in new[] {
+            (original, 42),
+            (readonlyReplacement, 44),
+            (writableReplacement, 46),
+        })
+        {
+            NativeModuleCompiler.Validate(single, provider);
+            Assert.Equal(expected, await NativeModuleCompiler.RunAsync(single, provider, TimeSpan.FromSeconds(10)));
+            NativeModuleCompiler.ValidateGraph(root, [middle, provider]);
+            Assert.Equal(expected, await NativeModuleCompiler.RunGraphAsync(root, [provider, middle],
+                TimeSpan.FromSeconds(10), policy));
+            Assert.Equal(expected, await NativeModuleCompiler.RunGraphJitAsync(root, [middle, provider], apphost,
+                TimeSpan.FromSeconds(30), policy));
+        }
+
+        var writableMiddle = NativeModuleCompiler.CreateGraphProducer(
+            Compile(Fixture("writable-view-middle.terrum"), policy,
+                NativeModuleCompiler.CreateGraphReference([original])),
+            ["Middle"], "NodeA", [original], policy);
+        Assert.Equal("native-17", NativeModuleCompiler.InspectGraphArtifact(writableMiddle).NativeProfileVersion);
+        NativeModuleCompiler.ValidateGraph(root, [original, writableMiddle]);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [writableMiddle, original],
+            TimeSpan.FromSeconds(10), policy));
+        NativeModuleCompiler.ValidateGraph(root, [writableReplacement, writableMiddle]);
+        Assert.Equal(46, await NativeModuleCompiler.RunGraphAsync(root, [writableMiddle, writableReplacement],
+            TimeSpan.FromSeconds(10), policy));
+        Assert.Equal(46, await NativeModuleCompiler.RunGraphJitAsync(root,
+            [writableReplacement, writableMiddle], apphost, TimeSpan.FromSeconds(30), policy));
+        Assert.Equal(persistedSingle, single);
+        Assert.Equal(persistedMiddle, middle);
+        Assert.Equal(persistedRoot, root);
+
+        var incompatible = NativeModuleCompiler.CreateProducer(
+            Compile("public int64 Leaf() { return 44; }", policy), ["Leaf"], "NodeB", policy);
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(single, incompatible));
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [middle, incompatible]));
+
+        var unknown = (byte[])writableReplacement.Clone();
+        var at = unknown.AsSpan().IndexOf("native-17"u8);
+        Assert.True(at >= 0);
+        "native-99"u8.CopyTo(unknown.AsSpan(at, 9));
+        SHA256.HashData(unknown.AsSpan(0, unknown.Length - 32)).CopyTo(unknown, unknown.Length - 32);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(unknown));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.ValidateGraph(root, [middle, unknown]));
+
+        var unknownGraph = (byte[])writableMiddle.Clone();
+        var graphProfile = unknownGraph.AsSpan().IndexOf("native-17"u8);
+        Assert.True(graphProfile >= 0);
+        "native-99"u8.CopyTo(unknownGraph.AsSpan(graphProfile, 9));
+        SHA256.HashData(unknownGraph.AsSpan(0, unknownGraph.Length - 32))
+            .CopyTo(unknownGraph, unknownGraph.Length - 32);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectGraphArtifact(unknownGraph));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.ValidateGraph(root, [original, unknownGraph]));
+
+        var downgraded = (byte[])writableReplacement.Clone();
+        var packageProfile = downgraded.AsSpan().IndexOf("native-17"u8);
+        Assert.True(packageProfile >= 0);
+        var semanticProfile = downgraded.AsSpan(packageProfile + 9).IndexOf("native-17"u8);
+        Assert.True(semanticProfile >= 0);
+        "native-16"u8.CopyTo(downgraded.AsSpan(packageProfile, 9));
+        "native-16"u8.CopyTo(downgraded.AsSpan(packageProfile + 9 + semanticProfile, 9));
+        SHA256.HashData(downgraded.AsSpan(0, downgraded.Length - 32))
+            .CopyTo(downgraded, downgraded.Length - 32);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(downgraded));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.ValidateGraph(root, [middle, downgraded]));
+
+        var escaped = (byte[])writableReplacement.Clone();
+        var signature = escaped.AsSpan().IndexOf("Leaf|2|"u8);
+        Assert.True(signature >= 0);
+        "Leaf|9|"u8.CopyTo(escaped.AsSpan(signature, 7));
+        SHA256.HashData(escaped.AsSpan(0, escaped.Length - 32)).CopyTo(escaped, escaped.Length - 32);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(escaped));
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.ValidateGraph(root, [middle, escaped]));
+    }
+
+    [Theory]
+    [InlineData("public int32 Leak(MutableInt32BufferView view) { return view.Length; }")]
+    [InlineData("public MutableInt32BufferView Leak() { return 0; }")]
+    [InlineData("public struct Leaky { public MutableInt32BufferView Value; } public int32 Leaf() { return 0; }")]
+    public void MutableViewCannotAppearInPublicContracts(string source)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.FailFast);
+        Assert.True(compilation.HasErrors);
+    }
 }
