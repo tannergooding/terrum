@@ -1,7 +1,9 @@
 # Language and library improvement review
 
-**Proposal, not accepted specification.** This C#/.NET, Rust, and systems-
-language synthesis adds no syntax/API promise or compiler authorization.
+**Proposal, not accepted specification.** This cross-language synthesis adds
+no syntax/API promise or compiler authorization. It draws on C#/.NET, Rust,
+Go, Swift, Kotlin, C++ and Java experience without treating any one ecosystem as a
+template.
 [Language](language.md), [lifetimes](lifetimes.md), [type families](type-families.md),
 [conversions](conversions.md), and [libraries](libraries.md) remain authoritative;
 status follows [implementation](implementation.md) and [roadmap](roadmap.md).
@@ -35,12 +37,11 @@ systems ABIs require explicit foreign contracts; none is copied wholesale.
 | **Open proposal** | A genuinely unsettled capability or policy; requires a decision before it can be treated as language behavior. |
 | **Implemented subset** | Verified in the bounded compiler/runtime profile described by the implementation documents. It is not a claim that the general feature is complete. |
 
-The reviewed implementation baseline, commit `57fa61d`, is bounded
-syntax-11/native-19: compact-owner moves,
-conditional `bool`/`out`, cleanup, managed classes, and compilation-local static
-protocols. It does not establish general
-interfaces/witnesses, arrays/views, async, proposed libraries, or specialization;
-examples and `.api.terrum` files remain design material.
+The reviewed implementation baseline is `f4b0425`, syntax-12/native-20:
+optional handles and source-defined cycles, plus private class implementations
+in v19 leaf modules. It does not establish a public managed ABI, general
+interfaces/witnesses, array/view libraries, async, proposed libraries, or
+specialization; examples and `.api.terrum` files remain design material.
 
 ## 1. Make capabilities explicit and composable
 
@@ -113,41 +114,75 @@ their costs and semantics explicit.
 ### 1.3 Keep generic and nongeneric APIs honest
 
 **Refinement proposal.** Keep generic collections primary; do not duplicate
-their API graph in an erased hierarchy. Where heterogeneity is necessary, use
-a narrow dynamic adapter with explicit type identity, ownership, lifetime, and
-dispatch cost.
+their API graph in an erased hierarchy; use a narrow dynamic adapter only where
+heterogeneity needs explicit identity, ownership, lifetime, and dispatch cost.
+Compose constraints from operation-specific capabilities, not a universal
+“number” interface. Operators do not imply scalar/SIMD membership or copy/
+storage permission; C# static-abstract members are useful prior art
+([C# interfaces](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/interface#static-abstract-and-virtual-members)).
 
-Generic constraints should compose granular capabilities: request an operator
-with explicit operand/result types, not one “number” interface that excludes
-vectors, complex types, or different results. Operators alone confer neither
-scalar/SIMD membership nor copy/storage permission. C# static-abstract interface
-members are generic-math prior art, but current Terrum protocols prove only a
-bounded slice ([C# interface members](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/interface#static-abstract-and-virtual-members)).
+Keep the existing conditional member-contract refinement distinct from
+behavioral conformance and family membership. Both need declared, versioned
+proofs, but refinement alone is not a witness; use neither a second
+`ISpecialSpan` nor an unsafe downcast.
 
-Bridge constraints through checked implications/witnesses, using the
-declaration/version discipline of the conditional member-contract refinement
-already recommended in [lifetimes](lifetimes.md), not a second `ISpecialSpan`
-or unsafe downcast. That refinement alone does **not** confer behavioral
-witnesses or family membership. Member refinement and conformance/witness
-registration are distinct contracts, though both need declared proofs and
-published versioning. Expose narrower facts only when declared and proven;
-separate consumers retain the broad contract. Bodies and extension names do
-not prove public representation. Rust's [coherence rules](https://doc.rust-lang.org/reference/items/implementations.html#trait-implementation-coherence)
-illustrate the need for a conflict policy. Across loaded modules, a defining
-producer or authorized registration owns each witness/family; reject competing
-blanket/specific overlaps and publish versioned resolution. A constraint
-establishes admissibility, not inference: `Parse<T>(text)` cannot infer `T`
-from `IParsable<T>` alone ([C# constraints](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/where-generic-type-constraint)).
-Whether a resolved expected-result target may infer `T` for such a call is a
-separate Terrum rule that needs design; otherwise require explicit `T` or a
-typed argument. A known typed argument can infer `T` before constructing a
-contextual literal; `F(1)` still has no fallback type.
+Associated results express targeted relationships without general higher-kinded
+types. Swift `Sequence.Element` hides the concrete sequence; Rust associated
+types and stable GATs can relate a lending result to `next`'s borrow
+([SE-0346](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0346-light-weight-same-type-syntax.md);
+[Rust associated types](https://doc.rust-lang.org/reference/items/traits.html);
+[GAT stabilization](https://blog.rust-lang.org/2022/10/28/gats-stabilization/)).
+Expose associated `E` only if one selected witness determines it; keep `E`
+explicit when one `T` has multiple relations. A borrowed result publishes its
+source dependency.
 
-Separate enum underlying-storage capability from numeric semantics: ordinary
-enums may hold unnamed values, closed unions can promise exhaustive cases, and
-flags are explicit. .NET generic enum APIs use enum constraints and
-underlying-type dispatch, not general numeric conformance
-([CoreLib `Enum`](https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/System/Enum.cs)).
+For erasure, Swift opens one existential's hidden type for an eligible generic
+call; two values do not prove equal hidden `Self`, and dependent results cannot
+escape their proof/backing
+([SE-0309](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0309-unlock-existential-types-for-all-protocols.md);
+[SE-0352](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0352-implicit-open-existentials.md)).
+Rust `dyn` excludes generic-method dispatch and most nonreceiver `Self` uses
+(`Self: Sized` methods may exist but are not dynamically callable)
+([dyn compatibility](https://doc.rust-lang.org/reference/items/traits.html#dyn-compatibility)).
+Any Terrum `dyn ISequence<E>` must declare root, ownership/loan, representation,
+and dispatch; opening one value cannot guess a second's type or let dependent
+results escape.
+
+Resolution is not coherence. Kotlin extensions use the declared receiver and
+lose to members; they add neither member nor witness
+([Kotlin extensions](https://kotlinlang.org/docs/extensions.html)). Rust
+rejects overlapping implementations. C++ constrained-overload subsumption uses
+atomic constraint origins/mappings, not arbitrary logical equivalence
+([Rust coherence](https://doc.rust-lang.org/reference/items/implementations.html#trait-implementation-coherence);
+[C++ ordering](https://eel.is/c++draft/temp.constr.order);
+[atomic constraints](https://eel.is/c++draft/temp.constr.atomic)).
+Terrum should publish producer-owned, versioned witnesses and reject overlaps,
+never resolve by import order. A newly applicable overload may change source
+meaning without changing old declarations, so source compatibility and
+recompilation matter alongside binary versioning.
+
+Inference is also a policy, not a universal rule. C++ relates parameter and
+argument types; Go solves some constraint equations and defaults untyped
+constants ([C++ deduction](https://eel.is/c++draft/temp.deduct.call);
+[Go inference](https://go.dev/ref/spec#Type_inference)). Terrum must define
+which relations participate and in what order. A constraint establishes
+admissibility, not `T` for `Parse<T>(text)` from `IParsable<T>` alone
+([C# constraints](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/where-generic-type-constraint)).
+Expected-result inference remains open; typed arguments may infer `T` before a
+contextual literal is constructed, but `F(1)` has no fallback type.
+
+Keep enum storage distinct from numeric semantics: ordinary enums allow
+unnamed values; flags and closed unions are explicit. .NET's generic enum
+operations use enum constraints and underlying dispatch, not general numeric
+conformance ([CoreLib `Enum`](https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/System/Enum.cs)).
+For public case sets, distinguish closed exhaustiveness from evolvable sums
+with unknown-case handling. Swift non-exhaustive enums address library
+evolution; Kotlin sealed subclasses are package/module scoped
+([Swift SE-0192](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0192-non-exhaustive-enums.md);
+[Kotlin sealed classes](https://kotlinlang.org/docs/sealed-classes.html)).
+Neither closes integer enums or makes native layout a safe case test. Specify
+unknown-case/version policy; matching also needs one-time evaluation, unique
+result typing, and effects/cleanup.
 Retain **sealed-by-default** concrete types; use interfaces/composition or
 narrow explicit extension points, not implicit virtual overrides.
 
@@ -221,7 +256,51 @@ Capabilities apply to the complete qualified form: `[Copy]` on a payload does
 not make `own T` or a borrowed `ref<T>` copyable. Access only attenuates:
 `mut Span<T>` may yield a read view, never a writable upgrade from one.
 
-### 2.3 Discards need one meaning
+### 2.3 Iteration and allocation are lifetime contracts
+
+**Open library-contract proposal.** Do not infer that one `foreach`/`Range`
+surface makes every source interchangeable: collections may yield copied
+values, collection-tied loans, or iterator-state lending items. Specify
+retention/invalidation, finite versus multipass behavior, effect reevaluation,
+mutation, and early-exit cleanup. Go 1.23 added range-over-function partly
+because `sync.Map.Range`, `flag.Visit`, and `filepath.Walk` exposed incompatible
+callbacks. Push and pull each have stopping/cleanup tradeoffs
+([Go range functions](https://go.dev/blog/range-functions)).
+
+C++ `borrowed_range` permits iterators to outlive a temporary range object; it
+does **not** keep the underlying owner alive or make iteration multipass
+([C++ `borrowed_range`](https://eel.is/c++draft/range.range)). Terrum backing
+and shape dependencies likewise do not decide cursor lifetime or repeatability.
+
+```text
+while (mut ref item = cursor.NextLoan()) {
+    inspect(item)             // loan ends before advancing
+    cursor.Advance()
+}
+```
+
+Not proposed syntax: the item borrows cursor scratch and cannot be retained
+across `Advance`, returned, or suspended without a separate contract. An owning
+iterator can instead transfer each item once; a generic algorithm must not
+silently copy a lending item.
+Where the selected sequence witness determines one item relation, an
+associated `Item<'a>` can express that `next(&'a mut self)` lends storage for
+`'a`; while the loan is live, advancing again is unavailable. If one
+implementation intentionally exposes multiple item relations, keep them
+explicit rather than guessing one associated type.
+
+Allocator behavior is observable too. C++ allocator-aware move construction
+with an equal explicit allocator can be constant time; an unequal one can
+require linear relocation. Move/copy/swap propagation are separate policies
+([C++ container allocator requirements](https://eel.is/c++draft/container.alloc.reqmts)).
+Specify allocator/backing ownership, relocation, and destination selection.
+Do not hide reallocation or allocator substitution behind “move,” or invent a
+universal default allocator.
+
+Expose allocator choice where storage policy belongs to the caller; test
+failure cleanup and publication.
+
+### 2.4 Discards need one meaning
 
 **Refinement proposal.** Choose a single rule for discards (`_`) across
 deconstruction, assignment, pattern matching, and lambda parameters. It should
@@ -273,6 +352,19 @@ unintended read/copy/write sequence for affine or large values. A declaration
 that participates in checked `+` does not automatically claim support for
 `+=`, saturating arithmetic, wrapping arithmetic, or constant evaluation.
 
+C++ distinguishes `constexpr` functions that may run
+at runtime from `consteval` immediate functions
+([C++ constexpr](https://eel.is/c++draft/dcl.constexpr)). Rust procedural
+macros are explicitly unhygienic, execute in the compiler process with file
+and resource access, and can hang compilation
+([Rust procedural macros](https://doc.rust-lang.org/reference/procedural-macros.html)).
+That is a deliberate cost/expressiveness contrast, not a default Terrum model.
+Swift library evolution likewise distinguishes resilient binary evolution
+from frozen-layout optimization
+([Swift library evolution](https://www.swift.org/blog/library-evolution/)):
+a consumer-baked value must bind to compiler rules, producer, and value ABI
+versions rather than assuming a replacement body will recompute it.
+
 ### 3.2 First-class handlers for target-directed construction
 
 **Open proposal.** Interpolation, collection expressions, and future typed
@@ -320,41 +412,92 @@ registrations. This is not a ban on semantic algorithm variants: e.g. strict
 and fast reductions may be distinct named APIs with different rounding,
 reordering, and effect contracts, not same-contract specialization.
 
+Keep generic semantics separate from code-generation strategy. Go's generic
+design addressed real costs in duplicated algorithms, reflection, interfaces,
+and generators; its FAQ describes shape-based code sharing and the difficulty
+of generic methods whose implementations could arise from unknown interface
+implementers ([Go generics rationale](https://go.dev/blog/why-generics);
+[Go generics FAQ](https://go.dev/doc/faq)).
+C# shares runtime code for reference-type instantiations but specializes
+value-type instantiations
+([C# generics at run time](https://learn.microsoft.com/en-us/dotnet/csharp/programming-guide/generics/generics-in-the-run-time)).
+Terrum's witness/representation contracts do not dictate monomorphization,
+shape sharing, or universal code sharing. Require viable AOT/JIT implementations
+with equivalent semantics; measure code size and workload before promising a
+strategy or calling any strategy free.
+
 ## 4. Make failures, functions, and async lifetimes explicit
 
 ### 4.1 Distinguish expected outcomes from exceptional failures
 
-**Accepted direction.** Expected alternatives (invalid user input, absence,
-domain status) should normally use a conditional output, optional/response
-value, or named status. Exceptions represent exceptional failure and propagate;
-catch-based recovery remains unsafe and cannot prove invariants survived.
-`require` is a checked requirement, not an assertion that disappears in release.
-
-**Refinement proposal:** document a taxonomy that does not conflate *cause*,
-*recoverability*, and *cleanup*. At minimum distinguish:
-
-1. **Source/compiler diagnostics**: invalid source, stable codes/ranges, and unknown-versus-proven facts.
-2. **Expected domain result**: normal status/optional branch, not an exception or compiler bug.
-3. **Exceptional operational failure**: declared I/O/allocation/runtime failure propagated through cleanup.
-4. **Programmer/invariant defect**: invalid state/precondition, not misclassified
-   as bad external input.
-5. **Host/process failure**: ABI escape, fail-fast, or missing runtime service; not a source-level result.
-
-This taxonomy is a proposal for APIs and diagnostics, not a promise that all
-such failures are catchable or that all causes have stable exception types.
-.NET's `ArgumentException` derives from `SystemException`, another reason not
-to treat exception inheritance as a developer-versus-environment taxonomy
+**Accepted direction.** Expected alternatives use conditional outputs or domain
+statuses; exceptional failures propagate; catch-based recovery is unsafe and
+does not prove invariants survived. `require` is checked in every build.
+**Refinement proposal:** distinguish diagnostics, expected results, operational
+failures, invariant defects, and host/process failures without conflating cause,
+recoverability, or cleanup. `ArgumentException` deriving from .NET
+`SystemException` illustrates why exception inheritance is not that taxonomy
 ([API reference](https://learn.microsoft.com/en-us/dotnet/api/system.systemexception?view=net-10.0)).
-No-throw, no-return, cleanup, and expected-result contracts remain independent.
-An invariant defect may surface as a checked `require` failure; classification
-does not make it irrecoverable. The accepted unsafe-catch rule applies to
-environmental exceptions too: external cause does not prove object/resource
-integrity. Recovery needs separate unsafe authorization and proof. Cancellation
-is a separate control/lifetime signal, not automatically an expected-result
-branch or a synonym for either an environmental error or developer defect; it
-does not prove that a callee, device, or foreign operation has stopped using
-borrowed storage. Validate external input at a checked boundary; reject static
-invariant violations rather than relying on catch-and-continue.
+
+No classification makes recovery safe: even environmental exceptions need
+separate unsafe authorization and proof of object integrity. A `require` failure
+may be checked/recoverable; cancellation is a control/lifetime signal, not proof
+that a foreign operation stopped using a borrow. No-throw, no-return, cleanup,
+and expected-result contracts remain independent.
+
+Propagation syntax has real demand but no consensus design. Go's 2025 review
+reported boilerplate and hundreds of proposals; `check`/`handle`, `try`, and
+`?` did not reach agreement, and syntax work paused -- not an adoption of `?`
+([Go retrospective](https://go.dev/blog/error-syntax)).
+
+**Open typed-failure proposal:** retain domain failure types where useful, with
+erased/exceptional propagation as a boundary option. Swift 6 implemented typed
+throws for cases such as `Result`/`Task`, but full inference did not ship in
+6.0; Kotlin remains unchecked-by-default. Together they show the information
+benefit versus propagation/versioning cost, not a universal answer
+([Swift SE-0413](https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0413-typed-throws.md);
+[Kotlin exceptions](https://kotlinlang.org/docs/exceptions.html)).
+Terrum must choose closed, evolvable/versioned, or erased public failure sets;
+typed propagation does not make `catch` safe. Consumers bind to
+published/versioned contracts, independent of private inference.
+
+Use one failure/cleanup vocabulary for error returns, conditional results,
+exceptions, callbacks, and builder refusal: specify initialized outputs,
+current owner, and cleanup before propagation. Safe source contracts need
+compiler evidence; foreign promises remain a separate trust boundary.
+
+Illustrative cleanup expansion, not a proposed `?` operator or an accepted
+`Result` API:
+
+```text
+own File file = open(path)
+try {
+    match parseConfig(ref file) {
+        success(config) -> publish(config)
+        failure(parseError) -> return domainFailure(parseError)
+    }
+} finally {
+    releaseNoThrow(move file)
+}
+```
+
+The parser borrows the file without retaining it; the expansion retires its
+owner exactly once through a `NoThrow` release. I/O failure propagates, while
+invalid configuration is a result. Fallible `Finish`/`Commit` runs before
+retirement and needs an explicit primary/secondary failure policy. For contrast,
+Java try-with-resources permits throwing close operations and uses reverse close order and suppressed
+exceptions to preserve the body failure
+([Java resource handling](https://docs.oracle.com/javase/tutorial/essential/exceptions/tryResourceClose.html)).
+Terrum need not copy Java, but a naive `finally` must not mask the primary error.
+
+JEP 421 is deprecation-for-removal, not completed removal of finalization; it
+cites unbounded latency, resurrection, unspecified thread/order,
+partial-construction hazards, and leaks
+([JEP 421](https://openjdk.org/jeps/421)). Terrum's deterministic unique
+cleanup, precise tracing, and complete publication already address much.
+Preserve those contracts: deterministic release stays `NoThrow`; fallible
+`Finish`/`Commit` is separate and defines primary/secondary failure reporting.
+Do not add fallible destructors or broaden recovery implicitly.
 
 ### 4.2 Prefer single-target callables; make event aggregation explicit
 
@@ -368,95 +511,166 @@ aggregation, reentrancy, mutation-during-dispatch, and unsubscribe/disposal
 rules. A closure's captures must preserve ownership and borrowing rules; copying
 a function value must not silently duplicate a unique capture.
 
-C# multicast delegates provide one defined policy: ordered invocation, stop
-when a handler throws, and return the last handler's result. That behavior is
-appropriate only when explicitly chosen for an event-like abstraction
-([Using Delegates](https://learn.microsoft.com/en-us/dotnet/csharp/programming-guide/delegates/using-delegates)).
+Go 1.22 shipped fresh loop bindings per iteration after production capture bugs;
+the version gate exposed analyzer false positives/negatives
+([preview](https://go.dev/blog/loopvar-preview); [release](https://go.dev/doc/go1.22)).
+Fresh binding is not deep copy: choose loan/copy/move and preserve it by module version.
 
-Until pack ABI exists, keep function arity explicit; reserve multicast for a
-declared event adapter, not ordinary calls.
+Kotlin KEEP-0139 links callback cardinality/returns-implies contracts to
+smart-cast and definite-initialization issues. Its prototype trusted
+declarations and left formal verification out of scope; the authoring DSL's
+experimental status differs from stdlib metadata consumption
+([KEEP-0139](https://github.com/Kotlin/KEEP/blob/main/proposals/KEEP-0139-kotlin-contracts.md)).
+For Terrum, prove `does not escape`, `does not suspend`, and `exactly once on
+normal return` separately from thread affinity, reentrancy, and purity. A
+`withResource`/`Visit` can lend storage or initialize an output without a
+built-in-only case. Exceptional paths still need cleanup; foreign promises
+remain a trust/unsafe boundary.
+
+```text
+withReadLease(owner, callback) // read loan; noescape, no-suspend, once on normal return
+callback failure -> release lease, then propagate
+```
+
+Not syntax: cardinality, noescape, no-suspend, and `[Pure]` are distinct.
+
+.NET multicast runs in order, stops on throw, returns the last result; select
+it only for an explicit event adapter ([delegates](https://learn.microsoft.com/en-us/dotnet/csharp/programming-guide/delegates/using-delegates)).
+Until pack ABI exists, keep arity explicit and multicast out of ordinary calls.
 
 ### 4.3 Never let async work disappear
 
-**Accepted direction plus refinement.** Async APIs return a task-like completion
-value, including no-result `Task<void>`; `async void` has no safe default place
-in ordinary library code because callers cannot await completion, observe
-failure, or structure cleanup. For intentional detached work, use a deliberate
-supervision/detach adapter with an explicit error sink, cancellation policy,
-lifetime/affinity, and shutdown/join story -- not an unobserved `void` task.
+**Accepted direction plus refinement.** Return task-like completion, including
+no-result `Task<void>`; ordinary APIs should not use `async void`. Detached work
+needs explicit supervision, error sink, cancellation/lifetime, and shutdown/
+join policy -- not an unobserved `void` task.
 
-In .NET, `async void` posts exceptions to the captured context/thread pool
-rather than faulting a `Task`; callback compatibility needs an explicit adapter
+In .NET, `async void` posts exceptions to a captured context/thread pool instead
+of faulting `Task`; use an explicit callback adapter
 ([`AsyncVoidMethodBuilder`](https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/System/Runtime/CompilerServices/AsyncVoidMethodBuilder.cs);
 [`AsyncTaskMethodBuilder`](https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/System/Runtime/CompilerServices/AsyncTaskMethodBuilder.cs)).
 
-Tasks do not extend borrows: declare captures through actual completion, since
-cancellation is not proof that external work has stopped using a buffer. Specify
-copy/borrow/ownership and cleanup; keep `Task<void>` distinct from a result-
-erasing `Task<T>`. Scheduler, affinity, start, and cancellation policies remain
-open in the language design.
+Tasks do not extend borrows; cancellation is not proof that external work
+stopped. Specify capture cleanup and keep `Task<void>` distinct from
+`Task<T>` result erasure. Scheduler, affinity, start, cancellation remain open.
+
+Prefer **structured lifetime**, not an actor mandate. Swift structured
+concurrency and Kotlin scopes await children; cancellation is
+cooperative and Kotlin says not to swallow `CancellationException`
+([Swift SE-0304](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0304-structured-concurrency.md);
+[Kotlin cancellation](https://kotlinlang.org/docs/coroutines-cancellation.html)).
+Swift `Sendable` separately checks transfer/sharing and closure captures;
+`[Copy]` alone is not sendability
+([SE-0302](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0302-concurrent-value-and-concurrent-closures.md)).
+Keep joining, cancellation, transfer safety, and failure reporting distinct;
+detached work also needs a sink and shutdown policy.
+
+Actors prevent unsynchronized access, not invariant changes across suspension.
+Swift accepts reentrancy for progress instead of holding an actor busy
+([Swift SE-0306](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0306-actors.md)).
+Another operation may change state while the first awaits:
+
+```text
+// Conceptual revalidation, not Terrum syntax.
+request = ownedSnapshot(state.data)
+observedVersion = state.version
+release any state borrow or guard
+response = await fetchRemote(request)
+if state.version != observedVersion:
+    reject or recompute only if the remote operation is safe to repeat
+revalidate current invariant before commit
+commit(response)
+```
+
+Revalidate before commit; version checks cannot undo remote effects, so retry
+requires idempotency or compensation. Synchronous callbacks can also reenter.
+Keep distinct data races, deadlock, and logical reentrancy; solving one does
+not prove the others absent. Cancellation cannot revoke a foreign borrow before
+the operation actually stops.
+
+Go `context` propagates cancellation and requires cancel functions to release
+resources; `AfterFunc.stop` does not wait for a running callback. Propagation
+is not structured joining
+([Go `context`](https://pkg.go.dev/context);
+[`AfterFunc`](https://pkg.go.dev/context#AfterFunc)).
+
+C++ execution's working draft makes connect/start, operation-state lifetime,
+scheduler/allocator queries, and value/error/stopped completion explicit.
+P2300 cites `std::async`/`future` composition limits; draft status implies
+neither broad vendor availability nor race freedom/zero cost. It is a tradeoff
+reference, not a Terrum API
+([P2300R10](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html);
+[C++ execution](https://eel.is/c++draft/exec)). A smaller task/scope model
+trades generality for simplicity.
 
 ## Coverage and priority
 
 | Concern raised | Shared response in this review | Status |
 |---|---|---|
-| Array variance | Propose invariant mutable storage; possible read-only covariance only through a checked projection | Proposed refinement from accepted access rules; open |
-| Universal object equality/hash/format defaults | Propose explicit equality/hash/format capabilities; keep compiler diagnostic metadata separate | Proposed refinement from opt-in capability and cost constraints |
-| Generic/nongeneric inconsistency | Generic primary APIs; explicit narrow dynamic adapter, not a duplicate erased hierarchy | Proposal |
-| Multicast delegates | Single-target callables; explicit event/subscription aggregate | Open |
-| `async void` | Return completion; detached work needs a supervisor/error contract | Accepted direction / refinement |
-| Developer errors vs external failures | Separate diagnostics, expected outcomes, operational exceptions, invariant defects, host failures | Proposal |
-| Cancellation | Separate control/lifetime signal; not evidence of completion or invariant safety | Refinement |
-| Unspecified layout / transparent wrappers | Propose opaque defaults and validated transparent wrappers, preserving explicit ABI contracts | Refinement / open representation proposal |
-| Arrays/enums lacking generic capabilities | Request checked nominal capabilities; don't infer behavior from representation or special-case types | Refinement |
-| Sealed-by-default | Preserve; interfaces/composition, explicitly justified extension points | Accepted direction |
-| Variadic `Func`/`Tuple` | Type-pack design distinct from homogeneous generics, with ABI/code-size limits | Open |
-| Multidimensional arrays, SoA/AoS | Shape and layout separated; checked strided views and honest projections | Proposal; detailed sketch exists |
-| Discards | One evaluation/binding/cleanup rule across syntax contexts | Refinement |
-| User participation in consteval/literals/operators/compound ops | Shared checked capability declarations; separate runtime and constant evaluators | Open |
-| First-class handlers/builders | Registered expansions; interpolation holes captured once, left-to-right, before draining; cleanup/publication rules | Open |
-| First-class specialization | Declared optimization with contract-preserving generic fallback | Open |
-| Generic constraint bridging | Composable checked witnesses and declaration-published refinements | Refinement |
+| Mutable-array variance and root arrays | Invariant writes; any read projection needs checked representation, access, and lifetime rules | Proposed refinement / open |
+| Universal object defaults | Opt-in equality/hash/format; diagnostic identity stays distinct from user operations | Proposed refinement |
+| Generic APIs, witnesses, associated results, erasure, inference, overloads | Explicit dynamic boundary; selected witnesses and versioned resolution; defined inference order | Proposal / refinement |
+| Generic array/enum capabilities | Request checked nominal properties; separate enum storage, numeric behavior, flags, and exhaustiveness | Refinement |
+| Layout and wrappers | Opaque by default; transparent/native layouts preserve ABI, validity, and ownership | Accepted direction / open proposal |
+| Sealed concrete types | Preserve; favor interfaces/composition and explicit extension points | Accepted direction |
+| `Func`/`Tuple` packs | Heterogeneous packs need per-element ownership/effects and ABI; no implicit tuple lowering | Open |
+| Tensor, multidimensional, SoA/AoS | Separate shape, strides, storage, and truthful projections | Proposal |
+| Discards | One evaluation, vacancy, and cleanup rule across contexts | Refinement |
+| Literals, consteval, operators, compound assignment | Bounded, hygienic, versioned constant evaluation distinct from runtime witnesses | Open |
+| Handlers and builders | Registered expansions; eager left-to-right holes, cleanup, and publish-on-success | Open |
+| Specialization | Same-contract optimization with fallback; semantic variants remain named APIs | Open |
+| Errors and propagation | Separate expected/domain results, exceptions, invariant defects, host failures, and cleanup | Accepted constraints / open refinement |
+| Callables, async, cancellation, structured concurrency | Completion, ownership, supervision, transfer, and revalidation remain explicit | Refinement / open |
+| Iteration, allocation, loop capture, callbacks | Lending/invalidation and allocator costs; capture/callback facts need contracts | Open library contracts |
+| Generic implementation strategy | AOT/JIT parity; sharing versus specialization is a backend choice | Open |
 
-Suggested sequencing: first verify witnesses, views, async lifetimes, and
-producer metadata across AOT/JIT/module replacement; next enable bounded,
-versioned opt-in literal/handler evaluation. Defer packs and explicit
-specialization until workload/ABI/code-size evidence. This is not a demand to
-add every proposal to the current roadmap.
+Validate contracts across AOT/JIT/module replacement before syntax; consider
+bounded, versioned literals/handlers where useful. Defer packs/specialization
+until workload evidence; no roadmap expansion is implied.
 
 These choices trade implicit convenience for stronger contracts. Keep the cost
 manageable with checked derivation of ordinary equality/formatting witnesses,
-contextual inference where unambiguous, and useful library defaults -- not
-universal inherited behavior. Static witnesses favor optimization but can grow
-code; explicit dynamic adapters favor code sharing but add dispatch and storage
-contracts. Handler registration is narrower than arbitrary macros, while packs
-and overlapping specialization add inference and coherence complexity that
-ordinary typed builders do not need.
+contextual inference only where the language specifies an unambiguous source of
+target type, and useful library defaults -- not universal inherited behavior.
+Static witnesses favor optimization but can grow code; explicit dynamic
+adapters favor code sharing but add dispatch and storage contracts. Handler
+registration is narrower than arbitrary macros, while packs and overlapping
+specialization add inference and coherence complexity that ordinary typed
+builders do not need.
+
+The deeper priority is safe composition before a full higher-kinded type
+system, arbitrary macro facility, or general effect language. A single failing
+resource/API path that demonstrates typed domain propagation, cleanup,
+callback lifetime, and useful diagnostics is more informative than a larger
+syntax inventory. Any compiler extension also needs source-mapped diagnostics
+and explicit compile-time resource budgets; this review makes no unmeasured
+zero-cost or performance claim.
 
 ## Illustrative contract sketches (not syntax)
 
 These contract expansions are **pseudocode, not grammar or promised APIs**:
 
-**Constraint bridging.** A caller needs evidence for the particular operation,
-not a cast from a weak interface to a stronger one.
+**Constraint bridging.**
 
 ```text
 Forward<T, E>(source: read loan T)
-    requires witness T : IContiguousSequence<E>
+    requires T : IContiguousSequence<E>
     returns source.AsSpan()
+    receiver dependency by default; narrower backing-only dependency
+    only with a published conditional proof
 
-Default published result dependency: source receiver.
-Declared conditional rule: if T's AsSpan witness has backing-only dependency,
-Forward's result depends on that backing instead.
-Caller proves the condition -> use the published refinement.
-Caller cannot prove it -> retain the broad receiver dependency.
+typed argument -> infer T; constraint alone does not
+authorized producer/version -> resolve witness, then applicable overload
+resolved target -> construct contextual literal; underconstrained F(1) diagnoses
+open x as hidden S for one generic call
+open y as hidden T; no proof that S = T or that a dependent result may escape
 ```
 
-Family membership and behavioral witnesses remain separate evidence. Neither
-is created merely by this member-lifetime refinement.
+Associated outputs depend on the selected witness; family/interface proof is
+separate from member-lifetime refinement. Opening a type for one call never
+re-roots or erases its original ownership/backing dependency.
 
-**Target-directed construction.** The target chooses a registered builder;
-the builder does not choose the meaning or evaluation order of source code.
+**Target-directed construction.**
 
 ```text
 value: int32 = 42
@@ -469,13 +683,11 @@ validate/freeze -> publish result
 failure -> clean private state and all still-owned captures exactly once
 ```
 
-Never-accepted captures still need cleanup; loans stay valid through draining.
-A user-defined numeric literal similarly receives its resolved target or tag,
-not an already rounded `float64`. Registering a literal constructor does not
-make every operation on the type eligible for compile-time evaluation.
+Clean every unconsumed owner; loans stay valid through drain. Literals use
+their resolved target/tag, not a rounded intermediate; registration alone
+does not make operations const-evaluable.
 
-**Shape versus storage.** An indexing contract can describe either layout
-without promising the wrong contiguous view.
+**Shape versus storage.**
 
 ```text
 shape = (m, n); elementStrides = (1, m)
@@ -484,14 +696,12 @@ SoA field projection: points.x[i] = xBuffer[i]
 AoS record projection: points[i] = recordBuffer[i]
 ```
 
-Construction validates dimensions, signed-stride representability, the checked
-element count, and reachable minimum/maximum backing offsets. Empty shapes skip
-`length - 1` address arithmetic and dereference, not dimension validation or
-backing/metadata dependencies. Indexing checks each coordinate and arithmetic.
-A contiguous `xBuffer` may lend an `x` span; it cannot lend `Span<Point>`.
+Validate dimensions, signed strides, element count, and reachable backing
+extrema before exposing a nonempty view. Empty shapes skip `length - 1`
+arithmetic/dereference but retain backing/metadata dependencies. Check indexes;
+SoA `xBuffer` may lend an `x` span, not `Span<Point>`.
 
-**Heterogeneous forwarding.** Pack expansion preserves each argument's mode;
-it is not conversion to an untyped argument array.
+**Heterogeneous forwarding.**
 
 ```text
 signature pack = [(read loan A), (consume B), (value C)]
@@ -501,13 +711,10 @@ expand in source order, evaluating each argument once
 invoke the checked signature without boxing or a universal tuple layout
 ```
 
-On partial failure each side cleans only owners it still owns. Forwarding a
-consuming argument is itself a transfer, not another copy; loans cannot outlive
-the permitted call/suspension. Per-element effects, inference, and ABI remain
-part of the proposed pack contract.
+On failure clean only owners still held; consume is transfer, not copy. Loans
+cannot outlive the call/suspension; effects, inference, and ABI are per-element.
 
-**Supervised start.** Establish ownership before an operation can run, without
-assuming that an ordinary async call is cold.
+**Supervised start.** Establish ownership before work runs.
 
 ```text
 factory = operation factory with explicit transferred/borrowed captures
@@ -516,22 +723,19 @@ await completion
 scope exit: join any outstanding operation before releasing its captures
 ```
 
-`Start` is hypothetical: the scope accepts responsibility before invoking the
-factory, and rejection cleans transferred captures. Exceptional scope exit
-also needs the join/cleanup contract. Cancellation requests do not discharge
-that obligation. Longer-lived detached work must instead transfer eligible
-captures to a supervisor with explicit error and shutdown handling.
+`Start` is hypothetical: scope accepts before invoking; rejection cleans
+transferred captures. Exceptional exit still joins/cleans; cancellation does
+not discharge that obligation. Detached work needs a supervisor/error sink.
 
-Spelling, proof transport, handler registration, and scope/start policy remain
-open. Executable claims require producer/witness, lifetime, and AOT/JIT/module
-checks.
+Spelling and start policy remain open; executable claims require
+producer/witness, lifetime, and AOT/JIT/module checks.
 
 ## Evidence and limits
 
-See [language](language.md), [lifetimes](lifetimes.md),
-[type families](type-families.md), [conversions](conversions.md),
-[libraries](libraries.md), [implementation](implementation.md),
-[roadmap](roadmap.md), [`library`](../library), and [references](references.md).
-External features are comparisons; performance claims require measurement.
-Array/function syntax, async supervision, const-eval, handlers, type-pack ABI,
-specialization, and production APIs remain open.
+Specifications establish behavior; proposal motivations and issue references
+establish concrete design problems, not popularity. The Go retrospectives and
+Swift typed-throws proposal provide explicit recurring-request evidence.
+Historical proposal limitations are not claims about every current compiler.
+These comparisons inform Terrum recommendations, not automatic adoption or
+measured performance claims. [Source notes](references.md) cover the existing
+CoreLib and ABI research.

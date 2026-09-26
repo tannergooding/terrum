@@ -103,17 +103,24 @@ true; on false or exceptional exit its completed private output is dropped
 without manufacturing a readable caller value. Existing owners passed as
 output destinations are dropped only when the call begins, not when earlier
 arguments are still being evaluated. A successful `out var` gains its own
-lexical cleanup scope. Receiver loans remain synchronous and readonly and
-cannot be stored, consumed or passed as values. Cleanup is an explicit
+lexical cleanup scope. User-defined unique receiver loans remain synchronous
+and readonly and cannot be stored, consumed or passed as values. Cleanup is an explicit
 `[NoThrow] [Cleanup] public void Close()`-shaped contract on a unique
-instance method; the name itself has no special meaning. Only primitive fields
-fit this first profile, and cleanup cannot invoke a potentially throwing
+instance method; the name itself has no special meaning. Compact owners can
+contain primitive, nested Copy and owning fields; partial construction cleans
+acquired fields in reverse acquisition order, and complete-value cleanup recurses
+through owning fields. Cleanup cannot invoke a potentially throwing
 operation. A statically constant index proven within an immutable host
 buffer grant may be used in NoThrow cleanup; general indexing cannot.
-This is not a general owning-expression/field analysis, native allocation, OS-resource
+`OwnedInt32Buffer` adds checked native allocation and lexical readonly/exclusive
+writable slices. Active slices block conflicting operations on their original
+owner, but cannot be passed, returned or stored. Managed classes separately use
+exact lexical/temporary roots and explicit descriptor-based tracing, not unique
+cleanup or a general stored-view representation.
+This is not a general owning-expression/field analysis, OS-resource
 adapter, stored interior, generic witness, return-anchor ABI or runtime
-guard implementation. Later stages must check place disjointness and
-last use, owning fields and temporaries, bounded result escapes,
+guard implementation. Later stages must extend place disjointness and
+last-use analysis, partial owning-field moves, temporaries and result escapes,
 interface variance/refinement and dynamic dependency binding before
 executing examples that depend on them. Unsupported escapes must
 diagnose, never silently box, clone, register, retain or copy.

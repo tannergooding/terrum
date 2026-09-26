@@ -67,15 +67,17 @@ explicit checked-exceptions proof policy uses private Windows SEH records for
 four compiler-generated failures and permits recovery only in `unsafe`
 `try`/`catch` scopes. Structured `try`/`finally` handles normal and checked
 exceptional exits in that policy; explicit fail-fast termination still skips
-pending cleanup. General exception identity, low-memory semantics, native allocation and
+pending cleanup. General exception identity, low-memory semantics and
 other effect bounds remain later implementation work. A compact
 `unique struct` proof checks named moves, by-value parameter transfer, and
 conditional owning `bool`/`out` publication with lexical NoThrow cleanup.
 Fresh constructor/factory results can transfer directly; a moved owner is
 vacant. Receiver loans remain synchronous and readonly. Compact owning fields
 have partial-construction cleanup in reverse actual acquisition order and
-complete-value recursive cleanup; partial moves,
-stored loans and resource adapters are not implemented.
+complete-value recursive cleanup. The compiler-owned `OwnedInt32Buffer` adds
+checked native allocation, initialized-prefix operations and lexical readonly or
+exclusive writable slices; partial moves, general stored loans and broader
+resource adapters are not implemented.
 See the [native proof limits](native.md).
 
 ### Storage, concurrency, entry and boundaries
@@ -102,7 +104,7 @@ The design examples use `own`, `move`, bracketed checked predicates, `[ViewOf]`,
 ## Current implementation limit
 
 The current compiler binds and verifies a bounded integer/boolean/code-unit and compact-value profile, emits native Windows x64 executables, and executes the same lowering through a JIT worker. Independently produced semantic modules support checked process-start replacement; the compiled Terrum scanner can supply the real front end's lexical input. These are not a general LMOD deployment model or a compiler bootstrap. Neither the fail-fast runtime nor bounded checked-exceptions proof is the
-language's future general exception runtime. Ownership/lifetime analysis, managed graphs and source-compatible standard libraries remain future stages. Syntax-only commands do not validate semantic obligations; native builds diagnose unsupported constructs rather than silently weakening them. See [implementation](implementation.md) and [native](native.md) for actual support, [roadmap](roadmap.md) for staging and [samples](samples.md) for runnable examples versus broader design sketches.
+language's future general exception runtime. Bounded ownership and lexical-view checks, source-defined managed classes, optional edges and explicit cycle tracing are implemented; general ownership/lifetime analysis, public managed module contracts and source-compatible standard libraries remain future stages. Syntax-only commands do not validate semantic obligations; native builds diagnose unsupported constructs rather than silently weakening them. See [implementation](implementation.md) and [native](native.md) for actual support, [roadmap](roadmap.md) for staging and [samples](samples.md) for runnable examples versus broader design sketches.
 
 ## Sources and prior art
 
