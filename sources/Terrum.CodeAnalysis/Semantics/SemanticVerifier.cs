@@ -250,10 +250,16 @@ public static class SemanticVerifier
             {
                 throw Invalid();
             }
-            for (var variableIndex = 0; variableIndex < function.ParameterCount; variableIndex++)
+            for (var variableIndex = function.IsConstructor ? 1 : 0;
+                variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0); variableIndex++)
             {
                 if (IsUnique(program, function.Variables[variableIndex].Type)
-                    && (variableIndex != 0 || function.DeclaringStruct is null || function.IsStatic))
+                    && variableIndex == 0 && function.DeclaringStruct is not null && !function.IsStatic)
+                {
+                    continue;
+                }
+                if (IsUnique(program, function.Variables[variableIndex].Type)
+                    && function.IsCleanup)
                 {
                     throw Invalid();
                 }
@@ -351,8 +357,27 @@ public static class SemanticVerifier
     private static void VerifyOwnerScopes(BoundBlock body, BoundFunction function, BoundProgram program)
     {
         var owners = new HashSet<BoundLocal>(ReferenceEqualityComparer.Instance);
+        var outputOwners = new HashSet<BoundOwnerDeclaration>(ReferenceEqualityComparer.Instance);
         var allowed = new HashSet<BoundDrop>(ReferenceEqualityComparer.Instance);
         var drops = new List<BoundDrop>();
+        var parameterBody = body;
+        for (var slot = function.IsConstructor ? 1 : 0;
+            slot < function.ParameterCount + (function.IsConstructor ? 1 : 0); slot++)
+        {
+            if (!IsUnique(program, function.Variables[slot].Type)
+                || (slot == 0 && function.DeclaringStruct is not null && !function.IsStatic))
+            {
+                continue;
+            }
+            if (parameterBody.Statements is not [BoundTryFinally parameterRegion]
+                || parameterRegion.Finally is not BoundBlock { Statements: [BoundDrop drop] }
+                || drop.Variable != slot || drop.IsOutput != function.Variables[slot].IsOut
+                || !allowed.Add(drop))
+            {
+                throw Invalid(function.Span);
+            }
+            parameterBody = parameterRegion.Body;
+        }
         var pending = new Stack<(BoundStatement Statement, int Depth)>();
         pending.Push((body, 0));
         var visits = MaximumAnalysisVisits;
@@ -382,10 +407,28 @@ public static class SemanticVerifier
                                             || (function.IsConstructor && terminal.Value is BoundRead { Variable: 0 }))))
                                 || region.Finally is not BoundBlock finallyBlock
                                 || finallyBlock.Statements is not [BoundDrop drop]
-                                || drop.Variable != local.Variable || !allowed.Add(drop)
+                                || drop.Variable != local.Variable || drop.IsOutput || !allowed.Add(drop)
                                 || !owners.Add(local))
                             {
                                 throw Invalid(local.Span);
+                            }
+                        }
+                        if (child is BoundOwnerDeclaration output
+                            && output.Variable >= 0 && output.Variable < function.Variables.Length
+                            && IsUnique(program, function.Variables[output.Variable].Type))
+                        {
+                            if (index + 1 >= block.Statements.Length
+                                || block.Statements[index + 1] is not BoundTryFinally outputRegion
+                                || (index + 2 != block.Statements.Length
+                                    && !(index + 3 == block.Statements.Length
+                                        && block.Statements[^1] is BoundReturn terminal
+                                        && ((function.ReturnType == PrimitiveType.Void && terminal.Value is null)
+                                            || (function.IsConstructor && terminal.Value is BoundRead { Variable: 0 }))))
+                                || outputRegion.Finally.Statements is not [BoundDrop outputDrop]
+                                || outputDrop.Variable != output.Variable || outputDrop.IsOutput
+                                || !allowed.Add(outputDrop) || !outputOwners.Add(output))
+                            {
+                                throw Invalid(output.Span);
                             }
                         }
                         pending.Push((child, item.Depth + 1));
@@ -396,6 +439,12 @@ public static class SemanticVerifier
                         || (IsUnique(program, local.Initializer.Type) && !owners.Remove(local)))
                     {
                         throw Invalid(local.Span);
+                    }
+                    break;
+                case BoundOwnerDeclaration output:
+                    if (!outputOwners.Remove(output))
+                    {
+                        throw Invalid(output.Span);
                     }
                     break;
                 case BoundDrop drop:
@@ -435,7 +484,7 @@ public static class SemanticVerifier
                 throw Invalid(drop.Span);
             }
         }
-        if (allowed.Count != 0 || owners.Count != 0)
+        if (allowed.Count != 0 || owners.Count != 0 || outputOwners.Count != 0)
         {
             throw Invalid();
         }
@@ -511,10 +560,22 @@ public static class SemanticVerifier
                     fieldMasks[local.Variable] = FullMask(program, local.Initializer.Type);
                 }
                 return false;
+            case BoundOwnerDeclaration output:
+                if (output.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                    || output.Variable >= initialized.Length
+                    || !IsUnique(program, function.Variables[output.Variable].Type)
+                    || initialized[output.Variable] || declarations.Contains(output.Variable))
+                {
+                    throw Invalid(output.Span);
+                }
+                return false;
             case BoundDrop drop:
-                if (!inCleanup || drop.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
-                    || drop.Variable >= initialized.Length || !declarations.Contains(drop.Variable)
-                    || !IsUnique(program, function.Variables[drop.Variable].Type))
+                if (!inCleanup || drop.Variable < 0 || drop.Variable >= initialized.Length
+                    || (drop.Variable >= function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                        && !declarations.Contains(drop.Variable))
+                    || !IsUnique(program, function.Variables[drop.Variable].Type)
+                    || (drop.IsOutput && (!function.Variables[drop.Variable].IsOut
+                        || function.ReturnType != PrimitiveType.Bool)))
                 {
                     throw Invalid(drop.Span);
                 }
@@ -564,6 +625,10 @@ public static class SemanticVerifier
                         && (!function.IsConstructor || fieldAssignment.Variable != 0)))
                 {
                     throw Invalid();
+                }
+                if (program.Structures[structType].IsUnique && function.Variables[fieldAssignment.Variable].IsOut)
+                {
+                    throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
                 var targetField = program.Structures[structType].Fields[fieldAssignment.Field];
                 if (!targetField.IsMutable && !(function.IsConstructor && fieldAssignment.Variable == 0))
@@ -802,7 +867,8 @@ public static class SemanticVerifier
                         for (var index = cleanups.Count - 1; index >= 0; index--)
                         {
                             VerifyCleanup(cleanups[index].Body, returnState, returnMasks, returnDeclarations,
-                                function, program, ref remaining, depth + 1, reachable, inUnsafe, cleanups[index].Visible);
+                                function, program, ref remaining, depth + 1, reachable, inUnsafe,
+                                cleanups[index].Visible, successfulReturn: predicate);
                         }
                         if (predicate)
                         {
@@ -960,7 +1026,7 @@ public static class SemanticVerifier
 
     private static void VerifyCleanup(BoundBlock cleanup, bool[] initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function, BoundProgram program, ref int remaining, int depth, bool reachable,
-        bool inUnsafe, HashSet<int>? visible = null)
+        bool inUnsafe, HashSet<int>? visible = null, bool? successfulReturn = null)
     {
         if (visible is not null)
         {
@@ -974,7 +1040,11 @@ public static class SemanticVerifier
                 }
             }
         }
-        if (Statement(cleanup, initialized, fieldMasks, declarations, function with { IsNoThrow = true },
+        var outputTransfer = successfulReturn == true
+            && cleanup.Statements is [BoundDrop { IsOutput: true }];
+        var checkState = outputTransfer ? (bool[])initialized.Clone() : initialized;
+        var checkMasks = outputTransfer ? (uint[])fieldMasks.Clone() : fieldMasks;
+        if (Statement(cleanup, checkState, checkMasks, declarations, function with { IsNoThrow = true },
             program, ref remaining, depth, reachable, inCleanup: true, inUnsafe: inUnsafe)
             || HasUnsupportedCleanupFlow(cleanup, program, ref remaining, depth))
         {
@@ -1134,10 +1204,11 @@ public static class SemanticVerifier
                 }
                 break;
             case BoundMove move:
-                if (!IsUnique(program, move.Type) || move.Variable < function.ParameterCount
-                    + (function.IsConstructor ? 1 : 0) || move.Variable >= initialized.Length
+                if (!IsUnique(program, move.Type) || move.Variable < 0 || move.Variable >= initialized.Length
+                    || (move.Variable == 0 && function.DeclaringStruct is not null && !function.IsStatic)
                     || !initialized[move.Variable] || move.Type != function.Variables[move.Variable].Type
-                    || !declarations.Contains(move.Variable))
+                    || (move.Variable >= function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                        && !declarations.Contains(move.Variable)))
                 {
                     throw InvalidEffect(move.Span, "Ownership");
                 }
@@ -1288,11 +1359,14 @@ public static class SemanticVerifier
                             || (output.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                                 && (!function.Variables[output.Variable].IsOut || output.DeclaresVariable))
                             || output.Type != function.Variables[output.Variable].Type
-                            || !outTargets.Add(output.Variable)
                             || (output.DeclaresVariable && (!declarations.Add(output.Variable) || initialized[output.Variable]))
                             || (!output.DeclaresVariable && !function.Variables[output.Variable].IsMutable))
                         {
                             throw Invalid();
+                        }
+                        if (!outTargets.Add(output.Variable))
+                        {
+                            throw InvalidEffect(output.Span, "Ownership");
                         }
                         initialized[output.Variable] = false;
                         fieldMasks[output.Variable] = 0;
@@ -1312,7 +1386,8 @@ public static class SemanticVerifier
                         }
                         else
                         {
-                            if (IsUnique(program, argument.Type))
+                            if (IsUnique(program, argument.Type)
+                                && argument is not (BoundMove or BoundCall))
                             {
                                 throw InvalidEffect(argument.Span, "Ownership");
                             }
@@ -1328,6 +1403,11 @@ public static class SemanticVerifier
                     {
                         throw Invalid();
                     }
+                }
+                if (call.Arguments is [BoundReceiverLoan receiverLoan, ..]
+                    && !initialized[receiverLoan.Variable])
+                {
+                    throw InvalidEffect(call.Span, "Ownership");
                 }
                 if (!target.IsNoThrow)
                 {

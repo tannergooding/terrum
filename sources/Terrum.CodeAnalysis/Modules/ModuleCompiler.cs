@@ -14,10 +14,11 @@ using Terrum.CodeAnalysis.Text;
 namespace Terrum.CodeAnalysis.Modules;
 
 /// <summary>A bounded, versioned semantic module artifact; linking never reads source text.</summary>
-public static class ModuleCompiler
+public static partial class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 12;
+    private const int OwnershipVersion = 12;
+    private const int Version = 13;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -73,7 +74,8 @@ public static class ModuleCompiler
     {
         var module = Read(artifact, isConsumer);
         return (Compilation.GetNativeProfileVersion(module.RuntimePolicy,
-            module.Structures.Any(static structure => structure.IsUnique)), module.RuntimePolicy);
+            module.Structures.Any(static structure => structure.IsUnique),
+            module.Functions.Any(static function => function.HasOwnershipTransfer)), module.RuntimePolicy);
     }
 
     private static BoundFunction Declaration(BoundFunction function) => function with {
@@ -219,7 +221,9 @@ public static class ModuleCompiler
         var structures = SelectStructures(program.Structures, required);
         var remapped = functions.Select(function => RemapFunction(function, program.Structures, structures));
         var module = new Module(false, -1, structures, [.. remapped.Select(function =>
-            new ModuleFunction(function.Name, Contract(function, structures), function, names.Contains(function.Name)))]) {
+            new ModuleFunction(function.Name, Contract(function, structures), function, names.Contains(function.Name)) {
+                HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, structures),
+            })]) {
             RuntimePolicy = program.RuntimePolicy,
         };
         return Write(module, program);
@@ -259,11 +263,14 @@ public static class ModuleCompiler
                 {
                     throw new ModuleContractException($"Declaration '{function.Name}' is not a public module import.");
                 }
-                if (!CompatibleContract(Contract(function, program.Structures), imported.Contract))
+                if (!CompatibleContract(Contract(function, program.Structures), imported.Contract)
+                    || Compilation.HasOwnershipTransfer(function, program.Structures) != imported.HasOwnershipTransfer)
                 {
                     throw new ModuleContractException($"Reference declaration for '{function.Name}' differs from the producer.");
                 }
-                declarations.Add(new ModuleFunction(function.Name, imported.Contract, null, true));
+                declarations.Add(new ModuleFunction(function.Name, imported.Contract, null, true) {
+                    HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
+                });
             }
             else
             {
@@ -278,7 +285,9 @@ public static class ModuleCompiler
                         throw new ModuleContractException("Consumer cannot call an unexported producer implementation.");
                     }
                 }
-                declarations.Add(new ModuleFunction(function.Name, Contract(function, program.Structures), function, false));
+                declarations.Add(new ModuleFunction(function.Name, Contract(function, program.Structures), function, false) {
+                    HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
+                });
             }
         }
         var entryPoint = -1;
@@ -372,7 +381,8 @@ public static class ModuleCompiler
             if (declaration.Import)
             {
                 if (!available.TryGetValue(declaration.Name, out var replacement)
-                    || !CompatibleContract(declaration.Contract, replacement.Contract))
+                    || !CompatibleContract(declaration.Contract, replacement.Contract)
+                    || declaration.HasOwnershipTransfer != replacement.HasOwnershipTransfer)
                 {
                     throw new ModuleContractException($"Incompatible or missing producer contract for '{declaration.Name}'.");
                 }
@@ -791,6 +801,7 @@ public static class ModuleCompiler
         return statement switch {
             BoundBlock block => block with { Statements = RemapStatements(block.Statements, source, destination) },
             BoundLocal local => local with { Initializer = RemapExpression(local.Initializer, source, destination) },
+            BoundOwnerDeclaration => statement,
             BoundAssignment assignment => assignment with { Value = RemapExpression(assignment.Value, source, destination) },
             BoundFieldAssignment field => field with { Value = RemapExpression(field.Value, source, destination) },
             BoundExpressionStatement expression => expression with {
@@ -810,6 +821,7 @@ public static class ModuleCompiler
                 Finally = (BoundBlock)RemapStatement(cleanup.Finally, source, destination),
             },
             BoundDrop => statement,
+            SymbolicDrop => statement,
             BoundUnsafe unsafeBlock => unsafeBlock with {
                 Body = (BoundBlock)RemapStatement(unsafeBlock.Body, source, destination),
             },
@@ -846,7 +858,9 @@ public static class ModuleCompiler
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         writer.Write(Magic);
         writer.Write(Version);
-        PutString(writer, Compilation.GetNativeProfileVersion(module.RuntimePolicy, module.Structures.Any(static structure => structure.IsUnique)));
+        PutString(writer, Compilation.GetNativeProfileVersion(module.RuntimePolicy,
+            module.Structures.Any(static structure => structure.IsUnique),
+            module.Functions.Any(static function => function.HasOwnershipTransfer)));
         writer.Write(module.Consumer);
         writer.Write((byte)program.RuntimePolicy);
         writer.Write(module.EntryPoint);
@@ -889,6 +903,7 @@ public static class ModuleCompiler
             PutString(writer, item.Contract);
             writer.Write(item.Import);
             writer.Write(item.Function is not null);
+            writer.Write(item.HasOwnershipTransfer);
             if (item.Function is BoundFunction function)
             {
                 PutFunction(writer, function, names, ref remaining);
@@ -916,10 +931,6 @@ public static class ModuleCompiler
             var (version, policy, profile) = ReadModuleHeader(reader, expectedConsumer);
             var entry = reader.ReadInt32();
             var (structures, structureNames) = ReadStructures(reader, version);
-            if (profile != Compilation.GetNativeProfileVersion(policy, structures.Any(static structure => structure.IsUnique)))
-            {
-                throw new ModuleFormatException("Module semantic profile does not match its value layouts.");
-            }
             var importedTypes = ReadImportedTypes(reader, structures.Length, structureNames, expectedConsumer);
             var count = Count(reader, MaximumFunctions);
             if (count == 0 || (expectedConsumer ? entry < 0 || entry >= count : entry != -1))
@@ -927,6 +938,12 @@ public static class ModuleCompiler
                 throw new ModuleFormatException("Module entry point is invalid.");
             }
             var items = ReadFunctions(reader, count, expectedConsumer, version, structures);
+            if (profile != Compilation.GetNativeProfileVersion(policy,
+                structures.Any(static structure => structure.IsUnique),
+                items.Any(static item => item.HasOwnershipTransfer)))
+            {
+                throw new ModuleFormatException("Module semantic profile does not match its retained contracts.");
+            }
             if (stream.Position != stream.Length || (expectedConsumer && items[entry].Import))
             {
                 throw new ModuleFormatException("Module has trailing data or an imported entry point.");
@@ -949,7 +966,7 @@ public static class ModuleCompiler
             throw new ModuleFormatException("Unknown module format or version.");
         }
         var version = reader.ReadInt32();
-        if (version is not (10 or 11 or Version))
+        if (version is not (10 or 11 or OwnershipVersion or Version))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -961,7 +978,8 @@ public static class ModuleCompiler
         var policy = version == 10 ? BoundRuntimePolicy.FailFast : (BoundRuntimePolicy)reader.ReadByte();
         if (policy is not (BoundRuntimePolicy.FailFast or BoundRuntimePolicy.CheckedExceptions)
             || (profile != Compilation.GetNativeProfileVersion(policy, uniqueValues: false)
-                && (version != Version || profile != "native-12")))
+                && (version < OwnershipVersion || profile != "native-12")
+                && (version != Version || profile != "native-13")))
         {
             throw new ModuleFormatException("Unsupported module semantic profile or checked-failure policy.");
         }
@@ -983,8 +1001,8 @@ public static class ModuleCompiler
             var size = reader.ReadInt32();
             var isPrivate = GetBool(reader);
             var isInternal = GetBool(reader);
-            var isUnique = version >= Version && GetBool(reader);
-            var cleanup = version >= Version && GetBool(reader) ? GetString(reader) : null;
+            var isUnique = version >= OwnershipVersion && GetBool(reader);
+            var cleanup = version >= OwnershipVersion && GetBool(reader) ? GetString(reader) : null;
             var fieldCount = Count(reader, MaximumSlots);
             var fields = ImmutableArray.CreateBuilder<BoundStructField>(fieldCount);
             for (var field = 0; field < fieldCount; field++)
@@ -1036,6 +1054,7 @@ public static class ModuleCompiler
             var contract = GetString(reader);
             var import = GetBool(reader);
             var hasBody = GetBool(reader);
+            var ownershipTransfer = version >= Version && GetBool(reader);
             if (name.Length == 0 || !seen.Add(name) || (expectedConsumer ? import == hasBody : !hasBody))
             {
                 throw new ModuleFormatException("Invalid module declaration.");
@@ -1051,11 +1070,14 @@ public static class ModuleCompiler
             {
                 throw new ModuleFormatException("Consumer import lacks an accessible contract.");
             }
-            if (function is not null && (function.Name != name || Contract(function, structures) != contract))
+            if (function is not null && (function.Name != name || Contract(function, structures) != contract
+                || Compilation.HasOwnershipTransfer(function, structures) != ownershipTransfer))
             {
                 throw new ModuleFormatException("Function body contradicts its declaration.");
             }
-            items.Add(new ModuleFunction(name, contract, function, import));
+            items.Add(new ModuleFunction(name, contract, function, import) {
+                HasOwnershipTransfer = ownershipTransfer,
+            });
         }
         return items.ToImmutable();
     }
@@ -1100,7 +1122,7 @@ public static class ModuleCompiler
         var isStatic = GetBool(reader);
         var isNoThrow = GetBool(reader);
         var doesNotReturn = GetBool(reader);
-        var isCleanup = version >= Version && GetBool(reader);
+        var isCleanup = version >= OwnershipVersion && GetBool(reader);
         var declaringStruct = GetBool(reader) ? GetString(reader) : null;
         var parameters = reader.ReadInt32();
         var count = Count(reader, MaximumSlots);
@@ -1118,7 +1140,7 @@ public static class ModuleCompiler
             var isOut = GetBool(reader);
             variables.Add(new BoundVariable(variableName, variableType, mutable, GetSpan(reader)) { IsOut = isOut });
         }
-        var body = GetStatement(reader, ref remaining, 0, version == 10) as BoundBlock
+        var body = GetStatement(reader, ref remaining, 0, version) as BoundBlock
             ?? throw new ModuleFormatException("Function requires a block body.");
         return new BoundFunction(name, type, variables.ToImmutable(), parameters, body, span) {
             IsConstructor = constructor,
@@ -1150,6 +1172,7 @@ public static class ModuleCompiler
             BoundUnsafe => (byte)11,
             BoundTryCatch => (byte)12,
             BoundDrop => (byte)13,
+            BoundOwnerDeclaration => (byte)14,
             _ => throw new ModuleFormatException("Unknown statement kind."),
         });
         PutSpan(writer, statement.Span);
@@ -1165,6 +1188,9 @@ public static class ModuleCompiler
             case BoundLocal local:
                 writer.Write(local.Variable);
                 PutExpression(writer, local.Initializer, names, ref remaining, depth + 1);
+                break;
+            case BoundOwnerDeclaration declaration:
+                writer.Write(declaration.Variable);
                 break;
             case BoundAssignment assignment:
                 writer.Write(assignment.Variable);
@@ -1212,6 +1238,7 @@ public static class ModuleCompiler
                 {
                     PutString(writer, names[drop.CleanupFunction]);
                 }
+                writer.Write(drop.IsOutput);
                 break;
             case BoundUnsafe unsafeBlock:
                 PutStatement(writer, unsafeBlock.Body, names, ref remaining, depth + 1);
@@ -1239,11 +1266,11 @@ public static class ModuleCompiler
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unknown serialized node tags are rejected.")]
-    private static BoundStatement GetStatement(BinaryReader reader, ref int remaining, int depth, bool legacy)
+    private static BoundStatement GetStatement(BinaryReader reader, ref int remaining, int depth, int version)
     {
         Step(ref remaining, depth);
         var kind = reader.ReadByte();
-        if (legacy && kind > 10)
+        if (version == 10 && kind > 10)
         {
             throw new ModuleFormatException("Unknown legacy statement kind.");
         }
@@ -1255,7 +1282,7 @@ public static class ModuleCompiler
                 var statements = ImmutableArray.CreateBuilder<BoundStatement>(count);
                 for (var i = 0; i < count; i++)
                 {
-                    statements.Add(GetStatement(reader, ref remaining, depth + 1, legacy));
+                    statements.Add(GetStatement(reader, ref remaining, depth + 1, version));
                 }
                 return new BoundBlock(statements.ToImmutable(), span);
             case 2:
@@ -1266,12 +1293,12 @@ public static class ModuleCompiler
                 return new BoundExpressionStatement(GetExpression(reader, ref remaining, depth + 1), span);
             case 5:
                 var condition = GetExpression(reader, ref remaining, depth + 1);
-                var then = GetStatement(reader, ref remaining, depth + 1, legacy);
-                var otherwise = GetBool(reader) ? GetStatement(reader, ref remaining, depth + 1, legacy) : null;
+                var then = GetStatement(reader, ref remaining, depth + 1, version);
+                var otherwise = GetBool(reader) ? GetStatement(reader, ref remaining, depth + 1, version) : null;
                 return new BoundIf(condition, then, otherwise, span);
             case 6:
                 return new BoundWhile(GetExpression(reader, ref remaining, depth + 1),
-                    GetStatement(reader, ref remaining, depth + 1, legacy), span);
+                    GetStatement(reader, ref remaining, depth + 1, version), span);
             case 7:
                 return new BoundRequire(GetExpression(reader, ref remaining, depth + 1), span);
             case 8:
@@ -1290,25 +1317,29 @@ public static class ModuleCompiler
                     NestedFields = fields.ToImmutable(),
                 };
             case 10:
-                return new BoundTryFinally(GetStatement(reader, ref remaining, depth + 1, legacy) as BoundBlock
+                return new BoundTryFinally(GetStatement(reader, ref remaining, depth + 1, version) as BoundBlock
                     ?? throw new ModuleFormatException("Expected try block."),
-                    GetStatement(reader, ref remaining, depth + 1, legacy) as BoundBlock
+                    GetStatement(reader, ref remaining, depth + 1, version) as BoundBlock
                     ?? throw new ModuleFormatException("Expected finally block."), span);
             case 11:
-                return new BoundUnsafe(GetStatement(reader, ref remaining, depth + 1, legacy) as BoundBlock
+                return new BoundUnsafe(GetStatement(reader, ref remaining, depth + 1, version) as BoundBlock
                     ?? throw new ModuleFormatException("Expected unsafe block."), span);
             case 12:
-                var body = GetStatement(reader, ref remaining, depth + 1, legacy) as BoundBlock
+                var body = GetStatement(reader, ref remaining, depth + 1, version) as BoundBlock
                     ?? throw new ModuleFormatException("Expected protected block.");
-                var handler = GetStatement(reader, ref remaining, depth + 1, legacy) as BoundBlock
+                var handler = GetStatement(reader, ref remaining, depth + 1, version) as BoundBlock
                     ?? throw new ModuleFormatException("Expected recovery block.");
-                var cleanup = GetBool(reader) ? GetStatement(reader, ref remaining, depth + 1, legacy) as BoundBlock
+                var cleanup = GetBool(reader) ? GetStatement(reader, ref remaining, depth + 1, version) as BoundBlock
                     ?? throw new ModuleFormatException("Expected recovery cleanup block.") : null;
                 return new BoundTryCatch(body, handler, cleanup, span);
             case 13:
                 var owner = reader.ReadInt32();
                 var method = GetBool(reader) ? GetString(reader) : null;
-                return new SymbolicDrop(owner, method, span);
+                return new SymbolicDrop(owner, method, span) {
+                    IsOutput = version >= Version && GetBool(reader),
+                };
+            case 14 when version >= Version:
+                return new BoundOwnerDeclaration(reader.ReadInt32(), span);
             default:
                 throw new ModuleFormatException("Unknown statement kind.");
         }
@@ -1436,6 +1467,7 @@ public static class ModuleCompiler
     private static BoundStatement ResolveStatement(BoundStatement statement, IReadOnlyDictionary<string, int> names) => statement switch {
         BoundBlock block => block with { Statements = [.. block.Statements.Select(child => ResolveStatement(child, names))] },
         BoundLocal local => local with { Initializer = ResolveExpression(local.Initializer, names) },
+        BoundOwnerDeclaration => statement,
         BoundAssignment assignment => assignment with { Value = ResolveExpression(assignment.Value, names) },
         BoundFieldAssignment field => field with { Value = ResolveExpression(field.Value, names) },
         BoundExpressionStatement expression => expression with { Expression = ResolveExpression(expression.Expression, names) },
@@ -1447,9 +1479,9 @@ public static class ModuleCompiler
         BoundWhile loop => loop with { Condition = ResolveExpression(loop.Condition, names), Body = ResolveStatement(loop.Body, names) },
         BoundTryFinally cleanup => cleanup with { Body = (BoundBlock)ResolveStatement(cleanup.Body, names), Finally = (BoundBlock)ResolveStatement(cleanup.Finally, names) },
         SymbolicDrop drop => drop.Name is null
-            ? new BoundDrop(drop.Variable, -1, drop.Span)
+            ? new BoundDrop(drop.Variable, -1, drop.Span) { IsOutput = drop.IsOutput }
             : names.TryGetValue(drop.Name, out var method)
-                ? new BoundDrop(drop.Variable, method, drop.Span)
+                ? new BoundDrop(drop.Variable, method, drop.Span) { IsOutput = drop.IsOutput }
                 : throw new ModuleContractException($"Unresolved cleanup target '{drop.Name}'."),
         BoundDrop => statement,
         BoundUnsafe unsafeBlock => unsafeBlock with { Body = (BoundBlock)ResolveStatement(unsafeBlock.Body, names) },
@@ -1531,9 +1563,15 @@ public static class ModuleCompiler
         public ImmutableArray<string> ImportedStructures { get; init; } = [];
         public BoundRuntimePolicy RuntimePolicy { get; init; }
     }
-    private sealed record ModuleFunction(string Name, string Contract, BoundFunction? Function, bool Import);
+    private sealed record ModuleFunction(string Name, string Contract, BoundFunction? Function, bool Import)
+    {
+        public bool HasOwnershipTransfer { get; init; }
+    }
     private sealed record SymbolicCall(string Name, ImmutableArray<BoundExpression> Arguments, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
-    private sealed record SymbolicDrop(int Variable, string? Name, TextSpan Span) : BoundStatement(Span);
+    private sealed record SymbolicDrop(int Variable, string? Name, TextSpan Span) : BoundStatement(Span)
+    {
+        public bool IsOutput { get; init; }
+    }
 }
 
 /// <summary>Invalid, unsupported or tampered module artifact.</summary>

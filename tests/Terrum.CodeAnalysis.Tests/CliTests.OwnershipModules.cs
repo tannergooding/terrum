@@ -14,11 +14,14 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed partial class CliTests
 {
     [Theory]
-    [InlineData("fail-fast", true, "native-12")]
-    [InlineData("checked-exceptions", true, "native-12")]
-    [InlineData("fail-fast", false, "native-10")]
-    [InlineData("checked-exceptions", false, "native-11")]
-    public async Task ModuleCommandsReportThePersistedOwnershipProfileAsync(string policy, bool exportOwner, string profile)
+    [InlineData("fail-fast", true, false, "native-12")]
+    [InlineData("checked-exceptions", true, false, "native-12")]
+    [InlineData("fail-fast", false, false, "native-10")]
+    [InlineData("checked-exceptions", false, false, "native-11")]
+    [InlineData("fail-fast", true, true, "native-13")]
+    [InlineData("checked-exceptions", true, true, "native-13")]
+    public async Task ModuleCommandsReportThePersistedOwnershipProfileAsync(
+        string policy, bool exportOwner, bool transferOwner, string profile)
     {
         var directory = Directory.CreateTempSubdirectory("terrum-owner-profile-").FullName;
         var source = Path.Combine(directory, "provider.terrum");
@@ -37,12 +40,15 @@ public sealed partial class CliTests
                     [NoThrow] [Cleanup] public void Close() {}
                 }
                 public Token Make() { return new Token(); }
+                public int32 Take(Token token) { return token.Id; }
                 public int32 Value() { return 42; }
                 """);
-            await File.WriteAllTextAsync(consumerSource, exportOwner
-                ? "int32 Main() { Token token = Make(); return token.Id; }"
-                : "int32 Main() { return Value(); }");
-            string[] exports = exportOwner ? ["--export", "Token.Close"] : [];
+            await File.WriteAllTextAsync(consumerSource, transferOwner
+                ? "int32 Main() { Token token = Make(); return Take(move token); }"
+                : exportOwner ? "int32 Main() { Token token = Make(); return token.Id; }"
+                    : "int32 Main() { return Value(); }");
+            string[] exports = transferOwner ? ["--export", "Token.Close", "--export", "Take"]
+                : exportOwner ? ["--export", "Token.Close"] : [];
             var name = exportOwner ? "Make" : "Value";
             await AssertModuleProfileAsync(profile, policy,
                 ["compile-module", "producer", source, name, .. exports, "-o", provider, "--runtime", policy, "--json"]);

@@ -28,6 +28,53 @@ public sealed class Compilation
         _ => throw new ArgumentOutOfRangeException(nameof(policy)),
     };
 
+    /// <summary>Includes declaration-derived ownership transfer across function boundaries.</summary>
+    public static string GetNativeProfileVersion(BoundRuntimePolicy policy, bool uniqueValues, bool ownershipTransfer)
+    {
+        var baseline = GetNativeProfileVersion(policy, uniqueValues);
+        return ownershipTransfer ? "native-13" : baseline;
+    }
+
+    /// <summary>Whether a declaration transfers compact ownership through a parameter.</summary>
+    internal static bool HasOwnershipTransfer(BoundFunction function, ImmutableArray<BoundStruct> structures)
+    {
+        for (var slot = function.IsConstructor ? 1 : 0;
+            slot < function.ParameterCount + (function.IsConstructor ? 1 : 0); slot++)
+        {
+            var type = function.Variables[slot].Type;
+            var index = (int)type - 100;
+            if (index >= structures.Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(function), "Function parameter references an unknown structure.");
+            }
+            if (index >= 0 && structures[index].IsUnique
+                && !(slot == 0 && function.DeclaringStruct is not null && !function.IsStatic))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>Computes the profile from retained types and function declarations.</summary>
+    public static string GetNativeProfileVersion(BoundProgram program)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        var unique = false;
+        foreach (var structure in program.Structures)
+        {
+            unique |= structure.IsUnique;
+        }
+        foreach (var function in program.Functions)
+        {
+            if (HasOwnershipTransfer(function, program.Structures))
+            {
+                return GetNativeProfileVersion(program.RuntimePolicy, unique, ownershipTransfer: true);
+            }
+        }
+        return GetNativeProfileVersion(program.RuntimePolicy, unique);
+    }
+
     private Compilation(SyntaxTree syntaxTree, ImmutableArray<Diagnostic> diagnostics, BoundProgram? program,
         ImmutableArray<SyntaxTree> syntaxTrees = default, ImmutableArray<SourceDiagnostic> sourceDiagnostics = default)
     {
@@ -71,14 +118,7 @@ public sealed class Compilation
             {
                 return null;
             }
-            foreach (var structure in program.Structures)
-            {
-                if (structure.IsUnique)
-                {
-                    return GetNativeProfileVersion(program.RuntimePolicy, uniqueValues: true);
-                }
-            }
-            return GetNativeProfileVersion(program.RuntimePolicy, uniqueValues: false);
+            return GetNativeProfileVersion(program);
         }
     }
 

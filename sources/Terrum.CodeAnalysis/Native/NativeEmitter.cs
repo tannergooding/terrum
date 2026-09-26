@@ -229,6 +229,7 @@ internal sealed class PeCompiler
     private readonly List<(int Offset, int Target)> _runtimeCalls = new();
     private readonly List<(int Offset, int Target)> _cleanupCalls = [];
     private readonly List<(BoundBlock Body, int Function, int Start, int End)> _funclets = [];
+    private readonly Dictionary<int, List<(int Value, int Live, PrimitiveType Type, int Cleanup)>> _stagedOwners = [];
     private readonly List<int> _imports = new();
     private readonly List<NativeImportFixup> _nativeImportFixups = [];
     private readonly List<NativeDataFixup> _dataFixups = [];
@@ -435,10 +436,10 @@ internal sealed class PeCompiler
             var live = new int[function.Variables.Length];
             Array.Fill(live, -1);
             var hasUnique = false;
-            for (var variable = function.ParameterCount + (function.IsConstructor ? 1 : 0);
-                variable < function.Variables.Length; variable++)
+            for (var variable = 0; variable < function.Variables.Length; variable++)
             {
-                if (IsUnique(function.Variables[variable].Type))
+                if (IsUnique(function.Variables[variable].Type)
+                    && !(variable == 0 && function.DeclaringStruct is not null && !function.IsStatic))
                 {
                     live[variable] = checked((int)required);
                     required += 8;
@@ -544,6 +545,14 @@ internal sealed class PeCompiler
                     _code.Store(Slot(slot));
                 }
             }
+            for (var argument = 0; argument < function.ParameterCount; argument++)
+            {
+                var slot = argument + (function.IsConstructor ? 1 : 0);
+                if (_liveSlots[i][slot] >= 0 && !function.Variables[slot].IsOut)
+                {
+                    _code.Set(_liveSlots[i][slot]);
+                }
+            }
             Statement(function.Body);
             if (function.ReturnType == PrimitiveType.Void)
             {
@@ -574,6 +583,24 @@ internal sealed class PeCompiler
             _code.Bytes(0x48, 0x89, 0xD5); // mov rbp,rdx: the source function's frame base
             _emittingFunclet = true;
             Statement(body);
+            if (_stagedOwners.TryGetValue(index, out var owners))
+            {
+                for (var owner = owners.Count - 1; owner >= 0; owner--)
+                {
+                    var (value, live, type, cleanup) = owners[owner];
+                    _code.Load(live);
+                    _code.Bytes(0x85, 0xC0);
+                    var vacant = _code.JumpIf(0x84);
+                    _code.Clear(live);
+                    if (cleanup >= 0)
+                    {
+                        LoadValue(value, type);
+                        _code.MoveArgument(0, true);
+                        EmitTargetCall(cleanup);
+                    }
+                    _code.PatchRelative(vacant, _code.Position);
+                }
+            }
             _emittingFunclet = false;
             Epilog();
             _funclets[index] = (body, function, start, _code.Position);
@@ -746,7 +773,13 @@ internal sealed class PeCompiler
                 var maximum = 1 + (call.Arguments.Length * 2);
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
-                    if (call.Arguments[i] is not BoundOutArgument)
+                    if (call.Arguments[i] is BoundOutArgument output && IsUnique(output.Type)
+                        && _program.Structures[(int)output.Type - 100].CleanupMethod is not null)
+                    {
+                        maximum = Math.Max(maximum, 1 + (call.Arguments.Length * 2)
+                            + CleanupSpills(ref maximumArguments));
+                    }
+                    else if (call.Arguments[i] is not BoundOutArgument)
                     {
                         maximum = Math.Max(maximum, 1 + (call.Arguments.Length * 2)
                             + ExpressionSpills(call.Arguments[i], ref maximumArguments));
@@ -775,6 +808,8 @@ internal sealed class PeCompiler
         }
         return _outBase + (16 * ordinal);
     }
+    private int OwnerPlace(int index) =>
+        _program.Functions[_currentFunction].Variables[index].IsOut ? OutSlot(index) : Slot(index);
     private static bool IsStruct(PrimitiveType type) => (int)type >= 100;
     private static bool IsWide(PrimitiveType type) => type is PrimitiveType.Int64 or PrimitiveType.UInt64;
     private int Size(PrimitiveType type) => ValueLayout.Size(type, _program.Structures);
@@ -787,7 +822,7 @@ internal sealed class PeCompiler
             && !function.IsStatic && IsUnique(function.Variables[0].Type);
     }
 
-    private void DropOwner(int variable)
+    private void DropOwner(int variable, int spill = 0)
     {
         var live = _liveSlots[_currentFunction][variable];
         _code.Load(live);
@@ -814,8 +849,18 @@ internal sealed class PeCompiler
             {
                 throw new InvalidOperationException("Verified unique cleanup method is missing.");
             }
-            Expression(new BoundCall(method, [new BoundMove(variable, type, default)],
-                PrimitiveType.Void, default), 0);
+            if (_program.Functions[_currentFunction].Variables[variable].IsOut)
+            {
+                _code.Clear(live);
+                LoadValue(OwnerPlace(variable), type);
+                _code.MoveArgument(0, true);
+                EmitTargetCall(method);
+            }
+            else
+            {
+                Expression(new BoundCall(method, [new BoundMove(variable, type, default)],
+                    PrimitiveType.Void, default), spill);
+            }
         }
         _code.PatchRelative(vacant, _code.Position);
     }
@@ -902,7 +947,24 @@ internal sealed class PeCompiler
     private void CallCleanup(int index)
     {
         _code.Bytes(0x48, 0x89, 0xEA); // mov rdx,rbp: pass the owning function's frame base
+        _code.Bytes(0x31, 0xC9); // normal cleanup has no exception record
         _cleanupCalls.Add((_code.RelativeCall(), index));
+    }
+
+    private void EmitTargetCall(int function)
+    {
+        if (_program.Functions[function].IsExternal)
+        {
+            if (_nativeImports is null || !_nativeImports.TryGetValue(function, out var import))
+            {
+                throw new InvalidOperationException("External call has no verified native import binding.");
+            }
+            _nativeImportFixups.Add(new NativeImportFixup(_code.ImportCall(), import.DllName, import.ExportName));
+        }
+        else
+        {
+            _calls.Add((_code.RelativeCall(), function));
+        }
     }
 
     private void EmitExceptionFilter(bool storeReason)
@@ -972,6 +1034,8 @@ internal sealed class PeCompiler
                     _code.Set(_liveSlots[_currentFunction][local.Variable]);
                 }
                 break;
+            case BoundOwnerDeclaration:
+                break;
             case BoundAssignment assignment:
                 Expression(assignment.Value, 0);
                 if (IsUnique(assignment.Value.Type))
@@ -979,7 +1043,7 @@ internal sealed class PeCompiler
                     StoreValue(_replacementSlots[_currentFunction], assignment.Value.Type);
                     DropOwner(assignment.Variable);
                     LoadValue(_replacementSlots[_currentFunction], assignment.Value.Type);
-                    StoreValue(Slot(assignment.Variable), assignment.Value.Type);
+                    StoreValue(OwnerPlace(assignment.Variable), assignment.Value.Type);
                     _code.Set(_liveSlots[_currentFunction][assignment.Variable]);
                     break;
                 }
@@ -1000,7 +1064,21 @@ internal sealed class PeCompiler
                 }
                 break;
             case BoundDrop drop:
-                DropOwner(drop.Variable);
+                if (drop.IsOutput)
+                {
+                    _code.Bytes(0x48, 0x85, 0xC9); // the unwind funclet receives an exception record
+                    var unwind = _code.JumpIf(0x85);
+                    _code.Load(PendingReturnSlot());
+                    _code.Bytes(0x85, 0xC0);
+                    var transferred = _code.JumpIf(0x85);
+                    _code.PatchRelative(unwind, _code.Position);
+                    DropOwner(drop.Variable);
+                    _code.PatchRelative(transferred, _code.Position);
+                }
+                else
+                {
+                    DropOwner(drop.Variable);
+                }
                 break;
             case BoundFieldAssignment fieldAssignment:
                 Expression(fieldAssignment.Value, 0);
@@ -1240,7 +1318,7 @@ internal sealed class PeCompiler
                     ? OutSlot(read.Variable) : Slot(read.Variable), read.Type);
                 break;
             case BoundMove move:
-                LoadValue(Slot(move.Variable), move.Type);
+                LoadValue(OwnerPlace(move.Variable), move.Type);
                 _code.Clear(_liveSlots[_currentFunction][move.Variable]);
                 break;
             case BoundReceiverLoan loan:
@@ -1250,7 +1328,7 @@ internal sealed class PeCompiler
                 }
                 else
                 {
-                    _code.Address(Slot(loan.Variable));
+                    _code.Address(OwnerPlace(loan.Variable));
                 }
                 break;
             case BoundFieldRead fieldRead:
@@ -1262,7 +1340,7 @@ internal sealed class PeCompiler
                     }
                     else
                     {
-                        _code.Address(Slot(owner.Variable));
+                        _code.Address(OwnerPlace(owner.Variable));
                     }
                 }
                 else
@@ -1359,6 +1437,40 @@ internal sealed class PeCompiler
                 break;
             case BoundCall call:
                 var argumentsBase = spill + 1;
+                List<(int Value, int Live, PrimitiveType Type, int Cleanup)>? staged = null;
+                for (var i = 0; i < call.Arguments.Length; i++)
+                {
+                    if (!IsUnique(call.Arguments[i].Type)
+                        || call.Arguments[i] is BoundReceiverLoan or BoundOutArgument)
+                    {
+                        continue;
+                    }
+                    staged ??= [];
+                    var name = _program.Structures[(int)call.Arguments[i].Type - 100].CleanupMethod;
+                    var cleanup = -1;
+                    if (name is not null)
+                    {
+                        for (var function = 0; function < _program.Functions.Length; function++)
+                        {
+                            if (_program.Functions[function].Name == name)
+                            {
+                                cleanup = function;
+                                break;
+                            }
+                        }
+                    }
+                    var live = Spill(argumentsBase + call.Arguments.Length + i);
+                    staged.Add((Spill(argumentsBase + i), live, call.Arguments[i].Type, cleanup));
+                    _code.Clear(live);
+                }
+                var stagedBegin = _code.Position;
+                var stagedFunclet = -1;
+                if (_checkedExceptions && staged is not null && !_emittingFunclet)
+                {
+                    stagedFunclet = _funclets.Count;
+                    _funclets.Add((new BoundBlock([], call.Span), _currentFunction, 0, 0));
+                    _stagedOwners.Add(stagedFunclet, staged);
+                }
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
                     if (call.Arguments[i] is BoundOutArgument)
@@ -1379,6 +1491,31 @@ internal sealed class PeCompiler
                         {
                             StoreValue(Spill(argumentsBase + i), call.Arguments[i].Type);
                         }
+                        if (staged is not null && IsUnique(call.Arguments[i].Type)
+                            && call.Arguments[i] is not BoundReceiverLoan)
+                        {
+                            _code.Set(Spill(argumentsBase + call.Arguments.Length + i));
+                        }
+                    }
+                }
+                if (stagedFunclet >= 0)
+                {
+                    _code.Byte(0x90);
+                    _scopes[_currentFunction].Add(new NativeExceptionScope(stagedBegin, _code.Position,
+                        -stagedFunclet - 1, 0));
+                }
+                if (staged is not null)
+                {
+                    foreach (var stagedOwner in staged)
+                    {
+                        _code.Clear(stagedOwner.Live);
+                    }
+                }
+                foreach (var argument in call.Arguments)
+                {
+                    if (argument is BoundOutArgument output && IsUnique(output.Type))
+                    {
+                        DropOwner(output.Variable, argumentsBase + (call.Arguments.Length * 2));
                     }
                 }
                 var hidden = IsIndirect(call.Type) ? 1 : 0;
@@ -1412,18 +1549,7 @@ internal sealed class PeCompiler
                     _code.Address(Spill(spill));
                     _code.MoveArgument(0, true);
                 }
-                if (_program.Functions[call.Function].IsExternal)
-                {
-                    if (_nativeImports is null || !_nativeImports.TryGetValue(call.Function, out var import))
-                    {
-                        throw new InvalidOperationException("External call has no verified native import binding.");
-                    }
-                    _nativeImportFixups.Add(new NativeImportFixup(_code.ImportCall(), import.DllName, import.ExportName));
-                }
-                else
-                {
-                    _calls.Add((_code.RelativeCall(), call.Function));
-                }
+                EmitTargetCall(call.Function);
                 if (hidden != 0)
                 {
                     _code.Address(Spill(spill));
@@ -1450,6 +1576,10 @@ internal sealed class PeCompiler
                                 {
                                     _code.Address(scratch);
                                     CopyToFrame(destination, Size(output.Type));
+                                    if (IsUnique(output.Type))
+                                    {
+                                        _code.Set(_liveSlots[_currentFunction][output.Variable]);
+                                    }
                                     continue;
                                 }
                                 if (output.Type is PrimitiveType.Bool or PrimitiveType.Char16)
@@ -1461,10 +1591,23 @@ internal sealed class PeCompiler
                                     LoadValue(scratch, output.Type);
                                 }
                                 StoreValue(destination, output.Type);
+                                if (IsUnique(output.Type))
+                                {
+                                    _code.Set(_liveSlots[_currentFunction][output.Variable]);
+                                }
                             }
                         }
                         _code.Bytes([0xB8, 0x01, 0x00, 0x00, 0x00]);
+                        var done = _code.Jump();
                         _code.PatchRelative(skip, _code.Position);
+                        for (var i = 0; i < call.Arguments.Length; i++)
+                        {
+                            if (call.Arguments[i] is BoundOutArgument output && IsUnique(output.Type))
+                            {
+                                _code.Clear(_liveSlots[_currentFunction][output.Variable]);
+                            }
+                        }
+                        _code.PatchRelative(done, _code.Position);
                     }
                 }
                 break;

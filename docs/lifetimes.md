@@ -66,15 +66,23 @@ Store both the **broad interface contract** and the **resolved published impleme
 ## Implementation and unsettled points
 
 The compact native profile tracks a unique named owner's vacancy across
-branches, loops, returns and exceptional edges. It lowers lexical drops to
-structured cleanup regions and verifies a synchronous receiver loan that
-cannot be stored, consumed or passed as a value. Cleanup is an explicit
+branches, loops, returns and exceptional edges. By-value parameters transfer
+from an explicit named move or fresh result and are dropped by the callee on
+normal or checked exceptional exit unless moved again. Arguments are staged
+in evaluation order: an earlier completed owner is dropped if a later
+argument fails before invocation. A `bool`/`out` owner is published only on
+true; on false or exceptional exit its completed private output is dropped
+without manufacturing a readable caller value. Existing owners passed as
+output destinations are dropped only when the call begins, not when earlier
+arguments are still being evaluated. A successful `out var` gains its own
+lexical cleanup scope. Receiver loans remain synchronous and readonly and
+cannot be stored, consumed or passed as values. Cleanup is an explicit
 `[NoThrow] [Cleanup] public void Close()`-shaped contract on a unique
 instance method; the name itself has no special meaning. Only primitive fields
 fit this first profile, and cleanup cannot invoke a potentially throwing
 operation. A statically constant index proven within an immutable host
 buffer grant may be used in NoThrow cleanup; general indexing cannot.
-This is not a general place/loan analysis, native allocation, OS-resource
+This is not a general owning-expression/field analysis, native allocation, OS-resource
 adapter, stored interior, generic witness, return-anchor ABI or runtime
 guard implementation. Later stages must check place disjointness and
 last use, owning fields and temporaries, bounded result escapes,

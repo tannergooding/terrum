@@ -297,6 +297,22 @@ internal sealed class Binder
                 var end = new TextSpan(syntaxBody.Span.End, 0);
                 body = body with { Statements = body.Statements.Add(new BoundReturn(null, end)) };
             }
+            for (var parameter = signature.Parameters.Length - 1; parameter >= 0; parameter--)
+            {
+                if (!IsUnique(signature.Parameters[parameter].Type))
+                {
+                    continue;
+                }
+                var slot = parameter + (signature.IsConstructor ? 1 : 0)
+                    + (signature.StructName is not null && !signature.IsStatic && !signature.IsConstructor ? 1 : 0);
+                var method = _structs[(int)signature.Parameters[parameter].Type - 100].CleanupMethod;
+                var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
+                body = new BoundBlock([new BoundTryFinally(body,
+                    new BoundBlock([new BoundDrop(slot, cleanupFunction, syntaxBody.Span) {
+                        IsOutput = signature.Parameters[parameter].IsOut,
+                    }], syntaxBody.Span),
+                    syntaxBody.Span)], syntaxBody.Span);
+            }
             bound.Add(new BoundFunction(signature.Name, signature.ReturnType, [.. _variables],
                 signature.Parameters.Length + (signature.StructName is not null && !signature.IsStatic && !signature.IsConstructor ? 1 : 0),
                 body, declaration.Span) {
@@ -634,10 +650,6 @@ internal sealed class Binder
             }
 
             declared.Add(new Parameter(token.Text, type, token.Span, isOut));
-            if ((int)type >= 100 && _structs[(int)type - 100].IsUnique)
-            {
-                Report("TRM3023", "Unique value parameters and owning outputs are not yet supported.", parameter.Span);
-            }
         }
 
         var qualifiedName = (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".")
@@ -732,13 +744,25 @@ internal sealed class Binder
     {
         _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
         var statements = ImmutableArray.CreateBuilder<BoundStatement>();
+        var outputOwners = new List<(int Statement, int Variable)>();
 
         foreach (var child in block.Children)
         {
             _cancellationToken.ThrowIfCancellationRequested();
             if (child is SyntaxNode statement)
             {
-                statements.Add(BindStatement(statement));
+                var firstVariable = _variables.Count;
+                var boundStatement = BindStatement(statement);
+                for (var slot = firstVariable; slot < _variables.Count; slot++)
+                {
+                    if (IsUnique(_variables[slot].Type)
+                        && _scopes[^1].TryGetValue(_variables[slot].Name, out var scoped)
+                        && scoped == slot && !(boundStatement is BoundLocal local && local.Variable == slot))
+                    {
+                        outputOwners.Add((statements.Count, slot));
+                    }
+                }
+                statements.Add(boundStatement);
             }
         }
 
@@ -746,16 +770,30 @@ internal sealed class Binder
         var bound = statements.ToImmutable();
         for (var index = bound.Length - 1; index >= 0; index--)
         {
-            if (bound[index] is not BoundLocal local || !IsUnique(local.Initializer.Type))
+            if (bound[index] is BoundLocal local && IsUnique(local.Initializer.Type))
             {
-                continue;
+                var method = _structs[(int)local.Initializer.Type - 100].CleanupMethod;
+                var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
+                bound = bound[..(index + 1)].Add(new BoundTryFinally(
+                    new BoundBlock(bound[(index + 1)..], block.Span),
+                    new BoundBlock([new BoundDrop(local.Variable, cleanupFunction, block.Span)], block.Span),
+                    block.Span));
             }
-            var method = _structs[(int)local.Initializer.Type - 100].CleanupMethod;
-            var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
-            bound = bound[..(index + 1)].Add(new BoundTryFinally(
-                new BoundBlock(bound[(index + 1)..], block.Span),
-                new BoundBlock([new BoundDrop(local.Variable, cleanupFunction, block.Span)], block.Span),
-                block.Span));
+            for (var output = outputOwners.Count - 1; output >= 0; output--)
+            {
+                if (outputOwners[output].Statement != index)
+                {
+                    continue;
+                }
+                var slot = outputOwners[output].Variable;
+                var method = _structs[(int)_variables[slot].Type - 100].CleanupMethod;
+                var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
+                bound = bound[..index]
+                    .Add(new BoundOwnerDeclaration(slot, block.Span))
+                    .Add(new BoundTryFinally(new BoundBlock(bound[index..], block.Span),
+                        new BoundBlock([new BoundDrop(slot, cleanupFunction, block.Span)], block.Span),
+                        block.Span));
+            }
         }
         return new BoundBlock(bound, block.Span);
     }
@@ -948,6 +986,7 @@ internal sealed class Binder
             case SyntaxKind.ForStatement:
             {
                 _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
+                var firstVariable = _variables.Count;
                 var initializer = BindStatement((SyntaxNode)node.Children[2]);
                 var conditionNode = (SyntaxNode)node.Children[4];
                 var condition = conditionNode.Kind == SyntaxKind.OmittedExpression
@@ -955,6 +994,17 @@ internal sealed class Binder
                     : BindExpression(conditionNode, PrimitiveType.Bool);
                 var iterator = BindStatement((SyntaxNode)node.Children[6]);
                 var body = BindBlock((SyntaxNode)node.Children[8]);
+                for (var slot = firstVariable; slot < _variables.Count; slot++)
+                {
+                    if (IsUnique(_variables[slot].Type)
+                        && _scopes[^1].TryGetValue(_variables[slot].Name, out var scoped)
+                        && scoped == slot
+                        && !(initializer is BoundLocal ownerInitializer && ownerInitializer.Variable == slot))
+                    {
+                        Report("TRM3023", "An owning for-condition or iterator output has no lexical cleanup region.",
+                            node.Span);
+                    }
+                }
                 _scopes.RemoveAt(_scopes.Count - 1);
                 var loopBody = new BoundBlock([body, iterator], node.Span);
                 var loop = new BoundWhile(condition, loopBody, node.Span);

@@ -68,9 +68,11 @@ four compiler-generated failures and permits recovery only in `unsafe`
 exceptional exits in that policy; explicit fail-fast termination still skips
 pending cleanup. General exception identity, low-memory semantics, native allocation and
 other effect bounds remain later implementation work. A compact
-`unique struct` proof now checks named moves and lexical NoThrow cleanup
-with nonescaping readonly receiver loans; it does not implement the wider
-owning fields, stored loans or resource adapter contracts.
+`unique struct` proof checks named moves, by-value parameter transfer, and
+conditional owning `bool`/`out` publication with lexical NoThrow cleanup.
+Fresh constructor/factory results can transfer directly; a moved owner is
+vacant. Receiver loans remain synchronous and readonly. This is not an
+owning-field, stored-loan or resource-adapter implementation.
 See the [native proof limits](native.md).
 
 ### Storage, concurrency, entry and boundaries

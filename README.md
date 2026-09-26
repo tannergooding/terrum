@@ -10,8 +10,9 @@ value-type profile and direct Windows x64 native emission. It binds declarations
 checked numerics, compact structs, places and conditional outputs, then verifies
 structured operations before encoding. The same backend writes PE executables
 and supplies a bounded JIT execution worker, without CIL, LLVM or an external
-linker. Ownership, managed graphs, general exceptions and the standard library
-are not implemented.
+linker. Compact unique values support checked moves, owned calls and deterministic
+cleanup. General stored loans, managed graphs, general exception objects and the
+standard library are not implemented.
 
 ## Build
 

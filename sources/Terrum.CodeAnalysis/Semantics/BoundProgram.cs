@@ -147,6 +147,9 @@ public sealed record BoundBlock(ImmutableArray<BoundStatement> Statements, TextS
 /// <param name="Span">The source range.</param>
 public sealed record BoundLocal(int Variable, BoundExpression Initializer, TextSpan Span) : BoundStatement(Span);
 
+/// <summary>Introduces a vacant owner whose initializer is a conditional output in the following region.</summary>
+public sealed record BoundOwnerDeclaration(int Variable, TextSpan Span) : BoundStatement(Span);
+
 /// <summary>Assigns an initialized mutable local.</summary>
 /// <param name="Variable">The local slot.</param>
 /// <param name="Value">The assigned value.</param>
@@ -185,7 +188,11 @@ public sealed record BoundWhile(BoundExpression Condition, BoundStatement Body, 
 public sealed record BoundTryFinally(BoundBlock Body, BoundBlock Finally, TextSpan Span) : BoundStatement(Span);
 
 /// <summary>Ends a lexical unique owner if it remains live; a moved owner is vacant.</summary>
-public sealed record BoundDrop(int Variable, int CleanupFunction, TextSpan Span) : BoundStatement(Span);
+public sealed record BoundDrop(int Variable, int CleanupFunction, TextSpan Span) : BoundStatement(Span)
+{
+    /// <summary>An owning output transfers only on a successful bool return; otherwise it is dropped.</summary>
+    public bool IsOutput { get; init; }
+}
 
 /// <summary>An explicit unsafe source context; only checked failures from its nested recovery regions can be caught.</summary>
 public sealed record BoundUnsafe(BoundBlock Body, TextSpan Span) : BoundStatement(Span);

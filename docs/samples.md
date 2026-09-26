@@ -13,6 +13,9 @@ cross-function division failure unwinds the inner `finally` before entering
 an unsafe `catch`. The separate
 [checked bounds component](../samples/native/checked-bounds.terrum) uses the
 same policy when compiled with an entry and an explicit host-buffer grant.
+The [owned transfer sample](../samples/native/owner-transfer.terrum) returns 42
+after a named move through a by-value parameter and failed then successful
+owning outputs. Its compact owners have lexical cleanup but hold no OS resource.
 
 | Program | Source | Design contract / expected behavior |
 |---|---|---|

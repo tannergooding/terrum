@@ -95,8 +95,7 @@ internal static partial class Program
                     ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
                 selectedPolicy = runtimePolicy;
                 result = NativeEmitter.Emit(program, runtimePolicy);
-                profile = Compilation.GetNativeProfileVersion(program.RuntimePolicy,
-                    program.Structures.Any(static structure => structure.IsUnique));
+                profile = Compilation.GetNativeProfileVersion(program);
                 output = args[4];
             }
             else if (count == 5 && args[0] == "run-module"

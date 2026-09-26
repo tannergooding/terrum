@@ -1,0 +1,111 @@
+public unique struct Ticket
+{
+    public int32 Id;
+    [NoThrow] public Ticket(int32 id) { Id = id; }
+    [NoThrow] [Cleanup] public void Close() {}
+    [NoThrow] public int32 Read() { return Id; }
+}
+
+public unique struct WideTicket
+{
+    public int64 Signed;
+    public uint64 Unsigned;
+    [NoThrow] public WideTicket(int64 signed, uint64 unsigned)
+    {
+        Signed = signed;
+        Unsigned = unsigned;
+    }
+    [NoThrow] [Cleanup] public void Close() {}
+    [NoThrow] public bool Matches()
+    {
+        return Signed == int64.MinValue && Unsigned == uint64.MaxValue;
+    }
+}
+
+public int32 Consume(Ticket value) { return value.Id; }
+public Ticket Relay(Ticket value) { return move value; }
+public WideTicket RelayWide(WideTicket value) { return move value; }
+
+public int32 ConsumeWide(WideTicket value)
+{
+    if (value.Signed == int64.MinValue && value.Unsigned == uint64.MaxValue)
+    {
+        return 42;
+    }
+    return 0;
+}
+
+public WideTicket RelayLast(int32 a, int32 b, int32 c, int32 d, int32 e, WideTicket value)
+{
+    require a == 1 && b == 2 && c == 3 && d == 4 && e == 5;
+    return move value;
+}
+
+public bool TryTicket(bool success, out Ticket value)
+{
+    value = new Ticket(42);
+    require value.Id == 42 && value.Read() == 42;
+    Ticket staged = move value;
+    value = move staged;
+    require value.Id == 42;
+    return success;
+}
+
+public bool TryWide(bool success, int32 a, int32 b, int32 c, int32 d, out WideTicket value)
+{
+    require a == 1 && b == 2 && c == 3 && d == 4;
+    value = new WideTicket(int64.MinValue, uint64.MaxValue);
+    require value.Signed == int64.MinValue && value.Unsigned == uint64.MaxValue && value.Matches();
+    WideTicket staged = move value;
+    value = move staged;
+    require value.Matches();
+    return success;
+}
+
+public bool TryPartial(out Ticket first, out WideTicket second)
+{
+    first = new Ticket(42);
+    return false;
+}
+
+public bool CatchOutputFailure(out Ticket value)
+{
+    unsafe
+    {
+        try
+        {
+            value = new Ticket(42);
+            require false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+}
+
+Ticket FailTicket()
+{
+    require false;
+    return new Ticket(2);
+}
+
+int32 ConsumeTwo(Ticket first, Ticket second)
+{
+    return first.Id + second.Id;
+}
+
+public int32 LaterArgumentFailure()
+{
+    unsafe
+    {
+        try
+        {
+            return ConsumeTwo(new Ticket(1), FailTicket());
+        }
+        catch
+        {
+            return 42;
+        }
+    }
+}

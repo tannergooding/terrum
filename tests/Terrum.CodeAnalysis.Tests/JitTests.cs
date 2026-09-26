@@ -84,6 +84,8 @@ public sealed class JitTests
     [InlineData("int32 Main() { mut int32 value = 0; try { value = 1; } finally { try { value = 2; } finally { value = 42; } } return value; }", 42)]
     [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} [NoThrow] public int32 Read() { return Value; } } int32 Main() { Item item = new Item(42); return item.Read(); }", 42)]
     [InlineData("unique struct Item { public int64 Value; public int32 Tag; public Item(int64 value) { Value = value; Tag = 1; } [NoThrow] [Cleanup] public void Close() {} } Item Take() { Item item = new Item(42i64); return move item; } int32 Main() { Item item = Take(); return (int32)item.Value; }", 42)]
+    [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} } int32 Take(int32 a, int32 b, int32 c, int32 d, int32 e, Item item) { return item.Value; } int32 Main() { Item item = new Item(42); return Take(1, 2, 3, 4, 5, move item); }", 42)]
+    [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} } bool Fill(out Item item) { item = new Item(42); return true; } int32 Main() { require Fill(out var item); return item.Value; }", 42)]
     public async Task WorkerAndNativeExecutableAgreeAsync(string source, int expected)
     {
         AssertWindowsX64();
@@ -133,6 +135,10 @@ public sealed class JitTests
     [InlineData("int32 Main() { require false; return 0; }", unchecked((int)0xE0540003))]
     [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} [NoThrow] public int32 Read() { return Value; } } int32 Main() { mut Item item = new Item(42); unsafe { try { item = new Item(42 / 0); } catch { return item.Read(); } } return 0; }", 42)]
     [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} } int32 Main() { mut Item item = new Item(7); item = new Item(42); return item.Value; }", 42)]
+    [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} } bool Fill(bool accepted, out Item item) { item = new Item(42); return accepted; } int32 Main() { bool rejected = Fill(false, out var absent); if (rejected) { return 0; } require Fill(true, out var item); return item.Value; }", 42)]
+    [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} } void Take(Item first, int32 second) {} int32 Main() { unsafe { try { Take(new Item(7), 1 / 0); } catch { return 42; } } return 0; }", 42)]
+    [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} [NoThrow] public int32 Read() { return Value; } } bool Fill(out Item output) { output = new Item(42); return output.Value == 42 && output.Read() == 42; } int32 Main() { require Fill(out var item); return item.Value; }", 42)]
+    [InlineData("unique struct Item { public int32 A; public int32 B; public int32 C; public Item(int32 a) { A = a; B = a + 1; C = a + 2; } [NoThrow] [Cleanup] public void Close() {} [NoThrow] public int32 Read() { return C; } } bool Refill(out Item output) { output = new Item(7); Item moved = move output; output = new Item(40); return output.C == 42 && output.Read() == 42; } int32 Main() { require Refill(out var item); return item.C; }", 42)]
     public async Task CheckedExceptionWorkerAndExecutableAgreeAsync(string source, int expected)
     {
         AssertWindowsX64();

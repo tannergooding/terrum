@@ -1,6 +1,6 @@
 # Bounded semantic and native modules
 
-The version 12 `.trm` format records the selected native runtime policy and
+The version 13 `.trm` format records the selected native runtime policy and
 persists verified, typed, source-mapped structured IR,
 not source text or a native DLL. `CreateProducer` stores selected function bodies
 and exported contracts. `CreateConsumer` stores its own function bodies and the
@@ -200,6 +200,13 @@ cycles and resilient public layouts remain later work.
 
 Version 12 stores the unique layout flag, declared cleanup method, cleanup
 function contract, explicit move/receiver-loan nodes and lexical drop regions.
+Version 13 additionally stores ownership transfer markers on retained function
+declarations, conditional output drops and vacant `out var` owner declarations.
+The semantic profile is computed from retained layouts and declaration
+markers: native-13 requires an owning parameter or output; older native-12
+continues to describe unique locals/returns. Versions 10, 11 and 12 remain
+readable with their original layouts and contracts; a native package keeps
+container version 1 and its selected runtime policy is checked separately.
 A consumer importing a unique type must also import its exported NoThrow
 cleanup method. Its cleanup identity and Copy/unique distinction participate
 in layout and signature compatibility; a replacement implementation may

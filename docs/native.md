@@ -1,7 +1,8 @@
 # Windows x64 native profile
 
-`native-10` (explicit fail-fast), `native-11` (explicit checked exceptions)
-and `native-12` (compact unique values under either runtime policy)
+`native-10` (explicit fail-fast), `native-11` (explicit checked exceptions),
+`native-12` (compact unique locals/returns) and `native-13` (owned
+by-value arguments and conditional outputs, under either runtime policy)
 are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
@@ -117,16 +118,29 @@ NoThrow on its two comparison-only classification helpers.
 ## Compact unique owners
 
 `unique struct` supports primitive fields in the same 1..16-byte aligned layouts
-as Copy structs. `move name` transfers a live named local and leaves it
+as Copy structs. `move name` transfers a live named owner and leaves it
 vacant; a read or second move before reinitialization is rejected at branch
 and loop joins. Plain reads/copies of unique values, owning fields,
-owning parameters/outputs, discarded owning results, and owning temporaries
-used as receivers diagnose. Nested aggregate fields in a unique type also
+discarded owning results, and owning temporaries used as
+receivers diagnose. Nested aggregate fields in a unique type also
 remain unsupported. A unique-returning constructor/factory result
 can initialize a local or be returned; a return of a named owner needs
 `move`. Instance method calls borrow a named unique receiver synchronously
 by pointer; this profile permits readonly methods, not captured/stored loans
-or mutating receiver methods.
+or mutating receiver methods. By-value parameters consume an explicit named
+move or fresh result; the callee drops an unreturned owner on normal or
+checked exceptional exit. Earlier argument values remain caller-owned
+until all later arguments finish evaluating; an argument failure drops
+completed staged owners inside-out without starting the callee.
+
+Unique `bool`/`out` parameters use private scratch. A completed output is
+published only on true; false and checked exceptional exits drop it without
+making the caller destination readable. An existing output owner's cleanup
+occurs at invocation, after all argument evaluations. Successful `out var`
+owners gain a lexical drop region even though they were not introduced by
+an ordinary local initializer. Output fields are assigned as a complete
+owner; piecewise output construction remains unsupported. Neither these
+transfers nor the cleanup trace prove an allocator or real OS resource.
 
 `[NoThrow] [Cleanup]` on one public parameterless readonly `void` instance
 method declares that unique type's cleanup contract. The method name is
@@ -194,8 +208,9 @@ matching bounded native contract.
 
 ## Bounded checked-failure recovery
 
-`--runtime checked-exceptions` selects `native-11` for Copy-only programs
-and `native-12` for programs with compact unique values, without changing
+`--runtime checked-exceptions` selects `native-11` for Copy-only programs,
+`native-12` for compact unique locals/returns, and `native-13` where
+function declarations transfer ownership through parameters, without changing
 older fail-fast artifacts. `analyze` also accepts this option to check recovery without emitting
 an artifact; omission keeps its existing fail-fast profile. The reusable
 compilation API accepts the policy with single or multiple original snapshots,
@@ -461,6 +476,17 @@ at a trusted test boundary; they are not a general source interop facility.
 The script
 obtains function addresses from encoder ranges; the development executable
 does not advertise an exported native API.
+
+The separate checked-policy generated-DLL fixture
+(`dotnet run --file scripts\check-owned-call-abi.cs`) exercises unique
+direct/indirect by-value parameters and returns from an independent C caller,
+including hidden-result RAX storage identity and a sixth owning argument.
+It checks owning output stack placement, true-only publication, unchanged
+false/partial/caught-failure output bytes, guard storage, repeated calls,
+and caught later-argument failure. The C fixture's cleanup methods are empty;
+Host.Trace execution tests, not this ABI probe, establish cleanup order and
+exactly-once effects. This remains a bounded test boundary, not a general
+native interop or resource-release contract.
 
 Images prefer base `0x140000000`, with 4 KiB section alignment and 512-byte
 file alignment. `.text` is read/execute, `.idata` read/write and
