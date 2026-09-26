@@ -137,6 +137,10 @@ public static class SemanticVerifier
                 if (nested >= 0)
                 {
                     VerifyLayout(nested, depth + 1);
+                    if (program.Structures[nested].IsUnique || structure.IsUnique)
+                    {
+                        throw Invalid();
+                    }
                     height = Math.Max(height, layoutHeights[nested] + 1);
                 }
                 var width = ValueLayout.Size(field.Type, program.Structures);
@@ -216,6 +220,11 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                if (!function.IsStatic && !function.IsConstructor && program.Structures[declaringType].IsUnique
+                    && (function.Variables[0].IsMutable || function.Variables[0].IsOut))
+                {
+                    throw Invalid();
+                }
             }
             else if (function.IsConstructor || function.IsPrivate)
             {
@@ -225,6 +234,46 @@ public static class SemanticVerifier
                 || function.ReturnType != function.Variables[0].Type
                 || (int)function.ReturnType < 100
                 || function.ParameterCount >= function.Variables.Length))
+            {
+                throw Invalid();
+            }
+            if (function.IsCleanup && (function.DeclaringStruct is null || function.IsConstructor
+                || function.IsStatic || function.IsPrivate || function.IsInternal || !function.IsNoThrow
+                || function.DoesNotReturn || function.ReturnType != PrimitiveType.Void
+                || function.ParameterCount != 1 || function.Variables[0].IsMutable))
+            {
+                throw Invalid();
+            }
+            if (function.IsCleanup && (function.Variables.IsEmpty
+                || !IsUnique(program, function.Variables[0].Type)
+                || program.Structures[(int)function.Variables[0].Type - 100].CleanupMethod != function.Name))
+            {
+                throw Invalid();
+            }
+            for (var variableIndex = 0; variableIndex < function.ParameterCount; variableIndex++)
+            {
+                if (IsUnique(program, function.Variables[variableIndex].Type)
+                    && (variableIndex != 0 || function.DeclaringStruct is null || function.IsStatic))
+                {
+                    throw Invalid();
+                }
+            }
+        }
+        foreach (var structure in program.Structures)
+        {
+            if (structure.CleanupMethod is not string cleanup)
+            {
+                continue;
+            }
+            var matches = 0;
+            foreach (var function in program.Functions)
+            {
+                if (function.Name == cleanup && function.IsCleanup && function.DeclaringStruct == structure.Name)
+                {
+                    matches++;
+                }
+            }
+            if (!structure.IsUnique || matches != 1)
             {
                 throw Invalid();
             }
@@ -272,6 +321,7 @@ public static class SemanticVerifier
             var declarations = new HashSet<int>();
             try
             {
+                VerifyOwnerScopes(function.Body, function, program);
                 var returns = Statement(function.Body, initialized, fieldMasks, declarations, function, program, ref remaining, 0);
                 if (function.DoesNotReturn && !returns)
                 {
@@ -294,6 +344,100 @@ public static class SemanticVerifier
                 exception.Data[FunctionIndexKey] = functionIndex;
                 throw;
             }
+        }
+    }
+
+    [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Leaf nodes have no ownership scope children.")]
+    private static void VerifyOwnerScopes(BoundBlock body, BoundFunction function, BoundProgram program)
+    {
+        var owners = new HashSet<BoundLocal>(ReferenceEqualityComparer.Instance);
+        var allowed = new HashSet<BoundDrop>(ReferenceEqualityComparer.Instance);
+        var drops = new List<BoundDrop>();
+        var pending = new Stack<(BoundStatement Statement, int Depth)>();
+        pending.Push((body, 0));
+        var visits = MaximumAnalysisVisits;
+        while (pending.TryPop(out var item))
+        {
+            Count(ref visits, item.Depth);
+            switch (item.Statement)
+            {
+                case BoundBlock block:
+                    if (block.Statements.IsDefault)
+                    {
+                        throw Invalid();
+                    }
+                    for (var index = 0; index < block.Statements.Length; index++)
+                    {
+                        var child = block.Statements[index];
+                        if (child is BoundLocal local && local.Variable >= 0
+                            && local.Variable < function.Variables.Length
+                            && IsUnique(program, function.Variables[local.Variable].Type))
+                        {
+                            if (index + 1 >= block.Statements.Length
+                                || block.Statements[index + 1] is not BoundTryFinally region
+                                || (index + 2 != block.Statements.Length
+                                    && !(index + 3 == block.Statements.Length
+                                        && block.Statements[^1] is BoundReturn terminal
+                                        && ((function.ReturnType == PrimitiveType.Void && terminal.Value is null)
+                                            || (function.IsConstructor && terminal.Value is BoundRead { Variable: 0 }))))
+                                || region.Finally is not BoundBlock finallyBlock
+                                || finallyBlock.Statements is not [BoundDrop drop]
+                                || drop.Variable != local.Variable || !allowed.Add(drop)
+                                || !owners.Add(local))
+                            {
+                                throw Invalid(local.Span);
+                            }
+                        }
+                        pending.Push((child, item.Depth + 1));
+                    }
+                    break;
+                case BoundLocal local:
+                    if (local.Initializer is null
+                        || (IsUnique(program, local.Initializer.Type) && !owners.Remove(local)))
+                    {
+                        throw Invalid(local.Span);
+                    }
+                    break;
+                case BoundDrop drop:
+                    drops.Add(drop);
+                    break;
+                case BoundTryFinally region:
+                    pending.Push((region.Body, item.Depth + 1));
+                    pending.Push((region.Finally, item.Depth + 1));
+                    break;
+                case BoundTryCatch recovery:
+                    pending.Push((recovery.Body, item.Depth + 1));
+                    pending.Push((recovery.Catch, item.Depth + 1));
+                    if (recovery.Finally is not null)
+                    {
+                        pending.Push((recovery.Finally, item.Depth + 1));
+                    }
+                    break;
+                case BoundUnsafe unsafeBlock:
+                    pending.Push((unsafeBlock.Body, item.Depth + 1));
+                    break;
+                case BoundIf conditional:
+                    pending.Push((conditional.Then, item.Depth + 1));
+                    if (conditional.Else is not null)
+                    {
+                        pending.Push((conditional.Else, item.Depth + 1));
+                    }
+                    break;
+                case BoundWhile loop:
+                    pending.Push((loop.Body, item.Depth + 1));
+                    break;
+            }
+        }
+        foreach (var drop in drops)
+        {
+            if (!allowed.Remove(drop))
+            {
+                throw Invalid(drop.Span);
+            }
+        }
+        if (allowed.Count != 0 || owners.Count != 0)
+        {
+            throw Invalid();
         }
     }
 
@@ -366,6 +510,23 @@ public static class SemanticVerifier
                 {
                     fieldMasks[local.Variable] = FullMask(program, local.Initializer.Type);
                 }
+                return false;
+            case BoundDrop drop:
+                if (!inCleanup || drop.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                    || drop.Variable >= initialized.Length || !declarations.Contains(drop.Variable)
+                    || !IsUnique(program, function.Variables[drop.Variable].Type))
+                {
+                    throw Invalid(drop.Span);
+                }
+                var method = program.Structures[(int)function.Variables[drop.Variable].Type - 100].CleanupMethod;
+                if (method is null ? drop.CleanupFunction != -1
+                    : drop.CleanupFunction < 0 || drop.CleanupFunction >= program.Functions.Length
+                        || program.Functions[drop.CleanupFunction].Name != method)
+                {
+                    throw Invalid(drop.Span);
+                }
+                initialized[drop.Variable] = false;
+                fieldMasks[drop.Variable] = 0;
                 return false;
             case BoundAssignment assignment:
                 if (assignment.Variable < 0 || assignment.Variable >= initialized.Length
@@ -442,7 +603,7 @@ public static class SemanticVerifier
                     == FullMask(program, function.Variables[fieldAssignment.Variable].Type);
                 return false;
             case BoundBufferAssignment bufferWrite:
-                if (function.IsNoThrow)
+                if (function.IsNoThrow && !IsProvenBufferIndex(bufferWrite.Buffer, bufferWrite.Index, program))
                 {
                     throw InvalidEffect(bufferWrite.Span);
                 }
@@ -464,6 +625,10 @@ public static class SemanticVerifier
                 if (expressionStatement.Expression is not BoundCall statementCall)
                 {
                     throw Invalid();
+                }
+                if (IsUnique(program, statementCall.Type))
+                {
+                    throw InvalidEffect(expressionStatement.Span, "Ownership");
                 }
                 Expression(expressionStatement.Expression, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 return program.Functions[statementCall.Function].DoesNotReturn;
@@ -601,7 +766,22 @@ public static class SemanticVerifier
                 }
                 else
                 {
-                    Expression(result.Value, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                    if (function.IsConstructor && result.Value is not BoundRead { Variable: 0 })
+                    {
+                        throw Invalid(result.Span);
+                    }
+                    if (function.IsConstructor && IsUnique(program, function.ReturnType)
+                        && result.Value is BoundRead { Variable: 0 } receiver)
+                    {
+                        if (!initialized[0] || receiver.Type != function.ReturnType)
+                        {
+                            throw Invalid(result.Span);
+                        }
+                    }
+                    else
+                    {
+                        Expression(result.Value, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                    }
                     if (result.Value.Type != function.ReturnType)
                     {
                         throw Invalid();
@@ -915,7 +1095,22 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                if (fieldRead.Receiver is BoundRead partial && function.IsConstructor && partial.Variable == 0)
+                if (program.Structures[readType].IsUnique && fieldRead.Receiver is not BoundRead)
+                {
+                    throw InvalidEffect(fieldRead.Span, "Ownership");
+                }
+                if (fieldRead.Receiver is BoundRead owned && IsUnique(program, owned.Type))
+                {
+                    if (owned.Variable < 0 || owned.Variable >= initialized.Length
+                        || owned.Type != function.Variables[owned.Variable].Type
+                        || (!initialized[owned.Variable]
+                            && (!function.IsConstructor || owned.Variable != 0
+                                || (fieldMasks[0] & (1u << fieldRead.Field)) == 0)))
+                    {
+                        throw InvalidEffect(fieldRead.Span, "Ownership");
+                    }
+                }
+                else if (fieldRead.Receiver is BoundRead partial && function.IsConstructor && partial.Variable == 0)
                 {
                     if (partial.Type != function.Variables[0].Type || (fieldMasks[0] & (1u << fieldRead.Field)) == 0)
                     {
@@ -928,16 +1123,33 @@ public static class SemanticVerifier
                 }
                 break;
             case BoundRead read:
+                if (IsUnique(program, read.Type))
+                {
+                    throw InvalidEffect(read.Span, "Ownership");
+                }
                 if (read.Variable < 0 || read.Variable >= initialized.Length || !initialized[read.Variable]
                     || read.Type != function.Variables[read.Variable].Type)
                 {
                     throw Invalid(read.Span);
                 }
                 break;
+            case BoundMove move:
+                if (!IsUnique(program, move.Type) || move.Variable < function.ParameterCount
+                    + (function.IsConstructor ? 1 : 0) || move.Variable >= initialized.Length
+                    || !initialized[move.Variable] || move.Type != function.Variables[move.Variable].Type
+                    || !declarations.Contains(move.Variable))
+                {
+                    throw InvalidEffect(move.Span, "Ownership");
+                }
+                initialized[move.Variable] = false;
+                fieldMasks[move.Variable] = 0;
+                break;
+            case BoundReceiverLoan loan:
+                throw InvalidEffect(loan.Span, "Ownership");
             case BoundOutArgument:
                 throw Invalid();
             case BoundBufferRead bufferRead:
-                if (function.IsNoThrow)
+                if (function.IsNoThrow && !IsProvenBufferIndex(bufferRead.Buffer, bufferRead.Index, program))
                 {
                     throw InvalidEffect(bufferRead.Span);
                 }
@@ -1047,6 +1259,10 @@ public static class SemanticVerifier
                     throw Limit();
                 }
                 var target = program.Functions[call.Function];
+                if (target.IsCleanup)
+                {
+                    throw InvalidEffect(call.Span, "Ownership");
+                }
                 if (function.IsNoThrow && !target.IsNoThrow)
                 {
                     throw InvalidEffect(call.Span);
@@ -1083,7 +1299,25 @@ public static class SemanticVerifier
                     }
                     else
                     {
-                        Expression(argument, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                        if (argument is BoundReceiverLoan loan)
+                        {
+                            if (i != 0 || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
+                                || loan.Variable < 0 || loan.Variable >= initialized.Length
+                                || loan.Type != target.Variables[0].Type || !IsUnique(program, loan.Type)
+                                || !initialized[loan.Variable]
+                                || function.Variables[loan.Variable].Type != loan.Type)
+                            {
+                                throw InvalidEffect(loan.Span, "Ownership");
+                            }
+                        }
+                        else
+                        {
+                            if (IsUnique(program, argument.Type))
+                            {
+                                throw InvalidEffect(argument.Span, "Ownership");
+                            }
+                            Expression(argument, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                        }
                     }
                     if (argument.Type != target.Variables[i + (target.IsConstructor ? 1 : 0)].Type)
                     {
@@ -1109,6 +1343,15 @@ public static class SemanticVerifier
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool
             || (allowVoid && type == PrimitiveType.Void)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length);
+
+    private static bool IsUnique(BoundProgram program, PrimitiveType type) =>
+        (int)type >= 100 && (int)type - 100 < program.Structures.Length
+            && program.Structures[(int)type - 100].IsUnique;
+
+    private static bool IsProvenBufferIndex(int buffer, BoundExpression index, BoundProgram program) =>
+        buffer >= 0 && buffer < program.Buffers.Length
+            && index is BoundConstant { Type: PrimitiveType.Int32 } constant
+            && constant.Value >= 0 && constant.Value < program.Buffers[buffer].Values.Length;
 
     private static bool IsTotalConversion(PrimitiveType source, PrimitiveType destination) =>
         source == destination || source == PrimitiveType.Char16
@@ -1231,7 +1474,10 @@ public static class SemanticVerifier
                 break;
             case BoundConstant:
             case BoundRead:
+            case BoundReceiverLoan:
                 break;
+            case BoundMove:
+                throw InvalidEffect(expression.Span, "Ownership");
             default:
                 throw Invalid();
         }

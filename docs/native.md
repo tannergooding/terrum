@@ -1,6 +1,7 @@
 # Windows x64 native profile
 
-`native-10` (explicit fail-fast) and `native-11` (explicit checked exceptions)
+`native-10` (explicit fail-fast), `native-11` (explicit checked exceptions)
+and `native-12` (compact unique values under either runtime policy)
 are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
@@ -98,8 +99,11 @@ complement, and calls to other NoThrow declarations. Numeric casts are total
 for identity conversions, `char16` to the supported integers, `int32` to `int64`,
 and `uint32` to `int64`/`uint64`. Negation of a constant operand is accepted
 when its result is representable, including ordinary negative literals.
-Other conversions, checked arithmetic and general negation
-and host-buffer accesses remain potentially throwing. A `require` needs a
+Other conversions, checked arithmetic, general negation and host-buffer
+accesses without a statically constant, proven in-range index remain
+potentially throwing. The proof uses the exact immutable host-buffer grant
+and its element type/read-write capability; it does not authorize unchecked
+pointers or treat fail-fast as NoThrow. A `require` needs a
 boolean condition whose false outcome is statically impossible. There is no
 numeric range or user-invariant inference; unreachable operations are still
 checked conservatively. NoThrow says nothing about termination or fatal
@@ -109,6 +113,33 @@ The [no-throw sample](../samples/native/no-throw.terrum) returns 42 through
 checked constructors, methods, widening conversion and conditional output
 publication, using the same AOT/JIT encoder. `CharacterFacts` publishes
 NoThrow on its two comparison-only classification helpers.
+
+## Compact unique owners
+
+`unique struct` supports primitive fields in the same 1..16-byte aligned layouts
+as Copy structs. `move name` transfers a live named local and leaves it
+vacant; a read or second move before reinitialization is rejected at branch
+and loop joins. Plain reads/copies of unique values, owning fields,
+owning parameters/outputs, discarded owning results, and owning temporaries
+used as receivers diagnose. Nested aggregate fields in a unique type also
+remain unsupported. A unique-returning constructor/factory result
+can initialize a local or be returned; a return of a named owner needs
+`move`. Instance method calls borrow a named unique receiver synchronously
+by pointer; this profile permits readonly methods, not captured/stored loans
+or mutating receiver methods.
+
+`[NoThrow] [Cleanup]` on one public parameterless readonly `void` instance
+method declares that unique type's cleanup contract. The method name is
+unimportant; ordinary Copy structs cannot declare cleanup. It cannot be
+called directly. The owner enters a structured cleanup region only after
+its initializer completes. A frame-local live bit conditions its cleanup
+on normal fallthrough, return and checked-exception unwind, inside-out.
+Moving clears that bit; assignment builds a replacement in separate frame
+storage before dropping the old owner. Pending return values and replacement
+storage never overlap cleanup-call spills. Fail-fast termination still does
+not unwind. No native allocator, owning field graph, real OS-resource
+release or GC is implied by this proof. The [sample](../samples/native/unique-owner.terrum)
+exercises checked recovery with a still-live owner.
 
 ## Checked normal-continuation contracts
 
@@ -163,8 +194,9 @@ matching bounded native contract.
 
 ## Bounded checked-failure recovery
 
-`--runtime checked-exceptions` selects `native-11` without changing fail-fast
-artifacts. `analyze` also accepts this option to check recovery without emitting
+`--runtime checked-exceptions` selects `native-11` for Copy-only programs
+and `native-12` for programs with compact unique values, without changing
+older fail-fast artifacts. `analyze` also accepts this option to check recovery without emitting
 an artifact; omission keeps its existing fail-fast profile. The reusable
 compilation API accepts the policy with single or multiple original snapshots,
 including explicit host-buffer grants. Only compiler-generated arithmetic/conversion, division-zero,
@@ -402,6 +434,12 @@ backend storage, not language pointers, escaping borrows or shared mutable
 references. Outputs use separate exact-size publication into the caller's
 storage only on a true return.
 
+Unique instance receiver loans are an exception to by-value aggregate passing:
+they always pass a pointer to the live readonly owner, including 4- and 8-byte
+owners. Cleanup instead consumes its receiver through the aggregate value ABI.
+The receiver-loan ABI composes with a hidden result pointer and stack arguments;
+it neither transfers ownership nor makes the owner copyable.
+
 The independent ABI fixture uses a C caller, rather than validating calls only
 by having Terrum call itself. From an x64 Visual Studio developer shell at the
 repository root:
@@ -416,6 +454,11 @@ It checks flat and nested direct and indirect aggregates passed/returned by valu
 hidden results and register/stack arguments, true/false output publication, guard storage
 around scalar and aggregate output destinations, and narrow
 arguments with deliberately unspecified upper register bits. The script
+also checks readonly unique receivers of 4, 8 and 16 bytes, preserved caller
+storage, and a borrowed receiver combined with an indirect result and five
+explicit arguments. These C fixtures provide initialized primitive payloads
+at a trusted test boundary; they are not a general source interop facility.
+The script
 obtains function addresses from encoder ranges; the development executable
 does not advertise an exported native API.
 
@@ -434,8 +477,8 @@ loader probe reserves that address, loads two images concurrently, and calls
 their RVA-addressed functions. It also observes ordinary executable image
 bases through Windows debug events, checking successful and fail-fast exits
 after relocation.
-This remains a single-image executable artifact, not a DLL export surface,
-module hot-swap mechanism or general-purpose loader.
+This RVA-based executable probe is not a module hot-swap mechanism or
+general-purpose loader; separately deployed images use the DLL/package APIs.
 
 PE layout, relative code/import fixups and unwind records are target-specific.
 The same encoder's `NativeCode` result is consumed by both PE layout and the
@@ -445,7 +488,7 @@ contracts, supports source binding against artifact declarations, verifies repla
 then lowers at process start. Producer libraries need no artificial entry point;
 unresolved imported declarations cannot reach the encoder. Static AOT
 linking from these artifacts is separate from replacement of an unchanged PE.
-There is no optimizer, debug-symbol format, native export/import API, managed
+There is no optimizer, debug-symbol format, general source interop, managed
 root map, production runtime or hot replacement. The broader LMOD design
 remains separate from both PE and any optional CIL representation.
 

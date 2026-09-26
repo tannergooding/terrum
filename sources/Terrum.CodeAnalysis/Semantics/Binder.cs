@@ -116,7 +116,9 @@ internal sealed class Binder
                 }
                 _signatures.Add(new Signature(function.Name, function.ReturnType, parameters.ToImmutable(),
                     null, null, _trees[0], function.DeclaringStruct, function.IsConstructor,
-                    false, false, false, function.IsStatic, function.IsNoThrow, function.DoesNotReturn, function));
+                    false, false, false, function.IsStatic, function.IsNoThrow, function.DoesNotReturn, function) {
+                    IsCleanup = function.IsCleanup,
+                });
             }
         }
         foreach (var tree in _trees)
@@ -303,6 +305,7 @@ internal sealed class Binder
                 IsInternal = signature.IsInternal,
                 IsStatic = signature.IsStatic,
                 IsNoThrow = signature.IsNoThrow,
+                IsCleanup = signature.IsCleanup,
                 DoesNotReturn = signature.DoesNotReturn,
                 DeclaringStruct = signature.StructName is null ? null
                    : (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".") + signature.StructName,
@@ -329,6 +332,7 @@ internal sealed class Binder
                 "FinallyNoReturn" => ("TRM3020", "Potentially nonreturning finally cleanup is unsupported in this bounded profile."),
                 "UnsafeRecovery" => ("TRM3021", "Checked failure recovery requires an unsafe block."),
                 "CheckedPolicy" => ("TRM3022", "Recovery requires the checked-exceptions runtime policy."),
+                "Ownership" => ("TRM3023", "A unique value must be moved from a live named owner; copies, vacant reads, and escaping receiver loans are not allowed."),
                 _ => ("TRM3016", exceededWorkLimit
                     ? "Source exceeds the semantic verification work limit."
                     : "Source violates definite assignment, initialization, or executable type rules."),
@@ -375,6 +379,7 @@ internal sealed class Binder
         var name = StructName(declaration);
         var qualified = string.IsNullOrEmpty(_namespace) ? name.Text : _namespace + "." + name.Text;
         var isPublic = false;
+        var isUnique = false;
         var visibilityCount = 0;
         foreach (var element in declaration.Children)
         {
@@ -385,6 +390,7 @@ internal sealed class Binder
             if (element is SyntaxTokenElement modifier)
             {
                 isPublic |= modifier.Token.Kind == TokenKind.PublicKeyword;
+                isUnique |= modifier.Token.Kind == TokenKind.UniqueKeyword;
                 visibilityCount += modifier.Token.Kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword or TokenKind.PrivateKeyword ? 1 : 0;
                 if (modifier.Token.Kind is TokenKind.PrivateKeyword or TokenKind.StaticKeyword or TokenKind.MutKeyword)
                 {
@@ -417,6 +423,11 @@ internal sealed class Binder
             {
                 DeclareStruct((int)type - 100);
                 SetContext(tree);
+            }
+            if ((int)type >= 100 && (int)type - 100 < _structs.Count
+                && (_structs[(int)type - 100].IsUnique || isUnique))
+            {
+                Report("TRM3023", "Unique types require primitive fields and cannot be stored in other structs in this ownership profile.", field.Span);
             }
             var width = ValueLayout.Size(type, _structs);
             var fieldAlignment = width == 0 ? 1 : ValueLayout.Alignment(type, _structs);
@@ -478,7 +489,10 @@ internal sealed class Binder
         {
             Report("TRM3005", "A struct must have a naturally aligned size from 1 through 16 bytes.", declaration.Span);
         }
-        _structs[index] = new BoundStruct(qualified, fields.ToImmutable(), size) { IsInternal = !isPublic };
+        _structs[index] = new BoundStruct(qualified, fields.ToImmutable(), size) {
+            IsInternal = !isPublic,
+            IsUnique = isUnique,
+        };
         _ = _layingOut.Remove(index);
         _ = _laidOut.Add(index);
     }
@@ -504,6 +518,7 @@ internal sealed class Binder
         var isInternal = false;
         var isStatic = false;
         var isNoThrow = false;
+        var isCleanup = false;
         var doesNotReturn = false;
         var accessModifiers = 0;
         for (var index = 0; index < modifierCount; index++)
@@ -518,9 +533,13 @@ internal sealed class Binder
                 {
                     doesNotReturn = true;
                 }
+                else if (attribute.Children[1] is SyntaxTokenElement { Token.Text: "Cleanup" } && !isCleanup)
+                {
+                    isCleanup = true;
+                }
                 else
                 {
-                    Report("TRM3001", "Only distinct parameterless NoThrow and DoesNotReturn contracts are supported.", attribute.Span);
+                    Report("TRM3001", "Only distinct parameterless NoThrow, DoesNotReturn, and Cleanup contracts are supported.", attribute.Span);
                 }
                 continue;
             }
@@ -563,6 +582,22 @@ internal sealed class Binder
         var parameters = (SyntaxNode)declaration.Children[^2];
         var body = (SyntaxNode)declaration.Children[^1];
         var returnType = constructor ? ResolveStruct(containingType!) : BindType(returnNode!, allowVoid: true);
+        if (isCleanup)
+        {
+            var structure = containingType is null ? null : _structs[(int)ResolveStruct(containingType) - 100];
+            if (structure is null || !structure.IsUnique || isStatic || constructor || isMutable || !isNoThrow
+                || returnType != PrimitiveType.Void || parameters.Children.Length != 2
+                || structure.CleanupMethod is not null || isPrivate || isInternal)
+            {
+                Report("TRM3023", "Cleanup requires one public, NoThrow, nonmutating, parameterless instance method on a unique struct.", declaration.Span);
+            }
+            else
+            {
+                _structs[(int)ResolveStruct(containingType!) - 100] = structure with {
+                    CleanupMethod = structure.Name + "." + nameToken.Text,
+                };
+            }
+        }
         if (doesNotReturn && returnType != PrimitiveType.Void)
         {
             Report("TRM3018", "DoesNotReturn requires a void function.", declaration.Span);
@@ -599,6 +634,10 @@ internal sealed class Binder
             }
 
             declared.Add(new Parameter(token.Text, type, token.Span, isOut));
+            if ((int)type >= 100 && _structs[(int)type - 100].IsUnique)
+            {
+                Report("TRM3023", "Unique value parameters and owning outputs are not yet supported.", parameter.Span);
+            }
         }
 
         var qualifiedName = (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".")
@@ -610,7 +649,9 @@ internal sealed class Binder
         }
 
         _signatures.Add(new Signature(qualifiedName, returnType, declared.ToImmutable(), body, declaration, _tree,
-            containingType, constructor, isPrivate, isInternal, isMutable, isStatic, isNoThrow, doesNotReturn));
+            containingType, constructor, isPrivate, isInternal, isMutable, isStatic, isNoThrow, doesNotReturn) {
+            IsCleanup = isCleanup,
+        });
     }
 
     private PrimitiveType BindType(SyntaxNode node, bool allowVoid)
@@ -637,6 +678,25 @@ internal sealed class Binder
 
     private PrimitiveType ResolveStruct(string name) =>
         TryResolveStruct(name, out var type) ? type : PrimitiveType.Int32;
+
+    private bool IsUnique(PrimitiveType type) =>
+        (int)type >= 100 && (int)type - 100 < _structs.Count && _structs[(int)type - 100].IsUnique;
+
+    private BoundExpression BindReceiverLoan(SyntaxNode receiver, PrimitiveType type)
+    {
+        while (receiver.Kind == SyntaxKind.ParenthesizedExpression)
+        {
+            receiver = (SyntaxNode)receiver.Children[1];
+        }
+        if (receiver.Kind == SyntaxKind.NameExpression
+            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token.Text, out var slot)
+            && _variables[slot].Type == type)
+        {
+            return new BoundReceiverLoan(slot, type, receiver.Span);
+        }
+        Report("TRM3023", "A unique receiver loan requires a named local; temporary receivers cannot escape cleanup.", receiver.Span);
+        return ErrorExpression(receiver.Span);
+    }
 
     private bool TryResolveStruct(string name, out PrimitiveType type)
     {
@@ -683,7 +743,21 @@ internal sealed class Binder
         }
 
         _scopes.RemoveAt(_scopes.Count - 1);
-        return new BoundBlock(statements.ToImmutable(), block.Span);
+        var bound = statements.ToImmutable();
+        for (var index = bound.Length - 1; index >= 0; index--)
+        {
+            if (bound[index] is not BoundLocal local || !IsUnique(local.Initializer.Type))
+            {
+                continue;
+            }
+            var method = _structs[(int)local.Initializer.Type - 100].CleanupMethod;
+            var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
+            bound = bound[..(index + 1)].Add(new BoundTryFinally(
+                new BoundBlock(bound[(index + 1)..], block.Span),
+                new BoundBlock([new BoundDrop(local.Variable, cleanupFunction, block.Span)], block.Span),
+                block.Span));
+        }
+        return new BoundBlock(bound, block.Span);
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unsupported syntax kinds are rejected by the default branch.")]
@@ -883,8 +957,18 @@ internal sealed class Binder
                 var body = BindBlock((SyntaxNode)node.Children[8]);
                 _scopes.RemoveAt(_scopes.Count - 1);
                 var loopBody = new BoundBlock([body, iterator], node.Span);
-
-                return new BoundBlock([initializer, new BoundWhile(condition, loopBody, node.Span)], node.Span);
+                var loop = new BoundWhile(condition, loopBody, node.Span);
+                if (initializer is BoundLocal owner && IsUnique(_variables[owner.Variable].Type))
+                {
+                    var method = _structs[(int)_variables[owner.Variable].Type - 100].CleanupMethod;
+                    var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
+                    return new BoundBlock([
+                        initializer,
+                        new BoundTryFinally(new BoundBlock([loop], node.Span),
+                            new BoundBlock([new BoundDrop(owner.Variable, cleanupFunction, node.Span)], node.Span), node.Span),
+                    ], node.Span);
+                }
+                return new BoundBlock([initializer, loop], node.Span);
             }
 
             default:
@@ -1088,6 +1172,25 @@ internal sealed class Binder
             {
                 var op = ((SyntaxTokenElement)node.Children[0]).Token;
                 var operandNode = (SyntaxNode)node.Children[1];
+                if (op.Kind == TokenKind.MoveKeyword)
+                {
+                    while (operandNode.Kind == SyntaxKind.ParenthesizedExpression)
+                    {
+                        operandNode = (SyntaxNode)operandNode.Children[1];
+                    }
+                    if (operandNode.Kind == SyntaxKind.NameExpression
+                        && TryFindVariable(((SyntaxTokenElement)operandNode.Children[0]).Token.Text, out var owner)
+                        && IsUnique(_variables[owner].Type) && (!_constructor || owner != 0))
+                    {
+                        expression = new BoundMove(owner, _variables[owner].Type, node.Span);
+                    }
+                    else
+                    {
+                        Report("TRM3023", "Move requires a named unique local; a constructor receiver cannot move.", node.Span);
+                        expression = ErrorExpression(node.Span);
+                    }
+                    break;
+                }
                 var operandType = op.Kind == TokenKind.Bang ? PrimitiveType.Bool
                     : KnownType(operandNode) ?? expected ?? PrimitiveType.Int32;
 
@@ -1327,14 +1430,20 @@ internal sealed class Binder
         var receiverCount = 0;
         if (receiver is not null && signature is not null)
         {
-            bound.Add(BindExpression(receiver, ResolveStruct(signature.StructName!)));
+            var receiverType = ResolveStruct(signature.StructName!);
+            bound.Add(IsUnique(receiverType) && !signature.IsCleanup
+                ? BindReceiverLoan(receiver, receiverType)
+                : BindExpression(receiver, receiverType));
             receiverCount = 1;
         }
         else if (signature is { StructName: not null, IsStatic: false, IsConstructor: false })
         {
             if (_currentStruct == signature.StructName && _variables.Count > 0 && _variables[0].Name == "this")
             {
-                bound.Add(new BoundRead(0, ResolveStruct(signature.StructName), node.Span));
+                var receiverType = ResolveStruct(signature.StructName);
+                bound.Add(IsUnique(receiverType) && !signature.IsCleanup
+                    ? new BoundReceiverLoan(0, receiverType, node.Span)
+                    : new BoundRead(0, receiverType, node.Span));
                 receiverCount = 1;
             }
             else
@@ -1404,6 +1513,10 @@ internal sealed class Binder
 
         if (signature is not null)
         {
+            if (signature.IsCleanup)
+            {
+                Report("TRM3023", "Cleanup methods are called only by lexical owner cleanup.", node.Span);
+            }
             var supplied = bound.Count - receiverCount;
             if (signature.Parameters.Length != supplied)
             {
@@ -1776,5 +1889,8 @@ internal sealed class Binder
 
     private sealed record Signature(string Name, PrimitiveType ReturnType, ImmutableArray<Parameter> Parameters,
         SyntaxNode? Body, SyntaxNode? Declaration, SyntaxTree Tree, string? StructName, bool IsConstructor, bool IsPrivate,
-        bool IsInternal, bool IsMutable, bool IsStatic, bool IsNoThrow, bool DoesNotReturn, BoundFunction? External = null);
+        bool IsInternal, bool IsMutable, bool IsStatic, bool IsNoThrow, bool DoesNotReturn, BoundFunction? External = null)
+    {
+        internal bool IsCleanup { get; init; }
+    }
 }

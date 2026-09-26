@@ -57,6 +57,12 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 /// <summary>A compact value type of at most sixteen bytes, with no references or aliases.</summary>
 public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> Fields, int Size)
 {
+    /// <summary>Whether a value has one noncopyable owner.</summary>
+    public bool IsUnique { get; init; }
+
+    /// <summary>The declared NoThrow instance cleanup method, if any.</summary>
+    public string? CleanupMethod { get; init; }
+
     /// <summary>Whether access is limited to its declaring scope.</summary>
     public bool IsPrivate { get; init; }
 
@@ -87,6 +93,9 @@ public sealed record BoundStructField(string Name, PrimitiveType Type, int Offse
 public sealed record BoundFunction(string Name, PrimitiveType ReturnType, ImmutableArray<BoundVariable> Variables,
     int ParameterCount, BoundBlock Body, TextSpan Span)
 {
+    /// <summary>Whether this method consumes its unique receiver during lexical cleanup.</summary>
+    public bool IsCleanup { get; init; }
+
     /// <summary>Whether the declaration guarantees no language-level throwing effects; implementations must prove this bound.</summary>
     public bool IsNoThrow { get; init; }
 
@@ -175,6 +184,9 @@ public sealed record BoundWhile(BoundExpression Condition, BoundStatement Body, 
 /// <summary>A cleanup region for normal exits and checked exceptional unwinding, but not fail-fast termination.</summary>
 public sealed record BoundTryFinally(BoundBlock Body, BoundBlock Finally, TextSpan Span) : BoundStatement(Span);
 
+/// <summary>Ends a lexical unique owner if it remains live; a moved owner is vacant.</summary>
+public sealed record BoundDrop(int Variable, int CleanupFunction, TextSpan Span) : BoundStatement(Span);
+
 /// <summary>An explicit unsafe source context; only checked failures from its nested recovery regions can be caught.</summary>
 public sealed record BoundUnsafe(BoundBlock Body, TextSpan Span) : BoundStatement(Span);
 
@@ -207,6 +219,12 @@ public sealed record BoundConstant(long Value, PrimitiveType Type, TextSpan Span
 /// <param name="Type">The slot type.</param>
 /// <param name="Span">The source range.</param>
 public sealed record BoundRead(int Variable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
+/// <summary>Transfers a named unique owner and vacates its source.</summary>
+public sealed record BoundMove(int Variable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
+/// <summary>A synchronous, nonescaping receiver loan; never a source value.</summary>
+public sealed record BoundReceiverLoan(int Variable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
 /// <summary>A checked unary operation.</summary>
 /// <param name="Operator">The operator token.</param>

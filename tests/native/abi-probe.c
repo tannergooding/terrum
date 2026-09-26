@@ -53,6 +53,13 @@ typedef struct WideIntegerPair { int64_t Signed; uint64_t Unsigned; } WideIntege
 typedef WideIntegerPair (*MakeWideIntegerPair)(int64_t, uint64_t);
 typedef int32_t (*ReadWideIntegerPair)(WideIntegerPair, int64_t, int64_t, int64_t, int64_t);
 typedef uint8_t (*TryWideIntegerPair)(uint8_t, WideIntegerPair*);
+typedef struct SmallOwner { int32_t Value; } SmallOwner;
+typedef struct WordOwner { uint64_t Value; } WordOwner;
+typedef struct LargeOwner { int64_t Signed; uint64_t Unsigned; } LargeOwner;
+typedef int32_t (*ReadSmallOwner)(const SmallOwner*);
+typedef uint64_t (*ReadWordOwner)(const WordOwner*);
+typedef uint64_t (*ReadLargeOwner)(const LargeOwner*);
+typedef WideIntegerPair (*PackSmallOwner)(const SmallOwner*, int64_t, int64_t, int64_t, uint64_t, uint64_t);
 extern int32_t CallWithCarrier(const void*, uint64_t);
 
 // Exercise the machine ABI directly: RCX is the hidden result pointer and RAX returns it.
@@ -100,7 +107,7 @@ static int CheckWideIntegerReturn(const void* function)
 // table. Loading an EXE as a library does not execute its process entrypoint.
 int main(int argc, char** argv)
 {
-    if (argc != 36)
+    if (argc != 40)
     {
         return 90;
     }
@@ -300,6 +307,24 @@ int main(int argc, char** argv)
         || guardedInteger[1].Signed != INT64_MIN || guardedInteger[1].Unsigned != UINT64_MAX)
     {
         result = 110;
+    }
+
+    ReadSmallOwner readSmallOwner = (ReadSmallOwner)((uint8_t*)image + strtoul(argv[36], NULL, 10));
+    ReadWordOwner readWordOwner = (ReadWordOwner)((uint8_t*)image + strtoul(argv[37], NULL, 10));
+    ReadLargeOwner readLargeOwner = (ReadLargeOwner)((uint8_t*)image + strtoul(argv[38], NULL, 10));
+    PackSmallOwner packSmallOwner = (PackSmallOwner)((uint8_t*)image + strtoul(argv[39], NULL, 10));
+    SmallOwner smallOwners[3] = {{-1}, {42}, {-2}};
+    WordOwner wordOwner = {UINT64_MAX};
+    LargeOwner largeOwner = {INT64_MIN, UINT64_MAX};
+    WideIntegerPair packed = packSmallOwner(&smallOwners[1], -INT64_C(4294967296), INT64_C(4294967296),
+        42, UINT64_MAX - 42, 42);
+    if (sizeof(SmallOwner) != 4 || sizeof(WordOwner) != 8 || sizeof(LargeOwner) != 16
+        || readSmallOwner(&smallOwners[1]) != 42 || readWordOwner(&wordOwner) != UINT64_MAX
+        || readLargeOwner(&largeOwner) != UINT64_MAX || packed.Signed != 84 || packed.Unsigned != UINT64_MAX
+        || smallOwners[0].Value != -1 || smallOwners[1].Value != 42 || smallOwners[2].Value != -2
+        || wordOwner.Value != UINT64_MAX || largeOwner.Signed != INT64_MIN || largeOwner.Unsigned != UINT64_MAX)
+    {
+        result = 111;
     }
 
     if (!FreeLibrary(image))

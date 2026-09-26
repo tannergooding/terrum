@@ -21,6 +21,13 @@ public sealed class Compilation
     /// <summary>The version of the supported executable semantic profile.</summary>
     public const string ProfileVersion = "native-10";
 
+    /// <summary>Resolves the checked-failure and compact-ownership semantic profile.</summary>
+    public static string GetNativeProfileVersion(BoundRuntimePolicy policy, bool uniqueValues) => policy switch {
+        BoundRuntimePolicy.FailFast => uniqueValues ? "native-12" : ProfileVersion,
+        BoundRuntimePolicy.CheckedExceptions => uniqueValues ? "native-12" : "native-11",
+        _ => throw new ArgumentOutOfRangeException(nameof(policy)),
+    };
+
     private Compilation(SyntaxTree syntaxTree, ImmutableArray<Diagnostic> diagnostics, BoundProgram? program,
         ImmutableArray<SyntaxTree> syntaxTrees = default, ImmutableArray<SourceDiagnostic> sourceDiagnostics = default)
     {
@@ -54,6 +61,26 @@ public sealed class Compilation
 
     /// <summary>Gets the verified program, or null on error. Libraries and programs with external declarations require linking.</summary>
     public BoundProgram? Program { get; }
+
+    /// <summary>Gets the native semantic profile of a successful compilation, including its ownership ABI.</summary>
+    public string? NativeProfileVersion
+    {
+        get
+        {
+            if (Program is not BoundProgram program)
+            {
+                return null;
+            }
+            foreach (var structure in program.Structures)
+            {
+                if (structure.IsUnique)
+                {
+                    return GetNativeProfileVersion(program.RuntimePolicy, uniqueValues: true);
+                }
+            }
+            return GetNativeProfileVersion(program.RuntimePolicy, uniqueValues: false);
+        }
+    }
 
     /// <summary>Gets whether the compilation contains errors.</summary>
     public bool HasErrors

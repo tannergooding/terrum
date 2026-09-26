@@ -37,6 +37,28 @@ public sealed partial class CliTests
     }
 
     [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task AnalyzeReportsCompactUniqueProfileAsync(string policy)
+    {
+        const string Source = """
+            unique struct Token {
+                public int32 Id;
+                public Token() { Id = 42; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            int32 Main() { Token value = new Token(); return value.Id; }
+            """;
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
+            "analyze", "-", "--runtime", policy, "--json");
+        Assert.Equal(0, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        Assert.Equal("native-12", document.RootElement.GetProperty("profile").GetString());
+        Assert.Equal(policy, document.RootElement.GetProperty("runtimePolicy").GetString());
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ModulePolicyIsNotReadFromAnOptionLikeSourceOperandAsync(bool native)

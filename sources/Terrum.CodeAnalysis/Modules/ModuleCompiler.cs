@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public static class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
-    private const int Version = 11;
+    private const int Version = 12;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -60,6 +60,20 @@ public static class ModuleCompiler
             }
         }
         return [.. imports.Order(StringComparer.Ordinal)];
+    }
+
+    /// <summary>Reads the native semantic profile of a persisted module, including its retained value contracts.</summary>
+    /// <param name="artifact">The bounded semantic module bytes.</param>
+    /// <param name="isConsumer">Whether a consumer rather than a producer artifact is expected.</param>
+    /// <returns>The native semantic profile recorded and checked against the module's layouts.</returns>
+    public static string GetNativeProfileVersion(byte[] artifact, bool isConsumer) =>
+        ReadNativeProfile(artifact, isConsumer).Profile;
+
+    internal static (string Profile, BoundRuntimePolicy RuntimePolicy) ReadNativeProfile(byte[] artifact, bool isConsumer)
+    {
+        var module = Read(artifact, isConsumer);
+        return (Compilation.GetNativeProfileVersion(module.RuntimePolicy,
+            module.Structures.Any(static structure => structure.IsUnique)), module.RuntimePolicy);
     }
 
     private static BoundFunction Declaration(BoundFunction function) => function with {
@@ -174,6 +188,15 @@ public static class ModuleCompiler
         if (indexes.Any(index => !Exportable(program.Functions[index], program.Structures)))
         {
             throw new ModuleContractException("Producer exports must have public declarations and public value layouts.");
+        }
+        var exportedTypes = RequiredStructures(indexes.Select(index => program.Functions[index]), program.Structures);
+        foreach (var structure in program.Structures)
+        {
+            if (exportedTypes.Contains(structure.Name) && structure.CleanupMethod is string cleanup
+                && !names.Contains(cleanup))
+            {
+                throw new ModuleContractException($"Exported unique type '{structure.Name}' requires its cleanup method to be exported.");
+            }
         }
         var pending = new Queue<int>(indexes);
         while (pending.Count != 0)
@@ -322,7 +345,10 @@ public static class ModuleCompiler
         }
         var structures = consumer.Structures.ToBuilder();
         var renamedTypes = producer.Structures.Select(structure => sharedTypes.Contains(structure.Name)
-            ? structure : structure with { Name = "$producer." + structure.Name }).ToImmutableArray();
+            ? structure : structure with {
+                Name = "$producer." + structure.Name,
+                CleanupMethod = structure.CleanupMethod is null ? null : "$producer." + structure.CleanupMethod,
+            }).ToImmutableArray();
         structures.AddRange(renamedTypes.Where(structure => !sharedTypes.Contains(structure.Name)));
         var allStructures = structures.ToImmutable();
         for (var index = consumer.Structures.Length; index < allStructures.Length; index++)
@@ -455,6 +481,9 @@ public static class ModuleCompiler
                     VisitStatement(cleanup.Body);
                     VisitStatement(cleanup.Finally);
                     break;
+                case BoundDrop drop when drop.CleanupFunction >= 0:
+                    calls.Add(drop.CleanupFunction);
+                    break;
                 case BoundUnsafe unsafeBlock:
                     VisitStatement(unsafeBlock.Body);
                     break;
@@ -522,6 +551,10 @@ public static class ModuleCompiler
             _ = result.Append('|').Append(parameter.IsOut ? "out:" : "in:")
                 .Append(ContractType(parameter.Type, structures));
         }
+        if (function.IsCleanup)
+        {
+            _ = result.Append("|Cleanup");
+        }
         _ = result.Append(function.IsNoThrow ? "|NoThrow" : "|MayThrow")
             .Append(function.DoesNotReturn ? "|DoesNotReturn" : "|MayReturn");
         return result.ToString();
@@ -573,6 +606,7 @@ public static class ModuleCompiler
         var index = (int)type - 100;
         return index >= 0 && index < structures.Length
             ? structures[index].Name + ":" + Visibility(structures[index])
+                + (structures[index].IsUnique ? ":Unique:" + (structures[index].CleanupMethod ?? "-") : "")
             : TypeName(type, structures);
     }
 
@@ -637,7 +671,8 @@ public static class ModuleCompiler
         ImmutableArray<BoundStruct> left, ImmutableArray<BoundStruct> right)
     {
         if (a.Name != b.Name || a.Size != b.Size || a.Fields.Length != b.Fields.Length
-            || a.IsPrivate != b.IsPrivate || a.IsInternal != b.IsInternal)
+            || a.IsPrivate != b.IsPrivate || a.IsInternal != b.IsInternal
+            || a.IsUnique != b.IsUnique || a.CleanupMethod != b.CleanupMethod)
         {
             return false;
         }
@@ -707,6 +742,8 @@ public static class ModuleCompiler
         return expression switch {
             BoundConstant constant => constant with { Type = RemapType(constant.Type, source, destination) },
             BoundRead read => read with { Type = RemapType(read.Type, source, destination) },
+            BoundMove move => move with { Type = RemapType(move.Type, source, destination) },
+            BoundReceiverLoan loan => loan with { Type = RemapType(loan.Type, source, destination) },
             BoundUnary unary => unary with {
                 Type = RemapType(unary.Type, source, destination),
                 Operand = RemapExpression(unary.Operand, source, destination),
@@ -772,6 +809,7 @@ public static class ModuleCompiler
                 Body = (BoundBlock)RemapStatement(cleanup.Body, source, destination),
                 Finally = (BoundBlock)RemapStatement(cleanup.Finally, source, destination),
             },
+            BoundDrop => statement,
             BoundUnsafe unsafeBlock => unsafeBlock with {
                 Body = (BoundBlock)RemapStatement(unsafeBlock.Body, source, destination),
             },
@@ -808,8 +846,7 @@ public static class ModuleCompiler
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         writer.Write(Magic);
         writer.Write(Version);
-        PutString(writer, program.RuntimePolicy == BoundRuntimePolicy.FailFast
-            ? Compilation.ProfileVersion : "native-11");
+        PutString(writer, Compilation.GetNativeProfileVersion(module.RuntimePolicy, module.Structures.Any(static structure => structure.IsUnique)));
         writer.Write(module.Consumer);
         writer.Write((byte)program.RuntimePolicy);
         writer.Write(module.EntryPoint);
@@ -820,6 +857,12 @@ public static class ModuleCompiler
             writer.Write(structure.Size);
             writer.Write(structure.IsPrivate);
             writer.Write(structure.IsInternal);
+            writer.Write(structure.IsUnique);
+            writer.Write(structure.CleanupMethod is not null);
+            if (structure.CleanupMethod is string cleanup)
+            {
+                PutString(writer, cleanup);
+            }
             writer.Write(structure.Fields.Length);
             foreach (var field in structure.Fields)
             {
@@ -870,9 +913,13 @@ public static class ModuleCompiler
         {
             using var stream = new MemoryStream(bytes, writable: false);
             using var reader = new BinaryReader(stream, new UTF8Encoding(false, true), leaveOpen: true);
-            var (version, policy) = ReadModuleHeader(reader, expectedConsumer);
+            var (version, policy, profile) = ReadModuleHeader(reader, expectedConsumer);
             var entry = reader.ReadInt32();
-            var (structures, structureNames) = ReadStructures(reader);
+            var (structures, structureNames) = ReadStructures(reader, version);
+            if (profile != Compilation.GetNativeProfileVersion(policy, structures.Any(static structure => structure.IsUnique)))
+            {
+                throw new ModuleFormatException("Module semantic profile does not match its value layouts.");
+            }
             var importedTypes = ReadImportedTypes(reader, structures.Length, structureNames, expectedConsumer);
             var count = Count(reader, MaximumFunctions);
             if (count == 0 || (expectedConsumer ? entry < 0 || entry >= count : entry != -1))
@@ -895,14 +942,14 @@ public static class ModuleCompiler
         }
     }
 
-    private static (int Version, BoundRuntimePolicy Policy) ReadModuleHeader(BinaryReader reader, bool expectedConsumer)
+    private static (int Version, BoundRuntimePolicy Policy, string Profile) ReadModuleHeader(BinaryReader reader, bool expectedConsumer)
     {
         if (reader.ReadInt32() != Magic)
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
         var version = reader.ReadInt32();
-        if (version is not (10 or Version))
+        if (version is not (10 or 11 or Version))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -913,14 +960,15 @@ public static class ModuleCompiler
         }
         var policy = version == 10 ? BoundRuntimePolicy.FailFast : (BoundRuntimePolicy)reader.ReadByte();
         if (policy is not (BoundRuntimePolicy.FailFast or BoundRuntimePolicy.CheckedExceptions)
-            || profile != (policy == BoundRuntimePolicy.FailFast ? Compilation.ProfileVersion : "native-11"))
+            || (profile != Compilation.GetNativeProfileVersion(policy, uniqueValues: false)
+                && (version != Version || profile != "native-12")))
         {
             throw new ModuleFormatException("Unsupported module semantic profile or checked-failure policy.");
         }
-        return (version, policy);
+        return (version, policy, profile);
     }
 
-    private static (ImmutableArray<BoundStruct> Structures, HashSet<string> Names) ReadStructures(BinaryReader reader)
+    private static (ImmutableArray<BoundStruct> Structures, HashSet<string> Names) ReadStructures(BinaryReader reader, int version)
     {
         var structureCount = Count(reader, MaximumFunctions);
         var structures = ImmutableArray.CreateBuilder<BoundStruct>(structureCount);
@@ -935,6 +983,8 @@ public static class ModuleCompiler
             var size = reader.ReadInt32();
             var isPrivate = GetBool(reader);
             var isInternal = GetBool(reader);
+            var isUnique = version >= Version && GetBool(reader);
+            var cleanup = version >= Version && GetBool(reader) ? GetString(reader) : null;
             var fieldCount = Count(reader, MaximumSlots);
             var fields = ImmutableArray.CreateBuilder<BoundStructField>(fieldCount);
             for (var field = 0; field < fieldCount; field++)
@@ -949,6 +999,8 @@ public static class ModuleCompiler
             structures.Add(new BoundStruct(name, fields.ToImmutable(), size) {
                 IsPrivate = isPrivate,
                 IsInternal = isInternal,
+                IsUnique = isUnique,
+                CleanupMethod = cleanup,
             });
         }
         return (structures.ToImmutable(), structureNames);
@@ -988,7 +1040,7 @@ public static class ModuleCompiler
             {
                 throw new ModuleFormatException("Invalid module declaration.");
             }
-            var function = hasBody ? GetFunction(reader, ref remaining, version == 10) : null;
+            var function = hasBody ? GetFunction(reader, ref remaining, version) : null;
             if (!expectedConsumer && import && function is BoundFunction exported
                 && !Exportable(exported, structures))
             {
@@ -1018,6 +1070,7 @@ public static class ModuleCompiler
         writer.Write(function.IsStatic);
         writer.Write(function.IsNoThrow);
         writer.Write(function.DoesNotReturn);
+        writer.Write(function.IsCleanup);
         writer.Write(function.DeclaringStruct is not null);
         if (function.DeclaringStruct is string declaringStruct)
         {
@@ -1037,7 +1090,7 @@ public static class ModuleCompiler
         PutStatement(writer, function.Body, names, ref remaining, 0);
     }
 
-    private static BoundFunction GetFunction(BinaryReader reader, ref int remaining, bool legacy)
+    private static BoundFunction GetFunction(BinaryReader reader, ref int remaining, int version)
     {
         var name = GetString(reader);
         var type = (PrimitiveType)reader.ReadInt32();
@@ -1047,6 +1100,7 @@ public static class ModuleCompiler
         var isStatic = GetBool(reader);
         var isNoThrow = GetBool(reader);
         var doesNotReturn = GetBool(reader);
+        var isCleanup = version >= Version && GetBool(reader);
         var declaringStruct = GetBool(reader) ? GetString(reader) : null;
         var parameters = reader.ReadInt32();
         var count = Count(reader, MaximumSlots);
@@ -1064,7 +1118,7 @@ public static class ModuleCompiler
             var isOut = GetBool(reader);
             variables.Add(new BoundVariable(variableName, variableType, mutable, GetSpan(reader)) { IsOut = isOut });
         }
-        var body = GetStatement(reader, ref remaining, 0, legacy) as BoundBlock
+        var body = GetStatement(reader, ref remaining, 0, version == 10) as BoundBlock
             ?? throw new ModuleFormatException("Function requires a block body.");
         return new BoundFunction(name, type, variables.ToImmutable(), parameters, body, span) {
             IsConstructor = constructor,
@@ -1073,6 +1127,7 @@ public static class ModuleCompiler
             IsStatic = isStatic,
             IsNoThrow = isNoThrow,
             DoesNotReturn = doesNotReturn,
+            IsCleanup = isCleanup,
             DeclaringStruct = declaringStruct,
         };
     }
@@ -1094,6 +1149,7 @@ public static class ModuleCompiler
             BoundTryFinally => (byte)10,
             BoundUnsafe => (byte)11,
             BoundTryCatch => (byte)12,
+            BoundDrop => (byte)13,
             _ => throw new ModuleFormatException("Unknown statement kind."),
         });
         PutSpan(writer, statement.Span);
@@ -1144,6 +1200,18 @@ public static class ModuleCompiler
             case BoundTryFinally cleanup:
                 PutStatement(writer, cleanup.Body, names, ref remaining, depth + 1);
                 PutStatement(writer, cleanup.Finally, names, ref remaining, depth + 1);
+                break;
+            case BoundDrop drop:
+                writer.Write(drop.Variable);
+                if (drop.CleanupFunction >= names.Length || drop.CleanupFunction < -1)
+                {
+                    throw new ModuleFormatException("Invalid lexical cleanup target.");
+                }
+                writer.Write(drop.CleanupFunction >= 0);
+                if (drop.CleanupFunction >= 0)
+                {
+                    PutString(writer, names[drop.CleanupFunction]);
+                }
                 break;
             case BoundUnsafe unsafeBlock:
                 PutStatement(writer, unsafeBlock.Body, names, ref remaining, depth + 1);
@@ -1237,6 +1305,10 @@ public static class ModuleCompiler
                 var cleanup = GetBool(reader) ? GetStatement(reader, ref remaining, depth + 1, legacy) as BoundBlock
                     ?? throw new ModuleFormatException("Expected recovery cleanup block.") : null;
                 return new BoundTryCatch(body, handler, cleanup, span);
+            case 13:
+                var owner = reader.ReadInt32();
+                var method = GetBool(reader) ? GetString(reader) : null;
+                return new SymbolicDrop(owner, method, span);
             default:
                 throw new ModuleFormatException("Unknown statement kind.");
         }
@@ -1255,6 +1327,8 @@ public static class ModuleCompiler
             BoundCast => (byte)6,
             BoundFieldRead => (byte)7,
             BoundOutArgument => (byte)8,
+            BoundMove => (byte)9,
+            BoundReceiverLoan => (byte)10,
             _ => throw new ModuleFormatException("Unknown expression kind."),
         });
         writer.Write((int)expression.Type);
@@ -1266,6 +1340,12 @@ public static class ModuleCompiler
                 break;
             case BoundRead read:
                 writer.Write(read.Variable);
+                break;
+            case BoundMove move:
+                writer.Write(move.Variable);
+                break;
+            case BoundReceiverLoan loan:
+                writer.Write(loan.Variable);
                 break;
             case BoundUnary unary:
                 writer.Write((int)unary.Operator);
@@ -1338,6 +1418,10 @@ public static class ModuleCompiler
                 return new BoundFieldRead(GetExpression(reader, ref remaining, depth + 1), field, type, span);
             case 8:
                 return new BoundOutArgument(reader.ReadInt32(), GetBool(reader), type, span);
+            case 9:
+                return new BoundMove(reader.ReadInt32(), type, span);
+            case 10:
+                return new BoundReceiverLoan(reader.ReadInt32(), type, span);
             default:
                 throw new ModuleFormatException("Unknown expression kind.");
         }
@@ -1362,6 +1446,12 @@ public static class ModuleCompiler
         },
         BoundWhile loop => loop with { Condition = ResolveExpression(loop.Condition, names), Body = ResolveStatement(loop.Body, names) },
         BoundTryFinally cleanup => cleanup with { Body = (BoundBlock)ResolveStatement(cleanup.Body, names), Finally = (BoundBlock)ResolveStatement(cleanup.Finally, names) },
+        SymbolicDrop drop => drop.Name is null
+            ? new BoundDrop(drop.Variable, -1, drop.Span)
+            : names.TryGetValue(drop.Name, out var method)
+                ? new BoundDrop(drop.Variable, method, drop.Span)
+                : throw new ModuleContractException($"Unresolved cleanup target '{drop.Name}'."),
+        BoundDrop => statement,
         BoundUnsafe unsafeBlock => unsafeBlock with { Body = (BoundBlock)ResolveStatement(unsafeBlock.Body, names) },
         BoundTryCatch recovery => recovery with {
             Body = (BoundBlock)ResolveStatement(recovery.Body, names),
@@ -1443,6 +1533,7 @@ public static class ModuleCompiler
     }
     private sealed record ModuleFunction(string Name, string Contract, BoundFunction? Function, bool Import);
     private sealed record SymbolicCall(string Name, ImmutableArray<BoundExpression> Arguments, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+    private sealed record SymbolicDrop(int Variable, string? Name, TextSpan Span) : BoundStatement(Span);
 }
 
 /// <summary>Invalid, unsupported or tampered module artifact.</summary>

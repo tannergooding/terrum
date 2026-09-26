@@ -82,6 +82,8 @@ public sealed class JitTests
     [InlineData("struct Value { public int32 A; public int32 B; public int32 C; public Value(int32 a) { A = a; B = 2; C = 3; } } int32 Mix(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { return a + b + c + d + e + f; } int32 Main() { Value value = new Value(42); return Mix(value.A, 2, 3, 4, 5, 6); }", 62)]
     [InlineData("[NoThrow] int32 Value() { return 42; } bool Take(out int32 result) { try { return true; } finally { result = Value(); } } int32 Main() { require Take(out var result); return result; }", 42)]
     [InlineData("int32 Main() { mut int32 value = 0; try { value = 1; } finally { try { value = 2; } finally { value = 42; } } return value; }", 42)]
+    [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} [NoThrow] public int32 Read() { return Value; } } int32 Main() { Item item = new Item(42); return item.Read(); }", 42)]
+    [InlineData("unique struct Item { public int64 Value; public int32 Tag; public Item(int64 value) { Value = value; Tag = 1; } [NoThrow] [Cleanup] public void Close() {} } Item Take() { Item item = new Item(42i64); return move item; } int32 Main() { Item item = Take(); return (int32)item.Value; }", 42)]
     public async Task WorkerAndNativeExecutableAgreeAsync(string source, int expected)
     {
         AssertWindowsX64();
@@ -129,6 +131,8 @@ public sealed class JitTests
     [InlineData("int32 Main() { return 2147483647 + 1; }", unchecked((int)0xE0540001))]
     [InlineData("int32 Main() { return 42 / 0; }", unchecked((int)0xE0540002))]
     [InlineData("int32 Main() { require false; return 0; }", unchecked((int)0xE0540003))]
+    [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} [NoThrow] public int32 Read() { return Value; } } int32 Main() { mut Item item = new Item(42); unsafe { try { item = new Item(42 / 0); } catch { return item.Read(); } } return 0; }", 42)]
+    [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} } int32 Main() { mut Item item = new Item(7); item = new Item(42); return item.Value; }", 42)]
     public async Task CheckedExceptionWorkerAndExecutableAgreeAsync(string source, int expected)
     {
         AssertWindowsX64();

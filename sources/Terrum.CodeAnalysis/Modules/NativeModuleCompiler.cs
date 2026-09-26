@@ -20,6 +20,9 @@ public sealed record NativeModuleInfo(string Identity, bool IsConsumer, string I
 {
     /// <summary>The checked-failure policy encoded in this package and its semantic contract.</summary>
     public NativeRuntimePolicy RuntimePolicy { get; init; }
+
+    /// <summary>The native semantic profile encoded in the checked package and its retained value contracts.</summary>
+    public string NativeProfileVersion { get; init; } = Compilation.ProfileVersion;
 }
 
 /// <summary>Creates and checks single-provider Windows x64 native packages; this is not an authenticated code loader.</summary>
@@ -99,6 +102,7 @@ public static class NativeModuleCompiler
         return new NativeModuleInfo(package.Identity, package.IsConsumer,
             Convert.ToHexString(SHA256.HashData(package.Image)), package.Image.Length, package.Contract.Length) {
             RuntimePolicy = package.Policy,
+            NativeProfileVersion = package.Profile,
         };
     }
 
@@ -254,8 +258,7 @@ public static class NativeModuleCompiler
         CheckIdentity(identity);
         CheckPolicy(policy);
         var name = Encoding.ASCII.GetBytes(identity);
-        var profile = Encoding.ASCII.GetBytes(policy == NativeRuntimePolicy.FailFast
-            ? Compilation.ProfileVersion : "native-11");
+        var profile = Encoding.ASCII.GetBytes(ModuleCompiler.GetNativeProfileVersion(contract, isConsumer));
         var length = checked(HeaderSize + name.Length + profile.Length + contract.Length + image.Length + HashSize);
         if (contract.Length is < 1 or > MaximumContractBytes || image.Length == 0 || length > MaximumBytes)
         {
@@ -307,15 +310,19 @@ public static class NativeModuleCompiler
         }
         var name = Encoding.ASCII.GetString(bytes, HeaderSize, nameLength);
         var profile = Encoding.ASCII.GetString(bytes, HeaderSize + nameLength, profileLength);
-        if (!ValidIdentity(name) || profile != (bytes[6] == (byte)NativeRuntimePolicy.FailFast
-            ? Compilation.ProfileVersion : "native-11"))
+        if (!ValidIdentity(name))
         {
-            throw new ModuleFormatException("Invalid provider identity or semantic profile.");
+            throw new ModuleFormatException("Invalid provider identity.");
         }
         var at = HeaderSize + nameLength + profileLength;
         var contract = bytes.AsSpan(at, contractLength).ToArray();
+        var (contractProfile, contractPolicy) = ModuleCompiler.ReadNativeProfile(contract, bytes[5] == 2);
+        if (profile != contractProfile || bytes[6] != (byte)contractPolicy)
+        {
+            throw new ModuleFormatException("Native package and semantic contract profiles or runtime policies differ.");
+        }
         var image = bytes.AsSpan(at + contractLength, imageLength).ToArray();
-        return new Package(bytes[5] == 2, name, (NativeRuntimePolicy)bytes[6], contract, image);
+        return new Package(bytes[5] == 2, name, (NativeRuntimePolicy)bytes[6], contract, image, profile);
     }
 
     private static string DllName(string identity) => "terrum-" + identity + ".dll";
@@ -342,5 +349,5 @@ public static class NativeModuleCompiler
         && identity.All(static character => character is (>= 'a' and <= 'z') or (>= 'A' and <= 'Z')
             or (>= '0' and <= '9') or '_');
 
-    private sealed record Package(bool IsConsumer, string Identity, NativeRuntimePolicy Policy, byte[] Contract, byte[] Image);
+    private sealed record Package(bool IsConsumer, string Identity, NativeRuntimePolicy Policy, byte[] Contract, byte[] Image, string Profile);
 }

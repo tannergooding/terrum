@@ -66,8 +66,11 @@ explicit checked-exceptions proof policy uses private Windows SEH records for
 four compiler-generated failures and permits recovery only in `unsafe`
 `try`/`catch` scopes. Structured `try`/`finally` handles normal and checked
 exceptional exits in that policy; explicit fail-fast termination still skips
-pending cleanup. General exception identity, low-memory semantics, owning
-cleanup and other effect bounds remain later implementation work.
+pending cleanup. General exception identity, low-memory semantics, native allocation and
+other effect bounds remain later implementation work. A compact
+`unique struct` proof now checks named moves and lexical NoThrow cleanup
+with nonescaping readonly receiver loans; it does not implement the wider
+owning fields, stored loans or resource adapter contracts.
 See the [native proof limits](native.md).
 
 ### Storage, concurrency, entry and boundaries

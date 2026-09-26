@@ -38,6 +38,7 @@ internal static partial class Program
         {
             byte[] result;
             string output;
+            string profile;
             var selectedPolicy = NativeRuntimePolicy.FailFast;
             if (count >= 6 && args[0] == "compile-module"
                 && (args[1] is "producer" or "consumer"))
@@ -78,6 +79,7 @@ internal static partial class Program
                         reference ?? throw new InvalidOperationException("Consumer reference is missing.")),
                     _ => throw new InvalidOperationException("Unknown module kind."),
                 };
+                profile = ModuleCompiler.GetNativeProfileVersion(result, args[1] == "consumer");
             }
             else if (count == 7 && args[0] == "link-module" && args[3] == "-o"
                 && args[5] == "--runtime" && args[6] is "fail-fast" or "checked-exceptions")
@@ -93,6 +95,8 @@ internal static partial class Program
                     ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
                 selectedPolicy = runtimePolicy;
                 result = NativeEmitter.Emit(program, runtimePolicy);
+                profile = Compilation.GetNativeProfileVersion(program.RuntimePolicy,
+                    program.Structures.Any(static structure => structure.IsUnique));
                 output = args[4];
             }
             else if (count == 5 && args[0] == "run-module"
@@ -112,7 +116,7 @@ internal static partial class Program
             WriteArtifact(outputPath, result);
             if (json)
             {
-                WriteModuleArtifactJson(args[0], outputPath, result, selectedPolicy);
+                WriteModuleArtifactJson(args[0], outputPath, result, selectedPolicy, profile);
             }
             return 0;
         }
@@ -181,12 +185,13 @@ internal static partial class Program
         => WriteCompilationResult("compile-module", compilation, compilation.SourceDiagnostics, false, null, null, json, policy);
 
     private static void WriteModuleArtifactJson(string command, string outputPath, byte[] result,
-        NativeRuntimePolicy policy)
+        NativeRuntimePolicy policy, string profile)
     {
         using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
         writer.WriteStartObject();
         writer.WriteNumber("schemaVersion", 1);
-        writer.WriteString("profile", Profile(policy));
+        writer.WriteString("profile", profile);
+        writer.WriteString("runtimePolicy", PolicyName(policy));
         writer.WriteString("command", command);
         writer.WriteBoolean("success", true);
         writer.WriteStartArray("diagnostics");
@@ -194,10 +199,7 @@ internal static partial class Program
         writer.WriteStartObject("artifact");
         writer.WriteString("path", outputPath);
         writer.WriteString("kind", command == "link-module" ? "windows-x64-executable" : "semantic-module");
-        if (command == "link-module")
-        {
-            writer.WriteString("runtimePolicy", PolicyName(policy));
-        }
+        writer.WriteString("runtimePolicy", PolicyName(policy));
         writer.WriteNumber("length", result.Length);
         writer.WriteString("sha256", Convert.ToHexString(SHA256.HashData(result)));
         writer.WriteEndObject();

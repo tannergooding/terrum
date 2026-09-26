@@ -1,6 +1,6 @@
 # Bounded semantic and native modules
 
-The version 11 `.trm` format records the selected native runtime policy and
+The version 12 `.trm` format records the selected native runtime policy and
 persists verified, typed, source-mapped structured IR,
 not source text or a native DLL. `CreateProducer` stores selected function bodies
 and exported contracts. `CreateConsumer` stores its own function bodies and the
@@ -192,11 +192,31 @@ public never type, general exception objects or asynchronous cleanup. Producer
 bodies claiming either promise must independently pass the verifier's
 structured-flow or conservative effect proof. NoThrow is about permitted
 operations and declared callees, not an exception handler or a claim that
-fail-fast process termination counts as NoThrow. Version 10 fail-fast artifacts
-remain readable; earlier versions, including version 9 without structured
+fail-fast process termination counts as NoThrow. Versions 10 (fail-fast) and 11 (checked-exceptions) remain readable; earlier
+versions, including version 9 without structured
 cleanup regions, are rejected;
 recreate them from source. Multi-producer identity/version resolution, dependency
 cycles and resilient public layouts remain later work.
+
+Version 12 stores the unique layout flag, declared cleanup method, cleanup
+function contract, explicit move/receiver-loan nodes and lexical drop regions.
+A consumer importing a unique type must also import its exported NoThrow
+cleanup method. Its cleanup identity and Copy/unique distinction participate
+in layout and signature compatibility; a replacement implementation may
+change without changing the consumer artifact. Native-12 marks contracts
+containing unique values under either runtime policy. Producers/consumers
+without unique layouts continue to use native-10 or native-11, even when
+serialized by the newer `.trm` writer, so compatible older native-10/package-1
+images remain usable. Native package version 1 embeds and checks the exact
+semantic profile rather than inferring it from runtime policy alone.
+`ModuleCompiler.GetNativeProfileVersion` and
+`NativeModuleCompiler.Inspect(...).NativeProfileVersion` expose that retained
+contract profile; module CLI artifact and validation responses report it too.
+Unused unique declarations removed during semantic export selection do not
+upgrade the artifact profile. Package and semantic runtime policies must still
+match exactly when both use native-12. Compilation and module JSON responses
+report `runtimePolicy` independently of `profile`, including analysis and
+validation responses without an output artifact.
 
 Native package validation checks both allocation-only and saved-RBP unwind
 records, their ordered `.pdata` ranges, `.xdata` bounds and corresponding
@@ -245,9 +265,10 @@ the package layer below adds that check. Neither provides a multi-provider
 contract linker, live patching or hot-unload protocol.
 
 `NativeModuleCompiler` packages each separately compiled native producer DLL
-or consumer EXE with its corresponding version 11 semantic `.trm` contract
-(or a readable version 10 fail-fast contract). Its version 1 package records
-the selected native-10/fail-fast or native-11/checked-exceptions profile,
+or consumer EXE with its corresponding version 12 semantic `.trm` contract
+(or a readable version 10/11 contract). Its version 1 package records
+the contract's native-10/fail-fast, native-11/checked-exceptions or
+native-12/compact-unique profile,
 single explicit provider identity and the exact PE and semantic bytes. The
 identity is 1–64 ASCII letters, digits or underscores, beginning with a
 letter; its loader basename is `terrum-<identity>.dll`. Artifacts are bounded

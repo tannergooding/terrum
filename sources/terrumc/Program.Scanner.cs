@@ -69,7 +69,8 @@ internal static partial class Program
         {
             if (json)
             {
-                WriteCompilationJson(args[0], tree, compilation.Diagnostics, false, null, null, policy);
+                WriteCompilationJson(args[0], tree, compilation.Diagnostics, false, null, null, policy,
+                    compilation.NativeProfileVersion ?? Profile(policy));
             }
             else
             {

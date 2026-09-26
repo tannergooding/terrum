@@ -112,8 +112,9 @@ public sealed class NoThrowTests
     }
 
     [Theory]
-    [InlineData("return Host.Data[0];")]
-    [InlineData("Host.Data[0] = 1; return 0;")]
+    [InlineData("return Host.Data[1];")]
+    [InlineData("Host.Data[1] = 1; return 0;")]
+    [InlineData("int32 index = 0; return Host.Data[index];")]
     public void CheckedBufferAccessIsNotAnImplicitNoThrowCapability(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("[NoThrow] int32 Main() { " + body + " }"),

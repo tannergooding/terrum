@@ -223,6 +223,8 @@ internal sealed class PeCompiler
     private readonly int[] _spillBases;
     private readonly int[] _outBases;
     private readonly int[] _returnSlots;
+    private readonly int[][] _liveSlots;
+    private readonly int[] _replacementSlots;
     private readonly List<(int Offset, int Target)> _calls = new();
     private readonly List<(int Offset, int Target)> _runtimeCalls = new();
     private readonly List<(int Offset, int Target)> _cleanupCalls = [];
@@ -271,6 +273,8 @@ internal sealed class PeCompiler
         _spillBases = new int[program.Functions.Length];
         _outBases = new int[program.Functions.Length];
         _returnSlots = new int[program.Functions.Length];
+        _liveSlots = new int[program.Functions.Length][];
+        _replacementSlots = new int[program.Functions.Length];
         _bufferOffsets = new int[program.Buffers.Length];
         var readOnlyBytes = 0;
         foreach (var buffer in program.Buffers)
@@ -428,6 +432,25 @@ internal sealed class PeCompiler
             {
                 required = ((required + 15) & ~15L) + 16;
             }
+            var live = new int[function.Variables.Length];
+            Array.Fill(live, -1);
+            var hasUnique = false;
+            for (var variable = function.ParameterCount + (function.IsConstructor ? 1 : 0);
+                variable < function.Variables.Length; variable++)
+            {
+                if (IsUnique(function.Variables[variable].Type))
+                {
+                    live[variable] = checked((int)required);
+                    required += 8;
+                    hasUnique = true;
+                }
+            }
+            _liveSlots[i] = live;
+            _replacementSlots[i] = checked((int)((required + 15) & ~15L));
+            if (hasUnique)
+            {
+                required = _replacementSlots[i] + 16L;
+            }
             required += 8; // Saved RBP lives above the addressable frame slots.
             if (required > MaximumFrame)
             {
@@ -463,6 +486,13 @@ internal sealed class PeCompiler
             Prolog(_frame - 8);
             _code.Bytes(0x48, 0x89, 0xE5); // mov rbp,rsp
             _code.UseFramePointer = true;
+            foreach (var live in _liveSlots[i])
+            {
+                if (live >= 0)
+                {
+                    _code.Clear(live);
+                }
+            }
             var hidden = IsIndirect(function.ReturnType) ? 1 : 0;
             if (hidden != 0)
             {
@@ -501,7 +531,8 @@ internal sealed class PeCompiler
             {
                 var slot = argument + (function.IsConstructor ? 1 : 0);
                 var type = function.Variables[slot].Type;
-                if (IsIndirect(type) && !function.Variables[slot].IsOut)
+                if (IsIndirect(type) && !function.Variables[slot].IsOut
+                    && !(slot == 0 && IsBorrowedReceiver()))
                 {
                     _code.Load64(Slot(slot));
                     CopyToFrame(Slot(slot), Size(type));
@@ -657,7 +688,11 @@ internal sealed class PeCompiler
             case BoundLocal local:
                 return ExpressionSpills(local.Initializer, ref maximumArguments);
             case BoundAssignment assignment:
-                return ExpressionSpills(assignment.Value, ref maximumArguments);
+                return Math.Max(ExpressionSpills(assignment.Value, ref maximumArguments),
+                    IsUnique(assignment.Value.Type) && _program.Structures[(int)assignment.Value.Type - 100].CleanupMethod is not null
+                        ? CleanupSpills(ref maximumArguments) : 0);
+            case BoundDrop drop:
+                return drop.CleanupFunction >= 0 ? CleanupSpills(ref maximumArguments) : 0;
             case BoundFieldAssignment assignment:
                 return ExpressionSpills(assignment.Value, ref maximumArguments);
             case BoundBufferAssignment assignment:
@@ -723,6 +758,12 @@ internal sealed class PeCompiler
         }
     }
 
+    private static int CleanupSpills(ref int maximumArguments)
+    {
+        maximumArguments = Math.Max(maximumArguments, 1);
+        return 3;
+    }
+
     private int Slot(int index) => _slots[_currentFunction][index];
     private int Spill(int index) => _spillBase + (index * 16);
     private int OutSlot(int index)
@@ -738,6 +779,46 @@ internal sealed class PeCompiler
     private static bool IsWide(PrimitiveType type) => type is PrimitiveType.Int64 or PrimitiveType.UInt64;
     private int Size(PrimitiveType type) => ValueLayout.Size(type, _program.Structures);
     private bool IsIndirect(PrimitiveType type) => IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8);
+    private bool IsUnique(PrimitiveType type) => IsStruct(type) && _program.Structures[(int)type - 100].IsUnique;
+    private bool IsBorrowedReceiver()
+    {
+        var function = _program.Functions[_currentFunction];
+        return function.DeclaringStruct is not null && !function.IsConstructor && !function.IsCleanup
+            && !function.IsStatic && IsUnique(function.Variables[0].Type);
+    }
+
+    private void DropOwner(int variable)
+    {
+        var live = _liveSlots[_currentFunction][variable];
+        _code.Load(live);
+        _code.Bytes(0x85, 0xC0);
+        var vacant = _code.JumpIf(0x84);
+        var type = _program.Functions[_currentFunction].Variables[variable].Type;
+        var name = _program.Structures[(int)type - 100].CleanupMethod;
+        if (name is null)
+        {
+            _code.Clear(live);
+        }
+        else
+        {
+            var method = -1;
+            for (var index = 0; index < _program.Functions.Length; index++)
+            {
+                if (_program.Functions[index].Name == name)
+                {
+                    method = index;
+                    break;
+                }
+            }
+            if (method < 0)
+            {
+                throw new InvalidOperationException("Verified unique cleanup method is missing.");
+            }
+            Expression(new BoundCall(method, [new BoundMove(variable, type, default)],
+                PrimitiveType.Void, default), 0);
+        }
+        _code.PatchRelative(vacant, _code.Position);
+    }
     private void StoreValue(int offset, PrimitiveType type)
     {
         if (IsIndirect(type))
@@ -886,9 +967,22 @@ internal sealed class PeCompiler
             case BoundLocal local:
                 Expression(local.Initializer, 0);
                 StoreValue(Slot(local.Variable), local.Initializer.Type);
+                if (IsUnique(local.Initializer.Type))
+                {
+                    _code.Set(_liveSlots[_currentFunction][local.Variable]);
+                }
                 break;
             case BoundAssignment assignment:
                 Expression(assignment.Value, 0);
+                if (IsUnique(assignment.Value.Type))
+                {
+                    StoreValue(_replacementSlots[_currentFunction], assignment.Value.Type);
+                    DropOwner(assignment.Variable);
+                    LoadValue(_replacementSlots[_currentFunction], assignment.Value.Type);
+                    StoreValue(Slot(assignment.Variable), assignment.Value.Type);
+                    _code.Set(_liveSlots[_currentFunction][assignment.Variable]);
+                    break;
+                }
                 if (_program.Functions[_currentFunction].Variables[assignment.Variable].IsOut)
                 {
                     if (IsIndirect(assignment.Value.Type))
@@ -904,6 +998,9 @@ internal sealed class PeCompiler
                 {
                     StoreValue(Slot(assignment.Variable), assignment.Value.Type);
                 }
+                break;
+            case BoundDrop drop:
+                DropOwner(drop.Variable);
                 break;
             case BoundFieldAssignment fieldAssignment:
                 Expression(fieldAssignment.Value, 0);
@@ -1142,10 +1239,38 @@ internal sealed class PeCompiler
                 LoadValue(_program.Functions[_currentFunction].Variables[read.Variable].IsOut
                     ? OutSlot(read.Variable) : Slot(read.Variable), read.Type);
                 break;
+            case BoundMove move:
+                LoadValue(Slot(move.Variable), move.Type);
+                _code.Clear(_liveSlots[_currentFunction][move.Variable]);
+                break;
+            case BoundReceiverLoan loan:
+                if (loan.Variable == 0 && IsBorrowedReceiver())
+                {
+                    _code.Load64(Slot(0));
+                }
+                else
+                {
+                    _code.Address(Slot(loan.Variable));
+                }
+                break;
             case BoundFieldRead fieldRead:
-                Expression(fieldRead.Receiver, spill);
+                if (fieldRead.Receiver is BoundRead owner && IsUnique(owner.Type))
+                {
+                    if (owner.Variable == 0 && IsBorrowedReceiver())
+                    {
+                        _code.Load64(Slot(0));
+                    }
+                    else
+                    {
+                        _code.Address(Slot(owner.Variable));
+                    }
+                }
+                else
+                {
+                    Expression(fieldRead.Receiver, spill);
+                }
                 var field = _program.Structures[(int)fieldRead.Receiver.Type - 100].Fields[fieldRead.Field];
-                if (IsIndirect(fieldRead.Receiver.Type))
+                if (IsIndirect(fieldRead.Receiver.Type) || IsUnique(fieldRead.Receiver.Type))
                 {
                     if (IsIndirect(field.Type))
                     {
@@ -1246,13 +1371,20 @@ internal sealed class PeCompiler
                     else
                     {
                         Expression(call.Arguments[i], argumentsBase + (call.Arguments.Length * 2));
-                        StoreValue(Spill(argumentsBase + i), call.Arguments[i].Type);
+                        if (call.Arguments[i] is BoundReceiverLoan)
+                        {
+                            _code.Store64(Spill(argumentsBase + i));
+                        }
+                        else
+                        {
+                            StoreValue(Spill(argumentsBase + i), call.Arguments[i].Type);
+                        }
                     }
                 }
                 var hidden = IsIndirect(call.Type) ? 1 : 0;
                 for (var i = Math.Max(0, 4 - hidden); i < call.Arguments.Length; i++)
                 {
-                    if (call.Arguments[i] is BoundOutArgument)
+                    if (call.Arguments[i] is BoundOutArgument or BoundReceiverLoan)
                     {
                         _code.Load64(Spill(argumentsBase + i));
                     }
@@ -1264,7 +1396,7 @@ internal sealed class PeCompiler
                 }
                 for (var i = 0; i < Math.Min(4 - hidden, call.Arguments.Length); i++)
                 {
-                    if (call.Arguments[i] is BoundOutArgument)
+                    if (call.Arguments[i] is BoundOutArgument or BoundReceiverLoan)
                     {
                         _code.Load64(Spill(argumentsBase + i));
                     }
@@ -1273,7 +1405,7 @@ internal sealed class PeCompiler
                         LoadValue(Spill(argumentsBase + i), call.Arguments[i].Type);
                     }
                     _code.MoveArgument(i + hidden,
-                        call.Arguments[i] is BoundOutArgument || IsStruct(call.Arguments[i].Type) || IsWide(call.Arguments[i].Type));
+                        call.Arguments[i] is BoundOutArgument or BoundReceiverLoan || IsStruct(call.Arguments[i].Type) || IsWide(call.Arguments[i].Type));
                 }
                 if (hidden != 0)
                 {
@@ -1767,6 +1899,26 @@ internal sealed class MachineCode
             Bytes(0x89, 0x84, 0x24);
         }
         Int32(offset);
+    }
+    internal void Clear(int offset)
+    {
+        Bytes(0xC7, UseFramePointer ? (byte)0x85 : (byte)0x84);
+        if (!UseFramePointer)
+        {
+            Byte(0x24);
+        }
+        Int32(offset);
+        Int32(0);
+    }
+    internal void Set(int offset)
+    {
+        Bytes(0xC7, UseFramePointer ? (byte)0x85 : (byte)0x84);
+        if (!UseFramePointer)
+        {
+            Byte(0x24);
+        }
+        Int32(offset);
+        Int32(1);
     }
     internal void StoreOutgoing64(int offset)
     {

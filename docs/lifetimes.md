@@ -1,6 +1,6 @@
 # Lifetime and access contracts
 
-This document specifies the accepted direction for checked loans, views and published member contracts, with **provisional notation** where the grammar is unresolved. It refines [language](language.md); [libraries](libraries.md) illustrates the span/text/collection protocols. The current native integer/bool binder does not implement these lifetime contracts ([implementation](implementation.md)); dependent constructs are rejected for execution.
+This document specifies the accepted direction for checked loans, views and published member contracts, with **provisional notation** where the grammar is unresolved. It refines [language](language.md); [libraries](libraries.md) illustrates the span/text/collection protocols. Only compact unique locals, explicit named moves and synchronous readonly receiver loans have executable ownership checks today ([implementation](implementation.md)); the remaining lifetime constructs are rejected for execution.
 
 ## Three independent dependencies
 
@@ -65,4 +65,19 @@ Store both the **broad interface contract** and the **resolved published impleme
 
 ## Implementation and unsettled points
 
-The compiler has **no** flow-sensitive place/loan analysis, metadata contract verifier, stored interiors, generic witness binder, return-anchor ABI or runtime guard enforcement. Its current slot-initialization/mutation verifier is not a lifetime checker. Later semantic stages must check loan use after transfer, place disjointness and last use, constructor/exception cleanup, bounded result escapes, interface variance/refinement and dynamic dependency binding before executing examples that depend on them. Unsupported escapes should diagnose, never trigger silent boxing, cloning, registration, retention or copying. Exact receiver/conditional syntax, static-source-set versus dependent predicates, multi-source ABI, first-class stored loan qualifiers and lease/root descriptors remain design work.
+The compact native profile tracks a unique named owner's vacancy across
+branches, loops, returns and exceptional edges. It lowers lexical drops to
+structured cleanup regions and verifies a synchronous receiver loan that
+cannot be stored, consumed or passed as a value. Cleanup is an explicit
+`[NoThrow] [Cleanup] public void Close()`-shaped contract on a unique
+instance method; the name itself has no special meaning. Only primitive fields
+fit this first profile, and cleanup cannot invoke a potentially throwing
+operation. A statically constant index proven within an immutable host
+buffer grant may be used in NoThrow cleanup; general indexing cannot.
+This is not a general place/loan analysis, native allocation, OS-resource
+adapter, stored interior, generic witness, return-anchor ABI or runtime
+guard implementation. Later stages must check place disjointness and
+last use, owning fields and temporaries, bounded result escapes,
+interface variance/refinement and dynamic dependency binding before
+executing examples that depend on them. Unsupported escapes must
+diagnose, never silently box, clone, register, retain or copy.

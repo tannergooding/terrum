@@ -313,7 +313,7 @@ internal sealed class Parser
 
         while (Current.Kind is not (TokenKind.CloseBrace or TokenKind.EndOfFile))
         {
-            if (Current.Kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword or TokenKind.PrivateKeyword or TokenKind.StaticKeyword or TokenKind.StructKeyword)
+            if (Current.Kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword or TokenKind.PrivateKeyword or TokenKind.StaticKeyword or TokenKind.StructKeyword or TokenKind.UniqueKeyword)
             {
                 break;
             }
@@ -745,11 +745,11 @@ internal sealed class Parser
     }
 
     private static bool IsModifier(TokenKind kind)
-        => kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword or TokenKind.PrivateKeyword or TokenKind.StaticKeyword or TokenKind.MutKeyword;
+        => kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword or TokenKind.PrivateKeyword or TokenKind.StaticKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword;
 
     private static bool IsTypeStart(TokenKind kind) => kind is TokenKind.Identifier or TokenKind.VoidKeyword;
 
-    private static int UnaryPrecedence(TokenKind kind) => kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde ? 11 : 0;
+    private static int UnaryPrecedence(TokenKind kind) => kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde or TokenKind.MoveKeyword ? 11 : 0;
 
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Non-operator tokens have zero precedence.")]
     private static int BinaryPrecedence(TokenKind kind) => kind switch {

@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-8 and native-10/native-11
+## Current boundary: syntax-9 and native-10/native-11/native-12
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -8,17 +8,17 @@ immutable and usable independently. The separate [native profiles](native.md)
 binds a bounded scalar/compact-value language and emits Windows x64 executables through
 verified structured operations. A clean syntax result is deliberately not a
 valid-program claim: `var x = 1;` parses but semantic analysis rejects its missing
-numeric context. Ownership/lifetime checking, general semantic IL/LMOD,
+numeric context. General ownership/lifetime checking, general semantic IL/LMOD,
 managed graphs and standard-library execution are not implemented.
 
 | Surface | Implemented | Not yet implemented |
 |---|---|---|
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
 | Lexing | Pinned Unicode identifiers, ASCII numbers/tags, comments, leading trivia, strings, diagnostics, EOF | Interpolation, raw/character/native literals, directives |
-| Declarations | Using, file-scoped namespaces, functions, compact structs with explicit fields/constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]`; library binding and one validated module reference per consumer | Classes, interfaces, enums/unions, general attributes, generic declarations/constraints, general module dependency graphs |
+| Declarations | Using, file-scoped namespaces, functions, compact structs and primitive-field `unique struct` with explicit fields/constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; library binding and one validated module reference per consumer | Classes, interfaces, enums/unions, owning fields, general attributes, generic declarations/constraints, general module dependency graphs |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; repeated `?` diagnoses | General type resolution, optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, break/continue, switch/patterns, general exception objects/throw, async, compound assignment |
-| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named/ref/out argument syntax | Character literals, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
+| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named `move` of unique locals, readonly unique receiver loans, named/ref/out argument syntax | Character literals, owning temporaries/parameters/fields, stored loans, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
 Only the grammar below is supported. Unsupported constructs diagnose rather than
@@ -31,6 +31,7 @@ using       = "using" qualifiedName ";"
 namespace   = "namespace" qualifiedName ";"
 declaration = attributes modifiers (function | struct)
 attributes  = ("[" name "]")*
+modifiers   = ("public" | "internal" | "private" | "static" | "mut" | "unique")*
 function    = type name parameters block
 struct      = "struct" name "{" member* "}"
 member      = attributes modifiers (field | constructor | function)
@@ -58,7 +59,8 @@ assignmentClause = expression "=" expression
 Assignment is a statement, not an expression. Native places include initialized
 mutable locals, accessible fields of mutable compact values, constructor fields,
 conditional output scratch slots and checked writable host-buffer elements.
-General borrowed references and owning places remain unsupported.
+Unique local places additionally track vacancy and cleanup obligations.
+General borrowed references and owning fields/parameters remain unsupported.
 For-loop initialization runs once, followed by condition, body and iterator;
 the iterator does not run after a returning body. An omitted condition is true.
 Initializer locals remain in scope through the header and body, not afterward.
@@ -67,7 +69,7 @@ increment/compound-assignment operators and break/continue are not implemented.
 The binder lowers the scoped loop to existing verified blocks and `while`
 operations; there is no separate machine-code or module-IR loop variant.
 Braces are required on control bodies. Supported precedence, strongest
-first: postfix; unary `+ - ! ~`; `* / %`; `+ -`; `< <= > >=`; `== !=`; `&`; `^`;
+first: postfix; unary `+ - ! ~ move`; `* / %`; `+ -`; `< <= > >=`; `== !=`; `&`; `^`;
 `|`; `&&`; `||`. Binary operators associate left. Lexing does not fuse angle
 brackets into shift tokens. Generic-call/comparison ambiguities are not solved by
 guessing semantic types in the lexer. See [lexical grammar](lexical-grammar.md)
@@ -83,11 +85,13 @@ rejection rule; `syntax-2` added the lossless `RequireStatement` node.
 checked casts for supported 32- and 64-bit integer types and `char16`.
 `syntax-8` adds `unsafe` blocks and the parameterless checked-policy `catch`,
 with optional `finally`; a try requires at least one handler or cleanup clause.
-`[NoThrow]` on functions/constructors and `[DoesNotReturn]` on void functions are
-currently bound; unknown, duplicate and misplaced attributes diagnose rather
+`syntax-9` adds `unique struct` declarations and `move` expressions.
+`[NoThrow]` on functions/constructors, `[DoesNotReturn]` on void functions and
+`[Cleanup]` on eligible unique instance methods are currently bound;
+unknown, duplicate and misplaced attributes diagnose rather
 than becoming unchecked metadata. Attribute nodes retain their brackets and
-name as three children. The `native-10` (fail-fast) and `native-11`
-(checked-exceptions) profiles support checked
+name as three children. The `native-10` (fail-fast), `native-11`
+(checked-exceptions) and `native-12` (compact unique owner) profiles support checked
 signed/unsigned 32- and 64-bit integers, raw code units, conditional outputs,
 fixed host-buffer capabilities and acyclic value layouts up to 16 bytes.
 Fields are read-only after construction unless explicitly declared `mut`.
@@ -102,9 +106,11 @@ diagnose before emission.
 mandatory verifier, not inferred from a body for consumers. `TRM3017` locates
 an operation whose throwing effect violates that bound. The bounded proof
 accepts comparisons, bitwise operations, fields, total numeric conversions
-and calls to other declared NoThrow functions. It conservatively rejects
-checked arithmetic, potentially failing conversions and buffer access without
-range or invariant inference. The [native contract](native.md) describes
+and calls to other declared NoThrow functions. A host-buffer access is
+NoThrow only with a statically constant index proven within that exact
+compilation grant. It conservatively rejects checked arithmetic, potentially
+failing conversions and general buffer indexes without range or invariant inference.
+The [native contract](native.md) describes
 these limits. `BoundFunction.DoesNotReturn` separately removes a call's normal
 continuation. Its implementation must have no reachable return or fallthrough
 (`TRM3018`). Constant-true loops, statically false requirements and declared

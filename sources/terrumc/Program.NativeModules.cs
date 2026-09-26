@@ -81,10 +81,12 @@ internal static partial class Program
                     ReadModuleFile(args[2], 16 * 1024 * 1024));
                 if (json)
                 {
+                    var info = NativeModuleCompiler.Inspect(consumer);
                     using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
                     writer.WriteStartObject();
                     writer.WriteNumber("schemaVersion", 1);
-                    writer.WriteString("profile", Profile(NativeModuleCompiler.Inspect(consumer).RuntimePolicy));
+                    writer.WriteString("profile", info.NativeProfileVersion);
+                    writer.WriteString("runtimePolicy", PolicyName(info.RuntimePolicy));
                     writer.WriteString("command", args[0]);
                     writer.WriteBoolean("success", true);
                     writer.WriteStartArray("diagnostics");
@@ -138,7 +140,8 @@ internal static partial class Program
         using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
         writer.WriteStartObject();
         writer.WriteNumber("schemaVersion", 1);
-        writer.WriteString("profile", Profile(policy));
+        writer.WriteString("profile", info.NativeProfileVersion);
+        writer.WriteString("runtimePolicy", PolicyName(policy));
         writer.WriteString("command", command);
         writer.WriteBoolean("success", true);
         writer.WriteStartArray("diagnostics");

@@ -596,7 +596,7 @@ public sealed partial class CliTests
         using var document = JsonDocument.Parse(output);
         var root = document.RootElement;
         Assert.False(root.GetProperty("success").GetBoolean());
-        Assert.Equal("syntax-8", root.GetProperty("languageVersion").GetString());
+        Assert.Equal(SyntaxTree.LanguageVersion, root.GetProperty("languageVersion").GetString());
         var diagnostic = Assert.Single(root.GetProperty("diagnostics").EnumerateArray());
         Assert.Equal("TRM1005", diagnostic.GetProperty("code").GetString());
         Assert.Equal(Source.LastIndexOf('?', StringComparison.Ordinal), diagnostic.GetProperty("span").GetProperty("start").GetInt32());

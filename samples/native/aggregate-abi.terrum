@@ -346,3 +346,33 @@ public bool TryWideIntegerPair(bool success, out WideIntegerPair value)
     value = MakeWideIntegerPair(int64.MinValue, uint64.MaxValue);
     return true;
 }
+
+public unique struct SmallOwner
+{
+    public int32 Value;
+    public SmallOwner(int32 value) { Value = value; }
+    [NoThrow] public int32 Read() { return Value; }
+    public WideIntegerPair Pack(int64 a, int64 b, int64 c, uint64 d, uint64 e)
+    {
+        return new WideIntegerPair((int64)Value + a + b + c, d + e);
+    }
+}
+
+public unique struct WordOwner
+{
+    public uint64 Value;
+    public WordOwner(uint64 value) { Value = value; }
+    [NoThrow] public uint64 Read() { return Value; }
+}
+
+public unique struct LargeOwner
+{
+    public int64 Signed;
+    public uint64 Unsigned;
+    public LargeOwner(int64 signed, uint64 unsigned)
+    {
+        Signed = signed;
+        Unsigned = unsigned;
+    }
+    [NoThrow] public uint64 Read() { return Unsigned; }
+}

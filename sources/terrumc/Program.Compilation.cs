@@ -180,16 +180,17 @@ internal static partial class Program
         ImmutableArray<SourceDiagnostic> diagnostics, bool success, string? outputPath, byte[]? image, bool json,
         NativeRuntimePolicy runtimePolicy = NativeRuntimePolicy.FailFast)
     {
+        var profile = compilation.NativeProfileVersion ?? Profile(runtimePolicy);
         if (json)
         {
             if (compilation.SyntaxTrees.Length == 1)
             {
                 WriteCompilationJson(command, compilation.SyntaxTree, [.. diagnostics.Select(static item => item.Diagnostic)],
-                    success, outputPath, image, runtimePolicy);
+                    success, outputPath, image, runtimePolicy, profile);
             }
             else
             {
-                WriteCompilationJson(command, compilation, diagnostics, success, outputPath, image, runtimePolicy);
+                WriteCompilationJson(command, compilation, diagnostics, success, outputPath, image, runtimePolicy, profile);
             }
         }
         else
@@ -208,8 +209,8 @@ internal static partial class Program
                     ? compilation.SyntaxTree.Source.Path
                     : FormattableString.Invariant($"{compilation.SyntaxTrees.Length} source files");
                 Console.Out.WriteLine(outputPath is not null
-                    ? $"{outputPath}: Windows x64 {Profile(runtimePolicy)} ({PolicyName(runtimePolicy)} runtime)"
-                    : $"{sourceDescription}: {Profile(runtimePolicy)} semantic analysis OK");
+                    ? $"{outputPath}: Windows x64 {profile} ({PolicyName(runtimePolicy)} runtime)"
+                    : $"{sourceDescription}: {profile} semantic analysis OK");
             }
         }
     }
@@ -243,13 +244,14 @@ internal static partial class Program
 
     private static void WriteCompilationJson(string command, SyntaxTree tree, ImmutableArray<Diagnostic> diagnostics,
         bool success, string? outputPath, byte[]? image,
-        NativeRuntimePolicy runtimePolicy = NativeRuntimePolicy.FailFast)
+        NativeRuntimePolicy runtimePolicy, string profile)
     {
         using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
         writer.WriteStartObject();
         writer.WriteNumber("schemaVersion", 1);
         writer.WriteString("languageVersion", SyntaxTree.LanguageVersion);
-        writer.WriteString("profile", Profile(runtimePolicy));
+        writer.WriteString("profile", profile);
+        writer.WriteString("runtimePolicy", PolicyName(runtimePolicy));
         writer.WriteString("command", command);
         writer.WriteString("path", tree.Source.Path);
         writer.WriteString("coordinateSystem", "utf-16");
@@ -268,13 +270,14 @@ internal static partial class Program
 
     private static void WriteCompilationJson(string command, Compilation compilation,
         ImmutableArray<SourceDiagnostic> diagnostics, bool success, string? outputPath, byte[]? image,
-        NativeRuntimePolicy runtimePolicy)
+        NativeRuntimePolicy runtimePolicy, string profile)
     {
         using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
         writer.WriteStartObject();
         writer.WriteNumber("schemaVersion", 2);
         writer.WriteString("languageVersion", SyntaxTree.LanguageVersion);
-        writer.WriteString("profile", Profile(runtimePolicy));
+        writer.WriteString("profile", profile);
+        writer.WriteString("runtimePolicy", PolicyName(runtimePolicy));
         writer.WriteString("command", command);
         writer.WriteString("coordinateSystem", "utf-16");
         writer.WriteBoolean("success", success);
@@ -322,7 +325,7 @@ internal static partial class Program
     }
 
     private static string Profile(NativeRuntimePolicy policy) =>
-        policy == NativeRuntimePolicy.FailFast ? Compilation.ProfileVersion : "native-11";
+        Compilation.GetNativeProfileVersion((BoundRuntimePolicy)policy, uniqueValues: false);
 
     private static string PolicyName(NativeRuntimePolicy policy) =>
         policy == NativeRuntimePolicy.FailFast ? "fail-fast" : "checked-exceptions";
