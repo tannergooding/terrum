@@ -256,12 +256,13 @@ internal sealed class Parser
 
         SyntaxKind kind;
 
-        if (Current.Text == "struct")
+        if (Current.Kind is TokenKind.StructKeyword or TokenKind.ClassKeyword)
         {
+            var isClass = Current.Kind == TokenKind.ClassKeyword;
             children.Add(Take());
             var name = Expect(TokenKind.Identifier);
             children.Add(name);
-            if (Current.Kind == TokenKind.Colon)
+            if (!isClass && Current.Kind == TokenKind.Colon)
             {
                 children.Add(ParseConformances());
             }
@@ -275,7 +276,7 @@ internal sealed class Parser
             }
 
             children.Add(Expect(TokenKind.CloseBrace));
-            kind = SyntaxKind.StructDeclaration;
+            kind = isClass ? SyntaxKind.ClassDeclaration : SyntaxKind.StructDeclaration;
         }
         else if (Current.Kind == TokenKind.InterfaceKeyword)
         {

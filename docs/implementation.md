@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-10 and native-10 through native-18
+## Current boundary: syntax-11 and native-10 through native-19
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -15,11 +15,11 @@ general managed graphs and standard-library execution are not implemented.
 |---|---|---|
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
 | Lexing | Pinned Unicode identifiers, ASCII numbers/tags, comments, leading trivia, strings, diagnostics, EOF | Interpolation, raw/character/native literals, directives |
-| Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes/generics, public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
+| Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, bounded reference classes, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Inheritance, unique/inline classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes/generics, public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; repeated `?` diagnoses | General type resolution, optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, break/continue, switch/patterns, general exception objects/throw, async, compound assignment |
 | Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, explicit closed static-protocol calls, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations and lexical readonly/exclusive writable buffer slices | Character literals, partial owning-field moves, owning field replacement, general expression temporaries, general stored loans, evaluation outside the native profile, user-defined conversions, general overloads/generic calls, conditional expressions, constructor generic inference |
-| Managed-node proof | Aliasable opaque `ManagedNode` handles, one traced outgoing edge, exact frame/temporary roots and explicit nonmoving cycle collection under both runtime policies, including exceptional root retirement and escaping-frame unlink | General classes, managed user-struct fields, stored interior pointers, implicit GC, native DLL/module graph managed ABI |
+| Managed storage | Aliasable `ManagedNode` and source-class handles, descriptor-listed managed edges, complete-publication class factories, exact frame/temporary roots and explicit nonmoving collection under both policies, including exceptional root retirement and escaping-frame unlink | Optional class edges, managed user-struct fields, stored interior pointers, implicit GC, native DLL/module graph managed ABI |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
 Only the grammar below is supported. Unsupported constructs diagnose rather than
@@ -30,11 +30,12 @@ recover every later declaration optimally.
 file        = using* namespace? declaration* EOF
 using       = "using" qualifiedName ";"
 namespace   = "namespace" qualifiedName ";"
-declaration = attributes modifiers (function | struct | interface)
+declaration = attributes modifiers (function | struct | class | interface)
 attributes  = ("[" name "]")*
 modifiers   = ("public" | "internal" | "private" | "static" | "abstract" | "mut" | "unique")*
 function    = type name typeParameters? parameters constraints* block
 struct      = "struct" name (":" type ("," type)*)? "{" member* "}"
+class       = "class" name "{" member* "}"
 interface   = "interface" name typeParameters "{" (attributes modifiers operator)* "}"
 member      = attributes modifiers (field | constructor | function | operator)
 operator    = type "operator" ("+" | "*") parameters (";" | block)
@@ -103,8 +104,8 @@ only on true; `node.Value`, `SetValue`, `SetNext`, `ClearNext` and
 `TryGetNext(out var next)` access a scalar and a single nullable internal
 edge. A fixed local binding can mutate through its writable handle.
 `ManagedHeap.Collect()` walks typed active roots across generated frames,
-including staged call arguments, outputs and pending returns, then marks the
-one-edge graph and reclaims unmarked cycles. This bounded collector runs only
+including staged call arguments, outputs and pending returns, then follows
+descriptor-listed managed edges and reclaims unmarked cycles. This bounded collector runs only
 at explicit calls and at executable entry teardown; it does not rely on
 reference counts, stack word scanning or hidden allocation-triggered GC.
 Managed handles cannot be placed in user structs, passed across external
@@ -116,6 +117,15 @@ Checked unwind retires departed lexical roots after their nested user cleanup,
 clears argument and unpublished output staging, and unlinks a root frame only
 when unwinding out of that function. A same-frame catch keeps its surviving
 roots; a pending managed return remains rooted through collecting cleanup.
+Source classes use the same root and collection machinery. Their explicit
+constructors initialize every scalar/non-null managed field before the generated
+`C.TryCreate(arguments, out C)` factory publishes an eight-byte handle.
+Allocation failure returns false; checked constructor failure frees the
+unpublished object and propagates. Collector-private zeroed reference slots are
+not source defaults. Class payloads are bounded to 128 bytes; readonly/mutable
+field access, visibility and partial-construction checks remain mandatory.
+Classes have no inheritance, optional edges, inline-struct storage or managed
+module ABI; `new C(...)` is rejected rather than inventing an allocation exception.
 The [source-line index candidate](../self-host/SourceLineIndex.terrum) uses `OwnedInt32Buffer`
 to build and own a line-start table, with binary-searched UTF-16 positions checked
 against host fixtures under both native failure policies.
@@ -160,6 +170,8 @@ executes for two distinct wrappers. General interface dispatch, primitive
 conformance, generic inference, recursive generic algorithms and public
 generic/witness metadata remain unsupported. A public concrete wrapper may
 use a private specialization without publishing its template or witnesses.
+`syntax-11` adds source class declarations; `native-19` adds their bounded
+construction and descriptor-based tracing contract.
 `[NoThrow]` on functions/constructors, `[DoesNotReturn]` on void functions and
 `[Cleanup]` on eligible unique instance methods are currently bound;
 unknown, duplicate and misplaced attributes diagnose rather

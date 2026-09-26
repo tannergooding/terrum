@@ -32,6 +32,11 @@ The [managed-node cycle sample](../samples/native/managed-node-cycle.terrum)
 returns 42 under either runtime policy: collection reclaims an unreachable
 two-node cycle while preserving a rooted node and its child. This exercises
 the bounded managed-node runtime, not general class syntax or a collection library.
+The [managed-class sample](../samples/native/managed-classes.terrum) returns 42
+under both policies. It constructs source-defined classes with multiple managed
+edges, collects during partial construction without publishing it, and updates
+a shared writable referent through an alias. This is not inheritance, optional
+reference fields, a public managed ABI or a general collection library.
 The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
 returns 46 through AOT and JIT. Two nominal Copy wrappers explicitly implement
 source-defined addition/multiplication protocols used by one constrained

@@ -6,8 +6,9 @@ by-value arguments and conditional outputs), `native-14` (composite unique
 fields, including nested Copy fields, under either runtime policy),
 `native-15` (compiler-defined owned native `int32` buffer), `native-16`
 (lexical readonly slices of its initialized prefix), `native-17`
-(lexical exclusive writable slices and in-place prefix reset), and
-`native-18` (closed-image managed-node tracing under either runtime policy)
+(lexical exclusive writable slices and in-place prefix reset),
+`native-18` (closed-image managed-node tracing under either runtime policy),
+and `native-19` (source-defined managed classes and descriptor-based tracing)
 are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
@@ -52,10 +53,12 @@ var node)` returns false without publishing a handle when allocation fails;
 edge. Copying a handle shares node identity. `ManagedHeap.Collect()` is an
 explicit, allocation-free safe point: it traces exact initialized managed
 locals, argument and output staging, return snapshots and suspended callers,
-then sweeps unreachable nodes, including cycles. A bounded 24-byte,
-nonmoving node has its managed edge at offset 0, allocation-list link at 8,
-`int32` payload at 16 and mark word at 20. Collection follows the sole edge
-without recursion or a mark-stack allocation; it does not run implicitly on
+then sweeps unreachable objects, including cycles. The current private object
+header has a work link at offset 0, allocation-list link at 8, immutable
+descriptor pointer at 16 and mark word at 24; payload starts at 32.
+`ManagedNode` stores its edge at 32 and scalar payload at 40. A class
+descriptor lists only its managed-reference offsets. Marking uses an intrusive
+worklist without recursion or a mark-stack allocation; it does not run implicitly on
 allocation. Frame roots retire when their lexical block ends, and the
 executable/JIT callable entry invokes the same generated collector after
 `Main` returns and all source frames have unlinked. This drains surviving
@@ -70,7 +73,7 @@ Local catches retain the surviving frame, and pending returns stay rooted
 through collecting cleanup. These use the same verified root metadata,
 collector and Windows unwind machinery as normal execution.
 This is a single-threaded, image-private AOT/JIT proof with no
-general class syntax, managed user-struct
+inheritance, managed user-struct
 fields, managed native exports/imports, persisted module graph ABI, finalizers,
 interior pointers, pinning or generational/concurrent collection. Native DLL
 emission admits only scalar by-value parameters and scalar or `void` results,
@@ -87,6 +90,37 @@ Its checked-unwind fixture also checks lexical and staged-root retirement,
 return snapshots, and a native C handler that validates the private versioned
 exception record before collecting after both Terrum frames have departed.
 That fixture is evidence for frame cleanup, not a public exception ABI.
+
+`native-19` adds up to 256 source-defined classes with explicit constructors and
+at most 16 scalar or non-null managed-reference fields in a payload of at most
+128 bytes. Constructor arguments are limited to three scalars or managed handles;
+inline values, unique owners and borrowed views are not accepted by the factory.
+Class values are eight-byte aliasable handles, not inline copies.
+`C.TryCreate(arguments, out var value)` is a compiler-owned allocation adapter:
+it returns false only for allocation failure or the shared 4,096-object cap.
+The factory preserves private constructor access; a public wrapper within the
+class may expose construction without exposing that constructor.
+It publishes the handle after the constructor initializes every field.
+The provisional object and constructor arguments remain rooted during
+collection; zeroed but uninitialized reference slots are collector-private,
+never readable source defaults. Checked constructor failure frees the
+unpublished allocation before propagating; fatal release failure still terminates.
+Fields are readonly after construction unless declared `mut`; a fixed handle
+binding may mutate writable fields of its referent. Private/internal access and
+partial-construction checks also apply through nested handle fields.
+An assignment selects its target referent before evaluating its value and keeps
+that referent rooted across calls, collection and exceptional cleanup.
+`new C(...)`, inheritance, unique/inline classes, optional reference fields,
+static managed roots and managed class values in inline structs remain
+unsupported. Required references do not permit bootstrapping a cycle by leaking
+partial objects. Existing `ManagedNode` edges retain the cyclic-collection proof.
+Class metadata is image-private: semantic/native modules reject it, and native
+DLL exports remain scalar-only. The [class sample](../samples/native/managed-classes.terrum)
+returns 42 through shared aliases and heterogeneous managed edges. The independent
+C heap probe checks multiple-edge liveness, pointer-shaped scalar nonroots,
+allocation failure, collection during construction, and exact provisional-object
+release through both Terrum and native catch boundaries. It also checks selected
+assignment-target roots across edge replacement, collection and checked failure.
 
 The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
 uses source-declared `+` and `*` constraints and two nominal Copy wrappers,

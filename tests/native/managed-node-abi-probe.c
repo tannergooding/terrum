@@ -244,6 +244,97 @@ static int RunUnwindChecks(HMODULE image)
     return 0;
 }
 
+static int RunClassChecks(HMODULE image, int checkedUnwind)
+{
+    const char* names[] = { "MixedEdges", "AliasUpdates", "DuringConstruction", "AssignmentAcrossCollection" };
+    const int allocations[] = { 4, 3, 3, 3 };
+    const int survivors[] = { 4, 3, 2, 2 };
+    Collect collect = (Collect)GetProcAddress(image, "CollectWithScalar");
+    Collect scalar = (Collect)GetProcAddress(image, "ScalarNonRoot");
+    Check loose = (Check)GetProcAddress(image, "CreateLoose");
+    Check failure = (Check)GetProcAddress(image, "AllocationFailure");
+    Check retain = (Check)GetProcAddress(image, "RetainAcrossAllocationFailure");
+    VERIFY(collect && scalar && loose && failure && retain, 70);
+    VERIFY(ReplaceImport(image, "HeapAlloc", (void*)TrackedAllocate), 71);
+    VERIFY(ReplaceImport(image, "HeapFree", (void*)TrackedRelease), 72);
+
+    for (int iteration = 0; iteration < 64; iteration++)
+    {
+        for (int index = 0; index < 4; index++)
+        {
+            Check check = (Check)GetProcAddress(image, names[index]);
+            VERIFY(check != NULL, 73);
+            attempts = 0;
+            releases = 0;
+            VERIFY(check() == 42, 74);
+            VERIFY(attempts == allocations[index] && LiveCount() == survivors[index]
+                && releases == attempts - survivors[index] && !invalid, 75);
+            VERIFY(collect(0) == survivors[index], 76);
+            VERIFY(releases == attempts && LiveCount() == 0 && !invalid, 77);
+        }
+        attempts = 0;
+        releases = 0;
+        VERIFY(loose() == 42 && attempts == 2 && releases == 0 && LiveCount() == 2, 78);
+        uint64_t pointerBits = 0;
+        for (int index = 0; index < 16; index++)
+        {
+            if (live[index])
+            {
+                pointerBits = (uint64_t)(uintptr_t)live[index];
+                break;
+            }
+        }
+        VERIFY(pointerBits != 0 && scalar(pointerBits) == 42, 79);
+        VERIFY(attempts == 3 && releases == 2 && LiveCount() == 1 && !invalid, 80);
+        VERIFY(collect(0) == 1 && releases == 3 && LiveCount() == 0 && !invalid, 81);
+    }
+
+    attempts = 0;
+    releases = 0;
+    failAttempt = 1;
+    VERIFY(failure() == 42 && attempts == 1 && releases == 0 && LiveCount() == 0 && !invalid, 82);
+    attempts = 0;
+    failAttempt = 2;
+    VERIFY(retain() == 42 && attempts == 2 && releases == 0 && LiveCount() == 1 && !invalid, 83);
+    VERIFY(collect(0) == 1 && releases == 1 && LiveCount() == 0 && !invalid, 84);
+    failAttempt = 0;
+
+    if (checkedUnwind)
+    {
+        Check constructorFailure = (Check)GetProcAddress(image, "ConstructorFailure");
+        Check assignmentFailure = (Check)GetProcAddress(image, "AssignmentFailure");
+        ThrowingExport escape = (ThrowingExport)GetProcAddress(image, "EscapeConstructorToNative");
+        VERIFY(constructorFailure && assignmentFailure && escape, 85);
+        for (int iteration = 0; iteration < 64; iteration++)
+        {
+            attempts = 0;
+            releases = 0;
+            VERIFY(assignmentFailure() == 42 && attempts == 3 && releases == 1
+                && LiveCount() == 2 && !invalid, 90);
+            VERIFY(collect(0) == 2 && releases == 3 && LiveCount() == 0 && !invalid, 91);
+            attempts = 0;
+            releases = 0;
+            VERIFY(constructorFailure() == 42 && attempts == 2 && releases == 1
+                && LiveCount() == 1 && !invalid, 86);
+            VERIFY(collect(0) == 1 && releases == 2 && LiveCount() == 0 && !invalid, 87);
+            attempts = 0;
+            releases = 0;
+            int caught = 0;
+            __try
+            {
+                escape();
+            }
+            __except (CatchRequirement(GetExceptionInformation()))
+            {
+                caught = 1;
+            }
+            VERIFY(caught && attempts == 2 && releases == 1 && LiveCount() == 1 && !invalid, 88);
+            VERIFY(collect(0) == 1 && releases == 2 && LiveCount() == 0 && !invalid, 89);
+        }
+    }
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if (argc != 2 && argc != 3)
@@ -269,12 +360,37 @@ int main(int argc, char** argv)
         FreeLibrary(image);
         return 5;
     }
+    if (argc == 3 && strcmp(argv[2], "classes-reject-release") == 0)
+    {
+        Check failure = (Check)GetProcAddress(image, "ConstructorFailure");
+        if (!failure || !ReplaceImport(image, "HeapFree", (void*)RejectRelease))
+        {
+            FreeLibrary(image);
+            return 4;
+        }
+        (void)failure();
+        FreeLibrary(image);
+        return 5;
+    }
     int unwind = argc == 3 && strcmp(argv[2], "unwind") == 0;
-    int result = unwind ? RunUnwindChecks(image) : RunChecks(image);
+    int checkedClasses = argc == 3 && strcmp(argv[2], "classes-checked") == 0;
+    int classes = checkedClasses || (argc == 3 && strcmp(argv[2], "classes") == 0);
+    if (argc == 3 && !unwind && !classes)
+    {
+        fprintf(stderr, "Unknown managed-heap probe mode: %s.\n", argv[2]);
+        FreeLibrary(image);
+        return 2;
+    }
+    int result = classes ? RunClassChecks(image, checkedClasses)
+        : unwind ? RunUnwindChecks(image) : RunChecks(image);
     FreeLibrary(image);
     if (result == 0)
     {
-        puts(unwind
+        puts(classes
+            ? checkedClasses
+                ? "managed-classes rounds=64 descriptors=checked construction=checked unwind=checked live=0"
+                : "managed-classes rounds=64 descriptors=checked construction=checked unwind=disabled live=0"
+            : unwind
             ? "managed-node-unwind rounds=64 lexical=checked staging=checked native-catch=checked live=0"
             : "managed-node-abi roots=precise cycle-rounds=64 publication=checked failures=checked live=0");
     }

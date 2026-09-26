@@ -225,10 +225,11 @@ public static class NativeEmitter
         return (PeImage.BuildLibrary(code, [.. selected]), UsedImports(code, imports));
     }
 
-    internal static bool UsesManagedNodes(BoundProgram program) => program.Functions.Any(static function =>
+    internal static bool UsesManagedNodes(BoundProgram program) => !program.Classes.IsEmpty
+        || program.Functions.Any(static function =>
         function.Intrinsic is >= BoundIntrinsic.NodeTryCreate and <= BoundIntrinsic.NodeCollect
-        || function.ReturnType == PrimitiveType.ManagedNode
-        || function.Variables.Any(static variable => variable.Type == PrimitiveType.ManagedNode));
+        || ManagedClassTypes.IsManaged(function.ReturnType)
+        || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type)));
 
     private static bool Exportable(BoundProgram program, BoundFunction function, bool scalarExportsOnly)
     {
@@ -265,7 +266,7 @@ public static class NativeEmitter
 
         bool PublicLayout(PrimitiveType type)
         {
-            if (type == PrimitiveType.ManagedNode)
+            if (ManagedClassTypes.IsManaged(type))
             {
                 return false;
             }
@@ -438,6 +439,7 @@ internal sealed partial class PeCompiler
         EmitSourceFunctions();
         EmitCleanupFunclets();
         EmitManagedCollector();
+        EmitManagedDescriptors();
 
         foreach (var (offset, target) in _calls)
         {
@@ -499,7 +501,7 @@ internal sealed partial class PeCompiler
         }
         if (_managedNodes)
         {
-            functions.Add(new NativeFunctionRange(_managedCollectorStart, _managedCollectorEnd, 88));
+            functions.Add(new NativeFunctionRange(_managedCollectorStart, _managedCollectorEnd, 120));
         }
 
         return new NativeCode(_code.ToArray(), _entryStart,
@@ -723,20 +725,28 @@ internal sealed partial class PeCompiler
                     _code.Set(_liveSlots[i][slot]);
                 }
             }
-            if (function.Intrinsic == BoundIntrinsic.None)
+            if (function.Intrinsic is BoundIntrinsic.None or BoundIntrinsic.ClassTryCreate)
             {
                 RegisterManagedRoots(i);
             }
             var rootsBegin = _code.Position;
             if (function.Intrinsic != BoundIntrinsic.None)
             {
-                if (function.Intrinsic >= BoundIntrinsic.NodeTryCreate)
+                if (function.Intrinsic == BoundIntrinsic.ClassTryCreate)
+                {
+                    EmitManagedClassFactory(function);
+                }
+                else if (function.Intrinsic >= BoundIntrinsic.NodeTryCreate)
                 {
                     EmitManagedIntrinsic(function.Intrinsic);
                 }
                 else
                 {
                     EmitBufferIntrinsic(function.Intrinsic);
+                }
+                if (function.Intrinsic == BoundIntrinsic.ClassTryCreate)
+                {
+                    UnregisterManagedRoots(i);
                 }
                 Epilog();
             }
@@ -800,6 +810,11 @@ internal sealed partial class PeCompiler
                 {
                     SetManagedRoot(slot, active: false);
                 }
+            }
+            if (_managedAbandonedFactories.TryGetValue(index, out var provisional))
+            {
+                SetManagedRoot(provisional, active: false);
+                EmitManagedAbandon(provisional);
             }
             if (_unwindRootFrames.Contains(index))
             {
@@ -942,7 +957,7 @@ internal sealed partial class PeCompiler
             case BoundDrop drop:
                 return drop.CleanupFunction >= 0 ? CleanupSpills(ref maximumArguments) : 0;
             case BoundFieldAssignment assignment:
-                return ExpressionSpills(assignment.Value, ref maximumArguments);
+                return Math.Max(2, 1 + ExpressionSpills(assignment.Value, ref maximumArguments));
             case BoundBufferAssignment assignment:
                 return Math.Max(ExpressionSpills(assignment.Index, ref maximumArguments),
                     1 + ExpressionSpills(assignment.Value, ref maximumArguments));
@@ -1032,10 +1047,10 @@ internal sealed partial class PeCompiler
     }
     private int OwnerPlace(int index) =>
         _program.Functions[_currentFunction].Variables[index].IsOut ? OutSlot(index) : Slot(index);
-    private static bool IsStruct(PrimitiveType type) => (int)type >= 100;
+    private static bool IsStruct(PrimitiveType type) => (int)type >= 100 && !ManagedClassTypes.IsClass(type);
     private static bool IsWide(PrimitiveType type) =>
         type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.OwnedInt32Buffer
-            or PrimitiveType.ManagedNode;
+            or PrimitiveType.ManagedNode || ManagedClassTypes.IsClass(type);
     private int Size(PrimitiveType type) => ValueLayout.Size(type, _program.Structures);
     private bool IsIndirect(PrimitiveType type) => IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8);
     private bool IsUnique(PrimitiveType type) =>
@@ -1166,7 +1181,7 @@ internal sealed partial class PeCompiler
                 break;
             case BoundIntrinsic.None or BoundIntrinsic.NodeTryCreate or BoundIntrinsic.NodeValue
                 or BoundIntrinsic.NodeSetValue or BoundIntrinsic.NodeSetNext or BoundIntrinsic.NodeClearNext
-                or BoundIntrinsic.NodeTryGetNext or BoundIntrinsic.NodeCollect:
+                or BoundIntrinsic.NodeTryGetNext or BoundIntrinsic.NodeCollect or BoundIntrinsic.ClassTryCreate:
             default:
                 throw new InvalidOperationException("Unknown verified native buffer intrinsic.");
         }
@@ -1424,7 +1439,7 @@ internal sealed partial class PeCompiler
             case BoundLocal local:
                 Expression(local.Initializer, 0);
                 StoreValue(Slot(local.Variable), local.Initializer.Type);
-                if (local.Initializer.Type == PrimitiveType.ManagedNode)
+                if (ManagedClassTypes.IsManaged(local.Initializer.Type))
                 {
                     SetManagedRoot(Slot(local.Variable), active: true);
                 }
@@ -1476,7 +1491,7 @@ internal sealed partial class PeCompiler
                 break;
             case BoundAssignment assignment:
                 Expression(assignment.Value, 0);
-                if (assignment.Value.Type == PrimitiveType.ManagedNode)
+                if (ManagedClassTypes.IsManaged(assignment.Value.Type))
                 {
                     var managedDestination = OwnerPlace(assignment.Variable);
                     StoreValue(managedDestination, assignment.Value.Type);
@@ -1543,23 +1558,89 @@ internal sealed partial class PeCompiler
                 _code.PatchRelative(completed, _code.Position);
                 break;
             case BoundFieldAssignment fieldAssignment:
-                Expression(fieldAssignment.Value, 0);
                 var variable = _program.Functions[_currentFunction].Variables[fieldAssignment.Variable];
                 var fieldType = variable.Type;
-                var field = _program.Structures[(int)fieldType - 100].Fields[fieldAssignment.Field];
-                var destination = (variable.IsOut ? OutSlot(fieldAssignment.Variable) : Slot(fieldAssignment.Variable)) + field.Offset;
+                var classField = ManagedClassTypes.IsClass(fieldType);
+                var field = classField ? _program.Classes[(int)fieldType - ManagedClassTypes.First]
+                    .Fields[fieldAssignment.Field] : _program.Structures[(int)fieldType - 100].Fields[fieldAssignment.Field];
+                var destination = (variable.IsOut ? OutSlot(fieldAssignment.Variable) : Slot(fieldAssignment.Variable))
+                    + field.Offset;
                 foreach (var nestedField in fieldAssignment.NestedFields)
                 {
-                    field = _program.Structures[(int)field.Type - 100].Fields[nestedField];
-                    destination += field.Offset;
+                    if (classField)
+                    {
+                        field = _program.Classes[(int)field.Type - ManagedClassTypes.First].Fields[nestedField];
+                    }
+                    else
+                    {
+                        field = _program.Structures[(int)field.Type - 100].Fields[nestedField];
+                        destination += field.Offset;
+                    }
                 }
-                if (IsIndirect(field.Type))
+                if (classField)
                 {
-                    CopyToFrame(destination, field.Size);
+                    _code.Load64(OwnerPlace(fieldAssignment.Variable));
+                    var currentType = fieldType;
+                    var currentField = _program.Classes[(int)currentType - ManagedClassTypes.First]
+                        .Fields[fieldAssignment.Field];
+                    foreach (var nestedField in fieldAssignment.NestedFields)
+                    {
+                        _code.PointerOffset(32 + currentField.Offset);
+                        _code.Bytes(0x48, 0x8B, 0x00);
+                        currentType = currentField.Type;
+                        currentField = _program.Classes[(int)currentType - ManagedClassTypes.First]
+                            .Fields[nestedField];
+                    }
+                    _code.Store64(Spill(0));
+                    SetManagedRoot(Spill(0), active: true);
+                    var stagedBegin = _code.Position;
+                    var stagedFunclet = -1;
+                    if (_checkedExceptions && !_emittingFunclet)
+                    {
+                        stagedFunclet = _funclets.Count;
+                        _funclets.Add((new BoundBlock([], fieldAssignment.Span), _currentFunction, 0, 0));
+                        _managedStagedRoots.Add(stagedFunclet, [Spill(0)]);
+                    }
+                    Expression(fieldAssignment.Value, 1);
+                    _code.Store64(Spill(1));
+                    _code.Load64(Spill(0));
+                    _code.PointerOffset(32 + field.Offset);
+                    _code.Bytes(0x48, 0x89, 0xC2);
+                    _code.Load64(Spill(1));
+                    switch (field.Size)
+                    {
+                        case 1:
+                            _code.Bytes(0x88, 0x02);
+                            break;
+                        case 2:
+                            _code.Bytes(0x66, 0x89, 0x02);
+                            break;
+                        case 4:
+                            _code.Bytes(0x89, 0x02);
+                            break;
+                        default:
+                            _code.Bytes(0x48, 0x89, 0x02);
+                            break;
+                    }
+                    SetManagedRoot(Spill(0), active: false);
+                    if (stagedFunclet >= 0)
+                    {
+                        _code.Byte(0x90);
+                        _scopes[_currentFunction].Add(new NativeExceptionScope(stagedBegin, _code.Position,
+                            -stagedFunclet - 1, 0));
+                    }
                 }
                 else
                 {
-                    _code.StoreField(destination, field.Size);
+                    Expression(fieldAssignment.Value, 0);
+                    if (IsIndirect(field.Type))
+                    {
+                        CopyToFrame(destination, field.Size);
+                    }
+                    else
+                    {
+                        _code.StoreField(destination, field.Size);
+                    }
                 }
                 if (fieldAssignment.Variable == 0 && fieldAssignment.NestedFields.IsEmpty
                     && IsUnique(field.Type)
@@ -1589,7 +1670,7 @@ internal sealed partial class PeCompiler
                     if (_cleanups.Count != 0)
                     {
                         StoreValue(PendingReturnSlot(), result.Value.Type);
-                        if (result.Value.Type == PrimitiveType.ManagedNode)
+                        if (ManagedClassTypes.IsManaged(result.Value.Type))
                         {
                             SetManagedRoot(PendingReturnSlot(), active: true);
                         }
@@ -1824,6 +1905,14 @@ internal sealed partial class PeCompiler
                 _code.Address(OwnerPlace(mutableLoan.Variable));
                 break;
             case BoundFieldRead fieldRead:
+                if (ManagedClassTypes.IsClass(fieldRead.Receiver.Type))
+                {
+                    Expression(fieldRead.Receiver, spill);
+                    var classField = _program.Classes[(int)fieldRead.Receiver.Type
+                        - ManagedClassTypes.First].Fields[fieldRead.Field];
+                    _code.LoadPointerField(32 + classField.Offset, classField.Size);
+                    break;
+                }
                 if (IsUnique(fieldRead.Receiver.Type))
                 {
                     EmitUniqueFieldPlace(fieldRead.Receiver);
@@ -1944,7 +2033,7 @@ internal sealed partial class PeCompiler
                     List<int>? managedSlots = null;
                     for (var i = 0; i < call.Arguments.Length; i++)
                     {
-                        if (call.Arguments[i].Type == PrimitiveType.ManagedNode)
+                        if (ManagedClassTypes.IsManaged(call.Arguments[i].Type))
                         {
                             managedSlots ??= [];
                             managedSlots.Add(Spill(argumentsBase + i));
@@ -1973,7 +2062,7 @@ internal sealed partial class PeCompiler
                     {
                         var scratch = Spill(argumentsBase + call.Arguments.Length + i);
                         ZeroStruct(scratch, IsIndirect(call.Arguments[i].Type) ? Size(call.Arguments[i].Type) : 8);
-                        if (call.Arguments[i].Type == PrimitiveType.ManagedNode)
+                        if (ManagedClassTypes.IsManaged(call.Arguments[i].Type))
                         {
                             SetManagedRoot(scratch, active: true);
                         }
@@ -1990,7 +2079,7 @@ internal sealed partial class PeCompiler
                         else
                         {
                             StoreValue(Spill(argumentsBase + i), call.Arguments[i].Type);
-                            if (call.Arguments[i].Type == PrimitiveType.ManagedNode)
+                            if (ManagedClassTypes.IsManaged(call.Arguments[i].Type))
                             {
                                 SetManagedRoot(Spill(argumentsBase + i), active: true);
                             }
@@ -2022,7 +2111,7 @@ internal sealed partial class PeCompiler
                         DropOwner(output.Variable);
                     }
                     if (argument is BoundOutArgument managedOutput
-                        && managedOutput.Type == PrimitiveType.ManagedNode)
+                        && ManagedClassTypes.IsManaged(managedOutput.Type))
                     {
                         SetManagedRoot(OwnerPlace(managedOutput.Variable), active: false);
                     }
@@ -2100,7 +2189,7 @@ internal sealed partial class PeCompiler
                                     LoadValue(scratch, output.Type);
                                 }
                                 StoreValue(destination, output.Type);
-                                if (output.Type == PrimitiveType.ManagedNode)
+                                if (ManagedClassTypes.IsManaged(output.Type))
                                 {
                                     SetManagedRoot(destination, active: true);
                                 }
@@ -2125,7 +2214,7 @@ internal sealed partial class PeCompiler
                 }
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
-                    if (call.Arguments[i].Type == PrimitiveType.ManagedNode)
+                    if (ManagedClassTypes.IsManaged(call.Arguments[i].Type))
                     {
                         SetManagedRoot(Spill(argumentsBase + i), active: false);
                         if (call.Arguments[i] is BoundOutArgument)

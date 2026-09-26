@@ -15,6 +15,8 @@ public enum SyntaxKind
     FunctionDeclaration,
     /// <summary>A structure declaration.</summary>
     StructDeclaration,
+    /// <summary>A sealed managed reference type declaration.</summary>
+    ClassDeclaration,
     /// <summary>A constructor declaration.</summary>
     ConstructorDeclaration,
     /// <summary>A field declaration.</summary>

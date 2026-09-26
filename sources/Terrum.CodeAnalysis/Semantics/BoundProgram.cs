@@ -38,6 +38,22 @@ public enum PrimitiveType
     ManagedNode,
 }
 
+/// <summary>Disjoint source-class type identifiers start above the complete inline-struct range.</summary>
+public static class ManagedClassTypes
+{
+    /// <summary>The first source-defined managed class type identifier.</summary>
+    public const int First = 1024;
+
+    /// <summary>The bounded per-object payload size, independent of compact inline values.</summary>
+    public const int MaximumPayload = 128;
+
+    /// <summary>Whether a type is a source-defined managed class handle.</summary>
+    public static bool IsClass(PrimitiveType type) => (int)type >= First;
+
+    /// <summary>Whether a type is a managed reference handled by the image-private collector.</summary>
+    public static bool IsManaged(PrimitiveType type) => type == PrimitiveType.ManagedNode || IsClass(type);
+}
+
 /// <summary>Compiler-defined native storage and managed graph operations; user functions cannot declare these implementations.</summary>
 public enum BoundIntrinsic
 {
@@ -71,6 +87,8 @@ public enum BoundIntrinsic
     NodeTryGetNext,
     /// <summary>Traces exact roots and reclaims unreachable nodes, returning their count.</summary>
     NodeCollect,
+    /// <summary>Allocates and constructs a source class, publishing its handle only on success.</summary>
+    ClassTryCreate,
 }
 
 /// <summary>The verified behavior of compiler-generated checked failures.</summary>
@@ -90,11 +108,21 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
     /// <summary>Validated value layouts; type identifiers are 100 + declaration index.</summary>
     public ImmutableArray<BoundStruct> Structures { get; init; } = [];
 
+    /// <summary>Source-defined managed layouts; handles have type identifiers starting at <see cref="ManagedClassTypes.First"/>.</summary>
+    public ImmutableArray<BoundClass> Classes { get; init; } = [];
+
     /// <summary>Compiler-supplied, bounded buffers; never represented as source values or raw addresses.</summary>
     public ImmutableArray<HostBuffer> Buffers { get; init; } = [];
 
     /// <summary>The runtime behavior verified for this program and its imports.</summary>
     public BoundRuntimePolicy RuntimePolicy { get; init; }
+}
+
+/// <summary>A sealed, image-private managed payload with non-null initialized fields.</summary>
+public sealed record BoundClass(string Name, ImmutableArray<BoundStructField> Fields, int Size)
+{
+    /// <summary>Whether access is limited to the current compilation.</summary>
+    public bool IsInternal { get; init; }
 }
 
 /// <summary>A compact value type of at most sixteen bytes, with no references or aliases.</summary>
@@ -165,6 +193,12 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
 
     /// <summary>A fixed compiler-defined operation, or None for an ordinary function.</summary>
     public BoundIntrinsic Intrinsic { get; init; }
+
+    /// <summary>Whether this source constructor initializes an unpublished managed receiver.</summary>
+    public bool IsClassConstructor { get; init; }
+
+    /// <summary>Source constructor called by a compiler-defined class factory, or -1.</summary>
+    public int ClassConstructor { get; init; } = -1;
 }
 
 /// <summary>A parameter or initialized local declaration.</summary>

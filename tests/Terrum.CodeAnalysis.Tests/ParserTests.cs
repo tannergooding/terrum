@@ -202,7 +202,7 @@ public sealed class ParserTests
     [Theory]
     [InlineData("void F( { return ;")]
     [InlineData("void F() { var a = ; @@@ return 2 }")]
-    [InlineData("class C { void F() {} } void G() { return; }")]
+    [InlineData("class C { void F( {} } void G() { return; }")]
     [InlineData("void F() { if (true) return; }")]
     [InlineData("void F() { 1abc; F(,); }")]
     [InlineData("namespace A; namespace B; using C;")]
@@ -217,6 +217,16 @@ public sealed class ParserTests
         Assert.True(tree.HasErrors);
         AssertLossless(tree);
         Assert.All(tree.Diagnostics, diagnostic => Assert.InRange(diagnostic.Span.End, 0, text.Length));
+    }
+
+    [Fact]
+    public void ClassMembersAndFollowingDeclarationsRemainLossless()
+    {
+        var tree = SyntaxTree.Parse("class C { void F() {} } void G() { return; }");
+        Assert.False(tree.HasErrors);
+        AssertLossless(tree);
+        _ = Assert.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.ClassDeclaration);
+        Assert.Equal(2, tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.FunctionDeclaration));
     }
 
     [Fact]

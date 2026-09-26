@@ -1,0 +1,97 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System.Threading.Tasks;
+using Xunit;
+
+namespace Terrum.CodeAnalysis.Tests;
+
+public sealed partial class JitTests
+{
+    private const string ManagedFieldAssignmentDeclarations = """
+        class Leaf {
+            public mut int32 Value;
+            public Leaf(int32 value) { Value = value; }
+        }
+        class Pair {
+            public mut Leaf Left;
+            public Pair(Leaf left) { Left = left; }
+        }
+        Pair Build() {
+            require Leaf.TryCreate(1, out var leaf);
+            require Pair.TryCreate(leaf, out var pair);
+            return pair;
+        }
+        int32 ReplaceLeft(Pair pair, Leaf replacement) {
+            pair.Left = replacement;
+            require ManagedHeap.Collect() == 0;
+            return 42;
+        }
+        """;
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task ManagedFieldAssignmentPreservesSelectedReceiverAcrossReplacingRhsAsync(bool checkedExceptions)
+    {
+        var source = ManagedFieldAssignmentDeclarations + """
+            int32 Main() {
+                Pair pair = Build();
+                require Leaf.TryCreate(7, out var replacement);
+                pair.Left.Value = ReplaceLeft(pair, replacement);
+                require pair.Left.Value == 7;
+                require ManagedHeap.Collect() == 1;
+                return 42;
+            }
+            """;
+        return checkedExceptions
+            ? AssertCheckedExecutionAsync(source, 42)
+            : AssertFailFastExecutionAsync(source, 42);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task ManagedFieldAssignmentWritesOriginalReceiverAcrossReplacingRhsAsync(bool checkedExceptions)
+    {
+        var source = ManagedFieldAssignmentDeclarations + """
+            int32 Main() {
+                Pair pair = Build();
+                Leaf original = pair.Left;
+                require Leaf.TryCreate(7, out var replacement);
+                pair.Left.Value = ReplaceLeft(pair, replacement);
+                require pair.Left.Value == 7;
+                return original.Value;
+            }
+            """;
+        return checkedExceptions
+            ? AssertCheckedExecutionAsync(source, 42)
+            : AssertFailFastExecutionAsync(source, 42);
+    }
+
+    [Fact]
+    public Task CheckedFieldAssignmentRetiresSelectedReceiverAfterRhsThrowsAsync()
+    {
+        var source = ManagedFieldAssignmentDeclarations + """
+            int32 FailAfterReplace(Pair pair, Leaf replacement) {
+                pair.Left = replacement;
+                require false;
+                return 42;
+            }
+            int32 Main() {
+                Pair pair = Build();
+                require Leaf.TryCreate(7, out var replacement);
+                unsafe {
+                    try {
+                        pair.Left.Value = FailAfterReplace(pair, replacement);
+                    }
+                    catch {
+                        require ManagedHeap.Collect() == 1;
+                        return pair.Left.Value + 35;
+                    }
+                }
+                return 0;
+            }
+            """;
+        return AssertCheckedExecutionAsync(source, 42);
+    }
+}

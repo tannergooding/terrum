@@ -16,7 +16,12 @@ through the loop and retire when its header scope ends. Checked unwind retires
 departed lexical and staged roots after user cleanup and unlinks escaping
 frames; local catches preserve surviving roots and returns stay rooted through
 cleanup. It neither gives a managed root authority over an `OwnedInt32Buffer`
-nor implements general class, stored-view, exception-object or module root contracts.
+nor implements stored-view, exception-object or module root contracts.
+Source-defined classes extend these roots to immutable descriptors listing
+multiple managed fields. A generated `TryCreate` roots provisional construction,
+publishes only a fully initialized handle, and releases the unpublished object
+on checked constructor failure. Private zeroed tracing slots do not expose
+source null/default values. Inline structs still cannot contain managed handles.
 The remaining lifetime constructs are rejected for execution.
 
 ## Three independent dependencies

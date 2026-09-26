@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Native;
@@ -11,20 +12,22 @@ internal sealed partial class PeCompiler
     private readonly int[] _managedRootFrames;
     private readonly Dictionary<int, int>[] _managedRootFlags;
     private readonly List<int> _managedCollectorCalls = [];
+    private readonly List<(int Displacement, int Descriptor)> _managedDescriptorReferences = [];
+    private readonly Dictionary<int, int> _managedAbandonedFactories = [];
     private int _managedCollectorStart;
     private int _managedCollectorEnd;
 
     private long PrepareManagedRoots(int functionIndex, BoundFunction function, int spillSlots,
         bool needsReturnSnapshot, long at)
     {
-        if (!_managedNodes || function.Intrinsic != BoundIntrinsic.None)
+        if (!_managedNodes || function.Intrinsic is not (BoundIntrinsic.None or BoundIntrinsic.ClassTryCreate))
         {
             return at;
         }
         var roots = _managedRootFlags[functionIndex];
         for (var i = 0; i < function.Variables.Length; i++)
         {
-            if (function.Variables[i].Type != PrimitiveType.ManagedNode)
+            if (!ManagedClassTypes.IsManaged(function.Variables[i].Type))
             {
                 continue;
             }
@@ -35,7 +38,7 @@ internal sealed partial class PeCompiler
         {
             _ = roots.TryAdd(_spillBases[functionIndex] + (16 * spill), 0);
         }
-        if (function.ReturnType == PrimitiveType.ManagedNode && needsReturnSnapshot)
+        if (ManagedClassTypes.IsManaged(function.ReturnType) && needsReturnSnapshot)
         {
             _ = roots.TryAdd((_returnSlots[functionIndex] + 15) & ~15, 0);
         }
@@ -52,7 +55,6 @@ internal sealed partial class PeCompiler
         }
         return at + 16 + (roots.Count * 16L);
     }
-
     private int OutSlotFor(int functionIndex, BoundFunction function, int variable)
     {
         var ordinal = 0;
@@ -88,7 +90,7 @@ internal sealed partial class PeCompiler
         for (var i = function.IsConstructor ? 1 : 0;
             i < function.ParameterCount + (function.IsConstructor ? 1 : 0); i++)
         {
-            if (function.Variables[i].Type == PrimitiveType.ManagedNode && !function.Variables[i].IsOut)
+            if (ManagedClassTypes.IsManaged(function.Variables[i].Type) && !function.Variables[i].IsOut)
             {
                 SetManagedRoot(_slots[functionIndex][i], active: true);
             }
@@ -132,53 +134,41 @@ internal sealed partial class PeCompiler
         switch (intrinsic)
         {
             case BoundIntrinsic.NodeTryCreate:
-                _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), _managedRuntimeOffset));
-                _code.Bytes(0x81, 0x7A, 0x10);
-                _code.Int32(NativeManagedNodeIntrinsics.MaximumNodes);
-                var full = _code.JumpIf(0x83);
-                _nativeImportFixups.Add(new NativeImportFixup(_code.ImportCall(), "KERNEL32.dll", "GetProcessHeap"));
-                _code.MoveArgument(0, true);
-                _code.Bytes(0x31, 0xD2, 0x41, 0xB8, 0x18, 0x00, 0x00, 0x00);
-                _nativeImportFixups.Add(new NativeImportFixup(_code.ImportCall(), "KERNEL32.dll", "HeapAlloc"));
+                EmitManagedAllocation(0, 48);
                 _code.Bytes(0x48, 0x85, 0xC0);
                 var allocationFailed = _code.JumpIf(0x84);
-                _code.Bytes(0x48, 0x89, 0xC2); // rdx = new node
+                _code.Bytes(0x48, 0x89, 0xC2);
+                _code.Bytes(0x48, 0xC7, 0x42, 0x20, 0x00, 0x00, 0x00, 0x00);
                 _code.Load(Slot(0));
-                _code.Bytes(0x89, 0x42, 0x10, 0x48, 0x89, 0xD0);
-                _code.Bytes(0x48, 0xC7, 0x00, 0x00, 0x00, 0x00, 0x00);
-                _code.Bytes(0xC7, 0x40, 0x14, 0x00, 0x00, 0x00, 0x00);
-                _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), _managedRuntimeOffset));
-                _code.Bytes(0x48, 0x8B, 0x0A, 0x48, 0x89, 0x48, 0x08);
-                _code.Bytes(0x48, 0x89, 0x02, 0xFF, 0x42, 0x10);
+                _code.Bytes(0x89, 0x42, 0x28, 0x48, 0x89, 0xD0);
                 _code.Load64(Slot(1), destinationRegister: true);
                 _code.Bytes(0x48, 0x89, 0x02, 0xB8, 0x01, 0x00, 0x00, 0x00);
                 var success = _code.Jump();
-                _code.PatchRelative(full, _code.Position);
                 _code.PatchRelative(allocationFailed, _code.Position);
                 _code.Bytes(0x31, 0xC0);
                 _code.PatchRelative(success, _code.Position);
                 break;
             case BoundIntrinsic.NodeValue:
                 _code.Load64(Slot(0));
-                _code.LoadPointerField(16, 4);
+                _code.LoadPointerField(40, 4);
                 break;
             case BoundIntrinsic.NodeSetValue:
                 _code.Load64(Slot(0), destinationRegister: true);
                 _code.Load(Slot(1));
-                _code.Bytes(0x89, 0x42, 0x10);
+                _code.Bytes(0x89, 0x42, 0x28);
                 break;
             case BoundIntrinsic.NodeSetNext:
                 _code.Load64(Slot(0), destinationRegister: true);
                 _code.Load64(Slot(1));
-                _code.Bytes(0x48, 0x89, 0x02);
+                _code.Bytes(0x48, 0x89, 0x42, 0x20);
                 break;
             case BoundIntrinsic.NodeClearNext:
                 _code.Load64(Slot(0), destinationRegister: true);
-                _code.Bytes(0x31, 0xC0, 0x48, 0x89, 0x02);
+                _code.Bytes(0x31, 0xC0, 0x48, 0x89, 0x42, 0x20);
                 break;
             case BoundIntrinsic.NodeTryGetNext:
                 _code.Load64(Slot(0));
-                _code.Bytes(0x48, 0x8B, 0x00, 0x48, 0x85, 0xC0);
+                _code.Bytes(0x48, 0x8B, 0x40, 0x20, 0x48, 0x85, 0xC0);
                 var empty = _code.JumpIf(0x84);
                 _code.Load64(Slot(1), destinationRegister: true);
                 _code.Bytes(0x48, 0x89, 0x02, 0xB8, 0x01, 0x00, 0x00, 0x00);
@@ -192,11 +182,82 @@ internal sealed partial class PeCompiler
                 _code.Bytes(0x48, 0x89, 0xD1);
                 _managedCollectorCalls.Add(_code.RelativeCall());
                 break;
-            case BoundIntrinsic.None or BoundIntrinsic.BufferTryCreate or BoundIntrinsic.BufferCount
+            case BoundIntrinsic.None or BoundIntrinsic.ClassTryCreate or BoundIntrinsic.BufferTryCreate or BoundIntrinsic.BufferCount
                 or BoundIntrinsic.BufferCapacity or BoundIntrinsic.BufferRead or BoundIntrinsic.BufferSet
                 or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear:
             default:
                 throw new InvalidOperationException("Unknown managed-node intrinsic.");
+        }
+    }
+
+    private void EmitDescriptorAddress(int descriptor)
+    {
+        _code.Bytes(0x48, 0x8D, 0x0D); // lea rcx,[rip+descriptor]
+        var displacement = _code.Position;
+        _code.Int32(0);
+        _managedDescriptorReferences.Add((displacement, descriptor));
+    }
+
+    private void EmitManagedAllocation(int descriptor, int size)
+    {
+        _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), _managedRuntimeOffset));
+        _code.Bytes(0x81, 0x7A, 0x10);
+        _code.Int32(NativeManagedNodeIntrinsics.MaximumNodes);
+        var full = _code.JumpIf(0x83);
+        _nativeImportFixups.Add(new NativeImportFixup(_code.ImportCall(), "KERNEL32.dll", "GetProcessHeap"));
+        _code.MoveArgument(0, true);
+        _code.Bytes(0x31, 0xD2, 0x41, 0xB8);
+        _code.Int32(size);
+        _nativeImportFixups.Add(new NativeImportFixup(_code.ImportCall(), "KERNEL32.dll", "HeapAlloc"));
+        _code.Bytes(0x48, 0x85, 0xC0);
+        var failed = _code.JumpIf(0x84);
+        _code.Bytes(0x48, 0x89, 0xC2); // rdx = allocated object
+        EmitDescriptorAddress(descriptor);
+        _code.Bytes(0x48, 0x89, 0x4A, 0x10); // descriptor at +16
+        _code.Bytes(0x48, 0xC7, 0x02, 0x00, 0x00, 0x00, 0x00);
+        _code.Bytes(0xC7, 0x42, 0x18, 0x00, 0x00, 0x00, 0x00);
+        _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), _managedRuntimeOffset));
+        _code.Bytes(0x48, 0x8B, 0x0A, 0x48, 0x89, 0x48, 0x08);
+        _code.Bytes(0x48, 0x89, 0x02, 0xFF, 0x42, 0x10);
+        var complete = _code.Jump();
+        _code.PatchRelative(full, _code.Position);
+        _code.PatchRelative(failed, _code.Position);
+        _code.Bytes(0x31, 0xC0);
+        _code.PatchRelative(complete, _code.Position);
+    }
+
+    private void EmitManagedDescriptors()
+    {
+        if (!_managedNodes)
+        {
+            return;
+        }
+        var offsets = new int[_program.Classes.Length + 1];
+        for (var descriptor = 0; descriptor < offsets.Length; descriptor++)
+        {
+            offsets[descriptor] = _code.Position;
+            if (descriptor == 0)
+            {
+                _code.Int32(1);
+                _code.Int32(48);
+                _code.Int32(32);
+            }
+            else
+            {
+                var @class = _program.Classes[descriptor - 1];
+                var edges = @class.Fields.Where(static field => ManagedClassTypes.IsManaged(field.Type))
+                    .Select(static field => field.Offset + 32).ToArray();
+                _code.Int32(edges.Length);
+                _code.Int32(@class.Size + 32);
+                foreach (var edge in edges)
+                {
+                    _code.Int32(edge);
+                }
+            }
+        }
+        foreach (var (displacement, descriptor) in _managedDescriptorReferences)
+        {
+            _code.PatchRelative(displacement, offsets[descriptor]);
         }
     }
 
@@ -212,17 +273,19 @@ internal sealed partial class PeCompiler
             _code.PatchRelative(call, _managedCollectorStart);
         }
         _code.UseFramePointer = false;
-        Prolog(88);
+        Prolog(120);
         _code.Bytes(0x48, 0x89, 0xC8); // runtime state is the sole argument
         _code.Store64(32);
         _code.Clear(72);
+        _code.Bytes(0x31, 0xC0);
+        _code.Store64(80);
+        var markCalls = new List<int>();
 
-        // Reset marks on the allocation list.
         _code.Bytes(0x48, 0x8B, 0x01);
         var reset = _code.Position;
         _code.Bytes(0x48, 0x85, 0xC0);
         var marksReset = _code.JumpIf(0x84);
-        _code.Bytes(0xC7, 0x40, 0x14, 0x00, 0x00, 0x00, 0x00);
+        _code.Bytes(0xC7, 0x40, 0x18, 0x00, 0x00, 0x00, 0x00);
         _code.Bytes(0x48, 0x8B, 0x40, 0x08);
         _code.PatchRelative(_code.Jump(), reset);
         _code.PatchRelative(marksReset, _code.Position);
@@ -244,16 +307,7 @@ internal sealed partial class PeCompiler
         _code.Bytes(0x83, 0x78, 0x18, 0x00);
         var nextRoot = _code.JumpIf(0x84);
         _code.Bytes(0x48, 0x8B, 0x40, 0x10, 0x48, 0x8B, 0x00);
-        var edge = _code.Position;
-        _code.Bytes(0x48, 0x85, 0xC0);
-        var marked = _code.JumpIf(0x84);
-        _code.Bytes(0x83, 0x78, 0x14, 0x00);
-        var seen = _code.JumpIf(0x85);
-        _code.Bytes(0xC7, 0x40, 0x14, 0x01, 0x00, 0x00, 0x00);
-        _code.Bytes(0x48, 0x8B, 0x00);
-        _code.PatchRelative(_code.Jump(), edge);
-        _code.PatchRelative(marked, _code.Position);
-        _code.PatchRelative(seen, _code.Position);
+        markCalls.Add(_code.RelativeCall());
         _code.PatchRelative(nextRoot, _code.Position);
         _code.Bytes(0xFF, 0x84, 0x24, 0x30, 0x00, 0x00, 0x00);
         _code.PatchRelative(_code.Jump(), rootLoop);
@@ -264,13 +318,40 @@ internal sealed partial class PeCompiler
         _code.PatchRelative(_code.Jump(), frameLoop);
         _code.PatchRelative(tracingDone, _code.Position);
 
+        var workLoop = _code.Position;
+        _code.Load64(80);
+        _code.Bytes(0x48, 0x85, 0xC0);
+        var workDone = _code.JumpIf(0x84);
+        _code.Store64(88);
+        _code.Bytes(0x48, 0x8B, 0x08);
+        _code.Bytes(0x48, 0x89, 0xC8);
+        _code.Store64(80); // pop the intrusive work link
+        _code.Load64(88);
+        _code.Bytes(0x48, 0x8B, 0x40, 0x10);
+        _code.Store64(104); // descriptor
+        _code.Clear(96);
+        var scan = _code.Position;
+        _code.Load64(104, destinationRegister: true);
+        _code.Load(96);
+        _code.Bytes(0x3B, 0x02);
+        var nextObject = _code.JumpIf(0x83);
+        _code.Bytes(0x8B, 0x4C, 0x82, 0x08); // ecx = descriptor.referenceOffsets[index]
+        _code.Load64(88);
+        _code.Bytes(0x48, 0x8B, 0x04, 0x08); // rax = object field
+        markCalls.Add(_code.RelativeCall());
+        _code.Bytes(0xFF, 0x84, 0x24, 0x60, 0x00, 0x00, 0x00);
+        _code.PatchRelative(_code.Jump(), scan);
+        _code.PatchRelative(nextObject, _code.Position);
+        _code.PatchRelative(_code.Jump(), workLoop);
+        _code.PatchRelative(workDone, _code.Position);
+
         _code.Load64(32);
         _code.Store64(64); // link is the address of the allocation-list pointer to examine
         var sweep = _code.Position;
         _code.Load64(64, destinationRegister: true);
         _code.Bytes(0x48, 0x8B, 0x12, 0x48, 0x85, 0xD2);
         var finished = _code.JumpIf(0x84);
-        _code.Bytes(0x83, 0x7A, 0x14, 0x00);
+        _code.Bytes(0x83, 0x7A, 0x18, 0x00);
         var live = _code.JumpIf(0x85);
         _code.Bytes(0x48, 0x89, 0xD0);
         _code.Store64(56); // preserve the node across HeapFree imports
@@ -300,10 +381,26 @@ internal sealed partial class PeCompiler
         _code.PatchRelative(_code.Jump(), sweep);
         _code.PatchRelative(finished, _code.Position);
         _code.Load(72);
-        _frame = 88;
+        _frame = 120;
         Epilog();
         _managedCollectorEnd = _code.Position;
-        if (_managedCollectorEnd > MaximumText)
+        var mark = _code.Position;
+        foreach (var call in markCalls)
+        {
+            _code.PatchRelative(call, mark);
+        }
+        _code.Bytes(0x48, 0x85, 0xC0);
+        var noObject = _code.JumpIf(0x84);
+        _code.Bytes(0x83, 0x78, 0x18, 0x00);
+        var alreadyMarked = _code.JumpIf(0x85);
+        _code.Bytes(0xC7, 0x40, 0x18, 0x01, 0x00, 0x00, 0x00);
+        _code.Bytes(0x48, 0x8B, 0x8C, 0x24, 0x58, 0x00, 0x00, 0x00);
+        _code.Bytes(0x48, 0x89, 0x08);
+        _code.Bytes(0x48, 0x89, 0x84, 0x24, 0x58, 0x00, 0x00, 0x00);
+        _code.PatchRelative(noObject, _code.Position);
+        _code.PatchRelative(alreadyMarked, _code.Position);
+        _code.Byte(0xC3);
+        if (_code.Position > MaximumText)
         {
             throw new NotSupportedException("Native text exceeds the 8 MiB image ceiling.");
         }

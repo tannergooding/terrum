@@ -98,6 +98,66 @@ if (unwindProof.Trim() != "managed-node-unwind rounds=64 lexical=checked staging
 }
 Console.Write(unwindProof);
 
+foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+{
+    var classes = Path.Combine(artifacts, $"managed-class-abi-{policy}.dll");
+    var compileClasses = new ProcessStartInfo("dotnet");
+    foreach (var argument in new[] { cli, "build-library",
+        Path.GetFullPath(Path.Combine("tests", "native", "managed-class-abi.terrum")),
+        "--export", "MixedEdges", "--export", "AliasUpdates", "--export", "DuringConstruction",
+        "--export", "AssignmentAcrossCollection",
+        "--export", "CreateLoose", "--export", "ScalarNonRoot", "--export", "AllocationFailure",
+        "--export", "RetainAcrossAllocationFailure", "--export", "CollectWithScalar",
+        "-o", classes, "--runtime", policy })
+    {
+        compileClasses.ArgumentList.Add(argument);
+    }
+    var checkedUnwind = policy == "checked-exceptions";
+    if (checkedUnwind)
+    {
+        compileClasses.ArgumentList.Add("--source");
+        compileClasses.ArgumentList.Add(Path.GetFullPath(
+            Path.Combine("tests", "native", "managed-class-unwind-abi.terrum")));
+        compileClasses.ArgumentList.Add("--export");
+        compileClasses.ArgumentList.Add("ConstructorFailure");
+        compileClasses.ArgumentList.Add("--export");
+        compileClasses.ArgumentList.Add("EscapeConstructorToNative");
+        compileClasses.ArgumentList.Add("--export");
+        compileClasses.ArgumentList.Add("AssignmentFailure");
+    }
+    var classBuild = await Run(compileClasses, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+    await File.WriteAllTextAsync(Path.Combine(artifacts, $"managed-class-abi-build-{policy}.log"),
+        classBuild).ConfigureAwait(false);
+    var classExecute = new ProcessStartInfo(executable);
+    classExecute.ArgumentList.Add(classes);
+    classExecute.ArgumentList.Add(checkedUnwind ? "classes-checked" : "classes");
+    var classProof = await Run(classExecute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+    await File.WriteAllTextAsync(Path.Combine(artifacts, $"managed-class-abi-proof-{policy}.log"),
+        classProof).ConfigureAwait(false);
+    var expected = checkedUnwind
+        ? "managed-classes rounds=64 descriptors=checked construction=checked unwind=checked live=0"
+        : "managed-classes rounds=64 descriptors=checked construction=checked unwind=disabled live=0";
+    if (classProof.Trim() != expected)
+    {
+        throw new InvalidOperationException("The independent managed-class ABI proof did not complete.");
+    }
+    Console.Write($"{policy}: {classProof}");
+    if (checkedUnwind)
+    {
+        var abandonFailure = new ProcessStartInfo(executable);
+        abandonFailure.ArgumentList.Add(classes);
+        abandonFailure.ArgumentList.Add("classes-reject-release");
+        const uint FailedAbandonStatus = 0xE0540005;
+        _ = await Run(abandonFailure, TimeSpan.FromSeconds(10),
+            unchecked((int)FailedAbandonStatus)).ConfigureAwait(false);
+        var abandonProof = FormattableString.Invariant(
+            $"Failed constructor release terminates with 0x{FailedAbandonStatus:X8} before catch.\n");
+        await File.WriteAllTextAsync(Path.Combine(artifacts, "managed-class-abandon-failure.log"),
+            abandonProof).ConfigureAwait(false);
+        Console.Write(abandonProof);
+    }
+}
+
 static async Task<string> Run(ProcessStartInfo start, TimeSpan timeout, int expectedExitCode = 0)
 {
     start.UseShellExecute = false;

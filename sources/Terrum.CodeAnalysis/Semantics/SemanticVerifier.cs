@@ -79,9 +79,14 @@ public static class SemanticVerifier
                 throw Invalid();
             }
         }
-        var usesManagedNodes = program.Functions.Any(static function => function.Intrinsic >= BoundIntrinsic.NodeTryCreate
-            || function.ReturnType == PrimitiveType.ManagedNode
-            || function.Variables.Any(static variable => variable.Type == PrimitiveType.ManagedNode));
+        if (program.Classes.IsDefault || program.Classes.Length > MaximumVariables)
+        {
+            throw Invalid();
+        }
+        var usesManagedNodes = !program.Classes.IsEmpty || program.Functions.Any(static function =>
+            function.Intrinsic >= BoundIntrinsic.NodeTryCreate
+            || ManagedClassTypes.IsManaged(function.ReturnType)
+            || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type)));
         if (usesManagedNodes && program.Functions.Any(static function => function.IsExternal))
         {
             throw InvalidEffect(default, "Ownership");
@@ -126,6 +131,44 @@ public static class SemanticVerifier
         {
             VerifyLayout(index, 0);
         }
+        var classNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var @class in program.Classes)
+        {
+            if (@class is null || string.IsNullOrWhiteSpace(@class.Name)
+                || @class.Name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName
+                || !classNames.Add(@class.Name) || structNames.Contains(@class.Name)
+                || @class.Fields.IsDefaultOrEmpty || @class.Fields.Length > 16
+                || @class.Size is < 8 or > ManagedClassTypes.MaximumPayload || (@class.Size & 7) != 0)
+            {
+                throw Invalid();
+            }
+            var offset = 0;
+            var fieldNames = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var field in @class.Fields)
+            {
+                if (field is null || !ValidType(field.Type, allowVoid: false, program)
+                    || field.Type is PrimitiveType.OwnedInt32Buffer or PrimitiveType.ReadonlyInt32BufferView
+                        or PrimitiveType.MutableInt32BufferView
+                    || ((int)field.Type >= 100 && !ManagedClassTypes.IsClass(field.Type)))
+                {
+                    throw Invalid();
+                }
+                var width = ValueLayout.Size(field.Type, program.Structures);
+                offset = (offset + width - 1) & -width;
+                if (field.Size != width || field.Offset != offset
+                    || offset + width > ManagedClassTypes.MaximumPayload
+                    || string.IsNullOrWhiteSpace(field.Name) || !fieldNames.Add(field.Name)
+                    || (field.IsPrivate && field.IsInternal))
+                {
+                    throw Invalid();
+                }
+                offset += width;
+            }
+            if (((offset + 7) & ~7) != @class.Size)
+            {
+                throw Invalid();
+            }
+        }
 
         void VerifyLayout(int index, int depth)
         {
@@ -161,11 +204,12 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                if (field.Type == PrimitiveType.ManagedNode)
+                if (ManagedClassTypes.IsManaged(field.Type))
                 {
                     throw InvalidEffect(default, "Ownership");
                 }
-                var nested = (int)field.Type >= 100 ? (int)field.Type - 100 : -1;
+                var nested = (int)field.Type >= 100 && !ManagedClassTypes.IsClass(field.Type)
+                    ? (int)field.Type - 100 : -1;
                 if (nested >= program.Structures.Length)
                 {
                     throw Invalid();
@@ -221,6 +265,32 @@ public static class SemanticVerifier
             {
                 throw Limit();
             }
+            if (function.Intrinsic is BoundIntrinsic.None or BoundIntrinsic.ClassTryCreate)
+            {
+                for (var variableIndex = 0; variableIndex < function.Variables.Length; variableIndex++)
+                {
+                    var variable = function.Variables[variableIndex];
+                    if (variable is null || string.IsNullOrEmpty(variable.Name)
+                        || (variable.Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
+                            ? variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                                || variable.IsMutable != (variable.Type == PrimitiveType.MutableInt32BufferView)
+                                || variable.IsOut || function.IsExternal
+                            : !ValidType(variable.Type, allowVoid: false, program)))
+                    {
+                        throw Invalid();
+                    }
+                    if (variable.IsOut && (variableIndex >= function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                        || function.ReturnType != PrimitiveType.Bool))
+                    {
+                        throw Invalid();
+                    }
+                }
+            }
+            if (function.Intrinsic == BoundIntrinsic.ClassTryCreate)
+            {
+                VerifyClassFactory(program, function, i);
+                continue;
+            }
             if (function.Intrinsic != BoundIntrinsic.None)
             {
                 if (!NativeBufferIntrinsics.Matches(function) && !NativeManagedNodeIntrinsics.Matches(function))
@@ -238,28 +308,10 @@ public static class SemanticVerifier
             if (function.IsExternal && (!allowExternal || function.IsPrivate || function.IsInternal
                 || function.Body.Statements.IsDefault || !function.Body.Statements.IsEmpty
                 || function.Variables.Length != function.ParameterCount + (function.IsConstructor ? 1 : 0)
-                || function.ReturnType == PrimitiveType.ManagedNode
-                || function.Variables.Any(static variable => variable.Type == PrimitiveType.ManagedNode)))
+                || ManagedClassTypes.IsManaged(function.ReturnType)
+                || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type))))
             {
                 throw Invalid();
-            }
-            for (var variableIndex = 0; variableIndex < function.Variables.Length; variableIndex++)
-            {
-                var variable = function.Variables[variableIndex];
-                if (variable is null || string.IsNullOrEmpty(variable.Name)
-                    || (variable.Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
-                        ? variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
-                            || variable.IsMutable != (variable.Type == PrimitiveType.MutableInt32BufferView)
-                            || variable.IsOut || function.IsExternal
-                        : !ValidType(variable.Type, allowVoid: false, program)))
-                {
-                    throw Invalid();
-                }
-                if (variable.IsOut && (variableIndex >= function.ParameterCount + (function.IsConstructor ? 1 : 0)
-                    || function.ReturnType != PrimitiveType.Bool))
-                {
-                    throw Invalid();
-                }
             }
             if (function.DeclaringStruct is string declaringStruct)
             {
@@ -272,16 +324,26 @@ public static class SemanticVerifier
                         break;
                     }
                 }
+                for (var type = 0; type < program.Classes.Length; type++)
+                {
+                    if (program.Classes[type].Name == declaringStruct)
+                    {
+                        declaringType = ManagedClassTypes.First + type;
+                        break;
+                    }
+                }
                 if (declaringType < 0 || !function.Name.StartsWith(declaringStruct + ".", StringComparison.Ordinal)
                     || (function.IsConstructor && function.IsStatic)
                     || (!function.IsStatic && (function.Variables.IsEmpty
                         || function.Variables[0].Name != "this"
-                        || function.Variables[0].Type != (PrimitiveType)(100 + declaringType)
+                        || function.Variables[0].Type != (PrimitiveType)(declaringType >= ManagedClassTypes.First
+                            ? declaringType : 100 + declaringType)
                         || (!function.IsConstructor && function.ParameterCount < 1))))
                 {
                     throw Invalid();
                 }
-                if (!function.IsStatic && !function.IsConstructor && program.Structures[declaringType].IsUnique
+                if (!function.IsStatic && !function.IsConstructor
+                    && declaringType < ManagedClassTypes.First && program.Structures[declaringType].IsUnique
                     && (function.Variables[0].IsMutable || function.Variables[0].IsOut))
                 {
                     throw Invalid();
@@ -295,6 +357,21 @@ public static class SemanticVerifier
                 || function.ReturnType != function.Variables[0].Type
                 || (int)function.ReturnType < 100
                 || function.ParameterCount >= function.Variables.Length))
+            {
+                throw Invalid();
+            }
+            if (function.IsClassConstructor && (function.IsConstructor || function.IsStatic
+                || function.IsExternal || function.ReturnType != PrimitiveType.Void
+                || function.DeclaringStruct is null || function.Variables.IsEmpty
+                || !ManagedClassTypes.IsClass(function.Variables[0].Type)
+                || function.Name != function.DeclaringStruct + ".#ctor"
+                || function.ParameterCount is < 1 or > 4
+                || function.Variables.Skip(1).Take(function.ParameterCount - 1)
+                    .Any(static variable => variable.IsOut || !IsClassArgumentType(variable.Type))))
+            {
+                throw Invalid();
+            }
+            if (!function.IsClassConstructor && function.ClassConstructor >= 0)
             {
                 throw Invalid();
             }
@@ -324,6 +401,19 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
+            }
+        }
+        for (var classIndex = 0; classIndex < program.Classes.Length; classIndex++)
+        {
+            var @class = program.Classes[classIndex];
+            var classType = (PrimitiveType)(ManagedClassTypes.First + classIndex);
+            if (program.Functions.Count(function => function.IsClassConstructor
+                && function.DeclaringStruct == @class.Name
+                && function.Variables[0].Type == classType) != 1
+                || program.Functions.Count(function => function.Intrinsic == BoundIntrinsic.ClassTryCreate
+                    && function.DeclaringStruct == @class.Name) != 1)
+            {
+                throw Invalid();
             }
         }
         foreach (var structure in program.Structures)
@@ -377,6 +467,10 @@ public static class SemanticVerifier
             {
                 Array.Fill(initialized, true, 0, function.ParameterCount);
             }
+            if (function.IsClassConstructor)
+            {
+                initialized[0] = false;
+            }
             for (var i = 0; i < function.ParameterCount; i++)
             {
                 initialized[i + (function.IsConstructor ? 1 : 0)] &= !function.Variables[i + (function.IsConstructor ? 1 : 0)].IsOut;
@@ -427,7 +521,7 @@ public static class SemanticVerifier
         var remaining = MaximumAnalysisVisits;
         for (var slot = 0; slot < function.ParameterCount + (function.IsConstructor ? 1 : 0); slot++)
         {
-            if (function.Variables[slot].Type == PrimitiveType.ManagedNode)
+            if (ManagedClassTypes.IsManaged(function.Variables[slot].Type))
             {
                 _ = active.Add(slot);
             }
@@ -437,7 +531,7 @@ public static class SemanticVerifier
         {
             if (slot < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                 || slot >= function.Variables.Length || slot < 0
-                || function.Variables[slot].Type != PrimitiveType.ManagedNode
+                || !ManagedClassTypes.IsManaged(function.Variables[slot].Type)
                 || !scope.Add(slot) || !active.Add(slot))
             {
                 throw InvalidEffect(span, "Ownership");
@@ -453,13 +547,13 @@ public static class SemanticVerifier
             }
             switch (expression)
             {
-                case BoundRead read when read.Type == PrimitiveType.ManagedNode:
+                case BoundRead read when ManagedClassTypes.IsManaged(read.Type):
                     if (!active.Contains(read.Variable))
                     {
                         throw InvalidEffect(read.Span, "Ownership");
                     }
                     break;
-                case BoundOutArgument output when output.Type == PrimitiveType.ManagedNode:
+                case BoundOutArgument output when ManagedClassTypes.IsManaged(output.Type):
                     if (output.DeclaresVariable)
                     {
                         Declare(output.Variable, scope, output.Span);
@@ -585,7 +679,7 @@ public static class SemanticVerifier
                     {
                         throw Invalid();
                     }
-                    if (function.Variables[local.Variable].Type == PrimitiveType.ManagedNode)
+                    if (ManagedClassTypes.IsManaged(function.Variables[local.Variable].Type))
                     {
                         Declare(local.Variable, scope, local.Span);
                     }
@@ -596,7 +690,7 @@ public static class SemanticVerifier
                     {
                         throw Invalid();
                     }
-                    if (function.Variables[assignment.Variable].Type == PrimitiveType.ManagedNode
+                    if (ManagedClassTypes.IsManaged(function.Variables[assignment.Variable].Type)
                         && !active.Contains(assignment.Variable))
                     {
                         throw InvalidEffect(assignment.Span, "Ownership");
@@ -633,7 +727,7 @@ public static class SemanticVerifier
         for (var slot = function.ParameterCount + (function.IsConstructor ? 1 : 0);
             slot < function.Variables.Length; slot++)
         {
-            if (function.Variables[slot].Type == PrimitiveType.ManagedNode && !retired.Contains(slot))
+            if (ManagedClassTypes.IsManaged(function.Variables[slot].Type) && !retired.Contains(slot))
             {
                 throw InvalidEffect(function.Variables[slot].Span, "Ownership");
             }
@@ -1299,25 +1393,27 @@ public static class SemanticVerifier
                 return false;
             case BoundFieldAssignment fieldAssignment:
                 if (fieldAssignment.Variable < 0 || fieldAssignment.Variable >= initialized.Length
-                    || !function.Variables[fieldAssignment.Variable].IsMutable
+                    || (!function.Variables[fieldAssignment.Variable].IsMutable
+                        && !ManagedClassTypes.IsClass(function.Variables[fieldAssignment.Variable].Type))
                     || fieldAssignment.NestedFields.IsDefault)
                 {
                     throw Invalid();
                 }
-                var structType = (int)function.Variables[fieldAssignment.Variable].Type - 100;
-                if (structType < 0 || structType >= program.Structures.Length
-                    || fieldAssignment.Field < 0 || fieldAssignment.Field >= program.Structures[structType].Fields.Length
-                    || !CanAccessField(function, program.Structures[structType], fieldAssignment.Field)
+                var ownerType = function.Variables[fieldAssignment.Variable].Type;
+                if (!HasFields(program, ownerType)
+                    || fieldAssignment.Field < 0 || fieldAssignment.Field >= Fields(program, ownerType).Length
+                    || !CanAccessField(function, program, ownerType, fieldAssignment.Field)
                     || (!initialized[fieldAssignment.Variable]
-                        && (!function.IsConstructor || fieldAssignment.Variable != 0)))
+                        && (!(function.IsConstructor || function.IsClassConstructor)
+                            || fieldAssignment.Variable != 0)))
                 {
                     throw Invalid();
                 }
-                if (program.Structures[structType].IsUnique && function.Variables[fieldAssignment.Variable].IsOut)
+                if (IsUnique(program, ownerType) && function.Variables[fieldAssignment.Variable].IsOut)
                 {
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
-                var targetField = program.Structures[structType].Fields[fieldAssignment.Field];
+                var targetField = Fields(program, ownerType)[fieldAssignment.Field];
                 if (IsUnique(program, targetField.Type)
                     && (!function.IsConstructor || fieldAssignment.Variable != 0
                         || !fieldAssignment.NestedFields.IsEmpty
@@ -1325,7 +1421,9 @@ public static class SemanticVerifier
                 {
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
-                if (!targetField.IsMutable && !(function.IsConstructor && fieldAssignment.Variable == 0))
+                if (!targetField.IsMutable
+                    && (!ManagedClassTypes.IsClass(ownerType) || fieldAssignment.NestedFields.IsEmpty)
+                    && !((function.IsConstructor || function.IsClassConstructor) && fieldAssignment.Variable == 0))
                 {
                     throw Invalid();
                 }
@@ -1337,20 +1435,22 @@ public static class SemanticVerifier
                 for (var index = 0; index < fieldAssignment.NestedFields.Length; index++)
                 {
                     Count(ref remaining, depth + index + 1);
-                    var nestedType = (int)targetField.Type - 100;
+                    var nestedType = targetField.Type;
                     var nestedField = fieldAssignment.NestedFields[index];
-                    if (nestedType < 0 || nestedType >= program.Structures.Length
-                        || nestedField < 0 || nestedField >= program.Structures[nestedType].Fields.Length
-                        || !CanAccessField(function, program.Structures[nestedType], nestedField))
+                    if (!HasFields(program, nestedType)
+                        || nestedField < 0 || nestedField >= Fields(program, nestedType).Length
+                        || !CanAccessField(function, program, nestedType, nestedField))
                     {
                         throw Invalid();
                     }
-                    targetField = program.Structures[nestedType].Fields[nestedField];
-                    if (program.Structures[nestedType].IsUnique)
+                    targetField = Fields(program, nestedType)[nestedField];
+                    if (IsUnique(program, nestedType))
                     {
                         throw InvalidEffect(fieldAssignment.Span, "Ownership");
                     }
-                    if (!targetField.IsMutable)
+                    if (!targetField.IsMutable
+                        && (!ManagedClassTypes.IsClass(nestedType)
+                            || index == fieldAssignment.NestedFields.Length - 1))
                     {
                         throw Invalid();
                     }
@@ -1368,7 +1468,7 @@ public static class SemanticVerifier
                 }
                 fieldMasks[fieldAssignment.Variable] |= 1u << fieldAssignment.Field;
                 initialized[fieldAssignment.Variable] = fieldMasks[fieldAssignment.Variable]
-                    == FullMask(program, function.Variables[fieldAssignment.Variable].Type);
+                    == FullMask(program, ownerType);
                 return false;
             case BoundBufferAssignment bufferWrite:
                 if (function.IsNoThrow && !IsProvenBufferIndex(bufferWrite.Buffer, bufferWrite.Index, program))
@@ -1606,6 +1706,11 @@ public static class SemanticVerifier
                 if (function.DoesNotReturn && reachable)
                 {
                     throw InvalidEffect(result.Span, "DoesNotReturn");
+                }
+                if (function.IsClassConstructor && (!initialized[0]
+                    || fieldMasks[0] != FullMask(program, function.Variables[0].Type)))
+                {
+                    throw InvalidEffect(result.Span, "Ownership");
                 }
                 var beforeReturn = (bool[])initialized.Clone();
                 if (result.Value is null)
@@ -1980,15 +2085,15 @@ public static class SemanticVerifier
                 {
                     throw Invalid(fieldRead.Span);
                 }
-                var readType = (int)fieldRead.Receiver.Type - 100;
-                if (readType < 0 || readType >= program.Structures.Length
-                    || fieldRead.Field < 0 || fieldRead.Field >= program.Structures[readType].Fields.Length
-                    || !CanAccessField(function, program.Structures[readType], fieldRead.Field)
-                    || fieldRead.Type != program.Structures[readType].Fields[fieldRead.Field].Type)
+                var readType = fieldRead.Receiver.Type;
+                if (!HasFields(program, readType)
+                    || fieldRead.Field < 0 || fieldRead.Field >= Fields(program, readType).Length
+                    || !CanAccessField(function, program, readType, fieldRead.Field)
+                    || fieldRead.Type != Fields(program, readType)[fieldRead.Field].Type)
                 {
                     throw Invalid();
                 }
-                if (program.Structures[readType].IsUnique && fieldRead.Receiver is not BoundRead)
+                if (IsUnique(program, readType) && fieldRead.Receiver is not BoundRead)
                 {
                     if (fieldRead.Receiver is not BoundFieldRead candidate || !IsUnique(program, candidate.Type))
                     {
@@ -2010,7 +2115,8 @@ public static class SemanticVerifier
                 {
                     _ = VerifyUniqueFieldPlace(nested, initialized, fieldMasks, function, program, ref remaining, depth + 1);
                 }
-                else if (fieldRead.Receiver is BoundRead partial && function.IsConstructor && partial.Variable == 0)
+                else if (fieldRead.Receiver is BoundRead partial
+                    && (function.IsConstructor || function.IsClassConstructor) && partial.Variable == 0)
                 {
                     if (partial.Type != function.Variables[0].Type || (fieldMasks[0] & (1u << fieldRead.Field)) == 0)
                     {
@@ -2196,7 +2302,7 @@ public static class SemanticVerifier
                     throw Limit();
                 }
                 var target = program.Functions[call.Function];
-                if (target.IsCleanup)
+                if (target.IsCleanup || target.IsClassConstructor)
                 {
                     throw InvalidEffect(call.Span, "Ownership");
                 }
@@ -2330,12 +2436,66 @@ public static class SemanticVerifier
             or PrimitiveType.Char16 or PrimitiveType.Bool or PrimitiveType.OwnedInt32Buffer
             or PrimitiveType.ManagedNode
             || (allowVoid && type == PrimitiveType.Void)
-            || ((int)type >= 100 && (int)type - 100 < program.Structures.Length);
+            || ((int)type >= 100 && (int)type - 100 < program.Structures.Length)
+            || (ManagedClassTypes.IsClass(type)
+                && (int)type - ManagedClassTypes.First < program.Classes.Length);
+
+    internal static bool IsClassArgumentType(PrimitiveType type) =>
+        type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+            or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool or PrimitiveType.ManagedNode
+            || ManagedClassTypes.IsClass(type);
 
     private static bool IsUnique(BoundProgram program, PrimitiveType type) =>
         type == PrimitiveType.OwnedInt32Buffer
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length
                 && program.Structures[(int)type - 100].IsUnique);
+
+    private static void VerifyClassFactory(BoundProgram program, BoundFunction function, int index)
+    {
+        var constructorIndex = function.ClassConstructor;
+        if (constructorIndex < 0 || constructorIndex >= program.Functions.Length || constructorIndex == index
+            || function.DeclaringStruct is not string name
+            || function.Name != name + ".TryCreate"
+            || function.ReturnType != PrimitiveType.Bool || function.IsConstructor
+            || function.IsClassConstructor || function.IsExternal
+            || !function.IsStatic || function.IsCleanup || function.DoesNotReturn
+            || function.Body.Statements.IsDefault || !function.Body.Statements.IsEmpty
+            || function.ParameterCount is < 1 or > 4
+            || function.Variables.Length != function.ParameterCount + 1)
+        {
+            throw Invalid();
+        }
+        var constructor = program.Functions[constructorIndex];
+        var type = function.Variables[function.ParameterCount - 1].Type;
+        if (constructor is null || constructor.Variables.IsDefaultOrEmpty
+            || constructor.ParameterCount is < 1 or > 4
+            || constructor.Variables.Length < constructor.ParameterCount
+            || !ManagedClassTypes.IsClass(type)
+            || (int)type - ManagedClassTypes.First >= program.Classes.Length
+            || program.Classes[(int)type - ManagedClassTypes.First].Name != name
+            || !constructor.IsClassConstructor || constructor.DeclaringStruct != name
+            || function.IsPrivate != constructor.IsPrivate
+            || function.IsInternal != !constructor.IsPrivate
+            || constructor.ParameterCount != function.ParameterCount
+            || constructor.Variables[0].Type != type
+            || function.Variables[function.ParameterCount - 1] is not { IsOut: true, IsMutable: false }
+            || function.Variables[function.ParameterCount] is not { IsOut: false, IsMutable: false }
+            || function.Variables[function.ParameterCount].Type != type
+            || function.IsNoThrow != constructor.IsNoThrow)
+        {
+            throw Invalid();
+        }
+        for (var parameter = 0; parameter < function.ParameterCount - 1; parameter++)
+        {
+            if (function.Variables[parameter].Type != constructor.Variables[parameter + 1].Type
+                || function.Variables[parameter].IsOut || function.Variables[parameter].IsMutable
+                || constructor.Variables[parameter + 1].IsOut
+                || !IsClassArgumentType(function.Variables[parameter].Type))
+            {
+                throw Invalid();
+            }
+        }
+    }
 
     private static bool InvalidatesReservedOwner(BoundExpression expression, int variable, ref int remaining, int depth)
     {
@@ -2377,7 +2537,23 @@ public static class SemanticVerifier
             || (source == PrimitiveType.UInt32 && destination is PrimitiveType.Int64 or PrimitiveType.UInt64);
 
     private static uint FullMask(BoundProgram program, PrimitiveType type) =>
-        (1u << program.Structures[(int)type - 100].Fields.Length) - 1;
+        (1u << Fields(program, type).Length) - 1;
+
+    private static bool HasFields(BoundProgram program, PrimitiveType type) =>
+        ManagedClassTypes.IsClass(type)
+            ? (int)type - ManagedClassTypes.First < program.Classes.Length
+            : (int)type >= 100 && (int)type - 100 < program.Structures.Length;
+
+    private static ImmutableArray<BoundStructField> Fields(BoundProgram program, PrimitiveType type) =>
+        ManagedClassTypes.IsClass(type) ? program.Classes[(int)type - ManagedClassTypes.First].Fields
+            : program.Structures[(int)type - 100].Fields;
+
+    private static bool CanAccessField(BoundFunction function, BoundProgram program, PrimitiveType type,
+        int field) =>
+        ManagedClassTypes.IsClass(type)
+            ? !program.Classes[(int)type - ManagedClassTypes.First].Fields[field].IsPrivate
+                || function.DeclaringStruct == program.Classes[(int)type - ManagedClassTypes.First].Name
+            : CanAccessField(function, program.Structures[(int)type - 100], field);
 
     private static bool CanAccessField(BoundFunction function, BoundStruct structure, int field) =>
         !structure.Fields[field].IsPrivate || function.DeclaringStruct == structure.Name;

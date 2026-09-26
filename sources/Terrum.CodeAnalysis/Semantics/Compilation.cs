@@ -140,6 +140,10 @@ public sealed class Compilation
     public static string GetNativeProfileVersion(BoundProgram program)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (!program.Classes.IsEmpty)
+        {
+            return "native-19";
+        }
         if (program.Functions.Any(static function => function.Intrinsic >= BoundIntrinsic.NodeTryCreate
             || function.ReturnType == PrimitiveType.ManagedNode
             || function.Variables.Any(static variable => variable.Type == PrimitiveType.ManagedNode)))

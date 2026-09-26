@@ -16,6 +16,7 @@ internal static class ValueLayout
         PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.OwnedInt32Buffer or PrimitiveType.ManagedNode => 8,
         PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView => 16,
         PrimitiveType.Void => 0,
+        _ when ManagedClassTypes.IsClass(type) => 8,
         _ when (int)type >= 100 && (int)type - 100 < structures.Count => structures[(int)type - 100].Size,
         _ => 0,
     };
@@ -23,6 +24,10 @@ internal static class ValueLayout
     // Callers have established that all nested layouts are acyclic and complete.
     internal static int Alignment(PrimitiveType type, IReadOnlyList<BoundStruct> structures)
     {
+        if (ManagedClassTypes.IsClass(type))
+        {
+            return 8;
+        }
         if ((int)type < 100)
         {
             return type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView

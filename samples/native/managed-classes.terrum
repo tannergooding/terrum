@@ -1,0 +1,46 @@
+class Leaf {
+    public mut int32 Value;
+    public int32 Stamp;
+
+    public Leaf(int32 value, int32 stamp) {
+        Value = value;
+        Stamp = stamp;
+    }
+
+    public int32 Get() { return Value; }
+}
+
+class Pair {
+    public Leaf Left;
+    public mut Leaf Right;
+    public ManagedNode Edge;
+    public int32 Serial;
+
+    public Pair(Leaf left, Leaf right, ManagedNode edge) {
+        Left = left;
+        require ManagedHeap.Collect() == 0;
+        Right = right;
+        Edge = edge;
+        Serial = left.Stamp + right.Stamp;
+    }
+
+    public int32 Total() { return Left.Get() + Right.Get() + Edge.Value; }
+}
+
+bool Build(out Pair result) {
+    require Leaf.TryCreate(19, 1, out var left);
+    require Leaf.TryCreate(3, 2, out var right);
+    require ManagedNode.TryCreate(1, out var edge);
+    edge.SetNext(edge);
+    return Pair.TryCreate(left, right, edge, out result);
+}
+
+int32 Main() {
+    require Build(out var pair);
+    Leaf alias = pair.Left;
+    Pair same = pair;
+    alias.Value = 38;
+    if (ManagedHeap.Collect() != 0) { return 1; }
+    if (pair.Serial != 3) { return 2; }
+    return same.Total();
+}

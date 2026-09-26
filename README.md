@@ -12,8 +12,9 @@ structured operations before encoding. The same backend writes PE executables
 and supplies a bounded JIT execution worker, without CIL, LLVM or an external
 linker. Compact unique values support checked moves, owned calls and deterministic
 cleanup. Native buffers have checked lexical views, and a bounded managed-node
-runtime traces precise roots and reclaims cycles. General stored loans, classes
-and managed layouts, general exception objects and the standard library are not
+runtime traces precise roots and reclaims cycles. Bounded source-defined classes
+add complete-publication construction and descriptor-based tracing. General
+stored loans and managed layouts, general exception objects and the standard library are not
 implemented.
 
 ## Build

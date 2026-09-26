@@ -110,6 +110,10 @@ public static partial class ModuleCompiler
 
     private static void RejectManagedNodes(BoundProgram program)
     {
+        if (!program.Classes.IsDefaultOrEmpty)
+        {
+            throw new ModuleFormatException("Source classes have no persisted module runtime or ABI.");
+        }
         if (program.Functions.Any(static function =>
                 function.Intrinsic >= BoundIntrinsic.NodeTryCreate
                 || function.ReturnType == PrimitiveType.ManagedNode

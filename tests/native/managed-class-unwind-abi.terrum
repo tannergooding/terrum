@@ -1,0 +1,49 @@
+class Broken {
+    public Leaf Left;
+    public Leaf Right;
+    public Broken(Leaf child, bool complete) {
+        Left = child;
+        require complete;
+        Right = child;
+    }
+}
+
+public int32 ConstructorFailure() {
+    require Leaf.TryCreate(42, out var retained);
+    unsafe {
+        try {
+            if (Broken.TryCreate(retained, false, out var unpublished)) {
+                return 0;
+            }
+            return 1;
+        } catch {
+            require ManagedHeap.Collect() == 0;
+        }
+    }
+    return retained.Value;
+}
+
+public void EscapeConstructorToNative() {
+    require Leaf.TryCreate(42, out var retained);
+    require Broken.TryCreate(retained, false, out var unpublished);
+}
+
+int32 ReplaceCollectAndFail(ReplaceableEdge edge) {
+    var result = ReplaceAndCollect(edge);
+    require false;
+    return result;
+}
+
+public int32 AssignmentFailure() {
+    var edge = CreateReplaceableEdge();
+    unsafe {
+        try {
+            edge.Item.Value = ReplaceCollectAndFail(edge);
+            return 0;
+        } catch {
+            require ManagedHeap.Collect() == 1;
+        }
+    }
+    require edge.Item.Value == 7;
+    return 42;
+}

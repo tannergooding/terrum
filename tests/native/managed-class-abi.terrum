@@ -1,0 +1,131 @@
+class Leaf {
+    public mut int32 Value;
+    [NoThrow] public Leaf(int32 value) { Value = value; }
+}
+
+class Pair {
+    public Leaf First;
+    public Leaf Second;
+    public ManagedNode Extra;
+    [NoThrow] public Pair(Leaf first, Leaf second, ManagedNode extra) {
+        First = first;
+        Second = second;
+        Extra = extra;
+    }
+    [NoThrow] public int32 ReadFirst() { return First.Value; }
+    public int32 Sum() { return First.Value + Second.Value + Extra.Value; }
+}
+
+class CollectingPair {
+    public Leaf Left;
+    public Leaf Right;
+    [NoThrow] public CollectingPair(Leaf child) {
+        Left = child;
+        ManagedHeap.Collect();
+        Right = child;
+    }
+}
+
+class ScalarBox {
+    public uint64 Bits;
+    [NoThrow] public ScalarBox(uint64 bits) { Bits = bits; }
+}
+
+class ReplaceableEdge {
+    public mut Leaf Item;
+    [NoThrow] public ReplaceableEdge(Leaf item) { Item = item; }
+}
+
+ReplaceableEdge CreateReplaceableEdge() {
+    require Leaf.TryCreate(1, out var item);
+    require ReplaceableEdge.TryCreate(item, out var edge);
+    return edge;
+}
+
+int32 ReplaceAndCollect(ReplaceableEdge edge) {
+    require Leaf.TryCreate(7, out var replacement);
+    edge.Item = replacement;
+    require ManagedHeap.Collect() == 0;
+    return 42;
+}
+
+public int32 AssignmentAcrossCollection() {
+    var edge = CreateReplaceableEdge();
+    edge.Item.Value = ReplaceAndCollect(edge);
+    require edge.Item.Value == 7;
+    require ManagedHeap.Collect() == 1;
+    return 42;
+}
+
+Pair CreatePair() {
+    require Leaf.TryCreate(10, out var first);
+    require Leaf.TryCreate(20, out var second);
+    require ManagedNode.TryCreate(12, out var extra);
+    require Pair.TryCreate(first, second, extra, out var pair);
+    return pair;
+}
+
+void DiscardLeaf() {
+    require Leaf.TryCreate(0, out var discarded);
+}
+
+public int32 MixedEdges() {
+    var pair = CreatePair();
+    require ManagedHeap.Collect() == 0;
+    require pair.ReadFirst() == 10;
+    return pair.Sum();
+}
+
+public int32 AliasUpdates() {
+    require Leaf.TryCreate(20, out var child);
+    require ManagedNode.TryCreate(0, out var extra);
+    extra.SetNext(extra);
+    require Pair.TryCreate(child, child, extra, out var pair);
+    var alias = pair.First;
+    alias.Value = 21;
+    require ManagedHeap.Collect() == 0;
+    return pair.Sum();
+}
+
+public int32 DuringConstruction() {
+    DiscardLeaf();
+    require Leaf.TryCreate(42, out var child);
+    require CollectingPair.TryCreate(child, out var pair);
+    require ManagedHeap.Collect() == 0;
+    require pair.Left.Value == pair.Right.Value;
+    return pair.Left.Value;
+}
+
+public int32 CreateLoose() {
+    DiscardLeaf();
+    DiscardLeaf();
+    return 42;
+}
+
+public int32 ScalarNonRoot(uint64 bits) {
+    require ScalarBox.TryCreate(bits, out var box);
+    require ManagedHeap.Collect() == 2;
+    require box.Bits == bits;
+    return 42;
+}
+
+public int32 AllocationFailure() {
+    if (Leaf.TryCreate(42, out var unpublished)) {
+        return 0;
+    }
+    require ManagedHeap.Collect() == 0;
+    return 42;
+}
+
+public int32 RetainAcrossAllocationFailure() {
+    require Leaf.TryCreate(42, out var retained);
+    if (CollectingPair.TryCreate(retained, out var unpublished)) {
+        return 0;
+    }
+    require ManagedHeap.Collect() == 0;
+    return retained.Value;
+}
+
+public int32 CollectWithScalar(uint64 bits) {
+    return ManagedHeap.Collect();
+}

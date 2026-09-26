@@ -198,6 +198,10 @@ internal sealed partial class Binder
             SetContext(tree);
             foreach (var child in tree.Root.Children)
             {
+                if (child is SyntaxNode { Kind: SyntaxKind.ClassDeclaration } classDeclaration)
+                {
+                    DeclareClassName(tree, classDeclaration);
+                }
                 if (child is SyntaxNode { Kind: SyntaxKind.StructDeclaration } structure)
                 {
                     var name = StructName(structure).Text;
@@ -215,7 +219,8 @@ internal sealed partial class Binder
                         Report("TRM3016", "Source exceeds the supported number of value layouts.", structure.Span);
                         return null;
                     }
-                    if (!_structNames.TryAdd(qualified, (PrimitiveType)(100 + index)))
+                    if (_classNames.ContainsKey(qualified)
+                        || !_structNames.TryAdd(qualified, (PrimitiveType)(100 + index)))
                     {
                         Report("TRM3003", $"Duplicate struct '{name}'.", structure.Span);
                         continue;
@@ -240,6 +245,10 @@ internal sealed partial class Binder
         {
             DeclareStruct(index);
         }
+        foreach (var index in _classDeclarations.Keys)
+        {
+            DeclareClass(index);
+        }
         DeclareConformances();
 
         foreach (var tree in _trees)
@@ -251,7 +260,7 @@ internal sealed partial class Binder
                 {
                     continue;
                 }
-                if (node.Kind == SyntaxKind.StructDeclaration)
+                if (node.Kind is SyntaxKind.StructDeclaration or SyntaxKind.ClassDeclaration)
                 {
                     var structName = StructName(node).Text;
                     foreach (var member in node.Children)
@@ -319,6 +328,7 @@ internal sealed partial class Binder
                     false, true, false, intrinsic.IsStatic, intrinsic.IsNoThrow, false, intrinsic));
             }
         }
+        DeclareClassFactories();
         foreach (var template in _templates.Values)
         {
             if (_functions.ContainsKey(template.Name))
@@ -367,6 +377,11 @@ internal sealed partial class Binder
                 bound.Add(external);
                 continue;
             }
+            if (signature.ClassConstructor >= 0)
+            {
+                bound.Add(CreateClassFactory(signature));
+                continue;
+            }
             var declaration = signature.Declaration ?? throw new InvalidOperationException("Source declaration is missing.");
             var syntaxBody = signature.Body ?? throw new InvalidOperationException("Source body is missing.");
             SetContext(signature.Tree);
@@ -375,13 +390,14 @@ internal sealed partial class Binder
             _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
             _returnType = signature.ReturnType;
             _currentStruct = signature.StructName;
-            _constructor = signature.IsConstructor;
+            _constructor = signature.IsConstructor || signature.IsClassConstructor;
             _hasReceiver = signature.StructName is not null && !signature.IsStatic;
 
             if (signature.StructName is not null && _hasReceiver)
             {
-                var receiverType = ResolveStruct(signature.StructName);
-                _ = AddVariable("this", receiverType, signature.IsConstructor || signature.IsMutable, declaration.Span);
+                var receiverType = ResolveDeclaredType(signature.StructName);
+                _ = AddVariable("this", receiverType,
+                    signature.IsConstructor || signature.IsClassConstructor || signature.IsMutable, declaration.Span);
             }
 
             foreach (var parameter in signature.Parameters)
@@ -395,7 +411,7 @@ internal sealed partial class Binder
 
             var body = signature.Generic is GenericInstantiation generic
                 ? BindGenericBody(generic) : BindBlock(syntaxBody);
-            if (_constructor)
+            if (signature.IsConstructor)
             {
                 var end = new TextSpan(syntaxBody.Span.End, 0);
                 body = body with {
@@ -439,6 +455,7 @@ internal sealed partial class Binder
                 IsInternal = signature.IsInternal,
                 IsStatic = signature.IsStatic,
                 IsNoThrow = signature.IsNoThrow,
+                IsClassConstructor = signature.IsClassConstructor,
                 IsCleanup = signature.IsCleanup,
                 DoesNotReturn = signature.DoesNotReturn,
                 DeclaringStruct = signature.StructName is null ? null
@@ -452,6 +469,7 @@ internal sealed partial class Binder
         }
         var program = new BoundProgram(bound.ToImmutable(), entryPoint) {
             Structures = [.. _structs],
+            Classes = [.. _classes],
             Buffers = _buffers,
             RuntimePolicy = _runtimePolicy,
         };
@@ -554,11 +572,11 @@ internal sealed partial class Binder
             var fieldName = ((SyntaxTokenElement)field.Children[^2]).Token;
             var type = BindType(typeNode, allowVoid: false);
             if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
-                or PrimitiveType.ManagedNode)
+                or PrimitiveType.ManagedNode || ManagedClassTypes.IsClass(type))
             {
-                Report("TRM3023", "A native buffer view or managed node cannot be stored in an inline struct.", field.Span);
+                Report("TRM3023", "A native buffer view or managed handle cannot be stored in an inline struct.", field.Span);
             }
-            if ((int)type >= 100 && !_laidOut.Contains((int)type - 100))
+            if (IsStruct(type) && !_laidOut.Contains((int)type - 100))
             {
                 DeclareStruct((int)type - 100);
                 SetContext(tree);
@@ -639,7 +657,8 @@ internal sealed partial class Binder
     {
         for (var index = 0; index + 1 < declaration.Children.Length; index++)
         {
-            if (declaration.Children[index] is SyntaxTokenElement token && token.Token.Kind == TokenKind.StructKeyword)
+            if (declaration.Children[index] is SyntaxTokenElement token
+                && token.Token.Kind is TokenKind.StructKeyword or TokenKind.ClassKeyword)
             {
                 return ((SyntaxTokenElement)declaration.Children[index + 1]).Token;
             }
@@ -725,14 +744,18 @@ internal sealed partial class Binder
         {
             Report("TRM3001", "A static operator implementation requires a struct body.", declaration.Span);
         }
-        var returnType = constructor ? ResolveStruct(containingType!) : BindType(returnNode!, allowVoid: true);
+        var classConstructor = constructor && TryResolveClass(Qualify(containingType!), out _);
+        var returnType = constructor ? ResolveDeclaredType(containingType!) : BindType(returnNode!, allowVoid: true);
         if (returnType is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
         {
             Report("TRM3023", "A native buffer view cannot be returned.", returnNode!.Span);
         }
         if (isCleanup)
         {
-            var structure = containingType is null ? null : _structs[(int)ResolveStruct(containingType) - 100];
+            var structureIndex = containingType is not null && !classConstructor
+                && _structNames.TryGetValue(Qualify(containingType), out var structType)
+                && IsStruct(structType) ? (int)structType - 100 : -1;
+            var structure = structureIndex < 0 ? null : _structs[structureIndex];
             if (structure is null || !structure.IsUnique || isStatic || constructor || isMutable || !isNoThrow
                 || returnType != PrimitiveType.Void || parameters.Children.Length != 2
                 || structure.CleanupMethod is not null || isPrivate || isInternal)
@@ -741,7 +764,7 @@ internal sealed partial class Binder
             }
             else
             {
-                _structs[(int)ResolveStruct(containingType!) - 100] = structure with {
+                _structs[structureIndex] = structure with {
                     CleanupMethod = structure.Name + "." + nameText,
                 };
             }
@@ -796,16 +819,20 @@ internal sealed partial class Binder
             Report("TRM3003", $"Duplicate function '{nameToken.Text}'; overloads are not supported.", nameToken.Span);
         }
 
-        _signatures.Add(new Signature(qualifiedName, returnType, declared.ToImmutable(), body, declaration, _tree,
-            containingType, constructor, isPrivate, isInternal, isMutable, isStatic, isNoThrow, doesNotReturn) {
+        _signatures.Add(new Signature(qualifiedName, classConstructor ? PrimitiveType.Void : returnType,
+            declared.ToImmutable(), body, declaration, _tree,
+            containingType, constructor && !classConstructor, isPrivate, isInternal, isMutable, isStatic,
+            isNoThrow, doesNotReturn) {
             IsCleanup = isCleanup,
             IsOperator = operatorDeclaration,
+            IsClassConstructor = classConstructor,
         });
     }
 
     private PrimitiveType BindType(SyntaxNode node, bool allowVoid)
     {
         var name = NameText(node);
+        var resolution = ResolveTypeName(name, out var resolved);
         var type = name switch {
             "int32" => PrimitiveType.Int32,
             "uint32" => PrimitiveType.UInt32,
@@ -817,19 +844,18 @@ internal sealed partial class Binder
             "MutableInt32BufferView" => PrimitiveType.MutableInt32BufferView,
             "ManagedNode" => PrimitiveType.ManagedNode,
             "void" when allowVoid => PrimitiveType.Void,
-            _ => TryResolveStruct(name, out var structure) ? structure : (PrimitiveType?)null,
+            _ => resolution == DeclaredTypeResolution.Unique ? resolved : (PrimitiveType?)null,
         };
 
         if (type is null)
         {
-            Report("TRM3005", $"Type '{name}' is not supported here.", node.Span);
+            Report("TRM3005", resolution == DeclaredTypeResolution.Ambiguous
+                ? $"Type '{name}' is ambiguous across declared and imported types."
+                : $"Type '{name}' is not supported here.", node.Span);
         }
 
         return type ?? PrimitiveType.Int32;
     }
-
-    private PrimitiveType ResolveStruct(string name) =>
-        TryResolveStruct(name, out var type) ? type : PrimitiveType.Int32;
 
     private bool IsUnique(PrimitiveType type) =>
         type == PrimitiveType.OwnedInt32Buffer
@@ -929,35 +955,9 @@ internal sealed partial class Binder
         return -1;
     }
 
-    private bool TryResolveStruct(string name, out PrimitiveType type)
-    {
-        if (_structNames.TryGetValue(name, out type))
-        {
-            return true;
-        }
-        if (_structNames.TryGetValue(_namespace + "." + name, out type))
-        {
-            return true;
-        }
-        var parent = _namespace;
-        while (parent.Contains('.', StringComparison.Ordinal))
-        {
-            var separator = parent.LastIndexOf('.', StringComparison.Ordinal);
-            parent = parent[..separator];
-            if (_structNames.TryGetValue(parent + "." + name, out type))
-            {
-                return true;
-            }
-        }
-        foreach (var imported in _usings)
-        {
-            if (_structNames.TryGetValue(imported + "." + name, out type))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
+    private bool TryResolveStruct(string name, out PrimitiveType type) =>
+        ResolveTypeName(name, out type) == DeclaredTypeResolution.Unique
+            && !ManagedClassTypes.IsClass(type);
 
     private BoundBlock BindBlock(SyntaxNode block)
     {
@@ -986,7 +986,7 @@ internal sealed partial class Binder
         }
 
         var managedLocals = _scopes[^1].Values
-            .Where(slot => _variables[slot].Type == PrimitiveType.ManagedNode)
+            .Where(slot => ManagedClassTypes.IsManaged(_variables[slot].Type))
             .Order().ToImmutableArray();
         _scopes.RemoveAt(_scopes.Count - 1);
         var bound = statements.ToImmutable();
@@ -1123,15 +1123,15 @@ internal sealed partial class Binder
                 if (!TryFindVariable(token.Text, out var slot))
                 {
                     if (_hasReceiver && _currentStruct is not null
-                        && TryFindField(ResolveStruct(_currentStruct), token.Text, out var ownField))
+                        && TryFindField(ResolveDeclaredType(_currentStruct), token.Text, out var ownField))
                     {
-                        if (!_variables[0].IsMutable)
+                        if (!_variables[0].IsMutable && !IsClass(_variables[0].Type))
                         {
                             Report("TRM3008", "An immutable receiver cannot be mutated.", target.Span);
                         }
-                        CheckFieldMutation(ResolveStruct(_currentStruct), ownField, _constructor, target.Span);
+                        CheckFieldMutation(ResolveDeclaredType(_currentStruct), ownField, _constructor, target.Span);
                         return new BoundFieldAssignment(0, ownField,
-                            BindExpression(valueNode, GetField(ResolveStruct(_currentStruct), ownField).Type), node.Span);
+                            BindExpression(valueNode, GetField(ResolveDeclaredType(_currentStruct), ownField).Type), node.Span);
                     }
                     Report("TRM3006", $"Unknown or not-yet-declared variable '{token.Text}'.", token.Span);
                     _ = BindExpression(valueNode, null);
@@ -1260,7 +1260,7 @@ internal sealed partial class Binder
                     }
                 }
                 var managedLocals = _scopes[^1].Values
-                    .Where(slot => _variables[slot].Type == PrimitiveType.ManagedNode)
+                    .Where(slot => ManagedClassTypes.IsManaged(_variables[slot].Type))
                     .Order().ToImmutableArray();
                 _scopes.RemoveAt(_scopes.Count - 1);
                 var loopBody = new BoundBlock([body, iterator], node.Span);
@@ -1313,7 +1313,7 @@ internal sealed partial class Binder
             var name = ((SyntaxTokenElement)root.Children[0]).Token;
             if (!TryFindVariable(name.Text, out variable)
                 && _hasReceiver && _currentStruct is not null
-                && TryFindField(ResolveStruct(_currentStruct), name.Text, out var ownField))
+                && TryFindField(ResolveDeclaredType(_currentStruct), name.Text, out var ownField))
             {
                 variable = 0;
                 fields.Add(ownField);
@@ -1328,9 +1328,13 @@ internal sealed partial class Binder
         var type = _variables[variable].Type;
         if (fields.Count != 0)
         {
-            CheckFieldMutation(type, fields[0], _constructor && variable == 0, root.Span);
+            if (members.Count == 0 || !IsClass(type))
+            {
+                CheckFieldMutation(type, fields[0], _constructor && variable == 0, root.Span);
+            }
             type = GetField(type, fields[0]).Type;
         }
+        var remainingMembers = members.Count;
         foreach (var member in members)
         {
             if (!TryFindField(type, member.Text, out var field))
@@ -1340,11 +1344,15 @@ internal sealed partial class Binder
                 return new BoundBlock([], span);
             }
             CheckFieldAccess(type, field, member.Span);
-            CheckFieldMutation(type, field, _constructor && variable == 0 && fields.Count == 0, member.Span);
+            remainingMembers--;
+            if (remainingMembers == 0 || !IsClass(type))
+            {
+                CheckFieldMutation(type, field, _constructor && variable == 0 && fields.Count == 0, member.Span);
+            }
             fields.Add(field);
             type = GetField(type, field).Type;
         }
-        if (!_variables[variable].IsMutable)
+        if (!_variables[variable].IsMutable && !IsClass(_variables[variable].Type))
         {
             Report("TRM3008", $"Variable '{_variables[variable].Name}' is immutable.", target.Span);
         }
@@ -1460,9 +1468,10 @@ internal sealed partial class Binder
                 {
                     expression = new BoundRead(slot, _variables[slot].Type, node.Span);
                 }
-                else if (_hasReceiver && _currentStruct is not null && TryFindField(ResolveStruct(_currentStruct), token.Text, out var field))
+                else if (_hasReceiver && _currentStruct is not null
+                    && TryFindField(ResolveDeclaredType(_currentStruct), token.Text, out var field))
                 {
-                    var structure = ResolveStruct(_currentStruct);
+                    var structure = ResolveDeclaredType(_currentStruct);
                     expression = new BoundFieldRead(new BoundRead(0, structure, node.Span),
                         field, GetField(structure, field).Type, node.Span);
                 }
@@ -1644,9 +1653,16 @@ internal sealed partial class Binder
             case SyntaxKind.ObjectCreationExpression:
             {
                 var typeName = NameText((SyntaxNode)node.Children[1]);
+                if (ResolveTypeName(typeName, out _) == DeclaredTypeResolution.Ambiguous)
+                {
+                    Report("TRM3005", $"Type '{typeName}' is ambiguous across declared and imported types.",
+                        ((SyntaxNode)node.Children[1]).Span);
+                    expression = ErrorExpression(node.Span);
+                    break;
+                }
                 if (!TryResolveStruct(typeName, out var structure))
                 {
-                    Report("TRM3005", $"Unknown struct '{typeName}'.", node.Span);
+                    Report("TRM3005", $"A class requires its conditional TryCreate factory; unknown struct '{typeName}'.", node.Span);
                     expression = ErrorExpression(node.Span);
                     break;
                 }
@@ -1846,6 +1862,12 @@ internal sealed partial class Binder
                 receiver = left;
                 _ = TryFindFunction(NativeManagedNodeIntrinsics.TypeName + "." + member, out function);
             }
+            else if (type is PrimitiveType classType && IsClass(classType))
+            {
+                receiver = left;
+                _ = TryFindFunction(_classes[(int)classType - ManagedClassTypes.First].Name + "." + member,
+                    out function);
+            }
             else if (type is PrimitiveType structType && IsStruct(structType))
             {
                 receiver = left;
@@ -1853,7 +1875,13 @@ internal sealed partial class Binder
             }
             else
             {
-                _ = TryFindFunction(NameText(callee), out function);
+                if (ResolveStaticMember(left, member, out var staticMember) == DeclaredTypeResolution.Ambiguous)
+                {
+                    Report("TRM3011", $"Type '{NameText(left)}' is ambiguous across declared and imported types.",
+                        left.Span);
+                    return ErrorExpression(node.Span);
+                }
+                _ = TryFindFunction(staticMember, out function);
             }
             if (function < 0)
             {
@@ -1870,7 +1898,10 @@ internal sealed partial class Binder
     private BoundCall BindArguments(SyntaxNode node, SyntaxNode arguments, int function, SyntaxNode? receiver)
     {
         var signature = function < 0 ? null : _signatures[function];
-        if (signature is not null && signature.IsPrivate && signature.StructName != _currentStruct)
+        var ownerName = signature?.StructName is null ? null
+            : signature.Name[..signature.Name.LastIndexOf('.', StringComparison.Ordinal)];
+        if (signature is not null && signature.IsPrivate
+            && ownerName != (_currentStruct is null ? null : Qualify(_currentStruct)))
         {
             Report("TRM3011", $"'{signature.Name}' is private.", node.Span);
         }
@@ -1882,7 +1913,7 @@ internal sealed partial class Binder
         var receiverCount = 0;
         if (receiver is not null && signature is not null)
         {
-            var receiverType = ResolveStruct(signature.StructName!);
+            var receiverType = ResolveDeclaredType(ownerName!);
             bound.Add(signature.External?.Intrinsic is BoundIntrinsic.BufferSet or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear
                 ? BindMutableReceiverLoan(receiver, receiver.Span)
                 : IsUnique(receiverType) && !signature.IsCleanup
@@ -1894,7 +1925,7 @@ internal sealed partial class Binder
         {
             if (_currentStruct == signature.StructName && _variables.Count > 0 && _variables[0].Name == "this")
             {
-                var receiverType = ResolveStruct(signature.StructName);
+                var receiverType = ResolveDeclaredType(ownerName!);
                 bound.Add(IsUnique(receiverType) && !signature.IsCleanup
                     ? new BoundReceiverLoan(0, receiverType, node.Span)
                     : new BoundRead(0, receiverType, node.Span));
@@ -1981,7 +2012,8 @@ internal sealed partial class Binder
         return new BoundCall(Math.Max(0, function), bound.ToImmutable(), signature?.ReturnType ?? PrimitiveType.Int32, node.Span);
     }
 
-    private bool IsStruct(PrimitiveType type) => (int)type >= 100 && (int)type - 100 < _structs.Count;
+    private bool IsStruct(PrimitiveType type) => (int)type >= 100
+        && !ManagedClassTypes.IsClass(type) && (int)type - 100 < _structs.Count;
 
     private bool TryFindBuffer(SyntaxNode node, out int buffer)
     {
@@ -2005,9 +2037,10 @@ internal sealed partial class Binder
 
     private bool TryFindField(PrimitiveType type, string name, out int field)
     {
-        if (IsStruct(type))
+        if (IsStruct(type) || IsClass(type))
         {
-            var fields = _structs[(int)type - 100].Fields;
+            var fields = IsClass(type) ? _classes[(int)type - ManagedClassTypes.First].Fields
+                : _structs[(int)type - 100].Fields;
             for (var i = 0; i < fields.Length; i++)
             {
                 if (fields[i].Name == name)
@@ -2021,12 +2054,15 @@ internal sealed partial class Binder
         return false;
     }
 
-    private BoundStructField GetField(PrimitiveType type, int field) => _structs[(int)type - 100].Fields[field];
+    private BoundStructField GetField(PrimitiveType type, int field) => IsClass(type)
+        ? _classes[(int)type - ManagedClassTypes.First].Fields[field]
+        : _structs[(int)type - 100].Fields[field];
 
     private void CheckFieldAccess(PrimitiveType type, int field, TextSpan span)
     {
         if (GetField(type, field).IsPrivate
-            && _structs[(int)type - 100].Name != (string.IsNullOrEmpty(_namespace)
+            && (IsClass(type) ? _classes[(int)type - ManagedClassTypes.First].Name
+                : _structs[(int)type - 100].Name) != (string.IsNullOrEmpty(_namespace)
                 ? _currentStruct : _namespace + "." + _currentStruct))
         {
             Report("TRM3011", "Private field cannot be accessed outside its declaring struct.", span);
@@ -2142,8 +2178,9 @@ internal sealed partial class Binder
                 {
                     return _variables[slot].Type;
                 }
-                return _hasReceiver && _currentStruct is not null && TryFindField(ResolveStruct(_currentStruct), name, out var field)
-                    ? GetField(ResolveStruct(_currentStruct), field).Type : null;
+                return _hasReceiver && _currentStruct is not null
+                    && TryFindField(ResolveDeclaredType(_currentStruct), name, out var field)
+                    ? GetField(ResolveDeclaredType(_currentStruct), field).Type : null;
             }
             case SyntaxKind.LiteralExpression:
             {
@@ -2191,8 +2228,10 @@ internal sealed partial class Binder
                     var name = receiverType switch {
                         PrimitiveType.OwnedInt32Buffer => NativeBufferIntrinsics.TypeName + "." + member,
                         PrimitiveType.ManagedNode => NativeManagedNodeIntrinsics.TypeName + "." + member,
+                        PrimitiveType type when IsClass(type) => _classes[(int)type - ManagedClassTypes.First].Name + "." + member,
                         PrimitiveType type when IsStruct(type) => _structs[(int)type - 100].Name + "." + member,
-                        _ => NameText(callee),
+                        _ => ResolveStaticMember(left, member, out var staticMember)
+                            == DeclaredTypeResolution.Ambiguous ? "" : staticMember,
                     };
                     return TryFindFunction(name, out var method) ? _signatures[method].ReturnType : null;
                 }
@@ -2362,6 +2401,7 @@ internal sealed partial class Binder
         PrimitiveType.ReadonlyInt32BufferView => "ReadonlyInt32BufferView",
         PrimitiveType.MutableInt32BufferView => "MutableInt32BufferView",
         PrimitiveType.ManagedNode => "ManagedNode",
+        _ when IsClass(type) => _classes[(int)type - ManagedClassTypes.First].Name,
         _ when IsStruct(type) => _structs[(int)type - 100].Name,
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };
@@ -2382,5 +2422,7 @@ internal sealed partial class Binder
         internal bool IsCleanup { get; init; }
         internal bool IsOperator { get; init; }
         internal GenericInstantiation? Generic { get; init; }
+        internal bool IsClassConstructor { get; init; }
+        internal int ClassConstructor { get; init; } = -1;
     }
 }
