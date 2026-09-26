@@ -22,17 +22,34 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class ModuleTests
 {
     [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast)]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
-    public async Task SemanticClassLeafExecutesAfterConstructorAndOwnerRemappingAsync(BoundRuntimePolicy policy)
+    [InlineData(BoundRuntimePolicy.FailFast, "managed-class-leaf")]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions, "managed-class-leaf")]
+    [InlineData(BoundRuntimePolicy.FailFast, "managed-copy-class-leaf")]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions, "managed-copy-class-leaf")]
+    public async Task SemanticClassLeafExecutesAfterConstructorAndOwnerRemappingAsync(
+        BoundRuntimePolicy policy, string sample)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var source = await File.ReadAllTextAsync(Path.Combine(root, "samples", "native", "graph",
-            "managed-class-leaf.terrum")).ConfigureAwait(true);
+            sample + ".terrum")).ConfigureAwait(true);
         var library = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Leaf"]);
-        var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Leaf() + 2; }"),
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Cell {
+                public int64 Value;
+                public Cell(int64 value) { Value = value; }
+            }
+            struct Stamp {
+                public int32 Value;
+                public Stamp(int32 value) { Value = value; }
+            }
+            int32 Main() {
+                Cell first = new Cell(1i64);
+                Stamp second = new Stamp(2);
+                return Leaf() + (int32)first.Value + second.Value - 1;
+            }
+            """),
             ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);

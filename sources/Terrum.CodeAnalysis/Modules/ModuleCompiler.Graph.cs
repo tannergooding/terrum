@@ -306,7 +306,7 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Graph library cannot have an entry point.");
             }
             var (structures, names) = ReadStructures(reader, version);
-            if (version >= Version)
+            if (version >= ManagedClassVersion)
             {
                 throw new ModuleFormatException("Graph libraries cannot use the private class module version.");
             }

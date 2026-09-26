@@ -125,15 +125,16 @@ static managed roots and managed class values in inline structs remain
 unsupported. Required references do not permit bootstrapping a cycle by leaking
 partial objects. Optional fields in `native-20` provide an explicit construction
 path for source-defined cycles.
-Class metadata is image-private: version 19 semantic/native leaf modules can
+Class metadata is image-private: version 19 and 20 semantic/native leaf modules can
 retain it internally, but native DLL exports remain scalar-only.
 Executable class payloads also admit acyclic, handle-free Copy struct fields
 of at most 16 bytes, within the same 128-byte payload bound. Whole-value reads
 and writes copy all bytes; nested field access preserves declared mutability
 and construction checks. These aggregates contribute no managed descriptor
 slots. They cannot contain managed handles, owners or views, and factories
-still cannot take aggregate arguments. Version 19 persisted class modules
-reject these inline fields rather than reinterpret their existing wire contract.
+still cannot take aggregate arguments. Version 20 persists these inline fields
+and their private nested layouts; version 19 continues rejecting them rather
+than reinterpreting its existing wire contract.
 The [class sample](../samples/native/managed-classes.terrum)
 returns 42 through shared aliases and heterogeneous managed edges. The independent
 C heap probe checks multiple-edge liveness, pointer-shaped scalar nonroots,
@@ -162,7 +163,7 @@ Descriptors include optional reference slots; tracing ignores zero without
 treating it as uninitialized source storage. The
 [cycle sample](../samples/native/managed-optional-cycle.terrum) exercises
 source-defined cycles and snapshots across edge clearing and collection.
-Version 19 semantic modules retain optional IR and types only inside a private
+Version 19 and 20 semantic modules retain optional IR and types only inside a private
 source-class leaf. Neither this nor the version 18 private-node module exposes
 an optional or managed-reference ABI. An optional-node-only module remains
 unsupported.

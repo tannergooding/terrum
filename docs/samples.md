@@ -49,6 +49,9 @@ leaf under AOT and root-only JIT; see the [graph commands](native-graph.md).
 The [private class leaf](../samples/native/graph/managed-class-leaf.terrum)
 extends that replacement proof to source-defined optional cycles and checked
 class metadata, without exposing a managed module ABI.
+The [Copy-field class leaf](../samples/native/graph/managed-copy-class-leaf.terrum)
+persists nested private Copy layouts in semantic version 20 and replaces the
+same unchanged consumer/intermediate images.
 The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
 returns 46 through AOT and JIT. Two nominal Copy wrappers explicitly implement
 source-defined addition/multiplication protocols used by one constrained

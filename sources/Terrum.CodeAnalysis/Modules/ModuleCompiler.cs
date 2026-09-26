@@ -24,7 +24,8 @@ public static partial class ModuleCompiler
     private const int ReadonlyViewVersion = 16;
     private const int WritableViewVersion = 17;
     private const int ManagedNodeVersion = 18;
-    private const int Version = 19;
+    private const int ManagedClassVersion = 19;
+    private const int Version = 20;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -302,10 +303,21 @@ public static partial class ModuleCompiler
         Span = default,
     };
 
-    private static HashSet<string> RequiredStructures(IEnumerable<BoundFunction> functions, ImmutableArray<BoundStruct> structures)
+    private static HashSet<string> RequiredStructures(IEnumerable<BoundFunction> functions,
+        ImmutableArray<BoundStruct> structures, ImmutableArray<BoundClass> classes = default)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
         var pending = new Queue<PrimitiveType>();
+        if (!classes.IsDefaultOrEmpty)
+        {
+            foreach (var @class in classes)
+            {
+                foreach (var field in @class.Fields)
+                {
+                    Add(field.Type);
+                }
+            }
+        }
         foreach (var function in functions)
         {
             Add(function.ReturnType);
@@ -386,11 +398,6 @@ public static partial class ModuleCompiler
         else
         {
             SemanticVerifier.Verify(program);
-        }
-        if (program.Classes.Any(static @class => @class.Fields.Any(
-                static field => IsInlineClassField(field.Type))))
-        {
-            throw new ModuleFormatException("Inline struct class fields require a newer semantic module version.");
         }
         if (program.Classes.IsDefaultOrEmpty && program.Functions.Any(static function =>
                 ManagedClassTypes.IsOptional(function.ReturnType)
@@ -476,14 +483,14 @@ public static partial class ModuleCompiler
             }
         }
         var functions = program.Functions.Where((_, index) => indexes.Contains(index)).ToImmutableArray();
-        var required = RequiredStructures(functions, program.Structures);
+        var required = RequiredStructures(functions, program.Structures, program.Classes);
         var structures = SelectStructures(program.Structures, required);
         var remapped = functions.Select(function => RemapFunction(function, program.Structures, structures));
         var module = new Module(false, -1, structures, [.. remapped.Select(function =>
             new ModuleFunction(function.Name, Contract(function, structures), function, names.Contains(function.Name)) {
                 HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, structures),
             })]) {
-            Classes = program.Classes,
+            Classes = [.. program.Classes.Select(@class => RemapClass(@class, program.Structures, structures))],
             RuntimePolicy = program.RuntimePolicy,
         };
         return Write(module, program);
@@ -703,7 +710,8 @@ public static partial class ModuleCompiler
         }
         var result = new BoundProgram(functions.ToImmutable(), consumer.EntryPoint) {
             Structures = allStructures,
-            Classes = [.. producer.Classes.Select(static item => item with { Name = "$producer." + item.Name })],
+            Classes = [.. producer.Classes.Select(@class => RemapClass(
+                @class with { Name = "$producer." + @class.Name }, renamedTypes, allStructures))],
             RuntimePolicy = consumer.RuntimePolicy,
         };
         try
@@ -1046,6 +1054,11 @@ public static partial class ModuleCompiler
             Fields = [.. structure.Fields.Select(field => field with { Type = RemapType(field.Type, source, destination) })],
         };
 
+    private static BoundClass RemapClass(BoundClass @class, ImmutableArray<BoundStruct> source,
+        ImmutableArray<BoundStruct> destination) => @class with {
+            Fields = [.. @class.Fields.Select(field => field with { Type = RemapType(field.Type, source, destination) })],
+        };
+
     private static ImmutableArray<BoundStruct> SelectStructures(ImmutableArray<BoundStruct> source, HashSet<string> required)
     {
         var selected = source.Where(structure => required.Contains(structure.Name)).ToImmutableArray();
@@ -1203,7 +1216,9 @@ public static partial class ModuleCompiler
         }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-        var version = module.Classes.IsEmpty ? ManagedNodeVersion : Version;
+        var version = module.Classes.IsEmpty ? ManagedNodeVersion
+            : module.Classes.Any(static @class => @class.Fields.Any(
+                static field => IsInlineClassField(field.Type))) ? Version : ManagedClassVersion;
         writer.Write(Magic);
         writer.Write(version);
         PutString(writer, RetainedNativeProfile(module));
@@ -1235,7 +1250,7 @@ public static partial class ModuleCompiler
                 writer.Write(field.IsMutable);
             }
         }
-        if (version >= Version)
+        if (version >= ManagedClassVersion)
         {
             writer.Write(module.Classes.Length);
             foreach (var @class in module.Classes)
@@ -1298,10 +1313,15 @@ public static partial class ModuleCompiler
             var (version, policy, profile) = ReadModuleHeader(reader, expectedConsumer);
             var entry = reader.ReadInt32();
             var (structures, structureNames) = ReadStructures(reader, version);
-            var classes = version >= Version ? ReadClasses(reader, structureNames) : [];
-            if (version >= Version && classes.IsEmpty)
+            var classes = version >= ManagedClassVersion ? ReadClasses(reader, structureNames, version) : [];
+            if (version >= ManagedClassVersion && classes.IsEmpty)
             {
                 throw new ModuleFormatException("Class module version requires private managed layouts.");
+            }
+            if (version == Version && !classes.Any(static @class => @class.Fields.Any(
+                    static field => IsInlineClassField(field.Type))))
+            {
+                throw new ModuleFormatException("Class module version 20 requires inline struct fields.");
             }
             var importedTypes = ReadImportedTypes(reader, structures.Length, structureNames, expectedConsumer);
             var count = Count(reader, MaximumFunctions);
@@ -1334,7 +1354,7 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Module has trailing data or an imported entry point.");
             }
-            if (!expectedConsumer && version >= Version && HasPrivateManagedState(module))
+            if (!expectedConsumer && version >= ManagedClassVersion && HasPrivateManagedState(module))
             {
                 ValidateProducer(module);
             }
@@ -1354,7 +1374,8 @@ public static partial class ModuleCompiler
         }
         var version = reader.ReadInt32();
         if (version is not (10 or 11 or OwnershipVersion or TransferVersion or CompositeVersion
-            or BufferVersion or ReadonlyViewVersion or WritableViewVersion or ManagedNodeVersion or Version))
+            or BufferVersion or ReadonlyViewVersion or WritableViewVersion or ManagedNodeVersion
+            or ManagedClassVersion or Version))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -1373,7 +1394,7 @@ public static partial class ModuleCompiler
                 && (version < ReadonlyViewVersion || profile != "native-16")
                 && (version < WritableViewVersion || profile != "native-17")
                 && (version < ManagedNodeVersion || profile != "native-18")
-                && (version < Version || profile is not ("native-19" or "native-20"))))
+                && (version < ManagedClassVersion || profile is not ("native-19" or "native-20"))))
         {
             throw new ModuleFormatException("Unsupported module semantic profile or checked-failure policy.");
         }
@@ -1442,7 +1463,8 @@ public static partial class ModuleCompiler
         return importedTypes.ToImmutable();
     }
 
-    private static ImmutableArray<BoundClass> ReadClasses(BinaryReader reader, HashSet<string> structureNames)
+    private static ImmutableArray<BoundClass> ReadClasses(BinaryReader reader, HashSet<string> structureNames,
+        int version)
     {
         var count = Count(reader, 256);
         var classes = ImmutableArray.CreateBuilder<BoundClass>(count);
@@ -1462,7 +1484,7 @@ public static partial class ModuleCompiler
             {
                 var fieldName = GetString(reader);
                 var fieldType = (PrimitiveType)reader.ReadInt32();
-                if (IsInlineClassField(fieldType))
+                if (version < Version && IsInlineClassField(fieldType))
                 {
                     throw new ModuleFormatException("Inline struct class fields require a newer semantic module version.");
                 }
@@ -1549,7 +1571,7 @@ public static partial class ModuleCompiler
         writer.Write(function.DoesNotReturn);
         writer.Write(function.IsCleanup);
         writer.Write((byte)function.Intrinsic);
-        if (version >= Version)
+        if (version >= ManagedClassVersion)
         {
             writer.Write(function.IsClassConstructor);
             writer.Write(function.ClassConstructor);
@@ -1577,7 +1599,7 @@ public static partial class ModuleCompiler
     {
         var name = GetString(reader);
         var type = (PrimitiveType)reader.ReadInt32();
-        if (version < Version && (ManagedClassTypes.IsOptional(type) || ManagedClassTypes.IsClass(type)))
+        if (version < ManagedClassVersion && (ManagedClassTypes.IsOptional(type) || ManagedClassTypes.IsClass(type)))
         {
             throw new ModuleFormatException("Optional managed handles have no persisted module ABI.");
         }
@@ -1598,10 +1620,10 @@ public static partial class ModuleCompiler
         var doesNotReturn = GetBool(reader);
         var isCleanup = version >= OwnershipVersion && GetBool(reader);
         var intrinsic = version >= BufferVersion ? (BoundIntrinsic)reader.ReadByte() : BoundIntrinsic.None;
-        var classConstructor = version >= Version && GetBool(reader);
-        var classFactoryConstructor = version >= Version ? reader.ReadInt32() : -1;
+        var classConstructor = version >= ManagedClassVersion && GetBool(reader);
+        var classFactoryConstructor = version >= ManagedClassVersion ? reader.ReadInt32() : -1;
         if (intrinsic >= BoundIntrinsic.NodeTryCreate
-            && (version < ManagedNodeVersion || (version < Version && intrinsic > BoundIntrinsic.NodeCollect)
+            && (version < ManagedNodeVersion || (version < ManagedClassVersion && intrinsic > BoundIntrinsic.NodeCollect)
                 || intrinsic > BoundIntrinsic.ClassTryCreate))
         {
             throw new ModuleFormatException("Managed nodes have no persisted module runtime.");
@@ -1623,7 +1645,7 @@ public static partial class ModuleCompiler
         {
             var variableName = GetString(reader);
             var variableType = (PrimitiveType)reader.ReadInt32();
-            if (version < Version && (ManagedClassTypes.IsOptional(variableType)
+            if (version < ManagedClassVersion && (ManagedClassTypes.IsOptional(variableType)
                 || ManagedClassTypes.IsClass(variableType)))
             {
                 throw new ModuleFormatException("Optional managed handles have no persisted module ABI.");
@@ -2028,7 +2050,7 @@ public static partial class ModuleCompiler
         Step(ref remaining, depth);
         var kind = reader.ReadByte();
         var type = (PrimitiveType)reader.ReadInt32();
-        if (version < Version && (ManagedClassTypes.IsOptional(type) || ManagedClassTypes.IsClass(type)))
+        if (version < ManagedClassVersion && (ManagedClassTypes.IsOptional(type) || ManagedClassTypes.IsClass(type)))
         {
             throw new ModuleFormatException("Optional managed handles have no persisted module ABI.");
         }
@@ -2080,13 +2102,13 @@ public static partial class ModuleCompiler
             case 14 when version >= ReadonlyViewVersion && type == PrimitiveType.Int32:
                 var variable = reader.ReadInt32();
                 return new BoundViewRead(variable, GetExpression(reader, ref remaining, depth + 1, version), span);
-            case 15 when version >= Version && ManagedClassTypes.IsOptional(type):
+            case 15 when version >= ManagedClassVersion && ManagedClassTypes.IsOptional(type):
                 return new BoundNull(type, span);
-            case 16 when version >= Version && ManagedClassTypes.IsOptional(type):
+            case 16 when version >= ManagedClassVersion && ManagedClassTypes.IsOptional(type):
                 return new BoundOptionalLift(GetExpression(reader, ref remaining, depth + 1, version), type, span);
-            case 17 when version >= Version && type == PrimitiveType.Bool:
+            case 17 when version >= ManagedClassVersion && type == PrimitiveType.Bool:
                 return new BoundIsNull(GetExpression(reader, ref remaining, depth + 1, version), span);
-            case 18 when version >= Version && type == PrimitiveType.Bool:
+            case 18 when version >= ManagedClassVersion && type == PrimitiveType.Bool:
                 var pattern = reader.ReadInt32();
                 return new BoundIsSome(GetExpression(reader, ref remaining, depth + 1, version), pattern, span);
             default:

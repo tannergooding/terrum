@@ -258,8 +258,8 @@ its own unreachable graph; no managed handle crosses a module or native DLL
 boundary. The package reader verifies the retained `native-18` profile, roots
 and node operations before permitting the DLL's bounded heap imports.
 Previously stored modules remain readable under their original versions.
-The version 19 `.trm` variant is written only for leaf producers with private
-source classes. It stores their bounded field layouts, constructor/factory
+The version 19 `.trm` variant is written for leaf producers with private
+source classes whose fields are scalar or managed references. It stores their bounded field layouts, constructor/factory
 association, optional-handle expressions and exact lexical roots, and validates
 the complete retained class/function table on reload. Class leaves select
 `native-19`, or `native-20` when optional handles occur; class-free modules keep
@@ -267,11 +267,16 @@ their version 18 wire layout and historical profiles. Exports remain scalar/void
 by-value declarations, and a managed leaf cannot import another provider.
 Source classes and managed handles never become imported module layouts or
 native DLL values. An optional-node-only program without a private source
-class remains outside this bounded module increment. Version 19 rejects inline
-struct fields in source classes even when the struct is Copy and accepted for
-executable compilation; persisting those layouts requires a new semantic
-module version. Collection is local to the leaf image; no DLL-unload heap
-cleanup of live objects is promised.
+class remains outside this bounded module increment. Class leaves with
+acyclic, handle-free Copy struct fields use semantic version 20, retaining
+their private nested value layouts and natural field alignment. Versions 18
+and 19 keep their original wire layouts and reject inline class fields; class
+leaves without those fields still write version 19. Native `native-19` and
+`native-20` profiles still depend on optional handles, not the presence of a
+private Copy field. Collection is local to the leaf image; no DLL-unload heap
+cleanup of live objects is promised. For a runnable version 20 replacement,
+use the [Copy-field class leaf](../samples/native/graph/managed-copy-class-leaf.terrum)
+as the producer source in the [unchanged-root graph example](native-graph.md).
 A consumer importing a unique type must also import the exported NoThrow
 cleanup methods of that type and its owning children. Their cleanup identities
 and Copy/unique distinctions participate in layout and signature compatibility;

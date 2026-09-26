@@ -171,6 +171,14 @@ without optional handles selects `native-19`. Neither class layout nor handle
 is part of the imported `Leaf()` declaration, and no other DLL can share the
 leaf's managed roots.
 
+The [Copy-field variant](../samples/native/graph/managed-copy-class-leaf.terrum)
+can replace that same leaf with nested inline Copy values alongside its optional
+edges. Use it in place of `managed-class-leaf.terrum` in the producer command
+below. It writes semantic version 20 while retaining `native-20`, returns the
+same result and collects its private cycle. The unchanged root and intermediate
+do not import its nested struct layouts; older semantic versions continue to
+reject inline class fields.
+
 ```powershell
 & $c compile-native producer samples\native\graph\managed-class-leaf-original.terrum NodeB --export Leaf -o class-original.trmn --runtime fail-fast
 & $c compile-native-graph producer samples\native\graph\middle.terrum NodeA --provider class-original.trmn --export Middle -o class-middle.trng --runtime fail-fast

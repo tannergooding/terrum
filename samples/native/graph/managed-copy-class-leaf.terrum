@@ -1,0 +1,48 @@
+struct Cell {
+    public int32 Amount;
+    public Cell(int32 amount) { Amount = amount; }
+}
+
+struct Stamp {
+    public bool Active;
+    public Cell Item;
+    public int64 Code;
+    public Stamp(int32 amount) {
+        Active = true;
+        Item = new Cell(amount);
+        Code = 42i64;
+    }
+}
+
+class Cycle {
+    public bool Ready;
+    public Stamp Data;
+    public mut Cycle? Next;
+
+    public Cycle(int32 value) {
+        Ready = true;
+        Data = new Stamp(value);
+        Next = null;
+    }
+}
+
+int32 MakeValue() {
+    require Cycle.TryCreate(20, out var first);
+    require Cycle.TryCreate(22, out var second);
+    first.Next = second;
+    second.Next = first;
+    if (first.Next is some snapshot) {
+        require first.Ready && snapshot.Data.Active && first.Data.Code == 42i64;
+        first.Next = null;
+        if (ManagedHeap.Collect() != 0) { return 0; }
+        first.Next = snapshot;
+        return first.Data.Item.Amount + snapshot.Data.Item.Amount;
+    }
+    return 0;
+}
+
+public int32 Leaf() {
+    int32 result = MakeValue();
+    require ManagedHeap.Collect() == 2;
+    return result;
+}

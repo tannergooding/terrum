@@ -145,8 +145,10 @@ Version 18 semantic modules separately admit private `ManagedNode` code in a
 leaf producer whose exported declarations are scalar and by-value only.
 Version 19 extends that private-leaf contract to source classes and their
 optional handles, serializing checked layouts, construction and root metadata.
-Class-free modules retain the version 18 format. Version 19 rejects inline Copy
-fields in classes until their persistence contract is deliberately extended.
+Class-free modules retain the version 18 format. Classes with inline Copy fields
+use version 20, retaining their private nested layouts and remapping type IDs
+during semantic linking. Version 19 still rejects those fields and remains the
+writer format for scalar/reference-only classes.
 Optional-node-only modules,
 managed consumer declarations and managed imported/exported signatures still
 reject.
