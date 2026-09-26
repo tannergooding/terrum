@@ -1,0 +1,109 @@
+class Link {
+    public mut Link? Next;
+    public int32 Value;
+    public Link(int32 value) {
+        Next = null;
+        Value = value;
+    }
+}
+
+class OptionalEdges {
+    public mut Link? Item;
+    public mut ManagedNode? Node;
+    public OptionalEdges(Link? item, ManagedNode? node) {
+        Item = null;
+        ManagedHeap.Collect();
+        Node = node;
+        Item = item;
+    }
+}
+
+void DiscardSelfCycle() {
+    require Link.TryCreate(1, out var node);
+    node.Next = node;
+}
+
+void DiscardPairCycle() {
+    require Link.TryCreate(1, out var first);
+    require Link.TryCreate(2, out var second);
+    first.Next = second;
+    second.Next = first;
+}
+
+OptionalEdges CreateOptionalEdges() {
+    require Link.TryCreate(42, out var item);
+    require ManagedNode.TryCreate(7, out var node);
+    require OptionalEdges.TryCreate(item, node, out var edges);
+    return edges;
+}
+
+int32 ReadSnapshot(OptionalEdges edges) {
+    if (edges.Item is some item) {
+        if (edges.Node is some node) {
+            edges.Item = null;
+            edges.Node = null;
+            require ManagedHeap.Collect() == 0;
+            require node.Value == 7;
+            return item.Value;
+        }
+    }
+    return 0;
+}
+
+bool TryNull(bool success, out Link? value) {
+    if (success) {
+        value = null;
+        return true;
+    }
+    return false;
+}
+
+public int32 OptionalCycles() {
+    DiscardSelfCycle();
+    DiscardPairCycle();
+    require ManagedHeap.Collect() == 3;
+    return 42;
+}
+
+public int32 OptionalSnapshots() {
+    var edges = CreateOptionalEdges();
+    require ReadSnapshot(edges) == 42;
+    require ManagedHeap.Collect() == 2;
+    require edges.Item is null;
+    require edges.Node is null;
+    return 42;
+}
+
+public int32 OptionalNullOutput() {
+    require TryNull(true, out var value);
+    require value is null;
+    require ManagedHeap.Collect() == 0;
+    if (TryNull(false, out var unpublished)) {
+        return 0;
+    }
+    return 42;
+}
+
+public int32 OptionalAllocationFailure() {
+    Link? absent = null;
+    if (OptionalEdges.TryCreate(absent, null, out var unpublished)) {
+        return 0;
+    }
+    require ManagedHeap.Collect() == 0;
+    return 42;
+}
+
+public int32 OptionalRetainAcrossFailure() {
+    require Link.TryCreate(42, out var item);
+    require ManagedNode.TryCreate(7, out var node);
+    if (OptionalEdges.TryCreate(item, node, out var unpublished)) {
+        return 0;
+    }
+    require ManagedHeap.Collect() == 0;
+    require node.Value == 7;
+    return item.Value;
+}
+
+public int32 CollectWithScalar(uint64 bits) {
+    return ManagedHeap.Collect();
+}

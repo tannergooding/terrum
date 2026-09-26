@@ -335,6 +335,95 @@ static int RunClassChecks(HMODULE image, int checkedUnwind)
     return 0;
 }
 
+static int RunOptionalChecks(HMODULE image, int checkedUnwind)
+{
+    const char* names[] = { "OptionalCycles", "OptionalSnapshots", "OptionalNullOutput" };
+    const int allocations[] = { 3, 3, 0 };
+    const int survivors[] = { 0, 1, 0 };
+    Collect collect = (Collect)GetProcAddress(image, "CollectWithScalar");
+    Check allocationFailure = (Check)GetProcAddress(image, "OptionalAllocationFailure");
+    Check retain = (Check)GetProcAddress(image, "OptionalRetainAcrossFailure");
+    VERIFY(collect && allocationFailure && retain, 100);
+    VERIFY(ReplaceImport(image, "HeapAlloc", (void*)TrackedAllocate), 101);
+    VERIFY(ReplaceImport(image, "HeapFree", (void*)TrackedRelease), 102);
+
+    for (int iteration = 0; iteration < 64; iteration++)
+    {
+        for (int index = 0; index < 3; index++)
+        {
+            Check check = (Check)GetProcAddress(image, names[index]);
+            VERIFY(check != NULL, 103);
+            attempts = 0;
+            releases = 0;
+            VERIFY(check() == 42, 104);
+            VERIFY(attempts == allocations[index] && LiveCount() == survivors[index]
+                && releases == attempts - survivors[index] && !invalid, 105);
+            VERIFY(collect(0) == survivors[index], 106);
+            VERIFY(releases == attempts && LiveCount() == 0 && !invalid, 107);
+        }
+        if (checkedUnwind)
+        {
+            Check recover = (Check)GetProcAddress(image, "OptionalRecovery");
+            ThrowingExport escape = (ThrowingExport)GetProcAddress(image, "OptionalEscapeToNative");
+            VERIFY(recover && escape, 108);
+            attempts = 0;
+            releases = 0;
+            VERIFY(recover() == 42 && attempts == 3 && releases == 2
+                && LiveCount() == 1 && !invalid, 109);
+            VERIFY(collect(0) == 1 && releases == 3 && LiveCount() == 0 && !invalid, 110);
+            attempts = 0;
+            releases = 0;
+            int caught = 0;
+            __try
+            {
+                escape();
+            }
+            __except (CatchRequirement(GetExceptionInformation()))
+            {
+                caught = 1;
+            }
+            VERIFY(caught && attempts == 3 && releases == 0 && LiveCount() == 3 && !invalid, 111);
+            VERIFY(collect(0) == 3 && releases == 3 && LiveCount() == 0 && !invalid, 112);
+        }
+    }
+    attempts = 0;
+    releases = 0;
+    failAttempt = 1;
+    VERIFY(allocationFailure() == 42 && attempts == 1 && releases == 0
+        && LiveCount() == 0 && !invalid, 113);
+    attempts = 0;
+    failAttempt = 3;
+    VERIFY(retain() == 42 && attempts == 3 && releases == 0 && LiveCount() == 2 && !invalid, 114);
+    VERIFY(collect(0) == 2 && releases == 2 && LiveCount() == 0 && !invalid, 115);
+    failAttempt = 0;
+    return 0;
+}
+
+static int RunTokenChainChecks(HMODULE image)
+{
+    Check reuse = (Check)GetProcAddress(image, "ChainReuse");
+    Check allocationFailure = (Check)GetProcAddress(image, "ChainAllocationFailure");
+    Collect collect = (Collect)GetProcAddress(image, "CollectWithScalar");
+    VERIFY(reuse && allocationFailure && collect, 120);
+    VERIFY(ReplaceImport(image, "HeapAlloc", (void*)TrackedAllocate), 121);
+    VERIFY(ReplaceImport(image, "HeapFree", (void*)TrackedRelease), 122);
+    for (int iteration = 0; iteration < 64; iteration++)
+    {
+        attempts = 0;
+        releases = 0;
+        VERIFY(reuse() == 42 && attempts == 6 && releases == 5 && LiveCount() == 1 && !invalid, 123);
+        VERIFY(collect(0) == 1 && releases == 6 && LiveCount() == 0 && !invalid, 124);
+        attempts = 0;
+        releases = 0;
+        failAttempt = 3;
+        VERIFY(allocationFailure() == 42 && attempts == 3 && releases == 0
+            && LiveCount() == 2 && !invalid, 125);
+        VERIFY(collect(0) == 2 && releases == 2 && LiveCount() == 0 && !invalid, 126);
+        failAttempt = 0;
+    }
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if (argc != 2 && argc != 3)
@@ -375,18 +464,29 @@ int main(int argc, char** argv)
     int unwind = argc == 3 && strcmp(argv[2], "unwind") == 0;
     int checkedClasses = argc == 3 && strcmp(argv[2], "classes-checked") == 0;
     int classes = checkedClasses || (argc == 3 && strcmp(argv[2], "classes") == 0);
-    if (argc == 3 && !unwind && !classes)
+    int checkedOptional = argc == 3 && strcmp(argv[2], "optional-checked") == 0;
+    int optional = checkedOptional || (argc == 3 && strcmp(argv[2], "optional") == 0);
+    int chain = argc == 3 && strcmp(argv[2], "chain") == 0;
+    if (argc == 3 && !unwind && !classes && !optional && !chain)
     {
         fprintf(stderr, "Unknown managed-heap probe mode: %s.\n", argv[2]);
         FreeLibrary(image);
         return 2;
     }
-    int result = classes ? RunClassChecks(image, checkedClasses)
+    int result = chain ? RunTokenChainChecks(image)
+        : optional ? RunOptionalChecks(image, checkedOptional)
+        : classes ? RunClassChecks(image, checkedClasses)
         : unwind ? RunUnwindChecks(image) : RunChecks(image);
     FreeLibrary(image);
     if (result == 0)
     {
-        puts(classes
+        puts(chain
+            ? "managed-token-chain rounds=64 reuse=checked allocation-failure=checked live=0"
+            : optional
+            ? checkedOptional
+                ? "managed-optionals rounds=64 cycles=checked snapshots=checked unwind=checked live=0"
+                : "managed-optionals rounds=64 cycles=checked snapshots=checked unwind=disabled live=0"
+            : classes
             ? checkedClasses
                 ? "managed-classes rounds=64 descriptors=checked construction=checked unwind=checked live=0"
                 : "managed-classes rounds=64 descriptors=checked construction=checked unwind=disabled live=0"

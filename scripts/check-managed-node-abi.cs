@@ -158,6 +158,76 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     }
 }
 
+foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+{
+    var optional = Path.Combine(artifacts, $"managed-optional-abi-{policy}.dll");
+    var compileOptional = new ProcessStartInfo("dotnet");
+    foreach (var argument in new[] { cli, "build-library",
+        Path.GetFullPath(Path.Combine("tests", "native", "managed-optional-abi.terrum")),
+        "--export", "OptionalCycles", "--export", "OptionalSnapshots", "--export", "OptionalNullOutput",
+        "--export", "OptionalAllocationFailure", "--export", "OptionalRetainAcrossFailure",
+        "--export", "CollectWithScalar", "-o", optional, "--runtime", policy })
+    {
+        compileOptional.ArgumentList.Add(argument);
+    }
+    var checkedUnwind = policy == "checked-exceptions";
+    if (checkedUnwind)
+    {
+        compileOptional.ArgumentList.Add("--source");
+        compileOptional.ArgumentList.Add(Path.GetFullPath(
+            Path.Combine("tests", "native", "managed-optional-unwind-abi.terrum")));
+        compileOptional.ArgumentList.Add("--export");
+        compileOptional.ArgumentList.Add("OptionalRecovery");
+        compileOptional.ArgumentList.Add("--export");
+        compileOptional.ArgumentList.Add("OptionalEscapeToNative");
+    }
+    var optionalBuild = await Run(compileOptional, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+    await File.WriteAllTextAsync(Path.Combine(artifacts, $"managed-optional-abi-build-{policy}.log"),
+        optionalBuild).ConfigureAwait(false);
+    var optionalExecute = new ProcessStartInfo(executable);
+    optionalExecute.ArgumentList.Add(optional);
+    optionalExecute.ArgumentList.Add(checkedUnwind ? "optional-checked" : "optional");
+    var optionalProof = await Run(optionalExecute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+    await File.WriteAllTextAsync(Path.Combine(artifacts, $"managed-optional-abi-proof-{policy}.log"),
+        optionalProof).ConfigureAwait(false);
+    var expected = checkedUnwind
+        ? "managed-optionals rounds=64 cycles=checked snapshots=checked unwind=checked live=0"
+        : "managed-optionals rounds=64 cycles=checked snapshots=checked unwind=disabled live=0";
+    if (optionalProof.Trim() != expected)
+    {
+        throw new InvalidOperationException("The independent managed-optional ABI proof did not complete.");
+    }
+    Console.Write($"{policy}: {optionalProof}");
+}
+
+foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+{
+    var chain = Path.Combine(artifacts, $"managed-token-chain-abi-{policy}.dll");
+    var compileChain = new ProcessStartInfo("dotnet");
+    foreach (var argument in new[] { cli, "build-library",
+        Path.GetFullPath(Path.Combine("tests", "native", "managed-token-chain-abi.terrum")),
+        "--source", Path.GetFullPath(Path.Combine("self-host", "ManagedTokenChain.terrum")),
+        "--export", "ChainReuse", "--export", "ChainAllocationFailure", "--export", "CollectWithScalar",
+        "-o", chain, "--runtime", policy })
+    {
+        compileChain.ArgumentList.Add(argument);
+    }
+    var chainBuild = await Run(compileChain, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+    await File.WriteAllTextAsync(Path.Combine(artifacts, $"managed-token-chain-abi-build-{policy}.log"),
+        chainBuild).ConfigureAwait(false);
+    var chainExecute = new ProcessStartInfo(executable);
+    chainExecute.ArgumentList.Add(chain);
+    chainExecute.ArgumentList.Add("chain");
+    var chainProof = await Run(chainExecute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+    await File.WriteAllTextAsync(Path.Combine(artifacts, $"managed-token-chain-abi-proof-{policy}.log"),
+        chainProof).ConfigureAwait(false);
+    if (chainProof.Trim() != "managed-token-chain rounds=64 reuse=checked allocation-failure=checked live=0")
+    {
+        throw new InvalidOperationException("The independent managed token-chain ABI proof did not complete.");
+    }
+    Console.Write($"{policy}: {chainProof}");
+}
+
 static async Task<string> Run(ProcessStartInfo start, TimeSpan timeout, int expectedExitCode = 0)
 {
     start.UseShellExecute = false;

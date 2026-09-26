@@ -101,4 +101,8 @@ public enum SyntaxKind
     ConstraintClause,
     /// <summary>An explicitly instantiated generic function name.</summary>
     GenericNameExpression,
+    /// <summary>A test for an absent optional managed handle.</summary>
+    IsNullExpression,
+    /// <summary>A test that binds a non-null managed-handle snapshot on success.</summary>
+    IsSomeExpression,
 }

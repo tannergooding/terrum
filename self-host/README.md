@@ -39,6 +39,7 @@ remain hosted in C#.
 | [TokenCursor](TokenCursor.terrum) | Read-view traversal without copying backing storage or cleanup | Span indexing, matched access, stored backing dependencies, capture contract, constructor initialization |
 | [RangeTests](RangeTests.terrum) | Small success/failure and overflow boundary cases | Executed with a host-supplied entry wrapper; a Terrum test runner remains future work |
 | [TokenTests](TokenTests.terrum) | Nested value copies and reconstruction with a validated replacement range | Executed through the Windows indirect aggregate ABI; token and range fields stay read-only; no retained backing views |
+| [ManagedTokenChain](ManagedTokenChain.terrum) | Bounded linked storage for copied token categories and source offsets | AOT/JIT fixtures under both policies; 64-link capacity, count/version changes, indexed reads and collection after clear; not wired into the scanner |
 | [Scanner](Scanner.terrum) | UTF-16 decoding, pinned Unicode identifiers, exact token kinds, lossless trivia, lexical diagnostics and bounded integer magnitudes | Executed through fixed checked host buffers; see the [precise subset](../docs/scanner.md) |
 | [Host APIs](host.api.terrum) | Explicit source acquisition, cancellation, digest and output boundary | Interfaces, immutable publication, operation failures; host adapters |
 
@@ -80,6 +81,17 @@ exclusive lexical views to reverse digits or insert a minus sign. The signed
 minimum is handled without negating it in the signed domain. Output words hold
 explicit ASCII decimal code values; this component does not select a default
 runtime text encoding or implement general format strings.
+
+`ManagedTokenChain` stores at most 64 category/offset pairs in source-defined
+managed links. Append rejects negative categories/offsets, decreasing offsets,
+capacity exhaustion and version overflow before publishing a mutation.
+Allocation refusal leaves the existing chain unchanged. Indexed reads return
+copied scalar values; no link handle or retained source view escapes the chain.
+Clear drops its private links and increments the version; explicit collection
+reclaims them once the operation's temporary roots have retired.
+This exercises optional managed fields and bounded mutable storage, not a
+generic collection, persistent iterator, complete token stream or scanner
+integration.
 
 `StringLiteral.TryCreate` validates a complete quoted source range before
 publishing its spelling and scalar count. `TryReadScalar` reports a Unicode

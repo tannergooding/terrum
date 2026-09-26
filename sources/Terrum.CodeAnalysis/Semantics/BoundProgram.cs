@@ -36,6 +36,8 @@ public enum PrimitiveType
     MutableInt32BufferView,
     /// <summary>An aliasable handle to a compiler-managed node in the bounded tracing profile.</summary>
     ManagedNode,
+    /// <summary>An explicitly nullable managed-node handle.</summary>
+    OptionalManagedNode,
 }
 
 /// <summary>Disjoint source-class type identifiers start above the complete inline-struct range.</summary>
@@ -43,15 +45,30 @@ public static class ManagedClassTypes
 {
     /// <summary>The first source-defined managed class type identifier.</summary>
     public const int First = 1024;
+    /// <summary>The first nullable class handle; class identifiers remain disjoint.</summary>
+    public const int OptionalFirst = First + 256;
 
     /// <summary>The bounded per-object payload size, independent of compact inline values.</summary>
     public const int MaximumPayload = 128;
 
     /// <summary>Whether a type is a source-defined managed class handle.</summary>
-    public static bool IsClass(PrimitiveType type) => (int)type >= First;
+    public static bool IsClass(PrimitiveType type) => (int)type is >= First and < OptionalFirst;
+
+    /// <summary>Whether a type is an optional managed handle.</summary>
+    public static bool IsOptional(PrimitiveType type) => type == PrimitiveType.OptionalManagedNode
+        || ((int)type >= OptionalFirst && (int)type < OptionalFirst + 256);
+
+    /// <summary>The non-null type stored by an optional managed handle.</summary>
+    public static PrimitiveType Required(PrimitiveType type) => type == PrimitiveType.OptionalManagedNode
+        ? PrimitiveType.ManagedNode : (PrimitiveType)((int)type - 256);
+
+    /// <summary>The optional form of an existing managed handle.</summary>
+    public static PrimitiveType Optional(PrimitiveType type) => type == PrimitiveType.ManagedNode
+        ? PrimitiveType.OptionalManagedNode : (PrimitiveType)((int)type + 256);
 
     /// <summary>Whether a type is a managed reference handled by the image-private collector.</summary>
-    public static bool IsManaged(PrimitiveType type) => type == PrimitiveType.ManagedNode || IsClass(type);
+    public static bool IsManaged(PrimitiveType type) => type == PrimitiveType.ManagedNode
+        || IsClass(type) || IsOptional(type);
 }
 
 /// <summary>Compiler-defined native storage and managed graph operations; user functions cannot declare these implementations.</summary>
@@ -321,6 +338,18 @@ public abstract record BoundExpression(PrimitiveType Type, TextSpan Span);
 /// <param name="Type">The constant type.</param>
 /// <param name="Span">The source range.</param>
 public sealed record BoundConstant(long Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
+/// <summary>An explicitly absent optional managed handle.</summary>
+public sealed record BoundNull(PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
+/// <summary>Widens a known non-null handle without changing its pointer bits.</summary>
+public sealed record BoundOptionalLift(BoundExpression Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
+/// <summary>Tests an optional handle for absence.</summary>
+public sealed record BoundIsNull(BoundExpression Value, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span);
+
+/// <summary>Tests an optional handle and snapshots its non-null value into a scoped variable on success.</summary>
+public sealed record BoundIsSome(BoundExpression Value, int Variable, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span);
 
 /// <summary>A read of an initialized slot.</summary>
 /// <param name="Variable">The slot index.</param>

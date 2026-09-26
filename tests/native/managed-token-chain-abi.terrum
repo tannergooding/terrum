@@ -1,0 +1,35 @@
+using Terrum.CodeAnalysis;
+
+public int32 ChainAllocationFailure() {
+    require ManagedTokenChain.TryCreate(out var chain);
+    require chain.TryAppend(1, 0);
+    if (chain.TryAppend(2, 1)) {
+        return 0;
+    }
+    require chain.GetCount() == 1;
+    require chain.GetVersion() == 1;
+    require chain.TryGet(0, out var kind, out var offset);
+    require kind == 1 && offset == 0;
+    require ManagedHeap.Collect() == 0;
+    return 42;
+}
+
+public int32 ChainReuse() {
+    require ManagedTokenChain.TryCreate(out var chain);
+    require chain.TryAppend(1, 0);
+    require chain.TryAppend(2, 1);
+    require chain.TryAppend(3, 2);
+    require chain.TryClear();
+    require ManagedHeap.Collect() == 3;
+    require chain.TryAppend(4, 0);
+    require chain.TryAppend(5, 1);
+    require chain.GetCount() == 2;
+    require chain.GetVersion() == 6;
+    require chain.TryClear();
+    require ManagedHeap.Collect() == 2;
+    return 42;
+}
+
+public int32 CollectWithScalar(uint64 bits) {
+    return ManagedHeap.Collect();
+}

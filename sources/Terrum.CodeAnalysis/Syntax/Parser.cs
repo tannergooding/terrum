@@ -734,6 +734,24 @@ internal sealed class Parser
 
         while (true)
         {
+            if (Current.Kind == TokenKind.Identifier && Current.Text == "is" && parentPrecedence < 6)
+            {
+                var keyword = Take();
+                if (Current.Kind == TokenKind.NullKeyword)
+                {
+                    left = Node(SyntaxKind.IsNullExpression, [left, keyword, Take()]);
+                }
+                else
+                {
+                    var some = Expect(TokenKind.Identifier);
+                    if (some.Token.Text != "some")
+                    {
+                        Report("TRM1001", "Expected 'some' or 'null' after 'is'.", some.Span);
+                    }
+                    left = Node(SyntaxKind.IsSomeExpression, [left, keyword, some, Expect(TokenKind.Identifier)]);
+                }
+                continue;
+            }
             var precedence = BinaryPrecedence(Current.Kind);
 
             if (precedence == 0 || precedence <= parentPrecedence)
@@ -770,7 +788,8 @@ internal sealed class Parser
         {
             expression = Node(SyntaxKind.ObjectCreationExpression, [Take(), ParseType(), ParseArguments()]);
         }
-        else if (Current.Kind is TokenKind.NumericLiteral or TokenKind.StringLiteral or TokenKind.TrueKeyword or TokenKind.FalseKeyword)
+        else if (Current.Kind is TokenKind.NumericLiteral or TokenKind.StringLiteral or TokenKind.TrueKeyword
+            or TokenKind.FalseKeyword or TokenKind.NullKeyword)
         {
             expression = Node(SyntaxKind.LiteralExpression, [Take()]);
         }

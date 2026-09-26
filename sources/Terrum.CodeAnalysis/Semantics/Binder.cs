@@ -156,7 +156,7 @@ internal sealed partial class Binder
                 _usesNativeBuffer = true;
             }
             if ((item.Node.Kind == SyntaxKind.TypeName
-                    && NameText(item.Node) == NativeManagedNodeIntrinsics.TypeName)
+                    && NameText(item.Node) is NativeManagedNodeIntrinsics.TypeName or "ManagedNode?")
                 || (item.Node.Kind == SyntaxKind.MemberAccessExpression
                     && item.Node.Children[0] is SyntaxNode managedReceiver
                     && managedReceiver.Kind == SyntaxKind.NameExpression
@@ -572,7 +572,7 @@ internal sealed partial class Binder
             var fieldName = ((SyntaxTokenElement)field.Children[^2]).Token;
             var type = BindType(typeNode, allowVoid: false);
             if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
-                or PrimitiveType.ManagedNode || ManagedClassTypes.IsClass(type))
+                || ManagedClassTypes.IsManaged(type))
             {
                 Report("TRM3023", "A native buffer view or managed handle cannot be stored in an inline struct.", field.Span);
             }
@@ -832,6 +832,11 @@ internal sealed partial class Binder
     private PrimitiveType BindType(SyntaxNode node, bool allowVoid)
     {
         var name = NameText(node);
+        var optional = node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.Question };
+        if (optional)
+        {
+            name = name[..^1];
+        }
         var resolution = ResolveTypeName(name, out var resolved);
         var type = name switch {
             "int32" => PrimitiveType.Int32,
@@ -847,6 +852,17 @@ internal sealed partial class Binder
             _ => resolution == DeclaredTypeResolution.Unique ? resolved : (PrimitiveType?)null,
         };
 
+        if (optional && type is PrimitiveType required)
+        {
+            if (!ManagedClassTypes.IsManaged(required) || ManagedClassTypes.IsOptional(required))
+            {
+                Report("TRM3005", "Only managed class and ManagedNode handles can be optional.", node.Span);
+            }
+            else
+            {
+                type = ManagedClassTypes.Optional(required);
+            }
+        }
         if (type is null)
         {
             Report("TRM3005", resolution == DeclaredTypeResolution.Ambiguous
@@ -1458,7 +1474,45 @@ internal sealed partial class Binder
                 break;
 
             case SyntaxKind.LiteralExpression:
-                expression = BindLiteral(((SyntaxTokenElement)node.Children[0]).Token, expected);
+                var literalToken = ((SyntaxTokenElement)node.Children[0]).Token;
+                if (literalToken.Kind == TokenKind.NullKeyword)
+                {
+                    if (expected is not PrimitiveType optionalType || !ManagedClassTypes.IsOptional(optionalType))
+                    {
+                        Report("TRM3007", "'null' requires an optional managed-handle type.", node.Span);
+                        expression = ErrorExpression(node.Span);
+                    }
+                    else
+                    {
+                        expression = new BoundNull(optionalType, node.Span);
+                    }
+                }
+                else
+                {
+                    expression = BindLiteral(literalToken, expected);
+                }
+                break;
+
+            case SyntaxKind.IsNullExpression:
+                var nullable = BindExpression((SyntaxNode)node.Children[0], null);
+                if (!ManagedClassTypes.IsOptional(nullable.Type))
+                {
+                    Report("TRM3007", "'is null' requires an optional managed handle.", node.Span);
+                }
+                expression = new BoundIsNull(nullable, node.Span);
+                break;
+
+            case SyntaxKind.IsSomeExpression:
+                var source = BindExpression((SyntaxNode)node.Children[0], null);
+                if (!ManagedClassTypes.IsOptional(source.Type))
+                {
+                    Report("TRM3007", "'is some' requires an optional managed handle.", node.Span);
+                }
+                var name = ((SyntaxTokenElement)node.Children[3]).Token;
+                var payload = ManagedClassTypes.IsOptional(source.Type)
+                    ? ManagedClassTypes.Required(source.Type) : PrimitiveType.Int32;
+                var patternSlot = AddVariable(name.Text, payload, false, name.Span);
+                expression = new BoundIsSome(source, patternSlot, node.Span);
                 break;
 
             case SyntaxKind.NameExpression:
@@ -1700,6 +1754,12 @@ internal sealed partial class Binder
                 break;
         }
 
+        if (expected is PrimitiveType optionalExpected
+            && ManagedClassTypes.IsOptional(optionalExpected)
+            && expression.Type == ManagedClassTypes.Required(optionalExpected))
+        {
+            expression = new BoundOptionalLift(expression, optionalExpected, node.Span);
+        }
         if (expected is not null && expression.Type != expected)
         {
             Report("TRM3007", $"Expected {TypeName(expected.Value)}, got {TypeName(expression.Type)}.", node.Span);
@@ -2013,7 +2073,7 @@ internal sealed partial class Binder
     }
 
     private bool IsStruct(PrimitiveType type) => (int)type >= 100
-        && !ManagedClassTypes.IsClass(type) && (int)type - 100 < _structs.Count;
+        && (int)type < ManagedClassTypes.First && (int)type - 100 < _structs.Count;
 
     private bool TryFindBuffer(SyntaxNode node, out int buffer)
     {
@@ -2194,6 +2254,8 @@ internal sealed partial class Binder
                     _ => null,
                 };
             }
+            case SyntaxKind.IsNullExpression or SyntaxKind.IsSomeExpression:
+                return PrimitiveType.Bool;
             case SyntaxKind.InvocationExpression:
             {
                 var callee = (SyntaxNode)node.Children[0];
@@ -2401,6 +2463,9 @@ internal sealed partial class Binder
         PrimitiveType.ReadonlyInt32BufferView => "ReadonlyInt32BufferView",
         PrimitiveType.MutableInt32BufferView => "MutableInt32BufferView",
         PrimitiveType.ManagedNode => "ManagedNode",
+        PrimitiveType.OptionalManagedNode => "ManagedNode?",
+        _ when ManagedClassTypes.IsOptional(type) =>
+            _classes[(int)type - ManagedClassTypes.OptionalFirst].Name + "?",
         _ when IsClass(type) => _classes[(int)type - ManagedClassTypes.First].Name,
         _ when IsStruct(type) => _structs[(int)type - 100].Name,
         _ => throw new ArgumentOutOfRangeException(nameof(type)),

@@ -8,7 +8,8 @@ fields, including nested Copy fields, under either runtime policy),
 (lexical readonly slices of its initialized prefix), `native-17`
 (lexical exclusive writable slices and in-place prefix reset),
 `native-18` (closed-image managed-node tracing under either runtime policy),
-and `native-19` (source-defined managed classes and descriptor-based tracing)
+`native-19` (source-defined managed classes and descriptor-based tracing),
+and `native-20` (optional managed handles and presence-pattern snapshots)
 are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
@@ -119,10 +120,11 @@ binding may mutate writable fields of its referent. Private/internal access and
 partial-construction checks also apply through nested handle fields.
 An assignment selects its target referent before evaluating its value and keeps
 that referent rooted across calls, collection and exceptional cleanup.
-`new C(...)`, inheritance, unique/inline classes, optional reference fields,
+`new C(...)`, inheritance, unique/inline classes,
 static managed roots and managed class values in inline structs remain
 unsupported. Required references do not permit bootstrapping a cycle by leaking
-partial objects. Existing `ManagedNode` edges retain the cyclic-collection proof.
+partial objects. Optional fields in `native-20` provide an explicit construction
+path for source-defined cycles.
 Class metadata is image-private: semantic/native modules reject it, and native
 DLL exports remain scalar-only. The [class sample](../samples/native/managed-classes.terrum)
 returns 42 through shared aliases and heterogeneous managed edges. The independent
@@ -130,6 +132,27 @@ C heap probe checks multiple-edge liveness, pointer-shaped scalar nonroots,
 allocation failure, collection during construction, and exact provisional-object
 release through both Terrum and native catch boundaries. It also checks selected
 assignment-target roots across edge replacement, collection and checked failure.
+
+`native-20` admits source-class and `ManagedNode` optional handles in locals,
+parameters, results, conditional outputs and class fields. They occupy eight
+bytes: zero is explicit absence, while a present value is an existing non-null
+handle. Neither integer zero nor an uninitialized slot can manufacture a valid
+non-null handle. `null` requires an optional target type; lifting a non-null
+handle does not allocate. Scalar options and generic option normalization are
+not part of this profile.
+
+`value is null` tests absence. `value is some item` snapshots the present
+non-null handle and publishes it only on the successful condition path,
+including short-circuit conditions, loops and `require`. That snapshot has its
+own precise root, so mutation of the tested optional cannot invalidate a
+successful extraction. Optional fields still require explicit initialization,
+and failed `bool`/`out` calls do not publish even an absent value.
+Descriptors include optional reference slots; tracing ignores zero without
+treating it as uninitialized source storage. The
+[cycle sample](../samples/native/managed-optional-cycle.terrum) exercises
+source-defined cycles and snapshots across edge clearing and collection.
+Semantic modules still reject optional IR and types; the version 18 private-node
+module proof does not expose an optional or managed-reference ABI.
 
 The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
 uses source-declared `+` and `*` constraints and two nominal Copy wrappers,

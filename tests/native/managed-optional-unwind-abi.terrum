@@ -1,0 +1,32 @@
+void FailWithSnapshots(OptionalEdges edges) {
+    if (edges.Item is some item) {
+        if (edges.Node is some node) {
+            edges.Item = null;
+            edges.Node = null;
+            require ManagedHeap.Collect() == 0;
+            require item.Value == 42;
+            require node.Value == 7;
+            require false;
+        }
+    }
+}
+
+public int32 OptionalRecovery() {
+    var edges = CreateOptionalEdges();
+    unsafe {
+        try {
+            FailWithSnapshots(edges);
+            return 0;
+        } catch {
+            require ManagedHeap.Collect() == 2;
+        }
+    }
+    require edges.Item is null;
+    require edges.Node is null;
+    return 42;
+}
+
+public void OptionalEscapeToNative() {
+    var edges = CreateOptionalEdges();
+    FailWithSnapshots(edges);
+}

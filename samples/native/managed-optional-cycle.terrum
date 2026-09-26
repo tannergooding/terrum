@@ -1,0 +1,67 @@
+class CycleNode {
+    public int32 Value;
+    public mut CycleNode? Next;
+
+    public CycleNode(int32 value) {
+        Value = value;
+        Next = null;
+    }
+}
+
+bool TryPublish(bool enabled, out CycleNode? result) {
+    require CycleNode.TryCreate(20, out var first);
+    if (!enabled) { return false; }
+    require CycleNode.TryCreate(22, out var second);
+    first.Next = second;
+    second.Next = first;
+    result = first;
+    return true;
+}
+
+CycleNode? Echo(CycleNode? value) { return value; }
+
+int32 Main() {
+    CycleNode? empty = Echo(null);
+    if (empty is some unexpected) { return 1; }
+    {
+        if (TryPublish(false, out var absent)) { return 2; }
+    }
+    if (ManagedHeap.Collect() != 1) { return 14; }
+    {
+        if (!TryPublish(true, out var cycle)) { return 3; }
+        mut CycleNode? returned = Echo(cycle);
+        require returned is some first;
+        mut CycleNode? cursor = returned;
+        mut int32 visits = 0;
+        while (cursor is some current && visits < 2) {
+            visits = visits + 1;
+            cursor = current.Next;
+        }
+        if (visits != 2) { return 17; }
+        cursor = null;
+        returned = null;
+        if (first.Next is some snapshot && snapshot.Value == 22) {
+            first.Next = null;
+            if (ManagedHeap.Collect() != 0) { return 4; }
+            if (snapshot.Value + first.Value != 42) { return 5; }
+            snapshot.Next = null;
+        } else { return 6; }
+    }
+    if (ManagedHeap.Collect() != 2) { return 8; }
+    {
+        require TryPublish(true, out var loop);
+        if (loop is null) { return 15; }
+    }
+    if (ManagedHeap.Collect() != 2) { return 16; }
+    {
+        require CycleNode.TryCreate(42, out var self);
+        self.Next = self;
+        require self.Next is some captured;
+        if (ManagedHeap.Collect() != 0) { return 9; }
+        if (captured.Value != 42) { return 10; }
+    }
+    if (ManagedHeap.Collect() != 1) { return 12; }
+    ManagedNode? missing = null;
+    if (missing is some present) { return 13; }
+    return 42;
+}

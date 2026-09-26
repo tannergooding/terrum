@@ -22,6 +22,12 @@ multiple managed fields. A generated `TryCreate` roots provisional construction,
 publishes only a fully initialized handle, and releases the unpublished object
 on checked constructor failure. Private zeroed tracing slots do not expose
 source null/default values. Inline structs still cannot contain managed handles.
+Optional managed fields instead admit explicitly initialized `null`. Presence
+patterns copy a present handle into a separately rooted, conditionally initialized
+payload variable; they do not permanently narrow a mutable aliased field.
+Clearing the field cannot revoke that snapshot, while leaving its scope or
+unwinding retires its root normally. An unsuccessful output is still uninitialized,
+not an implicitly published null.
 The remaining lifetime constructs are rejected for execution.
 
 ## Three independent dependencies

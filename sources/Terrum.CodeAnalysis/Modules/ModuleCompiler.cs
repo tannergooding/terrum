@@ -130,6 +130,13 @@ public static partial class ModuleCompiler
         {
             throw new ModuleFormatException("Source classes have no persisted module runtime or ABI.");
         }
+        if (program.Structures.Any(static structure => structure.Fields.Any(
+                static field => ManagedClassTypes.IsOptional(field.Type)))
+            || program.Functions.Any(static function => ManagedClassTypes.IsOptional(function.ReturnType)
+                || function.Variables.Any(static variable => ManagedClassTypes.IsOptional(variable.Type))))
+        {
+            throw new ModuleFormatException("Optional managed handles have no persisted module ABI.");
+        }
     }
 
     private static bool HasManagedNodes(IEnumerable<ModuleFunction> functions) =>
@@ -177,6 +184,36 @@ public static partial class ModuleCompiler
             }
         }
         return false;
+    }
+
+    private static bool ContractContainsOptionalType(string contract)
+    {
+        var parts = contract.Split('|');
+        var count = ContractParameterCount(parts);
+        if (parts.Length < 8 + count)
+        {
+            throw new ModuleFormatException("Invalid module type contract.");
+        }
+        if (Optional(parts[1]))
+        {
+            return true;
+        }
+        for (var i = 0; i < count; i++)
+        {
+            var parameter = parts[8 + i];
+            if (Optional(parameter[(parameter.IndexOf(':', StringComparison.Ordinal) + 1)..]))
+            {
+                return true;
+            }
+        }
+        return false;
+
+        static bool Optional(string identity)
+        {
+            return int.TryParse(identity, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var value)
+                && ManagedClassTypes.IsOptional((PrimitiveType)value);
+        }
     }
 
     private static bool HasMutableNativeViewOrClear(ImmutableArray<ModuleFunction> functions)
@@ -1267,9 +1304,9 @@ public static partial class ModuleCompiler
             {
                 var fieldName = GetString(reader);
                 var fieldType = (PrimitiveType)reader.ReadInt32();
-                if (fieldType == PrimitiveType.ManagedNode)
+                if (fieldType == PrimitiveType.ManagedNode || ManagedClassTypes.IsOptional(fieldType))
                 {
-                    throw new ModuleFormatException("Managed nodes have no persisted module ABI.");
+                    throw new ModuleFormatException("Managed fields have no persisted inline layout.");
                 }
                 fields.Add(new BoundStructField(fieldName, fieldType,
                     reader.ReadInt32(), reader.ReadInt32()) {
@@ -1333,6 +1370,10 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Managed-node handles cannot cross a module declaration.");
             }
+            if (ContractContainsOptionalType(contract))
+            {
+                throw new ModuleFormatException("Optional managed handles have no persisted module ABI.");
+            }
             if (expectedConsumer && function is BoundFunction body && UsesManagedNode(body))
             {
                 throw new ModuleFormatException("Managed-node bodies require an image-private leaf.");
@@ -1389,6 +1430,10 @@ public static partial class ModuleCompiler
     {
         var name = GetString(reader);
         var type = (PrimitiveType)reader.ReadInt32();
+        if (ManagedClassTypes.IsOptional(type))
+        {
+            throw new ModuleFormatException("Optional managed handles have no persisted module ABI.");
+        }
         if (version < Version && type == PrimitiveType.ManagedNode)
         {
             throw new ModuleFormatException("Managed nodes have no persisted module ABI.");
@@ -1428,6 +1473,10 @@ public static partial class ModuleCompiler
         {
             var variableName = GetString(reader);
             var variableType = (PrimitiveType)reader.ReadInt32();
+            if (ManagedClassTypes.IsOptional(variableType))
+            {
+                throw new ModuleFormatException("Optional managed handles have no persisted module ABI.");
+            }
             if (version < Version && variableType == PrimitiveType.ManagedNode)
             {
                 throw new ModuleFormatException("Managed nodes have no persisted module ABI.");
@@ -1810,6 +1859,10 @@ public static partial class ModuleCompiler
         Step(ref remaining, depth);
         var kind = reader.ReadByte();
         var type = (PrimitiveType)reader.ReadInt32();
+        if (ManagedClassTypes.IsOptional(type))
+        {
+            throw new ModuleFormatException("Optional managed handles have no persisted module ABI.");
+        }
         if (version < Version && type == PrimitiveType.ManagedNode)
         {
             throw new ModuleFormatException("Managed-node expressions require semantic module version 18.");

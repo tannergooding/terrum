@@ -149,7 +149,8 @@ public static class SemanticVerifier
                 if (field is null || !ValidType(field.Type, allowVoid: false, program)
                     || field.Type is PrimitiveType.OwnedInt32Buffer or PrimitiveType.ReadonlyInt32BufferView
                         or PrimitiveType.MutableInt32BufferView
-                    || ((int)field.Type >= 100 && !ManagedClassTypes.IsClass(field.Type)))
+                    || ((int)field.Type >= 100 && !ManagedClassTypes.IsClass(field.Type)
+                        && !ManagedClassTypes.IsOptional(field.Type)))
                 {
                     throw Invalid();
                 }
@@ -478,7 +479,7 @@ public static class SemanticVerifier
             var fieldMasks = new uint[function.Variables.Length];
             for (var i = 0; i < initialized.Length; i++)
             {
-                if (initialized[i] && (int)function.Variables[i].Type >= 100)
+                if (initialized[i] && HasFields(program, function.Variables[i].Type))
                 {
                     fieldMasks[i] = FullMask(program, function.Variables[i].Type);
                 }
@@ -573,6 +574,16 @@ public static class SemanticVerifier
                         Expression(argument, scope, depth + 1);
                     }
                     break;
+                case BoundOptionalLift lift:
+                    Expression(lift.Value, scope, depth + 1);
+                    break;
+                case BoundIsNull test:
+                    Expression(test.Value, scope, depth + 1);
+                    break;
+                case BoundIsSome pattern:
+                    Expression(pattern.Value, scope, depth + 1);
+                    Declare(pattern.Variable, scope, pattern.Span);
+                    break;
                 case BoundUnary unary:
                     Expression(unary.Operand, scope, depth + 1);
                     break;
@@ -595,7 +606,7 @@ public static class SemanticVerifier
                 case BoundViewRead view:
                     Expression(view.Index, scope, depth + 1);
                     break;
-                case BoundConstant or BoundRead or BoundMove or BoundReceiverLoan
+                case BoundConstant or BoundNull or BoundRead or BoundMove or BoundReceiverLoan
                     or BoundMutableReceiverLoan or BoundOutArgument or BoundViewLength:
                     break;
                 default:
@@ -983,6 +994,15 @@ public static class SemanticVerifier
                 case BoundCast cast:
                     Expression(cast.Operand, depth + 1, acquiringRoot);
                     break;
+                case BoundOptionalLift lift:
+                    Expression(lift.Value, depth + 1, acquiringRoot);
+                    break;
+                case BoundIsNull test:
+                    Expression(test.Value, depth + 1, acquiringRoot);
+                    break;
+                case BoundIsSome pattern:
+                    Expression(pattern.Value, depth + 1, acquiringRoot);
+                    break;
                 case BoundBinary binary:
                     Expression(binary.Left, depth + 1, acquiringRoot);
                     Expression(binary.Right, depth + 1, acquiringRoot);
@@ -993,7 +1013,7 @@ public static class SemanticVerifier
                 case BoundBufferRead buffer:
                     Expression(buffer.Index, depth + 1, acquiringRoot);
                     break;
-                case BoundConstant or BoundRead:
+                case BoundConstant or BoundNull or BoundRead:
                     break;
                 default:
                     throw Invalid();
@@ -1328,7 +1348,7 @@ public static class SemanticVerifier
                     throw Invalid();
                 }
                 initialized[local.Variable] = true;
-                if ((int)local.Initializer.Type >= 100)
+                if (HasFields(program, local.Initializer.Type))
                 {
                     fieldMasks[local.Variable] = FullMask(program, local.Initializer.Type);
                 }
@@ -1385,7 +1405,7 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                if ((int)assignment.Value.Type >= 100)
+                if (HasFields(program, assignment.Value.Type))
                 {
                     fieldMasks[assignment.Variable] = FullMask(program, assignment.Value.Type);
                 }
@@ -1821,7 +1841,7 @@ public static class SemanticVerifier
             {
                 unreachableState[index] = index < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                     || declarations.Contains(index);
-                if (unreachableState[index] && (int)function.Variables[index].Type >= 100)
+                if (unreachableState[index] && HasFields(program, function.Variables[index].Type))
                 {
                     unreachableMasks[index] = FullMask(program, function.Variables[index].Type);
                 }
@@ -2063,6 +2083,44 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                break;
+            case BoundNull:
+                if (!ManagedClassTypes.IsOptional(expression.Type))
+                {
+                    throw Invalid();
+                }
+                break;
+            case BoundOptionalLift lift:
+                if (!ManagedClassTypes.IsOptional(lift.Type)
+                    || lift.Value is null || lift.Value.Type != ManagedClassTypes.Required(lift.Type))
+                {
+                    throw Invalid();
+                }
+                Expression(lift.Value, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+                break;
+            case BoundIsNull test:
+                if (test.Value is null || !ManagedClassTypes.IsOptional(test.Value.Type))
+                {
+                    throw Invalid();
+                }
+                Expression(test.Value, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+                break;
+            case BoundIsSome pattern:
+                if (pattern.Value is null || !ManagedClassTypes.IsOptional(pattern.Value.Type)
+                    || pattern.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                    || pattern.Variable < 0 || pattern.Variable >= initialized.Length
+                    || function.Variables[pattern.Variable].Type != ManagedClassTypes.Required(pattern.Value.Type)
+                    || function.Variables[pattern.Variable].IsOut
+                    || function.Variables[pattern.Variable].IsMutable
+                    || declarations.Contains(pattern.Variable))
+                {
+                    throw Invalid();
+                }
+                Expression(pattern.Value, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+                _ = declarations.Add(pattern.Variable);
                 break;
             case BoundCast cast:
                 Expression(cast.Operand, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
@@ -2434,16 +2492,19 @@ public static class SemanticVerifier
     private static bool ValidType(PrimitiveType type, bool allowVoid, BoundProgram program) =>
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
             or PrimitiveType.Char16 or PrimitiveType.Bool or PrimitiveType.OwnedInt32Buffer
-            or PrimitiveType.ManagedNode
+            or PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode
             || (allowVoid && type == PrimitiveType.Void)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length)
             || (ManagedClassTypes.IsClass(type)
-                && (int)type - ManagedClassTypes.First < program.Classes.Length);
+                && (int)type - ManagedClassTypes.First < program.Classes.Length)
+            || (ManagedClassTypes.IsOptional(type) && type != PrimitiveType.OptionalManagedNode
+                && (int)type - ManagedClassTypes.OptionalFirst < program.Classes.Length);
 
     internal static bool IsClassArgumentType(PrimitiveType type) =>
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-            or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool or PrimitiveType.ManagedNode
-            || ManagedClassTypes.IsClass(type);
+            or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool
+            or PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode
+            || ManagedClassTypes.IsClass(type) || ManagedClassTypes.IsOptional(type);
 
     private static bool IsUnique(BoundProgram program, PrimitiveType type) =>
         type == PrimitiveType.OwnedInt32Buffer
@@ -2517,6 +2578,9 @@ public static class SemanticVerifier
             BoundMutableReceiverLoan loan => loan.Variable == variable,
             BoundUnary unary => InvalidatesReservedOwner(unary.Operand, variable, ref remaining, depth + 1),
             BoundCast cast => InvalidatesReservedOwner(cast.Operand, variable, ref remaining, depth + 1),
+            BoundOptionalLift lift => InvalidatesReservedOwner(lift.Value, variable, ref remaining, depth + 1),
+            BoundIsNull test => InvalidatesReservedOwner(test.Value, variable, ref remaining, depth + 1),
+            BoundIsSome pattern => InvalidatesReservedOwner(pattern.Value, variable, ref remaining, depth + 1),
             BoundBinary binary => InvalidatesReservedOwner(binary.Left, variable, ref remaining, depth + 1)
                 || InvalidatesReservedOwner(binary.Right, variable, ref remaining, depth + 1),
             BoundFieldRead field => InvalidatesReservedOwner(field.Receiver, variable, ref remaining, depth + 1),
@@ -2542,7 +2606,8 @@ public static class SemanticVerifier
     private static bool HasFields(BoundProgram program, PrimitiveType type) =>
         ManagedClassTypes.IsClass(type)
             ? (int)type - ManagedClassTypes.First < program.Classes.Length
-            : (int)type >= 100 && (int)type - 100 < program.Structures.Length;
+            : (int)type >= 100 && (int)type < ManagedClassTypes.First
+                && (int)type - 100 < program.Structures.Length;
 
     private static ImmutableArray<BoundStructField> Fields(BoundProgram program, PrimitiveType type) =>
         ManagedClassTypes.IsClass(type) ? program.Classes[(int)type - ManagedClassTypes.First].Fields
@@ -2563,7 +2628,7 @@ public static class SemanticVerifier
         for (var i = 0; i < initialized.Length; i++)
         {
             var type = function.Variables[i].Type;
-            if (initialized[i] && (int)type >= 100)
+            if (initialized[i] && HasFields(program, type))
             {
                 masks[i] = FullMask(program, type);
             }
@@ -2602,6 +2667,12 @@ public static class SemanticVerifier
                 CanBe(or.Left, false, ref remaining) && CanBe(or.Right, true, ref remaining));
         }
         var state = (bool[])initialized.Clone();
+        if (expression is BoundIsSome pattern)
+        {
+            VacateNestedOutputs(pattern.Value, state, ref remaining);
+            state[pattern.Variable] = result;
+            return state;
+        }
         if (expression is BoundCall call)
         {
             foreach (var argument in call.Arguments)
@@ -2660,6 +2731,16 @@ public static class SemanticVerifier
             case BoundCast cast:
                 VacateNestedOutputs(cast.Operand, state, ref remaining);
                 break;
+            case BoundOptionalLift lift:
+                VacateNestedOutputs(lift.Value, state, ref remaining);
+                break;
+            case BoundIsNull test:
+                VacateNestedOutputs(test.Value, state, ref remaining);
+                break;
+            case BoundIsSome pattern:
+                VacateNestedOutputs(pattern.Value, state, ref remaining);
+                state[pattern.Variable] = false;
+                break;
             case BoundFieldRead field:
                 VacateNestedOutputs(field.Receiver, state, ref remaining);
                 break;
@@ -2671,6 +2752,7 @@ public static class SemanticVerifier
                 break;
             case BoundViewLength:
             case BoundConstant:
+            case BoundNull:
             case BoundRead:
             case BoundReceiverLoan:
             case BoundMutableReceiverLoan:

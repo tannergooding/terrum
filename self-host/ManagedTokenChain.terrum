@@ -1,0 +1,82 @@
+namespace Terrum.CodeAnalysis;
+
+class ManagedTokenLink {
+    public int32 Kind;
+    public int32 SourceOffset;
+    public mut ManagedTokenLink? Next;
+
+    public ManagedTokenLink(int32 kind, int32 sourceOffset) {
+        Kind = kind;
+        SourceOffset = sourceOffset;
+        Next = null;
+    }
+}
+
+class ManagedTokenChain {
+    private mut ManagedTokenLink? _first;
+    private mut ManagedTokenLink? _last;
+    private mut int32 _count;
+    private mut int32 _version;
+
+    public ManagedTokenChain() {
+        _first = null;
+        _last = null;
+        _count = 0;
+        _version = 0;
+    }
+
+    public int32 GetCount() { return _count; }
+    public int32 GetVersion() { return _version; }
+
+    public bool TryAppend(int32 kind, int32 sourceOffset) {
+        // Bound per-chain heap use and linear indexed reads to 64 links.
+        if (kind < 0 || sourceOffset < 0 || _count == 64 || _version == int32.MaxValue) {
+            return false;
+        }
+        if (_last is some previous) {
+            if (sourceOffset < previous.SourceOffset) { return false; }
+        }
+        if (!ManagedTokenLink.TryCreate(kind, sourceOffset, out var created)) {
+            return false;
+        }
+        if (_last is some last) {
+            last.Next = created;
+        } else {
+            _first = created;
+        }
+        _last = created;
+        _count = _count + 1;
+        _version = _version + 1;
+        return true;
+    }
+
+    public bool TryGet(int32 index, out int32 kind, out int32 sourceOffset) {
+        if (index < 0 || index >= _count) { return false; }
+        mut ManagedTokenLink? cursor = _first;
+        for (mut int32 at = 0; at < index; at = at + 1) {
+            if (cursor is some current) {
+                cursor = current.Next;
+            } else {
+                // An in-range index requires this link to exist.
+                require false;
+                return false;
+            }
+        }
+        if (cursor is some found) {
+            kind = found.Kind;
+            sourceOffset = found.SourceOffset;
+            return true;
+        }
+        require false;
+        return false;
+    }
+
+    public bool TryClear() {
+        if (_count == 0 || _version == int32.MaxValue) { return false; }
+        _first = null;
+        _last = null;
+        _count = 0;
+        _version = _version + 1;
+        return true;
+    }
+}

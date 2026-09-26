@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-11 and native-10 through native-19
+## Current boundary: syntax-12 and native-10 through native-20
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -16,10 +16,10 @@ general managed graphs and standard-library execution are not implemented.
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
 | Lexing | Pinned Unicode identifiers, ASCII numbers/tags, comments, leading trivia, strings, diagnostics, EOF | Interpolation, raw/character/native literals, directives |
 | Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, bounded reference classes, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Inheritance, unique/inline classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes/generics, public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
-| Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; repeated `?` diagnoses | General type resolution, optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
-| Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, break/continue, switch/patterns, general exception objects/throw, async, compound assignment |
+| Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; executable source-class and `ManagedNode` optionals; repeated `?` diagnoses | Scalar options, generic optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
+| Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, break/continue, general switch/patterns, general exception objects/throw, async, compound assignment |
 | Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, explicit closed static-protocol calls, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations and lexical readonly/exclusive writable buffer slices | Character literals, partial owning-field moves, owning field replacement, general expression temporaries, general stored loans, evaluation outside the native profile, user-defined conversions, general overloads/generic calls, conditional expressions, constructor generic inference |
-| Managed storage | Aliasable `ManagedNode` and source-class handles, descriptor-listed managed edges, complete-publication class factories, exact frame/temporary roots and explicit nonmoving collection under both policies, including exceptional root retirement and escaping-frame unlink | Optional class edges, managed user-struct fields, stored interior pointers, implicit GC, native DLL/module graph managed ABI |
+| Managed storage | Aliasable `ManagedNode` and source-class handles, optional edges and non-null pattern snapshots, descriptor-based cycle tracing, complete-publication class factories, exact frame/temporary roots and explicit nonmoving collection under both policies, including exceptional root retirement and escaping-frame unlink | Managed user-struct fields, stored interior pointers, implicit GC, native DLL/module graph managed ABI |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
 Only the grammar below is supported. Unsupported constructs diagnose rather than
@@ -124,8 +124,19 @@ Allocation failure returns false; checked constructor failure frees the
 unpublished object and propagates. Collector-private zeroed reference slots are
 not source defaults. Class payloads are bounded to 128 bytes; readonly/mutable
 field access, visibility and partial-construction checks remain mandatory.
-Classes have no inheritance, optional edges, inline-struct storage or managed
+Classes have no inheritance, inline-struct storage or managed
 module ABI; `new C(...)` is rejected rather than inventing an allocation exception.
+`native-20` adds `C?` and `ManagedNode?`, contextual `null`, non-null-to-optional
+lifting, `is null` and `is some value`. Successful extraction creates a non-null
+handle snapshot; clearing the original edge does not invalidate it.
+Patterns participate in conditional flow, including short-circuit conditions,
+`while` and `require`. The payload name belongs to the enclosing lexical scope;
+reads additionally require proof that extraction succeeded on the current path.
+The pattern does not narrow the original variable or an aliased field.
+An initialized absent value is not an uninitialized
+variable or an output from a failed call. Constructors must explicitly initialize
+optional fields, and direct optional dereference is rejected. Optional scalar
+types, generic normalization and persisted optional IR remain unsupported.
 Version 18 semantic modules separately admit private `ManagedNode` code in a
 leaf producer whose exported declarations are scalar and by-value only.
 Native packages validate its managed profile, heap imports and root metadata.
@@ -179,6 +190,8 @@ generic/witness metadata remain unsupported. A public concrete wrapper may
 use a private specialization without publishing its template or witnesses.
 `syntax-11` adds source class declarations; `native-19` adds their bounded
 construction and descriptor-based tracing contract.
+`syntax-12` adds optional-presence patterns; `native-20` executes them for managed
+handles with exact roots and explicit absence.
 `[NoThrow]` on functions/constructors, `[DoesNotReturn]` on void functions and
 `[Cleanup]` on eligible unique instance methods are currently bound;
 unknown, duplicate and misplaced attributes diagnose rather

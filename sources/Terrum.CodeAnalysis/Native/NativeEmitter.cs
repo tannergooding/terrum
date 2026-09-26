@@ -996,6 +996,12 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(unary.Operand, ref maximumArguments);
             case BoundCast cast:
                 return ExpressionSpills(cast.Operand, ref maximumArguments);
+            case BoundOptionalLift lift:
+                return ExpressionSpills(lift.Value, ref maximumArguments);
+            case BoundIsNull test:
+                return ExpressionSpills(test.Value, ref maximumArguments);
+            case BoundIsSome pattern:
+                return ExpressionSpills(pattern.Value, ref maximumArguments);
             case BoundFieldRead field:
                 return ExpressionSpills(field.Receiver, ref maximumArguments);
             case BoundBufferRead buffer:
@@ -1047,10 +1053,12 @@ internal sealed partial class PeCompiler
     }
     private int OwnerPlace(int index) =>
         _program.Functions[_currentFunction].Variables[index].IsOut ? OutSlot(index) : Slot(index);
-    private static bool IsStruct(PrimitiveType type) => (int)type >= 100 && !ManagedClassTypes.IsClass(type);
+    private static bool IsStruct(PrimitiveType type) =>
+        (int)type is >= 100 and < ManagedClassTypes.First;
     private static bool IsWide(PrimitiveType type) =>
         type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.OwnedInt32Buffer
-            or PrimitiveType.ManagedNode || ManagedClassTypes.IsClass(type);
+            or PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode
+            || ManagedClassTypes.IsClass(type) || ManagedClassTypes.IsOptional(type);
     private int Size(PrimitiveType type) => ValueLayout.Size(type, _program.Structures);
     private bool IsIndirect(PrimitiveType type) => IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8);
     private bool IsUnique(PrimitiveType type) =>
@@ -1867,6 +1875,29 @@ internal sealed partial class PeCompiler
                     _code.Byte(0xB8);
                     _code.Int32(checked((int)constant.Value));
                 }
+                break;
+            case BoundNull:
+                _code.Bytes(0x31, 0xC0);
+                break;
+            case BoundOptionalLift lift:
+                Expression(lift.Value, spill);
+                break;
+            case BoundIsNull test:
+                Expression(test.Value, spill);
+                _code.Bytes(0x48, 0x85, 0xC0, 0x0F, 0x94, 0xC0, 0x0F, 0xB6, 0xC0);
+                break;
+            case BoundIsSome pattern:
+                Expression(pattern.Value, spill);
+                _code.Bytes(0x48, 0x85, 0xC0);
+                var empty = _code.JumpIf(0x84);
+                _code.Store64(Slot(pattern.Variable));
+                SetManagedRoot(Slot(pattern.Variable), active: true);
+                _code.Bytes(0xB8, 0x01, 0x00, 0x00, 0x00);
+                var patternDone = _code.Jump();
+                _code.PatchRelative(empty, _code.Position);
+                SetManagedRoot(Slot(pattern.Variable), active: false);
+                _code.Bytes(0x31, 0xC0);
+                _code.PatchRelative(patternDone, _code.Position);
                 break;
             case BoundRead read:
                 LoadValue(_program.Functions[_currentFunction].Variables[read.Variable].IsOut

@@ -13,18 +13,21 @@ internal static class ValueLayout
         PrimitiveType.Bool => 1,
         PrimitiveType.Char16 => 2,
         PrimitiveType.Int32 or PrimitiveType.UInt32 => 4,
-        PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.OwnedInt32Buffer or PrimitiveType.ManagedNode => 8,
+        PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.OwnedInt32Buffer
+            or PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode => 8,
+        _ when ManagedClassTypes.IsOptional(type) => 8,
         PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView => 16,
         PrimitiveType.Void => 0,
         _ when ManagedClassTypes.IsClass(type) => 8,
-        _ when (int)type >= 100 && (int)type - 100 < structures.Count => structures[(int)type - 100].Size,
+        _ when (int)type >= 100 && (int)type < ManagedClassTypes.First
+            && (int)type - 100 < structures.Count => structures[(int)type - 100].Size,
         _ => 0,
     };
 
     // Callers have established that all nested layouts are acyclic and complete.
     internal static int Alignment(PrimitiveType type, IReadOnlyList<BoundStruct> structures)
     {
-        if (ManagedClassTypes.IsClass(type))
+        if (ManagedClassTypes.IsManaged(type))
         {
             return 8;
         }

@@ -140,6 +140,13 @@ public sealed class Compilation
     public static string GetNativeProfileVersion(BoundProgram program)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (program.Classes.Any(static item => item.Fields.Any(
+                static field => ManagedClassTypes.IsOptional(field.Type)))
+            || program.Functions.Any(static function => ManagedClassTypes.IsOptional(function.ReturnType)
+                || function.Variables.Any(static variable => ManagedClassTypes.IsOptional(variable.Type))))
+        {
+            return "native-20";
+        }
         if (!program.Classes.IsEmpty)
         {
             return "native-19";
