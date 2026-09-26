@@ -13,6 +13,10 @@ using only that artifact's declarations. Both AOT and JIT execute the linked
 result; no producer source is rebound while compiling the consumer.
 The cursor and general host-interface sketches still require later language
 slices. Executing these components is not a self-hosted compiler bootstrap.
+Compilation-local static operator protocols now support bounded closed numeric
+expressions, but not the generic spans, stored dependencies or host interfaces
+required by those sketches. The scanner consumes the shared host keyword catalog,
+including `abstract`, `operator` and `where`, without a second keyword table.
 `build-component` uses the compiled scanner's records as the lexical input to
 the official host parser, binder and native emitter; it does not re-lex the
 target input. The scanner's own compilation and the later compiler phases

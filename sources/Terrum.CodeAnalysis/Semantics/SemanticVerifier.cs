@@ -82,8 +82,7 @@ public static class SemanticVerifier
         var usesManagedNodes = program.Functions.Any(static function => function.Intrinsic >= BoundIntrinsic.NodeTryCreate
             || function.ReturnType == PrimitiveType.ManagedNode
             || function.Variables.Any(static variable => variable.Type == PrimitiveType.ManagedNode));
-        if (usesManagedNodes && (program.RuntimePolicy != BoundRuntimePolicy.FailFast
-            || program.Functions.Any(static function => function.IsExternal)))
+        if (usesManagedNodes && program.Functions.Any(static function => function.IsExternal))
         {
             throw InvalidEffect(default, "Ownership");
         }

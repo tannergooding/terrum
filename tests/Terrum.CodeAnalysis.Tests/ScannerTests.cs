@@ -75,6 +75,7 @@ public sealed class ScannerTests
     [InlineData("a\u200Cb a\u200Db \u200C \u200D \u0661 a\u06612")]
     [InlineData("a\u00E9 ae\u0301 \U0001F600x")]
     [InlineData("if while require int32 2147483648")]
+    [InlineData("abstract operator where abstractly operator_ where2 G<T( ;")]
     [InlineData("// trailing comment")]
     [InlineData("alpha/* inner // ignored */+// line\r\n\"quoted\\ntext\"")]
     [InlineData("1.25e-10f64 2e+3 3i128 4u8 0.5 6. 7efoo 8i32extra")]
@@ -115,6 +116,16 @@ public sealed class ScannerTests
         Assert.Equal(keywords.Select(keyword => keyword.Kind).Append(TokenKind.Identifier).Append(TokenKind.Identifier)
             .Append(TokenKind.EndOfFile), lexed.Tokens.Select(token => token.Kind));
         await CheckScannerAsync(source).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public void NewKeywordKindsAppendWithoutRenumberingPublishedKinds()
+    {
+        Assert.Equal(24, (int)TokenKind.InterfaceKeyword);
+        Assert.Equal(76, (int)TokenKind.UnsafeKeyword);
+        Assert.Equal(77, (int)TokenKind.AbstractKeyword);
+        Assert.Equal(78, (int)TokenKind.OperatorKeyword);
+        Assert.Equal(79, (int)TokenKind.WhereKeyword);
     }
 
     [Fact]

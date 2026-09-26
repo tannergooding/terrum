@@ -87,4 +87,16 @@ public enum SyntaxKind
     UnsafeStatement,
     /// <summary>A structured checked-failure handler with optional cleanup.</summary>
     TryCatchStatement,
+    /// <summary>A compilation-local static operator protocol.</summary>
+    InterfaceDeclaration,
+    /// <summary>A static operator declaration or implementation.</summary>
+    OperatorDeclaration,
+    /// <summary>Declared type parameters of a protocol or function.</summary>
+    TypeParameterList,
+    /// <summary>An explicit nominal conformance list.</summary>
+    ConformanceList,
+    /// <summary>A generic function's declared constraints.</summary>
+    ConstraintClause,
+    /// <summary>An explicitly instantiated generic function name.</summary>
+    GenericNameExpression,
 }

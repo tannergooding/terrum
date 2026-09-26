@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-9 and native-10 through native-18
+## Current boundary: syntax-10 and native-10 through native-18
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -15,11 +15,11 @@ general managed graphs and standard-library execution are not implemented.
 |---|---|---|
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
 | Lexing | Pinned Unicode identifiers, ASCII numbers/tags, comments, leading trivia, strings, diagnostics, EOF | Interpolation, raw/character/native literals, directives |
-| Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Classes, interfaces, enums/unions, owning fields in Copy structs, general attributes, generic declarations/constraints, cyclic dependencies, automatic version resolution and resilient module layouts |
+| Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes/generics, public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; repeated `?` diagnoses | General type resolution, optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, break/continue, switch/patterns, general exception objects/throw, async, compound assignment |
-| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations and lexical readonly/exclusive writable buffer slices | Character literals, partial owning-field moves, owning field replacement, general expression temporaries, general stored loans, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
-| Managed-node proof | Aliasable opaque `ManagedNode` handles, one traced outgoing edge, exact frame/temporary roots and explicit nonmoving cycle collection in closed fail-fast executables/JIT | General classes, managed user-struct fields, checked-exception roots, stored interior pointers, implicit GC, native DLL/module graph managed ABI |
+| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, explicit closed static-protocol calls, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations and lexical readonly/exclusive writable buffer slices | Character literals, partial owning-field moves, owning field replacement, general expression temporaries, general stored loans, evaluation outside the native profile, user-defined conversions, general overloads/generic calls, conditional expressions, constructor generic inference |
+| Managed-node proof | Aliasable opaque `ManagedNode` handles, one traced outgoing edge, exact frame/temporary roots and explicit nonmoving cycle collection under both runtime policies, including exceptional root retirement and escaping-frame unlink | General classes, managed user-struct fields, stored interior pointers, implicit GC, native DLL/module graph managed ABI |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
 Only the grammar below is supported. Unsupported constructs diagnose rather than
@@ -30,12 +30,16 @@ recover every later declaration optimally.
 file        = using* namespace? declaration* EOF
 using       = "using" qualifiedName ";"
 namespace   = "namespace" qualifiedName ";"
-declaration = attributes modifiers (function | struct)
+declaration = attributes modifiers (function | struct | interface)
 attributes  = ("[" name "]")*
-modifiers   = ("public" | "internal" | "private" | "static" | "mut" | "unique")*
-function    = type name parameters block
-struct      = "struct" name "{" member* "}"
-member      = attributes modifiers (field | constructor | function)
+modifiers   = ("public" | "internal" | "private" | "static" | "abstract" | "mut" | "unique")*
+function    = type name typeParameters? parameters constraints* block
+struct      = "struct" name (":" type ("," type)*)? "{" member* "}"
+interface   = "interface" name typeParameters "{" (attributes modifiers operator)* "}"
+member      = attributes modifiers (field | constructor | function | operator)
+operator    = type "operator" ("+" | "*") parameters (";" | block)
+typeParameters = "<" name ("," name)* ">"
+constraints = "where" name ":" (type | attributes) ("," (type | attributes))*
 field       = type name ("=" expression)? ";"
 constructor = containingTypeName parameters block
 parameters  = "(" (mode? type name ("," mode? type name)*)? ")"
@@ -104,10 +108,14 @@ one-edge graph and reclaims unmarked cycles. This bounded collector runs only
 at explicit calls and at executable entry teardown; it does not rely on
 reference counts, stack word scanning or hidden allocation-triggered GC.
 Managed handles cannot be placed in user structs, passed across external
-calls or DLL exports, or stored in semantic/native modules. The fail-fast
-profile admits closed executables/JIT and isolated native DLLs with scalar-only
+calls or DLL exports, or stored in semantic/native modules. Both runtime
+policies admit closed executables/JIT and isolated native DLLs with scalar-only
 exports and private managed state; DLL callers must serialize calls and
 explicitly collect abandoned nodes before unload.
+Checked unwind retires departed lexical roots after their nested user cleanup,
+clears argument and unpublished output staging, and unlinks a root frame only
+when unwinding out of that function. A same-frame catch keeps its surviving
+roots; a pending managed return remains rooted through collecting cleanup.
 The [source-line index candidate](../self-host/SourceLineIndex.terrum) uses `OwnedInt32Buffer`
 to build and own a line-start table, with binary-searched UTF-16 positions checked
 against host fixtures under both native failure policies.
@@ -137,6 +145,21 @@ checked casts for supported 32- and 64-bit integer types and `char16`.
 `syntax-8` adds `unsafe` blocks and the parameterless checked-policy `catch`,
 with optional `finally`; a try requires at least one handler or cleanup clause.
 `syntax-9` adds `unique struct` declarations and `move` expressions.
+`syntax-10` adds static operator interfaces, explicit struct conformance,
+generic function constraints and generic-name call expressions. Its executable
+subset is deliberately compilation-local: each interface has three type
+parameters and one `static abstract` `+` or `*` declaration; an internal Copy
+struct explicitly implements a closed homogeneous instance. Parameter/result
+types, accessibility and declared effects must match. An internal generic
+function has one `[Copy]` type parameter and a single return expression built
+from its parameters, grouping and its declared operator constraints. Concrete
+capabilities cannot make an undeclared generic operation valid. Calls require
+an explicit concrete struct type; at most 32 closed specializations lower to
+ordinary verified calls. The [quadratic example](../samples/native/static-protocol-quadratic.terrum)
+executes for two distinct wrappers. General interface dispatch, primitive
+conformance, generic inference, recursive generic algorithms and public
+generic/witness metadata remain unsupported. A public concrete wrapper may
+use a private specialization without publishing its template or witnesses.
 `[NoThrow]` on functions/constructors, `[DoesNotReturn]` on void functions and
 `[Cleanup]` on eligible unique instance methods are currently bound;
 unknown, duplicate and misplaced attributes diagnose rather

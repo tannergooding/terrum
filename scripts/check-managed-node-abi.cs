@@ -35,40 +35,68 @@ var nativeOutput = await Run(nativeBuild, TimeSpan.FromMinutes(2)).ConfigureAwai
 await File.WriteAllTextAsync(Path.Combine(artifacts, "managed-node-abi-c-build.log"),
     nativeOutput).ConfigureAwait(false);
 var cli = Path.Combine(artifacts, "bin", "sources", "terrumc", "Debug", "net11.0", "terrumc.dll");
-var dll = Path.Combine(artifacts, "managed-node-abi.dll");
-var compile = new ProcessStartInfo("dotnet");
-foreach (var argument in new[] { cli, "build-library",
-    Path.GetFullPath(Path.Combine("tests", "native", "managed-node-abi.terrum")),
-    "--export", "Cycles", "--export", "CollectWithScalar",
-    "--export", "AllocationFailure", "--export", "RetainAcrossAllocationFailure",
-    "-o", dll, "--runtime", "fail-fast" })
+foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
 {
-    compile.ArgumentList.Add(argument);
-}
-var buildOutput = await Run(compile, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
-await File.WriteAllTextAsync(Path.Combine(artifacts, "managed-node-abi-build.log"),
-    buildOutput).ConfigureAwait(false);
-var execute = new ProcessStartInfo(executable);
-execute.ArgumentList.Add(dll);
-var proof = await Run(execute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
-await File.WriteAllTextAsync(Path.Combine(artifacts, "managed-node-abi-proof.log"),
-    proof).ConfigureAwait(false);
-if (proof.Trim() != "managed-node-abi roots=precise cycle-rounds=64 publication=checked failures=checked live=0")
-{
-    throw new InvalidOperationException("The independent managed-node ABI proof did not complete.");
-}
-Console.Write(proof);
+    var dll = Path.Combine(artifacts, $"managed-node-abi-{policy}.dll");
+    var compile = new ProcessStartInfo("dotnet");
+    foreach (var argument in new[] { cli, "build-library",
+        Path.GetFullPath(Path.Combine("tests", "native", "managed-node-abi.terrum")),
+        "--export", "Cycles", "--export", "CollectWithScalar",
+        "--export", "AllocationFailure", "--export", "RetainAcrossAllocationFailure",
+        "-o", dll, "--runtime", policy })
+    {
+        compile.ArgumentList.Add(argument);
+    }
+    var buildOutput = await Run(compile, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+    await File.WriteAllTextAsync(Path.Combine(artifacts, $"managed-node-abi-build-{policy}.log"),
+        buildOutput).ConfigureAwait(false);
+    var execute = new ProcessStartInfo(executable);
+    execute.ArgumentList.Add(dll);
+    var proof = await Run(execute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+    await File.WriteAllTextAsync(Path.Combine(artifacts, $"managed-node-abi-proof-{policy}.log"),
+        proof).ConfigureAwait(false);
+    if (proof.Trim() != "managed-node-abi roots=precise cycle-rounds=64 publication=checked failures=checked live=0")
+    {
+        throw new InvalidOperationException("The independent managed-node ABI proof did not complete.");
+    }
+    Console.Write($"{policy}: {proof}");
 
-var failedRelease = new ProcessStartInfo(executable);
-failedRelease.ArgumentList.Add(dll);
-failedRelease.ArgumentList.Add("reject-release");
-const uint FailedReleaseStatus = 0xE0540005;
-_ = await Run(failedRelease, TimeSpan.FromSeconds(10), unchecked((int)FailedReleaseStatus)).ConfigureAwait(false);
-var failureProof = FormattableString.Invariant(
-    $"BOOL low32=false/high32!=0; collection release failure terminates with 0x{FailedReleaseStatus:X8}\n");
-await File.WriteAllTextAsync(Path.Combine(artifacts, "managed-node-release-failure.log"),
-    failureProof).ConfigureAwait(false);
-Console.Write(failureProof);
+    var failedRelease = new ProcessStartInfo(executable);
+    failedRelease.ArgumentList.Add(dll);
+    failedRelease.ArgumentList.Add("reject-release");
+    const uint FailedReleaseStatus = 0xE0540005;
+    _ = await Run(failedRelease, TimeSpan.FromSeconds(10), unchecked((int)FailedReleaseStatus)).ConfigureAwait(false);
+    var failureProof = FormattableString.Invariant(
+        $"BOOL low32=false/high32!=0; collection release failure terminates with 0x{FailedReleaseStatus:X8}\n");
+    await File.WriteAllTextAsync(Path.Combine(artifacts, $"managed-node-release-failure-{policy}.log"),
+        failureProof).ConfigureAwait(false);
+    Console.Write($"{policy}: {failureProof}");
+}
+
+var unwindDll = Path.Combine(artifacts, "managed-unwind-abi.dll");
+var compileUnwind = new ProcessStartInfo("dotnet");
+foreach (var argument in new[] { cli, "build-library",
+    Path.GetFullPath(Path.Combine("tests", "native", "managed-unwind-abi.terrum")),
+    "--export", "SameFrame", "--export", "EscapingFrame", "--export", "LaterArgument",
+    "--export", "OutputFailure", "--export", "ReturnAcrossCleanup", "--export", "EscapeToNative",
+    "--export", "CollectWithScalar", "-o", unwindDll, "--runtime", "checked-exceptions" })
+{
+    compileUnwind.ArgumentList.Add(argument);
+}
+var unwindBuild = await Run(compileUnwind, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+await File.WriteAllTextAsync(Path.Combine(artifacts, "managed-unwind-abi-build.log"),
+    unwindBuild).ConfigureAwait(false);
+var unwindExecute = new ProcessStartInfo(executable);
+unwindExecute.ArgumentList.Add(unwindDll);
+unwindExecute.ArgumentList.Add("unwind");
+var unwindProof = await Run(unwindExecute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+await File.WriteAllTextAsync(Path.Combine(artifacts, "managed-unwind-abi-proof.log"),
+    unwindProof).ConfigureAwait(false);
+if (unwindProof.Trim() != "managed-node-unwind rounds=64 lexical=checked staging=checked native-catch=checked live=0")
+{
+    throw new InvalidOperationException("The independent managed-node unwind proof did not complete.");
+}
+Console.Write(unwindProof);
 
 static async Task<string> Run(ProcessStartInfo start, TimeSpan timeout, int expectedExitCode = 0)
 {

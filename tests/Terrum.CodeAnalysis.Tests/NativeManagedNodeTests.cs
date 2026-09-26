@@ -132,10 +132,12 @@ public sealed class NativeManagedNodeTests
     }
 
     [Fact]
-    public void RejectsCheckedPolicyAndPersistedModules()
+    public void AcceptsCheckedPolicyButRejectsPersistedModules()
     {
         var checkedCompilation = Compilation.Create(SyntaxTree.Parse(Cycle), BoundRuntimePolicy.CheckedExceptions);
-        Assert.Contains(checkedCompilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
+        Assert.False(checkedCompilation.HasErrors, string.Join(Environment.NewLine, checkedCompilation.Diagnostics));
+        Assert.Equal("native-18", Compilation.GetNativeProfileVersion(
+            Assert.IsType<BoundProgram>(checkedCompilation.Program)));
         var library = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public int32 Proof() {
                 require ManagedNode.TryCreate(42, out var node);
@@ -151,41 +153,76 @@ public sealed class NativeManagedNodeTests
     }
 
     [Theory]
-    [InlineData("CopyReturn")]
-    [InlineData("CopyInput")]
-    [InlineData("UniqueReturn")]
-    [InlineData("OwnedOutput")]
-    [InlineData("OwnedInput")]
-    [InlineData("OutScalar")]
-    public void ManagedImageRejectsNonScalarExportContracts(string name)
+    [InlineData("CopyReturn", BoundRuntimePolicy.FailFast)]
+    [InlineData("CopyInput", BoundRuntimePolicy.FailFast)]
+    [InlineData("UniqueReturn", BoundRuntimePolicy.FailFast)]
+    [InlineData("OwnedOutput", BoundRuntimePolicy.FailFast)]
+    [InlineData("OwnedInput", BoundRuntimePolicy.FailFast)]
+    [InlineData("OutScalar", BoundRuntimePolicy.FailFast)]
+    [InlineData("CopyReturn", BoundRuntimePolicy.CheckedExceptions)]
+    [InlineData("OwnedInput", BoundRuntimePolicy.CheckedExceptions)]
+    public void ManagedImageRejectsNonScalarExportContracts(string name, BoundRuntimePolicy policy)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(MixedLibrary));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(MixedLibrary), policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         Assert.Equal("native-18", Compilation.GetNativeProfileVersion(program));
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program, [name],
-            NativeRuntimePolicy.FailFast));
+            (NativeRuntimePolicy)policy));
     }
 
     [Theory]
-    [InlineData("Echo")]
-    [InlineData("Flag")]
-    [InlineData("Ping")]
-    public void ManagedImageRetainsScalarAndVoidExports(string name)
+    [InlineData("Echo", BoundRuntimePolicy.FailFast)]
+    [InlineData("Flag", BoundRuntimePolicy.FailFast)]
+    [InlineData("Ping", BoundRuntimePolicy.FailFast)]
+    [InlineData("Echo", BoundRuntimePolicy.CheckedExceptions)]
+    public void ManagedImageRetainsScalarAndVoidExports(string name, BoundRuntimePolicy policy)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(MixedLibrary));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(MixedLibrary), policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
-        Assert.NotEmpty(NativeEmitter.EmitLibrary(program, [name], NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.EmitLibrary(program, [name], (NativeRuntimePolicy)policy));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast, "TRM3022")]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions, "TRM3021")]
+    public void ManagedRecoveryKeepsCheckedAndUnsafeContracts(BoundRuntimePolicy policy, string diagnostic)
+    {
+        var source = policy == BoundRuntimePolicy.FailFast
+            ? "int32 Main() { require ManagedNode.TryCreate(42, out var node); unsafe { try { require false; } catch { return node.Value; } } return 0; }"
+            : "int32 Main() { require ManagedNode.TryCreate(42, out var node); try { require false; } catch { return node.Value; } return 0; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
+        Assert.Contains(compilation.Diagnostics, item => item.Code == diagnostic);
+    }
+
+    [Fact]
+    public void CheckedManagedMalformedRootsFailBeforeEmissionOrModuleStorage()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Proof() {
+                require ManagedNode.TryCreate(42, out var node);
+                return node.Value;
+            }
+            """), BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateProducer(program, ["Proof"]));
+        var functionIndex = program.Functions.IndexOf(Assert.Single(program.Functions, static item => item.Name == "Proof"));
+        var function = program.Functions[functionIndex];
+        var forged = program with {
+            Functions = program.Functions.SetItem(functionIndex,
+                function with { Body = function.Body with { RetiredManagedLocals = [] } }),
+        };
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(forged));
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(forged,
+            ["Proof"], NativeRuntimePolicy.CheckedExceptions));
     }
 
     [Fact]
     public void ScalarExportsPointToTheirSourceFunctionsWithACollector()
     {
-        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", ".."));
-        var source = File.ReadAllText(Path.Combine(repository, "tests", "native", "managed-node-abi.terrum"));
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(NativeFixture("managed-node-abi.terrum")));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var exports = new[] { "RetainAcrossAllocationFailure", "Cycles", "AllocationFailure", "CollectWithScalar" };
@@ -233,6 +270,19 @@ public sealed class NativeManagedNodeTests
         {
             return checked(edata.PointerToRawData + rva - edata.VirtualAddress);
         }
+    }
+
+    [Fact]
+    public void CheckedManagedScalarProbeCompilesWithoutSourceErrors()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(NativeFixture("managed-unwind-abi.terrum")),
+            BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.NotEmpty(NativeEmitter.EmitLibrary(program, [
+            "SameFrame", "EscapingFrame", "LaterArgument", "OutputFailure", "ReturnAcrossCleanup",
+            "EscapeToNative", "CollectWithScalar",
+        ], NativeRuntimePolicy.CheckedExceptions));
     }
 
     [Fact]
@@ -348,6 +398,13 @@ public sealed class NativeManagedNodeTests
         };
         var error = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
         Assert.Equal("Ownership", error.Data["Terrum.InvalidEffect"]);
+    }
+
+    private static string NativeFixture(string name)
+    {
+        var repository = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", ".."));
+        return File.ReadAllText(Path.Combine(repository, "tests", "native", name));
     }
 
     private static async Task<int> RunAsync(BoundProgram program)

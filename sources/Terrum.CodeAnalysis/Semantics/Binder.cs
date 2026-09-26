@@ -15,7 +15,7 @@ using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
-internal sealed class Binder
+internal sealed partial class Binder
 {
     private const int MaximumSemanticDepth = 128;
     private SyntaxTree _tree;
@@ -191,6 +191,11 @@ internal sealed class Binder
                 }
             }
             _contexts.Add(tree, (_namespace, [.. _usings]));
+        }
+        DeclareProtocols();
+        foreach (var tree in _trees)
+        {
+            SetContext(tree);
             foreach (var child in tree.Root.Children)
             {
                 if (child is SyntaxNode { Kind: SyntaxKind.StructDeclaration } structure)
@@ -235,6 +240,7 @@ internal sealed class Binder
         {
             DeclareStruct(index);
         }
+        DeclareConformances();
 
         foreach (var tree in _trees)
         {
@@ -250,11 +256,16 @@ internal sealed class Binder
                     var structName = StructName(node).Text;
                     foreach (var member in node.Children)
                     {
-                        if (member is SyntaxNode declaration && declaration.Kind is SyntaxKind.FunctionDeclaration or SyntaxKind.ConstructorDeclaration)
+                        if (member is SyntaxNode declaration && declaration.Kind is SyntaxKind.FunctionDeclaration
+                            or SyntaxKind.ConstructorDeclaration or SyntaxKind.OperatorDeclaration)
                         {
                             Declare(declaration, structName);
                         }
                     }
+                    continue;
+                }
+                if (node.Kind == SyntaxKind.InterfaceDeclaration)
+                {
                     continue;
                 }
                 if (node.Kind != SyntaxKind.FunctionDeclaration)
@@ -262,7 +273,14 @@ internal sealed class Binder
                     Report("TRM3001", "Only top-level function declarations are supported.", node.Span);
                     continue;
                 }
-                Declare(node, null);
+                if (node.Children.Any(static child => child is SyntaxNode { Kind: SyntaxKind.TypeParameterList }))
+                {
+                    DeclareGeneric(node);
+                }
+                else
+                {
+                    Declare(node, null);
+                }
             }
         }
 
@@ -301,6 +319,16 @@ internal sealed class Binder
                     false, true, false, intrinsic.IsStatic, intrinsic.IsNoThrow, false, intrinsic));
             }
         }
+        foreach (var template in _templates.Values)
+        {
+            if (_functions.ContainsKey(template.Name))
+            {
+                SetContext(template.Tree);
+                Report("TRM3003", $"Generic and concrete functions cannot share '{template.Name}'.",
+                    template.Declaration.Span);
+            }
+        }
+        ValidateConformances();
 
         var entryPoint = -1;
 
@@ -330,8 +358,9 @@ internal sealed class Binder
         }
 
         var bound = ImmutableArray.CreateBuilder<BoundFunction>(_signatures.Count);
-        foreach (var signature in _signatures)
+        for (var signatureIndex = 0; signatureIndex < _signatures.Count; signatureIndex++)
         {
+            var signature = _signatures[signatureIndex];
             _cancellationToken.ThrowIfCancellationRequested();
             if (signature.External is BoundFunction external)
             {
@@ -364,7 +393,8 @@ internal sealed class Binder
                 }
             }
 
-            var body = BindBlock(syntaxBody);
+            var body = signature.Generic is GenericInstantiation generic
+                ? BindGenericBody(generic) : BindBlock(syntaxBody);
             if (_constructor)
             {
                 var end = new TextSpan(syntaxBody.Span.End, 0);
@@ -620,7 +650,8 @@ internal sealed class Binder
     private void Declare(SyntaxNode declaration, string? containingType)
     {
         var constructor = declaration.Kind == SyntaxKind.ConstructorDeclaration;
-        var modifierCount = declaration.Children.Length - (constructor ? 3 : 4);
+        var operatorDeclaration = declaration.Kind == SyntaxKind.OperatorDeclaration;
+        var modifierCount = declaration.Children.Length - (constructor ? 3 : operatorDeclaration ? 5 : 4);
         var isMutable = false;
         var isPrivate = false;
         var isInternal = false;
@@ -685,10 +716,15 @@ internal sealed class Binder
             Report("TRM3001", "Mutating instance methods require a receiver write-back ABI not present in this value profile.", declaration.Span);
         }
 
-        var returnNode = constructor ? null : (SyntaxNode)declaration.Children[^4];
+        var returnNode = constructor ? null : (SyntaxNode)declaration.Children[operatorDeclaration ? ^5 : ^4];
         var nameToken = ((SyntaxTokenElement)declaration.Children[^3]).Token;
+        var nameText = operatorDeclaration ? OperatorName(nameToken.Kind) : nameToken.Text;
         var parameters = (SyntaxNode)declaration.Children[^2];
         var body = (SyntaxNode)declaration.Children[^1];
+        if (operatorDeclaration && (containingType is null || !isStatic || body.Kind != SyntaxKind.Block))
+        {
+            Report("TRM3001", "A static operator implementation requires a struct body.", declaration.Span);
+        }
         var returnType = constructor ? ResolveStruct(containingType!) : BindType(returnNode!, allowVoid: true);
         if (returnType is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
         {
@@ -706,7 +742,7 @@ internal sealed class Binder
             else
             {
                 _structs[(int)ResolveStruct(containingType!) - 100] = structure with {
-                    CleanupMethod = structure.Name + "." + nameToken.Text,
+                    CleanupMethod = structure.Name + "." + nameText,
                 };
             }
         }
@@ -754,7 +790,7 @@ internal sealed class Binder
 
         var qualifiedName = (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".")
             + (containingType is null ? "" : containingType + ".")
-            + (constructor ? "#ctor" : nameToken.Text);
+            + (constructor ? "#ctor" : nameText);
         if (!_functions.TryAdd(qualifiedName, _signatures.Count))
         {
             Report("TRM3003", $"Duplicate function '{nameToken.Text}'; overloads are not supported.", nameToken.Span);
@@ -763,6 +799,7 @@ internal sealed class Binder
         _signatures.Add(new Signature(qualifiedName, returnType, declared.ToImmutable(), body, declaration, _tree,
             containingType, constructor, isPrivate, isInternal, isMutable, isStatic, isNoThrow, doesNotReturn) {
             IsCleanup = isCleanup,
+            IsOperator = operatorDeclaration,
         });
     }
 
@@ -1656,13 +1693,32 @@ internal sealed class Binder
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unsupported operators are rejected by the default branch.")]
-    private BoundBinary BindBinary(SyntaxNode node, PrimitiveType? expected)
+    private BoundExpression BindBinary(SyntaxNode node, PrimitiveType? expected)
     {
         var leftNode = (SyntaxNode)node.Children[0];
         var op = ((SyntaxTokenElement)node.Children[1]).Token;
         var rightNode = (SyntaxNode)node.Children[2];
         var leftKnown = KnownType(leftNode);
         var rightKnown = KnownType(rightNode);
+        if (leftKnown is PrimitiveType concrete && IsStruct(concrete) && op.Kind is TokenKind.Plus or TokenKind.Star)
+        {
+            var leftValue = BindExpression(leftNode, concrete);
+            var rightValue = BindExpression(rightNode, concrete);
+            var name = _structs[(int)concrete - 100].Name + "." + OperatorName(op.Kind);
+            if (!TryFindFunction(name, out var method) || _signatures[method].ReturnType != concrete
+                || _signatures[method].Parameters.Length != 2
+                || _signatures[method].Parameters.Any(parameter => parameter.Type != concrete)
+                || !_signatures[method].IsStatic || !_signatures[method].IsOperator)
+            {
+                Report("TRM3007", "No matching accessible static operator is declared.", op.Span);
+                return new BoundBinary(op.Kind, leftValue, rightValue, concrete, node.Span);
+            }
+            if (_signatures[method].IsPrivate && _currentStruct != _signatures[method].StructName)
+            {
+                Report("TRM3011", "Private operator is inaccessible.", op.Span);
+            }
+            return new BoundCall(method, [leftValue, rightValue], concrete, node.Span);
+        }
         PrimitiveType? operandType;
         PrimitiveType resultType;
 
@@ -1753,6 +1809,10 @@ internal sealed class Binder
             {
                 Report("TRM3011", $"Unknown function '{name.Text}'.", name.Span);
             }
+        }
+        else if (callee.Kind == SyntaxKind.GenericNameExpression)
+        {
+            function = InstantiateGeneric(callee);
         }
         else if (callee.Kind == SyntaxKind.MemberAccessExpression)
         {
@@ -2100,6 +2160,10 @@ internal sealed class Binder
             case SyntaxKind.InvocationExpression:
             {
                 var callee = (SyntaxNode)node.Children[0];
+                if (callee.Kind == SyntaxKind.GenericNameExpression)
+                {
+                    return GenericCallType(callee);
+                }
                 if (callee.Kind == SyntaxKind.NameExpression)
                 {
                     var name = ((SyntaxTokenElement)callee.Children[0]).Token.Text;
@@ -2316,5 +2380,7 @@ internal sealed class Binder
         bool IsInternal, bool IsMutable, bool IsStatic, bool IsNoThrow, bool DoesNotReturn, BoundFunction? External = null)
     {
         internal bool IsCleanup { get; init; }
+        internal bool IsOperator { get; init; }
+        internal GenericInstantiation? Generic { get; init; }
     }
 }

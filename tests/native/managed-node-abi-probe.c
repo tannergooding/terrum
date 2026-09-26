@@ -8,6 +8,7 @@
 
 typedef int32_t (*Check)(void);
 typedef int32_t (*Collect)(uint64_t);
+typedef void (*ThrowingExport)(void);
 
 static void* live[16];
 static HANDLE heaps[16];
@@ -185,6 +186,64 @@ static int RunChecks(HMODULE image)
     return 0;
 }
 
+static int CatchRequirement(EXCEPTION_POINTERS* pointers)
+{
+    const EXCEPTION_RECORD* record = pointers->ExceptionRecord;
+    return record->ExceptionCode == 0xE0540092u
+        && (record->ExceptionFlags & EXCEPTION_NONCONTINUABLE) != 0
+        && record->NumberParameters == 3
+        && record->ExceptionInformation[0] == UINT64_C(0x54455252554D0001)
+        && record->ExceptionInformation[1] == 1
+        && record->ExceptionInformation[2] == 3
+        ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH;
+}
+
+static int RunUnwindChecks(HMODULE image)
+{
+    const char* names[] = {
+        "SameFrame", "EscapingFrame", "LaterArgument", "OutputFailure", "ReturnAcrossCleanup"
+    };
+    const int allocations[] = { 2, 3, 3, 2, 2 };
+    Collect collect = (Collect)GetProcAddress(image, "CollectWithScalar");
+    ThrowingExport escape = (ThrowingExport)GetProcAddress(image, "EscapeToNative");
+    VERIFY(collect && escape, 50);
+    VERIFY(ReplaceImport(image, "HeapAlloc", (void*)TrackedAllocate), 51);
+    VERIFY(ReplaceImport(image, "HeapFree", (void*)TrackedRelease), 52);
+
+    for (int iteration = 0; iteration < 64; iteration++)
+    {
+        for (int index = 0; index < 5; index++)
+        {
+            Check check = (Check)GetProcAddress(image, names[index]);
+            VERIFY(check != NULL, 53);
+            attempts = 0;
+            releases = 0;
+            VERIFY(check() == 42, 54);
+            VERIFY(attempts == allocations[index] && releases == attempts - 1
+                && LiveCount() == 1 && !invalid, 55);
+            VERIFY(collect(0) == 1, 56);
+            VERIFY(releases == attempts && LiveCount() == 0 && !invalid, 57);
+        }
+
+        attempts = 0;
+        releases = 0;
+        int caught = 0;
+        __try
+        {
+            escape();
+        }
+        __except (CatchRequirement(GetExceptionInformation()))
+        {
+            caught = 1;
+        }
+        // The image's shadow-root chain must no longer reference either departed Terrum frame.
+        VERIFY(caught && attempts == 2 && releases == 0 && LiveCount() == 2, 58);
+        VERIFY(collect(0) == 2, 59);
+        VERIFY(releases == 2 && LiveCount() == 0 && !invalid, 60);
+    }
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if (argc != 2 && argc != 3)
@@ -210,11 +269,14 @@ int main(int argc, char** argv)
         FreeLibrary(image);
         return 5;
     }
-    int result = RunChecks(image);
+    int unwind = argc == 3 && strcmp(argv[2], "unwind") == 0;
+    int result = unwind ? RunUnwindChecks(image) : RunChecks(image);
     FreeLibrary(image);
     if (result == 0)
     {
-        puts("managed-node-abi roots=precise cycle-rounds=64 publication=checked failures=checked live=0");
+        puts(unwind
+            ? "managed-node-unwind rounds=64 lexical=checked staging=checked native-catch=checked live=0"
+            : "managed-node-abi roots=precise cycle-rounds=64 publication=checked failures=checked live=0");
     }
     return result;
 }

@@ -29,9 +29,14 @@ The [writable buffer-view sample](../samples/native/mutable-buffer-view.terrum)
 returns 42 after an exclusive scoped update and a NoThrow in-place `Clear`
 followed by reuse of the same fixed-capacity owner.
 The [managed-node cycle sample](../samples/native/managed-node-cycle.terrum)
-returns 42 with `--runtime fail-fast`: collection reclaims an unreachable
+returns 42 under either runtime policy: collection reclaims an unreachable
 two-node cycle while preserving a rooted node and its child. This exercises
 the bounded managed-node runtime, not general class syntax or a collection library.
+The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
+returns 46 through AOT and JIT. Two nominal Copy wrappers explicitly implement
+source-defined addition/multiplication protocols used by one constrained
+generic expression; this is closed specialization, not general generic-library
+or public witness support.
 
 | Program | Source | Design contract / expected behavior |
 |---|---|---|

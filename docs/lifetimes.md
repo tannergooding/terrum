@@ -12,10 +12,11 @@ The separate bounded `ManagedNode` proof allows copied aliasable handles,
 records exact active roots for locals, call/output/return temporaries and
 suspended frames, and traces its single managed edge at explicit collection
 points. Managed `for` header locals and conditional outputs remain rooted
-through the loop and retire when its header scope ends. It neither gives a
-managed root authority over an `OwnedInt32Buffer`
-nor implements general class, stored-view, checked-exception or module root
-contracts.
+through the loop and retire when its header scope ends. Checked unwind retires
+departed lexical and staged roots after user cleanup and unlinks escaping
+frames; local catches preserve surviving roots and returns stay rooted through
+cleanup. It neither gives a managed root authority over an `OwnedInt32Buffer`
+nor implements general class, stored-view, exception-object or module root contracts.
 The remaining lifetime constructs are rejected for execution.
 
 ## Three independent dependencies

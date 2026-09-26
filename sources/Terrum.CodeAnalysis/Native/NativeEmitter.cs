@@ -194,7 +194,7 @@ public static class NativeEmitter
         }
         var selected = new List<(string Name, int Index)>(exports.Count);
         var names = new HashSet<string>(StringComparer.Ordinal);
-        var scalarExportsOnly = Compilation.GetNativeProfileVersion(program) == "native-18";
+        var scalarExportsOnly = UsesManagedNodes(program);
         foreach (var name in exports)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -224,6 +224,11 @@ public static class NativeEmitter
         var code = compiler.Compile();
         return (PeImage.BuildLibrary(code, [.. selected]), UsedImports(code, imports));
     }
+
+    internal static bool UsesManagedNodes(BoundProgram program) => program.Functions.Any(static function =>
+        function.Intrinsic is >= BoundIntrinsic.NodeTryCreate and <= BoundIntrinsic.NodeCollect
+        || function.ReturnType == PrimitiveType.ManagedNode
+        || function.Variables.Any(static variable => variable.Type == PrimitiveType.ManagedNode));
 
     private static bool Exportable(BoundProgram program, BoundFunction function, bool scalarExportsOnly)
     {
@@ -327,6 +332,8 @@ internal sealed partial class PeCompiler
     private readonly List<(int Offset, int Target)> _cleanupCalls = [];
     private readonly List<(BoundBlock Body, int Function, int Start, int End)> _funclets = [];
     private readonly Dictionary<int, List<(int Value, int Live, PrimitiveType Type)>> _stagedOwners = [];
+    private readonly Dictionary<int, List<int>> _managedStagedRoots = [];
+    private readonly HashSet<int> _unwindRootFrames = [];
     private readonly List<int> _imports = new();
     private readonly List<NativeImportFixup> _nativeImportFixups = [];
     private readonly List<NativeDataFixup> _dataFixups = [];
@@ -410,10 +417,7 @@ internal sealed partial class PeCompiler
             }
         }
         _hostDataLength = writableAt;
-        _managedNodes = program.Functions.Any(static function =>
-            function.Intrinsic >= BoundIntrinsic.NodeTryCreate
-            || function.ReturnType == PrimitiveType.ManagedNode
-            || function.Variables.Any(static variable => variable.Type == PrimitiveType.ManagedNode));
+        _managedNodes = NativeEmitter.UsesManagedNodes(program);
         _managedRuntimeOffset = _managedNodes ? (writableAt + 7) & ~7 : -1;
         _data = new byte[_managedNodes ? _managedRuntimeOffset + 24 : writableAt];
         for (var index = 0; index < program.Buffers.Length; index++)
@@ -568,7 +572,8 @@ internal sealed partial class PeCompiler
             _outBases[i] = _spillBases[i] + (16 * spillSlots);
             _returnSlots[i] = _outBases[i] + (16 * outParameters);
             var required = _returnSlots[i] + (IsIndirect(function.ReturnType) ? 8L : 0L);
-            if (ContainsCleanup(function.Body))
+            var needsReturnSnapshot = ContainsCleanup(function.Body, _checkedExceptions && _managedNodes);
+            if (needsReturnSnapshot)
             {
                 required = ((required + 15) & ~15L) + 16;
             }
@@ -609,7 +614,7 @@ internal sealed partial class PeCompiler
                 _cleanupArgumentSlots[i] = checked((int)((required + 15) & ~15L));
                 required = _cleanupArgumentSlots[i] + 16L;
             }
-            required = PrepareManagedRoots(i, function, spillSlots, required);
+            required = PrepareManagedRoots(i, function, spillSlots, needsReturnSnapshot, required);
             required += 8; // Saved RBP lives above the addressable frame slots.
             if (required > MaximumFrame)
             {
@@ -722,6 +727,7 @@ internal sealed partial class PeCompiler
             {
                 RegisterManagedRoots(i);
             }
+            var rootsBegin = _code.Position;
             if (function.Intrinsic != BoundIntrinsic.None)
             {
                 if (function.Intrinsic >= BoundIntrinsic.NodeTryCreate)
@@ -742,6 +748,13 @@ internal sealed partial class PeCompiler
                     UnregisterManagedRoots(i);
                     Epilog();
                 }
+            }
+            if (_checkedExceptions && _managedRootFlags[i].Count != 0)
+            {
+                var unwind = _funclets.Count;
+                _funclets.Add((new BoundBlock([], function.Span), i, 0, 0));
+                _ = _unwindRootFrames.Add(unwind);
+                _scopes[i].Add(new NativeExceptionScope(rootsBegin, _code.Position, -unwind - 1, 0));
             }
             _ends[i] = _code.Position;
             if (_code.Position > MaximumText)
@@ -780,6 +793,17 @@ internal sealed partial class PeCompiler
                     EmitDropValue(value, type);
                     _code.PatchRelative(vacant, _code.Position);
                 }
+            }
+            if (_managedStagedRoots.TryGetValue(index, out var roots))
+            {
+                foreach (var slot in roots)
+                {
+                    SetManagedRoot(slot, active: false);
+                }
+            }
+            if (_unwindRootFrames.Contains(index))
+            {
+                UnregisterManagedRoots(function);
             }
             _emittingFunclet = false;
             Epilog();
@@ -875,16 +899,17 @@ internal sealed partial class PeCompiler
 
     private static int AlignFrame(int bytes) => ((bytes + 8 + 15) & ~15) - 8;
 
-    private static bool ContainsCleanup(BoundStatement statement) => statement switch {
+    private static bool ContainsCleanup(BoundStatement statement, bool managedScopes = false) => statement switch {
         BoundTryFinally => true,
-        BoundTryCatch recovery => recovery.Finally is not null || ContainsCleanup(recovery.Body)
-            || ContainsCleanup(recovery.Catch),
-        BoundUnsafe unsafeBlock => ContainsCleanup(unsafeBlock.Body),
-        BoundBlock block => block.Statements.Any(ContainsCleanup),
-        BoundIf conditional => ContainsCleanup(conditional.Then)
-            || (conditional.Else is not null && ContainsCleanup(conditional.Else)),
-        BoundWhile loop => ContainsCleanup(loop.Body),
-        BoundViewScope view => ContainsCleanup(view.Body),
+        BoundTryCatch recovery => recovery.Finally is not null || ContainsCleanup(recovery.Body, managedScopes)
+            || ContainsCleanup(recovery.Catch, managedScopes),
+        BoundUnsafe unsafeBlock => ContainsCleanup(unsafeBlock.Body, managedScopes),
+        BoundBlock block => (managedScopes && !block.RetiredManagedLocals.IsEmpty)
+            || block.Statements.Any(child => ContainsCleanup(child, managedScopes)),
+        BoundIf conditional => ContainsCleanup(conditional.Then, managedScopes)
+            || (conditional.Else is not null && ContainsCleanup(conditional.Else, managedScopes)),
+        BoundWhile loop => ContainsCleanup(loop.Body, managedScopes),
+        BoundViewScope view => ContainsCleanup(view.Body, managedScopes),
         _ => false,
     };
 
@@ -1366,13 +1391,34 @@ internal sealed partial class PeCompiler
                 RuntimeBranch(0x84, 2);
                 break;
             case BoundBlock block:
+                var rootCleanup = -1;
+                if (_checkedExceptions && !_emittingFunclet && !block.RetiredManagedLocals.IsEmpty)
+                {
+                    rootCleanup = _funclets.Count;
+                    _funclets.Add((new BoundBlock([], block.Span) {
+                        RetiredManagedLocals = block.RetiredManagedLocals,
+                    }, _currentFunction, 0, 0));
+                    _cleanups.Add(rootCleanup);
+                }
+                var rootScopeBegin = _code.Position;
                 foreach (var child in block.Statements)
                 {
                     Statement(child);
                 }
-                foreach (var retired in block.RetiredManagedLocals)
+                if (rootCleanup >= 0)
                 {
-                    SetManagedRoot(OwnerPlace(retired), active: false);
+                    _code.Byte(0x90);
+                    _cleanups.RemoveAt(_cleanups.Count - 1);
+                    _scopes[_currentFunction].Add(new NativeExceptionScope(rootScopeBegin, _code.Position,
+                        -rootCleanup - 1, 0));
+                    CallCleanup(rootCleanup);
+                }
+                else
+                {
+                    foreach (var retired in block.RetiredManagedLocals)
+                    {
+                        SetManagedRoot(OwnerPlace(retired), active: false);
+                    }
                 }
                 break;
             case BoundLocal local:
@@ -1892,6 +1938,29 @@ internal sealed partial class PeCompiler
                 }
                 var stagedBegin = _code.Position;
                 var stagedFunclet = -1;
+                var managedFunclet = -1;
+                if (_checkedExceptions && _managedNodes && !_emittingFunclet)
+                {
+                    List<int>? managedSlots = null;
+                    for (var i = 0; i < call.Arguments.Length; i++)
+                    {
+                        if (call.Arguments[i].Type == PrimitiveType.ManagedNode)
+                        {
+                            managedSlots ??= [];
+                            managedSlots.Add(Spill(argumentsBase + i));
+                            if (call.Arguments[i] is BoundOutArgument)
+                            {
+                                managedSlots.Add(Spill(argumentsBase + call.Arguments.Length + i));
+                            }
+                        }
+                    }
+                    if (managedSlots is not null)
+                    {
+                        managedFunclet = _funclets.Count;
+                        _funclets.Add((new BoundBlock([], call.Span), _currentFunction, 0, 0));
+                        _managedStagedRoots.Add(managedFunclet, managedSlots);
+                    }
+                }
                 if (_checkedExceptions && staged is not null && !_emittingFunclet)
                 {
                     stagedFunclet = _funclets.Count;
@@ -2064,6 +2133,12 @@ internal sealed partial class PeCompiler
                             SetManagedRoot(Spill(argumentsBase + call.Arguments.Length + i), active: false);
                         }
                     }
+                }
+                if (managedFunclet >= 0)
+                {
+                    _code.Byte(0x90);
+                    _scopes[_currentFunction].Add(new NativeExceptionScope(stagedBegin, _code.Position,
+                        -managedFunclet - 1, 0));
                 }
                 break;
         }

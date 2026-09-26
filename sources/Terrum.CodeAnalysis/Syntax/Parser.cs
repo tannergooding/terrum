@@ -26,6 +26,144 @@ internal sealed class Parser
         _cancellationToken = cancellationToken;
     }
 
+    private SyntaxNode ParseTypeParameters()
+    {
+        var children = new List<SyntaxElement> { Expect(TokenKind.Less), Expect(TokenKind.Identifier) };
+        while (Current.Kind == TokenKind.Comma)
+        {
+            children.Add(Take());
+            children.Add(Expect(TokenKind.Identifier));
+        }
+        children.Add(Expect(TokenKind.Greater));
+        return Node(SyntaxKind.TypeParameterList, children);
+    }
+
+    private SyntaxNode ParseConformances()
+    {
+        var children = new List<SyntaxElement> { Take(), ParseType() };
+        while (Current.Kind == TokenKind.Comma)
+        {
+            children.Add(Take());
+            children.Add(ParseType());
+        }
+        return Node(SyntaxKind.ConformanceList, children);
+    }
+
+    private SyntaxNode ParseConstraint()
+    {
+        var children = new List<SyntaxElement> {
+            Take(), Expect(TokenKind.Identifier), Expect(TokenKind.Colon),
+        };
+        while (true)
+        {
+            var start = _position;
+            if (Current.Kind == TokenKind.OpenBracket)
+            {
+                children.Add(Node(SyntaxKind.Attribute,
+                    [Take(), Expect(TokenKind.Identifier), Expect(TokenKind.CloseBracket)]));
+            }
+            else
+            {
+                children.Add(ParseType());
+            }
+            if (_position == start)
+            {
+                if (Current.Kind is not (TokenKind.OpenBrace or TokenKind.EndOfFile))
+                {
+                    children.Add(Node(SyntaxKind.SkippedSyntax, [Take()]));
+                }
+                break;
+            }
+            if (Current.Kind != TokenKind.Comma)
+            {
+                break;
+            }
+            children.Add(Take());
+        }
+        return Node(SyntaxKind.ConstraintClause, children);
+    }
+
+    private bool LooksLikeGenericCall()
+    {
+        var depth = 0;
+        var previous = TokenKind.Identifier;
+        for (var offset = 0; offset < _tokens.Length - _position; offset++)
+        {
+            if ((offset & 63) == 0)
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+            }
+            var kind = Peek(offset).Kind;
+            if (kind == TokenKind.Less)
+            {
+                // Qualified names do not increase nesting; only type arguments use the parser's depth bound.
+                if (previous != TokenKind.Identifier || ++depth > MaximumDepth)
+                {
+                    return false;
+                }
+            }
+            else if (kind == TokenKind.Greater)
+            {
+                if (depth == 0 || previous is not (TokenKind.Identifier or TokenKind.VoidKeyword
+                    or TokenKind.Greater or TokenKind.Question))
+                {
+                    return false;
+                }
+                if (--depth == 0)
+                {
+                    return Peek(offset + 1).Kind == TokenKind.OpenParen;
+                }
+            }
+            else if (kind is TokenKind.Identifier or TokenKind.VoidKeyword)
+            {
+                if (previous is not (TokenKind.Less or TokenKind.Comma or TokenKind.Dot))
+                {
+                    return false;
+                }
+            }
+            else if (kind == TokenKind.Dot)
+            {
+                if (previous != TokenKind.Identifier)
+                {
+                    return false;
+                }
+            }
+            else if (kind == TokenKind.Comma)
+            {
+                if (depth == 0 || previous is not (TokenKind.Identifier or TokenKind.VoidKeyword
+                    or TokenKind.Greater or TokenKind.Question))
+                {
+                    return false;
+                }
+            }
+            else if (kind == TokenKind.Question)
+            {
+                if (previous is not (TokenKind.Identifier or TokenKind.VoidKeyword or TokenKind.Greater))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                return false;
+            }
+            previous = kind;
+        }
+        return false;
+    }
+
+    private SyntaxNode ParseTypeArguments()
+    {
+        var children = new List<SyntaxElement> { Take(), ParseType() };
+        while (Current.Kind == TokenKind.Comma)
+        {
+            children.Add(Take());
+            children.Add(ParseType());
+        }
+        children.Add(Expect(TokenKind.Greater));
+        return Node(SyntaxKind.TypeParameterList, children);
+    }
+
     internal IEnumerable<Diagnostic> Diagnostics => _diagnostics;
 
     private SyntaxToken Current => Peek(0);
@@ -111,7 +249,7 @@ internal sealed class Parser
             children.Add(Node(SyntaxKind.Attribute, [Take(), Expect(TokenKind.Identifier), Expect(TokenKind.CloseBracket)]));
         }
 
-        while (IsModifier(Current.Kind))
+        while (IsModifier(Current.Kind) || Current.Kind == TokenKind.AbstractKeyword)
         {
             children.Add(Take());
         }
@@ -123,6 +261,10 @@ internal sealed class Parser
             children.Add(Take());
             var name = Expect(TokenKind.Identifier);
             children.Add(name);
+            if (Current.Kind == TokenKind.Colon)
+            {
+                children.Add(ParseConformances());
+            }
             children.Add(Expect(TokenKind.OpenBrace));
 
             while (Current.Kind is not (TokenKind.CloseBrace or TokenKind.EndOfFile))
@@ -135,6 +277,21 @@ internal sealed class Parser
             children.Add(Expect(TokenKind.CloseBrace));
             kind = SyntaxKind.StructDeclaration;
         }
+        else if (Current.Kind == TokenKind.InterfaceKeyword)
+        {
+            children.Add(Take());
+            children.Add(Expect(TokenKind.Identifier));
+            children.Add(ParseTypeParameters());
+            children.Add(Expect(TokenKind.OpenBrace));
+            while (Current.Kind is not (TokenKind.CloseBrace or TokenKind.EndOfFile))
+            {
+                var start = _position;
+                children.Add(ParseDeclaration(null));
+                EnsureProgress(start, children);
+            }
+            children.Add(Expect(TokenKind.CloseBrace));
+            kind = SyntaxKind.InterfaceDeclaration;
+        }
         else if (containingType is not null && Current.Kind == TokenKind.Identifier
             && Current.Text == containingType && Peek(1).Kind == TokenKind.OpenParen)
         {
@@ -146,30 +303,49 @@ internal sealed class Parser
         else if (IsTypeStart(Current.Kind))
         {
             children.Add(ParseType());
-            children.Add(Expect(TokenKind.Identifier));
-
-            if (Current.Kind == TokenKind.OpenParen)
+            if (Current.Kind == TokenKind.OperatorKeyword)
             {
+                children.Add(Take());
+                children.Add(Current.Kind is TokenKind.Plus or TokenKind.Star ? Take() : Expect(TokenKind.Plus));
                 children.Add(ParseParameters());
-                children.Add(ParseBlock());
-                kind = SyntaxKind.FunctionDeclaration;
-            }
-            else if (containingType is not null)
-            {
-                if (Current.Kind == TokenKind.Equals)
-                {
-                    children.Add(Take());
-                    children.Add(ParseExpression());
-                }
-
-                children.Add(Expect(TokenKind.Semicolon));
-                kind = SyntaxKind.FieldDeclaration;
+                children.Add(Current.Kind == TokenKind.Semicolon ? Take() : ParseBlock());
+                kind = SyntaxKind.OperatorDeclaration;
             }
             else
             {
-                Report("TRM1002", $"Expected a function declaration; this construct is outside {SyntaxTree.LanguageVersion}.", Current.Span);
-                children.Add(SkipDeclaration());
-                kind = SyntaxKind.SkippedSyntax;
+                children.Add(Expect(TokenKind.Identifier));
+
+                if (Current.Kind == TokenKind.Less)
+                {
+                    children.Add(ParseTypeParameters());
+                }
+                if (Current.Kind == TokenKind.OpenParen)
+                {
+                    children.Add(ParseParameters());
+                    while (Current.Kind == TokenKind.WhereKeyword)
+                    {
+                        children.Add(ParseConstraint());
+                    }
+                    children.Add(ParseBlock());
+                    kind = SyntaxKind.FunctionDeclaration;
+                }
+                else if (containingType is not null && children.TrueForAll(static child =>
+                    child is not SyntaxNode { Kind: SyntaxKind.TypeParameterList }))
+                {
+                    if (Current.Kind == TokenKind.Equals)
+                    {
+                        children.Add(Take());
+                        children.Add(ParseExpression());
+                    }
+                    children.Add(Expect(TokenKind.Semicolon));
+                    kind = SyntaxKind.FieldDeclaration;
+                }
+                else
+                {
+                    Report("TRM1002", $"Expected a function declaration; this construct is outside {SyntaxTree.LanguageVersion}.", Current.Span);
+                    children.Add(SkipDeclaration());
+                    kind = SyntaxKind.SkippedSyntax;
+                }
             }
         }
         else
@@ -599,7 +775,10 @@ internal sealed class Parser
         }
         else if (Current.Kind == TokenKind.Identifier)
         {
-            expression = Node(SyntaxKind.NameExpression, [Take()]);
+            var name = Take();
+            expression = Current.Kind == TokenKind.Less && LooksLikeGenericCall()
+                ? Node(SyntaxKind.GenericNameExpression, [name, ParseTypeArguments()])
+                : Node(SyntaxKind.NameExpression, [name]);
         }
         else
         {

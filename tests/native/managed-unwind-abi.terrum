@@ -1,0 +1,112 @@
+ManagedNode MakeNode(int32 value) {
+    require ManagedNode.TryCreate(value, out var node);
+    return node;
+}
+
+void FailCycle() {
+    var first = MakeNode(1);
+    var second = MakeNode(2);
+    first.SetNext(second);
+    second.SetNext(first);
+    require false;
+}
+
+ManagedNode FailNode() {
+    var node = MakeNode(2);
+    node.SetNext(node);
+    require false;
+    return node;
+}
+
+int32 ReadPair(ManagedNode first, ManagedNode second) {
+    return first.Value + second.Value;
+}
+
+bool FailOutput(out ManagedNode node) {
+    require ManagedNode.TryCreate(1, out node);
+    node.SetNext(node);
+    require false;
+    return true;
+}
+
+unique struct CollectOnDrop {
+    int32 Tag;
+    [NoThrow] public CollectOnDrop(int32 tag) { Tag = tag; }
+    [Cleanup] [NoThrow] public void Close() { ManagedHeap.Collect(); }
+}
+
+ManagedNode ReturnKept() {
+    var cleanup = new CollectOnDrop(0);
+    var kept = MakeNode(42);
+    {
+        var discarded = MakeNode(0);
+        discarded.SetNext(discarded);
+    }
+    return kept;
+}
+
+public int32 SameFrame() {
+    var retained = MakeNode(42);
+    unsafe {
+        try {
+            var discarded = MakeNode(1);
+            discarded.SetNext(discarded);
+            require false;
+        } catch {
+            require ManagedHeap.Collect() == 1;
+        }
+    }
+    return retained.Value;
+}
+
+public int32 EscapingFrame() {
+    var retained = MakeNode(42);
+    unsafe {
+        try {
+            FailCycle();
+        } catch {
+            require ManagedHeap.Collect() == 2;
+        }
+    }
+    return retained.Value;
+}
+
+public int32 LaterArgument() {
+    var retained = MakeNode(42);
+    unsafe {
+        try {
+            return ReadPair(MakeNode(1), FailNode());
+        } catch {
+            require ManagedHeap.Collect() == 2;
+        }
+    }
+    return retained.Value;
+}
+
+public int32 OutputFailure() {
+    var retained = MakeNode(42);
+    unsafe {
+        try {
+            if (FailOutput(out var unpublished)) {
+                return unpublished.Value;
+            }
+        } catch {
+            require ManagedHeap.Collect() == 1;
+        }
+    }
+    return retained.Value;
+}
+
+public int32 ReturnAcrossCleanup() {
+    var kept = ReturnKept();
+    require ManagedHeap.Collect() == 0;
+    return kept.Value;
+}
+
+public void EscapeToNative() {
+    FailCycle();
+}
+
+public int32 CollectWithScalar(uint64 value) {
+    return ManagedHeap.Collect();
+}

@@ -1,0 +1,42 @@
+interface Addition<TSelf, TOther, TResult> {
+    static abstract TResult operator +(TSelf left, TOther right);
+}
+
+interface Multiplication<TSelf, TOther, TResult> {
+    static abstract TResult operator *(TSelf left, TOther right);
+}
+
+struct Meters : Addition<Meters, Meters, Meters>, Multiplication<Meters, Meters, Meters> {
+    public int32 Value;
+    public Meters(int32 value) { Value = value; }
+    public static Meters operator +(Meters left, Meters right) {
+        return new Meters(left.Value + right.Value);
+    }
+    public static Meters operator *(Meters left, Meters right) {
+        return new Meters(left.Value * right.Value);
+    }
+}
+
+struct Seconds : Addition<Seconds, Seconds, Seconds>, Multiplication<Seconds, Seconds, Seconds> {
+    public int32 Value;
+    public Seconds(int32 value) { Value = value; }
+    public static Seconds operator +(Seconds left, Seconds right) {
+        return new Seconds(left.Value + right.Value);
+    }
+    public static Seconds operator *(Seconds left, Seconds right) {
+        return new Seconds(left.Value * right.Value);
+    }
+}
+
+T EvaluateQuadratic<T>(T x, T a, T b, T c)
+    where T : Addition<T, T, T>, Multiplication<T, T, T>, [Copy] {
+    return (a * x + b) * x + c;
+}
+
+int32 Main() {
+    Meters distance = EvaluateQuadratic<Meters>(
+        new Meters(2), new Meters(3), new Meters(4), new Meters(5));
+    Seconds time = EvaluateQuadratic<Seconds>(
+        new Seconds(2), new Seconds(4), new Seconds(1), new Seconds(3));
+    return distance.Value + time.Value;
+}

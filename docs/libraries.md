@@ -17,6 +17,14 @@ The API inventories deliberately mix signatures with selected algorithm bodies. 
 
 ## Scalar mathematics, keys and conversion
 
+The executable [static-protocol sample](../samples/native/static-protocol-quadratic.terrum)
+now exercises a bounded part of this direction: source-defined addition and
+multiplication protocols, explicit nominal Copy conformance and one constrained
+algorithm specialized for two wrappers. Its templates and witnesses remain
+compilation-local; the [implementation limits](implementation.md) do not extend
+to these complete inventories, primitive numeric conformance, mixed-result
+operators, families or generic collection algorithms.
+
 The granular `IAdditionOperators<TSelf, TOther, TResult>` and `IMultiplyOperators<...>` protocols in [numerics](../library/numerics.api.terrum) express an operand and a *possibly different* result. `IAdditiveIdentity<TSelf, TResult>` supplies an operation's zero. `IScalarNumber<TSelf>` composes selected closed scalar operations; IEEE classification/functions live on `IScalarIeee754<TSelf>`. A declared fixed-vector family checks its common operations and associated element/mask relationships; it can supply the same granular operator witnesses without requiring users to name an `ISimdVector` interface merely to abstract over widths. Granular interfaces remain useful across unrelated vector, complex and matrix types. A SIMD vector does **not** become a scalar number by providing `+` and `*`. The inventory is representative, not an implemented numeric surface.
 
 Integer arithmetic is checked regardless of build; wrapping/saturating/try forms are explicit. No promotion between already typed numbers is implicit. Numeric literals are constructed directly in an unambiguous target type, not converted from an implicit default. Ordinary casts select checked conversion; reusable checked/saturating/truncating protocols replace permanent per-source-type `FromInt32` method families. [Conversion policies](conversions.md) specify fractional rounding separately from range and modulo narrowing: checked can be inexact, and bit reinterpretation remains `FromBits`/`ToBits`. `Splat`/broadcast replicates the *same* lane value or tensor elements, without itself converting them. A widening vector conversion must define output shape and lane count explicitly -- it cannot silently discard half the elements. Fixed-width `float32` math has strict target-format rounding and no implicit reassociation/contraction; `FusedMultiplyAdd`, native/approximate functions and reproducible reductions are separate contracts. IEEE `decimal32` is not CLR `decimal` or a binary64 intermediary. The CLR's decimal BID software implementation is a useful reference, not proof of matching Terrum ABI, parsing, rounding and exceptional behavior.

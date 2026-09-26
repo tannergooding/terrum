@@ -7,7 +7,7 @@ fields, including nested Copy fields, under either runtime policy),
 `native-15` (compiler-defined owned native `int32` buffer), `native-16`
 (lexical readonly slices of its initialized prefix), `native-17`
 (lexical exclusive writable slices and in-place prefix reset), and
-`native-18` (closed-image, fail-fast managed-node tracing proof)
+`native-18` (closed-image managed-node tracing under either runtime policy)
 are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
@@ -63,8 +63,14 @@ nodes before the JIT unregisters and releases its executable image; the
 JIT does not delegate reclamation to its worker process exit or CLR GC.
 The maximum live allocation count is 4,096; a full heap makes `TryCreate`
 return false rather than fabricate a result. `HeapFree` failure remains fatal.
-This is a single-threaded, image-private, fail-fast AOT/JIT proof with no
-general class syntax, checked-exception root unwind, managed user-struct
+Under checked exceptions, lexical root-retirement funclets run after nested
+user cleanup. Staged arguments and unpublished outputs retire on failure;
+an outer function scope unlinks its root frame only when unwind escapes it.
+Local catches retain the surviving frame, and pending returns stay rooted
+through collecting cleanup. These use the same verified root metadata,
+collector and Windows unwind machinery as normal execution.
+This is a single-threaded, image-private AOT/JIT proof with no
+general class syntax, managed user-struct
 fields, managed native exports/imports, persisted module graph ABI, finalizers,
 interior pointers, pinning or generational/concurrent collection. Native DLL
 emission admits only scalar by-value parameters and scalar or `void` results,
@@ -76,7 +82,20 @@ or automatic unload teardown.
 The independent `scripts/check-managed-node-abi.cs` probe instruments the
 image's `HeapAlloc`/`HeapFree` imports. It checks cycle reclamation, retired
 frame roots, pointer-shaped scalar nonroots, allocation failure and fatal
-release failures through a separately compiled C caller.
+release failures through a separately compiled C caller under both policies.
+Its checked-unwind fixture also checks lexical and staged-root retirement,
+return snapshots, and a native C handler that validates the private versioned
+exception record before collecting after both Terrum frames have departed.
+That fixture is evidence for frame cleanup, not a public exception ABI.
+
+The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
+uses source-declared `+` and `*` constraints and two nominal Copy wrappers,
+returning 46 through AOT and JIT. Closed specialization emits ordinary concrete
+calls through this backend; there is no second evaluator or generic runtime.
+Templates and witnesses are compilation-local, while an exported concrete
+wrapper can use the existing separately compiled contract format. See the
+[bounded grammar and constraints](implementation.md); this does not implement
+the proposed generic standard library or replaceable generic witnesses.
 
 For owned buffers, allocation-failure and exactly-once-release behavior can be checked with
 the trusted native ABI probe in `scripts/check-owned-buffer-abi.cs`, which

@@ -14,7 +14,8 @@ internal sealed partial class PeCompiler
     private int _managedCollectorStart;
     private int _managedCollectorEnd;
 
-    private long PrepareManagedRoots(int functionIndex, BoundFunction function, int spillSlots, long at)
+    private long PrepareManagedRoots(int functionIndex, BoundFunction function, int spillSlots,
+        bool needsReturnSnapshot, long at)
     {
         if (!_managedNodes || function.Intrinsic != BoundIntrinsic.None)
         {
@@ -34,7 +35,7 @@ internal sealed partial class PeCompiler
         {
             _ = roots.TryAdd(_spillBases[functionIndex] + (16 * spill), 0);
         }
-        if (function.ReturnType == PrimitiveType.ManagedNode && ContainsCleanup(function.Body))
+        if (function.ReturnType == PrimitiveType.ManagedNode && needsReturnSnapshot)
         {
             _ = roots.TryAdd((_returnSlots[functionIndex] + 15) & ~15, 0);
         }

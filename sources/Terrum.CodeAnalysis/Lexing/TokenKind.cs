@@ -159,4 +159,10 @@ public enum TokenKind
     Caret,
     /// <summary>The <c>unsafe</c> keyword, required for checked-failure recovery.</summary>
     UnsafeKeyword,
+    /// <summary>The <c>abstract</c> keyword.</summary>
+    AbstractKeyword,
+    /// <summary>The <c>operator</c> keyword.</summary>
+    OperatorKeyword,
+    /// <summary>The <c>where</c> keyword.</summary>
+    WhereKeyword,
 }
