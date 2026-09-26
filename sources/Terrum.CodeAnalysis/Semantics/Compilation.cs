@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
 using System.Threading;
 using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Syntax;
@@ -43,6 +44,35 @@ public sealed class Compilation
         return compositeUnique ? "native-14" : baseline;
     }
 
+    /// <summary>Includes the compiler-defined owned native buffer ABI and cleanup obligation.</summary>
+    public static string GetNativeProfileVersion(BoundRuntimePolicy policy, bool uniqueValues,
+        bool ownershipTransfer, bool compositeUnique, bool ownedNativeBuffer)
+    {
+        var baseline = GetNativeProfileVersion(policy, uniqueValues, ownershipTransfer, compositeUnique);
+        return ownedNativeBuffer ? "native-15" : baseline;
+    }
+
+    internal static bool HasOwnedNativeBuffer(ImmutableArray<BoundStruct> structures,
+        IEnumerable<BoundFunction> functions)
+    {
+        foreach (var structure in structures)
+        {
+            if (structure.Fields.Any(static field => field.Type == PrimitiveType.OwnedInt32Buffer))
+            {
+                return true;
+            }
+        }
+        foreach (var function in functions)
+        {
+            if (function.ReturnType == PrimitiveType.OwnedInt32Buffer
+                || function.Variables.Any(static variable => variable.Type == PrimitiveType.OwnedInt32Buffer))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     internal static bool HasCompositeUnique(ImmutableArray<BoundStruct> structures)
     {
         foreach (var structure in structures)
@@ -79,7 +109,7 @@ public sealed class Compilation
             {
                 throw new ArgumentOutOfRangeException(nameof(function), "Function parameter references an unknown structure.");
             }
-            if (index >= 0 && structures[index].IsUnique
+            if ((type == PrimitiveType.OwnedInt32Buffer || (index >= 0 && structures[index].IsUnique))
                 && !(slot == 0 && function.DeclaringStruct is not null && !function.IsStatic))
             {
                 return true;
@@ -98,16 +128,17 @@ public sealed class Compilation
             unique |= structure.IsUnique;
         }
         var composite = HasCompositeUnique(program.Structures);
+        var ownedBuffer = HasOwnedNativeBuffer(program.Structures, program.Functions);
         foreach (var function in program.Functions)
         {
             if (HasOwnershipTransfer(function, program.Structures))
             {
                 return GetNativeProfileVersion(program.RuntimePolicy, unique,
-                    ownershipTransfer: true, compositeUnique: composite);
+                    ownershipTransfer: true, compositeUnique: composite, ownedNativeBuffer: ownedBuffer);
             }
         }
         return GetNativeProfileVersion(program.RuntimePolicy, unique,
-            ownershipTransfer: false, compositeUnique: composite);
+            ownershipTransfer: false, compositeUnique: composite, ownedNativeBuffer: ownedBuffer);
     }
 
     private Compilation(SyntaxTree syntaxTree, ImmutableArray<Diagnostic> diagnostics, BoundProgram? program,

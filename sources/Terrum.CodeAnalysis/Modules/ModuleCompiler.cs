@@ -19,7 +19,8 @@ public static partial class ModuleCompiler
     private const int Magic = 0x4D525254; // TRRM
     private const int OwnershipVersion = 12;
     private const int TransferVersion = 13;
-    private const int Version = 14;
+    private const int CompositeVersion = 14;
+    private const int Version = 15;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -82,8 +83,17 @@ public static partial class ModuleCompiler
         return (Compilation.GetNativeProfileVersion(module.RuntimePolicy,
             module.Structures.Any(static structure => structure.IsUnique),
             module.Functions.Any(static function => function.HasOwnershipTransfer),
-            Compilation.HasCompositeUnique(module.Structures)), module.RuntimePolicy);
+            Compilation.HasCompositeUnique(module.Structures),
+            HasOwnedNativeBuffer(module.Structures, module.Functions)), module.RuntimePolicy);
     }
+
+    private static bool HasOwnedNativeBuffer(ImmutableArray<BoundStruct> structures,
+        ImmutableArray<ModuleFunction> functions) =>
+        Compilation.HasOwnedNativeBuffer(structures,
+            functions.Where(static function => function.Function is not null)
+                .Select(static function => function.Function ?? throw new ModuleFormatException("Missing function body.")))
+        || functions.Any(static function => function.Contract.Split('|')
+            .Any(static part => part is "7" or "in:7" or "out:7"));
 
     private static BoundFunction Declaration(BoundFunction function) => function with {
         IsExternal = true,
@@ -104,7 +114,8 @@ public static partial class ModuleCompiler
             {
                 Add(variable.Type);
             }
-            if (function.DeclaringStruct is string declaring)
+            if (function.DeclaringStruct is string declaring
+                && declaring != NativeBufferIntrinsics.TypeName)
             {
                 var index = 0;
                 while (index < structures.Length && structures[index].Name != declaring)
@@ -427,12 +438,19 @@ public static partial class ModuleCompiler
         }
         foreach (var exported in producer.Functions)
         {
+            if (exported.Function is { Intrinsic: not BoundIntrinsic.None }
+                && names.TryGetValue(exported.Name, out var intrinsicIndex))
+            {
+                producerNames.Add(exported.Name, intrinsicIndex);
+                continue;
+            }
             if (!producerNames.ContainsKey(exported.Name))
             {
                 producerNames.Add(exported.Name, functions.Count);
                 producerOwned.Add(functions.Count);
                 var owner = exported.Function?.DeclaringStruct;
-                var name = owner is not null && sharedTypes.Contains(owner)
+                var name = exported.Function is { Intrinsic: not BoundIntrinsic.None } ? exported.Name
+                    : owner is not null && sharedTypes.Contains(owner)
                     ? owner + ".$producer." + exported.Name[(owner.Length + 1)..] : "$producer." + exported.Name;
                 functions.Add(ImportFunction(exported, name));
             }
@@ -463,7 +481,8 @@ public static partial class ModuleCompiler
         {
             var function = declaration.Function ?? throw new ModuleFormatException("Producer has an unowned function.");
             var owner = function.DeclaringStruct;
-            if (owner is not null && !sharedTypes.Contains(owner))
+            if (owner is not null && owner != NativeBufferIntrinsics.TypeName
+                && !sharedTypes.Contains(owner))
             {
                 owner = "$producer." + owner;
             }
@@ -788,6 +807,7 @@ public static partial class ModuleCompiler
                 Type = RemapType(loan.Type, source, destination),
                 Place = (BoundFieldRead)RemapExpression(loan.Place, source, destination),
             },
+            BoundMutableReceiverLoan loan => loan with { Type = RemapType(loan.Type, source, destination) },
             BoundUnary unary => unary with {
                 Type = RemapType(unary.Type, source, destination),
                 Operand = RemapExpression(unary.Operand, source, destination),
@@ -896,7 +916,8 @@ public static partial class ModuleCompiler
         PutString(writer, Compilation.GetNativeProfileVersion(module.RuntimePolicy,
             module.Structures.Any(static structure => structure.IsUnique),
             module.Functions.Any(static function => function.HasOwnershipTransfer),
-            Compilation.HasCompositeUnique(module.Structures)));
+            Compilation.HasCompositeUnique(module.Structures),
+            HasOwnedNativeBuffer(module.Structures, module.Functions)));
         writer.Write(module.Consumer);
         writer.Write((byte)program.RuntimePolicy);
         writer.Write(module.EntryPoint);
@@ -977,7 +998,8 @@ public static partial class ModuleCompiler
             if (profile != Compilation.GetNativeProfileVersion(policy,
                 structures.Any(static structure => structure.IsUnique),
                 items.Any(static item => item.HasOwnershipTransfer),
-                Compilation.HasCompositeUnique(structures)))
+                Compilation.HasCompositeUnique(structures),
+                HasOwnedNativeBuffer(structures, items)))
             {
                 throw new ModuleFormatException("Module semantic profile does not match its retained contracts.");
             }
@@ -1003,7 +1025,7 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Unknown module format or version.");
         }
         var version = reader.ReadInt32();
-        if (version is not (10 or 11 or OwnershipVersion or TransferVersion or Version))
+        if (version is not (10 or 11 or OwnershipVersion or TransferVersion or CompositeVersion or Version))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -1017,7 +1039,8 @@ public static partial class ModuleCompiler
             || (profile != Compilation.GetNativeProfileVersion(policy, uniqueValues: false)
                 && (version < OwnershipVersion || profile != "native-12")
                 && (version < TransferVersion || profile != "native-13")
-                && (version != Version || profile != "native-14")))
+                && (version < CompositeVersion || profile != "native-14")
+                && (version < Version || profile != "native-15")))
         {
             throw new ModuleFormatException("Unsupported module semantic profile or checked-failure policy.");
         }
@@ -1131,6 +1154,7 @@ public static partial class ModuleCompiler
         writer.Write(function.IsNoThrow);
         writer.Write(function.DoesNotReturn);
         writer.Write(function.IsCleanup);
+        writer.Write((byte)function.Intrinsic);
         writer.Write(function.DeclaringStruct is not null);
         if (function.DeclaringStruct is string declaringStruct)
         {
@@ -1161,6 +1185,7 @@ public static partial class ModuleCompiler
         var isNoThrow = GetBool(reader);
         var doesNotReturn = GetBool(reader);
         var isCleanup = version >= OwnershipVersion && GetBool(reader);
+        var intrinsic = version >= Version ? (BoundIntrinsic)reader.ReadByte() : BoundIntrinsic.None;
         var declaringStruct = GetBool(reader) ? GetString(reader) : null;
         var parameters = reader.ReadInt32();
         var count = Count(reader, MaximumSlots);
@@ -1188,6 +1213,7 @@ public static partial class ModuleCompiler
             IsNoThrow = isNoThrow,
             DoesNotReturn = doesNotReturn,
             IsCleanup = isCleanup,
+            Intrinsic = intrinsic,
             DeclaringStruct = declaringStruct,
         };
     }
@@ -1388,7 +1414,7 @@ public static partial class ModuleCompiler
                 };
             case 14 when version >= TransferVersion:
                 return new BoundOwnerDeclaration(reader.ReadInt32(), span);
-            case 15 when version >= Version:
+            case 15 when version >= CompositeVersion:
                 var constructedOwner = reader.ReadInt32();
                 var acquired = Count(reader, ValueLayout.MaximumSize);
                 var order = ImmutableArray.CreateBuilder<int>(acquired);
@@ -1419,6 +1445,7 @@ public static partial class ModuleCompiler
             BoundMove => (byte)9,
             BoundReceiverLoan => (byte)10,
             BoundFieldLoan => (byte)11,
+            BoundMutableReceiverLoan => (byte)12,
             _ => throw new ModuleFormatException("Unknown expression kind."),
         });
         writer.Write((int)expression.Type);
@@ -1435,6 +1462,9 @@ public static partial class ModuleCompiler
                 writer.Write(move.Variable);
                 break;
             case BoundReceiverLoan loan:
+                writer.Write(loan.Variable);
+                break;
+            case BoundMutableReceiverLoan loan:
                 writer.Write(loan.Variable);
                 break;
             case BoundFieldLoan fieldLoan:
@@ -1515,9 +1545,11 @@ public static partial class ModuleCompiler
                 return new BoundMove(reader.ReadInt32(), type, span);
             case 10:
                 return new BoundReceiverLoan(reader.ReadInt32(), type, span);
-            case 11 when version >= Version:
+            case 11 when version >= CompositeVersion:
                 return new BoundFieldLoan(GetExpression(reader, ref remaining, depth + 1, version)
                     as BoundFieldRead ?? throw new ModuleFormatException("Expected owning field place."), type, span);
+            case 12 when version >= Version:
+                return new BoundMutableReceiverLoan(reader.ReadInt32(), type, span);
             default:
                 throw new ModuleFormatException("Unknown expression kind.");
         }

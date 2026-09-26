@@ -104,7 +104,7 @@ public static partial class NativeModuleCompiler
     /// <summary>Checks the complete selected closure, every edge and every PE import before execution.</summary>
     public static void ValidateGraph(byte[] consumer, IReadOnlyList<byte[]> producers)
     {
-        CheckGraph(ReadGraphPackage(consumer), ReadGraphProviders(producers));
+        _ = CheckGraph(ReadGraphPackage(consumer), ReadGraphProviders(producers));
     }
 
     /// <summary>Runs unchanged checked EXE and DLL snapshots, with a bounded deadline and no recompilation.</summary>
@@ -127,7 +127,7 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleContractException("Selected graph runtime policy differs from persisted consumer.");
         }
-        CheckGraph(executable, providers);
+        _ = CheckGraph(executable, providers);
         cancellationToken.ThrowIfCancellationRequested();
         var directory = Directory.CreateTempSubdirectory("terrum-native-graph-").FullName;
         var paths = new List<string>();
@@ -179,7 +179,7 @@ public static partial class NativeModuleCompiler
         }
     }
 
-    private static void CheckGraph(GraphPackage consumer, GraphPackage[] providers)
+    private static GraphPackage[] CheckGraph(GraphPackage consumer, GraphPackage[] providers)
     {
         if (!consumer.Consumer || consumer.IsLeaf || providers[0].Policy != consumer.Policy)
         {
@@ -189,6 +189,7 @@ public static partial class NativeModuleCompiler
             StringComparer.OrdinalIgnoreCase);
         var visiting = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var order = new List<GraphPackage>(providers.Length);
         foreach (var dependency in consumer.Dependencies)
         {
             Visit(dependency.Identity);
@@ -198,6 +199,7 @@ public static partial class NativeModuleCompiler
             throw new ModuleContractException("Native graph includes unexpected producers.");
         }
         ValidateGraphDirect(consumer, ResolveDirect(consumer, byIdentity));
+        return [.. order];
 
         void Visit(string identity)
         {
@@ -220,6 +222,7 @@ public static partial class NativeModuleCompiler
                     ValidateGraphDirect(node, ResolveDirect(node, byIdentity));
                 }
                 _ = visited.Add(identity);
+                order.Add(node);
             }
             _ = visiting.Remove(identity);
         }

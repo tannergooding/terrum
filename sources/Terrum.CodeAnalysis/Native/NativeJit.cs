@@ -6,6 +6,8 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
+using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using Terrum.CodeAnalysis.Semantics;
 
@@ -21,6 +23,8 @@ public sealed record NativeExecutionResult(int ExitCode, byte[] Data)
     public ImmutableArray<int> BufferOffsets { get; init; } = [];
 }
 
+internal sealed record NativeJitModule(string DllName, string FullPath, IReadOnlyList<string> Exports);
+
 /// <summary>Executes verified native code in the current Windows x64 process.</summary>
 /// <remarks>
 /// Unhandled checked failures terminate the process; recovery occurs only within generated Terrum regions.
@@ -28,14 +32,22 @@ public sealed record NativeExecutionResult(int ExitCode, byte[] Data)
 /// </remarks>
 public static unsafe class NativeJit
 {
+    private static readonly List<INativeJitContinuationRegistration> s_retainedRegistrations = [];
+
     /// <summary>Emits and executes the callable entry point, returning its int32 result.</summary>
     /// <exception cref="PlatformNotSupportedException">The host is not Windows x64.</exception>
-    public static int Execute(BoundProgram program, NativeRuntimePolicy runtimePolicy) =>
-        ExecuteWithData(program, runtimePolicy).ExitCode;
+    public static int Execute(BoundProgram program, NativeRuntimePolicy runtimePolicy,
+        string? registrarAssembly = null) =>
+        ExecuteWithData(program, runtimePolicy, registrarAssembly).ExitCode;
 
     /// <summary>Executes the entry point and copies compiler-supplied buffers before releasing native memory.</summary>
     /// <exception cref="PlatformNotSupportedException">The host is not Windows x64.</exception>
-    public static NativeExecutionResult ExecuteWithData(BoundProgram program, NativeRuntimePolicy runtimePolicy)
+    /// <param name="program">The verified program to execute.</param>
+    /// <param name="runtimePolicy">The generated native runtime policy.</param>
+    /// <param name="registrarAssembly">Trusted CLI assembly serving remote CET continuation registration
+    /// when the current host enforces CET and generated code uses checked exception continuations.</param>
+    public static NativeExecutionResult ExecuteWithData(BoundProgram program, NativeRuntimePolicy runtimePolicy,
+        string? registrarAssembly = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
@@ -45,7 +57,23 @@ public static unsafe class NativeJit
 
         var code = NativeEmitter.EmitCode(program, runtimePolicy);
         ValidateBufferMetadata(program, code);
-        return ExecuteCode(code);
+        return ExecuteCode(code, [], [], registrarAssembly, null, null);
+    }
+
+    internal static int ExecuteImportedCode(NativeCode code, IReadOnlyList<NativeJitModule> modules,
+        IReadOnlyList<NativeImportBinding> expectedImports, string? registrarAssembly = null,
+        string? registrarInputPipe = null, string? registrarOutputPipe = null)
+    {
+        if (!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
+        {
+            throw new PlatformNotSupportedException("Native JIT requires a Windows x64 process.");
+        }
+        if (code.Data.Length != 0 || !code.BufferOffsets.IsEmpty)
+        {
+            throw new ArgumentException("Native graph consumers cannot contain host buffers.", nameof(code));
+        }
+        return ExecuteCode(code, modules, expectedImports, registrarAssembly,
+            registrarInputPipe, registrarOutputPipe).ExitCode;
     }
 
     private static void ValidateBufferMetadata(BoundProgram program, NativeCode code)
@@ -100,8 +128,13 @@ public static unsafe class NativeJit
         }
     }
 
-    private static NativeExecutionResult ExecuteCode(NativeCode code)
+    private static NativeExecutionResult ExecuteCode(NativeCode code, IReadOnlyList<NativeJitModule> modules,
+        IReadOnlyList<NativeImportBinding> expectedImports, string? registrarAssembly,
+        string? registrarInputPipe, string? registrarOutputPipe)
     {
+        ArgumentNullException.ThrowIfNull(code);
+        ArgumentNullException.ThrowIfNull(modules);
+        ArgumentNullException.ThrowIfNull(expectedImports);
         var text = code.Code;
         var data = code.Data;
         if (text.Length == 0 || code.EntryPoint < 0 || code.EntryPoint >= text.Length || code.Functions.IsDefaultOrEmpty)
@@ -215,15 +248,43 @@ public static unsafe class NativeJit
                 }
             }
         }
+        var moduleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var module in modules)
+        {
+            if (string.IsNullOrEmpty(module.DllName) || !moduleNames.Add(module.DllName)
+                || !Path.IsPathFullyQualified(module.FullPath))
+            {
+                throw new ArgumentException("Native JIT providers require unique DLL names and full paths.",
+                    nameof(modules));
+            }
+        }
+        var allowed = new HashSet<(string Dll, string Export)>();
+        foreach (var binding in expectedImports)
+        {
+            if (!modules.Any(module => module.DllName == binding.DllName
+                    && module.Exports.Contains(binding.ExportName, StringComparer.Ordinal))
+                || !allowed.Add((binding.DllName, binding.ExportName)))
+            {
+                throw new ArgumentException("Native JIT import has no unique validated provider.", nameof(expectedImports));
+            }
+        }
+        var emitted = new HashSet<(string Dll, string Export)>();
         foreach (var fixup in code.NativeImports)
         {
             if (fixup.DisplacementOffset < 0 || fixup.DisplacementOffset > text.Length - sizeof(int)
-                || !((fixup.DllName.Equals("KERNEL32.dll", StringComparison.OrdinalIgnoreCase)
-                        && fixup.ExportName == "RaiseException")
-                    || (fixup.DllName.Equals("NTDLL.dll", StringComparison.OrdinalIgnoreCase)
-                        && fixup.ExportName == "__C_specific_handler")))
+                || (fixup.DeclarationIndex >= 0
+                    ? !allowed.Contains((fixup.DllName, fixup.ExportName))
+                    : !((fixup.DllName.Equals("KERNEL32.dll", StringComparison.OrdinalIgnoreCase)
+                            && fixup.ExportName is "RaiseException" or "ExitProcess" or "GetProcessHeap"
+                                or "HeapAlloc" or "HeapFree")
+                        || (fixup.DllName.Equals("NTDLL.dll", StringComparison.OrdinalIgnoreCase)
+                            && fixup.ExportName == "__C_specific_handler"))))
             {
-                throw new ArgumentException("Invalid JIT runtime import.", nameof(code));
+                throw new ArgumentException("Invalid or unowned JIT import.", nameof(code));
+            }
+            if (fixup.DeclarationIndex >= 0)
+            {
+                _ = emitted.Add((fixup.DllName, fixup.ExportName));
             }
             for (var offset = fixup.DisplacementOffset; offset < fixup.DisplacementOffset + sizeof(int); offset++)
             {
@@ -233,14 +294,53 @@ public static unsafe class NativeJit
                 }
             }
         }
+        if (!emitted.SetEquals(allowed))
+        {
+            throw new ArgumentException("Native JIT fixups differ from persisted machine imports.", nameof(code));
+        }
+        var cetEnforced = false;
+        if (code.NativeImports.Any(static fixup => fixup.ExportName == "RaiseException")
+            && OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041))
+        {
+            if (!JitWindows.GetProcessMitigationPolicy(JitWindows.GetCurrentProcess(), 15,
+                out var shadowStackPolicy, sizeof(uint)))
+            {
+                throw new Win32Exception(Marshal.GetLastPInvokeError());
+            }
+            cetEnforced = (shadowStackPolicy & 0x05) != 0;
+        }
+        var continuations = cetEnforced
+            ? functions.SelectMany(static function => function.ExceptionScopes)
+                .Where(static scope => scope.Target != 0).Select(static scope => scope.Target)
+                .Distinct().ToArray()
+            : [];
+        if (continuations.Length != 0
+            && (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 20348)
+                || !JitWindows.HasDynamicEHContinuationTargets()
+                || (registrarAssembly is null && (registrarInputPipe is null || registrarOutputPipe is null))
+                || continuations.Length > ushort.MaxValue))
+        {
+            throw new NotSupportedException("Checked native JIT under CET requires the Windows build 20348 dynamic continuation API and a trusted remote registrar.");
+        }
 
         var exitProcessModule = NativeLibrary.Load("kernel32.dll", typeof(NativeJit).Assembly, DllImportSearchPath.System32);
         nint handlerModule = 0;
         nint memory = 0;
         var registered = false;
+        INativeJitContinuationRegistration? continuationRegistration = null;
+        var loaded = new Dictionary<string, nint>(StringComparer.OrdinalIgnoreCase);
 
         try
         {
+            foreach (var module in modules)
+            {
+                var handle = JitWindows.LoadLibraryEx(module.FullPath, 0, 0x100 | 0x800);
+                if (handle == 0)
+                {
+                    throw new Win32Exception(Marshal.GetLastPInvokeError());
+                }
+                loaded.Add(module.DllName, handle);
+            }
             var exitProcess = NativeLibrary.GetExport(exitProcessModule, "ExitProcess");
             memory = JitWindows.VirtualAlloc(0, (nuint)size, 0x3000, 0x04);
             if (memory == 0)
@@ -258,8 +358,9 @@ public static unsafe class NativeJit
                 {
                     handlerModule = NativeLibrary.Load("ntdll.dll", typeof(NativeJit).Assembly, DllImportSearchPath.System32);
                 }
-                var module = fixup.DllName.Equals("NTDLL.dll", StringComparison.OrdinalIgnoreCase)
-                    ? handlerModule : exitProcessModule;
+                var module = fixup.DeclarationIndex >= 0 ? loaded[fixup.DllName]
+                    : fixup.DllName.Equals("NTDLL.dll", StringComparison.OrdinalIgnoreCase)
+                        ? handlerModule : exitProcessModule;
                 var target = NativeLibrary.GetExport(module, fixup.ExportName);
                 var pointer = pointerOffset + (sizeof(nint) * (index + 1));
                 BinaryPrimitives.WriteInt64LittleEndian(bytes.Slice(pointer, sizeof(nint)), target);
@@ -328,6 +429,14 @@ public static unsafe class NativeJit
                 }
             }
 
+            if (continuations.Length != 0)
+            {
+                continuationRegistration = registrarInputPipe is not null && registrarOutputPipe is not null
+                    ? new NativeJitPipeRegistration(registrarInputPipe, registrarOutputPipe)
+                    : new NativeJitContinuationRegistration(registrarAssembly!);
+                continuationRegistration.Register(memory, text.Length, continuations);
+            }
+
             var entryPoint = (delegate* unmanaged[Stdcall]<int>)(memory + code.EntryPoint);
             var exitCode = entryPoint();
             var snapshot = new byte[data.Length];
@@ -337,29 +446,48 @@ public static unsafe class NativeJit
         }
         finally
         {
-            Release(memory, tableOffset, registered, exitProcessModule, handlerModule);
+            Release(memory, tableOffset, registered, continuationRegistration,
+                exitProcessModule, handlerModule, loaded, modules);
         }
     }
 
-    private static void Release(nint memory, int tableOffset, bool registered, nint module, nint handlerModule)
+    private static void Release(nint memory, int tableOffset, bool registered,
+        INativeJitContinuationRegistration? continuationRegistration, nint module, nint handlerModule,
+        Dictionary<string, nint> loaded, IReadOnlyList<NativeJitModule> modules)
     {
         // Never free a still-registered table: another thread could unwind through its address.
         var removed = !registered || JitWindows.RtlDeleteFunctionTable(memory + tableOffset);
-        var released = removed && (memory == 0 || JitWindows.VirtualFree(memory, 0, 0x8000));
-        var error = Marshal.GetLastPInvokeError();
-        NativeLibrary.Free(module);
-        if (handlerModule != 0)
-        {
-            NativeLibrary.Free(handlerModule);
-        }
         if (!removed)
         {
+            if (continuationRegistration is not null)
+            {
+                // An abandoned registrar pipe would remove EH targets while the unwind table still exists.
+                lock (s_retainedRegistrations)
+                {
+                    s_retainedRegistrations.Add(continuationRegistration);
+                }
+            }
             throw new InvalidOperationException("RtlDeleteFunctionTable failed; native memory remains allocated.");
         }
+        continuationRegistration?.Dispose();
+        var released = memory == 0 || JitWindows.VirtualFree(memory, 0, 0x8000);
+        var error = Marshal.GetLastPInvokeError();
         if (!released)
         {
             throw new Win32Exception(error);
         }
+        for (var index = modules.Count - 1; index >= 0; index--)
+        {
+            if (loaded.TryGetValue(modules[index].DllName, out var handle))
+            {
+                NativeLibrary.Free(handle);
+            }
+        }
+        if (handlerModule != 0)
+        {
+            NativeLibrary.Free(handlerModule);
+        }
+        NativeLibrary.Free(module);
     }
 
     private static int Align(int value, int alignment) => checked((value + alignment - 1) & (-alignment));
@@ -367,6 +495,11 @@ public static unsafe class NativeJit
 
 internal static partial class JitWindows
 {
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [LibraryImport("kernel32.dll", EntryPoint = "LoadLibraryExW",
+        StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    internal static partial nint LoadLibraryEx(string path, nint file, uint flags);
+
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("kernel32.dll", SetLastError = true)]
     internal static partial nint VirtualAlloc(nint address, nuint size, uint allocationType, uint protection);
@@ -389,6 +522,11 @@ internal static partial class JitWindows
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("kernel32.dll")]
     internal static partial nint GetCurrentProcess();
+
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool GetProcessMitigationPolicy(nint process, int policy, out uint flags, nuint length);
 
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("kernel32.dll", EntryPoint = "RtlAddFunctionTable")]

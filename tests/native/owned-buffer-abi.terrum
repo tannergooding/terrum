@@ -1,0 +1,55 @@
+public bool TryAcquire(out OwnedInt32Buffer buffer) {
+    return OwnedInt32Buffer.TryCreate(4, out buffer);
+}
+
+public OwnedInt32Buffer Relay(OwnedInt32Buffer buffer) {
+    return move buffer;
+}
+
+public OwnedInt32Buffer Build() {
+    require OwnedInt32Buffer.TryCreate(2, out var created);
+    mut OwnedInt32Buffer buffer = move created;
+    require buffer.TryAppend(40);
+    require buffer.TryAppend(2);
+    return move buffer;
+}
+
+public int32 Consume(OwnedInt32Buffer buffer) {
+    mut int32 sum = 0;
+    for (mut int32 index = 0; index < buffer.Count; index = index + 1) {
+        sum = sum + buffer.Read(index);
+    }
+    return sum;
+}
+
+public int32 Rebuild() {
+    require OwnedInt32Buffer.TryCreate(2, out var created);
+    mut OwnedInt32Buffer buffer = move created;
+    require buffer.TryAppend(20);
+    require OwnedInt32Buffer.TryCreate(1, out buffer);
+    require buffer.TryAppend(42);
+    return buffer.Read(0);
+}
+
+public bool TryRebuild() {
+    require OwnedInt32Buffer.TryCreate(2, out var created);
+    mut OwnedInt32Buffer buffer = move created;
+    return OwnedInt32Buffer.TryCreate(1, out buffer);
+}
+
+public unique struct Envelope {
+    public OwnedInt32Buffer Data;
+
+    public Envelope(bool complete) {
+        require OwnedInt32Buffer.TryCreate(1, out var created);
+        mut OwnedInt32Buffer buffer = move created;
+        require buffer.TryAppend(42);
+        Data = move buffer;
+        require complete;
+    }
+}
+
+public int32 Composite() {
+    Envelope value = new Envelope(true);
+    return value.Data.Read(0);
+}

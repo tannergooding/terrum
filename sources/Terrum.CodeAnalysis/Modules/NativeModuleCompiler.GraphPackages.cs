@@ -244,7 +244,9 @@ public static partial class NativeModuleCompiler
                 throw new ModuleFormatException("Graph dependency supplies neither declarations nor types.");
             }
         }
-        NativeModuleImageValidator.Validate(image, consumer, GraphImports(package), exports, policy);
+        NativeModuleImageValidator.Validate(image, consumer, GraphImports(package), exports, policy,
+            allowOwnedBufferRuntime: (consumer ? ModuleCompiler.GetNativeProfileVersion(contract, true)
+                : ModuleCompiler.GetGraphProfile(contract)) == "native-15");
         return package;
     }
 

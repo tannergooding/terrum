@@ -1,0 +1,70 @@
+namespace Terrum.CodeAnalysis;
+
+public unique struct SourceLineIndex
+{
+    private OwnedInt32Buffer _starts;
+    private int32 _length;
+
+    private SourceLineIndex(OwnedInt32Buffer starts, int32 length)
+    {
+        _starts = move starts;
+        _length = length;
+    }
+
+    public static bool TryCreate(out SourceLineIndex index)
+    {
+        // Each code unit can end a line, with one additional final line.
+        if (!OwnedInt32Buffer.TryCreate(Host.Source.Length + 1, out var created))
+        {
+            return false;
+        }
+
+        mut OwnedInt32Buffer starts = move created;
+        mut int32 position = 0;
+        while (true)
+        {
+            require starts.TryAppend(position);
+            require TryReadSourceLine(position, out var content, out var includingBreak);
+            if (content.Length == includingBreak.Length)
+            {
+                index = new SourceLineIndex(move starts, Host.Source.Length);
+                return true;
+            }
+            position = includingBreak.GetEnd();
+        }
+    }
+
+    [NoThrow]
+    public int32 GetLineCount()
+    {
+        return _starts.Count;
+    }
+
+    public bool TryGetPosition(int32 position, out int32 line, out int32 character)
+    {
+        if (position < 0 || position > _length)
+        {
+            return false;
+        }
+
+        // The first start is zero; find the last start not greater than the position.
+        mut int32 low = 0;
+        mut int32 high = _starts.Count;
+        while (low + 1 < high)
+        {
+            int32 middle = low + (high - low) / 2;
+            if (_starts.Read(middle) <= position)
+            {
+                low = middle;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        line = low;
+        character = position - _starts.Read(low);
+        return true;
+    }
+}

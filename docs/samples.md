@@ -19,6 +19,9 @@ owning outputs. Its compact owners have lexical cleanup but hold no OS resource.
 The [composite owner sample](../samples/native/composite-owner.terrum) returns
 42 with `--runtime checked-exceptions`: a failed constructor releases its
 already acquired child before recovery constructs a complete owner.
+The [owned buffer sample](../samples/native/owned-buffer.terrum) returns 42
+under either runtime policy after appending, reading and updating the
+initialized prefix of a fixed-capacity native buffer.
 
 | Program | Source | Design contract / expected behavior |
 |---|---|---|

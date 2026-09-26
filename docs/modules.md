@@ -1,6 +1,6 @@
 # Bounded semantic and native modules
 
-The version 14 `.trm` format records the selected native runtime policy and
+The version 15 `.trm` format records the selected native runtime policy and
 persists verified, typed, source-mapped structured IR,
 not source text or a native DLL. `CreateProducer` stores selected function bodies
 and exported contracts. `CreateConsumer` stores its own function bodies and the
@@ -224,6 +224,14 @@ continues to describe unique locals/returns. Versions 10 through 13 remain
 readable with their original layouts and contracts. Version 14 retains version
 13's scalar wire encoding; composite requirements cannot be downgraded to an
 older format or profile.
+Version 15 adds the compiler-owned `OwnedInt32Buffer` identity, its canonical
+intrinsic operation markers and reserved mutable-receiver loans. The resource
+selects `native-15` from retained layouts, function bodies or declaration
+contracts (including imports without bodies); a consumer cannot reinterpret
+an imported owning buffer as a plain eight-byte integer. Native packages keep
+their existing container version; the resource contract and selected runtime
+policy remain in the embedded semantic profile. Versions 10 through 14 remain
+readable under their original profiles.
 A consumer importing a unique type must also import the exported NoThrow
 cleanup methods of that type and its owning children. Their cleanup identities
 and Copy/unique distinctions participate in layout and signature compatibility;
@@ -293,7 +301,7 @@ contract linker, live patching or hot-unload protocol.
 or consumer EXE with its corresponding semantic `.trm` contract. Producer
 containers remain version 1; new consumer containers use version 2, and version
 1 consumers remain readable. The container records the exact native profile
-(native-10 through native-14), runtime policy,
+(native-10 through native-15), runtime policy,
 single explicit provider identity and the exact PE and semantic bytes. The
 identity is 1–64 ASCII letters, digits or underscores, beginning with a
 letter; its loader basename is `terrum-<identity>.dll`. Artifacts are bounded

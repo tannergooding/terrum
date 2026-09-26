@@ -14,7 +14,7 @@ using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
 
-public sealed class SourceLineComponentTests
+public sealed partial class SourceLineComponentTests
 {
     [Theory]
     [InlineData("")]
@@ -105,10 +105,15 @@ public sealed class SourceLineComponentTests
         ]);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
+        await ExecuteAsync(program, NativeRuntimePolicy.FailFast).ConfigureAwait(true);
+    }
+
+    private static async Task ExecuteAsync(BoundProgram program, NativeRuntimePolicy policy)
+    {
         var path = Path.Combine(RepositoryRoot(), "artifacts", $"source-lines-{Guid.NewGuid():N}.exe");
         try
         {
-            await File.WriteAllBytesAsync(path, NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(path, NativeEmitter.Emit(program, policy)).ConfigureAwait(true);
             using var process = Process.Start(new ProcessStartInfo(path) { UseShellExecute = false, CreateNoWindow = true })
                 ?? throw new InvalidOperationException("Could not start compiled source-line component.");
             try

@@ -2,12 +2,39 @@
 
 `native-10` (explicit fail-fast), `native-11` (explicit checked exceptions),
 `native-12` (compact unique locals/returns), `native-13` (owned
-by-value arguments and conditional outputs) and `native-14` (composite unique
-fields, including nested Copy fields, under either runtime policy)
+by-value arguments and conditional outputs), `native-14` (composite unique
+fields, including nested Copy fields, under either runtime policy), and
+`native-15` (compiler-defined owned native `int32` buffer)
 are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
+
+`OwnedInt32Buffer.TryCreate` accepts capacities from zero through 1,048,576
+elements. It allocates an eight-byte count/capacity header plus fixed element
+storage on the Windows process heap; zero capacity still has a live owner.
+Allocation failure returns false without publishing an output. Negative or
+excessive capacity and `Read`/`Set` outside the initialized prefix use the
+selected checked-failure policy. `TryAppend` writes the element before
+incrementing count and returns false at full capacity without modifying the
+prefix. The handle is never a source-exposed pointer or copyable layout.
+Whole-owner move, by-value call/return and true-only output transfer the
+obligation; lexical and recursive composite cleanup release it exactly once.
+`HeapFree` failure is a fatal process invariant error (`0xE0540005`), not a
+recoverable checked failure or a fabricated successful release. The buffer
+operations do not store receiver loans or resize backing memory.
+Allocation-failure and exactly-once-release behavior can be checked with
+the trusted native ABI probe in `scripts/check-owned-buffer-abi.cs`, which
+replaces the fixture DLL's `HeapAlloc`/`HeapFree` imports to inject a
+deterministic failed allocation and track live blocks; tests do not rely on
+exhausting host memory. It also checks that only the low 32 bits of the
+`HeapFree` BOOL result determine success, and that failed release terminates
+even while a checked catch is available.
+
+The [owned source-line index](../self-host/SourceLineIndex.terrum) builds a
+line-start table with this storage and publishes a unique immutable index.
+Its position queries use binary search over initialized words, without a
+retained source pointer or a general span/allocator API.
 
 ## Compile and run
 
@@ -171,8 +198,10 @@ never runs. Fail-fast termination skips this exceptional cleanup.
 Moving clears that bit; assignment builds a replacement in separate frame
 storage before dropping the old owner. Pending return values and replacement
 storage never overlap cleanup-call spills. Fail-fast termination still does
-not unwind. No native allocator, arbitrary owning graph, real OS-resource
-release or GC is implied by this proof. The [sample](../samples/native/unique-owner.terrum)
+not unwind. The separate `OwnedInt32Buffer` intrinsic allocates and frees
+one fixed-capacity process-heap block; arbitrary owning graphs, general
+OS-resource handles, stored loans and GC are not implied by this proof.
+The [sample](../samples/native/unique-owner.terrum)
 exercises checked recovery with a still-live owner.
 
 ## Checked normal-continuation contracts
@@ -230,8 +259,9 @@ matching bounded native contract.
 
 `--runtime checked-exceptions` selects `native-11` for Copy-only programs,
 `native-12` for compact unique locals/returns, `native-13` where
-function declarations transfer ownership through parameters, and `native-14`
-for retained composite unique layouts, without changing
+function declarations transfer ownership through parameters, `native-14`
+for retained composite unique layouts, and `native-15` for owned native buffers,
+without changing
 older fail-fast artifacts. `analyze` also accepts this option to check recovery without emitting
 an artifact; omission keeps its existing fail-fast profile. The reusable
 compilation API accepts the policy with single or multiple original snapshots,

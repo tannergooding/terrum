@@ -1,0 +1,11 @@
+public int32 Recover() {
+    unsafe {
+        try {
+            Envelope value = new Envelope(false);
+        }
+        catch {
+            return 42;
+        }
+    }
+    return 0;
+}

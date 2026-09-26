@@ -1,0 +1,15 @@
+int32 Main()
+{
+    require OwnedInt32Buffer.TryCreate(3, out var created);
+    mut OwnedInt32Buffer words = move created;
+    if (!words.TryAppend(30) || !words.TryAppend(12))
+    {
+        return 2;
+    }
+    words.Set(1, words.Read(1));
+    if (words.Count != 2 || words.Capacity != 3)
+    {
+        return 3;
+    }
+    return words.Read(0) + words.Read(1);
+}

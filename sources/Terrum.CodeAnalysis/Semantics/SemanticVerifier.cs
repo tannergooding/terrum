@@ -121,7 +121,8 @@ public static class SemanticVerifier
             }
             layoutStates[index] = 1;
             var structure = program.Structures[index];
-            if (structure is null || string.IsNullOrWhiteSpace(structure.Name) || !structNames.Add(structure.Name)
+            if (structure is null || string.IsNullOrWhiteSpace(structure.Name)
+                || structure.Name == NativeBufferIntrinsics.TypeName || !structNames.Add(structure.Name)
                 || (structure.IsPrivate && structure.IsInternal)
                 || structure.Fields.IsDefaultOrEmpty || structure.Size is < 1 or > ValueLayout.MaximumSize)
             {
@@ -150,6 +151,10 @@ public static class SemanticVerifier
                         throw Invalid();
                     }
                     height = Math.Max(height, layoutHeights[nested] + 1);
+                }
+                if (field.Type == PrimitiveType.OwnedInt32Buffer && !structure.IsUnique)
+                {
+                    throw Invalid();
                 }
                 var width = ValueLayout.Size(field.Type, program.Structures);
                 var fieldAlignment = nested >= 0 ? alignments[nested] : width;
@@ -188,6 +193,18 @@ public static class SemanticVerifier
             if (function.Variables.Length > MaximumVariables || function.ParameterCount > MaximumArguments)
             {
                 throw Limit();
+            }
+            if (function.Intrinsic != BoundIntrinsic.None)
+            {
+                if (!NativeBufferIntrinsics.Matches(function))
+                {
+                    throw Invalid();
+                }
+                continue;
+            }
+            if (function.Name.StartsWith(NativeBufferIntrinsics.TypeName + ".", StringComparison.Ordinal))
+            {
+                throw Invalid();
             }
             if (function.IsExternal && (!allowExternal || function.IsPrivate || function.IsInternal
                 || function.Body.Statements.IsDefault || !function.Body.Statements.IsEmpty
@@ -308,6 +325,10 @@ public static class SemanticVerifier
         {
             var function = program.Functions[functionIndex];
             if (function.IsExternal)
+            {
+                continue;
+            }
+            if (function.Intrinsic != BoundIntrinsic.None)
             {
                 continue;
             }
@@ -675,7 +696,8 @@ public static class SemanticVerifier
                 {
                     throw Invalid(drop.Span);
                 }
-                var method = program.Structures[(int)function.Variables[drop.Variable].Type - 100].CleanupMethod;
+                var method = function.Variables[drop.Variable].Type == PrimitiveType.OwnedInt32Buffer
+                    ? null : program.Structures[(int)function.Variables[drop.Variable].Type - 100].CleanupMethod;
                 if (method is null ? drop.CleanupFunction != -1
                     : drop.CleanupFunction < 0 || drop.CleanupFunction >= program.Functions.Length
                         || program.Functions[drop.CleanupFunction].Name != method)
@@ -1382,6 +1404,8 @@ public static class SemanticVerifier
                 break;
             case BoundReceiverLoan loan:
                 throw InvalidEffect(loan.Span, "Ownership");
+            case BoundMutableReceiverLoan mutableLoan:
+                throw InvalidEffect(mutableLoan.Span, "Ownership");
             case BoundFieldLoan fieldLoan:
                 throw InvalidEffect(fieldLoan.Span, "Ownership");
             case BoundOutArgument:
@@ -1519,9 +1543,15 @@ public static class SemanticVerifier
                 var outTargets = new HashSet<int>();
                 var loanRoot = -1;
                 var loanOfInitializedField = false;
+                var reservedReceiver = -1;
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
                     var argument = call.Arguments[i];
+                    if (reservedReceiver >= 0 && InvalidatesReservedOwner(argument, reservedReceiver,
+                        ref remaining, depth + 1))
+                    {
+                        throw InvalidEffect(argument.Span, "Ownership");
+                    }
                     if (argument is BoundOutArgument output)
                     {
                         if (output.Variable < 0 || output.Variable >= initialized.Length
@@ -1542,7 +1572,20 @@ public static class SemanticVerifier
                     }
                     else
                     {
-                        if (argument is BoundReceiverLoan loan)
+                        if (argument is BoundMutableReceiverLoan mutableLoan)
+                        {
+                            if (i != 0 || target.Intrinsic is not (BoundIntrinsic.BufferSet or BoundIntrinsic.BufferTryAppend)
+                                || mutableLoan.Variable < 0 || mutableLoan.Variable >= initialized.Length
+                                || mutableLoan.Type != PrimitiveType.OwnedInt32Buffer
+                                || function.Variables[mutableLoan.Variable].Type != mutableLoan.Type
+                                || !function.Variables[mutableLoan.Variable].IsMutable
+                                || !initialized[mutableLoan.Variable])
+                            {
+                                throw InvalidEffect(mutableLoan.Span, "Ownership");
+                            }
+                            loanRoot = mutableLoan.Variable;
+                        }
+                        else if (argument is BoundReceiverLoan loan)
                         {
                             if (i != 0 || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
                                 || loan.Variable < 0 || loan.Variable >= initialized.Length
@@ -1577,6 +1620,10 @@ public static class SemanticVerifier
                             Expression(argument, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                         }
                     }
+                    if (i == 0 && loanRoot >= 0)
+                    {
+                        reservedReceiver = loanRoot;
+                    }
                     if (argument.Type != target.Variables[i + (target.IsConstructor ? 1 : 0)].Type)
                     {
                         throw Invalid();
@@ -1603,13 +1650,43 @@ public static class SemanticVerifier
     }
 
     private static bool ValidType(PrimitiveType type, bool allowVoid, BoundProgram program) =>
-        type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool
+        type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+            or PrimitiveType.Char16 or PrimitiveType.Bool or PrimitiveType.OwnedInt32Buffer
             || (allowVoid && type == PrimitiveType.Void)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length);
 
     private static bool IsUnique(BoundProgram program, PrimitiveType type) =>
-        (int)type >= 100 && (int)type - 100 < program.Structures.Length
-            && program.Structures[(int)type - 100].IsUnique;
+        type == PrimitiveType.OwnedInt32Buffer
+            || ((int)type >= 100 && (int)type - 100 < program.Structures.Length
+                && program.Structures[(int)type - 100].IsUnique);
+
+    private static bool InvalidatesReservedOwner(BoundExpression expression, int variable, ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        if (expression is BoundCall call)
+        {
+            foreach (var argument in call.Arguments)
+            {
+                if (InvalidatesReservedOwner(argument, variable, ref remaining, depth + 1))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+        return expression switch {
+            BoundMove move => move.Variable == variable,
+            BoundOutArgument output => output.Variable == variable,
+            BoundMutableReceiverLoan loan => loan.Variable == variable,
+            BoundUnary unary => InvalidatesReservedOwner(unary.Operand, variable, ref remaining, depth + 1),
+            BoundCast cast => InvalidatesReservedOwner(cast.Operand, variable, ref remaining, depth + 1),
+            BoundBinary binary => InvalidatesReservedOwner(binary.Left, variable, ref remaining, depth + 1)
+                || InvalidatesReservedOwner(binary.Right, variable, ref remaining, depth + 1),
+            BoundFieldRead field => InvalidatesReservedOwner(field.Receiver, variable, ref remaining, depth + 1),
+            BoundBufferRead buffer => InvalidatesReservedOwner(buffer.Index, variable, ref remaining, depth + 1),
+            _ => false,
+        };
+    }
 
     private static bool IsProvenBufferIndex(int buffer, BoundExpression index, BoundProgram program) =>
         buffer >= 0 && buffer < program.Buffers.Length
@@ -1738,10 +1815,16 @@ public static class SemanticVerifier
             case BoundConstant:
             case BoundRead:
             case BoundReceiverLoan:
+            case BoundMutableReceiverLoan:
             case BoundFieldLoan:
                 break;
-            case BoundMove:
-                throw InvalidEffect(expression.Span, "Ownership");
+            case BoundMove move:
+                if (move.Variable < 0 || move.Variable >= state.Length)
+                {
+                    throw InvalidEffect(move.Span, "Ownership");
+                }
+                state[move.Variable] = false;
+                break;
             default:
                 throw Invalid();
         }

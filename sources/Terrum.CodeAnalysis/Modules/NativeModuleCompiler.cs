@@ -233,7 +233,9 @@ public static partial class NativeModuleCompiler
         }
         var exports = ModuleCompiler.CreateReference(producer.Contract).Functions.Select(static function => function.Name)
             .ToArray();
-        NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, DllName(producer.Identity), exports, producer.Policy);
+        NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, DllName(producer.Identity), exports,
+            producer.Policy, allowOwnedBufferRuntime:
+                ModuleCompiler.GetNativeProfileVersion(producer.Contract, false) == "native-15");
         ValidateConsumerImage(consumer);
     }
 
@@ -246,7 +248,8 @@ public static partial class NativeModuleCompiler
         {
             groups.Add(DllName(consumer.Identity), imports);
         }
-        NativeModuleImageValidator.Validate(consumer.Image, isConsumer: true, groups, [], consumer.Policy);
+        NativeModuleImageValidator.Validate(consumer.Image, isConsumer: true, groups, [], consumer.Policy,
+            allowOwnedBufferRuntime: ModuleCompiler.GetNativeProfileVersion(consumer.Contract, true) == "native-15");
     }
 
     private static void ValidateProducer(Package producer)
@@ -261,7 +264,9 @@ public static partial class NativeModuleCompiler
             throw new ModuleFormatException("Native package and semantic contract policies differ.");
         }
         NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, DllName(producer.Identity),
-            [.. reference.Functions.Select(static function => function.Name)], producer.Policy);
+            [.. reference.Functions.Select(static function => function.Name)], producer.Policy,
+            allowOwnedBufferRuntime:
+                ModuleCompiler.GetNativeProfileVersion(producer.Contract, false) == "native-15");
     }
 
     private static byte[] Write(bool isConsumer, string identity, NativeRuntimePolicy policy, byte[] contract,

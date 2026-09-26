@@ -36,6 +36,19 @@ public static class NativeEmitter
         EmitWithImportUsage(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
             NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default)
     {
+        var (code, selected) = CompileWithImports(program, bindings, runtimePolicy, cancellationToken);
+        return (PeImage.Build(code), UsedImports(code, selected));
+    }
+
+    /// <summary>Emits callable native code with verified external declaration bindings for graph JIT callers.</summary>
+    internal static NativeCode EmitCodeWithImports(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
+        NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
+        CompileWithImports(program, bindings, runtimePolicy, cancellationToken).Code;
+
+    private static (NativeCode Code, Dictionary<int, NativeImportBinding> Selected)
+        CompileWithImports(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
+            NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken)
+    {
         if (runtimePolicy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
             throw new NotSupportedException("Unsupported native runtime policy.");
@@ -50,8 +63,7 @@ public static class NativeEmitter
         }
         var selected = SelectImports(program, bindings, cancellationToken);
         var compiler = new PeCompiler(program, cancellationToken, imports: selected);
-        var code = compiler.Compile();
-        return (PeImage.Build(code), UsedImports(code, selected));
+        return (compiler.Compile(), selected);
     }
 
     private static Dictionary<int, NativeImportBinding> SelectImports(BoundProgram program,
@@ -661,10 +673,18 @@ internal sealed class PeCompiler
                     _code.Set(_liveSlots[i][slot]);
                 }
             }
-            Statement(function.Body);
-            if (function.ReturnType == PrimitiveType.Void)
+            if (function.Intrinsic != BoundIntrinsic.None)
             {
+                EmitBufferIntrinsic(function.Intrinsic);
                 Epilog();
+            }
+            else
+            {
+                Statement(function.Body);
+                if (function.ReturnType == PrimitiveType.Void)
+                {
+                    Epilog();
+                }
             }
             _ends[i] = _code.Position;
             if (_code.Position > MaximumText)
@@ -819,7 +839,7 @@ internal sealed class PeCompiler
                 return ExpressionSpills(local.Initializer, ref maximumArguments);
             case BoundAssignment assignment:
                 return Math.Max(ExpressionSpills(assignment.Value, ref maximumArguments),
-                    IsUnique(assignment.Value.Type) && _program.Structures[(int)assignment.Value.Type - 100].CleanupMethod is not null
+                    HasDeclaredCleanup(assignment.Value.Type)
                         ? CleanupSpills(ref maximumArguments) : 0);
             case BoundDrop drop:
                 return drop.CleanupFunction >= 0 ? CleanupSpills(ref maximumArguments) : 0;
@@ -876,8 +896,7 @@ internal sealed class PeCompiler
                 var maximum = 1 + (call.Arguments.Length * 2);
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
-                    if (call.Arguments[i] is BoundOutArgument output && IsUnique(output.Type)
-                        && _program.Structures[(int)output.Type - 100].CleanupMethod is not null)
+                    if (call.Arguments[i] is BoundOutArgument output && HasDeclaredCleanup(output.Type))
                     {
                         maximum = Math.Max(maximum, 1 + (call.Arguments.Length * 2)
                             + CleanupSpills(ref maximumArguments));
@@ -914,10 +933,15 @@ internal sealed class PeCompiler
     private int OwnerPlace(int index) =>
         _program.Functions[_currentFunction].Variables[index].IsOut ? OutSlot(index) : Slot(index);
     private static bool IsStruct(PrimitiveType type) => (int)type >= 100;
-    private static bool IsWide(PrimitiveType type) => type is PrimitiveType.Int64 or PrimitiveType.UInt64;
+    private static bool IsWide(PrimitiveType type) =>
+        type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.OwnedInt32Buffer;
     private int Size(PrimitiveType type) => ValueLayout.Size(type, _program.Structures);
     private bool IsIndirect(PrimitiveType type) => IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8);
-    private bool IsUnique(PrimitiveType type) => IsStruct(type) && _program.Structures[(int)type - 100].IsUnique;
+    private bool IsUnique(PrimitiveType type) =>
+        type == PrimitiveType.OwnedInt32Buffer
+            || (IsStruct(type) && _program.Structures[(int)type - 100].IsUnique);
+    private bool HasDeclaredCleanup(PrimitiveType type) =>
+        IsStruct(type) && _program.Structures[(int)type - 100].CleanupMethod is not null;
     private bool IsBorrowedReceiver()
     {
         var function = _program.Functions[_currentFunction];
@@ -957,8 +981,108 @@ internal sealed class PeCompiler
         _code.PatchRelative(vacant, _code.Position);
     }
 
+    private void EmitBufferIntrinsic(BoundIntrinsic intrinsic)
+    {
+        switch (intrinsic)
+        {
+            case BoundIntrinsic.BufferTryCreate:
+                _code.Load(Slot(0));
+                _code.Bytes(0x85, 0xC0);
+                RuntimeBranch(0x88, 0);
+                _code.Byte(0x3D);
+                _code.Int32(NativeBufferIntrinsics.MaximumCapacity);
+                RuntimeBranch(0x8F, 0);
+                _nativeImportFixups.Add(new NativeImportFixup(_code.ImportCall(), "KERNEL32.dll", "GetProcessHeap"));
+                _code.MoveArgument(0, true);
+                _code.Bytes(0x31, 0xD2); // HeapAlloc flags = 0
+                _code.Load(Slot(0));
+                _code.Bytes(0x4C, 0x8D, 0x04, 0x85);
+                _code.Int32(8); // r8 = sizeof(header) + capacity * sizeof(int32)
+                _nativeImportFixups.Add(new NativeImportFixup(_code.ImportCall(), "KERNEL32.dll", "HeapAlloc"));
+                _code.Bytes(0x48, 0x85, 0xC0);
+                var allocationFailed = _code.JumpIf(0x84);
+                _code.Bytes(0x48, 0x89, 0xC1); // rcx = allocated header
+                _code.Bytes(0xC7, 0x01);
+                _code.Int32(0); // initialized prefix is empty
+                _code.Load(Slot(0));
+                _code.Bytes(0x89, 0x41, 0x04);
+                _code.Load64(Slot(1));
+                _code.Bytes(0x48, 0x89, 0x08); // publish owner only after header initialization
+                _code.Bytes(0xB8);
+                _code.Int32(1);
+                var created = _code.Jump();
+                _code.PatchRelative(allocationFailed, _code.Position);
+                _code.Bytes(0x31, 0xC0);
+                _code.PatchRelative(created, _code.Position);
+                break;
+            case BoundIntrinsic.BufferCount:
+            case BoundIntrinsic.BufferCapacity:
+                _code.Load64(Slot(0));
+                _code.Bytes(0x48, 0x8B, 0x00); // receiver place -> opaque owner handle
+                _code.Bytes(0x8B, intrinsic == BoundIntrinsic.BufferCount ? (byte)0x00 : (byte)0x40);
+                if (intrinsic == BoundIntrinsic.BufferCapacity)
+                {
+                    _code.Byte(0x04);
+                }
+                break;
+            case BoundIntrinsic.BufferRead:
+            case BoundIntrinsic.BufferSet:
+                _code.Load64(Slot(0));
+                _code.Bytes(0x48, 0x8B, 0x00, 0x48, 0x89, 0xC2); // rdx = owner handle
+                _code.Load(Slot(1));
+                _code.Bytes(0x3B, 0x02); // unsigned index >= count includes negative indexes
+                RuntimeBranch(0x83, 2);
+                if (intrinsic == BoundIntrinsic.BufferRead)
+                {
+                    _code.Bytes(0x8B, 0x44, 0x82, 0x08);
+                }
+                else
+                {
+                    _code.Bytes(0x89, 0xC1); // rcx = checked index
+                    _code.Load(Slot(2));
+                    _code.Bytes(0x89, 0x44, 0x8A, 0x08);
+                }
+                break;
+            case BoundIntrinsic.BufferTryAppend:
+                _code.Load64(Slot(0));
+                _code.Bytes(0x48, 0x8B, 0x00, 0x48, 0x89, 0xC2);
+                _code.Bytes(0x8B, 0x02, 0x3B, 0x42, 0x04); // count < capacity
+                var full = _code.JumpIf(0x83);
+                _code.Bytes(0x89, 0xC1);
+                _code.Load(Slot(1));
+                _code.Bytes(0x89, 0x44, 0x8A, 0x08); // initialize element before publishing count
+                _code.Bytes(0xFF, 0x02, 0xB8);
+                _code.Int32(1);
+                var appended = _code.Jump();
+                _code.PatchRelative(full, _code.Position);
+                _code.Bytes(0x31, 0xC0);
+                _code.PatchRelative(appended, _code.Position);
+                break;
+            case BoundIntrinsic.None:
+            default:
+                throw new InvalidOperationException("Unknown verified native buffer intrinsic.");
+        }
+    }
+
     private void EmitDropValue(int place, PrimitiveType type)
     {
+        if (type == PrimitiveType.OwnedInt32Buffer)
+        {
+            _nativeImportFixups.Add(new NativeImportFixup(_code.ImportCall(), "KERNEL32.dll", "GetProcessHeap"));
+            _code.MoveArgument(0, true);
+            _code.Bytes(0x31, 0xD2); // HeapFree flags = 0
+            _code.Load64(place);
+            _code.Bytes(0x49, 0x89, 0xC0); // r8 = owner handle
+            _nativeImportFixups.Add(new NativeImportFixup(_code.ImportCall(), "KERNEL32.dll", "HeapFree"));
+            _code.Bytes(0x85, 0xC0);
+            var released = _code.JumpIf(0x85);
+            _code.Bytes(0xB9);
+            _code.Int32(unchecked((int)0xE0540005));
+            _nativeImportFixups.Add(new NativeImportFixup(_code.ImportCall(), "KERNEL32.dll", "ExitProcess"));
+            _code.Bytes(0x0F, 0x0B); // ExitProcess cannot return
+            _code.PatchRelative(released, _code.Position);
+            return;
+        }
         var structure = _program.Structures[(int)type - 100];
         var name = structure.CleanupMethod;
         if (name is not null)
@@ -1496,6 +1620,9 @@ internal sealed class PeCompiler
             case BoundFieldLoan fieldLoan:
                 EmitUniqueFieldPlace(fieldLoan.Place);
                 break;
+            case BoundMutableReceiverLoan mutableLoan:
+                _code.Address(OwnerPlace(mutableLoan.Variable));
+                break;
             case BoundFieldRead fieldRead:
                 if (IsUnique(fieldRead.Receiver.Type))
                 {
@@ -1599,7 +1726,8 @@ internal sealed class PeCompiler
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
                     if (!IsUnique(call.Arguments[i].Type)
-                        || call.Arguments[i] is BoundReceiverLoan or BoundFieldLoan or BoundOutArgument)
+                        || call.Arguments[i] is BoundReceiverLoan or BoundMutableReceiverLoan
+                            or BoundFieldLoan or BoundOutArgument)
                     {
                         continue;
                     }
@@ -1628,7 +1756,7 @@ internal sealed class PeCompiler
                     else
                     {
                         Expression(call.Arguments[i], argumentsBase + (call.Arguments.Length * 2));
-                        if (call.Arguments[i] is BoundReceiverLoan or BoundFieldLoan)
+                        if (call.Arguments[i] is BoundReceiverLoan or BoundMutableReceiverLoan or BoundFieldLoan)
                         {
                             _code.Store64(Spill(argumentsBase + i));
                         }
@@ -1637,7 +1765,7 @@ internal sealed class PeCompiler
                             StoreValue(Spill(argumentsBase + i), call.Arguments[i].Type);
                         }
                         if (staged is not null && IsUnique(call.Arguments[i].Type)
-                            && call.Arguments[i] is not (BoundReceiverLoan or BoundFieldLoan))
+                            && call.Arguments[i] is not (BoundReceiverLoan or BoundMutableReceiverLoan or BoundFieldLoan))
                         {
                             _code.Set(Spill(argumentsBase + call.Arguments.Length + i));
                         }
@@ -1666,7 +1794,7 @@ internal sealed class PeCompiler
                 var hidden = IsIndirect(call.Type) ? 1 : 0;
                 for (var i = Math.Max(0, 4 - hidden); i < call.Arguments.Length; i++)
                 {
-                    if (call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundFieldLoan)
+                    if (call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan or BoundFieldLoan)
                     {
                         _code.Load64(Spill(argumentsBase + i));
                     }
@@ -1678,7 +1806,7 @@ internal sealed class PeCompiler
                 }
                 for (var i = 0; i < Math.Min(4 - hidden, call.Arguments.Length); i++)
                 {
-                    if (call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundFieldLoan)
+                    if (call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan or BoundFieldLoan)
                     {
                         _code.Load64(Spill(argumentsBase + i));
                     }
@@ -1687,7 +1815,7 @@ internal sealed class PeCompiler
                         LoadValue(Spill(argumentsBase + i), call.Arguments[i].Type);
                     }
                     _code.MoveArgument(i + hidden,
-                        call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundFieldLoan || IsStruct(call.Arguments[i].Type) || IsWide(call.Arguments[i].Type));
+                        call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan or BoundFieldLoan || IsStruct(call.Arguments[i].Type) || IsWide(call.Arguments[i].Type));
                 }
                 if (hidden != 0)
                 {

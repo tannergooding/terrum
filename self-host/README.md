@@ -25,6 +25,7 @@ remain hosted in C#.
 | [WideIntegerTests](WideIntegerTests.terrum) | Signed extrema, invalid digits, decimal overflow and repeated output publication | Executed through AOT and JIT with a shared entry wrapper |
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and conditional bool/out publication |
 | [SourceLines](SourceLines.terrum) | Streaming line ranges and UTF-16 line/character mapping over an immutable source grant | Executed with conditional outputs; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
+| [SourceLineIndex](SourceLineIndex.terrum) | Owned line-start table and binary-searched UTF-16 positions | Executed as AOT under both failure policies; every position matches host fixtures, with invalid outputs and owner copies rejected |
 | [SourceLineTests](SourceLineTests.terrum) | Shared line-range/position fixtures, invalid offsets and repeated queries | Executed natively with host-supplied expected records; no source normalization or default output values |
 | [StringLiteral](StringLiteral.terrum) | Validated quoted spelling and scalar decoding from the immutable UTF-16 source grant | Executed with conditional creation/reads, all supported escapes and exact source boundaries; not a runtime text representation |
 | [StringLiteralTests](StringLiteralTests.terrum) | Quoted-form validation, scalar values and rejection of offsets inside escapes or surrogate pairs | Shared host-lexer/compiled fixtures under both native runtime policies; failed calls publish no output |
@@ -56,6 +57,15 @@ break. EOF is a valid empty range. Position lookup scans those lines rather than
 using the host's allocated binary-search index. Break units belong to the preceding
 line, and a trailing break creates a final empty line. This is an executed bounded
 component, not an implemented `SourceText` collection or an efficient indexed replacement.
+
+`SourceLineIndex` builds on that streaming reader. It owns a fixed-capacity native
+table of line starts, publishes the completed index through a conditional output,
+and answers position queries by binary search. It retains only copied offsets
+and the source length; queries do not retain or reread the source grant. Construction
+reserves one word per source code unit plus one for the final line, a conservative
+single-pass bound rather than a resizing collection. Capacity and allocation
+failure follow the bounded `OwnedInt32Buffer` contract. This is not a stored
+source view, managed line collection, or general allocator API.
 
 `StringLiteral.TryCreate` validates a complete quoted source range before
 publishing its spelling and scalar count. `TryReadScalar` reports a Unicode

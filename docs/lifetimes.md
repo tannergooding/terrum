@@ -1,6 +1,9 @@
 # Lifetime and access contracts
 
-This document specifies the accepted direction for checked loans, views and published member contracts, with **provisional notation** where the grammar is unresolved. It refines [language](language.md); [libraries](libraries.md) illustrates the span/text/collection protocols. Only compact unique locals, explicit named moves and synchronous readonly receiver loans have executable ownership checks today ([implementation](implementation.md)); the remaining lifetime constructs are rejected for execution.
+This document specifies the accepted direction for checked loans, views and published member contracts, with **provisional notation** where the grammar is unresolved. It refines [language](language.md); [libraries](libraries.md) illustrates the span/text/collection protocols. Compact unique locals, explicit named moves, synchronous readonly receiver loans,
+and the exclusive, call-bounded receiver loan of `OwnedInt32Buffer.Set` and
+`TryAppend` have executable ownership checks today ([implementation](implementation.md));
+the remaining lifetime constructs are rejected for execution.
 
 ## Three independent dependencies
 

@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -137,13 +138,19 @@ internal static partial class Program
                 {
                     // This worker returns Main's raw exit status, not a JSON success envelope.
                     // Its caller must enforce a deadline; native fail-fast can terminate it.
-                    return NativeJit.Execute(program, runtimePolicy);
+                    return NativeJit.Execute(program, runtimePolicy, GraphJitRegistrarAssemblyPath());
                 }
 
                 image = library ? NativeEmitter.EmitLibrary(program, exports, runtimePolicy)
                     : NativeEmitter.Emit(program, runtimePolicy);
             }
             catch (NotSupportedException exception)
+            {
+                diagnostics = diagnostics.Add(new SourceDiagnostic(trees[0],
+                    new Diagnostic("TRM4001", DiagnosticSeverity.Error, exception.Message, trees[0].Root.Span)));
+            }
+            catch (Exception exception) when (command == "jit" && exception is IOException
+                or Win32Exception or InvalidOperationException or TimeoutException)
             {
                 diagnostics = diagnostics.Add(new SourceDiagnostic(trees[0],
                     new Diagnostic("TRM4001", DiagnosticSeverity.Error, exception.Message, trees[0].Root.Span)));

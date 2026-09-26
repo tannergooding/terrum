@@ -26,6 +26,8 @@ $LASTEXITCODE # 42
 & $c validate-native-graph root.trng --provider middle.trng --provider leaf-new.trmn
 & $c run-native-graph root.trng --provider middle.trng --provider leaf-new.trmn --runtime fail-fast
 $LASTEXITCODE # 43
+& $c run-native-graph-jit root.trng --provider middle.trng --provider leaf-new.trmn --runtime fail-fast
+$LASTEXITCODE # 43
 ```
 
 Compile commands never launch a consumer. The CLI takes `--source` for
@@ -35,6 +37,28 @@ additional source snapshots, reports original source locations, accepts
 closure, in any argument order. Packages are trusted native artifacts, not
 an authenticated sandbox. Execution stages validated byte snapshots into a
 private directory and supervises a single subprocess with a deadline.
+`run-native-graph-jit` accepts the same explicit closure and runtime policy.
+It first validates all packages and graph edges, then starts a supervised
+`terrumc.exe` apphost worker. The worker revalidates the staged snapshots and DLL
+images before loading any provider; it reconstructs only the root's verified
+semantic program and emits root machine code through the ordinary encoder.
+Every actual JIT fixup must match the root package's recorded machine imports.
+Selected leaf and intermediate DLL images remain byte-for-byte unchanged.
+JIT requires a v2 root with explicit machine-import metadata; older graph
+packages remain readable and executable by the AOT runner.
+The worker loads DLLs by full staged path in dependency order, registers
+unwind information for root code, and unloads DLLs after root code and unwind
+memory are released. This requires Windows x64. On CET-enforcing Windows, the
+supervisor registers the worker's validated exception continuations through
+private inherited pipes, bound to the child it launched. The bounded target
+set must lie within one RX code region; unwind metadata is removed before
+continuation deregistration, code release and DLL unload. Failed deregistration
+retains the code instead of freeing a registered target. The supervisor never
+executes native artifacts; target registration needs Windows build 20348 or
+later and the dynamic registration API. Direct apphost `jit` uses a separate
+framework-dependent .NET registrar bound to its creator process, which likewise
+never executes generated code. It is process-start code generation, not
+in-process replacement of live code or a native-code sandbox.
 
 This graph is acyclic and explicitly bounded. It does not claim transitive
 version roll-forward, hot servicing, resilient layouts, full LMOD or
@@ -67,5 +91,7 @@ are unchanged when the leaf is replaced:
 $LASTEXITCODE # 42
 & $c compile-native producer samples\native\graph\owned-leaf-replacement.terrum Leaf --export Make --export Ticket.Close -o owned-leaf-new.trmn --runtime fail-fast
 & $c run-native-graph owned-root.trng --provider owned-middle.trng --provider owned-leaf-new.trmn --runtime fail-fast
+$LASTEXITCODE # 44
+& $c run-native-graph-jit owned-root.trng --provider owned-middle.trng --provider owned-leaf-new.trmn --runtime fail-fast
 $LASTEXITCODE # 44
 ```

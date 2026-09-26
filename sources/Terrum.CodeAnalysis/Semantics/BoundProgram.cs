@@ -28,6 +28,27 @@ public enum PrimitiveType
     /// <summary>An unsigned, checked 64-bit integer.</summary>
     [SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Names the Terrum primitive type represented by the compiler.")]
     UInt64,
+    /// <summary>An opaque, uniquely owned native allocation of initialized int32 elements.</summary>
+    OwnedInt32Buffer,
+}
+
+/// <summary>Compiler-defined native buffer operations; user functions cannot declare these implementations.</summary>
+public enum BoundIntrinsic
+{
+    /// <summary>An ordinary source definition or imported declaration.</summary>
+    None,
+    /// <summary>Allocates bounded storage and publishes an empty owner only on success.</summary>
+    BufferTryCreate,
+    /// <summary>Reads the number of initialized elements through a readonly receiver loan.</summary>
+    BufferCount,
+    /// <summary>Reads the fixed capacity through a readonly receiver loan.</summary>
+    BufferCapacity,
+    /// <summary>Reads a checked index within the initialized prefix.</summary>
+    BufferRead,
+    /// <summary>Replaces an initialized element through an exclusive mutable receiver loan.</summary>
+    BufferSet,
+    /// <summary>Appends through an exclusive mutable receiver loan, returning false without mutation when full.</summary>
+    BufferTryAppend,
 }
 
 /// <summary>The verified behavior of compiler-generated checked failures.</summary>
@@ -119,6 +140,9 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
 
     /// <summary>Whether a member has no receiver.</summary>
     public bool IsStatic { get; init; }
+
+    /// <summary>A fixed compiler-defined operation, or None for an ordinary function.</summary>
+    public BoundIntrinsic Intrinsic { get; init; }
 }
 
 /// <summary>A parameter or initialized local declaration.</summary>
@@ -235,6 +259,9 @@ public sealed record BoundMove(int Variable, PrimitiveType Type, TextSpan Span) 
 
 /// <summary>A synchronous, nonescaping receiver loan; never a source value.</summary>
 public sealed record BoundReceiverLoan(int Variable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
+/// <summary>A reserved, nonescaping exclusive loan of a named mutable native buffer owner.</summary>
+public sealed record BoundMutableReceiverLoan(int Variable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
 /// <summary>A synchronous readonly loan of an initialized owning field place.</summary>
 public sealed record BoundFieldLoan(BoundFieldRead Place, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);

@@ -18,7 +18,21 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class JitTests
 {
+    private const string OwnedBufferProgram = """
+        int32 Main() {
+            require OwnedInt32Buffer.TryCreate(3, out var created);
+            mut OwnedInt32Buffer buffer = move created;
+            require buffer.TryAppend(20);
+            require buffer.TryAppend(22);
+            require buffer.TryAppend(buffer.Read(0));
+            if (buffer.TryAppend(99) || buffer.Count != 3) { return 1; }
+            buffer.Set(2, 0);
+            return buffer.Read(0) + buffer.Read(1) + buffer.Read(2);
+        }
+        """;
+
     [Theory]
+    [InlineData(OwnedBufferProgram, 42)]
     [InlineData("int32 Main() { return 42; }", 42)]
     [InlineData("void Main() { }", 0)]
     [InlineData("int32 Main() { mut int32 y = 9; bool result = true || Try(out y); return y; } bool Try(out int32 y) { return false; }", 9)]
@@ -168,6 +182,7 @@ public sealed class JitTests
     [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} } void Take(Item first, int32 second) {} int32 Main() { unsafe { try { Take(new Item(7), 1 / 0); } catch { return 42; } } return 0; }", 42)]
     [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} [NoThrow] public int32 Read() { return Value; } } bool Fill(out Item output) { output = new Item(42); return output.Value == 42 && output.Read() == 42; } int32 Main() { require Fill(out var item); return item.Value; }", 42)]
     [InlineData("unique struct Item { public int32 A; public int32 B; public int32 C; public Item(int32 a) { A = a; B = a + 1; C = a + 2; } [NoThrow] [Cleanup] public void Close() {} [NoThrow] public int32 Read() { return C; } } bool Refill(out Item output) { output = new Item(7); Item moved = move output; output = new Item(40); return output.C == 42 && output.Read() == 42; } int32 Main() { require Refill(out var item); return item.C; }", 42)]
+    [InlineData(OwnedBufferProgram, 42)]
     public async Task CheckedExceptionWorkerAndExecutableAgreeAsync(string source, int expected)
     {
         AssertWindowsX64();

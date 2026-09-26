@@ -624,7 +624,10 @@ public sealed class ModuleTests
         Assert.True(functionName >= sizeof(int));
         Assert.Equal(name.Length, BinaryPrimitives.ReadInt32LittleEndian(
             modified.AsSpan(functionName - sizeof(int), sizeof(int))));
-        var ownerLengthOffset = functionName + name.Length + sizeof(int) + 8;
+        var intrinsicOffset = functionName + name.Length + sizeof(int) + 7;
+        Assert.Equal((byte)BoundIntrinsic.None, modified[intrinsicOffset]);
+        Assert.Equal(1, modified[intrinsicOffset + 1]);
+        var ownerLengthOffset = intrinsicOffset + 2;
         var ownerLength = BinaryPrimitives.ReadInt32LittleEndian(modified.AsSpan(ownerLengthOffset, sizeof(int)));
         Assert.Equal("Box", Encoding.UTF8.GetString(modified, ownerLengthOffset + sizeof(int), ownerLength));
         var parameterOffset = ownerLengthOffset + sizeof(int) + ownerLength;
@@ -872,9 +875,9 @@ public sealed class ModuleTests
         var producer = ModuleCompiler.CreateProducer(initial, ["Helper"]);
         var consumer = ModuleCompiler.CreateConsumer(initial, producer);
         var version = (byte[])consumer.Clone();
-        for (var incompatible = 0; incompatible < 13; incompatible++)
+        for (var unsupported = 0; unsupported < 10; unsupported++)
         {
-            BinaryPrimitives.WriteInt32LittleEndian(version.AsSpan(4, 4), incompatible);
+            BinaryPrimitives.WriteInt32LittleEndian(version.AsSpan(4, 4), unsupported);
             _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
         }
         BinaryPrimitives.WriteInt32LittleEndian(version.AsSpan(4, 4), int.MaxValue);
@@ -888,14 +891,29 @@ public sealed class ModuleTests
     [InlineData(13, 13)]
     [InlineData(13, 14)]
     [InlineData(14, 13)]
-    public async Task ScalarModulesPreserveVersionThirteenWireCompatibilityAsync(int consumerVersion, int producerVersion)
+    [InlineData(14, 14)]
+    [InlineData(null, 13)]
+    [InlineData(null, 14)]
+    [InlineData(13, null)]
+    [InlineData(14, null)]
+    public async Task LinksLegacyScalarModulesWithoutRewritingTheirBodiesAsync(int? consumerVersion, int? producerVersion)
     {
+        // Captured version-14 scalar artifacts also have the version-13 body encoding.
+        const string LegacyProducer = "VFJSTQ4AAAAJAAAAbmF0aXZlLTEwAAD/////AAAAAAAAAAABAAAABgAAAEhlbHBlcicAAABIZWxwZXJ8MnxGfEV8SXwtfC18MHxNYXlUaHJvd3xNYXlSZXR1cm4BAQAGAAAASGVscGVyAgAAAAAAAAAAAAAAAAAAAAAAAAAiAAAAJAAAAAE4AAAADgAAAAEAAAAIOgAAAAoAAAABAQIAAABBAAAAAgAAAAsAAAAAAAAA";
+        const string LegacyConsumer = "VFJSTQ4AAAAJAAAAbmF0aXZlLTEwAQAAAAAAAAAAAAAAAAACAAAABAAAAE1haW4lAAAATWFpbnwyfEZ8TnxJfC18LXwwfE1heVRocm93fE1heVJldHVybgABAAQAAABNYWluAgAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAIQAAAAENAAAAFAAAAAEAAAAIDwAAABAAAAABBQIAAAAWAAAACAAAAAYAAABIZWxwZXIAAAAABgAAAEhlbHBlcicAAABIZWxwZXJ8MnxGfEV8SXwtfC18MHxNYXlUaHJvd3xNYXlSZXR1cm4BAAA=";
         var program = Compile("int32 Main() { return Helper(); } public int32 Helper() { return 11; }");
         var producer = ModuleCompiler.CreateProducer(program, ["Helper"]);
         var consumer = ModuleCompiler.CreateConsumer(program, producer);
-        // Version 14 adds composite nodes and a profile without changing the scalar encoding.
-        BinaryPrimitives.WriteInt32LittleEndian(consumer.AsSpan(4, 4), consumerVersion);
-        BinaryPrimitives.WriteInt32LittleEndian(producer.AsSpan(4, 4), producerVersion);
+        if (consumerVersion is int legacyConsumerVersion)
+        {
+            consumer = Convert.FromBase64String(LegacyConsumer);
+            BinaryPrimitives.WriteInt32LittleEndian(consumer.AsSpan(4, 4), legacyConsumerVersion);
+        }
+        if (producerVersion is int legacyProducerVersion)
+        {
+            producer = Convert.FromBase64String(LegacyProducer);
+            BinaryPrimitives.WriteInt32LittleEndian(producer.AsSpan(4, 4), legacyProducerVersion);
+        }
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.Equal(11, await ExecuteAsync(NativeEmitter.Emit(linked, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
     }

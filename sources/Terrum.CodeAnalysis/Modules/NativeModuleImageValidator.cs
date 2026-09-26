@@ -18,14 +18,15 @@ internal static class NativeModuleImageValidator
     private const int MaximumUnwindRecords = 100_008;
 
     internal static void Validate(byte[] image, bool isConsumer, string providerDll, IReadOnlyList<string> exports,
-        NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast)
+        NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast, bool allowOwnedBufferRuntime = false)
         => Validate(image, isConsumer, isConsumer
             ? new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal) { [providerDll] = exports }
-            : new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal), exports, policy);
+            : new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal), exports, policy,
+            allowOwnedBufferRuntime);
 
     internal static void Validate(byte[] image, bool isConsumer,
         IReadOnlyDictionary<string, IReadOnlyList<string>> providerImports, IReadOnlyList<string> exports,
-        NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast)
+        NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast, bool allowOwnedBufferRuntime = false)
     {
         if (policy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
@@ -263,8 +264,13 @@ internal static class NativeModuleImageValidator
                     {
                         throw Invalid();
                     }
-                    if (index == 0 && !symbols.SequenceEqual(checkedExceptions
-                        ? ["ExitProcess", "RaiseException"] : ["ExitProcess"]))
+                    if (index == 0 && (!symbols.Contains("ExitProcess")
+                        || symbols.Contains("RaiseException") != checkedExceptions
+                        || symbols.Any(symbol => symbol is not ("ExitProcess" or "RaiseException")
+                            && (!allowOwnedBufferRuntime
+                                || symbol is not ("GetProcessHeap" or "HeapAlloc" or "HeapFree")))
+                        || (symbols.Contains("GetProcessHeap")
+                            != (symbols.Contains("HeapAlloc") || symbols.Contains("HeapFree")))))
                     {
                         throw Invalid();
                     }

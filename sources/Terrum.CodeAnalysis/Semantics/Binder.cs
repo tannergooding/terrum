@@ -44,6 +44,7 @@ internal sealed class Binder
     private readonly bool _isLibrary;
     private readonly CompilationReference? _reference;
     private readonly BoundRuntimePolicy _runtimePolicy;
+    private bool _usesNativeBuffer;
 
     internal Binder(SyntaxTree tree, CancellationToken cancellationToken)
         : this([tree], [], cancellationToken)
@@ -95,6 +96,11 @@ internal sealed class Binder
             Report("TRM3022", "The referenced module requires a different checked-failure runtime policy.", _trees[0].Root.Span);
             return null;
         }
+        _usesNativeBuffer = _reference?.Functions.Any(static function =>
+            function.ReturnType == PrimitiveType.OwnedInt32Buffer
+            || function.Variables.Any(static variable => variable.Type == PrimitiveType.OwnedInt32Buffer)) == true
+            || _reference?.Structures.Any(static structure =>
+                structure.Fields.Any(static field => field.Type == PrimitiveType.OwnedInt32Buffer)) == true;
         // Parser depth limits do not bound left-associated flat expression trees.
         var pending = new Stack<(SyntaxTree Tree, SyntaxNode Node, int Depth)>();
         if (_reference is not null)
@@ -138,6 +144,16 @@ internal sealed class Binder
                 return null;
             }
 
+            var namesBuffer = item.Node.Kind == SyntaxKind.TypeName
+                && NameText(item.Node) == NativeBufferIntrinsics.TypeName;
+            var callsBuffer = item.Node.Kind == SyntaxKind.MemberAccessExpression
+                    && item.Node.Children[0] is SyntaxNode receiver
+                    && receiver.Kind == SyntaxKind.NameExpression
+                    && NameText(receiver) == NativeBufferIntrinsics.TypeName;
+            if (namesBuffer || callsBuffer)
+            {
+                _usesNativeBuffer = true;
+            }
             foreach (var child in item.Node.Children)
             {
                 if (child is SyntaxNode node)
@@ -170,6 +186,11 @@ internal sealed class Binder
                 {
                     var name = StructName(structure).Text;
                     var qualified = string.IsNullOrEmpty(_namespace) ? name : _namespace + "." + name;
+                    if (qualified == NativeBufferIntrinsics.TypeName)
+                    {
+                        Report("TRM3003", "The compiler-owned native buffer type cannot be redeclared.", structure.Span);
+                        continue;
+                    }
                     var index = _structs.Count;
                     if (index >= SemanticVerifier.MaximumVariables)
                     {
@@ -187,6 +208,10 @@ internal sealed class Binder
             }
         }
 
+        if (_usesNativeBuffer)
+        {
+            _ = _structNames.TryAdd(NativeBufferIntrinsics.TypeName, PrimitiveType.OwnedInt32Buffer);
+        }
         foreach (var index in _structDeclarations.Keys)
         {
             DeclareStruct(index);
@@ -219,6 +244,25 @@ internal sealed class Binder
                     continue;
                 }
                 Declare(node, null);
+            }
+        }
+
+        if (_usesNativeBuffer)
+        {
+            foreach (var intrinsic in NativeBufferIntrinsics.Functions)
+            {
+                if (!_functions.TryAdd(intrinsic.Name, _signatures.Count))
+                {
+                    Report("TRM3003", $"The compiler-owned operation '{intrinsic.Name}' cannot be redeclared.", _trees[0].Root.Span);
+                    return null;
+                }
+                var offset = intrinsic.IsStatic ? 0 : 1;
+                var parameters = intrinsic.Variables.Skip(offset)
+                    .Select(static variable => new Parameter(variable.Name, variable.Type, default, variable.IsOut));
+                _signatures.Add(new Signature(intrinsic.Name, intrinsic.ReturnType, [.. parameters],
+                    null, null, _trees[0], NativeBufferIntrinsics.TypeName, false,
+                    false, true, intrinsic.Variables[0].IsMutable && !intrinsic.IsStatic,
+                    intrinsic.IsStatic, intrinsic.IsNoThrow, false, intrinsic));
             }
         }
 
@@ -313,7 +357,7 @@ internal sealed class Binder
                 }
                 var slot = parameter + (signature.IsConstructor ? 1 : 0)
                     + (signature.StructName is not null && !signature.IsStatic && !signature.IsConstructor ? 1 : 0);
-                var method = _structs[(int)signature.Parameters[parameter].Type - 100].CleanupMethod;
+                var method = CleanupMethod(signature.Parameters[parameter].Type);
                 var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
                 body = new BoundBlock([new BoundTryFinally(body,
                     new BoundBlock([new BoundDrop(slot, cleanupFunction, syntaxBody.Span) {
@@ -448,8 +492,7 @@ internal sealed class Binder
                 DeclareStruct((int)type - 100);
                 SetContext(tree);
             }
-            if ((int)type >= 100 && (int)type - 100 < _structs.Count
-                && _structs[(int)type - 100].IsUnique && !isUnique)
+            if (IsUnique(type) && !isUnique)
             {
                 Report("TRM3023", "Copy structs cannot store unique owning fields.", field.Span);
             }
@@ -700,7 +743,12 @@ internal sealed class Binder
         TryResolveStruct(name, out var type) ? type : PrimitiveType.Int32;
 
     private bool IsUnique(PrimitiveType type) =>
-        (int)type >= 100 && (int)type - 100 < _structs.Count && _structs[(int)type - 100].IsUnique;
+        type == PrimitiveType.OwnedInt32Buffer
+            || ((int)type >= 100 && (int)type - 100 < _structs.Count
+                && _structs[(int)type - 100].IsUnique);
+
+    private string? CleanupMethod(PrimitiveType type) =>
+        type == PrimitiveType.OwnedInt32Buffer ? null : _structs[(int)type - 100].CleanupMethod;
 
     private BoundExpression BindReceiverLoan(SyntaxNode receiver, PrimitiveType type)
     {
@@ -721,6 +769,22 @@ internal sealed class Binder
         }
         Report("TRM3023", "A unique receiver loan requires a named owner or initialized field place.", receiver.Span);
         return ErrorExpression(receiver.Span);
+    }
+
+    private BoundExpression BindMutableReceiverLoan(SyntaxNode receiver, TextSpan span)
+    {
+        while (receiver.Kind == SyntaxKind.ParenthesizedExpression)
+        {
+            receiver = (SyntaxNode)receiver.Children[1];
+        }
+        if (receiver.Kind == SyntaxKind.NameExpression
+            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token.Text, out var slot)
+            && _variables[slot].Type == PrimitiveType.OwnedInt32Buffer && _variables[slot].IsMutable)
+        {
+            return new BoundMutableReceiverLoan(slot, PrimitiveType.OwnedInt32Buffer, span);
+        }
+        Report("TRM3023", "Native buffer mutation requires a named mutable owner.", span);
+        return ErrorExpression(span);
     }
 
     private bool TryResolveStruct(string name, out PrimitiveType type)
@@ -785,7 +849,7 @@ internal sealed class Binder
         {
             if (bound[index] is BoundLocal local && IsUnique(local.Initializer.Type))
             {
-                var method = _structs[(int)local.Initializer.Type - 100].CleanupMethod;
+                var method = CleanupMethod(local.Initializer.Type);
                 var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
                 bound = bound[..(index + 1)].Add(new BoundTryFinally(
                     new BoundBlock(bound[(index + 1)..], block.Span),
@@ -799,7 +863,7 @@ internal sealed class Binder
                     continue;
                 }
                 var slot = outputOwners[output].Variable;
-                var method = _structs[(int)_variables[slot].Type - 100].CleanupMethod;
+                var method = CleanupMethod(_variables[slot].Type);
                 var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
                 bound = bound[..index]
                     .Add(new BoundOwnerDeclaration(slot, block.Span))
@@ -1023,7 +1087,7 @@ internal sealed class Binder
                 var loop = new BoundWhile(condition, loopBody, node.Span);
                 if (initializer is BoundLocal owner && IsUnique(_variables[owner.Variable].Type))
                 {
-                    var method = _structs[(int)_variables[owner.Variable].Type - 100].CleanupMethod;
+                    var method = CleanupMethod(_variables[owner.Variable].Type);
                     var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
                     return new BoundBlock([
                         initializer,
@@ -1264,6 +1328,13 @@ internal sealed class Binder
                 var member = ((SyntaxTokenElement)node.Children[2]).Token.Text;
                 var receiverNode = (SyntaxNode)node.Children[0];
                 var receiverType = KnownType(receiverNode);
+                if (receiverType == PrimitiveType.OwnedInt32Buffer && member is "Count" or "Capacity"
+                    && TryFindFunction(NativeBufferIntrinsics.TypeName + "." + member, out var intrinsic))
+                {
+                    expression = new BoundCall(intrinsic,
+                        [BindReceiverLoan(receiverNode, PrimitiveType.OwnedInt32Buffer)], PrimitiveType.Int32, node.Span);
+                    break;
+                }
                 if (receiverType is PrimitiveType fieldType && TryFindField(fieldType, member, out var field))
                 {
                     CheckFieldAccess(fieldType, field, node.Span);
@@ -1526,7 +1597,12 @@ internal sealed class Binder
             var left = (SyntaxNode)callee.Children[0];
             var member = ((SyntaxTokenElement)callee.Children[2]).Token.Text;
             var type = KnownType(left);
-            if (type is PrimitiveType structType && IsStruct(structType))
+            if (type == PrimitiveType.OwnedInt32Buffer)
+            {
+                receiver = left;
+                _ = TryFindFunction(NativeBufferIntrinsics.TypeName + "." + member, out function);
+            }
+            else if (type is PrimitiveType structType && IsStruct(structType))
             {
                 receiver = left;
                 _ = TryFindFunction(_structs[(int)structType - 100].Name + "." + member, out function);
@@ -1563,9 +1639,11 @@ internal sealed class Binder
         if (receiver is not null && signature is not null)
         {
             var receiverType = ResolveStruct(signature.StructName!);
-            bound.Add(IsUnique(receiverType) && !signature.IsCleanup
-                ? BindReceiverLoan(receiver, receiverType)
-                : BindExpression(receiver, receiverType));
+            bound.Add(signature.External?.Intrinsic is BoundIntrinsic.BufferSet or BoundIntrinsic.BufferTryAppend
+                ? BindMutableReceiverLoan(receiver, receiver.Span)
+                : IsUnique(receiverType) && !signature.IsCleanup
+                    ? BindReceiverLoan(receiver, receiverType)
+                    : BindExpression(receiver, receiverType));
             receiverCount = 1;
         }
         else if (signature is { StructName: not null, IsStatic: false, IsConstructor: false })
@@ -1852,9 +1930,11 @@ internal sealed class Binder
                     var left = (SyntaxNode)callee.Children[0];
                     var member = ((SyntaxTokenElement)callee.Children[2]).Token.Text;
                     var receiverType = KnownType(left);
-                    var name = receiverType is PrimitiveType type && IsStruct(type)
-                        ? _structs[(int)type - 100].Name + "." + member
-                        : NameText(callee);
+                    var name = receiverType switch {
+                        PrimitiveType.OwnedInt32Buffer => NativeBufferIntrinsics.TypeName + "." + member,
+                        PrimitiveType type when IsStruct(type) => _structs[(int)type - 100].Name + "." + member,
+                        _ => NameText(callee),
+                    };
                     return TryFindFunction(name, out var method) ? _signatures[method].ReturnType : null;
                 }
                 return null;
@@ -1880,6 +1960,10 @@ internal sealed class Binder
                 var receiver = (SyntaxNode)node.Children[0];
                 var member = ((SyntaxTokenElement)node.Children[2]).Token.Text;
                 var receiverType = KnownType(receiver);
+                if (receiverType == PrimitiveType.OwnedInt32Buffer && member is "Count" or "Capacity")
+                {
+                    return PrimitiveType.Int32;
+                }
                 if (receiverType is PrimitiveType type && TryFindField(type, member, out var field))
                 {
                     return GetField(type, field).Type;
@@ -2006,6 +2090,7 @@ internal sealed class Binder
         PrimitiveType.Char16 => "char16",
         PrimitiveType.Bool => "bool",
         PrimitiveType.Void => "void",
+        PrimitiveType.OwnedInt32Buffer => NativeBufferIntrinsics.TypeName,
         _ when IsStruct(type) => _structs[(int)type - 100].Name,
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };

@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -322,6 +323,98 @@ public sealed class OwnershipTests
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)]);
         Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
         Assert.Null(compilation.Program);
+    }
+
+    private const string NestedReceiver = """
+        unique struct Leaf {
+            public int32 Id;
+            public Leaf() { Id = 42; }
+            [NoThrow] [Cleanup] public void Close() {}
+            public int32 Read(int32 offset) { return Id + offset; }
+        }
+        unique struct Branch {
+            public Leaf Leaf;
+            public Branch() { Leaf = new Leaf(); }
+            [NoThrow] [Cleanup] public void Close() {}
+        }
+        unique struct Root {
+            public Branch Branch;
+            public Root() { Branch = new Branch(); }
+            [NoThrow] [Cleanup] public void Close() {}
+        }
+        bool Replace(out Root replacement) { replacement = new Root(); return true; }
+        bool ReplaceMoved(Root old, out Root replacement) {
+            replacement = new Root();
+            return true;
+        }
+        int32 Observe(bool value) { if (value) { return 0; } return 0; }
+        """;
+
+    [Theory]
+    [InlineData("root.Branch.Leaf.Read(Observe(Replace(out root)))")]
+    [InlineData("root.Branch.Leaf.Read(Observe(ReplaceMoved(move root, out root)))")]
+    public void NestedFieldLoanReservesOriginalRootAcrossScalarArguments(string expression)
+    {
+        var source = NestedReceiver + " int32 Main() { mut Root root = new Root(); return "
+            + expression + "; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023"
+            && diagnostic.Span.Start == source.LastIndexOf("Observe(", StringComparison.Ordinal));
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PublicIrRejectsNestedFieldLoanRootReplacementDuringScalarArgument(bool moveFirst)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(NestedReceiver
+            + " int32 Main() { mut Root root = new Root(); return root.Branch.Leaf.Read(Observe(true)); }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var entry = program.Functions[program.EntryPoint];
+        var local = Assert.IsType<BoundLocal>(entry.Body.Statements[0]);
+        var region = Assert.IsType<BoundTryFinally>(entry.Body.Statements[1]);
+        var result = Assert.IsType<BoundReturn>(Assert.Single(region.Body.Statements));
+        var call = Assert.IsType<BoundCall>(result.Value);
+        _ = Assert.IsType<BoundFieldLoan>(call.Arguments[0]);
+        var scalar = Assert.IsType<BoundCall>(call.Arguments[1]);
+        var replacement = program.Functions.IndexOf(Assert.Single(program.Functions,
+            function => function.Name == (moveFirst ? "ReplaceMoved" : "Replace")));
+        ImmutableArray<BoundExpression> arguments = [new BoundOutArgument(
+            local.Variable, false, local.Initializer.Type, scalar.Span)];
+        if (moveFirst)
+        {
+            arguments = [new BoundMove(local.Variable, local.Initializer.Type, scalar.Span), .. arguments];
+        }
+        var invalidating = new BoundCall(replacement, arguments, PrimitiveType.Bool, scalar.Span);
+        var forgedScalar = scalar with { Arguments = [invalidating] };
+        var forgedCall = call with { Arguments = call.Arguments.SetItem(1, forgedScalar) };
+        var forgedReturn = result with { Value = forgedCall };
+        var forgedRegion = region with { Body = region.Body with { Statements = [forgedReturn] } };
+        var forged = program with {
+            Functions = program.Functions.SetItem(program.EntryPoint, entry with {
+                Body = entry.Body with { Statements = entry.Body.Statements.SetItem(1, forgedRegion) },
+            }),
+        };
+        var error = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged));
+        Assert.Equal("Ownership", error.Data["Terrum.InvalidEffect"]);
+        Assert.Equal(scalar.Span, error.Data["Terrum.SourceSpan"]);
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task NestedFieldLoanAllowsCompletedReadonlyQueryAsync(BoundRuntimePolicy policy)
+    {
+        var source = NestedReceiver + """
+            int32 Main() {
+                Root root = new Root();
+                return root.Branch.Leaf.Read(root.Branch.Leaf.Read(0) - 42);
+            }
+            """;
+        Assert.Equal(42, await RunNativeAsync(source, policy).ConfigureAwait(true));
     }
 
     [Fact]
@@ -1464,7 +1557,7 @@ public sealed class OwnershipTests
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var exports = new[] { "Token.Close", "Token.Read", "Pair.Close", "Pair.Read", "Make", "Take" };
         var semanticProducer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.Equal(14, BinaryPrimitives.ReadInt32LittleEndian(semanticProducer.AsSpan(4, 4)));
+        Assert.Equal(15, BinaryPrimitives.ReadInt32LittleEndian(semanticProducer.AsSpan(4, 4)));
         var staleVersion = (byte[])semanticProducer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(staleVersion.AsSpan(4, 4), 13);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(staleVersion));

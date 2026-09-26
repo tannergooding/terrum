@@ -246,7 +246,8 @@ public static partial class ModuleCompiler
         return Compilation.GetNativeProfileVersion(module.RuntimePolicy,
             module.Structures.Any(static item => item.IsUnique),
             module.Functions.Any(static item => item.HasOwnershipTransfer),
-            Compilation.HasCompositeUnique(module.Structures));
+            Compilation.HasCompositeUnique(module.Structures),
+            HasOwnedNativeBuffer(module.Structures, module.Functions));
     }
 
     private static BoundFunction RecordedImportPromises(string contract, BoundFunction replacement)
@@ -319,7 +320,8 @@ public static partial class ModuleCompiler
                 || profile != Compilation.GetNativeProfileVersion(policy,
                     structures.Any(static item => item.IsUnique),
                     functions.Any(static item => item.HasOwnershipTransfer),
-                    Compilation.HasCompositeUnique(structures)))
+                    Compilation.HasCompositeUnique(structures),
+                    HasOwnedNativeBuffer(structures, functions)))
             {
                 throw new ModuleFormatException("Graph semantic profile or payload is invalid.");
             }

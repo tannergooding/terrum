@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.Json;
 using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
 
@@ -38,6 +39,7 @@ internal static partial class Program
         + "       terrumc compile-native-graph consumer <source> --provider <dependency.trmn|dependency.trng> -o <consumer.trng> --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc validate-native-graph <consumer.trng> --provider <selected.trmn|selected.trng> [--provider <selected>] [--json]\n"
         + "       terrumc run-native-graph <consumer.trng> --provider <selected.trmn|selected.trng> [--provider <selected>] --runtime <fail-fast|checked-exceptions> [--json]\n"
+        + "       terrumc run-native-graph-jit <consumer.trng> --provider <selected.trmn|selected.trng> [--provider <selected>] --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "check/tokens/tree inspect syntax; analyze binds the native profile; build emits Windows x64 PE.\n"
         + "fail-fast explicitly selects process termination for runtime failures, not catchable exceptions.\n"
         + "checked-exceptions enables recovery and unwinding for four compiler-generated failure reasons.\n"
@@ -79,6 +81,16 @@ internal static partial class Program
         if (args.Length != 0 && args[0] is "compile-native-graph" or "validate-native-graph" or "run-native-graph")
         {
             return RunNativeGraphCommand(args, json);
+        }
+
+        if (args.Length != 0 && args[0] is "run-native-graph-jit" or "--native-graph-jit-worker")
+        {
+            return RunNativeGraphJitCommand(args, json);
+        }
+
+        if (args.Length == 1 && args[0] == "--native-jit-registrar")
+        {
+            return NativeJitContinuationRegistrar.Serve();
         }
 
         if (args.Length != 0 && args[0] is "analyze" or "build" or "build-library" or "jit")

@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-9 and native-10/native-11/native-12/native-13/native-14
+## Current boundary: syntax-9 and native-10 through native-15
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -18,7 +18,7 @@ managed graphs and standard-library execution are not implemented.
 | Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Classes, interfaces, enums/unions, owning fields in Copy structs, general attributes, generic declarations/constraints, cyclic dependencies, automatic version resolution and resilient module layouts |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; repeated `?` diagnoses | General type resolution, optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, break/continue, switch/patterns, general exception objects/throw, async, compound assignment |
-| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, named/ref/out argument syntax | Character literals, partial owning-field moves, owning field replacement, general expression temporaries, stored loans, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
+| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, named/ref/out argument syntax, and checked synchronous `OwnedInt32Buffer` operations | Character literals, partial owning-field moves, owning field replacement, general expression temporaries, stored loans, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
 Only the grammar below is supported. Unsupported constructs diagnose rather than
@@ -62,6 +62,21 @@ conditional output scratch slots and checked writable host-buffer elements.
 Unique local places additionally track vacancy and cleanup obligations.
 Composite owning fields are assigned once along sequential constructor flow;
 complete owners can be transferred, but partial field moves are unsupported.
+`OwnedInt32Buffer` is an opaque, compiler-owned, move-only native resource with
+fixed capacity and an initialized `int32` prefix. `TryCreate(capacity, out buffer)`
+publishes on true only; `Count`, `Capacity` and `Read(index)` borrow
+an initialized owner, while `Set(index, value)` and `TryAppend(value)` require a
+mutable named owner. The latter reserve that original receiver before evaluating
+arguments: moving or replacing it within an argument is rejected even if its
+slot becomes live again. Readonly nested queries remain possible. An `out var`
+binding is readonly; explicitly move it into a `mut OwnedInt32Buffer` binding
+to append or set. There is no resize, aliasable view, stored loan, generic
+buffer or user-defined buffer representation. `TryAppend` is a bounded
+initialized-prefix adapter for compiler components, not an implementation of
+the proposed general `Buffer<T>`/`TryAdd` library contracts.
+The [source-line index candidate](../self-host/SourceLineIndex.terrum) uses it
+to build and own a line-start table, with binary-searched UTF-16 positions checked
+against host fixtures under both native failure policies.
 General borrowed references and stored loans remain unsupported.
 For-loop initialization runs once, followed by condition, body and iterator;
 the iterator does not run after a returning body. An omitted condition is true.

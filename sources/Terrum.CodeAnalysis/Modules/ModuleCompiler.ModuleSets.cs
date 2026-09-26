@@ -172,6 +172,11 @@ public static partial class ModuleCompiler
 
     internal static void ValidateConsumerAgainstReference(byte[] consumerBytes, CompilationReference reference)
     {
+        _ = RestoreConsumerAgainstReference(consumerBytes, reference);
+    }
+
+    internal static BoundProgram RestoreConsumerAgainstReference(byte[] consumerBytes, CompilationReference reference)
+    {
         var consumer = Read(consumerBytes, expectedConsumer: true);
         if (consumer.RuntimePolicy != reference.RuntimePolicy)
         {
@@ -213,7 +218,9 @@ public static partial class ModuleCompiler
         };
         try
         {
-            SemanticVerifier.VerifyReferences(Resolve(program, names));
+            var resolved = Resolve(program, names);
+            SemanticVerifier.VerifyReferences(resolved);
+            return resolved;
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
         {
