@@ -63,6 +63,9 @@ images before loading any provider; it reconstructs only the root's verified
 semantic program and emits root machine code through the ordinary encoder.
 Every actual JIT fixup must match the root package's recorded machine imports.
 Selected leaf and intermediate DLL images remain byte-for-byte unchanged.
+The JIT worker uses its application directory as its current directory and
+absolute paths for staged inputs, so a retained worker-directory handle cannot
+prevent removal of the transient staging directory after execution.
 JIT requires a v2 root with explicit machine-import metadata; older graph
 packages remain readable and executable by the AOT runner.
 The worker loads DLLs by full staged path in dependency order, registers

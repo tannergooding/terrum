@@ -105,10 +105,13 @@ public static partial class NativeModuleCompiler
             cancellationToken.ThrowIfCancellationRequested();
             using var requests = new AnonymousPipeServerStream(PipeDirection.In, HandleInheritability.Inheritable);
             using var responses = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.Inheritable);
+            // The worker uses absolute staged paths; keeping its current directory outside staging
+            // lets the supervisor remove the staging directory as soon as the worker exits.
             var start = new ProcessStartInfo(worker) {
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                WorkingDirectory = directory,
+                WorkingDirectory = Path.GetDirectoryName(worker)
+                    ?? throw new InvalidOperationException("Native graph JIT worker has no application directory."),
                 RedirectStandardInput = true,
             };
             start.ArgumentList.Add("--native-graph-jit-worker");

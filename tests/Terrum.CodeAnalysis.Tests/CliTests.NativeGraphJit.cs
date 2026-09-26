@@ -96,8 +96,9 @@ public sealed partial class CliTests
                 "--provider", middle, "-o", root, "--runtime", policy)).ExitCode);
             Assert.Equal(42, (await RunAsync([], "run-native-graph", root,
                 "--provider", middle, "--provider", leaf, "--runtime", policy)).ExitCode);
-            Assert.Equal(42, (await RunAsync([], "run-native-graph-jit", root,
-                "--provider", leaf, "--provider", middle, "--runtime", policy)).ExitCode);
+            var (jitExit, jitOutput, jitError) = await RunAsync([], "run-native-graph-jit", root,
+                "--provider", leaf, "--provider", middle, "--runtime", policy);
+            Assert.True(jitExit == 42, $"Expected 42, got {jitExit}: stdout: {jitOutput}; stderr: {jitError}");
         }
         finally
         {
@@ -311,12 +312,13 @@ public sealed partial class CliTests
                 "--provider", middle, "--provider", replacement)).ExitCode);
             Assert.Equal(44, (await RunAsync([], "run-native-graph", root,
                 "--provider", replacement, "--provider", middle, "--runtime", policy)).ExitCode);
-            Assert.Equal(44, (await RunAsync([], "run-native-graph-jit", root,
-                "--provider", middle, "--provider", replacement, "--runtime", policy)).ExitCode);
+            var (jitExit, jitOutput, jitError) = await RunAsync([], "run-native-graph-jit", root,
+                "--provider", middle, "--provider", replacement, "--runtime", policy);
+            Assert.True(jitExit == 44, $"Expected 44, got {jitExit}: stdout: {jitOutput}; stderr: {jitError}");
             var (apphostExit, apphostError) = await RunGraphJitApphostAsync(
                 "run-native-graph-jit", root, "--provider", replacement, "--provider", middle,
                 "--runtime", policy);
-            Assert.Equal(44, apphostExit);
+            Assert.True(apphostExit == 44, $"Expected 44, got {apphostExit}: {apphostError}");
             Assert.Empty(apphostError);
             Assert.Equal(originalRoot, await File.ReadAllBytesAsync(root));
             Assert.Equal(originalMiddle, await File.ReadAllBytesAsync(middle));
