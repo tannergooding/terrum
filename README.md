@@ -74,6 +74,9 @@ Read the [language design](docs/language.md), [lifetime contracts](docs/lifetime
 [standard-library design](docs/libraries.md), [sample catalog](docs/samples.md),
 [syntax API and support matrix](docs/implementation.md), and [roadmap](docs/roadmap.md).
 The repository is the canonical design/development location.
+The [language and library integration review](docs/language-library-review.md)
+explores additional contracts and extensibility mechanisms; its proposals are
+not accepted language semantics or additions to the current implementation scope.
 
 The C#/.NET compiler host does not imply managed output. The first backend is
 Terrum-owned Windows x64 AOT. A CIL backend could be added for a demonstrated
