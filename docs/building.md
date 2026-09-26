@@ -17,6 +17,7 @@ The Unicode data generator is Terrum-specific and is not part of the build drive
 .\restore.cmd
 .\build.cmd
 .\build.cmd -fast -test
+.\build.cmd -test
 .\build.cmd -configuration Release -test
 .\test.cmd
 .\pack.cmd
@@ -32,43 +33,26 @@ or project instead of `Terrum.slnx`.
 
 `-architecture` installs the exact `global.json` SDK into `artifacts\dotnet`
 and selects it for that invocation, without changing the machine installation.
-`scripts\cibuild.cmd` enables restore, build, test and local packaging using a
-local architecture-specific SDK. It does not publish packages or push Git.
+`scripts\cibuild.cmd` enables restore, build, test and local packaging by
+default, using a local architecture-specific SDK. It does not publish
+packages or push Git.
 Pack failures are checked independently for the default, preview and stable
 variants so a later successful command cannot hide an earlier failure.
 
-`-fast` passes `RunAnalyzers=false` only to the build action for a faster
-inner loop. It retains C# compilation, type checking and test execution; it
-does not turn off Terrum's language verifier. It is incompatible with `-ci`.
-The default build still runs the full .NET analyzer/style and trimming policy:
-use `.\build.cmd -configuration Release -test` as the full-analysis checkpoint.
+Use `-fast` for routine builds during large compiler changes. It passes
+`RunAnalyzers=false` and `GenerateDocumentationFile=false` only to the build
+action, skipping XML documentation generation and deferring .NET analyzer/style
+and trimming checks while retaining C# compilation, type checking, requested
+tests and Terrum's semantic verifier. At a full-analysis checkpoint, build
+and test without the switch in the same configuration: `.\build.cmd -test`
+for Debug or `.\build.cmd -configuration Release -test` for Release.
 
-## Build-time analysis
-
-On Windows x64 with SDK `11.0.100-rc.1.26425.128`, a no-restore forced
-Release rebuild of the three-project solution took 179-199 seconds with
-analysis enabled versus 1.1 seconds with `RunAnalyzers=false`. The
-no-analyzer wrapper rebuilt in 0.8 seconds and then ran 1,313 tests in
-51 seconds. An already-cached restore took 0.5 seconds; these are not
-fresh-machine restore measurements. The MSBuild performance summary assigns
-178-198 seconds to `CoreCompile`/`Csc` with full analysis, rather than
-evaluation, copying, or restore. A diagnostic analyzer report attributed
-163 of 187 aggregate core-project analyzer-seconds to CA1508 (dead
-conditional code) and 19 seconds to the trimming analyzer. Analyzer seconds
-overlap wall time and other analyzer work; they are not additive. CA5403/CA5390
-previously dominated a 23-minute rebuild but fell below 0.5 analyzer-seconds
-each after byte-emission changes. Keep CA1508 and trimming checks in the
-full-analysis checkpoint rather than removing useful diagnostics.
-With only CA1508, CA5403 and CA5390 temporarily suppressed, repeated
-Release rebuilds took 2.7-3.0 seconds versus 1.2-1.3 seconds with all
-analyzers off; the temporary suppression was not committed.
-
-To capture comparable analyzer evidence after restoring dependencies, run
-`dotnet build Terrum.slnx --no-restore -c Release -t:Rebuild -p:ReportAnalyzer=true -v:diag`
-and compare against the same command with `-p:RunAnalyzers=false`.
-`ReportAnalyzer` prints per-rule execution time; `-clp:PerformanceSummary`
-prints MSBuild stage times. Redirect diagnostic output to an ignored
-`artifacts\` log, not a tracked file.
+For a CI leg without analysis or packaging, select the actions explicitly:
+`.\scripts\cibuild.cmd -restore -build -test -fast`. The `-fast` switch only
+affects analysis and documentation generation, not which actions run. With no action switches,
+`cibuild.cmd` restores, builds, tests and packages; run it without `-fast`
+for the full-analysis packaging/checkpoint leg. Packaging consumes an
+existing build and does not run analysis on its own.
 
 ## Project-specific differences
 

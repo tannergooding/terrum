@@ -20,7 +20,8 @@ $ErrorActionPreference = "Stop"
 
 function Build() {
   $logFile = Join-Path -Path $LogDir -ChildPath "$configuration\build.binlog"
-  & dotnet build -c "$configuration" --no-restore -v "$verbosity" /bl:"$logFile" /err $properties "$solution"
+  $fastProperty = if ($fast) { "/p:RunAnalyzers=false;GenerateDocumentationFile=false" } else { $null }
+  & dotnet build -c "$configuration" --no-restore -v "$verbosity" /bl:"$logFile" /err $properties $fastProperty "$solution"
 
   if ($LastExitCode -ne 0) {
     throw "'Build' failed for '$solution'"
@@ -44,11 +45,11 @@ function Help() {
     Write-Host -Object "  -build                  Build solution"
     Write-Host -Object "  -test                   Run all tests in the solution"
     Write-Host -Object "  -pack                   Package build artifacts"
-    Write-Host -Object "  -fast                   Skip .NET analyzers for the build (not supported with -ci)"
+    Write-Host -Object "  -fast                   Skip .NET analyzers and XML documentation during builds"
     Write-Host -Object ""
     Write-Host -Object "Advanced settings:"
     Write-Host -Object "  -solution <value>       Path to solution to build"
-    Write-Host -Object "  -ci                     Set when running on CI server"
+    Write-Host -Object "  -ci                     Set when running on CI server (all actions by default)"
     Write-Host -Object "  -architecture <value>   Test Architecture (<auto>, amd64, x64, x86, arm64, arm)"
     Write-Host -Object ""
     Write-Host -Object "Command line arguments not listed above are passed through to MSBuild."
@@ -103,14 +104,12 @@ try {
   }
 
   if ($ci) {
-    if ($fast) {
-      throw "'-fast' cannot be used with '-ci'; CI must run full analysis."
+    if (-not ($build -or $pack -or $restore -or $test)) {
+      $build = $true
+      $pack = $true
+      $restore = $true
+      $test = $true
     }
-
-    $build = $true
-    $pack = $true
-    $restore = $true
-    $test = $true
 
     if ($architecture -eq "") {
       $architecture = "<auto>"
@@ -151,10 +150,6 @@ try {
   }
 
   if ($build) {
-    if ($fast) {
-      $properties += "/p:RunAnalyzers=false"
-    }
-
     Build
   }
 

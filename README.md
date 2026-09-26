@@ -25,8 +25,9 @@ use an existing installation; `-architecture x64` acquires that version under
 ```powershell
 .\restore.cmd
 .\build.cmd
-.\build.cmd -fast -test # host compiler/type checks and tests; skip .NET analyzers
-.\build.cmd -configuration Release -test # full analyzer checkpoint
+.\build.cmd -fast -test # iterative build/test during large changes
+.\build.cmd -test # full analyzer checkpoint (Debug)
+.\build.cmd -configuration Release -test # full analyzer checkpoint (Release)
 .\test.cmd
 .\pack.cmd
 dotnet run --project sources\terrumc -- check samples\syntax\hello.terrum
@@ -50,9 +51,11 @@ to `artifacts\tst` and packages to `artifacts\pkg`. Builds enforce TerraFX's
 analyzer/style policy, XML documentation, nullable analysis, public signing and
 trimming/AOT compatibility. Host overflow checks are enabled in Debug as in
 TerraFX; this is not the implementation of Terrum numeric semantics.
-`-fast` is an opt-in inner-loop build: it skips .NET analyzers only during the
-build, not compiler errors or Terrum's semantic verification. Run the default
-build before committing; `-ci` always requires full analysis.
+For large changes, use `-fast -test` for routine compile/test cycles.
+This defers .NET analyzer/style and trimming checks and XML documentation
+generation, but not C# compiler errors, tests or Terrum's semantic verifier.
+Run a build without the switch in the same configuration at a full-analysis checkpoint. CI legs can opt
+into `-fast`; the packaging leg should run with full analysis.
 
 ## Layout
 
