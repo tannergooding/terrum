@@ -10,8 +10,9 @@ typedef int32_t (*Check)(void);
 typedef int32_t (*Collect)(uint64_t);
 typedef void (*ThrowingExport)(void);
 
-static void* live[16];
-static HANDLE heaps[16];
+enum { TrackedCapacity = 4096 };
+static void* live[TrackedCapacity];
+static HANDLE heaps[TrackedCapacity];
 static int attempts;
 static int releases;
 static int failAttempt;
@@ -20,7 +21,7 @@ static int invalid;
 static int LiveCount(void)
 {
     int count = 0;
-    for (int index = 0; index < 16; index++)
+    for (int index = 0; index < TrackedCapacity; index++)
     {
         count += live[index] != NULL;
     }
@@ -44,7 +45,7 @@ static LPVOID WINAPI TrackedAllocate(HANDLE heap, DWORD flags, SIZE_T bytes)
         invalid = 1;
         return NULL;
     }
-    for (int index = 0; index < 16; index++)
+    for (int index = 0; index < TrackedCapacity; index++)
     {
         if (!live[index])
         {
@@ -60,7 +61,7 @@ static LPVOID WINAPI TrackedAllocate(HANDLE heap, DWORD flags, SIZE_T bytes)
 
 static BOOL WINAPI TrackedRelease(HANDLE heap, DWORD flags, LPVOID allocation)
 {
-    for (int index = 0; index < 16; index++)
+    for (int index = 0; index < TrackedCapacity; index++)
     {
         if (allocation && live[index] == allocation && heaps[index] == heap)
         {
@@ -424,6 +425,25 @@ static int RunTokenChainChecks(HMODULE image)
     return 0;
 }
 
+static int RunClassCapacityChecks(HMODULE image)
+{
+    Check fill = (Check)GetProcAddress(image, "CapacityCycle");
+    Collect collect = (Collect)GetProcAddress(image, "CollectWithScalar");
+    VERIFY(fill && collect, 130);
+    VERIFY(ReplaceImport(image, "HeapAlloc", (void*)TrackedAllocate), 131);
+    VERIFY(ReplaceImport(image, "HeapFree", (void*)TrackedRelease), 132);
+    for (int iteration = 0; iteration < 2; iteration++)
+    {
+        attempts = 0;
+        releases = 0;
+        VERIFY(fill() == 42 && attempts == TrackedCapacity
+            && releases == 0 && LiveCount() == TrackedCapacity && !invalid, 133);
+        VERIFY(collect(0) == TrackedCapacity && releases == attempts
+            && LiveCount() == 0 && !invalid, 134);
+    }
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if (argc != 2 && argc != 3)
@@ -467,20 +487,24 @@ int main(int argc, char** argv)
     int checkedOptional = argc == 3 && strcmp(argv[2], "optional-checked") == 0;
     int optional = checkedOptional || (argc == 3 && strcmp(argv[2], "optional") == 0);
     int chain = argc == 3 && strcmp(argv[2], "chain") == 0;
-    if (argc == 3 && !unwind && !classes && !optional && !chain)
+    int capacity = argc == 3 && strcmp(argv[2], "class-capacity") == 0;
+    if (argc == 3 && !unwind && !classes && !optional && !chain && !capacity)
     {
         fprintf(stderr, "Unknown managed-heap probe mode: %s.\n", argv[2]);
         FreeLibrary(image);
         return 2;
     }
-    int result = chain ? RunTokenChainChecks(image)
+    int result = capacity ? RunClassCapacityChecks(image)
+        : chain ? RunTokenChainChecks(image)
         : optional ? RunOptionalChecks(image, checkedOptional)
         : classes ? RunClassChecks(image, checkedClasses)
         : unwind ? RunUnwindChecks(image) : RunChecks(image);
     FreeLibrary(image);
     if (result == 0)
     {
-        puts(chain
+        puts(capacity
+            ? "managed-class-capacity rounds=2 live-limit=4096 refusal=checked reuse=checked live=0"
+            : chain
             ? "managed-token-chain rounds=64 reuse=checked allocation-failure=checked live=0"
             : optional
             ? checkedOptional

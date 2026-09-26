@@ -22,6 +22,42 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class ModuleTests
 {
     [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task SemanticClassLeafExecutesAfterConstructorAndOwnerRemappingAsync(BoundRuntimePolicy policy)
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var source = await File.ReadAllTextAsync(Path.Combine(root, "samples", "native", "graph",
+            "managed-class-leaf.terrum")).ConfigureAwait(true);
+        var library = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
+        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Leaf"]);
+        var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Leaf() + 2; }"),
+            ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        var consumerPath = Path.Combine(AppContext.BaseDirectory, $"class-module-{Guid.NewGuid():N}.trm");
+        var producerPath = Path.ChangeExtension(consumerPath, ".producer.trm");
+        try
+        {
+            await File.WriteAllBytesAsync(consumerPath, consumer).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(producerPath, producer).ConfigureAwait(true);
+            var (exit, error) = await RunCliAsync("run-module", consumerPath, producerPath, "--runtime",
+                policy == BoundRuntimePolicy.FailFast ? "fail-fast" : "checked-exceptions").ConfigureAwait(true);
+            Assert.Equal(44, exit);
+            Assert.Empty(error);
+            Assert.Equal(44, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, producer),
+                (NativeRuntimePolicy)policy)).ConfigureAwait(true));
+            Assert.Equal(consumer, await File.ReadAllBytesAsync(consumerPath).ConfigureAwait(true));
+        }
+        finally
+        {
+            File.Delete(consumerPath);
+            File.Delete(producerPath);
+        }
+    }
+
+    [Theory]
     [InlineData(7, BoundRuntimePolicy.FailFast, "native-10")]
     [InlineData(8, BoundRuntimePolicy.FailFast, "native-10")]
     [InlineData(7, BoundRuntimePolicy.CheckedExceptions, "native-11")]

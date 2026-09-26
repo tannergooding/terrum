@@ -163,6 +163,25 @@ $LASTEXITCODE # 44
 $LASTEXITCODE # 44
 ```
 
+The same unchanged root and intermediate can instead load a class-backed leaf.
+Its private `Cycle` objects have optional edges; the leaf snapshots across edge
+clearing, restores the cycle, then collects it after its roots retire. The replacement carries a
+version 19 semantic class table and verified `native-20` profile. A class leaf
+without optional handles selects `native-19`. Neither class layout nor handle
+is part of the imported `Leaf()` declaration, and no other DLL can share the
+leaf's managed roots.
+
+```powershell
+& $c compile-native producer samples\native\graph\managed-class-leaf-original.terrum NodeB --export Leaf -o class-original.trmn --runtime fail-fast
+& $c compile-native-graph producer samples\native\graph\middle.terrum NodeA --provider class-original.trmn --export Middle -o class-middle.trng --runtime fail-fast
+& $c compile-native-graph consumer samples\native\graph\consumer.terrum --provider class-middle.trng -o class-root.trng --runtime fail-fast
+& $c compile-native producer samples\native\graph\managed-class-leaf.terrum NodeB --export Leaf -o class-new.trmn --runtime fail-fast
+& $c run-native-graph class-root.trng --provider class-middle.trng --provider class-new.trmn --runtime fail-fast
+$LASTEXITCODE # 44
+& $c run-native-graph-jit class-root.trng --provider class-middle.trng --provider class-new.trmn --runtime fail-fast
+$LASTEXITCODE # 44
+```
+
 Graph v2 packages carry the declared origin and cleanup owner of every
 retained type, separately from the actual PE imports reported by the same
 native emission. A graph DLL may return or bool/out-publish a dependency-owned

@@ -88,6 +88,15 @@ internal static class NativeModuleImageValidator
                 previousRva = ((long)section.VirtualAddress + section.VirtualSize + header.SectionAlignment - 1)
                     / header.SectionAlignment * header.SectionAlignment;
             }
+            if (managedData)
+            {
+                var data = sections[2];
+                if (data.VirtualSize != 24
+                    || image.AsSpan(data.PointerToRawData, 24).IndexOfAnyExcept((byte)0) >= 0)
+                {
+                    throw Invalid();
+                }
+            }
             if (previousRaw != image.Length || previousRva != header.SizeOfImage)
             {
                 throw Invalid();

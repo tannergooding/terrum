@@ -1,0 +1,33 @@
+class CapacityLink {
+    public int32 Value;
+    public mut CapacityLink? Next;
+
+    public CapacityLink(int32 value) {
+        Value = value;
+        Next = null;
+    }
+}
+
+public int32 CapacityCycle() {
+    require CapacityLink.TryCreate(0, out var first);
+    mut CapacityLink last = first;
+    for (mut int32 index = 1; index < 4096; index = index + 1) {
+        require CapacityLink.TryCreate(index, out var created);
+        last.Next = created;
+        last = created;
+    }
+    last.Next = first;
+    if (CapacityLink.TryCreate(4096, out var refused)) {
+        return 0;
+    }
+    require ManagedHeap.Collect() == 0;
+    require first.Value == 0;
+    require last.Value == 4095;
+    require last.Next is some back;
+    require back.Value == 0;
+    return 42;
+}
+
+public int32 CollectWithScalar(uint64 bits) {
+    return ManagedHeap.Collect();
+}

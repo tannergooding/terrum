@@ -228,6 +228,33 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     Console.Write($"{policy}: {chainProof}");
 }
 
+foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+{
+    var capacity = Path.Combine(artifacts, $"managed-class-capacity-abi-{policy}.dll");
+    var compileCapacity = new ProcessStartInfo("dotnet");
+    foreach (var argument in new[] { cli, "build-library",
+        Path.GetFullPath(Path.Combine("tests", "native", "managed-class-capacity-abi.terrum")),
+        "--export", "CapacityCycle", "--export", "CollectWithScalar",
+        "-o", capacity, "--runtime", policy })
+    {
+        compileCapacity.ArgumentList.Add(argument);
+    }
+    var capacityBuild = await Run(compileCapacity, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+    await File.WriteAllTextAsync(Path.Combine(artifacts, $"managed-class-capacity-abi-build-{policy}.log"),
+        capacityBuild).ConfigureAwait(false);
+    var capacityExecute = new ProcessStartInfo(executable);
+    capacityExecute.ArgumentList.Add(capacity);
+    capacityExecute.ArgumentList.Add("class-capacity");
+    var capacityProof = await Run(capacityExecute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+    await File.WriteAllTextAsync(Path.Combine(artifacts, $"managed-class-capacity-abi-proof-{policy}.log"),
+        capacityProof).ConfigureAwait(false);
+    if (capacityProof.Trim() != "managed-class-capacity rounds=2 live-limit=4096 refusal=checked reuse=checked live=0")
+    {
+        throw new InvalidOperationException("The independent managed class-capacity ABI proof did not complete.");
+    }
+    Console.Write($"{policy}: {capacityProof}");
+}
+
 static async Task<string> Run(ProcessStartInfo start, TimeSpan timeout, int expectedExitCode = 0)
 {
     start.UseShellExecute = false;

@@ -130,7 +130,7 @@ public sealed class NativeManagedClassTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
-    public void ScalarOnlyPrivateClassLibraryEmitsButManagedExportsAndModulesDoNot(
+    public void ScalarOnlyPrivateClassLibraryPersistsWithoutManagedExports(
         BoundRuntimePolicy policy)
     {
         var source = Leaf + """
@@ -143,7 +143,11 @@ public sealed class NativeManagedClassTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
-        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateProducer(program, ["Proof"]));
+        var module = ModuleCompiler.CreateProducer(program, ["Proof"]);
+        var reference = ModuleCompiler.CreateReference(module);
+        Assert.Empty(reference.Structures);
+        Assert.Equal("Proof", Assert.Single(reference.Functions).Name);
+        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Create"]));
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program, ["Create"],
             (NativeRuntimePolicy)policy));
         Assert.NotEmpty(NativeEmitter.EmitLibrary(program, ["Proof"], (NativeRuntimePolicy)policy));

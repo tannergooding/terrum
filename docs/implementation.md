@@ -136,9 +136,14 @@ The pattern does not narrow the original variable or an aliased field.
 An initialized absent value is not an uninitialized
 variable or an output from a failed call. Constructors must explicitly initialize
 optional fields, and direct optional dereference is rejected. Optional scalar
-types, generic normalization and persisted optional IR remain unsupported.
+types and generic normalization remain unsupported.
 Version 18 semantic modules separately admit private `ManagedNode` code in a
 leaf producer whose exported declarations are scalar and by-value only.
+Version 19 extends that private-leaf contract to source classes and their
+optional handles, serializing checked layouts, construction and root metadata.
+Class-free modules retain the version 18 format; optional-node-only modules,
+managed consumer declarations and managed imported/exported signatures still
+reject.
 Native packages validate its managed profile, heap imports and root metadata.
 The leaf's collection is image-local and explicit; neither public managed
 contracts nor DLL-unload collection are implemented. Unchanged persisted

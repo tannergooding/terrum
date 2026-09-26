@@ -1,0 +1,273 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System;
+using System.Buffers.Binary;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Native;
+using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
+using Xunit;
+
+namespace Terrum.CodeAnalysis.Tests;
+
+public sealed class NativeManagedClassModuleTests
+{
+    private const string Middle = "public int32 Middle() { return Leaf() + 1; }";
+    private const string Root = "int32 Main() { Middle(); return Middle() + 1; }";
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task PrivateOptionalClassLeafReplacesUnchangedRootAndIntermediateAsync(NativeRuntimePolicy policy)
+    {
+        var original = NativeModuleCompiler.CreateProducer(Compile(Sample("managed-class-leaf-original"), policy),
+            ["Leaf"], "NodeB", policy);
+        var middle = NativeModuleCompiler.CreateGraphProducer(Compile(Middle, policy,
+            NativeModuleCompiler.CreateGraphReference([original])), ["Middle"], "NodeA", [original], policy);
+        var root = NativeModuleCompiler.CreateGraphConsumer(Compile(Root, policy,
+            NativeModuleCompiler.CreateGraphReference([middle]), library: false), [middle], policy);
+        var rootHash = SHA256.HashData(root);
+        var middleHash = SHA256.HashData(middle);
+        var replacement = NativeModuleCompiler.CreateProducer(Compile(Sample("managed-class-leaf"), policy),
+            ["Leaf"], "NodeB", policy);
+        Assert.Equal("native-20", NativeModuleCompiler.Inspect(replacement).NativeProfileVersion);
+        var declaration = Assert.Single(NativeModuleCompiler.CreateReference(replacement).Functions);
+        Assert.Equal("Leaf", declaration.Name);
+        NativeModuleCompiler.ValidateGraph(root, [middle, original]);
+        NativeModuleCompiler.ValidateGraph(root, [replacement, middle]);
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [middle]));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateGraph(root, [middle, original, replacement]));
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [original, middle],
+            TimeSpan.FromSeconds(10), policy));
+        Assert.Equal(44, await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
+            TimeSpan.FromSeconds(10), policy));
+        var frameworkDirectory = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = frameworkDirectory.Parent?.Name
+            ?? throw new InvalidOperationException("Missing test configuration directory.");
+        var repository = RepositoryRoot();
+        var apphost = Path.Combine(repository, "artifacts", "bin", "sources", "terrumc",
+            configuration, frameworkDirectory.Name, "terrumc.exe");
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [middle, original], apphost,
+            TimeSpan.FromSeconds(30), policy));
+        Assert.Equal(44, await NativeModuleCompiler.RunGraphJitAsync(root, [replacement, middle], apphost,
+            TimeSpan.FromSeconds(30), policy));
+        Assert.Equal(rootHash, SHA256.HashData(root));
+        Assert.Equal(middleHash, SHA256.HashData(middle));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void SemanticLinkRetainsPrivateClassesWithoutExportingThem(NativeRuntimePolicy policy)
+    {
+        var producer = ModuleCompiler.CreateProducer(Compile(Sample("managed-class-leaf"), policy), ["Leaf"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        Assert.Empty(reference.Structures);
+        _ = Assert.Single(reference.Functions);
+        var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Leaf() + 2; }",
+            policy, reference, library: false), producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        var @class = Assert.Single(linked.Classes);
+        Assert.Equal("$producer.Cycle", @class.Name);
+        Assert.Equal((int)ManagedClassTypes.Optional((PrimitiveType)ManagedClassTypes.First),
+            (int)@class.Fields[1].Type);
+    }
+
+    [Fact]
+    public void PersistedClassLayoutAndRootsAreVerifiedOnReload()
+    {
+        var program = Compile(Sample("managed-class-leaf"), NativeRuntimePolicy.FailFast);
+        var contract = ModuleCompiler.CreateProducer(program, ["Leaf"]);
+        Assert.Equal(19, BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
+        Assert.Equal("native-20", ModuleCompiler.GetNativeProfileVersion(contract, false));
+        using var reader = new BinaryReader(new MemoryStream(contract));
+        reader.BaseStream.Position = 8;
+        var profileLength = reader.ReadInt32();
+        reader.BaseStream.Position += profileLength + 1 + 1 + 4;
+        Assert.Equal(0, reader.ReadInt32());
+        var classCount = (int)reader.BaseStream.Position;
+        Assert.Equal(1, reader.ReadInt32());
+        var nameLength = reader.ReadInt32();
+        Assert.Equal("Cycle", Encoding.UTF8.GetString(reader.ReadBytes(nameLength)));
+        var size = (int)reader.BaseStream.Position;
+        Assert.Equal(16, reader.ReadInt32());
+        var visibility = (int)reader.BaseStream.Position;
+        Assert.Equal(1, reader.ReadByte());
+        Assert.Equal(2, reader.ReadInt32());
+        var firstNameLength = reader.ReadInt32();
+        Assert.Equal("Value", Encoding.UTF8.GetString(reader.ReadBytes(firstNameLength)));
+        Assert.Equal((int)PrimitiveType.Int32, reader.ReadInt32());
+        var firstOffset = (int)reader.BaseStream.Position;
+        Assert.Equal(0, reader.ReadInt32());
+        Assert.Equal(4, reader.ReadInt32());
+        reader.BaseStream.Position += 3;
+        var secondNameLength = reader.ReadInt32();
+        Assert.Equal("Next", Encoding.UTF8.GetString(reader.ReadBytes(secondNameLength)));
+        var edgeType = (int)reader.BaseStream.Position;
+        Assert.Equal((int)ManagedClassTypes.Optional((PrimitiveType)ManagedClassTypes.First), reader.ReadInt32());
+
+        var malformed = (byte[])contract.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(classCount, 4), 257);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+        malformed = (byte[])contract.Clone();
+        malformed[visibility] = 2;
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+        malformed = (byte[])contract.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(size, 4), 8);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+        malformed = (byte[])contract.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(firstOffset, 4), 4);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+        malformed = (byte[])contract.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(edgeType, 4),
+            ManagedClassTypes.OptionalFirst + 1);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+
+        var make = Assert.Single(program.Functions, function => function.Name == "MakeValue");
+        var retired = make.Body.RetiredManagedLocals;
+        Assert.NotEmpty(retired);
+        var marker = new byte[14 + (4 * retired.Length)];
+        marker[0] = 1;
+        BinaryPrimitives.WriteInt32LittleEndian(marker.AsSpan(1), make.Body.Span.Start);
+        BinaryPrimitives.WriteInt32LittleEndian(marker.AsSpan(5), make.Body.Span.Length);
+        marker[9] = 1;
+        BinaryPrimitives.WriteInt32LittleEndian(marker.AsSpan(10), retired.Length);
+        for (var i = 0; i < retired.Length; i++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(marker.AsSpan(14 + (4 * i)), retired[i]);
+        }
+        var scope = Find(contract, marker) + 9;
+        malformed = (byte[])contract.Clone();
+        malformed[scope] = 0;
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+        malformed = (byte[])contract.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(scope + 5, 4), 255);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+
+        var factoryIndex = Assert.Single(program.Functions.Select((function, index) => (function, index)),
+            item => item.function.Intrinsic == BoundIntrinsic.ClassTryCreate).index;
+        var factory = program.Functions[factoryIndex];
+        var factoryMarker = new byte[6];
+        factoryMarker[0] = (byte)BoundIntrinsic.ClassTryCreate;
+        BinaryPrimitives.WriteInt32LittleEndian(factoryMarker.AsSpan(2), factory.ClassConstructor);
+        malformed = (byte[])contract.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(Find(contract, factoryMarker) + 2, 4), 999);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+        var forged = program with {
+            Functions = program.Functions.SetItem(factoryIndex, factory with { ClassConstructor = 999 }),
+        };
+        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forged, ["Leaf"]));
+        forged = program with {
+            Functions = program.Functions.SetItem(program.Functions.IndexOf(make),
+                make with { Body = make.Body with { RetiredManagedLocals = [] } }),
+        };
+        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forged, ["Leaf"]));
+    }
+
+    [Fact]
+    public void NativePackageRejectsClassProfileAndManagedDataTampering()
+    {
+        var package = NativeModuleCompiler.CreateProducer(
+            Compile(Sample("managed-class-leaf"), NativeRuntimePolicy.FailFast),
+            ["Leaf"], "NodeB", NativeRuntimePolicy.FailFast);
+        var downgraded = (byte[])package.Clone();
+        var profile = 18 + downgraded[7];
+        Assert.Equal("native-20", Encoding.ASCII.GetString(downgraded, profile, downgraded[8]));
+        downgraded[profile + downgraded[8] - 1] = (byte)'9';
+        Rehash(downgraded);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(downgraded));
+
+        var imageStart = 18 + package[7] + package[8]
+            + BinaryPrimitives.ReadInt32LittleEndian(package.AsSpan(10, 4));
+        var invalidData = (byte[])package.Clone();
+        var pe = imageStart + BinaryPrimitives.ReadInt32LittleEndian(invalidData.AsSpan(imageStart + 0x3C, 4));
+        var dataSection = pe + 24 + 0xF0 + (2 * 40);
+        Assert.True(invalidData.AsSpan(dataSection, 8).StartsWith(".data"u8));
+        invalidData[dataSection + 4] = (byte)'X';
+        Rehash(invalidData);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(invalidData));
+        invalidData = (byte[])package.Clone();
+        var dataOffset = BinaryPrimitives.ReadInt32LittleEndian(invalidData.AsSpan(dataSection + 20, 4));
+        invalidData[imageStart + dataOffset] = 1;
+        Rehash(invalidData);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(invalidData));
+
+        var invalidImport = (byte[])package.Clone();
+        var alloc = invalidImport.AsSpan(imageStart,
+            BinaryPrimitives.ReadInt32LittleEndian(invalidImport.AsSpan(14, 4))).IndexOf("HeapAlloc\0"u8);
+        Assert.True(alloc >= 0);
+        invalidImport[imageStart + alloc + 4] = (byte)'X';
+        Rehash(invalidImport);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(invalidImport));
+    }
+
+    [Theory]
+    [InlineData("public Cycle Leak() { require Cycle.TryCreate(42, out var node); return node; }", "Leak")]
+    [InlineData("public Cycle? Leak() { return null; }", "Leak")]
+    [InlineData("public bool Leak(out Cycle? node) { node = null; return true; }", "Leak")]
+    [InlineData("public bool Leak(out int32 value) { value = 42; return true; }", "Leak")]
+    public void ManagedClassHandlesCannotCrossNativeExports(string declaration, string export)
+    {
+        var source = """
+            class Cycle {
+                public int32 Value;
+                public Cycle(int32 value) { Value = value; }
+            }
+            """ + declaration;
+        var program = Compile(source, NativeRuntimePolicy.FailFast);
+        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateProducer(
+            program, [export], "NodeB", NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void ManagedLeafCannotImportAnotherProvider()
+    {
+        var policy = NativeRuntimePolicy.FailFast;
+        var dependency = NativeModuleCompiler.CreateProducer(
+            Compile("public int32 External() { return 1; }", policy), ["External"], "Other", policy);
+        var source = Sample("managed-class-leaf").Replace("return result;",
+            "return result + External();", StringComparison.Ordinal);
+        var imported = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            NativeModuleCompiler.CreateReference(dependency), (BoundRuntimePolicy)policy);
+        Assert.True(imported.HasErrors, string.Join(Environment.NewLine, imported.Diagnostics));
+        var program = Compile(Sample("managed-class-leaf"), policy);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateGraphProducer(
+            program, ["Leaf"], "NodeB", [dependency], policy));
+    }
+
+    private static int Find(byte[] bytes, byte[] pattern)
+    {
+        var index = bytes.AsSpan().IndexOf(pattern);
+        Assert.True(index >= 0);
+        Assert.Equal(-1, bytes.AsSpan(index + 1).IndexOf(pattern));
+        return index;
+    }
+
+    private static void Rehash(byte[] package) =>
+        SHA256.HashData(package.AsSpan(0, package.Length - 32)).CopyTo(package, package.Length - 32);
+
+    private static BoundProgram Compile(string source, NativeRuntimePolicy policy,
+        CompilationReference? reference = null, bool library = true)
+    {
+        var syntax = SyntaxTree.Parse(source);
+        var boundPolicy = (BoundRuntimePolicy)policy;
+        var compilation = library
+            ? reference is null ? Compilation.CreateLibrary(syntax, boundPolicy)
+                : Compilation.CreateLibrary(syntax, reference, boundPolicy)
+            : Compilation.Create(syntax, Assert.IsType<CompilationReference>(reference), boundPolicy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return Assert.IsType<BoundProgram>(compilation.Program);
+    }
+
+    private static string Sample(string name) =>
+        File.ReadAllText(Path.Combine(RepositoryRoot(), "samples", "native", "graph", name + ".terrum"));
+
+    private static string RepositoryRoot() => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+        "..", "..", "..", "..", "..", ".."));
+}

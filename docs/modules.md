@@ -258,8 +258,17 @@ its own unreachable graph; no managed handle crosses a module or native DLL
 boundary. The package reader verifies the retained `native-18` profile, roots
 and node operations before permitting the DLL's bounded heap imports.
 Previously stored modules remain readable under their original versions.
-Source-defined classes, managed imports and managed values in public layouts
-or signatures remain unsupported; no DLL-unload heap cleanup is promised.
+The version 19 `.trm` variant is written only for leaf producers with private
+source classes. It stores their bounded field layouts, constructor/factory
+association, optional-handle expressions and exact lexical roots, and validates
+the complete retained class/function table on reload. Class leaves select
+`native-19`, or `native-20` when optional handles occur; class-free modules keep
+their version 18 wire layout and historical profiles. Exports remain scalar/void
+by-value declarations, and a managed leaf cannot import another provider.
+Source classes and managed handles never become imported module layouts or
+native DLL values. An optional-node-only program without a private source
+class remains outside this bounded module increment. Collection is local to
+the leaf image; no DLL-unload heap cleanup of live objects is promised.
 A consumer importing a unique type must also import the exported NoThrow
 cleanup methods of that type and its owning children. Their cleanup identities
 and Copy/unique distinctions participate in layout and signature compatibility;

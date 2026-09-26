@@ -125,8 +125,9 @@ static managed roots and managed class values in inline structs remain
 unsupported. Required references do not permit bootstrapping a cycle by leaking
 partial objects. Optional fields in `native-20` provide an explicit construction
 path for source-defined cycles.
-Class metadata is image-private: semantic/native modules reject it, and native
-DLL exports remain scalar-only. The [class sample](../samples/native/managed-classes.terrum)
+Class metadata is image-private: version 19 semantic/native leaf modules can
+retain it internally, but native DLL exports remain scalar-only.
+The [class sample](../samples/native/managed-classes.terrum)
 returns 42 through shared aliases and heterogeneous managed edges. The independent
 C heap probe checks multiple-edge liveness, pointer-shaped scalar nonroots,
 allocation failure, collection during construction, and exact provisional-object
@@ -151,8 +152,14 @@ Descriptors include optional reference slots; tracing ignores zero without
 treating it as uninitialized source storage. The
 [cycle sample](../samples/native/managed-optional-cycle.terrum) exercises
 source-defined cycles and snapshots across edge clearing and collection.
-Semantic modules still reject optional IR and types; the version 18 private-node
-module proof does not expose an optional or managed-reference ABI.
+Version 19 semantic modules retain optional IR and types only inside a private
+source-class leaf. Neither this nor the version 18 private-node module exposes
+an optional or managed-reference ABI. An optional-node-only module remains
+unsupported.
+The independent C probe additionally fills a 4,096-object source-class cycle,
+checks that capacity refusal makes no extra allocation, then accounts for every
+release and repeats full-capacity reuse. AOT/JIT fixtures exercise the same
+limit and interleaved class/node descriptors, aliases and scalar nonroots.
 
 The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
 uses source-declared `+` and `*` constraints and two nominal Copy wrappers,

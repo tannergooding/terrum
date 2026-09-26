@@ -306,13 +306,17 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Graph library cannot have an entry point.");
             }
             var (structures, names) = ReadStructures(reader, version);
+            if (version >= Version)
+            {
+                throw new ModuleFormatException("Graph libraries cannot use the private class module version.");
+            }
             var imported = ReadImportedTypes(reader, structures.Length, names, expectedConsumer: true);
             var count = Count(reader, MaximumFunctions);
             if (count == 0)
             {
                 throw new ModuleFormatException("Graph library has no functions.");
             }
-            var functions = ReadFunctions(reader, count, expectedConsumer: true, version, structures);
+            var functions = ReadFunctions(reader, count, expectedConsumer: true, version, structures, []);
             var module = new Module(true, -1, structures, functions) {
                 ImportedStructures = imported,
                 RuntimePolicy = policy,

@@ -1,0 +1,40 @@
+class Cycle {
+    public int32 Value;
+    public mut Cycle? Next;
+
+    public Cycle(int32 value) {
+        Value = value;
+        Next = null;
+    }
+}
+
+Cycle? Keep(Cycle? value) { return value; }
+
+bool TryKeep(Cycle? value, out Cycle? result) {
+    if (value is null) { return false; }
+    result = value;
+    return true;
+}
+
+int32 MakeValue() {
+    require Cycle.TryCreate(20, out var first);
+    require Cycle.TryCreate(22, out var second);
+    Cycle? echoed = Keep(first);
+    require TryKeep(echoed, out var kept);
+    require kept is some root;
+    root.Next = second;
+    second.Next = root;
+    if (root.Next is some snapshot) {
+        root.Next = null;
+        if (ManagedHeap.Collect() != 0) { return 1; }
+        root.Next = snapshot;
+        return root.Value + snapshot.Value;
+    }
+    return 2;
+}
+
+public int32 Leaf() {
+    int32 result = MakeValue();
+    require ManagedHeap.Collect() == 2;
+    return result;
+}

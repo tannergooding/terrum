@@ -67,7 +67,7 @@ public sealed class NativeManagedNodeModuleTests
     }
 
     [Fact]
-    public void SourceClassesRemainOutsideThePersistedModuleProfile()
+    public void PrivateSourceClassSelectsItsOwnNativeProfile()
     {
         var program = Compile("""
             class Leaf {
@@ -79,8 +79,9 @@ public sealed class NativeManagedNodeModuleTests
                 return leaf.Value;
             }
             """, NativeRuntimePolicy.FailFast);
-        _ = Assert.Throws<ModuleFormatException>(() =>
-            NativeModuleCompiler.CreateProducer(program, ["Proof"], "NodeB", NativeRuntimePolicy.FailFast));
+        var package = NativeModuleCompiler.CreateProducer(program, ["Proof"], "NodeB",
+            NativeRuntimePolicy.FailFast);
+        Assert.Equal("native-19", NativeModuleCompiler.Inspect(package).NativeProfileVersion);
     }
 
     [Fact]

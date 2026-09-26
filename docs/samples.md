@@ -45,6 +45,9 @@ The [private managed-node leaf](../samples/native/graph/managed-node-leaf.terrum
 replaces a scalar-only producer without changing its persisted consumer or
 intermediate DLL. Its cycle allocation and explicit collection stay inside the
 leaf under AOT and root-only JIT; see the [graph commands](native-graph.md).
+The [private class leaf](../samples/native/graph/managed-class-leaf.terrum)
+extends that replacement proof to source-defined optional cycles and checked
+class metadata, without exposing a managed module ABI.
 The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
 returns 46 through AOT and JIT. Two nominal Copy wrappers explicitly implement
 source-defined addition/multiplication protocols used by one constrained

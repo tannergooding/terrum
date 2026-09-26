@@ -122,6 +122,10 @@ public sealed class Compilation
             slot < function.ParameterCount + (function.IsConstructor ? 1 : 0); slot++)
         {
             var type = function.Variables[slot].Type;
+            if (ManagedClassTypes.IsManaged(type))
+            {
+                continue;
+            }
             var index = (int)type - 100;
             if (index >= structures.Length)
             {
