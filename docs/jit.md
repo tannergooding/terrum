@@ -56,8 +56,14 @@ The test harness isolates such execution in bounded subprocesses. A native
 failure can prevent normal resource cleanup in that worker; process termination
 reclaims its address space.
 
-The unwind records support platform stack walking, not language exceptions or
-cleanup. This proof has no executable-memory pooling, tiering, optimization,
+`--runtime checked-exceptions` supports the same bounded recovery and cleanup
+regions as AOT. Under CET, dynamic exception continuations require a trusted
+remote registrar as well as the Windows continuation-registration API.
+The CLI supplies its adjacent `terrumc.dll` registrar for source JIT,
+`run-module`, and scanner/component execution; launching the apphost must not
+silently drop that requirement. Fail-fast execution remains a distinct policy.
+
+This proof has no executable-memory pooling, tiering, optimization,
 concurrent code servicing, moving-GC maps, arbitrary managed interop or hot
 unload. It does not make the public JIT execution API a sandbox.
 

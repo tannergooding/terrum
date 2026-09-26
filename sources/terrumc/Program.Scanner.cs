@@ -90,7 +90,7 @@ internal static partial class Program
         NativeExecutionResult result;
         try
         {
-            result = NativeJit.ExecuteWithData(program, policy);
+            result = NativeJit.ExecuteWithData(program, policy, GraphJitRegistrarAssemblyPath());
         }
         catch (NotSupportedException exception)
         {

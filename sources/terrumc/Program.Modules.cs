@@ -104,7 +104,7 @@ internal static partial class Program
                 var program = ModuleCompiler.Link(ReadModuleFile(args[1]), ReadModuleFile(args[2]));
                 var runtimePolicy = args[4] == "fail-fast"
                     ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
-                return NativeJit.Execute(program, runtimePolicy);
+                return NativeJit.Execute(program, runtimePolicy, GraphJitRegistrarAssemblyPath());
             }
             else
             {

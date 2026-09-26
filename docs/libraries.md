@@ -20,7 +20,10 @@ The API inventories deliberately mix signatures with selected algorithm bodies. 
 The executable [static-protocol sample](../samples/native/static-protocol-quadratic.terrum)
 now exercises a bounded part of this direction: source-defined addition and
 multiplication protocols, explicit nominal Copy conformance and one constrained
-algorithm specialized for two wrappers. Its templates and witnesses remain
+algorithm specialized for two wrappers. The [integer-power sample](../samples/native/static-protocol-power.terrum)
+extends this to initialized generic locals, scalar loop control and constrained
+multiplication, with an explicit identity argument rather than implicit
+construction of a generic literal or default value. Templates and witnesses remain
 compilation-local; the [implementation limits](implementation.md) do not extend
 to these complete inventories, primitive numeric conformance, mixed-result
 operators, families or generic collection algorithms.

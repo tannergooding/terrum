@@ -1,0 +1,49 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System;
+using System.IO;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Xunit;
+
+namespace Terrum.CodeAnalysis.Tests;
+
+public sealed partial class JitTests
+{
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task ScannerApphostRegistersCleanupContinuationsAsync(string policy)
+    {
+        var scanner = Path.Combine(AppContext.BaseDirectory, $"registrar-scanner-{Guid.NewGuid():N}.terrum");
+        try
+        {
+            await File.WriteAllTextAsync(scanner, """
+                int32 Scan() {
+                    require OwnedInt32Buffer.TryCreate(1, out var buffer);
+                    require buffer.Count == 0;
+                    Host.Tokens[0] = 0;
+                    Host.Tokens[1] = 0;
+                    Host.Tokens[2] = 0;
+                    return 1;
+                }
+                """).ConfigureAwait(true);
+            var start = CliStart("scan-component", scanner, "-", "--runtime", policy, "--json");
+            start.FileName = Path.ChangeExtension(start.ArgumentList[0], ".exe");
+            start.ArgumentList.RemoveAt(0);
+            Assert.True(File.Exists(start.FileName));
+            var (exit, output, error) = await RunAsync(start, []).ConfigureAwait(true);
+            Assert.True(exit == 0, $"Scanner exit {exit}: {error}{output}");
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.True(document.RootElement.GetProperty("success").GetBoolean());
+            Assert.Equal(0, document.RootElement.GetProperty("sourceLength").GetInt32());
+            Assert.Equal(1, document.RootElement.GetProperty("tokens").GetArrayLength());
+            Assert.Equal(0, document.RootElement.GetProperty("diagnostics").GetArrayLength());
+        }
+        finally
+        {
+            File.Delete(scanner);
+        }
+    }
+}

@@ -18,8 +18,9 @@ internal sealed partial class Binder
 
     private sealed record StaticProtocol(string Name, TokenKind Operator, bool IsNoThrow, SyntaxNode Declaration,
         SyntaxTree Tree);
-    internal sealed record GenericTemplate(string Name, ImmutableArray<string> Parameters,
-        ImmutableDictionary<TokenKind, string> Operations, SyntaxNode Expression, SyntaxNode Declaration,
+    internal sealed record GenericParameter(string Name, PrimitiveType? ScalarType);
+    internal sealed record GenericTemplate(string Name, string TypeParameter, ImmutableArray<GenericParameter> Parameters,
+        ImmutableDictionary<TokenKind, string> Operations, SyntaxNode Body, SyntaxNode Declaration,
         SyntaxTree Tree, bool IsNoThrow);
     internal sealed record GenericInstantiation(GenericTemplate Template, PrimitiveType Type);
 
@@ -201,7 +202,8 @@ internal sealed partial class Binder
             element is SyntaxTokenElement { Token.Kind: TokenKind.Identifier })).Token;
         var qualified = Qualify(nameToken.Text);
         var arguments = parameters?.Children.OfType<SyntaxNode>().ToArray() ?? [];
-        var parameterNames = ImmutableArray.CreateBuilder<string>(arguments.Length);
+        var parameterNames = new HashSet<string>(StringComparer.Ordinal);
+        var templateParameters = ImmutableArray.CreateBuilder<GenericParameter>(arguments.Length);
         var operations = ImmutableDictionary.CreateBuilder<TokenKind, string>();
         var copy = false;
         var noThrow = declaration.Children.OfType<SyntaxNode>()
@@ -221,14 +223,29 @@ internal sealed partial class Binder
             if (argument.Kind != SyntaxKind.Parameter
                 || argument.Children is not [SyntaxNode argumentType, SyntaxTokenElement argumentName]
                 || argumentType.Kind != SyntaxKind.TypeName
-                || typeNames.Length != 1 || NameText(argumentType) != typeNames[0]
-                || parameterNames.Contains(argumentName.Token.Text))
+                || typeNames.Length != 1
+                || !parameterNames.Add(argumentName.Token.Text))
             {
                 valid = false;
             }
             else
             {
-                parameterNames.Add(argumentName.Token.Text);
+                var typeName = NameText(argumentType);
+                var scalar = typeName switch {
+                    "int32" => PrimitiveType.Int32,
+                    "uint32" => PrimitiveType.UInt32,
+                    "int64" => PrimitiveType.Int64,
+                    "uint64" => PrimitiveType.UInt64,
+                    "char16" => PrimitiveType.Char16,
+                    "bool" => PrimitiveType.Bool,
+                    _ => (PrimitiveType?)null,
+                };
+                if (typeName != typeNames[0] && scalar is null)
+                {
+                    valid = false;
+                }
+                templateParameters.Add(new GenericParameter(argumentName.Token.Text, typeName == typeNames[0]
+                    ? null : scalar));
             }
         }
         foreach (var constraint in children.Where(static child => child.Kind == SyntaxKind.ConstraintClause))
@@ -263,57 +280,22 @@ internal sealed partial class Binder
                 }
             }
         }
-        var expression = TemplateReturnExpression(body);
-        if (expression is null || !copy || operations.Count == 0
-            || !CheckTemplateExpression(expression, parameterNames.ToImmutableHashSet(StringComparer.Ordinal),
-                [.. operations.Keys], 0)
+        if (body is null || !copy || operations.Count == 0
+            || !templateParameters.Any(static parameter => parameter.ScalarType is null)
             || (noThrow && operations.Values.Any(protocol => !_protocols[protocol].IsNoThrow)))
         {
             valid = false;
         }
         if (!valid || _templates.Count >= MaximumStaticSpecializations)
         {
-            Report("TRM3007", "Generic function requires one local Copy type parameter, declared operator constraints, and a single constrained return expression.", declaration.Span);
+            Report("TRM3007", "Generic function requires one local Copy type parameter, supported by-value parameters, and declared operator constraints.", declaration.Span);
             return;
         }
-        if (!_templates.TryAdd(qualified, new GenericTemplate(qualified,
-            parameterNames.ToImmutable(), operations.ToImmutable(), expression!, declaration, _tree, noThrow)))
+        if (!_templates.TryAdd(qualified, new GenericTemplate(qualified, typeNames[0],
+            templateParameters.ToImmutable(), operations.ToImmutable(), body!, declaration, _tree, noThrow)))
         {
             Report("TRM3003", $"Duplicate generic function '{qualified}'.", declaration.Span);
         }
-    }
-
-    private static SyntaxNode? TemplateReturnExpression(SyntaxNode? body)
-    {
-        if (body?.Children is [SyntaxTokenElement, SyntaxNode statement, SyntaxTokenElement]
-            && statement.Kind == SyntaxKind.ReturnStatement
-            && statement.Children is [SyntaxTokenElement, SyntaxNode returned, SyntaxTokenElement])
-        {
-            return returned;
-        }
-        return null;
-    }
-
-    private static bool CheckTemplateExpression(SyntaxNode expression, ImmutableHashSet<string> parameters,
-        ImmutableHashSet<TokenKind> operators, int depth)
-    {
-        if (depth >= MaximumSemanticDepth)
-        {
-            return false;
-        }
-        if (expression.Kind == SyntaxKind.NameExpression)
-        {
-            return parameters.Contains(((SyntaxTokenElement)expression.Children[0]).Token.Text);
-        }
-        if (expression.Kind == SyntaxKind.ParenthesizedExpression)
-        {
-            return CheckTemplateExpression((SyntaxNode)expression.Children[1],
-                parameters, operators, depth + 1);
-        }
-        return expression.Kind == SyntaxKind.BinaryExpression
-                && operators.Contains(((SyntaxTokenElement)expression.Children[1]).Token.Kind)
-                && CheckTemplateExpression((SyntaxNode)expression.Children[0], parameters, operators, depth + 1)
-                && CheckTemplateExpression((SyntaxNode)expression.Children[2], parameters, operators, depth + 1);
     }
 
     private PrimitiveType? GenericCallType(SyntaxNode callee)
@@ -367,7 +349,7 @@ internal sealed partial class Binder
             Report("TRM3007", $"'{typeName}' lacks the declared Copy static protocol witnesses.", callee.Span);
             return -1;
         }
-        var parameters = template.Parameters.Select(parameter => new Parameter(parameter, concrete,
+        var parameters = template.Parameters.Select(parameter => new Parameter(parameter.Name, parameter.ScalarType ?? concrete,
             callee.Span, false)).ToImmutableArray();
         var index = _signatures.Count;
         _functions.Add(instantiated, index);
@@ -382,37 +364,106 @@ internal sealed partial class Binder
     private BoundBlock BindGenericBody(GenericInstantiation instantiation)
     {
         var template = instantiation.Template;
-        var result = BindTemplateExpression(template.Expression, instantiation.Type, template);
-        var returned = new BoundReturn(result, template.Expression.Span);
-        return new BoundBlock([returned], template.Declaration.Span);
+        var previousName = _genericTypeParameter;
+        var previousType = _genericType;
+        _genericTypeParameter = template.TypeParameter;
+        _genericType = instantiation.Type;
+        try
+        {
+            return BindBlock(template.Body);
+        }
+        finally
+        {
+            _genericTypeParameter = previousName;
+            _genericType = previousType;
+        }
     }
 
-    private BoundExpression BindTemplateExpression(SyntaxNode expression, PrimitiveType type, GenericTemplate template)
+    private bool ValidateGenericTemplates()
     {
-        if (expression.Kind == SyntaxKind.NameExpression)
+        foreach (var template in _templates.Values)
         {
-            var name = ((SyntaxTokenElement)expression.Children[0]).Token.Text;
-            var slot = template.Parameters.IndexOf(name);
-            return new BoundRead(slot, type, expression.Span);
-        }
-        if (expression.Kind == SyntaxKind.ParenthesizedExpression)
-        {
-            return BindTemplateExpression((SyntaxNode)expression.Children[1], type, template);
-        }
-        if (expression.Kind == SyntaxKind.BinaryExpression)
-        {
-            var operation = ((SyntaxTokenElement)expression.Children[1]).Token.Kind;
-            var left = BindTemplateExpression((SyntaxNode)expression.Children[0], type, template);
-            var right = BindTemplateExpression((SyntaxNode)expression.Children[2], type, template);
-            var name = _structs[(int)type - 100].Name + "." + OperatorName(operation);
-            if (!_functions.TryGetValue(name, out var index))
+            _cancellationToken.ThrowIfCancellationRequested();
+            SetContext(template.Tree);
+            var proofBinder = new Binder([template.Tree], [], _cancellationToken,
+                isLibrary: true, runtimePolicy: _runtimePolicy);
+            proofBinder._contexts.Add(template.Tree, _contexts[template.Tree]);
+            proofBinder.SetContext(template.Tree);
+            var probeName = "$T";
+            var probeType = (PrimitiveType)100;
+            var probe = new BoundStruct(probeName,
+                [new BoundStructField("$opaque", PrimitiveType.Int32, 0, 4) { IsPrivate = true }], 4) {
+                IsInternal = true,
+            };
+            var operators = ImmutableArray.CreateBuilder<BoundFunction>(template.Operations.Count);
+            proofBinder._structs.Add(probe);
+            foreach (var (operation, protocolName) in template.Operations)
             {
-                Report("TRM3007", $"No concrete operator '{name}' fulfills the declared constraint.", expression.Span);
-                return ErrorExpression(expression.Span);
+                var name = probeName + "." + OperatorName(operation);
+                var operatorSpan = template.Declaration.Span;
+                var variables = ImmutableArray.Create(
+                    new BoundVariable("left", probeType, false, operatorSpan),
+                    new BoundVariable("right", probeType, false, operatorSpan));
+                var external = new BoundFunction(name, probeType, variables, 2,
+                    new BoundBlock([], operatorSpan), operatorSpan) {
+                    IsExternal = true,
+                    IsStatic = true,
+                    IsNoThrow = _protocols[protocolName].IsNoThrow,
+                    DeclaringStruct = probeName,
+                };
+                proofBinder._functions.Add(name, proofBinder._signatures.Count);
+                proofBinder._signatures.Add(new Signature(name, probeType, [
+                    new Parameter("left", probeType, operatorSpan, false),
+                    new Parameter("right", probeType, operatorSpan, false),
+                ], null, null, template.Tree, probeName, false, false, false, false, true,
+                    external.IsNoThrow, false, external) { IsOperator = true });
+                operators.Add(external);
             }
-            return new BoundCall(index, [left, right], type, expression.Span);
+
+            proofBinder._scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
+            proofBinder._returnType = probeType;
+            foreach (var parameter in template.Parameters)
+            {
+                _ = proofBinder.AddVariable(parameter.Name, parameter.ScalarType ?? probeType, false,
+                    template.Declaration.Span);
+            }
+            var body = proofBinder.BindGenericBody(new GenericInstantiation(template, probeType));
+            if (proofBinder._diagnostics.Count != 0)
+            {
+                foreach (var diagnostic in proofBinder._diagnostics)
+                {
+                    _diagnostics.Add(diagnostic);
+                    _sourceDiagnostics.Add(new SourceDiagnostic(template.Tree, diagnostic));
+                }
+                Report("TRM3007", "Generic function requires a body valid using only its declared Copy and operator constraints.",
+                    template.Declaration.Span);
+                return false;
+            }
+
+            var function = new BoundFunction(template.Name + "<$T>", probeType, [.. proofBinder._variables],
+                template.Parameters.Length, body, template.Declaration.Span) {
+                IsNoThrow = template.IsNoThrow,
+            };
+            operators.Add(function);
+            var proof = new BoundProgram(operators.ToImmutable(), -1) {
+                Structures = [probe],
+                RuntimePolicy = _runtimePolicy,
+            };
+            if (!SemanticVerifier.TryVerifySource(proof, out _, out var span, out var limit, out var effect))
+            {
+                var code = effect switch {
+                    "NoThrow" => "TRM3017",
+                    "NormalReturn" => "TRM3012",
+                    "FinallyReturn" => "TRM3019",
+                    "FinallyNoReturn" => "TRM3020",
+                    "LoopTransfer" => "TRM3008",
+                    _ => limit ? "TRM3016" : "TRM3007",
+                };
+                Report(code, "Generic definition violates its declared type, control-flow, or effect contract.", span);
+                return false;
+            }
         }
-        throw new InvalidOperationException("Unvalidated generic expression.");
+        return true;
     }
 
     private string Qualify(string name) => string.IsNullOrEmpty(_namespace) ? name : _namespace + "." + name;

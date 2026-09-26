@@ -55,8 +55,11 @@ same unchanged consumer/intermediate images.
 The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
 returns 46 through AOT and JIT. Two nominal Copy wrappers explicitly implement
 source-defined addition/multiplication protocols used by one constrained
-generic expression; this is closed specialization, not general generic-library
-or public witness support.
+generic expression. The [integer-power sample](../samples/native/static-protocol-power.terrum)
+returns 42 using one structured generic algorithm for 32- and 64-bit wrappers.
+Its caller supplies the identity; scalar loop control does not grant extra
+operations on the type parameter. These are closed specializations, not
+general generic-library or public witness support.
 
 | Program | Source | Design contract / expected behavior |
 |---|---|---|

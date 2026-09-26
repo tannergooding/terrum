@@ -200,13 +200,20 @@ subset is deliberately compilation-local: each interface has three type
 parameters and one `static abstract` `+` or `*` declaration; an internal Copy
 struct explicitly implements a closed homogeneous instance. Parameter/result
 types, accessibility and declared effects must match. An internal generic
-function has one `[Copy]` type parameter and a single return expression built
-from its parameters, grouping and its declared operator constraints. Concrete
-capabilities cannot make an undeclared generic operation valid. Calls require
+function has one `[Copy]` type parameter and returns that type. By-value
+parameters and initialized locals may mix that type with supported scalars.
+Structured bodies use assignments, blocks, `if`, `while`, scoped `for`,
+`break`/`continue`, `require` and return; operations on the type parameter
+must come from its declared operator constraints. The definition is checked
+even when never instantiated. Concrete capabilities cannot make an undeclared
+generic operation valid. Calls require
 an explicit concrete struct type; at most 32 closed specializations lower to
 ordinary verified calls. The [quadratic example](../samples/native/static-protocol-quadratic.terrum)
-executes for two distinct wrappers. General interface dispatch, primitive
-conformance, generic inference, recursive generic algorithms and public
+executes for two distinct wrappers. The [integer-power example](../samples/native/static-protocol-power.terrum)
+combines scalar loop control with constrained multiplication and explicit
+caller-supplied identity. General interface dispatch, primitive
+conformance, generic inference, generic helper calls, member access on a
+type parameter and public
 generic/witness metadata remain unsupported. A public concrete wrapper may
 use a private specialization without publishing its template or witnesses.
 `syntax-11` adds source class declarations; `native-19` adds their bounded

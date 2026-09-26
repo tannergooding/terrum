@@ -1,0 +1,46 @@
+interface Multiplication<TSelf, TOther, TResult> {
+    static abstract TResult operator *(TSelf left, TOther right);
+}
+
+struct Int32Value : Multiplication<Int32Value, Int32Value, Int32Value> {
+    public int32 Value;
+    public Int32Value(int32 value) { Value = value; }
+    public static Int32Value operator *(Int32Value left, Int32Value right) {
+        return new Int32Value(left.Value * right.Value);
+    }
+}
+
+struct Int64Value : Multiplication<Int64Value, Int64Value, Int64Value> {
+    public int64 Value;
+    public Int64Value(int64 value) { Value = value; }
+    public static Int64Value operator *(Int64Value left, Int64Value right) {
+        return new Int64Value(left.Value * right.Value);
+    }
+}
+
+T Power<T>(T value, T one, uint32 exponent)
+    where T : Multiplication<T, T, T>, [Copy] {
+    mut T result = one;
+    mut T factor = value;
+    mut uint32 remaining = exponent;
+    while (remaining != 0u32) {
+        if ((remaining & 1u32) != 0u32) {
+            result = result * factor;
+        }
+        remaining = remaining / 2u32;
+        // A final unused square could overflow even when the result fits.
+        if (remaining == 0u32) { break; }
+        factor = factor * factor;
+    }
+    return result;
+}
+
+public int32 PowerProbe() {
+    var narrow = Power<Int32Value>(new Int32Value(2), new Int32Value(1), 5u32);
+    var wide = Power<Int64Value>(new Int64Value(10i64), new Int64Value(1i64), 1u32);
+    return narrow.Value + (int32)wide.Value;
+}
+
+int32 Main() {
+    return PowerProbe();
+}
