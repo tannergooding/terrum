@@ -108,8 +108,8 @@ including staged call arguments, outputs and pending returns, then follows
 descriptor-listed managed edges and reclaims unmarked cycles. This bounded collector runs only
 at explicit calls and at executable entry teardown; it does not rely on
 reference counts, stack word scanning or hidden allocation-triggered GC.
-Managed handles cannot be placed in user structs, passed across external
-calls or DLL exports, or stored in semantic/native modules. Both runtime
+Managed handles cannot be placed in user structs or passed across external
+calls, DLL exports or public persisted module contracts. Both runtime
 policies admit closed executables/JIT and isolated native DLLs with scalar-only
 exports and private managed state; DLL callers must serialize calls and
 explicitly collect abandoned nodes before unload.
@@ -271,6 +271,12 @@ partition, token/trivia text, EOF and diagnostic shape before invoking the same
 parser; it does not invoke the host lexer. The supplied component remains
 responsible for correct classification. Normal source-based parsing uses its
 own trusted lexer output without repeating this boundary validation.
+`SyntaxTree.Parse(LexResult, ImmutableArray<ScannerIntegerValue>)` additionally
+requires complete, ordered integer records for that stream. Binding uses their
+magnitudes rather than decoding digits again, including signed-minimum operands.
+Coverage and tag validation do not prove a scanner's arithmetic; the component
+must be trusted, with differential fixtures checking its numeric behavior.
+Raw token text, source identity and lossless reconstruction remain unchanged.
 
 `SourceText` owns exact input text and a diagnostic path label. All library
 offsets, line characters and lengths are UTF-16 units, not scalar/grapheme/display

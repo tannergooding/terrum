@@ -319,6 +319,63 @@ public static class ScannerHost
         return values.MoveToImmutable();
     }
 
+    internal static void ValidateIntegerValueCoverage(SourceText source,
+        ImmutableArray<SyntaxToken> tokens, ImmutableArray<ScannerIntegerValue> values)
+    {
+        if (values.IsDefault)
+        {
+            throw new ArgumentException("Missing scanner integer values.", nameof(values));
+        }
+
+        var next = 0;
+        for (var tokenIndex = 0; tokenIndex < tokens.Length - 1; tokenIndex++)
+        {
+            var token = tokens[tokenIndex];
+            if (token.Kind != TokenKind.NumericLiteral)
+            {
+                continue;
+            }
+
+            var text = source.Text.AsSpan(token.Span.Start, token.Span.Length);
+            var digits = 0;
+            while (digits < text.Length && text[digits] is >= '0' and <= '9')
+            {
+                digits++;
+            }
+
+            var tag = text[digits..] switch {
+                [] => "",
+                ['i', '8'] => "i8",
+                ['i', '1', '6'] => "i16",
+                ['i', '3', '2'] => "i32",
+                ['i', '6', '4'] => "i64",
+                ['i', '1', '2', '8'] => "i128",
+                ['u', '8'] => "u8",
+                ['u', '1', '6'] => "u16",
+                ['u', '3', '2'] => "u32",
+                ['u', '6', '4'] => "u64",
+                ['u', '1', '2', '8'] => "u128",
+                _ => null,
+            };
+            if (digits == 0 || tag is null)
+            {
+                continue;
+            }
+
+            if (next >= values.Length || values[next] is not ScannerIntegerValue value
+                || value.TokenIndex != tokenIndex || value.Tag != tag
+                || value.IsOverflow == value.Magnitude.HasValue)
+            {
+                throw new ArgumentException("Scanner integer values do not match the lexical stream.", nameof(values));
+            }
+            next++;
+        }
+        if (next != values.Length)
+        {
+            throw new ArgumentException("Scanner integer values do not match the lexical stream.", nameof(values));
+        }
+    }
+
     /// <summary>Validates and reads the published diagnostic prefix from the compiled scanner.</summary>
     /// <param name="source">The original source snapshot.</param>
     /// <param name="bytes">Little-endian words containing a count followed by (code, start, length) records.</param>

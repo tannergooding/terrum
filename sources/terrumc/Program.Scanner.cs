@@ -100,6 +100,7 @@ internal static partial class Program
 
         LexResult lexResult;
         ImmutableArray<ScannerIntegerValue> integers;
+        SyntaxTree? parsedTree = null;
         try
         {
             var words = result.Data.AsSpan(result.BufferOffsets[3], program.Buffers[3].Values.Length * 4);
@@ -108,6 +109,10 @@ internal static partial class Program
             lexResult = ScannerHost.ReadLexResult(source, result.ExitCode, words, triviaWords, diagnosticWords);
             var integerWords = result.Data.AsSpan(result.BufferOffsets[8], program.Buffers[8].Values.Length * 4);
             integers = ScannerHost.ReadIntegerValues(source, lexResult.Tokens, integerWords);
+            if (build)
+            {
+                parsedTree = SyntaxTree.Parse(lexResult, integers);
+            }
         }
         catch (ArgumentException exception)
         {
@@ -116,7 +121,11 @@ internal static partial class Program
         }
         if (build)
         {
-            return CompileTrees(args[0], [SyntaxTree.Parse(lexResult)], outputPath, json,
+            if (parsedTree is not SyntaxTree scannedTree)
+            {
+                throw new InvalidOperationException("A successful component build must contain its parsed source.");
+            }
+            return CompileTrees(args[0], [scannedTree], outputPath, json,
                 runtimePolicy: policy);
         }
         var tokens = lexResult.Tokens;

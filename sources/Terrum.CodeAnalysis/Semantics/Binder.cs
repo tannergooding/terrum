@@ -2169,7 +2169,22 @@ internal sealed partial class Binder
             PrimitiveType.Char16 => ushort.MaxValue,
             _ => int.MaxValue,
         };
-        if (!ulong.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed) || parsed > max)
+        ulong parsed;
+        if (_tree.HasDecodedIntegers)
+        {
+            if (_tree.GetDecodedInteger(token) is not { IsOverflow: false, Magnitude: ulong magnitude })
+            {
+                Report("TRM3013", "Integer literal is outside its destination range.", token.Span);
+                return ErrorExpression(token.Span);
+            }
+            parsed = magnitude;
+        }
+        else if (!ulong.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out parsed))
+        {
+            Report("TRM3013", "Integer literal is outside its destination range.", token.Span);
+            return ErrorExpression(token.Span);
+        }
+        if (parsed > max)
         {
             Report("TRM3013", "Integer literal is outside its destination range.", token.Span);
             return ErrorExpression(token.Span);
@@ -2198,14 +2213,19 @@ internal sealed partial class Binder
             return false;
         }
         var digits = text.EndsWith(tag, StringComparison.Ordinal) ? text.AsSpan(0, text.Length - 3) : text.AsSpan();
-        if (digits.IsEmpty || !AllDigits(digits) ||
-            !ulong.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var value)
-            || value != (type == PrimitiveType.Int32 ? 2147483648UL : 9223372036854775808UL))
+        if (digits.IsEmpty || !AllDigits(digits))
         {
             return false;
         }
 
-        return true;
+        var minimumMagnitude = type == PrimitiveType.Int32 ? 2147483648UL : 9223372036854775808UL;
+        if (_tree.HasDecodedIntegers)
+        {
+            return _tree.GetDecodedInteger(token) is { IsOverflow: false, Magnitude: ulong value }
+                && value == minimumMagnitude;
+        }
+        return ulong.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
+            && parsed == minimumMagnitude;
     }
 
     private static bool AllDigits(ReadOnlySpan<char> text)

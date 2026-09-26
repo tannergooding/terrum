@@ -32,12 +32,19 @@ diagnostic code/spans go to stderr. Input, compilation, or invalid-result
 failures retain the standard schema-1 error response rather than producing a
 scanner-4 token response.
 
-`build-component` instead adapts the native records to `LexResult`, feeds that
-result into the official lossless parser, binds and verifies the resulting tree,
-and emits a native executable. It never re-lexes the target source or falls back
-to the host lexer when the scanner fails. The scanner's own source is still
-compiled by the host front end. This is a Terrum-implemented lexical phase in
-the real compiler pipeline, not a self-hosted parser or complete bootstrap.
+`build-component` instead adapts the native records to `LexResult`, pairs the
+validated integer values with that same source and token stream, feeds them
+into the official lossless parser and binder, verifies the resulting program,
+and emits a native executable. Binding consumes the compiled scanner's
+integer magnitudes, including signed-minimum operands, rather than decoding
+their decimal digits again. Missing, duplicate or mismatched integer records
+reject the component result; unsupported numeric forms retain their existing
+binding diagnostics. Ordinary `build` still uses the host lexer and integer
+decoder. `build-component` never re-lexes the target source or falls back to
+host decoding when the scanner fails. The scanner's own source is still
+compiled by the host front end. This is a Terrum-implemented lexical and
+integer-decoding phase in the real compiler pipeline, not a self-hosted parser
+or complete bootstrap.
 Its JSON is the ordinary schema-1 compilation response with command
 `build-component`. A completed successful build returns 0; diagnostics return
 1 and input/output errors return 2. Native scanner fail-fast terminates the
@@ -46,10 +53,14 @@ record-validation failures leave an existing output artifact unchanged.
 
 `ScannerHost.ReadLexResult` materializes source-owned token/trivia text and
 standard diagnostic objects from validated buffer records. `SyntaxTree.Parse`
-accepts this lexical result without invoking the host lexer. These boundaries
-validate shape, source coverage and source identity, not the supplied scanner's
-classification algorithm. Use a trusted compiler component; shape validation
-cannot establish that an arbitrary replacement scanner implements Terrum.
+accepts this lexical result and its complete integer-value records without
+invoking the host lexer. These boundaries validate shape, source coverage,
+record ordering, suffixes and integer-token coverage, not the supplied
+scanner's classification or arithmetic. A record with a valid shape but an
+incorrect magnitude would affect binding. Use a trusted compiler component;
+host/component differential fixtures check actual numeric behavior, while
+shape validation alone cannot establish that an arbitrary replacement scanner
+implements Terrum.
 Lexical diagnostic codes/spans match the host lexer; their human messages are
 component-specific summaries.
 
@@ -125,10 +136,11 @@ without a lexical diagnostic. The exact `2^63` magnitude is preserved for
 unary-minus contexts, `ulong.MaxValue` is preserved, and an explicit tag is
 recorded regardless of whether its target type could hold the magnitude.
 Untagged integer magnitudes are not assigned a default type; minus remains a
-separate operator. `ReadLexResult` does not consume this optional side table,
-and semantic binding still independently constructs numeric values. It is an
-executable scanner-decoder milestone, not binding from decoded values or full
-self-hosting.
+separate operator. `ReadLexResult` does not consume this side table by itself. `build-component`
+passes both results to `SyntaxTree.Parse`, which requires a record for every
+integer-form numeric token and binds from those decoded magnitudes. Numeric
+forms without integer records (such as floats) remain unsupported in the
+native profile. This is not full self-hosting.
 The reader accepts either `ImmutableArray<ScannerToken>` or the
 `ImmutableArray<SyntaxToken>` already produced by `ReadLexResult`; neither
 overload re-lexes or duplicates the token stream.

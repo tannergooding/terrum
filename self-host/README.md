@@ -18,8 +18,9 @@ expressions, but not the generic spans, stored dependencies or host interfaces
 required by those sketches. The scanner consumes the shared host keyword catalog,
 including `abstract`, `operator` and `where`, without a second keyword table.
 `build-component` uses the compiled scanner's records as the lexical input to
-the official host parser, binder and native emitter; it does not re-lex the
-target input. The scanner's own compilation and the later compiler phases
+the official host parser, binder and native emitter; the binder also consumes
+its decoded integer magnitudes. It does not re-lex or decode integer magnitudes
+from the target input again. The scanner's own compilation and the later compiler phases
 remain hosted in C#.
 
 | Candidate | Purpose | Gates before execution |
@@ -115,7 +116,9 @@ token boundaries, keywords, leading trivia and lexical diagnostic decisions exec
 Integer magnitudes through the unsigned 64-bit range and explicit integer tags
 are decoded natively without assigning a default numeric type; larger magnitudes
 are reported as beyond the decoder's range, not lexical errors. Contextual
-literal binding and parser routines remain hosted. The string-literal candidate
+literal typing/range checks and parser routines remain hosted, while
+`build-component` binds the scanner's validated integer records without a host
+magnitude-decoding fallback. The string-literal candidate
 decodes scalars independently; it is not wired into the scanner side tables or
 the hosted semantic binder. Keep shared
 fixture expectations about observable ranges and contracts, not host object

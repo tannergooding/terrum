@@ -95,9 +95,9 @@ Neither is a production
 runtime or hot-servicing implementation. The [compiled scanner](docs/scanner.md)
 executes bounded Terrum tokenization against shared pinned Unicode data and
 decodes integer magnitudes without imposing a default numeric type.
-The `build-component` worker can use those native token/trivia records as the
-lexical phase of the real parser/binder/native-emission pipeline, without
-re-lexing the target source in C#.
+The `build-component` worker uses those native token/trivia and integer records
+in the real parser/binder/native-emission pipeline, without re-lexing the target
+source or decoding its integer magnitudes again in C#.
 
 For machine consumers use the built `artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll`
 rather than mixing `dotnet run` build messages with protocol output. CLI exit

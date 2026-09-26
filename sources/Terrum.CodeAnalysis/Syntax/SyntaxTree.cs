@@ -19,12 +19,23 @@ public sealed class SyntaxTree
     /// <summary>Identifies the syntax contract used by this parser.</summary>
     public const string LanguageVersion = "syntax-12";
 
-    private SyntaxTree(SourceText source, LexResult lexResult, SyntaxNode root, ImmutableArray<Diagnostic> diagnostics, CancellationToken cancellationToken)
+    private readonly Dictionary<SyntaxToken, ScannerIntegerValue>? _decodedIntegers;
+
+    private SyntaxTree(SourceText source, LexResult lexResult, SyntaxNode root, ImmutableArray<Diagnostic> diagnostics,
+        ImmutableArray<ScannerIntegerValue> decodedIntegers, CancellationToken cancellationToken)
     {
         Source = source;
         Tokens = lexResult.Tokens;
         Root = root;
         Diagnostics = diagnostics;
+        if (!decodedIntegers.IsDefault)
+        {
+            _decodedIntegers = new Dictionary<SyntaxToken, ScannerIntegerValue>(ReferenceEqualityComparer.Instance);
+            foreach (var value in decodedIntegers)
+            {
+                _decodedIntegers.Add(Tokens[value.TokenIndex], value);
+            }
+        }
         ContentId = ComputeContentId(source.Text, cancellationToken);
     }
 
@@ -42,6 +53,11 @@ public sealed class SyntaxTree
 
     /// <summary>SHA-256 of exact UTF-16LE code units, including malformed surrogates. Not a semantic identity.</summary>
     public string ContentId { get; }
+
+    internal bool HasDecodedIntegers => _decodedIntegers is not null;
+
+    internal ScannerIntegerValue? GetDecodedInteger(SyntaxToken token) =>
+        _decodedIntegers is not null && _decodedIntegers.TryGetValue(token, out var value) ? value : null;
 
     /// <summary>Gets whether any lexical or parser diagnostic has error severity.</summary>
     public bool HasErrors
@@ -110,7 +126,20 @@ public sealed class SyntaxTree
         return ParseCore(lexResult, cancellationToken);
     }
 
-    private static SyntaxTree ParseCore(LexResult lexResult, CancellationToken cancellationToken)
+    /// <summary>Parses a lexical stream with complete integer values supplied by the same trusted scanner.</summary>
+    /// <remarks>The values are checked for token coverage and shape, not recomputed from source digits.</remarks>
+    public static SyntaxTree Parse(LexResult lexResult, ImmutableArray<ScannerIntegerValue> integerValues,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(lexResult);
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateLexResult(lexResult, cancellationToken);
+        ScannerHost.ValidateIntegerValueCoverage(lexResult.Source, lexResult.Tokens, integerValues);
+        return ParseCore(lexResult, cancellationToken, integerValues);
+    }
+
+    private static SyntaxTree ParseCore(LexResult lexResult, CancellationToken cancellationToken,
+        ImmutableArray<ScannerIntegerValue> integerValues = default)
     {
         var parser = new Parser(lexResult.Tokens, cancellationToken);
         var root = parser.ParseCompilationUnit();
@@ -124,7 +153,7 @@ public sealed class SyntaxTree
         });
         cancellationToken.ThrowIfCancellationRequested();
 
-        return new SyntaxTree(lexResult.Source, lexResult, root, diagnostics.ToImmutable(), cancellationToken);
+        return new SyntaxTree(lexResult.Source, lexResult, root, diagnostics.ToImmutable(), integerValues, cancellationToken);
     }
 
     private static void ValidateLexResult(LexResult lexResult, CancellationToken cancellationToken)
