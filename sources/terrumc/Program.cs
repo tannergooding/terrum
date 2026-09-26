@@ -38,6 +38,7 @@ internal static partial class Program
         + "       terrumc compile-native-graph producer <source> <identity> --provider <dependency.trmn|dependency.trng> --export <name> -o <producer.trng> --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc compile-native-graph consumer <source> --provider <dependency.trmn|dependency.trng> -o <consumer.trng> --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc validate-native-graph <consumer.trng> --provider <selected.trmn|selected.trng> [--provider <selected>] [--json]\n"
+        + "       terrumc resolve-native-graph <consumer.trng> --candidate <local.trmn|local.trng> [--candidate <local>] [--json]\n"
         + "       terrumc run-native-graph <consumer.trng> --provider <selected.trmn|selected.trng> [--provider <selected>] --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc run-native-graph-jit <consumer.trng> --provider <selected.trmn|selected.trng> [--provider <selected>] --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "check/tokens/tree inspect syntax; analyze binds the native profile; build emits Windows x64 PE.\n"
@@ -81,6 +82,11 @@ internal static partial class Program
         if (args.Length != 0 && args[0] is "compile-native-graph" or "validate-native-graph" or "run-native-graph")
         {
             return RunNativeGraphCommand(args, json);
+        }
+
+        if (args.Length != 0 && args[0] == "resolve-native-graph")
+        {
+            return RunNativeGraphCatalogCommand(args, json);
         }
 
         if (args.Length != 0 && args[0] is "run-native-graph-jit" or "--native-graph-jit-worker")

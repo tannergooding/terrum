@@ -12,6 +12,21 @@ Implementation hashes are not pinned: a compatible leaf implementation can
 replace an independently compiled package without changing the intermediate
 DLL or root EXE.
 
+`resolve-native-graph` accepts an explicitly listed local candidate catalog
+rather than an already selected closure. It validates every package, ignores
+unrelated valid candidates, and reports the one complete compatible closure
+with selected paths and SHA-256 hashes. Byte-identical catalog entries count
+once; distinct compatible implementations of the same identity are ambiguous,
+not ranked by profile, version, input order or hash. Missing dependencies,
+incompatible contracts, cycles, malformed candidates and unproven uniqueness
+fail without executing or writing an artifact. The bounds are 32 candidates,
+64 MiB of aggregate root and candidate bytes, 16 selected producers and 4096
+candidate assignments. Exhausting the search budget fails even if a compatible
+closure was found earlier. Output paths are informational; use the selected
+packages with an existing `run-native-graph` or `run-native-graph-jit` command,
+which revalidates their bytes before execution. No directory scanning or
+remote discovery occurs.
+
 Build `terrumc`, then from the repository root run:
 
 ```powershell
@@ -28,6 +43,10 @@ $LASTEXITCODE # 42
 $LASTEXITCODE # 43
 & $c run-native-graph-jit root.trng --provider middle.trng --provider leaf-new.trmn --runtime fail-fast
 $LASTEXITCODE # 43
+& $c compile-native producer samples\native\graph\leaf.terrum Extra --export Leaf -o extra.trmn --runtime fail-fast
+& $c resolve-native-graph root.trng --candidate extra.trmn --candidate leaf-new.trmn --candidate middle.trng --json
+& $c resolve-native-graph root.trng --candidate leaf.trmn --candidate leaf-new.trmn --candidate middle.trng
+# Ambiguous: both NodeB implementations satisfy the persisted contracts.
 ```
 
 Compile commands never launch a consumer. The CLI takes `--source` for

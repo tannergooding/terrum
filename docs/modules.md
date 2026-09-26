@@ -183,7 +183,11 @@ The [native graph format](native-graph.md) also permits producer DLLs to import
 other producers. It validates a complete acyclic closure of at most sixteen
 producers before execution; a compatible leaf replacement leaves both the root
 EXE and intermediate DLLs unchanged. Direct dependencies are selected explicitly,
-not resolved through an automatic version policy.
+not resolved through an automatic version policy. A bounded local catalog
+resolver may instead select exactly one compatible closure from explicitly
+listed candidate packages. Two distinct compatible choices are ambiguous;
+the resolver never ranks semantic profiles or implementation hashes. Execution
+still revalidates the selected packages.
 Both paths use compact acyclic value layouts and the existing native value
 profile. Nested field types are retained
 transitively and remapped across artifact-local type indexes. Every imported
@@ -204,8 +208,8 @@ operations and declared callees, not an exception handler or a claim that
 fail-fast process termination counts as NoThrow. Versions 10 (fail-fast) and 11 (checked-exceptions) remain readable; earlier
 versions, including version 9 without structured
 cleanup regions, are rejected;
-recreate them from source. Automatic version resolution, dependency cycles and
-resilient public layouts remain later work.
+recreate them from source. A version-ordering policy and resilient public
+layouts remain undefined; cyclic dependencies remain unsupported.
 
 Version 12 stores the unique layout flag, declared cleanup method, cleanup
 function contract, explicit move/receiver-loan nodes and lexical drop regions.
