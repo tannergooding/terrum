@@ -1,0 +1,47 @@
+[CmdletBinding()]
+param(
+  [ValidateRange(0, 10000)][int] $Calls = 128,
+  [switch] $Span
+)
+
+$ErrorActionPreference = "Stop"
+$root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$output = Join-Path $root "artifacts\profiles\analyzer-repro"
+New-Item -ItemType Directory -Force $output | Out-Null
+
+@'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <AnalysisLevel>latest-all</AnalysisLevel>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <ReportAnalyzer>true</ReportAnalyzer>
+  </PropertyGroup>
+</Project>
+'@ | Set-Content -Path (Join-Path $output "AnalyzerRepro.csproj")
+
+# Keep this reproducer independent of the host repository's build settings.
+'<Project />' | Set-Content -Path (Join-Path $output "Directory.Build.props")
+'<Project />' | Set-Content -Path (Join-Path $output "Directory.Build.targets")
+
+$lines = [System.Collections.Generic.List[string]]::new()
+$lines.Add("using System;")
+$lines.Add("using System.Collections.Generic;")
+$lines.Add("public sealed class Encoder")
+$lines.Add("{")
+$lines.Add("    private readonly List<byte> _bytes = new();")
+if ($Span) {
+  $lines.Add("    private void Bytes(params ReadOnlySpan<byte> values) => _bytes.AddRange(values);")
+} else {
+  $lines.Add("    private void Bytes(params byte[] values) => _bytes.AddRange(values);")
+}
+$lines.Add("    public int Emit()")
+$lines.Add("    {")
+for ($i = 0; $i -lt $Calls; $i++) {
+  $lines.Add("        Bytes(0x48, 0x89, 0xC8, 0x48, 0x89, 0xC8, 0x90, 0x90);")
+}
+$lines.Add("        return _bytes.Count;")
+$lines.Add("    }")
+$lines.Add("}")
+[System.IO.File]::WriteAllLines((Join-Path $output "Encoder.cs"), $lines)
+Write-Output $output

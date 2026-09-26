@@ -16,6 +16,8 @@ The Unicode data generator is Terrum-specific and is not part of the build drive
 ```powershell
 .\restore.cmd
 .\build.cmd
+.\build.cmd -fast -test
+.\build.cmd -configuration Release -test
 .\test.cmd
 .\pack.cmd
 .\build.cmd -restore -test -configuration Release
@@ -34,6 +36,37 @@ and selects it for that invocation, without changing the machine installation.
 local architecture-specific SDK. It does not publish packages or push Git.
 Pack failures are checked independently for the default, preview and stable
 variants so a later successful command cannot hide an earlier failure.
+
+`-fast` passes `RunAnalyzers=false` only to the build action for a faster
+inner loop. It retains C# compilation, type checking and test execution; it
+does not turn off Terrum's language verifier. It is incompatible with `-ci`.
+The default build still runs the full .NET analyzer/style and trimming policy:
+use `.\build.cmd -configuration Release -test` as the full-analysis checkpoint.
+
+## Build-time analysis
+
+On Windows x64 with SDK `11.0.100-rc.1.26425.128`, a no-restore forced
+Release rebuild of the three-project solution took 179-199 seconds with
+analysis enabled versus 1.1 seconds with `RunAnalyzers=false`. The
+no-analyzer wrapper rebuilt in 0.8 seconds and then ran 1,313 tests in
+51 seconds. An already-cached restore took 0.5 seconds; these are not
+fresh-machine restore measurements. The MSBuild performance summary assigns
+178-198 seconds to `CoreCompile`/`Csc` with full analysis, rather than
+evaluation, copying, or restore. A diagnostic analyzer report attributed
+163 of 187 aggregate core-project analyzer-seconds to CA1508 (dead conditional
+code) and 19 seconds to the trimming analyzer. Analyzer seconds overlap
+wall time and other analyzer work; they are not additive. CA5403/CA5390
+previously dominated a 23-minute rebuild but fell below 0.5 analyzer-seconds
+each after byte-emission changes; see [CA5403](../reports/CA5403.md) and
+[CA5390](../reports/CA5390.md). Keep CA1508 and trimming checks in the
+full-analysis checkpoint rather than removing useful diagnostics.
+
+To capture comparable analyzer evidence after restoring dependencies, run
+`dotnet build Terrum.slnx --no-restore -c Release -t:Rebuild -p:ReportAnalyzer=true -v:diag`
+and compare against the same command with `-p:RunAnalyzers=false`.
+`ReportAnalyzer` prints per-rule execution time; `-clp:PerformanceSummary`
+prints MSBuild stage times. Redirect diagnostic output to an ignored
+`artifacts\` log, not a tracked file.
 
 ## Project-specific differences
 

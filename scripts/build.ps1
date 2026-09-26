@@ -4,6 +4,7 @@ Param(
   [switch] $build,
   [switch] $ci,
   [ValidateSet("Debug", "Release")][string] $configuration = "Debug",
+  [switch] $fast,
   [switch] $help,
   [switch] $pack,
   [switch] $restore,
@@ -43,6 +44,7 @@ function Help() {
     Write-Host -Object "  -build                  Build solution"
     Write-Host -Object "  -test                   Run all tests in the solution"
     Write-Host -Object "  -pack                   Package build artifacts"
+    Write-Host -Object "  -fast                   Skip .NET analyzers for the build (not supported with -ci)"
     Write-Host -Object ""
     Write-Host -Object "Advanced settings:"
     Write-Host -Object "  -solution <value>       Path to solution to build"
@@ -101,6 +103,10 @@ try {
   }
 
   if ($ci) {
+    if ($fast) {
+      throw "'-fast' cannot be used with '-ci'; CI must run full analysis."
+    }
+
     $build = $true
     $pack = $true
     $restore = $true
@@ -145,6 +151,10 @@ try {
   }
 
   if ($build) {
+    if ($fast) {
+      $properties += "/p:RunAnalyzers=false"
+    }
+
     Build
   }
 
