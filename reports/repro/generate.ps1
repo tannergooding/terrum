@@ -1,13 +1,16 @@
 [CmdletBinding()]
 param(
   [ValidateRange(0, 10000)][int] $Calls = 128,
-  [switch] $Span
+  [switch] $Span,
+  [string] $OutputDirectory = ""
 )
 
 $ErrorActionPreference = "Stop"
-$root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$output = Join-Path $root "artifacts\profiles\analyzer-repro"
-New-Item -ItemType Directory -Force $output | Out-Null
+if ($OutputDirectory -eq "") {
+  $root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+  $OutputDirectory = Join-Path $root "artifacts\profiles\analyzer-repro"
+}
+New-Item -ItemType Directory -Force $OutputDirectory | Out-Null
 
 @'
 <Project Sdk="Microsoft.NET.Sdk">
@@ -18,11 +21,11 @@ New-Item -ItemType Directory -Force $output | Out-Null
     <ReportAnalyzer>true</ReportAnalyzer>
   </PropertyGroup>
 </Project>
-'@ | Set-Content -Path (Join-Path $output "AnalyzerRepro.csproj")
+'@ | Set-Content -Path (Join-Path $OutputDirectory "AnalyzerRepro.csproj")
 
-# Keep this reproducer independent of the host repository's build settings.
-'<Project />' | Set-Content -Path (Join-Path $output "Directory.Build.props")
-'<Project />' | Set-Content -Path (Join-Path $output "Directory.Build.targets")
+# Keep the generated project independent of surrounding build settings.
+'<Project />' | Set-Content -Path (Join-Path $OutputDirectory "Directory.Build.props")
+'<Project />' | Set-Content -Path (Join-Path $OutputDirectory "Directory.Build.targets")
 
 $lines = [System.Collections.Generic.List[string]]::new()
 $lines.Add("using System;")
@@ -43,5 +46,5 @@ for ($i = 0; $i -lt $Calls; $i++) {
 $lines.Add("        return _bytes.Count;")
 $lines.Add("    }")
 $lines.Add("}")
-[System.IO.File]::WriteAllLines((Join-Path $output "Encoder.cs"), $lines)
-Write-Output $output
+[System.IO.File]::WriteAllLines((Join-Path $OutputDirectory "Encoder.cs"), $lines)
+Write-Output $OutputDirectory

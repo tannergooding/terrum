@@ -53,13 +53,17 @@ no-analyzer wrapper rebuilt in 0.8 seconds and then ran 1,313 tests in
 fresh-machine restore measurements. The MSBuild performance summary assigns
 178-198 seconds to `CoreCompile`/`Csc` with full analysis, rather than
 evaluation, copying, or restore. A diagnostic analyzer report attributed
-163 of 187 aggregate core-project analyzer-seconds to CA1508 (dead conditional
-code) and 19 seconds to the trimming analyzer. Analyzer seconds overlap
-wall time and other analyzer work; they are not additive. CA5403/CA5390
+163 of 187 aggregate core-project analyzer-seconds to
+[CA1508](../reports/CA1508.md) (dead conditional code) and 19 seconds to
+the trimming analyzer. Analyzer seconds overlap wall time and other analyzer
+work; they are not additive. CA5403/CA5390
 previously dominated a 23-minute rebuild but fell below 0.5 analyzer-seconds
 each after byte-emission changes; see [CA5403](../reports/CA5403.md) and
 [CA5390](../reports/CA5390.md). Keep CA1508 and trimming checks in the
 full-analysis checkpoint rather than removing useful diagnostics.
+With only CA1508, CA5403 and CA5390 temporarily suppressed, repeated
+Release rebuilds took 2.7-3.0 seconds versus 1.2-1.3 seconds with all
+analyzers off; the temporary suppression was not committed.
 
 To capture comparable analyzer evidence after restoring dependencies, run
 `dotnet build Terrum.slnx --no-restore -c Release -t:Rebuild -p:ReportAnalyzer=true -v:diag`
