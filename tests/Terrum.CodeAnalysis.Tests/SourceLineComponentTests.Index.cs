@@ -69,6 +69,31 @@ public sealed partial class SourceLineComponentTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task OwnedLineIndexDoesNotRereadSourceAfterConstructionAsync(NativeRuntimePolicy policy)
+    {
+        var trees = await ReadIndexComponentsAsync().ConfigureAwait(true);
+        const string Entry = """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                require SourceLineIndex.TryCreate(out var index);
+                Host.Source[0] = (char16)10;
+                if (index.GetLineCount() != 1) { return 1; }
+                for (mut int32 position = 0; position <= 3; position = position + 1) {
+                    require index.TryGetPosition(position, out var line, out var character);
+                    if (line != 0 || character != position) { return 2; }
+                }
+                return 0;
+            }
+            """;
+        var compilation = Compilation.Create(trees.Add(SyntaxTree.Parse(Entry, "index-snapshot-entry.terrum")),
+            [new HostBuffer("Source", PrimitiveType.Char16, [97, 98, 99], true)], (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData("index.TryGetPosition(-1, out var line, out var character); return line;")]
     [InlineData("index.TryGetPosition(2, out var line, out var character); return character;")]
     [InlineData("SourceLineIndex copy = index; return copy.GetLineCount();")]
