@@ -80,8 +80,21 @@ public sealed partial class CliTests
     private static void AssertMismatchedNativePolicyRejected(byte[] bytes)
     {
         var contract = 18 + bytes[7] + bytes[8];
+        if (bytes[4] == 2)
+        {
+            var count = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(contract, 2));
+            contract += 2;
+            for (var index = 0; index < count; index++)
+            {
+                var length = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(contract, 2));
+                contract += 2 + length;
+            }
+        }
+        Assert.InRange(contract, 18, bytes.Length - 32 - 1);
         var profileLength = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(contract + 8, 4));
         var policy = contract + 12 + profileLength + 1;
+        Assert.InRange(policy, contract, contract
+            + BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(10, 4)) - 1);
         bytes[policy] ^= 1;
         SHA256.HashData(bytes.AsSpan(0, bytes.Length - 32)).CopyTo(bytes, bytes.Length - 32);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.Inspect(bytes));

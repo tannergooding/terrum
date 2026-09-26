@@ -8,6 +8,8 @@
 
 typedef struct Ticket { int32_t Id; } Ticket;
 typedef struct WideTicket { int64_t Signed; uint64_t Unsigned; } WideTicket;
+typedef struct Bundle { Ticket Child; int32_t Tail; } Bundle;
+typedef struct WideBundle { int64_t Prefix; Ticket Child; uint32_t Tail; } WideBundle;
 typedef int32_t (*Consume)(Ticket);
 typedef Ticket (*Relay)(Ticket);
 typedef WideTicket (*RelayWide)(WideTicket);
@@ -19,6 +21,12 @@ typedef uint8_t (*TryPartial)(Ticket*, WideTicket*);
 typedef uint8_t (*CatchOutputFailure)(Ticket*);
 typedef int32_t (*LaterArgumentFailure)(void);
 typedef void* (*RawRelayWide)(void*, WideTicket);
+typedef Bundle (*MakeBundle)(void);
+typedef Bundle (*RelayBundle)(Bundle);
+typedef int32_t (*ConsumeBundle)(Bundle);
+typedef WideBundle (*RelayWideBundle)(WideBundle);
+typedef int32_t (*ConsumeWideBundle)(WideBundle);
+typedef uint8_t (*TryWideBundle)(uint8_t, WideBundle*);
 
 static int Check(HMODULE image)
 {
@@ -33,13 +41,20 @@ static int Check(HMODULE image)
     CatchOutputFailure catchOutput = (CatchOutputFailure)GetProcAddress(image, "CatchOutputFailure");
     LaterArgumentFailure laterArgument = (LaterArgumentFailure)GetProcAddress(image, "LaterArgumentFailure");
     RawRelayWide rawRelay = (RawRelayWide)GetProcAddress(image, "RelayWide");
+    MakeBundle makeBundle = (MakeBundle)GetProcAddress(image, "MakeBundle");
+    RelayBundle relayBundle = (RelayBundle)GetProcAddress(image, "RelayBundle");
+    ConsumeBundle consumeBundle = (ConsumeBundle)GetProcAddress(image, "ConsumeBundle");
+    RelayWideBundle relayWideBundle = (RelayWideBundle)GetProcAddress(image, "RelayWideBundle");
+    ConsumeWideBundle consumeWideBundle = (ConsumeWideBundle)GetProcAddress(image, "ConsumeWideBundle");
+    TryWideBundle tryWideBundle = (TryWideBundle)GetProcAddress(image, "TryWideBundle");
     if (!consume || !relay || !relayWide || !consumeWide || !relayLast
-        || !tryTicket || !tryWide || !tryPartial || !catchOutput || !laterArgument || !rawRelay)
+        || !tryTicket || !tryWide || !tryPartial || !catchOutput || !laterArgument || !rawRelay
+        || !makeBundle || !relayBundle || !consumeBundle || !relayWideBundle || !consumeWideBundle || !tryWideBundle)
     {
         fprintf(stderr, "Missing owned-call ABI export.\n");
         return 10;
     }
-    if (sizeof(Ticket) != 4 || sizeof(WideTicket) != 16)
+    if (sizeof(Ticket) != 4 || sizeof(WideTicket) != 16 || sizeof(Bundle) != 8 || sizeof(WideBundle) != 16)
     {
         return 11;
     }
@@ -118,6 +133,32 @@ static int Check(HMODULE image)
         {
             return 21;
         }
+        Bundle bundle = makeBundle();
+        Bundle forwarded = relayBundle(bundle);
+        if (consumeBundle(forwarded) != 42)
+        {
+            return 22;
+        }
+        __declspec(align(16)) WideBundle bundleStorage[3];
+        uint8_t bundleBefore[sizeof(bundleStorage)];
+        memset(bundleStorage, 0xA5, sizeof(bundleStorage));
+        memcpy(bundleBefore, bundleStorage, sizeof(bundleBefore));
+        if (tryWideBundle(0, &bundleStorage[1])
+            || memcmp(bundleBefore, bundleStorage, sizeof(bundleBefore)) != 0)
+        {
+            return 23;
+        }
+        if (!tryWideBundle(1, &bundleStorage[1]))
+        {
+            return 24;
+        }
+        WideBundle wideBundle = relayWideBundle(bundleStorage[1]);
+        if (consumeWideBundle(wideBundle) != 42
+            || memcmp(bundleBefore, bundleStorage, sizeof(WideBundle)) != 0
+            || memcmp(bundleBefore + 2 * sizeof(WideBundle), &bundleStorage[2], sizeof(WideBundle)) != 0)
+        {
+            return 25;
+        }
     }
     return 0;
 }
@@ -150,7 +191,7 @@ int main(int argc, char** argv)
     }
     if (result == 0)
     {
-        puts("owned-call-abi direct=4 indirect=16 stack=6 publication=checked recovery=42");
+        puts("owned-call-abi direct=4 indirect=16 stack=6 composite=8,16 publication=checked recovery=42");
     }
     return result;
 }

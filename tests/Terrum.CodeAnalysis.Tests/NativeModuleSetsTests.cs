@@ -107,8 +107,7 @@ public sealed class NativeModuleSetsTests
         var tampered = consumer.ToArray();
         tampered[^1] ^= 1;
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.ValidateConsumerSet(tampered, [alpha, beta]));
-        var version = consumer.ToArray();
-        version[4] = 2;
+        var version = WithUpdatedSetChecksum(consumer, bytes => bytes[4] = 3);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectConsumerSet(version));
         var mapping = WithUpdatedSetChecksum(consumer, bytes => {
             var firstImportOffset = 16 + 1 + "First".Length + 2 + 2;

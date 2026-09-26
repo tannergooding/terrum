@@ -1,0 +1,6 @@
+public Ticket Forward() { return Make(); }
+
+public bool TryForward(out Ticket ticket) {
+    ticket = Make();
+    return true;
+}

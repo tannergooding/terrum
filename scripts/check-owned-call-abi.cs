@@ -35,6 +35,8 @@ foreach (var argument in new[] { cli, "build-library",
     "--export", "Consume", "--export", "Relay", "--export", "RelayWide", "--export", "ConsumeWide",
     "--export", "RelayLast", "--export", "TryTicket", "--export", "TryWide", "--export", "TryPartial",
     "--export", "CatchOutputFailure", "--export", "LaterArgumentFailure",
+    "--export", "MakeBundle", "--export", "RelayBundle", "--export", "ConsumeBundle",
+    "--export", "RelayWideBundle", "--export", "ConsumeWideBundle", "--export", "TryWideBundle",
     "-o", dll, "--runtime", "checked-exceptions" })
 {
     buildLibrary.ArgumentList.Add(argument);
@@ -51,7 +53,7 @@ var execute = new ProcessStartInfo(executable);
 execute.ArgumentList.Add(dll);
 var proof = await Run(execute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
 await File.WriteAllTextAsync(Path.Combine(artifacts, "owned-call-abi-proof.log"), proof).ConfigureAwait(false);
-if (proof.Trim() != "owned-call-abi direct=4 indirect=16 stack=6 publication=checked recovery=42")
+if (proof.Trim() != "owned-call-abi direct=4 indirect=16 stack=6 composite=8,16 publication=checked recovery=42")
 {
     throw new InvalidOperationException("The independent native owned-call ABI proof did not complete.");
 }

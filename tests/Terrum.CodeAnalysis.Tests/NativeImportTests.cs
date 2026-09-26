@@ -126,6 +126,10 @@ public sealed class NativeImportTests
             _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitWithImports(program, bindings,
                 NativeRuntimePolicy.FailFast));
         }
+        var standalone = Compilation.Create(SyntaxTree.Parse("int32 Main() { return 42; }"));
+        Assert.False(standalone.HasErrors);
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitWithImports(
+            Assert.IsType<BoundProgram>(standalone.Program), [], NativeRuntimePolicy.FailFast));
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast));
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast));
         _ = Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitWithImports(program, [a, b],

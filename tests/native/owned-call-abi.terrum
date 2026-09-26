@@ -109,3 +109,67 @@ public int32 LaterArgumentFailure()
         }
     }
 }
+
+public unique struct Bundle
+{
+    public Ticket Child;
+    public int32 Tail;
+
+    public Bundle(int32 id)
+    {
+        Tail = 2;
+        Child = new Ticket(id);
+        require Child.Read() == id;
+    }
+
+    [NoThrow] [Cleanup] public void Close() {}
+    [NoThrow] public int32 ReadChild() { return Child.Read(); }
+}
+
+public unique struct WideBundle
+{
+    public int64 Prefix;
+    public Ticket Child;
+    public uint32 Tail;
+
+    public WideBundle(int32 id, bool complete)
+    {
+        Child = new Ticket(id);
+        require complete;
+        Prefix = int64.MinValue;
+        Tail = uint32.MaxValue;
+    }
+
+    [NoThrow] [Cleanup] public void Close() {}
+    [NoThrow] public int32 ReadChild() { return Child.Read(); }
+}
+
+public Bundle MakeBundle() { return new Bundle(40); }
+public Bundle RelayBundle(Bundle value) { return move value; }
+public int32 ConsumeBundle(Bundle value) { return value.ReadChild() + value.Tail; }
+public WideBundle RelayWideBundle(WideBundle value) { return move value; }
+
+public int32 ConsumeWideBundle(WideBundle value)
+{
+    require value.Prefix == int64.MinValue && value.Tail == uint32.MaxValue;
+    return value.ReadChild();
+}
+
+public bool TryWideBundle(bool complete, out WideBundle value)
+{
+    unsafe
+    {
+        try
+        {
+            value = new WideBundle(42, complete);
+            require value.ReadChild() == 42;
+            WideBundle staged = move value;
+            value = move staged;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+}

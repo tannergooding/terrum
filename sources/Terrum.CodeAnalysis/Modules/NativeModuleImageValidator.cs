@@ -279,8 +279,7 @@ internal static class NativeModuleImageValidator
                 }
                 var terminator = Offset(table.RelativeVirtualAddress + (count * 20), 20, ".idata");
                 if (image.AsSpan(terminator, 20).IndexOfAnyExcept((byte)0) >= 0
-                    || header.ImportAddressTableDirectory.Size < 16
-                    || (isConsumer && names.Count == 0))
+                    || header.ImportAddressTableDirectory.Size < 16)
                 {
                     throw Invalid();
                 }

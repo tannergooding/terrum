@@ -2,7 +2,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
 
@@ -143,7 +145,7 @@ public static class SemanticVerifier
                 if (nested >= 0)
                 {
                     VerifyLayout(nested, depth + 1);
-                    if (program.Structures[nested].IsUnique || structure.IsUnique)
+                    if (program.Structures[nested].IsUnique && !structure.IsUnique)
                     {
                         throw Invalid();
                     }
@@ -384,6 +386,20 @@ public static class SemanticVerifier
             }
             parameterBody = parameterRegion.Body;
         }
+        BoundDropConstructedFields? constructedFields = null;
+        if (function.IsConstructor && program.Structures[(int)function.ReturnType - 100].Fields
+            .Any(field => IsUnique(program, field.Type)))
+        {
+            if (parameterBody.Statements is not [BoundTryFinally constructorRegion]
+                || constructorRegion.Body is null || constructorRegion.Body.Statements.IsDefault
+                || constructorRegion.Finally is not BoundBlock { Statements: [BoundDropConstructedFields partial] }
+                || partial.Variable != 0 || partial.AcquisitionOrder.IsDefault
+                || !partial.AcquisitionOrder.SequenceEqual(ConstructorAcquisitions(constructorRegion.Body, function, program)))
+            {
+                throw Invalid(function.Span);
+            }
+            constructedFields = partial;
+        }
         var pending = new Stack<(BoundStatement Statement, int Depth)>();
         pending.Push((body, 0));
         var visits = MaximumAnalysisVisits;
@@ -456,6 +472,13 @@ public static class SemanticVerifier
                 case BoundDrop drop:
                     drops.Add(drop);
                     break;
+                case BoundDropConstructedFields partial:
+                    if (!ReferenceEquals(partial, constructedFields))
+                    {
+                        throw Invalid(partial.Span);
+                    }
+                    constructedFields = null;
+                    break;
                 case BoundTryFinally region:
                     pending.Push((region.Body, item.Depth + 1));
                     pending.Push((region.Finally, item.Depth + 1));
@@ -490,10 +513,77 @@ public static class SemanticVerifier
                 throw Invalid(drop.Span);
             }
         }
-        if (allowed.Count != 0 || owners.Count != 0 || outputOwners.Count != 0)
+        if (allowed.Count != 0 || owners.Count != 0 || outputOwners.Count != 0
+            || constructedFields is not null)
         {
             throw Invalid();
         }
+    }
+
+    [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Only field acquisitions and nested control regions contribute to the order.")]
+    private static ImmutableArray<int> ConstructorAcquisitions(BoundBlock body, BoundFunction function, BoundProgram program)
+    {
+        var order = ImmutableArray.CreateBuilder<int>();
+        var pending = new Stack<(BoundStatement Statement, bool Sequential, int Depth)>();
+        pending.Push((body, true, 0));
+        var remaining = MaximumAnalysisVisits;
+        var fields = program.Structures[(int)function.ReturnType - 100].Fields;
+        while (pending.TryPop(out var item))
+        {
+            Count(ref remaining, item.Depth);
+            if (item.Statement is null)
+            {
+                throw Invalid();
+            }
+            switch (item.Statement)
+            {
+                case BoundBlock block:
+                    if (block.Statements.IsDefault)
+                    {
+                        throw Invalid();
+                    }
+                    for (var i = block.Statements.Length - 1; i >= 0; i--)
+                    {
+                        pending.Push((block.Statements[i], item.Sequential, item.Depth + 1));
+                    }
+                    break;
+                case BoundTryFinally region:
+                    pending.Push((region.Finally, false, item.Depth + 1));
+                    pending.Push((region.Body, item.Sequential, item.Depth + 1));
+                    break;
+                case BoundFieldAssignment assignment when assignment.Variable == 0
+                    && assignment.Field >= 0 && assignment.Field < fields.Length
+                    && IsUnique(program, fields[assignment.Field].Type):
+                    if (!item.Sequential || !assignment.NestedFields.IsEmpty || order.Contains(assignment.Field))
+                    {
+                        throw InvalidEffect(assignment.Span, "Ownership");
+                    }
+                    order.Add(assignment.Field);
+                    break;
+                case BoundIf conditional:
+                    if (conditional.Else is not null)
+                    {
+                        pending.Push((conditional.Else, false, item.Depth + 1));
+                    }
+                    pending.Push((conditional.Then, false, item.Depth + 1));
+                    break;
+                case BoundWhile loop:
+                    pending.Push((loop.Body, false, item.Depth + 1));
+                    break;
+                case BoundTryCatch recovery:
+                    if (recovery.Finally is not null)
+                    {
+                        pending.Push((recovery.Finally, false, item.Depth + 1));
+                    }
+                    pending.Push((recovery.Catch, false, item.Depth + 1));
+                    pending.Push((recovery.Body, false, item.Depth + 1));
+                    break;
+                case BoundUnsafe unsafeBlock:
+                    pending.Push((unsafeBlock.Body, item.Sequential, item.Depth + 1));
+                    break;
+            }
+        }
+        return order.ToImmutable();
     }
 
     internal static bool TryVerifySource(BoundProgram program, out int functionIndex, out TextSpan span, out bool exceededWorkLimit,
@@ -595,6 +685,13 @@ public static class SemanticVerifier
                 initialized[drop.Variable] = false;
                 fieldMasks[drop.Variable] = 0;
                 return false;
+            case BoundDropConstructedFields partial:
+                if (!inCleanup || !function.IsConstructor || partial.Variable != 0
+                    || partial.AcquisitionOrder.IsDefault)
+                {
+                    throw Invalid(partial.Span);
+                }
+                return false;
             case BoundAssignment assignment:
                 if (assignment.Variable < 0 || assignment.Variable >= initialized.Length
                     || (assignment.Variable < function.ParameterCount && !function.Variables[assignment.Variable].IsOut)
@@ -637,6 +734,13 @@ public static class SemanticVerifier
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
                 var targetField = program.Structures[structType].Fields[fieldAssignment.Field];
+                if (IsUnique(program, targetField.Type)
+                    && (!function.IsConstructor || fieldAssignment.Variable != 0
+                        || !fieldAssignment.NestedFields.IsEmpty
+                        || (fieldMasks[0] & (1u << fieldAssignment.Field)) != 0))
+                {
+                    throw InvalidEffect(fieldAssignment.Span, "Ownership");
+                }
                 if (!targetField.IsMutable && !(function.IsConstructor && fieldAssignment.Variable == 0))
                 {
                     throw Invalid();
@@ -658,12 +762,21 @@ public static class SemanticVerifier
                         throw Invalid();
                     }
                     targetField = program.Structures[nestedType].Fields[nestedField];
+                    if (program.Structures[nestedType].IsUnique)
+                    {
+                        throw InvalidEffect(fieldAssignment.Span, "Ownership");
+                    }
                     if (!targetField.IsMutable)
                     {
                         throw Invalid();
                     }
                 }
                 Expression(fieldAssignment.Value, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                if (IsUnique(program, targetField.Type)
+                    && fieldAssignment.Value is not (BoundMove or BoundCall))
+                {
+                    throw InvalidEffect(fieldAssignment.Span, "Ownership");
+                }
                 if (fieldAssignment.Value.Type != targetField.Type
                     || (nestedWrite && (fieldMasks[fieldAssignment.Variable] & (1u << fieldAssignment.Field)) == 0))
                 {
@@ -1120,6 +1233,41 @@ public static class SemanticVerifier
         }
     }
 
+    private static int VerifyUniqueFieldPlace(BoundFieldRead place, bool[] initialized, uint[] fieldMasks,
+        BoundFunction function, BoundProgram program, ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        if (place is null || place.Receiver is null)
+        {
+            throw Invalid();
+        }
+        var owner = (int)place.Receiver.Type - 100;
+        if (owner < 0 || owner >= program.Structures.Length
+            || place.Field < 0 || place.Field >= program.Structures[owner].Fields.Length
+            || !program.Structures[owner].IsUnique || !IsUnique(program, place.Type)
+            || place.Type != program.Structures[owner].Fields[place.Field].Type
+            || !CanAccessField(function, program.Structures[owner], place.Field))
+        {
+            throw InvalidEffect(place.Span, "Ownership");
+        }
+        if (place.Receiver is BoundFieldRead parent)
+        {
+            return VerifyUniqueFieldPlace(parent, initialized, fieldMasks, function, program,
+                ref remaining, depth + 1);
+        }
+        if (place.Receiver is not BoundRead root || root.Variable < 0
+            || root.Variable >= initialized.Length
+            || root.Type != function.Variables[root.Variable].Type
+            || !IsUnique(program, root.Type)
+            || (!initialized[root.Variable]
+                && !(function.IsConstructor && root.Variable == 0
+                    && (fieldMasks[0] & (1u << place.Field)) != 0)))
+        {
+            throw InvalidEffect(place.Span, "Ownership");
+        }
+        return root.Variable;
+    }
+
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Unsupported token kinds must remain invalid rather than becoming accepted operators.")]
     private static void Expression(BoundExpression expression, bool[] initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function,
@@ -1173,7 +1321,10 @@ public static class SemanticVerifier
                 }
                 if (program.Structures[readType].IsUnique && fieldRead.Receiver is not BoundRead)
                 {
-                    throw InvalidEffect(fieldRead.Span, "Ownership");
+                    if (fieldRead.Receiver is not BoundFieldRead candidate || !IsUnique(program, candidate.Type))
+                    {
+                        throw InvalidEffect(fieldRead.Span, "Ownership");
+                    }
                 }
                 if (fieldRead.Receiver is BoundRead owned && IsUnique(program, owned.Type))
                 {
@@ -1186,6 +1337,10 @@ public static class SemanticVerifier
                         throw InvalidEffect(fieldRead.Span, "Ownership");
                     }
                 }
+                else if (fieldRead.Receiver is BoundFieldRead nested && IsUnique(program, nested.Type))
+                {
+                    _ = VerifyUniqueFieldPlace(nested, initialized, fieldMasks, function, program, ref remaining, depth + 1);
+                }
                 else if (fieldRead.Receiver is BoundRead partial && function.IsConstructor && partial.Variable == 0)
                 {
                     if (partial.Type != function.Variables[0].Type || (fieldMasks[0] & (1u << fieldRead.Field)) == 0)
@@ -1196,6 +1351,10 @@ public static class SemanticVerifier
                 else
                 {
                     Expression(fieldRead.Receiver, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                }
+                if (IsUnique(program, fieldRead.Type))
+                {
+                    throw InvalidEffect(fieldRead.Span, "Ownership");
                 }
                 break;
             case BoundRead read:
@@ -1223,6 +1382,8 @@ public static class SemanticVerifier
                 break;
             case BoundReceiverLoan loan:
                 throw InvalidEffect(loan.Span, "Ownership");
+            case BoundFieldLoan fieldLoan:
+                throw InvalidEffect(fieldLoan.Span, "Ownership");
             case BoundOutArgument:
                 throw Invalid();
             case BoundBufferRead bufferRead:
@@ -1356,6 +1517,8 @@ public static class SemanticVerifier
                     }
                 }
                 var outTargets = new HashSet<int>();
+                var loanRoot = -1;
+                var loanOfInitializedField = false;
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
                     var argument = call.Arguments[i];
@@ -1389,6 +1552,20 @@ public static class SemanticVerifier
                             {
                                 throw InvalidEffect(loan.Span, "Ownership");
                             }
+                            loanRoot = loan.Variable;
+                        }
+                        else if (argument is BoundFieldLoan fieldLoan)
+                        {
+                            if (i != 0 || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
+                                || fieldLoan.Place is null
+                                || fieldLoan.Type != target.Variables[0].Type
+                                || fieldLoan.Place.Type != fieldLoan.Type || !IsUnique(program, fieldLoan.Type))
+                            {
+                                throw InvalidEffect(fieldLoan.Span, "Ownership");
+                            }
+                            loanRoot = VerifyUniqueFieldPlace(fieldLoan.Place, initialized, fieldMasks,
+                                function, program, ref remaining, depth + 1);
+                            loanOfInitializedField = true;
                         }
                         else
                         {
@@ -1410,8 +1587,8 @@ public static class SemanticVerifier
                         throw Invalid();
                     }
                 }
-                if (call.Arguments is [BoundReceiverLoan receiverLoan, ..]
-                    && !initialized[receiverLoan.Variable])
+                if (loanRoot >= 0 && !initialized[loanRoot]
+                    && !(loanOfInitializedField && function.IsConstructor && loanRoot == 0))
                 {
                     throw InvalidEffect(call.Span, "Ownership");
                 }
@@ -1561,6 +1738,7 @@ public static class SemanticVerifier
             case BoundConstant:
             case BoundRead:
             case BoundReceiverLoan:
+            case BoundFieldLoan:
                 break;
             case BoundMove:
                 throw InvalidEffect(expression.Span, "Ownership");

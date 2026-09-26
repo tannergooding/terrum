@@ -1,0 +1,46 @@
+// Run with --runtime checked-exceptions.
+unique struct Child {
+    public int32 Id;
+
+    public Child(int32 id) {
+        Id = id;
+    }
+
+    [NoThrow] [Cleanup] public void Close() {
+    }
+
+    [NoThrow] public int32 Read() {
+        return Id;
+    }
+}
+
+unique struct Package {
+    public Child First;
+    public Child Second;
+
+    public Package(bool complete) {
+        Second = new Child(2);
+        require complete;
+        First = new Child(40);
+        require First.Read() == 40;
+    }
+
+    [NoThrow] [Cleanup] public void Close() {
+    }
+
+    [NoThrow] public int32 Read() {
+        return First.Read() + Second.Read();
+    }
+}
+
+int32 Main() {
+    unsafe {
+        try {
+            Package incomplete = new Package(false);
+        } catch {
+            Package complete = new Package(true);
+            return complete.Read();
+        }
+    }
+    return 0;
+}

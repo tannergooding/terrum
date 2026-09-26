@@ -1,0 +1,7 @@
+public unique struct Ticket {
+    public int32 Value;
+    [NoThrow] public Ticket(int32 value) { Value = value; }
+    [NoThrow] [Cleanup] public void Close() {}
+}
+
+public Ticket Make() { return new Ticket(21); }

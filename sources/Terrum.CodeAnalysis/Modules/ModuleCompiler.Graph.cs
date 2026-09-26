@@ -12,38 +12,51 @@ namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class ModuleCompiler
 {
-    internal static CompilationReference MergeGraphReferences(IReadOnlyList<CompilationReference> references)
+    internal static CompilationReference MergeGraphReferences(IReadOnlyList<CompilationReference> references,
+        IReadOnlyList<IReadOnlyDictionary<string, string?>>? origins = null)
     {
         ArgumentNullException.ThrowIfNull(references);
         if (references.Count is < 1 or > 16)
         {
             throw new ModuleContractException("A graph requires 1 to 16 direct dependencies.");
         }
+        if (origins is not null && origins.Count != references.Count)
+        {
+            throw new ModuleContractException("Graph type origin tables differ from selected providers.");
+        }
         var types = ImmutableArray.CreateBuilder<BoundStruct>();
         var names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var reference in references)
+        var originals = new Dictionary<string, (BoundStruct Type, ImmutableArray<BoundStruct> Table, string? Origin)>(
+            StringComparer.Ordinal);
+        for (var provider = 0; provider < references.Count; provider++)
         {
+            var reference = references[provider];
             if (reference.RuntimePolicy != references[0].RuntimePolicy)
             {
                 throw new ModuleContractException("Graph dependency policies differ.");
             }
             foreach (var structure in reference.Structures)
             {
-                if (!names.Add(structure.Name))
+                var origin = origins?[provider].GetValueOrDefault(structure.Name);
+                if (originals.TryGetValue(structure.Name, out var existing))
                 {
-                    throw new ModuleContractException($"Ambiguous graph type '{structure.Name}'.");
+                    if (origin is null || existing.Origin is null || origin != existing.Origin
+                        || !SameStructure(structure, existing.Type, reference.Structures, existing.Table))
+                    {
+                        throw new ModuleContractException($"Ambiguous graph type '{structure.Name}'.");
+                    }
+                    continue;
                 }
+                originals.Add(structure.Name, (structure, reference.Structures, origin));
+                _ = names.Add(structure.Name);
                 types.Add(structure);
             }
         }
         var combined = types.ToImmutable();
-        var index = 0;
-        foreach (var reference in references)
+        for (var index = 0; index < types.Count; index++)
         {
-            foreach (var structure in reference.Structures)
-            {
-                types[index++] = RemapStructure(structure, reference.Structures, combined);
-            }
+            var original = originals[types[index].Name];
+            types[index] = RemapStructure(original.Type, original.Table, combined);
         }
         combined = types.ToImmutable();
         var functions = ImmutableArray.CreateBuilder<BoundFunction>();
@@ -95,9 +108,9 @@ public static partial class ModuleCompiler
                 throw new ModuleContractException($"Incompatible graph import '{function.Name}'.");
             }
         }
-        if (!names.IsSubsetOf(allNames) || !program.Functions.Any(static item => item.IsExternal))
+        if (!names.IsSubsetOf(allNames))
         {
-            throw new ModuleContractException("Graph library must export owned functions and import a dependency.");
+            throw new ModuleContractException("Graph library must export owned functions.");
         }
         var required = RequiredStructures(program.Functions.Select(static item =>
             item.IsExternal ? Declaration(item) : item), program.Structures);
@@ -116,6 +129,16 @@ public static partial class ModuleCompiler
                 importedTypes.Add(structure.Name);
             }
         }
+        var publicTypes = RequiredStructures(program.Functions.Where(item => names.Contains(item.Name))
+            .Select(Declaration), program.Structures);
+        foreach (var structure in structures)
+        {
+            if (publicTypes.Contains(structure.Name) && structure.CleanupMethod is string cleanup
+                && !importedTypes.Contains(structure.Name) && !names.Contains(cleanup))
+            {
+                throw new ModuleContractException($"Graph-owned type requires exported cleanup '{cleanup}'.");
+            }
+        }
         var functions = program.Functions.Select(function => {
             var remapped = RemapFunction(function, program.Structures, structures);
             return new ModuleFunction(function.Name,
@@ -129,12 +152,13 @@ public static partial class ModuleCompiler
             RuntimePolicy = program.RuntimePolicy,
         };
         var contract = Write(module, program);
-        ValidateGraphLibrary(contract, exports, dependencies);
+        ValidateGraphLibrary(contract, exports, dependencies, allowImportedCleanup: true);
         return contract;
     }
 
     /// <summary>Reads exported declarations from a graph library, not its implementation bodies.</summary>
-    internal static CompilationReference CreateGraphReference(byte[] contract, IReadOnlyList<string> exports)
+    internal static CompilationReference CreateGraphReference(byte[] contract, IReadOnlyList<string> exports,
+        bool allowImportedCleanup = false)
     {
         var module = ReadGraphLibrary(contract);
         var names = exports.ToHashSet(StringComparer.Ordinal);
@@ -163,7 +187,8 @@ public static partial class ModuleCompiler
         foreach (var structure in module.Structures)
         {
             if (required.Contains(structure.Name) && structure.CleanupMethod is string cleanup
-                && !names.Contains(cleanup))
+                && !names.Contains(cleanup)
+                && (!allowImportedCleanup || !module.ImportedStructures.Contains(structure.Name)))
             {
                 throw new ModuleContractException($"Graph export requires cleanup '{cleanup}'.");
             }
@@ -176,10 +201,10 @@ public static partial class ModuleCompiler
 
     /// <summary>Validates a graph library against current dependency declarations, without emitting code.</summary>
     internal static void ValidateGraphLibrary(byte[] contract, IReadOnlyList<string> exports,
-        CompilationReference dependencies)
+        CompilationReference dependencies, bool allowImportedCleanup = false)
     {
         var module = ReadGraphLibrary(contract);
-        _ = CreateGraphReference(contract, exports);
+        _ = CreateGraphReference(contract, exports, allowImportedCleanup);
         ValidateGraphImports(module, dependencies);
         var indexes = module.Functions.Select((item, index) => (item.Name, index))
             .ToDictionary(static item => item.Name, static item => item.index, StringComparer.Ordinal);
@@ -208,12 +233,20 @@ public static partial class ModuleCompiler
             .Order(StringComparer.Ordinal)];
     }
 
+    internal static ImmutableArray<BoundStruct> GetGraphRetainedTypes(byte[] contract, bool consumer) =>
+        consumer ? Read(contract, expectedConsumer: true).Structures : ReadGraphLibrary(contract).Structures;
+
+    internal static ImmutableArray<string> GetGraphImportedTypes(byte[] contract, bool consumer) =>
+        consumer ? Read(contract, expectedConsumer: true).ImportedStructures
+            : ReadGraphLibrary(contract).ImportedStructures;
+
     internal static string GetGraphProfile(byte[] contract)
     {
         var module = ReadGraphLibrary(contract);
         return Compilation.GetNativeProfileVersion(module.RuntimePolicy,
             module.Structures.Any(static item => item.IsUnique),
-            module.Functions.Any(static item => item.HasOwnershipTransfer));
+            module.Functions.Any(static item => item.HasOwnershipTransfer),
+            Compilation.HasCompositeUnique(module.Structures));
     }
 
     private static BoundFunction RecordedImportPromises(string contract, BoundFunction replacement)
@@ -285,7 +318,8 @@ public static partial class ModuleCompiler
             if (stream.Position != stream.Length
                 || profile != Compilation.GetNativeProfileVersion(policy,
                     structures.Any(static item => item.IsUnique),
-                    functions.Any(static item => item.HasOwnershipTransfer)))
+                    functions.Any(static item => item.HasOwnershipTransfer),
+                    Compilation.HasCompositeUnique(structures)))
             {
                 throw new ModuleFormatException("Graph semantic profile or payload is invalid.");
             }

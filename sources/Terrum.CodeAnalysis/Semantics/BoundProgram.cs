@@ -194,6 +194,9 @@ public sealed record BoundDrop(int Variable, int CleanupFunction, TextSpan Span)
     public bool IsOutput { get; init; }
 }
 
+/// <summary>Drops completed owning fields on checked exceptional constructor exit in reverse acquisition order.</summary>
+public sealed record BoundDropConstructedFields(int Variable, ImmutableArray<int> AcquisitionOrder, TextSpan Span) : BoundStatement(Span);
+
 /// <summary>An explicit unsafe source context; only checked failures from its nested recovery regions can be caught.</summary>
 public sealed record BoundUnsafe(BoundBlock Body, TextSpan Span) : BoundStatement(Span);
 
@@ -232,6 +235,9 @@ public sealed record BoundMove(int Variable, PrimitiveType Type, TextSpan Span) 
 
 /// <summary>A synchronous, nonescaping receiver loan; never a source value.</summary>
 public sealed record BoundReceiverLoan(int Variable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
+/// <summary>A synchronous readonly loan of an initialized owning field place.</summary>
+public sealed record BoundFieldLoan(BoundFieldRead Place, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
 /// <summary>A checked unary operation.</summary>
 /// <param name="Operator">The operator token.</param>

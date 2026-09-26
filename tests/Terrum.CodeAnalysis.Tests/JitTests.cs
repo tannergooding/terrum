@@ -86,6 +86,35 @@ public sealed class JitTests
     [InlineData("unique struct Item { public int64 Value; public int32 Tag; public Item(int64 value) { Value = value; Tag = 1; } [NoThrow] [Cleanup] public void Close() {} } Item Take() { Item item = new Item(42i64); return move item; } int32 Main() { Item item = Take(); return (int32)item.Value; }", 42)]
     [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} } int32 Take(int32 a, int32 b, int32 c, int32 d, int32 e, Item item) { return item.Value; } int32 Main() { Item item = new Item(42); return Take(1, 2, 3, 4, 5, move item); }", 42)]
     [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} } bool Fill(out Item item) { item = new Item(42); return true; } int32 Main() { require Fill(out var item); return item.Value; }", 42)]
+    [InlineData("""
+        struct Info {
+            public int32 Offset;
+            public int32 Check;
+            public Info() { Offset = 2; Check = 1; }
+        }
+        unique struct Token {
+            public int32 Id;
+            public Token(int32 id) { Id = id; }
+            [NoThrow] [Cleanup] public void Close() {}
+            [NoThrow] public int32 Read() { return Id; }
+        }
+        unique struct Result {
+            public Info Data;
+            public Token Child;
+            public int32 Tail;
+            public Result(int32 id) {
+                Child = new Token(id);
+                Data = new Info();
+                Tail = 0;
+                require Child.Read() == id;
+            }
+            [NoThrow] [Cleanup] public void Close() {}
+            [NoThrow] public int32 Read() { return Child.Read(); }
+        }
+        Result Relay(Result value) { return move value; }
+        bool Fill(out Result value) { value = Relay(new Result(40)); return true; }
+        int32 Main() { require Fill(out var result); return result.Read() + result.Data.Offset; }
+        """, 42)]
     public async Task WorkerAndNativeExecutableAgreeAsync(string source, int expected)
     {
         AssertWindowsX64();

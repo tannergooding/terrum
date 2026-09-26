@@ -1,0 +1,5 @@
+int32 Main() {
+    Ticket first = Forward();
+    require TryForward(out var second);
+    return first.Value + second.Value + 2;
+}

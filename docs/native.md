@@ -1,8 +1,9 @@
 # Windows x64 native profile
 
 `native-10` (explicit fail-fast), `native-11` (explicit checked exceptions),
-`native-12` (compact unique locals/returns) and `native-13` (owned
-by-value arguments and conditional outputs, under either runtime policy)
+`native-12` (compact unique locals/returns), `native-13` (owned
+by-value arguments and conditional outputs) and `native-14` (composite unique
+fields, including nested Copy fields, under either runtime policy)
 are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
@@ -125,13 +126,19 @@ NoThrow on its two comparison-only classification helpers.
 
 ## Compact unique owners
 
-`unique struct` supports primitive fields in the same 1..16-byte aligned layouts
-as Copy structs. `move name` transfers a live named owner and leaves it
+`unique struct` supports primitive, nested Copy and owning fields in 1..16-byte
+aligned layouts. Copy structs cannot contain owning fields. `move name` transfers
+a live whole owner and leaves it
 vacant; a read or second move before reinitialization is rejected at branch
-and loop joins. Plain reads/copies of unique values, owning fields,
+and loop joins. Plain reads/copies of unique values, partial field moves,
 discarded owning results, and owning temporaries used as
-receivers diagnose. Nested aggregate fields in a unique type also
-remain unsupported. A unique-returning constructor/factory result
+receivers diagnose. Owning fields are initialized once in sequential constructor
+flow, including straight-line `unsafe` wrappers. Branches, loops and nested
+exception regions cannot acquire owning fields in this profile; reinitialization
+or mutation through an owning child is not supported.
+Readonly instance methods can synchronously borrow an initialized child field,
+even while other fields of its parent are under construction, without copying
+the child. A unique-returning constructor/factory result
 can initialize a local or be returned; a return of a named owner needs
 `move`. Instance method calls borrow a named unique receiver synchronously
 by pointer; this profile permits readonly methods, not captured/stored loans
@@ -156,10 +163,15 @@ unimportant; ordinary Copy structs cannot declare cleanup. It cannot be
 called directly. The owner enters a structured cleanup region only after
 its initializer completes. A frame-local live bit conditions its cleanup
 on normal fallthrough, return and checked-exception unwind, inside-out.
+For a complete composite owner, its own cleanup runs while its fields are
+readable, followed by owning children in reverse field-declaration order.
+When construction fails, only completed owning fields are destroyed, in the
+reverse order they were actually acquired; the incomplete parent's cleanup
+never runs. Fail-fast termination skips this exceptional cleanup.
 Moving clears that bit; assignment builds a replacement in separate frame
 storage before dropping the old owner. Pending return values and replacement
 storage never overlap cleanup-call spills. Fail-fast termination still does
-not unwind. No native allocator, owning field graph, real OS-resource
+not unwind. No native allocator, arbitrary owning graph, real OS-resource
 release or GC is implied by this proof. The [sample](../samples/native/unique-owner.terrum)
 exercises checked recovery with a still-live owner.
 
@@ -217,8 +229,9 @@ matching bounded native contract.
 ## Bounded checked-failure recovery
 
 `--runtime checked-exceptions` selects `native-11` for Copy-only programs,
-`native-12` for compact unique locals/returns, and `native-13` where
-function declarations transfer ownership through parameters, without changing
+`native-12` for compact unique locals/returns, `native-13` where
+function declarations transfer ownership through parameters, and `native-14`
+for retained composite unique layouts, without changing
 older fail-fast artifacts. `analyze` also accepts this option to check recovery without emitting
 an artifact; omission keeps its existing fail-fast profile. The reusable
 compilation API accepts the policy with single or multiple original snapshots,
@@ -244,7 +257,7 @@ source-frame-aware funclets used for normal exits. A native entry filter contain
 unhandled owned failures before they reach the managed JIT caller.
 
 This is not a general exception-class, throw-object or low-memory ABI. There is
-no `throw`, typed/filter catch, GC rooting, owned partial-value cleanup, async
+no `throw`, typed/filter catch, GC rooting, async
 or arbitrary native-fault recovery. Foreign callbacks must not unwind across
 an unsupported ABI. The selected policy is part of persisted module/native
 package compatibility; an old `native-10` fail-fast package remains valid
@@ -460,6 +473,9 @@ storage only on a true return.
 Unique instance receiver loans are an exception to by-value aggregate passing:
 they always pass a pointer to the live readonly owner, including 4- and 8-byte
 owners. Cleanup instead consumes its receiver through the aggregate value ABI.
+Indirect cleanup arguments use a dedicated frame-local aligned copy; child
+cleanup reads the original owner storage afterward, even if the parent cleanup
+overwrites its by-value input storage.
 The receiver-loan ABI composes with a hidden result pointer and stack arguments;
 it neither transfers ownership nor makes the owner copyable.
 
@@ -491,10 +507,23 @@ direct/indirect by-value parameters and returns from an independent C caller,
 including hidden-result RAX storage identity and a sixth owning argument.
 It checks owning output stack placement, true-only publication, unchanged
 false/partial/caught-failure output bytes, guard storage, repeated calls,
-and caught later-argument failure. The C fixture's cleanup methods are empty;
+and caught later-argument failure. Composite cases cover 8- and 16-byte owners,
+nested child loans, nonzero field offsets, and failed partial construction.
+The C fixture's cleanup methods are empty;
 Host.Trace execution tests, not this ABI probe, establish cleanup order and
 exactly-once effects. This remains a bounded test boundary, not a general
 native interop or resource-release contract.
+
+`dotnet run --file scripts\check-cleanup-copy-abi.cs` supplies independently
+compiled C cleanup callees instead. The parent cleanup deliberately overwrites
+its entire indirect by-value argument; child cleanup must still observe the
+original payload. Both runtime policies exercise normal destruction, replacement,
+an owning output call with a staged owning argument, destruction while a
+return value is pending, and recursive cleanup through an outer owner with no
+custom cleanup.
+The bounded worker checks cleanup order and counts as
+well as returned values. This uses the verified IR's explicit native-import
+boundary, not a source-level interop extension.
 
 Images prefer base `0x140000000`, with 4 KiB section alignment and 512-byte
 file alignment. `.text` is read/execute, `.idata` read/write and

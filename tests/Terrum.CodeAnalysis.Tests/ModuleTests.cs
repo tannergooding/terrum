@@ -872,10 +872,9 @@ public sealed class ModuleTests
         var producer = ModuleCompiler.CreateProducer(initial, ["Helper"]);
         var consumer = ModuleCompiler.CreateConsumer(initial, producer);
         var version = (byte[])consumer.Clone();
-        var currentVersion = BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4));
-        for (var unsupported = 0; unsupported < currentVersion; unsupported++)
+        for (var incompatible = 0; incompatible < 13; incompatible++)
         {
-            BinaryPrimitives.WriteInt32LittleEndian(version.AsSpan(4, 4), unsupported);
+            BinaryPrimitives.WriteInt32LittleEndian(version.AsSpan(4, 4), incompatible);
             _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(version, producer));
         }
         BinaryPrimitives.WriteInt32LittleEndian(version.AsSpan(4, 4), int.MaxValue);
@@ -883,6 +882,46 @@ public sealed class ModuleTests
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(consumer[..^1], producer));
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(new byte[(4 * 1024 * 1024) + 1], producer));
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link([.. consumer, 0], producer));
+    }
+
+    [Theory]
+    [InlineData(13, 13)]
+    [InlineData(13, 14)]
+    [InlineData(14, 13)]
+    public async Task ScalarModulesPreserveVersionThirteenWireCompatibilityAsync(int consumerVersion, int producerVersion)
+    {
+        var program = Compile("int32 Main() { return Helper(); } public int32 Helper() { return 11; }");
+        var producer = ModuleCompiler.CreateProducer(program, ["Helper"]);
+        var consumer = ModuleCompiler.CreateConsumer(program, producer);
+        // Version 14 adds composite nodes and a profile without changing the scalar encoding.
+        BinaryPrimitives.WriteInt32LittleEndian(consumer.AsSpan(4, 4), consumerVersion);
+        BinaryPrimitives.WriteInt32LittleEndian(producer.AsSpan(4, 4), producerVersion);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.Equal(11, await ExecuteAsync(NativeEmitter.Emit(linked, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public void RejectsCompositeContractsDowngradedToTransferVersion()
+    {
+        var program = Compile("""
+            public unique struct Child {
+                public int32 Value;
+                public Child() { Value = 42; }
+            }
+            public unique struct Owner {
+                public Child Item;
+                public Owner() { Item = new Child(); }
+            }
+            public Owner Make() { return new Owner(); }
+            int32 Main() { Owner item = Make(); return 42; }
+            """);
+        var producer = ModuleCompiler.CreateProducer(program, ["Make"]);
+        var consumer = ModuleCompiler.CreateConsumer(program, producer);
+        var downgradedProducer = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(downgradedProducer.AsSpan(4, 4), 13);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgradedProducer));
+        BinaryPrimitives.WriteInt32LittleEndian(consumer.AsSpan(4, 4), 13);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(consumer, producer));
     }
 
     private static BoundProgram Compile(string source)

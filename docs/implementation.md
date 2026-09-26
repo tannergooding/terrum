@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-9 and native-10/native-11/native-12/native-13
+## Current boundary: syntax-9 and native-10/native-11/native-12/native-13/native-14
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -15,10 +15,10 @@ managed graphs and standard-library execution are not implemented.
 |---|---|---|
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
 | Lexing | Pinned Unicode identifiers, ASCII numbers/tags, comments, leading trivia, strings, diagnostics, EOF | Interpolation, raw/character/native literals, directives |
-| Declarations | Using, file-scoped namespaces, functions, compact structs and primitive-field `unique struct` with explicit fields/constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Classes, interfaces, enums/unions, owning fields, general attributes, generic declarations/constraints, cyclic dependencies, automatic version resolution and resilient module layouts |
+| Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Classes, interfaces, enums/unions, owning fields in Copy structs, general attributes, generic declarations/constraints, cyclic dependencies, automatic version resolution and resilient module layouts |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; repeated `?` diagnoses | General type resolution, optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, break/continue, switch/patterns, general exception objects/throw, async, compound assignment |
-| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named `move` of unique locals or parameters, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver loans, named/ref/out argument syntax | Character literals, owning fields and general expression temporaries, stored loans, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
+| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, named/ref/out argument syntax | Character literals, partial owning-field moves, owning field replacement, general expression temporaries, stored loans, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
 Only the grammar below is supported. Unsupported constructs diagnose rather than
@@ -60,7 +60,9 @@ Assignment is a statement, not an expression. Native places include initialized
 mutable locals, accessible fields of mutable compact values, constructor fields,
 conditional output scratch slots and checked writable host-buffer elements.
 Unique local places additionally track vacancy and cleanup obligations.
-General borrowed references and owning fields/parameters remain unsupported.
+Composite owning fields are assigned once along sequential constructor flow;
+complete owners can be transferred, but partial field moves are unsupported.
+General borrowed references and stored loans remain unsupported.
 For-loop initialization runs once, followed by condition, body and iterator;
 the iterator does not run after a returning body. An omitted condition is true.
 Initializer locals remain in scope through the header and body, not afterward.

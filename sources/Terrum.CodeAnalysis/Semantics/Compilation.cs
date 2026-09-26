@@ -35,6 +35,38 @@ public sealed class Compilation
         return ownershipTransfer ? "native-13" : baseline;
     }
 
+    /// <summary>Includes unique structs containing compact aggregate field layouts.</summary>
+    public static string GetNativeProfileVersion(BoundRuntimePolicy policy, bool uniqueValues,
+        bool ownershipTransfer, bool compositeUnique)
+    {
+        var baseline = GetNativeProfileVersion(policy, uniqueValues, ownershipTransfer);
+        return compositeUnique ? "native-14" : baseline;
+    }
+
+    internal static bool HasCompositeUnique(ImmutableArray<BoundStruct> structures)
+    {
+        foreach (var structure in structures)
+        {
+            if (!structure.IsUnique)
+            {
+                continue;
+            }
+            foreach (var field in structure.Fields)
+            {
+                var index = (int)field.Type - 100;
+                if (index >= structures.Length)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(structures), "An aggregate field has an unknown type.");
+                }
+                if (index >= 0)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /// <summary>Whether a declaration transfers compact ownership through a parameter.</summary>
     internal static bool HasOwnershipTransfer(BoundFunction function, ImmutableArray<BoundStruct> structures)
     {
@@ -65,14 +97,17 @@ public sealed class Compilation
         {
             unique |= structure.IsUnique;
         }
+        var composite = HasCompositeUnique(program.Structures);
         foreach (var function in program.Functions)
         {
             if (HasOwnershipTransfer(function, program.Structures))
             {
-                return GetNativeProfileVersion(program.RuntimePolicy, unique, ownershipTransfer: true);
+                return GetNativeProfileVersion(program.RuntimePolicy, unique,
+                    ownershipTransfer: true, compositeUnique: composite);
             }
         }
-        return GetNativeProfileVersion(program.RuntimePolicy, unique);
+        return GetNativeProfileVersion(program.RuntimePolicy, unique,
+            ownershipTransfer: false, compositeUnique: composite);
     }
 
     private Compilation(SyntaxTree syntaxTree, ImmutableArray<Diagnostic> diagnostics, BoundProgram? program,

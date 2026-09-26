@@ -1061,6 +1061,525 @@ public sealed class OwnershipTests
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(consumer, incompatible));
     }
 
+    private const string CompositeOwners = """
+        unique struct Token {
+            public int32 Id;
+            public Token(int32 id) { Id = id; }
+            [NoThrow] [Cleanup] public void Close() {
+                Host.Trace[1] = Host.Trace[0];
+                Host.Trace[0] = Id;
+            }
+            [NoThrow] public int32 Read() { return Id; }
+        }
+        unique struct Pair {
+            public Token First;
+            public Token Second;
+            public Pair(bool complete) {
+                Second = new Token(2);
+                require complete;
+                First = new Token(1);
+                require First.Read() == 1;
+            }
+            [NoThrow] [Cleanup] public void Close() {
+                Host.Trace[2] = First.Read();
+            }
+            [NoThrow] public int32 Read() { return First.Read(); }
+        }
+        """;
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CompositeOwnerDropsParentThenReverseDeclaredChildrenAsync(BoundRuntimePolicy policy)
+    {
+        var source = CompositeOwners + """
+            Pair Relay(Pair owner) { return move owner; }
+            bool Fill(out Pair owner) { owner = Relay(new Pair(true)); return true; }
+            int32 Main() {
+                {
+                    if (Fill(out var owner)) {
+                        if (owner.Read() != 1) { return 0; }
+                    }
+                }
+                if (Host.Trace[0] == 1 && Host.Trace[1] == 2 && Host.Trace[2] == 1) {
+                    return 42;
+                }
+                return 0;
+            }
+            """;
+        Assert.Equal(42, await RunNativeAsync(source, policy, [0, 0, 0]).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast, true)]
+    [InlineData(BoundRuntimePolicy.FailFast, false)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions, true)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions, false)]
+    public async Task ConstructorCanRequireReadonlyChildCallAfterAcquisitionAsync(
+        BoundRuntimePolicy policy, bool completeParent)
+    {
+        var constructor = completeParent
+            ? "Tail = 2; Child = new Ticket(id); require Child.Read() == id;"
+            : "Child = new Ticket(id); require Child.Read() == id; Tail = 2;";
+        var source = """
+            unique struct Ticket {
+                public int32 Id;
+                [NoThrow] public Ticket(int32 id) { Id = id; }
+                [NoThrow] [Cleanup] public void Close() {}
+                [NoThrow] public int32 Read() { return Id; }
+            }
+            unique struct Bundle {
+                public Ticket Child;
+                public int32 Tail;
+                public Bundle(int32 id) {
+            """ + constructor + """
+                }
+                [NoThrow] public int32 ReadChild() { return Child.Read(); }
+            }
+            int32 Main() {
+                Bundle value = new Bundle(42);
+                return value.ReadChild();
+            }
+            """;
+        Assert.Equal(42, await RunNativeAsync(source, policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CompositeOwnersDropOnceAcrossLoopsAndConditionalMovesAsync(BoundRuntimePolicy policy)
+    {
+        const string Source = """
+            int32 Bit(int32 id) {
+                if (id == 0) { return 1; }
+                if (id == 1) { return 4; }
+                return 16;
+            }
+            unique struct Child {
+                public int32 Id;
+                public Child(int32 id) { Id = id; }
+                [NoThrow] [Cleanup] public void Close() { Host.Trace[0] = Host.Trace[0] ^ Id; }
+            }
+            unique struct Parent {
+                public Child First;
+                public Child Second;
+                public int32 Mask;
+                public Parent(int32 id) {
+                    Mask = Bit(id);
+                    First = new Child(Mask);
+                    Second = new Child(Mask * 2);
+                }
+                [NoThrow] [Cleanup] public void Close() { Host.Trace[1] = Host.Trace[1] ^ Mask; }
+            }
+            int32 Main() {
+                mut int32 iteration = 0;
+                while (iteration < 3) {
+                    Parent owner = new Parent(iteration);
+                    if (iteration == 1) {
+                        Parent moved = move owner;
+                    }
+                    iteration = iteration + 1;
+                }
+                if (Host.Trace[0] == 63 && Host.Trace[1] == 21) { return 42; }
+                return 0;
+            }
+            """;
+        Assert.Equal(42, await RunNativeAsync(Source, policy).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public async Task CompositePartialConstructorDropsOnlyAcquiredFieldsOnFailureAsync()
+    {
+        var source = CompositeOwners + """
+            int32 Main() {
+                unsafe {
+                    try { Pair absent = new Pair(false); }
+                    catch {
+                        if (Host.Trace[0] == 2 && Host.Trace[1] == 0 && Host.Trace[2] == 0) {
+                            return 42;
+                        }
+                    }
+                }
+                return 0;
+            }
+            """;
+        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions,
+            [0, 0, 0]).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public async Task StraightLineUnsafeConstructorFieldAcquisitionStillUnwindsAsync()
+    {
+        var source = CompositeOwners.Replace("Second = new Token(2);",
+            "unsafe { Second = new Token(2); }", StringComparison.Ordinal) + """
+            int32 Main() {
+                unsafe {
+                    try { Pair absent = new Pair(false); }
+                    catch {
+                        if (Host.Trace[0] == 2 && Host.Trace[1] == 0 && Host.Trace[2] == 0) {
+                            return 42;
+                        }
+                    }
+                }
+                return 0;
+            }
+            """;
+        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions,
+            [0, 0, 0]).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public async Task CompositePartialCleanupReversesAcquisitionRatherThanFieldOrderAsync()
+    {
+        var source = CompositeOwners.Replace("require First.Read() == 1;",
+            "require First.Read() == 0;", StringComparison.Ordinal) + """
+            int32 Main() {
+                unsafe {
+                    try { Pair absent = new Pair(true); }
+                    catch {
+                        if (Host.Trace[0] == 2 && Host.Trace[1] == 1 && Host.Trace[2] == 0) {
+                            return 42;
+                        }
+                    }
+                }
+                return 0;
+            }
+            """;
+        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions,
+            [0, 0, 0]).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public async Task CompositeOutputFailureLeavesCallerGuardLiveAsync()
+    {
+        var source = CompositeOwners + """
+            bool Make(bool complete, out Pair result) {
+                unsafe {
+                    try { result = new Pair(complete); return true; }
+                    catch { return false; }
+                }
+            }
+            int32 Main() {
+                Pair guard = new Pair(true);
+                bool success = Make(false, out var absent);
+                if (success || guard.Read() != 1 || Host.Trace[0] != 2
+                    || Host.Trace[1] != 0 || Host.Trace[2] != 0) {
+                    return 0;
+                }
+                return 42;
+            }
+            """;
+        Assert.Equal(42, await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions,
+            [0, 0, 0]).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public async Task UnrelatedFieldWriteDoesNotAcquireParentChildAsync()
+    {
+        const string Source = """
+            struct Scratch {
+                public int32 First;
+                public mut int32 Second;
+                public Scratch() { First = 0; Second = 0; }
+            }
+            unique struct Token {
+                public int32 Id;
+                public Token(int32 id) { Id = id; }
+                [NoThrow] [Cleanup] public void Close() { Host.Trace[0] = 1; }
+            }
+            unique struct Parent {
+                public Token First;
+                public Token Second;
+                public Parent() {
+                    mut Scratch scratch = new Scratch();
+                    scratch.Second = 42;
+                    require false;
+                    First = new Token(1);
+                    Second = new Token(2);
+                }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            int32 Main() {
+                unsafe {
+                    try { Parent incomplete = new Parent(); }
+                    catch { if (Host.Trace[0] == 0) { return 42; } }
+                }
+                return 0;
+            }
+            """;
+        Assert.Equal(42, await RunNativeAsync(Source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData("struct Copy { public Token Child; public Copy() { Child = new Token(1); } }")]
+    [InlineData("unique struct Pair { public Token Child; public Pair() { Child = new Token(1); Child = new Token(2); } }")]
+    [InlineData("unique struct Pair { public Token Child; public Pair() { if (true) { Child = new Token(1); } } }")]
+    [InlineData("unique struct Pair { public Token Child; public Pair() { Child = new Token(1); Token stolen = move Child; } }")]
+    public void UnsupportedCompositeOwnershipIsDiagnosed(string declaration)
+    {
+        var source = """
+            unique struct Token {
+                public int32 Id;
+                public Token(int32 id) { Id = id; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            """ + declaration + " int32 Main() { return 42; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
+    }
+
+    [Fact]
+    public void PublicIrCannotEraseOrReorderPartialConstructorCleanup()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(CompositeOwners
+            + " int32 Main() { Pair pair = new Pair(true); return pair.Read(); }"),
+            [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0, 0], true)],
+            BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var index = -1;
+        for (var i = 0; i < program.Functions.Length; i++)
+        {
+            if (program.Functions[i].IsConstructor && program.Functions[i].DeclaringStruct == "Pair")
+            {
+                index = i;
+                break;
+            }
+        }
+        Assert.True(index >= 0);
+        var constructor = program.Functions[index];
+        var region = Assert.IsType<BoundTryFinally>(Assert.Single(constructor.Body.Statements));
+        var erased = program with {
+            Functions = program.Functions.SetItem(index, constructor with { Body = region.Body }),
+        };
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(erased, NativeRuntimePolicy.CheckedExceptions));
+
+        var partial = Assert.IsType<BoundDropConstructedFields>(Assert.Single(region.Finally.Statements));
+        var reordered = region with {
+            Finally = region.Finally with {
+                Statements = [partial with { AcquisitionOrder = [0, 1] }],
+            },
+        };
+        var forged = program with {
+            Functions = program.Functions.SetItem(index, constructor with {
+                Body = constructor.Body with { Statements = [reordered] },
+            }),
+        };
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.CheckedExceptions));
+    }
+
+    [Fact]
+    public void PublicIrRejectsMalformedConstructorRegionsAndOwningFieldLoans()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(CompositeOwners
+            + " int32 Main() { Pair pair = new Pair(true); return pair.Read(); }"),
+            [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0, 0], true)],
+            BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var constructorIndex = -1;
+        var methodIndex = -1;
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            if (program.Functions[index].IsConstructor && program.Functions[index].DeclaringStruct == "Pair")
+            {
+                constructorIndex = index;
+            }
+            if (program.Functions[index].Name == "Pair.Read")
+            {
+                methodIndex = index;
+            }
+        }
+        Assert.True(constructorIndex >= 0 && methodIndex >= 0);
+        var constructor = program.Functions[constructorIndex];
+        var region = Assert.IsType<BoundTryFinally>(Assert.Single(constructor.Body.Statements));
+        Reject(constructorIndex, constructor with {
+            Body = constructor.Body with { Statements = [region with { Body = null! }] },
+        });
+        Reject(constructorIndex, constructor with {
+            Body = constructor.Body with {
+                Statements = [region with {
+                Body = region.Body with { Statements = default },
+            }]
+            },
+        });
+
+        var method = program.Functions[methodIndex];
+        var result = Assert.IsType<BoundReturn>(Assert.Single(method.Body.Statements));
+        var call = Assert.IsType<BoundCall>(result.Value);
+        var loan = Assert.IsType<BoundFieldLoan>(call.Arguments[0]);
+        Reject(methodIndex, method with {
+            Body = method.Body with {
+                Statements = [result with {
+                Value = call with { Arguments = call.Arguments.SetItem(0, loan with { Place = null! }) },
+            }]
+            },
+        });
+        Reject(methodIndex, method with {
+            Body = method.Body with {
+                Statements = [result with {
+                Value = call with { Arguments = call.Arguments.SetItem(0,
+                    loan with { Place = loan.Place with { Receiver = null! } }) },
+            }]
+            },
+        });
+
+        void Reject(int index, BoundFunction function)
+        {
+            var forged = program with { Functions = program.Functions.SetItem(index, function) };
+            _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(
+                forged, NativeRuntimePolicy.CheckedExceptions));
+        }
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task CompositeOwnershipContractsSurviveSeparateModulesAsync(NativeRuntimePolicy policy)
+    {
+        const string Provider = """
+            public unique struct Token {
+                public int32 Id;
+                public Token(int32 id) { Id = id; }
+                [NoThrow] [Cleanup] public void Close() {}
+                [NoThrow] public int32 Read() { return Id; }
+            }
+            public unique struct Pair {
+                public Token Child;
+                public int32 Tail;
+                public Pair(int32 id) {
+                    Child = new Token(id);
+                    Tail = 2;
+                    require Child.Read() == id;
+                }
+                [NoThrow] [Cleanup] public void Close() {}
+                [NoThrow] public int32 Read() { return Child.Read(); }
+            }
+            public Pair Make(int32 id) { return new Pair(id); }
+            public int32 Take(Pair pair) { return pair.Read() + pair.Tail; }
+            """;
+        var boundPolicy = (BoundRuntimePolicy)policy;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(Provider), boundPolicy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var exports = new[] { "Token.Close", "Token.Read", "Pair.Close", "Pair.Read", "Make", "Take" };
+        var semanticProducer = ModuleCompiler.CreateProducer(program, exports);
+        Assert.Equal(14, BinaryPrimitives.ReadInt32LittleEndian(semanticProducer.AsSpan(4, 4)));
+        var staleVersion = (byte[])semanticProducer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(staleVersion.AsSpan(4, 4), 13);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(staleVersion));
+        var reference = ModuleCompiler.CreateReference(semanticProducer);
+        var client = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() { Pair pair = Make(40); return Take(move pair); }
+            """), reference, boundPolicy);
+        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumerProgram = Assert.IsType<BoundProgram>(client.Program);
+        var semanticConsumer = ModuleCompiler.CreateConsumer(consumerProgram, semanticProducer);
+        Assert.Equal("native-14", ModuleCompiler.GetNativeProfileVersion(semanticProducer, false));
+        Assert.Equal("native-14", ModuleCompiler.GetNativeProfileVersion(semanticConsumer, true));
+        _ = ModuleCompiler.Link(semanticConsumer, semanticProducer);
+        var nativeProducer = NativeModuleCompiler.CreateProducer(program, exports, "composite_pair", policy);
+        var nativeConsumer = NativeModuleCompiler.CreateConsumer(consumerProgram, nativeProducer, policy);
+        Assert.Equal(42, await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+
+        var replacementSource = Provider.Replace("new Pair(id)", "new Pair(id + 1)", StringComparison.Ordinal);
+        var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(replacementSource), boundPolicy);
+        Assert.False(replacementCompilation.HasErrors, string.Join(Environment.NewLine, replacementCompilation.Diagnostics));
+        var replacement = Assert.IsType<BoundProgram>(replacementCompilation.Program);
+        _ = ModuleCompiler.Link(semanticConsumer, ModuleCompiler.CreateProducer(replacement, exports));
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(replacement, exports, "composite_pair", policy);
+        Assert.Equal(43, await NativeModuleCompiler.RunAsync(nativeConsumer, nativeReplacement,
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task CompositeChildCleanupUsesItsLeafOriginAcrossNativeGraphAsync(NativeRuntimePolicy policy)
+    {
+        const string Leaf = """
+            public unique struct Ticket {
+                public int32 Value;
+                public Ticket(int32 value) { Value = value; }
+                [NoThrow] [Cleanup] public void Close() {}
+                [NoThrow] public int32 Read() { return Value; }
+            }
+            public Ticket Make(int32 value) { return new Ticket(value); }
+            """;
+        const string Middle = """
+            public unique struct Pair {
+                public Ticket Child;
+                public int32 Tail;
+                public Pair(int32 value) { Child = Make(value); Tail = 2; }
+                [NoThrow] public int32 Read() { return Child.Read(); }
+            }
+            public Pair Forward() { return new Pair(40); }
+            """;
+        var boundPolicy = (BoundRuntimePolicy)policy;
+        var leafCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(Leaf), boundPolicy);
+        Assert.False(leafCompilation.HasErrors, string.Join(Environment.NewLine, leafCompilation.Diagnostics));
+        var leaf = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(leafCompilation.Program),
+            ["Make", "Ticket.Close", "Ticket.Read"], "CompositeLeaf", policy);
+        var middleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(Middle),
+            NativeModuleCompiler.CreateGraphReference([leaf]), boundPolicy);
+        Assert.False(middleCompilation.HasErrors, string.Join(Environment.NewLine, middleCompilation.Diagnostics));
+        var middle = NativeModuleCompiler.CreateGraphProducer(Assert.IsType<BoundProgram>(middleCompilation.Program),
+            ["Forward", "Pair.Read"], "CompositeMiddle", [leaf], policy);
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() { Pair value = Forward(); return value.Read() + value.Tail; }
+            """), NativeModuleCompiler.CreateGraphReference([leaf, middle]), boundPolicy);
+        Assert.False(rootCompilation.HasErrors, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var root = NativeModuleCompiler.CreateGraphConsumer(Assert.IsType<BoundProgram>(rootCompilation.Program),
+            [leaf, middle], policy);
+        Assert.Equal("native-14", NativeModuleCompiler.InspectGraphArtifact(root).NativeProfileVersion);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [leaf, middle],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            Leaf.Replace("new Ticket(value)", "new Ticket(value + 1)", StringComparison.Ordinal)), boundPolicy);
+        Assert.False(replacementCompilation.HasErrors);
+        var replacement = NativeModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(replacementCompilation.Program),
+            ["Make", "Ticket.Close", "Ticket.Read"], "CompositeLeaf", policy);
+        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task PrivateCompositeCleanupTargetsSurviveLibraryPruningAsync(NativeRuntimePolicy policy)
+    {
+        const string Provider = """
+            internal unique struct Child {
+                public int32 Value;
+                public Child(int32 value) { Value = value; }
+                [NoThrow] [Cleanup] public void Close() {}
+                [NoThrow] public int32 Read() { return Value; }
+            }
+            internal unique struct Shell {
+                public Child Value;
+                public Shell(int32 value) { Value = new Child(value); }
+                [NoThrow] public int32 Read() { return Value.Read(); }
+            }
+            public int32 Count() { Shell local = new Shell(42); return local.Read(); }
+            """;
+        var compiled = Compilation.CreateLibrary(SyntaxTree.Parse(Provider), (BoundRuntimePolicy)policy);
+        Assert.False(compiled.HasErrors, string.Join(Environment.NewLine, compiled.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compiled.Program);
+        var semantic = ModuleCompiler.CreateProducer(program, ["Count"]);
+        Assert.Equal("native-14", ModuleCompiler.GetNativeProfileVersion(semantic, false));
+        var reference = ModuleCompiler.CreateReference(semantic);
+        var client = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Count(); }"),
+            reference, (BoundRuntimePolicy)policy);
+        Assert.False(client.HasErrors, string.Join(Environment.NewLine, client.Diagnostics));
+        var consumer = Assert.IsType<BoundProgram>(client.Program);
+        _ = ModuleCompiler.Link(ModuleCompiler.CreateConsumer(consumer, semantic), semantic);
+        var producer = NativeModuleCompiler.CreateProducer(program, ["Count"], "private_shell", policy);
+        var nativeConsumer = NativeModuleCompiler.CreateConsumer(consumer, producer, policy);
+        Assert.Equal(42, await NativeModuleCompiler.RunAsync(nativeConsumer, producer,
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+    }
+
     private static async Task<int> RunNativeAsync(string source, BoundRuntimePolicy policy, int[]? trace = null)
     {
         Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);

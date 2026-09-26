@@ -18,7 +18,8 @@ public static partial class ModuleCompiler
 {
     private const int Magic = 0x4D525254; // TRRM
     private const int OwnershipVersion = 12;
-    private const int Version = 13;
+    private const int TransferVersion = 13;
+    private const int Version = 14;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -80,7 +81,8 @@ public static partial class ModuleCompiler
         var module = Read(artifact, isConsumer);
         return (Compilation.GetNativeProfileVersion(module.RuntimePolicy,
             module.Structures.Any(static structure => structure.IsUnique),
-            module.Functions.Any(static function => function.HasOwnershipTransfer)), module.RuntimePolicy);
+            module.Functions.Any(static function => function.HasOwnershipTransfer),
+            Compilation.HasCompositeUnique(module.Structures)), module.RuntimePolicy);
     }
 
     private static BoundFunction Declaration(BoundFunction function) => function with {
@@ -196,7 +198,7 @@ public static partial class ModuleCompiler
         {
             throw new ModuleContractException("Producer exports must have public declarations and public value layouts.");
         }
-        var exportedTypes = RequiredStructures(indexes.Select(index => program.Functions[index]), program.Structures);
+        var exportedTypes = RequiredStructures(indexes.Select(index => Declaration(program.Functions[index])), program.Structures);
         foreach (var structure in program.Structures)
         {
             if (exportedTypes.Contains(structure.Name) && structure.CleanupMethod is string cleanup
@@ -206,6 +208,8 @@ public static partial class ModuleCompiler
             }
         }
         var pending = new Queue<int>(indexes);
+        var functionIndexes = program.Functions.Select((function, index) => (function.Name, index))
+            .ToDictionary(static item => item.Name, static item => item.index, StringComparer.Ordinal);
         while (pending.Count != 0)
         {
             var index = pending.Dequeue();
@@ -218,6 +222,21 @@ public static partial class ModuleCompiler
                 if (indexes.Add(callee))
                 {
                     pending.Enqueue(callee);
+                }
+            }
+            var types = RequiredStructures([program.Functions[index]], program.Structures);
+            foreach (var structure in program.Structures)
+            {
+                if (types.Contains(structure.Name) && structure.CleanupMethod is string cleanup)
+                {
+                    if (!functionIndexes.TryGetValue(cleanup, out var callee))
+                    {
+                        throw new ModuleFormatException($"Missing cleanup declaration '{cleanup}'.");
+                    }
+                    if (indexes.Add(callee))
+                    {
+                        pending.Enqueue(callee);
+                    }
                 }
             }
         }
@@ -500,6 +519,8 @@ public static partial class ModuleCompiler
                 case BoundDrop drop when drop.CleanupFunction >= 0:
                     calls.Add(drop.CleanupFunction);
                     break;
+                case BoundDropConstructedFields:
+                    break;
                 case BoundUnsafe unsafeBlock:
                     VisitStatement(unsafeBlock.Body);
                     break;
@@ -544,6 +565,9 @@ public static partial class ModuleCompiler
                     break;
                 case BoundFieldRead field:
                     VisitExpression(field.Receiver);
+                    break;
+                case BoundFieldLoan loan:
+                    VisitExpression(loan.Place);
                     break;
             }
         }
@@ -760,6 +784,10 @@ public static partial class ModuleCompiler
             BoundRead read => read with { Type = RemapType(read.Type, source, destination) },
             BoundMove move => move with { Type = RemapType(move.Type, source, destination) },
             BoundReceiverLoan loan => loan with { Type = RemapType(loan.Type, source, destination) },
+            BoundFieldLoan loan => loan with {
+                Type = RemapType(loan.Type, source, destination),
+                Place = (BoundFieldRead)RemapExpression(loan.Place, source, destination),
+            },
             BoundUnary unary => unary with {
                 Type = RemapType(unary.Type, source, destination),
                 Operand = RemapExpression(unary.Operand, source, destination),
@@ -827,6 +855,7 @@ public static partial class ModuleCompiler
                 Finally = (BoundBlock)RemapStatement(cleanup.Finally, source, destination),
             },
             BoundDrop => statement,
+            BoundDropConstructedFields => statement,
             SymbolicDrop => statement,
             BoundUnsafe unsafeBlock => unsafeBlock with {
                 Body = (BoundBlock)RemapStatement(unsafeBlock.Body, source, destination),
@@ -866,7 +895,8 @@ public static partial class ModuleCompiler
         writer.Write(Version);
         PutString(writer, Compilation.GetNativeProfileVersion(module.RuntimePolicy,
             module.Structures.Any(static structure => structure.IsUnique),
-            module.Functions.Any(static function => function.HasOwnershipTransfer)));
+            module.Functions.Any(static function => function.HasOwnershipTransfer),
+            Compilation.HasCompositeUnique(module.Structures)));
         writer.Write(module.Consumer);
         writer.Write((byte)program.RuntimePolicy);
         writer.Write(module.EntryPoint);
@@ -946,7 +976,8 @@ public static partial class ModuleCompiler
             var items = ReadFunctions(reader, count, expectedConsumer, version, structures);
             if (profile != Compilation.GetNativeProfileVersion(policy,
                 structures.Any(static structure => structure.IsUnique),
-                items.Any(static item => item.HasOwnershipTransfer)))
+                items.Any(static item => item.HasOwnershipTransfer),
+                Compilation.HasCompositeUnique(structures)))
             {
                 throw new ModuleFormatException("Module semantic profile does not match its retained contracts.");
             }
@@ -972,7 +1003,7 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Unknown module format or version.");
         }
         var version = reader.ReadInt32();
-        if (version is not (10 or 11 or OwnershipVersion or Version))
+        if (version is not (10 or 11 or OwnershipVersion or TransferVersion or Version))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -985,7 +1016,8 @@ public static partial class ModuleCompiler
         if (policy is not (BoundRuntimePolicy.FailFast or BoundRuntimePolicy.CheckedExceptions)
             || (profile != Compilation.GetNativeProfileVersion(policy, uniqueValues: false)
                 && (version < OwnershipVersion || profile != "native-12")
-                && (version != Version || profile != "native-13")))
+                && (version < TransferVersion || profile != "native-13")
+                && (version != Version || profile != "native-14")))
         {
             throw new ModuleFormatException("Unsupported module semantic profile or checked-failure policy.");
         }
@@ -1060,7 +1092,7 @@ public static partial class ModuleCompiler
             var contract = GetString(reader);
             var import = GetBool(reader);
             var hasBody = GetBool(reader);
-            var ownershipTransfer = version >= Version && GetBool(reader);
+            var ownershipTransfer = version >= TransferVersion && GetBool(reader);
             if (name.Length == 0 || !seen.Add(name) || (expectedConsumer ? import == hasBody : !hasBody))
             {
                 throw new ModuleFormatException("Invalid module declaration.");
@@ -1179,6 +1211,7 @@ public static partial class ModuleCompiler
             BoundTryCatch => (byte)12,
             BoundDrop => (byte)13,
             BoundOwnerDeclaration => (byte)14,
+            BoundDropConstructedFields => (byte)15,
             _ => throw new ModuleFormatException("Unknown statement kind."),
         });
         PutSpan(writer, statement.Span);
@@ -1197,6 +1230,15 @@ public static partial class ModuleCompiler
                 break;
             case BoundOwnerDeclaration declaration:
                 writer.Write(declaration.Variable);
+                break;
+            case BoundDropConstructedFields partial:
+                writer.Write(partial.Variable);
+                writer.Write(partial.AcquisitionOrder.Length);
+                foreach (var field in partial.AcquisitionOrder)
+                {
+                    Step(ref remaining, depth + 1);
+                    writer.Write(field);
+                }
                 break;
             case BoundAssignment assignment:
                 writer.Write(assignment.Variable);
@@ -1292,23 +1334,23 @@ public static partial class ModuleCompiler
                 }
                 return new BoundBlock(statements.ToImmutable(), span);
             case 2:
-                return new BoundLocal(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1), span);
+                return new BoundLocal(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1, version), span);
             case 3:
-                return new BoundAssignment(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1), span);
+                return new BoundAssignment(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1, version), span);
             case 4:
-                return new BoundExpressionStatement(GetExpression(reader, ref remaining, depth + 1), span);
+                return new BoundExpressionStatement(GetExpression(reader, ref remaining, depth + 1, version), span);
             case 5:
-                var condition = GetExpression(reader, ref remaining, depth + 1);
+                var condition = GetExpression(reader, ref remaining, depth + 1, version);
                 var then = GetStatement(reader, ref remaining, depth + 1, version);
                 var otherwise = GetBool(reader) ? GetStatement(reader, ref remaining, depth + 1, version) : null;
                 return new BoundIf(condition, then, otherwise, span);
             case 6:
-                return new BoundWhile(GetExpression(reader, ref remaining, depth + 1),
+                return new BoundWhile(GetExpression(reader, ref remaining, depth + 1, version),
                     GetStatement(reader, ref remaining, depth + 1, version), span);
             case 7:
-                return new BoundRequire(GetExpression(reader, ref remaining, depth + 1), span);
+                return new BoundRequire(GetExpression(reader, ref remaining, depth + 1, version), span);
             case 8:
-                return new BoundReturn(GetBool(reader) ? GetExpression(reader, ref remaining, depth + 1) : null, span);
+                return new BoundReturn(GetBool(reader) ? GetExpression(reader, ref remaining, depth + 1, version) : null, span);
             case 9:
                 var variable = reader.ReadInt32();
                 var field = reader.ReadInt32();
@@ -1319,7 +1361,7 @@ public static partial class ModuleCompiler
                     Step(ref remaining, depth + index + 1);
                     fields.Add(reader.ReadInt32());
                 }
-                return new BoundFieldAssignment(variable, field, GetExpression(reader, ref remaining, depth + 1), span) {
+                return new BoundFieldAssignment(variable, field, GetExpression(reader, ref remaining, depth + 1, version), span) {
                     NestedFields = fields.ToImmutable(),
                 };
             case 10:
@@ -1342,10 +1384,20 @@ public static partial class ModuleCompiler
                 var owner = reader.ReadInt32();
                 var method = GetBool(reader) ? GetString(reader) : null;
                 return new SymbolicDrop(owner, method, span) {
-                    IsOutput = version >= Version && GetBool(reader),
+                    IsOutput = version >= TransferVersion && GetBool(reader),
                 };
-            case 14 when version >= Version:
+            case 14 when version >= TransferVersion:
                 return new BoundOwnerDeclaration(reader.ReadInt32(), span);
+            case 15 when version >= Version:
+                var constructedOwner = reader.ReadInt32();
+                var acquired = Count(reader, ValueLayout.MaximumSize);
+                var order = ImmutableArray.CreateBuilder<int>(acquired);
+                for (var i = 0; i < acquired; i++)
+                {
+                    Step(ref remaining, depth + 1);
+                    order.Add(reader.ReadInt32());
+                }
+                return new BoundDropConstructedFields(constructedOwner, order.ToImmutable(), span);
             default:
                 throw new ModuleFormatException("Unknown statement kind.");
         }
@@ -1366,6 +1418,7 @@ public static partial class ModuleCompiler
             BoundOutArgument => (byte)8,
             BoundMove => (byte)9,
             BoundReceiverLoan => (byte)10,
+            BoundFieldLoan => (byte)11,
             _ => throw new ModuleFormatException("Unknown expression kind."),
         });
         writer.Write((int)expression.Type);
@@ -1383,6 +1436,9 @@ public static partial class ModuleCompiler
                 break;
             case BoundReceiverLoan loan:
                 writer.Write(loan.Variable);
+                break;
+            case BoundFieldLoan fieldLoan:
+                PutExpression(writer, fieldLoan.Place, names, ref remaining, depth + 1);
                 break;
             case BoundUnary unary:
                 writer.Write((int)unary.Operator);
@@ -1420,7 +1476,7 @@ public static partial class ModuleCompiler
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unknown serialized node tags are rejected.")]
-    private static BoundExpression GetExpression(BinaryReader reader, ref int remaining, int depth)
+    private static BoundExpression GetExpression(BinaryReader reader, ref int remaining, int depth, int version)
     {
         Step(ref remaining, depth);
         var kind = reader.ReadByte();
@@ -1433,11 +1489,11 @@ public static partial class ModuleCompiler
             case 2:
                 return new BoundRead(reader.ReadInt32(), type, span);
             case 3:
-                return new BoundUnary((TokenKind)reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1), type, span);
+                return new BoundUnary((TokenKind)reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1, version), type, span);
             case 4:
                 var op = (TokenKind)reader.ReadInt32();
-                var left = GetExpression(reader, ref remaining, depth + 1);
-                return new BoundBinary(op, left, GetExpression(reader, ref remaining, depth + 1), type, span);
+                var left = GetExpression(reader, ref remaining, depth + 1, version);
+                return new BoundBinary(op, left, GetExpression(reader, ref remaining, depth + 1, version), type, span);
             case 5:
                 // Names are resolved after the complete module graph is read.
                 var name = GetString(reader);
@@ -1445,20 +1501,23 @@ public static partial class ModuleCompiler
                 var args = ImmutableArray.CreateBuilder<BoundExpression>(count);
                 for (var i = 0; i < count; i++)
                 {
-                    args.Add(GetExpression(reader, ref remaining, depth + 1));
+                    args.Add(GetExpression(reader, ref remaining, depth + 1, version));
                 }
                 return new SymbolicCall(name, args.ToImmutable(), type, span);
             case 6:
-                return new BoundCast(GetExpression(reader, ref remaining, depth + 1), type, span);
+                return new BoundCast(GetExpression(reader, ref remaining, depth + 1, version), type, span);
             case 7:
                 var field = reader.ReadInt32();
-                return new BoundFieldRead(GetExpression(reader, ref remaining, depth + 1), field, type, span);
+                return new BoundFieldRead(GetExpression(reader, ref remaining, depth + 1, version), field, type, span);
             case 8:
                 return new BoundOutArgument(reader.ReadInt32(), GetBool(reader), type, span);
             case 9:
                 return new BoundMove(reader.ReadInt32(), type, span);
             case 10:
                 return new BoundReceiverLoan(reader.ReadInt32(), type, span);
+            case 11 when version >= Version:
+                return new BoundFieldLoan(GetExpression(reader, ref remaining, depth + 1, version)
+                    as BoundFieldRead ?? throw new ModuleFormatException("Expected owning field place."), type, span);
             default:
                 throw new ModuleFormatException("Unknown expression kind.");
         }
@@ -1490,6 +1549,7 @@ public static partial class ModuleCompiler
                 ? new BoundDrop(drop.Variable, method, drop.Span) { IsOutput = drop.IsOutput }
                 : throw new ModuleContractException($"Unresolved cleanup target '{drop.Name}'."),
         BoundDrop => statement,
+        BoundDropConstructedFields => statement,
         BoundUnsafe unsafeBlock => unsafeBlock with { Body = (BoundBlock)ResolveStatement(unsafeBlock.Body, names) },
         BoundTryCatch recovery => recovery with {
             Body = (BoundBlock)ResolveStatement(recovery.Body, names),
@@ -1509,6 +1569,7 @@ public static partial class ModuleCompiler
         BoundBinary binary => binary with { Left = ResolveExpression(binary.Left, names), Right = ResolveExpression(binary.Right, names) },
         BoundCast cast => cast with { Operand = ResolveExpression(cast.Operand, names) },
         BoundFieldRead field => field with { Receiver = ResolveExpression(field.Receiver, names) },
+        BoundFieldLoan loan => loan with { Place = (BoundFieldRead)ResolveExpression(loan.Place, names) },
         _ => expression,
     };
 

@@ -27,11 +27,19 @@ to inspect the child status in PowerShell. Compilation never runs the consumer.
 `--json` is supported as the final argument on all three set commands.
 Output artifacts are atomically replaced only after successful compilation.
 
+The `TNSP` version 2 container records retained declaration ownership separately
+from actual machine imports; version 1 remains readable. Actual imports come
+from the same emission's fixups, including implicit recursive cleanup calls.
+They must belong to the selected provider's retained declarations, cover
+semantic calls, and exactly match the persisted PE's import table. Keeping a
+declaration for type or cleanup contracts does not itself create an IAT entry.
+
 The set is intentionally leaf-only: it does not model transitive graphs,
 cycles, arbitrary version roll-forward, hot servicing, resilient layouts,
 or full LMOD. Two providers cannot both claim the same public type or
 qualified export name; case-insensitive DLL identities also cannot collide.
-The selected dependencies must match exactly and each must supply an import.
+The selected dependencies must match exactly and each must supply a retained
+declaration; only emitted calls require machine imports.
 Implementation hashes are not pinned. These packages remain trusted native
 artifacts rather than an authenticated sandbox; validate before executing,
 and supervise the generated process with a deadline. Existing semantic JIT

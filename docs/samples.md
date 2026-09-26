@@ -16,6 +16,9 @@ same policy when compiled with an entry and an explicit host-buffer grant.
 The [owned transfer sample](../samples/native/owner-transfer.terrum) returns 42
 after a named move through a by-value parameter and failed then successful
 owning outputs. Its compact owners have lexical cleanup but hold no OS resource.
+The [composite owner sample](../samples/native/composite-owner.terrum) returns
+42 with `--runtime checked-exceptions`: a failed constructor releases its
+already acquired child before recovery constructs a complete owner.
 
 | Program | Source | Design contract / expected behavior |
 |---|---|---|

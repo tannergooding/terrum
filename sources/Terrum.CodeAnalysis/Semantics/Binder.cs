@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using Terrum.CodeAnalysis.Diagnostics;
@@ -291,6 +292,13 @@ internal sealed class Binder
                     Statements = body.Statements.Add(new BoundReturn(
                     new BoundRead(0, _returnType, end), end))
                 };
+                if (_structs[(int)_returnType - 100].Fields.Any(field => IsUnique(field.Type)))
+                {
+                    var acquisitions = ConstructorAcquisitions(body, _returnType);
+                    body = new BoundBlock([new BoundTryFinally(body,
+                        new BoundBlock([new BoundDropConstructedFields(0, acquisitions, syntaxBody.Span)],
+                            syntaxBody.Span), syntaxBody.Span)], syntaxBody.Span);
+                }
             }
             else if (_returnType == PrimitiveType.Void && !signature.DoesNotReturn)
             {
@@ -441,9 +449,9 @@ internal sealed class Binder
                 SetContext(tree);
             }
             if ((int)type >= 100 && (int)type - 100 < _structs.Count
-                && (_structs[(int)type - 100].IsUnique || isUnique))
+                && _structs[(int)type - 100].IsUnique && !isUnique)
             {
-                Report("TRM3023", "Unique types require primitive fields and cannot be stored in other structs in this ownership profile.", field.Span);
+                Report("TRM3023", "Copy structs cannot store unique owning fields.", field.Span);
             }
             var width = ValueLayout.Size(type, _structs);
             var fieldAlignment = width == 0 ? 1 : ValueLayout.Alignment(type, _structs);
@@ -706,7 +714,12 @@ internal sealed class Binder
         {
             return new BoundReceiverLoan(slot, type, receiver.Span);
         }
-        Report("TRM3023", "A unique receiver loan requires a named local; temporary receivers cannot escape cleanup.", receiver.Span);
+        var place = BindExpression(receiver, type);
+        if (place is BoundFieldRead field && IsUnique(field.Type))
+        {
+            return new BoundFieldLoan(field, type, receiver.Span);
+        }
+        Report("TRM3023", "A unique receiver loan requires a named owner or initialized field place.", receiver.Span);
         return ErrorExpression(receiver.Span);
     }
 
@@ -1086,6 +1099,20 @@ internal sealed class Binder
             Report("TRM3008", $"Variable '{_variables[variable].Name}' is immutable.", target.Span);
         }
         var path = fields.ToImmutable();
+        var fieldType = GetField(_variables[variable].Type, path[0]).Type;
+        if (IsUnique(fieldType) && (variable != 0 || !_constructor || path.Length != 1))
+        {
+            Report("TRM3023", "An owning field can only be initialized as a whole in its parent's constructor.", target.Span);
+        }
+        for (var index = 1; index < path.Length; index++)
+        {
+            if (IsUnique(fieldType))
+            {
+                Report("TRM3023", "Mutation through an owning field loan is unsupported.", target.Span);
+                break;
+            }
+            fieldType = GetField(fieldType, path[index]).Type;
+        }
         return new BoundFieldAssignment(variable, path[0], BindExpression(value, type), span) {
             NestedFields = path.RemoveAt(0),
         };
@@ -1097,6 +1124,61 @@ internal sealed class Binder
         if (!constructingReceiver && !declaration.IsMutable)
         {
             Report("TRM3008", $"Field '{declaration.Name}' is read-only after construction; assignment requires a mut field.", span);
+        }
+    }
+
+    [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Only field acquisitions and nested control regions contribute to the order.")]
+    private ImmutableArray<int> ConstructorAcquisitions(BoundBlock body, PrimitiveType ownerType)
+    {
+        var order = ImmutableArray.CreateBuilder<int>();
+        Collect(body, sequential: true);
+        return order.ToImmutable();
+
+        void Collect(BoundStatement statement, bool sequential)
+        {
+            switch (statement)
+            {
+                case BoundBlock block:
+                    foreach (var child in block.Statements)
+                    {
+                        Collect(child, sequential);
+                    }
+                    break;
+                case BoundTryFinally region:
+                    Collect(region.Body, sequential);
+                    Collect(region.Finally, sequential: false);
+                    break;
+                case BoundFieldAssignment field when field.Variable == 0
+                    && field.Field >= 0 && field.Field < _structs[(int)ownerType - 100].Fields.Length
+                    && IsUnique(_structs[(int)ownerType - 100].Fields[field.Field].Type):
+                    if (!sequential || !field.NestedFields.IsEmpty || order.Contains(field.Field))
+                    {
+                        Report("TRM3023", "Owning fields must be initialized once in sequential constructor flow.", field.Span);
+                    }
+                    order.Add(field.Field);
+                    break;
+                case BoundIf conditional:
+                    Collect(conditional.Then, sequential: false);
+                    if (conditional.Else is not null)
+                    {
+                        Collect(conditional.Else, sequential: false);
+                    }
+                    break;
+                case BoundWhile loop:
+                    Collect(loop.Body, sequential: false);
+                    break;
+                case BoundTryCatch recovery:
+                    Collect(recovery.Body, sequential: false);
+                    Collect(recovery.Catch, sequential: false);
+                    if (recovery.Finally is not null)
+                    {
+                        Collect(recovery.Finally, sequential: false);
+                    }
+                    break;
+                case BoundUnsafe unsafeBlock:
+                    Collect(unsafeBlock.Body, sequential);
+                    break;
+            }
         }
     }
 

@@ -56,4 +56,6 @@ public readonly record struct NativeExceptionScope(int Begin, int End, int Handl
 /// <summary>A RIP-relative displacement in code targeting an offset in the data image.</summary>
 public readonly record struct NativeDataFixup(int DisplacementOffset, int DataOffset);
 
-internal readonly record struct NativeImportFixup(int DisplacementOffset, string DllName, string ExportName);
+// A negative declaration index identifies a compiler runtime import rather than a source binding.
+internal readonly record struct NativeImportFixup(int DisplacementOffset, string DllName, string ExportName,
+    int DeclarationIndex = -1);

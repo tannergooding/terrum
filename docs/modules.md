@@ -1,6 +1,6 @@
 # Bounded semantic and native modules
 
-The version 13 `.trm` format records the selected native runtime policy and
+The version 14 `.trm` format records the selected native runtime policy and
 persists verified, typed, source-mapped structured IR,
 not source text or a native DLL. `CreateProducer` stores selected function bodies
 and exported contracts. `CreateConsumer` stores its own function bodies and the
@@ -211,19 +211,29 @@ Version 12 stores the unique layout flag, declared cleanup method, cleanup
 function contract, explicit move/receiver-loan nodes and lexical drop regions.
 Version 13 additionally stores ownership transfer markers on retained function
 declarations, conditional output drops and vacant `out var` owner declarations.
+Version 14 records partial-constructor cleanup regions with actual acquisition
+order and readonly owning-field places. Complete owners run their own NoThrow
+cleanup before nested owning fields in reverse declaration order; constructor
+failure cleans only acquired fields in reverse acquisition order. Retained
+composite unique layouts select `native-14` regardless of whether a declaration
+also transfers an owner. The runtime policy remains an independent artifact
+property, separate from the native package container version.
 The semantic profile is computed from retained layouts and declaration
 markers: native-13 requires an owning parameter or output; older native-12
-continues to describe unique locals/returns. Versions 10, 11 and 12 remain
-readable with their original layouts and contracts; a native package keeps
-container version 1 and its selected runtime policy is checked separately.
-A consumer importing a unique type must also import its exported NoThrow
-cleanup method. Its cleanup identity and Copy/unique distinction participate
-in layout and signature compatibility; a replacement implementation may
-change without changing the consumer artifact. Native-12 marks contracts
+continues to describe unique locals/returns. Versions 10 through 13 remain
+readable with their original layouts and contracts. Version 14 retains version
+13's scalar wire encoding; composite requirements cannot be downgraded to an
+older format or profile.
+A consumer importing a unique type must also import the exported NoThrow
+cleanup methods of that type and its owning children. Their cleanup identities
+and Copy/unique distinctions participate in layout and signature compatibility;
+a replacement implementation may change without changing the consumer artifact.
+Producer-private owners retain recursive cleanup targets without exporting
+those private types or their methods. Native-12 marks contracts
 containing unique values under either runtime policy. Producers/consumers
 without unique layouts continue to use native-10 or native-11, even when
 serialized by the newer `.trm` writer, so compatible older native-10/package-1
-images remain usable. Native package version 1 embeds and checks the exact
+images remain usable. Native packages embed and check the exact
 semantic profile rather than inferring it from runtime policy alone.
 `ModuleCompiler.GetNativeProfileVersion` and
 `NativeModuleCompiler.Inspect(...).NativeProfileVersion` expose that retained
@@ -239,8 +249,7 @@ records, their ordered `.pdata` ranges, `.xdata` bounds and corresponding
 machine-code prologs before accepting a replacement image. Checked native-11
 images additionally validate bounded scope records and handler references.
 Source functions precede cleanup funclets; exports must point to source-function
-entries, never to funclets or runtime helpers. The native package container is
-still version 1. Earlier native-10/package-1 fail-fast images with
+entries, never to funclets or runtime helpers. Earlier native-10/package-1 fail-fast images with
 allocation-only source frames remain valid: the four failure helpers (plus
 two consumer entry wrappers) precede the source functions in both layouts.
 Validation still rejects exports to helpers or funclets and unwind ranges
@@ -281,10 +290,10 @@ the package layer below adds that check. Neither provides a multi-provider
 contract linker, live patching or hot-unload protocol.
 
 `NativeModuleCompiler` packages each separately compiled native producer DLL
-or consumer EXE with its corresponding version 12 semantic `.trm` contract
-(or a readable version 10/11 contract). Its version 1 package records
-the contract's native-10/fail-fast, native-11/checked-exceptions or
-native-12/compact-unique profile,
+or consumer EXE with its corresponding semantic `.trm` contract. Producer
+containers remain version 1; new consumer containers use version 2, and version
+1 consumers remain readable. The container records the exact native profile
+(native-10 through native-14), runtime policy,
 single explicit provider identity and the exact PE and semantic bytes. The
 identity is 1–64 ASCII letters, digits or underscores, beginning with a
 letter; its loader basename is `terrum-<identity>.dll`. Artifacts are bounded
@@ -299,15 +308,19 @@ are rejected.
 `CreateReference` exposes only the producer package's verified semantic
 declarations to independent consumer binding. `CreateConsumer` emits the
 consumer PE once, binding every external declaration from the reference and
-emitting IAT entries for calls actually present in consumer bodies, named
+emitting IAT entries for actual calls, including implicit recursive cleanup, named
 exactly after their declarations. At validation and launch,
 `ModuleCompiler.Link` checks the persisted declaration, value layout,
 conditional output, field mutability, NoThrow and DoesNotReturn promises,
 and visibility contracts and verifies the linked IR. It does **not** emit
 code: the native consumer image is
 unchanged when a compatible producer package is selected for another
-launch. The consumer's exact imported call targets come from its bounded `.trm` reader,
-not from names in the replacement's linked function table; a replacement can
+launch. Version 2 records actual imported targets from the same encoder's
+fixups alongside the semantic contract. Validation requires those targets to
+belong to retained declarations, include semantic calls, and exactly match
+the persisted PE's IAT. Version 1 retains its original semantic-call-derived
+validation. Neither path derives imports from names in the replacement's
+linked function table; a replacement can
 add exports without changing a consumer that has an unrelated local function
 of the same name. Unused declarations retain semantic contracts but need no
 IAT cell. Bounded PE32+ structure checks require the declared exports

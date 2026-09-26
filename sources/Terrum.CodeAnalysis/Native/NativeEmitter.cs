@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Threading;
@@ -28,7 +29,12 @@ public static class NativeEmitter
     /// <summary>Emits a native consumer executable with explicit bindings for every external declaration.</summary>
     /// <remarks>Bindings specify ABI identities, not verified provider contracts; callers must validate provider compatibility.</remarks>
     public static byte[] EmitWithImports(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
-        NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default)
+        NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
+        EmitWithImportUsage(program, bindings, runtimePolicy, cancellationToken).Image;
+
+    internal static (byte[] Image, ImmutableArray<NativeImportBinding> Imports)
+        EmitWithImportUsage(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
+            NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default)
     {
         if (runtimePolicy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
@@ -43,8 +49,9 @@ public static class NativeEmitter
             throw new ArgumentException("Native and verified checked-failure policies differ.", nameof(program));
         }
         var selected = SelectImports(program, bindings, cancellationToken);
-        var code = new PeCompiler(program, cancellationToken, imports: selected).Compile();
-        return PeImage.Build(code);
+        var compiler = new PeCompiler(program, cancellationToken, imports: selected);
+        var code = compiler.Compile();
+        return (PeImage.Build(code), UsedImports(code, selected));
     }
 
     private static Dictionary<int, NativeImportBinding> SelectImports(BoundProgram program,
@@ -86,6 +93,31 @@ public static class NativeEmitter
         return selected;
     }
 
+    private static ImmutableArray<NativeImportBinding> UsedImports(NativeCode code,
+        Dictionary<int, NativeImportBinding>? bindings)
+    {
+        if (bindings is null)
+        {
+            return [];
+        }
+        var used = new HashSet<int>();
+        foreach (var fixup in code.NativeImports)
+        {
+            if (fixup.DeclarationIndex < 0)
+            {
+                continue;
+            }
+            if (!bindings.TryGetValue(fixup.DeclarationIndex, out var binding)
+                || !fixup.DllName.Equals(binding.DllName, StringComparison.OrdinalIgnoreCase)
+                || fixup.ExportName != binding.ExportName)
+            {
+                throw new InvalidOperationException("Emitted native import has no verified declaration binding.");
+            }
+            _ = used.Add(fixup.DeclarationIndex);
+        }
+        return [.. used.Select(index => bindings[index]).OrderBy(static binding => binding.FunctionName, StringComparer.Ordinal)];
+    }
+
     private static bool ValidImportName(string? name) => name is { Length: >= 1 and <= 256 }
         && name.All(static character => character is >= '!' and <= '~');
 
@@ -99,19 +131,26 @@ public static class NativeEmitter
     /// <exception cref="NotSupportedException">The runtime policy or a native resource limit is unsupported.</exception>
     public static byte[] EmitLibrary(BoundProgram program, IReadOnlyList<string> exports,
         NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
-        EmitLibraryCore(program, exports, null, runtimePolicy, cancellationToken);
+        EmitLibraryCore(program, exports, null, runtimePolicy, cancellationToken).Image;
 
     /// <summary>Emits a library whose verified external declarations have explicit DLL import bindings.</summary>
     /// <remarks>Bindings specify ABI identities, not provider compatibility; callers must validate dependency contracts.</remarks>
     public static byte[] EmitLibraryWithImports(BoundProgram program, IReadOnlyList<string> exports,
         IReadOnlyList<NativeImportBinding> bindings, NativeRuntimePolicy runtimePolicy,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        EmitLibraryWithImportUsage(program, exports, bindings, runtimePolicy, cancellationToken).Image;
+
+    internal static (byte[] Image, ImmutableArray<NativeImportBinding> Imports)
+        EmitLibraryWithImportUsage(BoundProgram program, IReadOnlyList<string> exports,
+            IReadOnlyList<NativeImportBinding> bindings, NativeRuntimePolicy runtimePolicy,
+            CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(bindings);
         return EmitLibraryCore(program, exports, bindings, runtimePolicy, cancellationToken);
     }
 
-    private static byte[] EmitLibraryCore(BoundProgram program, IReadOnlyList<string> exports,
+    private static (byte[] Image, ImmutableArray<NativeImportBinding> Imports)
+        EmitLibraryCore(BoundProgram program, IReadOnlyList<string> exports,
         IReadOnlyList<NativeImportBinding>? bindings, NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken)
     {
         if (runtimePolicy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
@@ -168,8 +207,9 @@ public static class NativeEmitter
         }
         selected.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
         var imports = bindings is null ? null : SelectImports(program, bindings, cancellationToken);
-        var code = new PeCompiler(program, cancellationToken, library: true, imports: imports).Compile();
-        return PeImage.BuildLibrary(code, [.. selected], program.Functions.Length);
+        var compiler = new PeCompiler(program, cancellationToken, library: true, imports: imports);
+        var code = compiler.Compile();
+        return (PeImage.BuildLibrary(code, [.. selected], program.Functions.Length), UsedImports(code, imports));
     }
 
     private static bool Exportable(BoundProgram program, BoundFunction function)
@@ -253,12 +293,14 @@ internal sealed class PeCompiler
     private readonly int[] _outBases;
     private readonly int[] _returnSlots;
     private readonly int[][] _liveSlots;
+    private readonly int[][] _constructedFieldSlots;
     private readonly int[] _replacementSlots;
+    private readonly int[] _cleanupArgumentSlots;
     private readonly List<(int Offset, int Target)> _calls = new();
     private readonly List<(int Offset, int Target)> _runtimeCalls = new();
     private readonly List<(int Offset, int Target)> _cleanupCalls = [];
     private readonly List<(BoundBlock Body, int Function, int Start, int End)> _funclets = [];
-    private readonly Dictionary<int, List<(int Value, int Live, PrimitiveType Type, int Cleanup)>> _stagedOwners = [];
+    private readonly Dictionary<int, List<(int Value, int Live, PrimitiveType Type)>> _stagedOwners = [];
     private readonly List<int> _imports = new();
     private readonly List<NativeImportFixup> _nativeImportFixups = [];
     private readonly List<NativeDataFixup> _dataFixups = [];
@@ -304,7 +346,9 @@ internal sealed class PeCompiler
         _outBases = new int[program.Functions.Length];
         _returnSlots = new int[program.Functions.Length];
         _liveSlots = new int[program.Functions.Length][];
+        _constructedFieldSlots = new int[program.Functions.Length][];
         _replacementSlots = new int[program.Functions.Length];
+        _cleanupArgumentSlots = new int[program.Functions.Length];
         _bufferOffsets = new int[program.Buffers.Length];
         var readOnlyBytes = 0;
         foreach (var buffer in program.Buffers)
@@ -422,6 +466,16 @@ internal sealed class PeCompiler
 
     private void PrepareFrames()
     {
+        var hasIndirectCleanup = false;
+        for (var type = 0; type < _program.Structures.Length; type++)
+        {
+            if (_program.Structures[type].CleanupMethod is not null
+                && IsIndirect((PrimitiveType)(100 + type)))
+            {
+                hasIndirectCleanup = true;
+                break;
+            }
+        }
         for (var i = 0; i < _program.Functions.Length; i++)
         {
             _cancellationToken.ThrowIfCancellationRequested();
@@ -476,10 +530,28 @@ internal sealed class PeCompiler
                 }
             }
             _liveSlots[i] = live;
+            var constructed = function.IsConstructor
+                ? new int[_program.Structures[(int)function.ReturnType - 100].Fields.Length] : [];
+            Array.Fill(constructed, -1);
+            for (var field = 0; field < constructed.Length; field++)
+            {
+                if (IsUnique(_program.Structures[(int)function.ReturnType - 100].Fields[field].Type))
+                {
+                    constructed[field] = checked((int)required);
+                    required += 8;
+                }
+            }
+            _constructedFieldSlots[i] = constructed;
             _replacementSlots[i] = checked((int)((required + 15) & ~15L));
             if (hasUnique)
             {
                 required = _replacementSlots[i] + 16L;
+            }
+            _cleanupArgumentSlots[i] = -1;
+            if (hasIndirectCleanup)
+            {
+                _cleanupArgumentSlots[i] = checked((int)((required + 15) & ~15L));
+                required = _cleanupArgumentSlots[i] + 16L;
             }
             required += 8; // Saved RBP lives above the addressable frame slots.
             if (required > MaximumFrame)
@@ -521,6 +593,13 @@ internal sealed class PeCompiler
                 if (live >= 0)
                 {
                     _code.Clear(live);
+                }
+            }
+            foreach (var field in _constructedFieldSlots[i])
+            {
+                if (field >= 0)
+                {
+                    _code.Clear(field);
                 }
             }
             var hidden = IsIndirect(function.ReturnType) ? 1 : 0;
@@ -616,17 +695,12 @@ internal sealed class PeCompiler
             {
                 for (var owner = owners.Count - 1; owner >= 0; owner--)
                 {
-                    var (value, live, type, cleanup) = owners[owner];
+                    var (value, live, type) = owners[owner];
                     _code.Load(live);
                     _code.Bytes(0x85, 0xC0);
                     var vacant = _code.JumpIf(0x84);
                     _code.Clear(live);
-                    if (cleanup >= 0)
-                    {
-                        LoadValue(value, type);
-                        _code.MoveArgument(0, true);
-                        EmitTargetCall(cleanup);
-                    }
+                    EmitDropValue(value, type);
                     _code.PatchRelative(vacant, _code.Position);
                 }
             }
@@ -851,19 +925,43 @@ internal sealed class PeCompiler
             && !function.IsStatic && IsUnique(function.Variables[0].Type);
     }
 
-    private void DropOwner(int variable, int spill = 0)
+    private void EmitUniqueFieldPlace(BoundExpression expression)
+    {
+        if (expression is BoundRead root)
+        {
+            if (root.Variable == 0 && IsBorrowedReceiver())
+            {
+                _code.Load64(Slot(0));
+            }
+            else
+            {
+                _code.Address(OwnerPlace(root.Variable));
+            }
+            return;
+        }
+        var fieldRead = (BoundFieldRead)expression;
+        EmitUniqueFieldPlace(fieldRead.Receiver);
+        var field = _program.Structures[(int)fieldRead.Receiver.Type - 100].Fields[fieldRead.Field];
+        _code.PointerOffset(field.Offset);
+    }
+
+    private void DropOwner(int variable)
     {
         var live = _liveSlots[_currentFunction][variable];
         _code.Load(live);
         _code.Bytes(0x85, 0xC0);
         var vacant = _code.JumpIf(0x84);
         var type = _program.Functions[_currentFunction].Variables[variable].Type;
-        var name = _program.Structures[(int)type - 100].CleanupMethod;
-        if (name is null)
-        {
-            _code.Clear(live);
-        }
-        else
+        _code.Clear(live);
+        EmitDropValue(OwnerPlace(variable), type);
+        _code.PatchRelative(vacant, _code.Position);
+    }
+
+    private void EmitDropValue(int place, PrimitiveType type)
+    {
+        var structure = _program.Structures[(int)type - 100];
+        var name = structure.CleanupMethod;
+        if (name is not null)
         {
             var method = -1;
             for (var index = 0; index < _program.Functions.Length; index++)
@@ -878,20 +976,31 @@ internal sealed class PeCompiler
             {
                 throw new InvalidOperationException("Verified unique cleanup method is missing.");
             }
-            if (_program.Functions[_currentFunction].Variables[variable].IsOut)
+            if (IsIndirect(type))
             {
-                _code.Clear(live);
-                LoadValue(OwnerPlace(variable), type);
-                _code.MoveArgument(0, true);
-                EmitTargetCall(method);
+                var scratch = _cleanupArgumentSlots[_currentFunction];
+                if (scratch < 0)
+                {
+                    throw new InvalidOperationException("Indirect cleanup requires dedicated argument storage.");
+                }
+                _code.Address(place);
+                CopyToFrame(scratch, Size(type));
+                _code.Address(scratch);
             }
             else
             {
-                Expression(new BoundCall(method, [new BoundMove(variable, type, default)],
-                    PrimitiveType.Void, default), spill);
+                LoadValue(place, type);
+            }
+            _code.MoveArgument(0, true);
+            EmitTargetCall(method);
+        }
+        for (var field = structure.Fields.Length - 1; field >= 0; field--)
+        {
+            if (IsUnique(structure.Fields[field].Type))
+            {
+                EmitDropValue(place + structure.Fields[field].Offset, structure.Fields[field].Type);
             }
         }
-        _code.PatchRelative(vacant, _code.Position);
     }
     private void StoreValue(int offset, PrimitiveType type)
     {
@@ -988,7 +1097,7 @@ internal sealed class PeCompiler
             {
                 throw new InvalidOperationException("External call has no verified native import binding.");
             }
-            _nativeImportFixups.Add(new NativeImportFixup(_code.ImportCall(), import.DllName, import.ExportName));
+            _nativeImportFixups.Add(new NativeImportFixup(_code.ImportCall(), import.DllName, import.ExportName, function));
         }
         else
         {
@@ -1109,6 +1218,23 @@ internal sealed class PeCompiler
                     DropOwner(drop.Variable);
                 }
                 break;
+            case BoundDropConstructedFields partial:
+                _code.Bytes(0x48, 0x85, 0xC9); // only an exceptional unwind owns unfinished fields
+                var completed = _code.JumpIf(0x84);
+                var fields = _program.Structures[(int)_program.Functions[_currentFunction].ReturnType - 100].Fields;
+                for (var index = partial.AcquisitionOrder.Length - 1; index >= 0; index--)
+                {
+                    var fieldIndex = partial.AcquisitionOrder[index];
+                    var live = _constructedFieldSlots[_currentFunction][fieldIndex];
+                    _code.Load(live);
+                    _code.Bytes(0x85, 0xC0);
+                    var vacant = _code.JumpIf(0x84);
+                    _code.Clear(live);
+                    EmitDropValue(Slot(0) + fields[fieldIndex].Offset, fields[fieldIndex].Type);
+                    _code.PatchRelative(vacant, _code.Position);
+                }
+                _code.PatchRelative(completed, _code.Position);
+                break;
             case BoundFieldAssignment fieldAssignment:
                 Expression(fieldAssignment.Value, 0);
                 var variable = _program.Functions[_currentFunction].Variables[fieldAssignment.Variable];
@@ -1127,6 +1253,13 @@ internal sealed class PeCompiler
                 else
                 {
                     _code.StoreField(destination, field.Size);
+                }
+                if (fieldAssignment.Variable == 0 && fieldAssignment.NestedFields.IsEmpty
+                    && IsUnique(field.Type)
+                    && _constructedFieldSlots[_currentFunction].Length > fieldAssignment.Field
+                    && _constructedFieldSlots[_currentFunction][fieldAssignment.Field] >= 0)
+                {
+                    _code.Set(_constructedFieldSlots[_currentFunction][fieldAssignment.Field]);
                 }
                 break;
             case BoundBufferAssignment bufferWrite:
@@ -1360,17 +1493,13 @@ internal sealed class PeCompiler
                     _code.Address(OwnerPlace(loan.Variable));
                 }
                 break;
+            case BoundFieldLoan fieldLoan:
+                EmitUniqueFieldPlace(fieldLoan.Place);
+                break;
             case BoundFieldRead fieldRead:
-                if (fieldRead.Receiver is BoundRead owner && IsUnique(owner.Type))
+                if (IsUnique(fieldRead.Receiver.Type))
                 {
-                    if (owner.Variable == 0 && IsBorrowedReceiver())
-                    {
-                        _code.Load64(Slot(0));
-                    }
-                    else
-                    {
-                        _code.Address(OwnerPlace(owner.Variable));
-                    }
+                    EmitUniqueFieldPlace(fieldRead.Receiver);
                 }
                 else
                 {
@@ -1466,30 +1595,17 @@ internal sealed class PeCompiler
                 break;
             case BoundCall call:
                 var argumentsBase = spill + 1;
-                List<(int Value, int Live, PrimitiveType Type, int Cleanup)>? staged = null;
+                List<(int Value, int Live, PrimitiveType Type)>? staged = null;
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
                     if (!IsUnique(call.Arguments[i].Type)
-                        || call.Arguments[i] is BoundReceiverLoan or BoundOutArgument)
+                        || call.Arguments[i] is BoundReceiverLoan or BoundFieldLoan or BoundOutArgument)
                     {
                         continue;
                     }
                     staged ??= [];
-                    var name = _program.Structures[(int)call.Arguments[i].Type - 100].CleanupMethod;
-                    var cleanup = -1;
-                    if (name is not null)
-                    {
-                        for (var function = 0; function < _program.Functions.Length; function++)
-                        {
-                            if (_program.Functions[function].Name == name)
-                            {
-                                cleanup = function;
-                                break;
-                            }
-                        }
-                    }
                     var live = Spill(argumentsBase + call.Arguments.Length + i);
-                    staged.Add((Spill(argumentsBase + i), live, call.Arguments[i].Type, cleanup));
+                    staged.Add((Spill(argumentsBase + i), live, call.Arguments[i].Type));
                     _code.Clear(live);
                 }
                 var stagedBegin = _code.Position;
@@ -1512,7 +1628,7 @@ internal sealed class PeCompiler
                     else
                     {
                         Expression(call.Arguments[i], argumentsBase + (call.Arguments.Length * 2));
-                        if (call.Arguments[i] is BoundReceiverLoan)
+                        if (call.Arguments[i] is BoundReceiverLoan or BoundFieldLoan)
                         {
                             _code.Store64(Spill(argumentsBase + i));
                         }
@@ -1521,7 +1637,7 @@ internal sealed class PeCompiler
                             StoreValue(Spill(argumentsBase + i), call.Arguments[i].Type);
                         }
                         if (staged is not null && IsUnique(call.Arguments[i].Type)
-                            && call.Arguments[i] is not BoundReceiverLoan)
+                            && call.Arguments[i] is not (BoundReceiverLoan or BoundFieldLoan))
                         {
                             _code.Set(Spill(argumentsBase + call.Arguments.Length + i));
                         }
@@ -1544,13 +1660,13 @@ internal sealed class PeCompiler
                 {
                     if (argument is BoundOutArgument output && IsUnique(output.Type))
                     {
-                        DropOwner(output.Variable, argumentsBase + (call.Arguments.Length * 2));
+                        DropOwner(output.Variable);
                     }
                 }
                 var hidden = IsIndirect(call.Type) ? 1 : 0;
                 for (var i = Math.Max(0, 4 - hidden); i < call.Arguments.Length; i++)
                 {
-                    if (call.Arguments[i] is BoundOutArgument or BoundReceiverLoan)
+                    if (call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundFieldLoan)
                     {
                         _code.Load64(Spill(argumentsBase + i));
                     }
@@ -1562,7 +1678,7 @@ internal sealed class PeCompiler
                 }
                 for (var i = 0; i < Math.Min(4 - hidden, call.Arguments.Length); i++)
                 {
-                    if (call.Arguments[i] is BoundOutArgument or BoundReceiverLoan)
+                    if (call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundFieldLoan)
                     {
                         _code.Load64(Spill(argumentsBase + i));
                     }
@@ -1571,7 +1687,7 @@ internal sealed class PeCompiler
                         LoadValue(Spill(argumentsBase + i), call.Arguments[i].Type);
                     }
                     _code.MoveArgument(i + hidden,
-                        call.Arguments[i] is BoundOutArgument or BoundReceiverLoan || IsStruct(call.Arguments[i].Type) || IsWide(call.Arguments[i].Type));
+                        call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundFieldLoan || IsStruct(call.Arguments[i].Type) || IsWide(call.Arguments[i].Type));
                 }
                 if (hidden != 0)
                 {
