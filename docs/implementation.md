@@ -19,7 +19,7 @@ general managed graphs and standard-library execution are not implemented.
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; executable source-class and `ManagedNode` optionals; repeated `?` diagnoses | Scalar options, generic optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, break/continue, general switch/patterns, general exception objects/throw, async, compound assignment |
 | Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, explicit closed static-protocol calls, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations and lexical readonly/exclusive writable buffer slices | Character literals, partial owning-field moves, owning field replacement, general expression temporaries, general stored loans, evaluation outside the native profile, user-defined conversions, general overloads/generic calls, conditional expressions, constructor generic inference |
-| Managed storage | Aliasable `ManagedNode` and source-class handles, optional edges and non-null pattern snapshots, descriptor-based cycle tracing, complete-publication class factories, exact frame/temporary roots and explicit nonmoving collection under both policies, including exceptional root retirement and escaping-frame unlink | Managed user-struct fields, stored interior pointers, implicit GC, native DLL/module graph managed ABI |
+| Managed storage | Aliasable `ManagedNode` and source-class handles, optional edges and non-null pattern snapshots, handle-free compact Copy fields in classes, descriptor-based cycle tracing, complete-publication class factories, exact frame/temporary roots and explicit nonmoving collection under both policies, including exceptional root retirement and escaping-frame unlink | Managed handles inside user structs, stored interior pointers, implicit GC, native DLL/module graph managed ABI |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
 Only the grammar below is supported. Unsupported constructs diagnose rather than
@@ -118,13 +118,17 @@ clears argument and unpublished output staging, and unlinks a root frame only
 when unwinding out of that function. A same-frame catch keeps its surviving
 roots; a pending managed return remains rooted through collecting cleanup.
 Source classes use the same root and collection machinery. Their explicit
-constructors initialize every scalar/non-null managed field before the generated
+constructors initialize every field before the generated
 `C.TryCreate(arguments, out C)` factory publishes an eight-byte handle.
 Allocation failure returns false; checked constructor failure frees the
 unpublished object and propagates. Collector-private zeroed reference slots are
 not source defaults. Class payloads are bounded to 128 bytes; readonly/mutable
 field access, visibility and partial-construction checks remain mandatory.
-Classes have no inheritance, inline-struct storage or managed
+Class fields may contain acyclic handle-free Copy structs up to 16 bytes, including
+nested compact values. Those fields are copied as complete values, not traced as
+potential pointers. Unique owners, views and managed handles inside structs are
+not admitted by this extension. Factories still accept only scalar/handle arguments.
+Classes have no inheritance, inline class representation or public managed
 module ABI; `new C(...)` is rejected rather than inventing an allocation exception.
 `native-20` adds `C?` and `ManagedNode?`, contextual `null`, non-null-to-optional
 lifting, `is null` and `is some value`. Successful extraction creates a non-null
@@ -141,7 +145,9 @@ Version 18 semantic modules separately admit private `ManagedNode` code in a
 leaf producer whose exported declarations are scalar and by-value only.
 Version 19 extends that private-leaf contract to source classes and their
 optional handles, serializing checked layouts, construction and root metadata.
-Class-free modules retain the version 18 format; optional-node-only modules,
+Class-free modules retain the version 18 format. Version 19 rejects inline Copy
+fields in classes until their persistence contract is deliberately extended.
+Optional-node-only modules,
 managed consumer declarations and managed imported/exported signatures still
 reject.
 Native packages validate its managed profile, heap imports and root metadata.

@@ -160,14 +160,14 @@ internal sealed partial class Binder
             }
             var type = BindType((SyntaxNode)child.Children[^3], allowVoid: false);
             if (type is PrimitiveType.OwnedInt32Buffer or PrimitiveType.ReadonlyInt32BufferView
-                or PrimitiveType.MutableInt32BufferView || IsStruct(type))
+                or PrimitiveType.MutableInt32BufferView || IsUnique(type))
             {
-                Report("TRM3023", "This managed class profile admits scalar and managed-handle fields only.", child.Span);
+                Report("TRM3023", "Class fields require scalars, managed handles, or handle-free Copy values.", child.Span);
             }
             var width = ValueLayout.Size(type, _structs);
-            var alignment = width;
+            var alignment = width == 0 ? 1 : ValueLayout.Alignment(type, _structs);
             offset = (offset + alignment - 1) & -alignment;
-            if (width is < 1 or > 8 || offset + width > ManagedClassTypes.MaximumPayload
+            if (width is < 1 or > ValueLayout.MaximumSize || offset + width > ManagedClassTypes.MaximumPayload
                 || !names.Add(fieldToken.Token.Text))
             {
                 Report("TRM3005", "Managed fields must have distinct names and fit the bounded payload.", child.Span);

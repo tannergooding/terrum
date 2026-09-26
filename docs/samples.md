@@ -40,7 +40,8 @@ reference fields, a public managed ABI or a general collection library.
 The [optional-cycle sample](../samples/native/managed-optional-cycle.terrum)
 adds explicitly initialized optional edges, source-defined cycles and non-null
 presence snapshots. The [managed token-chain candidate](../self-host/ManagedTokenChain.terrum)
-uses these edges for bounded linked storage with checked count/version updates.
+uses these edges and compact inline Copy fields for bounded linked storage of
+complete tokens, with checked count/version updates and independent copied results.
 The [private managed-node leaf](../samples/native/graph/managed-node-leaf.terrum)
 replaces a scalar-only producer without changing its persisted consumer or
 intermediate DLL. Its cycle allocation and explicit collection stay inside the

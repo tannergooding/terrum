@@ -57,10 +57,12 @@ Core `TensorPrimitives` operate over borrowed spans and caller destinations, not
 
 The executed [managed token-chain candidate](../self-host/ManagedTokenChain.terrum)
 is a bounded consumer of source-defined classes and optional edges: it stores
-copied scalar token metadata, preflights append mutations, tracks count/version
-and leaves collection explicit. It exposes no node handles or borrowed source
-storage. This is not the generic `List<T>`/`LinkedList<T>` API below and does not
-implement their guards, builders, iterator invalidation or public module contracts.
+complete 12-byte Copy tokens with validated source ranges, preflights append
+mutations, tracks count/version and leaves collection explicit. It exposes no
+node handles or borrowed source storage. Copied results survive collection of
+the original links. This is not the generic `List<T>`/`LinkedList<T>` API below
+and does not implement their guards, builders, iterator invalidation or public
+module contracts.
 
 Foundation owns explicit `Buffer<T>`, `Vector<T>`, arena-backed storage, maps and persistent shape metadata with allocator/lease obligations; Application provides managed aliasable collections. The [managed collection inventory](../library/collections.api.terrum) specifies initial `List<T>` element restrictions (`[ManagedStorable]`, `[Copy]`, `[Sized]`); this is **not** a permanent language ban on storing pointers/loans or affine elements. GC visits only initialized slots and uses write barriers; no fabricated `default(T)` fills unused capacity. Preflight capacity, checked count/version and guard conflicts precede mutation; remove/clear vacate slots and release retained references. `ListWriteAccess<T>` lends checked exclusive access, keeps actual storage stable and live and releases once. Every alias, indexer, cursor and reentrant callback checks the relevant guard. It is not a cross-thread mutex. `TryGet` distinguishes missing index from a present optional/null element.
 

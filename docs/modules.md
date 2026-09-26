@@ -267,8 +267,11 @@ their version 18 wire layout and historical profiles. Exports remain scalar/void
 by-value declarations, and a managed leaf cannot import another provider.
 Source classes and managed handles never become imported module layouts or
 native DLL values. An optional-node-only program without a private source
-class remains outside this bounded module increment. Collection is local to
-the leaf image; no DLL-unload heap cleanup of live objects is promised.
+class remains outside this bounded module increment. Version 19 rejects inline
+struct fields in source classes even when the struct is Copy and accepted for
+executable compilation; persisting those layouts requires a new semantic
+module version. Collection is local to the leaf image; no DLL-unload heap
+cleanup of live objects is promised.
 A consumer importing a unique type must also import the exported NoThrow
 cleanup methods of that type and its owning children. Their cleanup identities
 and Copy/unique distinctions participate in layout and signature compatibility;

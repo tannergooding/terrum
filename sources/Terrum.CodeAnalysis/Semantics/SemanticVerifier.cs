@@ -149,14 +149,15 @@ public static class SemanticVerifier
                 if (field is null || !ValidType(field.Type, allowVoid: false, program)
                     || field.Type is PrimitiveType.OwnedInt32Buffer or PrimitiveType.ReadonlyInt32BufferView
                         or PrimitiveType.MutableInt32BufferView
-                    || ((int)field.Type >= 100 && !ManagedClassTypes.IsClass(field.Type)
-                        && !ManagedClassTypes.IsOptional(field.Type)))
+                    || IsUnique(program, field.Type))
                 {
                     throw Invalid();
                 }
                 var width = ValueLayout.Size(field.Type, program.Structures);
-                offset = (offset + width - 1) & -width;
+                var alignment = width == 0 ? 1 : ValueLayout.Alignment(field.Type, program.Structures);
+                offset = (offset + alignment - 1) & -alignment;
                 if (field.Size != width || field.Offset != offset
+                    || width is < 1 or > ValueLayout.MaximumSize
                     || offset + width > ManagedClassTypes.MaximumPayload
                     || string.IsNullOrWhiteSpace(field.Name) || !fieldNames.Add(field.Name)
                     || (field.IsPrivate && field.IsInternal))
@@ -1442,7 +1443,8 @@ public static class SemanticVerifier
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
                 if (!targetField.IsMutable
-                    && (!ManagedClassTypes.IsClass(ownerType) || fieldAssignment.NestedFields.IsEmpty)
+                    && (!ManagedClassTypes.IsClass(ownerType) || fieldAssignment.NestedFields.IsEmpty
+                        || !ManagedClassTypes.IsClass(targetField.Type))
                     && !((function.IsConstructor || function.IsClassConstructor) && fieldAssignment.Variable == 0))
                 {
                     throw Invalid();
@@ -1470,6 +1472,7 @@ public static class SemanticVerifier
                     }
                     if (!targetField.IsMutable
                         && (!ManagedClassTypes.IsClass(nestedType)
+                            || !ManagedClassTypes.IsClass(targetField.Type)
                             || index == fieldAssignment.NestedFields.Length - 1))
                     {
                         throw Invalid();

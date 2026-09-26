@@ -207,6 +207,8 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     foreach (var argument in new[] { cli, "build-library",
         Path.GetFullPath(Path.Combine("tests", "native", "managed-token-chain-abi.terrum")),
         "--source", Path.GetFullPath(Path.Combine("self-host", "ManagedTokenChain.terrum")),
+        "--source", Path.GetFullPath(Path.Combine("self-host", "SourceRange.terrum")),
+        "--source", Path.GetFullPath(Path.Combine("self-host", "Token.terrum")),
         "--export", "ChainReuse", "--export", "ChainAllocationFailure", "--export", "CollectWithScalar",
         "-o", chain, "--runtime", policy })
     {
@@ -221,7 +223,7 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     var chainProof = await Run(chainExecute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
     await File.WriteAllTextAsync(Path.Combine(artifacts, $"managed-token-chain-abi-proof-{policy}.log"),
         chainProof).ConfigureAwait(false);
-    if (chainProof.Trim() != "managed-token-chain rounds=64 reuse=checked allocation-failure=checked live=0")
+    if (chainProof.Trim() != "managed-token-chain rounds=64 copy-values=checked reuse=checked allocation-failure=checked live=0")
     {
         throw new InvalidOperationException("The independent managed token-chain ABI proof did not complete.");
     }

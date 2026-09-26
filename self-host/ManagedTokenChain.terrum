@@ -1,13 +1,13 @@
 namespace Terrum.CodeAnalysis;
 
 class ManagedTokenLink {
-    public int32 Kind;
-    public int32 SourceOffset;
+    public Token Value;
     public mut ManagedTokenLink? Next;
 
-    public ManagedTokenLink(int32 kind, int32 sourceOffset) {
-        Kind = kind;
-        SourceOffset = sourceOffset;
+    public ManagedTokenLink(int32 kind, int32 sourceOffset, int32 sourceLength) {
+        require kind >= 0;
+        require SourceRange.TryCreate(sourceOffset, sourceLength, out var range);
+        Value = new Token(kind, range);
         Next = null;
     }
 }
@@ -28,15 +28,18 @@ class ManagedTokenChain {
     public int32 GetCount() { return _count; }
     public int32 GetVersion() { return _version; }
 
-    public bool TryAppend(int32 kind, int32 sourceOffset) {
+    public bool TryAppend(int32 kind, int32 sourceOffset, int32 sourceLength) {
         // Bound per-chain heap use and linear indexed reads to 64 links.
-        if (kind < 0 || sourceOffset < 0 || _count == 64 || _version == int32.MaxValue) {
+        if (kind < 0 || _count == 64 || _version == int32.MaxValue) {
+            return false;
+        }
+        if (!SourceRange.TryCreate(sourceOffset, sourceLength, out var range)) {
             return false;
         }
         if (_last is some previous) {
-            if (sourceOffset < previous.SourceOffset) { return false; }
+            if (range.Start < previous.Value.Range.Start) { return false; }
         }
-        if (!ManagedTokenLink.TryCreate(kind, sourceOffset, out var created)) {
+        if (!ManagedTokenLink.TryCreate(kind, range.Start, range.Length, out var created)) {
             return false;
         }
         if (_last is some last) {
@@ -50,7 +53,7 @@ class ManagedTokenChain {
         return true;
     }
 
-    public bool TryGet(int32 index, out int32 kind, out int32 sourceOffset) {
+    public bool TryGet(int32 index, out Token token) {
         if (index < 0 || index >= _count) { return false; }
         mut ManagedTokenLink? cursor = _first;
         for (mut int32 at = 0; at < index; at = at + 1) {
@@ -63,8 +66,7 @@ class ManagedTokenChain {
             }
         }
         if (cursor is some found) {
-            kind = found.Kind;
-            sourceOffset = found.SourceOffset;
+            token = found.Value;
             return true;
         }
         require false;

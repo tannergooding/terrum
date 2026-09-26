@@ -79,6 +79,35 @@ public sealed class NativeManagedClassModuleTests
             (int)@class.Fields[1].Type);
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void InlineCopyClassFieldsRequireANewerModuleVersion(NativeRuntimePolicy policy)
+    {
+        var program = Compile("""
+            struct Pair {
+                public int32 Left;
+                public int32 Right;
+                public Pair(int32 left, int32 right) { Left = left; Right = right; }
+            }
+            class Leaf {
+                public Pair Value;
+                public Leaf(int32 value) { Value = new Pair(value, 2); }
+            }
+            public int32 Proof() {
+                require Leaf.TryCreate(40, out var leaf);
+                return leaf.Value.Left + leaf.Value.Right;
+            }
+            """, policy);
+        var error = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateProducer(program, ["Proof"]));
+        Assert.Contains("Inline struct class fields require a newer semantic module version.", error.Message,
+            StringComparison.Ordinal);
+        error = Assert.Throws<ModuleFormatException>(() =>
+            NativeModuleCompiler.CreateProducer(program, ["Proof"], "NodeB", policy));
+        Assert.Contains("Inline struct class fields require a newer semantic module version.", error.Message,
+            StringComparison.Ordinal);
+    }
+
     [Fact]
     public void PersistedClassLayoutAndRootsAreVerifiedOnReload()
     {
@@ -102,6 +131,7 @@ public sealed class NativeManagedClassModuleTests
         Assert.Equal(2, reader.ReadInt32());
         var firstNameLength = reader.ReadInt32();
         Assert.Equal("Value", Encoding.UTF8.GetString(reader.ReadBytes(firstNameLength)));
+        var firstType = (int)reader.BaseStream.Position;
         Assert.Equal((int)PrimitiveType.Int32, reader.ReadInt32());
         var firstOffset = (int)reader.BaseStream.Position;
         Assert.Equal(0, reader.ReadInt32());
@@ -124,6 +154,11 @@ public sealed class NativeManagedClassModuleTests
         malformed = (byte[])contract.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(firstOffset, 4), 4);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+        malformed = (byte[])contract.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(firstType, 4), 100);
+        var fieldError = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+        Assert.Contains("Inline struct class fields require a newer semantic module version.",
+            fieldError.Message, StringComparison.Ordinal);
         malformed = (byte[])contract.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(edgeType, 4),
             ManagedClassTypes.OptionalFirst + 1);

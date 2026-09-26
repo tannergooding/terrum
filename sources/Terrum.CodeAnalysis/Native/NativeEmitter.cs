@@ -1573,31 +1573,26 @@ internal sealed partial class PeCompiler
                     .Fields[fieldAssignment.Field] : _program.Structures[(int)fieldType - 100].Fields[fieldAssignment.Field];
                 var destination = (variable.IsOut ? OutSlot(fieldAssignment.Variable) : Slot(fieldAssignment.Variable))
                     + field.Offset;
-                foreach (var nestedField in fieldAssignment.NestedFields)
-                {
-                    if (classField)
-                    {
-                        field = _program.Classes[(int)field.Type - ManagedClassTypes.First].Fields[nestedField];
-                    }
-                    else
-                    {
-                        field = _program.Structures[(int)field.Type - 100].Fields[nestedField];
-                        destination += field.Offset;
-                    }
-                }
                 if (classField)
                 {
                     _code.Load64(OwnerPlace(fieldAssignment.Variable));
-                    var currentType = fieldType;
-                    var currentField = _program.Classes[(int)currentType - ManagedClassTypes.First]
-                        .Fields[fieldAssignment.Field];
+                    var inlineOffset = 0;
                     foreach (var nestedField in fieldAssignment.NestedFields)
                     {
-                        _code.PointerOffset(32 + currentField.Offset);
-                        _code.Bytes(0x48, 0x8B, 0x00);
-                        currentType = currentField.Type;
-                        currentField = _program.Classes[(int)currentType - ManagedClassTypes.First]
-                            .Fields[nestedField];
+                        var containingType = field.Type;
+                        if (ManagedClassTypes.IsClass(containingType))
+                        {
+                            _code.PointerOffset(32 + inlineOffset + field.Offset);
+                            _code.Bytes(0x48, 0x8B, 0x00);
+                            field = _program.Classes[(int)containingType - ManagedClassTypes.First]
+                                .Fields[nestedField];
+                            inlineOffset = 0;
+                        }
+                        else
+                        {
+                            inlineOffset += field.Offset;
+                            field = _program.Structures[(int)containingType - 100].Fields[nestedField];
+                        }
                     }
                     _code.Store64(Spill(0));
                     SetManagedRoot(Spill(0), active: true);
@@ -1610,25 +1605,40 @@ internal sealed partial class PeCompiler
                         _managedStagedRoots.Add(stagedFunclet, [Spill(0)]);
                     }
                     Expression(fieldAssignment.Value, 1);
-                    _code.Store64(Spill(1));
-                    _code.Load64(Spill(0));
-                    _code.PointerOffset(32 + field.Offset);
-                    _code.Bytes(0x48, 0x89, 0xC2);
-                    _code.Load64(Spill(1));
-                    switch (field.Size)
+                    if (IsIndirect(field.Type))
                     {
-                        case 1:
-                            _code.Bytes(0x88, 0x02);
-                            break;
-                        case 2:
-                            _code.Bytes(0x66, 0x89, 0x02);
-                            break;
-                        case 4:
-                            _code.Bytes(0x89, 0x02);
-                            break;
-                        default:
-                            _code.Bytes(0x48, 0x89, 0x02);
-                            break;
+                        _code.Bytes(0x48, 0x89, 0xC1); // preserve the source pointer without overwriting its spill
+                    }
+                    else
+                    {
+                        _code.Store64(Spill(1));
+                    }
+                    _code.Load64(Spill(0));
+                    _code.PointerOffset(32 + inlineOffset + field.Offset);
+                    _code.Bytes(0x48, 0x89, 0xC2);
+                    if (IsIndirect(field.Type))
+                    {
+                        _code.Bytes(0x48, 0x89, 0xC8);
+                        _code.CopyMemory(field.Size);
+                    }
+                    else
+                    {
+                        _code.Load64(Spill(1));
+                        switch (field.Size)
+                        {
+                            case 1:
+                                _code.Bytes(0x88, 0x02);
+                                break;
+                            case 2:
+                                _code.Bytes(0x66, 0x89, 0x02);
+                                break;
+                            case 4:
+                                _code.Bytes(0x89, 0x02);
+                                break;
+                            default:
+                                _code.Bytes(0x48, 0x89, 0x02);
+                                break;
+                        }
                     }
                     SetManagedRoot(Spill(0), active: false);
                     if (stagedFunclet >= 0)
@@ -1640,6 +1650,11 @@ internal sealed partial class PeCompiler
                 }
                 else
                 {
+                    foreach (var nestedField in fieldAssignment.NestedFields)
+                    {
+                        field = _program.Structures[(int)field.Type - 100].Fields[nestedField];
+                        destination += field.Offset;
+                    }
                     Expression(fieldAssignment.Value, 0);
                     if (IsIndirect(field.Type))
                     {
@@ -1941,7 +1956,14 @@ internal sealed partial class PeCompiler
                     Expression(fieldRead.Receiver, spill);
                     var classField = _program.Classes[(int)fieldRead.Receiver.Type
                         - ManagedClassTypes.First].Fields[fieldRead.Field];
-                    _code.LoadPointerField(32 + classField.Offset, classField.Size);
+                    if (IsIndirect(classField.Type))
+                    {
+                        _code.PointerOffset(32 + classField.Offset);
+                    }
+                    else
+                    {
+                        _code.LoadPointerField(32 + classField.Offset, classField.Size);
+                    }
                     break;
                 }
                 if (IsUnique(fieldRead.Receiver.Type))

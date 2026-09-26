@@ -1344,7 +1344,7 @@ internal sealed partial class Binder
         var type = _variables[variable].Type;
         if (fields.Count != 0)
         {
-            if (members.Count == 0 || !IsClass(type))
+            if (members.Count == 0 || !IsClass(type) || !IsClass(GetField(type, fields[0]).Type))
             {
                 CheckFieldMutation(type, fields[0], _constructor && variable == 0, root.Span);
             }
@@ -1361,7 +1361,7 @@ internal sealed partial class Binder
             }
             CheckFieldAccess(type, field, member.Span);
             remainingMembers--;
-            if (remainingMembers == 0 || !IsClass(type))
+            if (remainingMembers == 0 || !IsClass(type) || !IsClass(GetField(type, field).Type))
             {
                 CheckFieldMutation(type, field, _constructor && variable == 0 && fields.Count == 0, member.Span);
             }

@@ -505,7 +505,7 @@ int main(int argc, char** argv)
         puts(capacity
             ? "managed-class-capacity rounds=2 live-limit=4096 refusal=checked reuse=checked live=0"
             : chain
-            ? "managed-token-chain rounds=64 reuse=checked allocation-failure=checked live=0"
+            ? "managed-token-chain rounds=64 copy-values=checked reuse=checked allocation-failure=checked live=0"
             : optional
             ? checkedOptional
                 ? "managed-optionals rounds=64 cycles=checked snapshots=checked unwind=checked live=0"

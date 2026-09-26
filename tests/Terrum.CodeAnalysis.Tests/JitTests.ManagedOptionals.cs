@@ -1,7 +1,11 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
+using System.Globalization;
 using System.IO;
+using System.Text;
 using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Text;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -95,30 +99,36 @@ public sealed partial class JitTests
     [InlineData(true)]
     public async Task LinkedTokenCandidateRejectsInvalidMutationsAndCollectsClearedLinksAsync(bool checkedFailures)
     {
-        var component = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "self-host",
-            "ManagedTokenChain.terrum")).ConfigureAwait(true);
-        var source = component + """
-
+        string[] components = [
+            Path.Combine(RepositoryRoot(), "self-host", "SourceRange.terrum"),
+            Path.Combine(RepositoryRoot(), "self-host", "Token.terrum"),
+            Path.Combine(RepositoryRoot(), "self-host", "ManagedTokenChain.terrum"),
+        ];
+        const string Source = """
+            using Terrum.CodeAnalysis;
             int32 Main() {
                 require ManagedTokenChain.TryCreate(out var chain);
                 if (chain.GetCount() != 0 || chain.GetVersion() != 0 || chain.TryClear()) { return 1; }
-                require chain.TryAppend(1, 0);
-                require chain.TryAppend(7, 42);
-                if (chain.TryAppend(-1, 43) || chain.TryAppend(9, 41)) { return 2; }
-                if (chain.TryGet(-1, out var invalidKind, out var invalidOffset)) { return 3; }
-                require chain.TryGet(1, out var kind, out var sourceOffset);
-                if (kind != 7 || sourceOffset != 42 || chain.GetCount() != 2
+                require chain.TryAppend(1, 0, 3);
+                require chain.TryAppend(7, 42, 5);
+                if (chain.TryAppend(-1, 43, 1) || chain.TryAppend(9, 41, 1)
+                    || chain.TryAppend(9, 43, -1) || chain.TryAppend(9, int32.MaxValue, 1)) { return 2; }
+                if (chain.TryGet(-1, out var invalid)) { return 3; }
+                require chain.TryGet(1, out var token);
+                if (token.Kind != 7 || token.Range.Start != 42 || token.Range.Length != 5
+                    || token.Range.GetEnd() != 47 || chain.GetCount() != 2
                     || chain.GetVersion() != 2) { return 4; }
                 require chain.TryClear();
                 if (chain.GetCount() != 0 || chain.GetVersion() != 3 || chain.TryClear()) { return 5; }
                 if (ManagedHeap.Collect() != 2) { return 6; }
+                if (token.Kind != 7 || token.Range.Start != 42 || token.Range.Length != 5) { return 10; }
                 for (mut int32 i = 0; i < 64; i = i + 1) {
-                    require chain.TryAppend(i, i);
+                    require chain.TryAppend(i, i, 1);
                 }
-                if (chain.TryAppend(64, 64) || chain.GetCount() != 64
+                if (chain.TryAppend(64, 64, 1) || chain.GetCount() != 64
                     || chain.GetVersion() != 67) { return 7; }
-                require chain.TryGet(63, out var lastKind, out var lastOffset);
-                if (lastKind != 63 || lastOffset != 63) { return 8; }
+                require chain.TryGet(63, out var last);
+                if (last.Kind != 63 || last.Range.Start != 63 || last.Range.Length != 1) { return 8; }
                 require chain.TryClear();
                 if (ManagedHeap.Collect() != 64) { return 9; }
                 return 42;
@@ -126,11 +136,56 @@ public sealed partial class JitTests
             """;
         if (checkedFailures)
         {
-            await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+            await AssertCheckedExecutionAsync(Source, 42, components).ConfigureAwait(true);
         }
         else
         {
-            await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
+            await AssertFailFastExecutionAsync(Source, 42, components).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LinkedTokenCopiesMatchHostMetadataAfterCollectionAsync(bool checkedFailures)
+    {
+        string[] components = [
+            Path.Combine(RepositoryRoot(), "self-host", "SourceRange.terrum"),
+            Path.Combine(RepositoryRoot(), "self-host", "Token.terrum"),
+            Path.Combine(RepositoryRoot(), "self-host", "ManagedTokenChain.terrum"),
+        ];
+        var lexical = Lexer.Lex(SourceText.From("// header\r\nint32 \U00010400() { return 42; }"));
+        Assert.Empty(lexical.Diagnostics);
+        var source = new StringBuilder("""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require ManagedTokenChain.TryCreate(out var chain);
+            """);
+        foreach (var token in lexical.Tokens)
+        {
+            _ = source.Append(CultureInfo.InvariantCulture,
+                $"require chain.TryAppend({(int)token.Kind}, {token.Span.Start}, {token.Span.Length});");
+        }
+        for (var index = 0; index < lexical.Tokens.Length; index++)
+        {
+            _ = source.Append(CultureInfo.InvariantCulture, $"require chain.TryGet({index}, out var copy{index});");
+        }
+        _ = source.Append(CultureInfo.InvariantCulture,
+            $"require chain.TryClear(); require ManagedHeap.Collect() == {lexical.Tokens.Length};");
+        for (var index = 0; index < lexical.Tokens.Length; index++)
+        {
+            var token = lexical.Tokens[index];
+            _ = source.Append(CultureInfo.InvariantCulture,
+                $"require copy{index}.Kind == {(int)token.Kind} && copy{index}.Range.Start == {token.Span.Start} && copy{index}.Range.Length == {token.Span.Length} && copy{index}.Range.GetEnd() == {token.Span.End};");
+        }
+        _ = source.Append("return 42; }");
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(source.ToString(), 42, components).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(source.ToString(), 42, components).ConfigureAwait(true);
         }
     }
 

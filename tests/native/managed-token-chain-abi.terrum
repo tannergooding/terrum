@@ -2,27 +2,34 @@ using Terrum.CodeAnalysis;
 
 public int32 ChainAllocationFailure() {
     require ManagedTokenChain.TryCreate(out var chain);
-    require chain.TryAppend(1, 0);
-    if (chain.TryAppend(2, 1)) {
+    require chain.TryAppend(1, 0, 3);
+    require !chain.TryAppend(3, int32.MaxValue, 1);
+    if (chain.TryAppend(2, 3, 4)) {
         return 0;
     }
     require chain.GetCount() == 1;
     require chain.GetVersion() == 1;
-    require chain.TryGet(0, out var kind, out var offset);
-    require kind == 1 && offset == 0;
+    require chain.TryGet(0, out var token);
+    require token.Kind == 1 && token.Range.Start == 0 && token.Range.Length == 3;
+    require token.Range.GetEnd() == 3;
     require ManagedHeap.Collect() == 0;
     return 42;
 }
 
 public int32 ChainReuse() {
     require ManagedTokenChain.TryCreate(out var chain);
-    require chain.TryAppend(1, 0);
-    require chain.TryAppend(2, 1);
-    require chain.TryAppend(3, 2);
+    require chain.TryAppend(1, 0, 2);
+    require chain.TryAppend(2, 2, 3);
+    require chain.TryAppend(3, 5, 0);
+    require chain.TryGet(1, out var snapshot);
     require chain.TryClear();
     require ManagedHeap.Collect() == 3;
-    require chain.TryAppend(4, 0);
-    require chain.TryAppend(5, 1);
+    require snapshot.Kind == 2 && snapshot.Range.Start == 2 && snapshot.Range.Length == 3;
+    require snapshot.Range.GetEnd() == 5;
+    require chain.TryAppend(4, 0, 7);
+    require chain.TryAppend(5, 7, 2);
+    require chain.TryGet(1, out var next);
+    require next.Kind == 5 && next.Range.Start == 7 && next.Range.Length == 2;
     require chain.GetCount() == 2;
     require chain.GetVersion() == 6;
     require chain.TryClear();

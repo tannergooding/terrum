@@ -170,6 +170,9 @@ public static partial class ModuleCompiler
             && (ManagedClassTypes.IsOptional(function.ReturnType)
                 || function.Variables.Any(static variable => ManagedClassTypes.IsOptional(variable.Type))));
 
+    private static bool IsInlineClassField(PrimitiveType type) =>
+        (int)type >= 100 && !ManagedClassTypes.IsManaged(type);
+
     private static bool UsesManagedNode(BoundFunction function) =>
         function.Intrinsic is >= BoundIntrinsic.NodeTryCreate and <= BoundIntrinsic.NodeCollect
         || function.ReturnType == PrimitiveType.ManagedNode
@@ -383,6 +386,11 @@ public static partial class ModuleCompiler
         else
         {
             SemanticVerifier.Verify(program);
+        }
+        if (program.Classes.Any(static @class => @class.Fields.Any(
+                static field => IsInlineClassField(field.Type))))
+        {
+            throw new ModuleFormatException("Inline struct class fields require a newer semantic module version.");
         }
         if (program.Classes.IsDefaultOrEmpty && program.Functions.Any(static function =>
                 ManagedClassTypes.IsOptional(function.ReturnType)
@@ -1452,7 +1460,13 @@ public static partial class ModuleCompiler
             var fields = ImmutableArray.CreateBuilder<BoundStructField>(fieldCount);
             for (var field = 0; field < fieldCount; field++)
             {
-                fields.Add(new BoundStructField(GetString(reader), (PrimitiveType)reader.ReadInt32(),
+                var fieldName = GetString(reader);
+                var fieldType = (PrimitiveType)reader.ReadInt32();
+                if (IsInlineClassField(fieldType))
+                {
+                    throw new ModuleFormatException("Inline struct class fields require a newer semantic module version.");
+                }
+                fields.Add(new BoundStructField(fieldName, fieldType,
                     reader.ReadInt32(), reader.ReadInt32()) {
                     IsPrivate = GetBool(reader),
                     IsInternal = GetBool(reader),

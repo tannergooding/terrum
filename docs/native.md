@@ -102,7 +102,7 @@ cross-image roots and source-class metadata remain unsupported
 ([replacement proof](native-graph.md)).
 
 `native-19` adds up to 256 source-defined classes with explicit constructors and
-at most 16 scalar or non-null managed-reference fields in a payload of at most
+at most 16 scalar, compact Copy or non-null managed-reference fields in a payload of at most
 128 bytes. Constructor arguments are limited to three scalars or managed handles;
 inline values, unique owners and borrowed views are not accepted by the factory.
 Class values are eight-byte aliasable handles, not inline copies.
@@ -127,12 +127,22 @@ partial objects. Optional fields in `native-20` provide an explicit construction
 path for source-defined cycles.
 Class metadata is image-private: version 19 semantic/native leaf modules can
 retain it internally, but native DLL exports remain scalar-only.
+Executable class payloads also admit acyclic, handle-free Copy struct fields
+of at most 16 bytes, within the same 128-byte payload bound. Whole-value reads
+and writes copy all bytes; nested field access preserves declared mutability
+and construction checks. These aggregates contribute no managed descriptor
+slots. They cannot contain managed handles, owners or views, and factories
+still cannot take aggregate arguments. Version 19 persisted class modules
+reject these inline fields rather than reinterpret their existing wire contract.
 The [class sample](../samples/native/managed-classes.terrum)
 returns 42 through shared aliases and heterogeneous managed edges. The independent
 C heap probe checks multiple-edge liveness, pointer-shaped scalar nonroots,
 allocation failure, collection during construction, and exact provisional-object
 release through both Terrum and native catch boundaries. It also checks selected
 assignment-target roots across edge replacement, collection and checked failure.
+The managed token-chain probe additionally stores complete 12-byte tokens,
+checks nested range fields and retains copied results after their source links
+are collected, with unchanged exact allocation/release accounting.
 
 `native-20` admits source-class and `ManagedNode` optional handles in locals,
 parameters, results, conditional outputs and class fields. They occupy eight

@@ -155,10 +155,10 @@ public sealed partial class JitTests
     public Task WorkerAndNativeExecutableAgreeAsync(string source, int expected) =>
         AssertFailFastExecutionAsync(source, expected);
 
-    private static async Task AssertFailFastExecutionAsync(string source, int expected)
+    private static async Task AssertFailFastExecutionAsync(string source, int expected, params string[] sourcePaths)
     {
         AssertWindowsX64();
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        var compilation = Compilation.Create(await ReadExecutionTreesAsync(source, sourcePaths).ConfigureAwait(true));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var root = RepositoryRoot();
@@ -170,7 +170,13 @@ public sealed partial class JitTests
         {
             await File.WriteAllBytesAsync(image, NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true);
             (var nativeExit, _, _) = await RunAsync(new ProcessStartInfo(image) { UseShellExecute = false, CreateNoWindow = true }, []).ConfigureAwait(true);
-            (var jitExit, var jitOutput, var jitError) = await RunAsync(CliStart("jit", "-", "--runtime", "fail-fast"), Encoding.UTF8.GetBytes(source)).ConfigureAwait(true);
+            var jit = CliStart("jit", "-", "--runtime", "fail-fast");
+            foreach (var path in sourcePaths)
+            {
+                jit.ArgumentList.Add("--source");
+                jit.ArgumentList.Add(path);
+            }
+            (var jitExit, var jitOutput, var jitError) = await RunAsync(jit, Encoding.UTF8.GetBytes(source)).ConfigureAwait(true);
             Assert.Equal(expected, nativeExit);
             Assert.Equal(nativeExit, jitExit);
             Assert.Equal("", jitOutput);
@@ -229,10 +235,11 @@ public sealed partial class JitTests
     public Task CheckedExceptionWorkerAndExecutableAgreeAsync(string source, int expected) =>
         AssertCheckedExecutionAsync(source, expected);
 
-    private static async Task AssertCheckedExecutionAsync(string source, int expected)
+    private static async Task AssertCheckedExecutionAsync(string source, int expected, params string[] sourcePaths)
     {
         AssertWindowsX64();
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
+        var compilation = Compilation.Create(await ReadExecutionTreesAsync(source, sourcePaths).ConfigureAwait(true),
+            BoundRuntimePolicy.CheckedExceptions);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         var directory = Path.Combine(RepositoryRoot(), "artifacts", "jit-tests");
@@ -245,8 +252,13 @@ public sealed partial class JitTests
                 UseShellExecute = false,
                 CreateNoWindow = true,
             }, []).ConfigureAwait(true);
-            (var jitExit, var output, var error) = await RunAsync(
-                CliStart("jit", "-", "--runtime", "checked-exceptions"), Encoding.UTF8.GetBytes(source)).ConfigureAwait(true);
+            var jit = CliStart("jit", "-", "--runtime", "checked-exceptions");
+            foreach (var path in sourcePaths)
+            {
+                jit.ArgumentList.Add("--source");
+                jit.ArgumentList.Add(path);
+            }
+            (var jitExit, var output, var error) = await RunAsync(jit, Encoding.UTF8.GetBytes(source)).ConfigureAwait(true);
             Assert.Equal(expected, nativeExit);
             Assert.Equal(nativeExit, jitExit);
             Assert.Equal("", output);
@@ -256,6 +268,18 @@ public sealed partial class JitTests
         {
             File.Delete(image);
         }
+    }
+
+    private static async Task<SyntaxTree[]> ReadExecutionTreesAsync(string source, string[] sourcePaths)
+    {
+        var trees = new SyntaxTree[sourcePaths.Length + 1];
+        trees[0] = SyntaxTree.Parse(source);
+        for (var index = 0; index < sourcePaths.Length; index++)
+        {
+            var path = sourcePaths[index];
+            trees[index + 1] = SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path);
+        }
+        return trees;
     }
 
     [Fact]
