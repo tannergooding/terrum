@@ -1,0 +1,1 @@
+public int32 Alpha() { return 20; }

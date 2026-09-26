@@ -73,7 +73,9 @@ Windows x64; emission itself does not invoke installed platform toolchains.
 The [JIT proof](docs/jit.md) covers executable-memory and unwind lifetimes;
 [modules](docs/modules.md) demonstrate process-start compatible producer
 replacement against unchanged persisted semantic or native consumers, with
-contract checks before execution. Neither is a production
+contract checks before execution. [Native module sets](docs/module-sets.md) extend
+the persisted native consumer proof to multiple independent leaf DLLs.
+Neither is a production
 runtime or hot-servicing implementation. The [compiled scanner](docs/scanner.md)
 executes bounded Terrum tokenization against shared pinned Unicode data and
 decodes integer magnitudes without imposing a default numeric type.

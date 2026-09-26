@@ -19,6 +19,13 @@ internal static class NativeModuleImageValidator
 
     internal static void Validate(byte[] image, bool isConsumer, string providerDll, IReadOnlyList<string> exports,
         NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast)
+        => Validate(image, isConsumer, isConsumer
+            ? new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal) { [providerDll] = exports }
+            : new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal), exports, policy);
+
+    internal static void Validate(byte[] image, bool isConsumer,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> providerImports, IReadOnlyList<string> exports,
+        NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast)
     {
         if (policy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
@@ -200,12 +207,15 @@ internal static class NativeModuleImageValidator
             void CheckImports()
             {
                 var table = header.ImportTableDirectory;
-                var count = (isConsumer ? 2 : 1) + (checkedExceptions ? 1 : 0);
+                var count = 1 + (isConsumer ? providerImports.Count : 0) + (checkedExceptions ? 1 : 0);
                 if (table.Size != 20 * (count + 1))
                 {
                     throw Invalid();
                 }
-                var names = new List<string>();
+                var names = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+                var systemCount = checkedExceptions ? 2 : 1;
+                var expectedDlls = providerImports.Keys.Order(StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(static (string item) => item, StringComparer.Ordinal).ToArray();
                 for (var index = 0; index < count; index++)
                 {
                     var at = Offset(table.RelativeVirtualAddress + (index * 20), 20, ".idata");
@@ -218,7 +228,7 @@ internal static class NativeModuleImageValidator
                     }
                     var dll = Name(name);
                     if (dll != (index == 0 ? "KERNEL32.dll"
-                        : checkedExceptions && index == 1 ? "NTDLL.dll" : providerDll))
+                        : checkedExceptions && index == 1 ? "NTDLL.dll" : expectedDlls[index - systemCount]))
                     {
                         throw Invalid();
                     }
@@ -262,9 +272,9 @@ internal static class NativeModuleImageValidator
                     {
                         throw Invalid();
                     }
-                    if (index != 0 && (!checkedExceptions || index != 1))
+                    if (index >= systemCount)
                     {
-                        names.AddRange(symbols);
+                        names.Add(dll, symbols);
                     }
                 }
                 var terminator = Offset(table.RelativeVirtualAddress + (count * 20), 20, ".idata");
@@ -274,7 +284,8 @@ internal static class NativeModuleImageValidator
                 {
                     throw Invalid();
                 }
-                if (isConsumer && !names.SequenceEqual(exports.Order(StringComparer.Ordinal)))
+                if (isConsumer && (names.Count != providerImports.Count
+                    || names.Any(pair => !pair.Value.SequenceEqual(providerImports[pair.Key].Order(StringComparer.Ordinal)))))
                 {
                     throw Invalid();
                 }

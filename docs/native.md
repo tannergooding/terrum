@@ -84,6 +84,12 @@ corruption; these are trusted native-code artifacts, not a sandbox or an
 authenticated distribution format. See [modules](modules.md) for the precise
 identity, compatibility, loader and runtime boundaries.
 
+[Native module sets](module-sets.md) extend this process-start proof to two to
+sixteen independently produced leaf DLLs. The persisted `.tnset` consumer keeps
+its original PE bytes while either selected provider is compatibly replaced;
+validation checks every dependency and the exact PE import ownership. This is
+not transitive dependency resolution or multi-provider JIT loading.
+
 ## Checked no-throw declarations
 
 `[NoThrow]` on a function or constructor declares a bound on language-level
@@ -512,7 +518,8 @@ The same encoder's `NativeCode` result is consumed by both PE layout and the
 The [module proof](modules.md) persists typed semantic bodies and normalized
 contracts, supports source binding against artifact declarations, verifies replacements,
 then lowers at process start. Producer libraries need no artificial entry point;
-unresolved imported declarations cannot reach the encoder. Static AOT
+imported declarations require explicit validated DLL/export bindings at the
+encoder boundary. Static AOT
 linking from these artifacts is separate from replacement of an unchanged PE.
 There is no optimizer, debug-symbol format, general source interop, managed
 root map, production runtime or hot replacement. The broader LMOD design

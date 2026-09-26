@@ -1,0 +1,1 @@
+public int32 Beta() { return 23; }

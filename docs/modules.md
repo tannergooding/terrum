@@ -175,8 +175,12 @@ structs are rejected at source binding. Field writes require declared `mut`
 authority along the complete path, except a constructor's own fields during
 construction; mutable local storage alone does not upgrade a readonly field.
 
-The proof supports one producer reference per consumer, compact acyclic value
-layouts and the existing native value profile. Nested field types are retained
+The original semantic/native pair APIs support one producer reference per
+consumer. [Native module sets](module-sets.md) additionally bind two to sixteen
+independent leaf producers and persist one consumer EXE that imports their DLLs;
+either provider can be compatibly replaced without re-emitting that consumer.
+Both paths use compact acyclic value layouts and the existing native value
+profile. Nested field types are retained
 transitively and remapped across artifact-local type indexes. Every imported
 nested layout participates in replacement checking, including field types,
 order, access and declared mutation authority. Version 10 retains the checked
@@ -195,7 +199,7 @@ operations and declared callees, not an exception handler or a claim that
 fail-fast process termination counts as NoThrow. Versions 10 (fail-fast) and 11 (checked-exceptions) remain readable; earlier
 versions, including version 9 without structured
 cleanup regions, are rejected;
-recreate them from source. Multi-producer identity/version resolution, dependency
+recreate them from source. Transitive dependency/version resolution, dependency
 cycles and resilient public layouts remain later work.
 
 Version 12 stores the unique layout flag, declared cleanup method, cleanup

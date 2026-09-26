@@ -26,7 +26,7 @@ public sealed record NativeModuleInfo(string Identity, bool IsConsumer, string I
 }
 
 /// <summary>Creates and checks single-provider Windows x64 native packages; this is not an authenticated code loader.</summary>
-public static class NativeModuleCompiler
+public static partial class NativeModuleCompiler
 {
     private const int Version = 1;
     private const int MaximumBytes = 16 * 1024 * 1024;

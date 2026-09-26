@@ -31,6 +31,9 @@ internal static partial class Program
         + "       terrumc compile-native consumer <source> <producer.trmn> [--source <source>] -o <consumer.trmn> --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc validate-native <consumer.trmn> <producer.trmn> [--json]\n"
         + "       terrumc run-native <consumer.trmn> <producer.trmn> --runtime <fail-fast|checked-exceptions> [--json]\n"
+        + "       terrumc compile-native-set <source> --provider <producer.trmn> --provider <producer.trmn> -o <consumer.tnset> --runtime <fail-fast|checked-exceptions> [--json]\n"
+        + "       terrumc validate-native-set <consumer.tnset> --provider <producer.trmn> --provider <producer.trmn> [--json]\n"
+        + "       terrumc run-native-set <consumer.tnset> --provider <producer.trmn> --provider <producer.trmn> --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "check/tokens/tree inspect syntax; analyze binds the native profile; build emits Windows x64 PE.\n"
         + "fail-fast explicitly selects process termination for runtime failures, not catchable exceptions.\n"
         + "checked-exceptions enables recovery and unwinding for four compiler-generated failure reasons.\n"
@@ -62,6 +65,11 @@ internal static partial class Program
         if (args.Length != 0 && args[0] is "compile-native" or "validate-native" or "run-native")
         {
             return RunNativeModuleCommand(args, json);
+        }
+
+        if (args.Length != 0 && args[0] is "compile-native-set" or "validate-native-set" or "run-native-set")
+        {
+            return RunNativeSetCommand(args, json);
         }
 
         if (args.Length != 0 && args[0] is "analyze" or "build" or "build-library" or "jit")
