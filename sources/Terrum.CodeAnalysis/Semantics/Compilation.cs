@@ -140,6 +140,12 @@ public sealed class Compilation
     public static string GetNativeProfileVersion(BoundProgram program)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (program.Functions.Any(static function => function.Intrinsic >= BoundIntrinsic.NodeTryCreate
+            || function.ReturnType == PrimitiveType.ManagedNode
+            || function.Variables.Any(static variable => variable.Type == PrimitiveType.ManagedNode)))
+        {
+            return "native-18";
+        }
         var unique = false;
         foreach (var structure in program.Structures)
         {

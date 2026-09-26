@@ -8,6 +8,14 @@ through `OwnedInt32Buffer.Slice`, and exclusive lexical
 executable ownership checks today
 ([implementation](implementation.md)); a slice cannot be copied, passed,
 stored or returned, and is not the proposed generic `Span<T>`.
+The separate bounded `ManagedNode` proof allows copied aliasable handles,
+records exact active roots for locals, call/output/return temporaries and
+suspended frames, and traces its single managed edge at explicit collection
+points. Managed `for` header locals and conditional outputs remain rooted
+through the loop and retire when its header scope ends. It neither gives a
+managed root authority over an `OwnedInt32Buffer`
+nor implements general class, stored-view, checked-exception or module root
+contracts.
 The remaining lifetime constructs are rejected for execution.
 
 ## Three independent dependencies

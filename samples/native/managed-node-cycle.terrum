@@ -1,0 +1,29 @@
+bool MakeRetained(out ManagedNode retained) {
+    require ManagedNode.TryCreate(40, out var head);
+    require ManagedNode.TryCreate(2, out var child);
+    head.SetNext(child);
+    retained = head;
+    return true;
+}
+
+void MakeCycle() {
+    require ManagedNode.TryCreate(1, out var first);
+    require ManagedNode.TryCreate(2, out var second);
+    first.SetNext(second);
+    second.SetNext(first);
+}
+
+int32 CollectAndRead(ManagedNode kept) {
+    int32 reclaimed = ManagedHeap.Collect();
+    require reclaimed == 2;
+    require kept.TryGetNext(out var child);
+    child.SetValue(2);
+    return kept.Value + child.Value;
+}
+
+int32 Main() {
+    require MakeRetained(out var kept);
+    MakeCycle();
+    ManagedNode alias = kept;
+    return CollectAndRead(alias);
+}

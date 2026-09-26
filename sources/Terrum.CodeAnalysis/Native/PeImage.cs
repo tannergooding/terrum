@@ -16,13 +16,12 @@ internal static class PeImage
     private const int TextRva = 0x1000;
     private const ulong ImageBase = 0x140000000;
 
-    internal static byte[] Build(NativeCode native) => BuildCore(native, null, 0);
+    internal static byte[] Build(NativeCode native) => BuildCore(native, null);
 
-    internal static byte[] BuildLibrary(NativeCode native, IReadOnlyList<(string Name, int Index)> exports,
-        int sourceFunctionCount) => BuildCore(native, exports, sourceFunctionCount);
+    internal static byte[] BuildLibrary(NativeCode native, IReadOnlyList<(string Name, int Index)> exports) =>
+        BuildCore(native, exports);
 
-    private static byte[] BuildCore(NativeCode native, IReadOnlyList<(string Name, int Index)>? exports,
-        int sourceFunctionCount)
+    private static byte[] BuildCore(NativeCode native, IReadOnlyList<(string Name, int Index)>? exports)
     {
         var library = exports is not null;
         var code = native.Code;
@@ -117,13 +116,16 @@ internal static class PeImage
             Write32(image, exportFile + 28, exportRva + functionsAt);
             Write32(image, exportFile + 32, exportRva + namesAt);
             Write32(image, exportFile + 36, exportRva + ordinalsAt);
-            // Cleanup funclets follow the source functions and must never become exports.
-            var sourceStart = functions.Length - sourceFunctionCount
-                - functions.Count(static function => function.UsesParentFrame);
             for (var i = 0; i < count; i++)
             {
                 var (name, index) = exports[i];
-                Write32(image, exportFile + functionsAt + (4 * i), textRva + functions[sourceStart + index].Start);
+                var sourceOffset = index >= 0 && index < native.SourceFunctionOffsets.Length
+                    ? native.SourceFunctionOffsets[index] : -1;
+                if (sourceOffset < 0 || sourceOffset >= code.Length)
+                {
+                    throw new ArgumentException("Export does not name an emitted source function.", nameof(exports));
+                }
+                Write32(image, exportFile + functionsAt + (4 * i), textRva + sourceOffset);
                 Write32(image, exportFile + namesAt + (4 * i), exportRva + stringAt);
                 Write16(image, exportFile + ordinalsAt + (2 * i), i);
                 var nameBytes = AsciiBytes(name + "\0");

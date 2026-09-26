@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-9 and native-10 through native-17
+## Current boundary: syntax-9 and native-10 through native-18
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -9,7 +9,7 @@ binds a bounded scalar/compact-value language and emits Windows x64 executables 
 verified structured operations. A clean syntax result is deliberately not a
 valid-program claim: `var x = 1;` parses but semantic analysis rejects its missing
 numeric context. General ownership/lifetime checking, general semantic IL/LMOD,
-managed graphs and standard-library execution are not implemented.
+general managed graphs and standard-library execution are not implemented.
 
 | Surface | Implemented | Not yet implemented |
 |---|---|---|
@@ -19,6 +19,7 @@ managed graphs and standard-library execution are not implemented.
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; repeated `?` diagnoses | General type resolution, optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, break/continue, switch/patterns, general exception objects/throw, async, compound assignment |
 | Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations and lexical readonly/exclusive writable buffer slices | Character literals, partial owning-field moves, owning field replacement, general expression temporaries, general stored loans, evaluation outside the native profile, user-defined conversions, overloads, generic calls, conditional expressions, constructor generic inference |
+| Managed-node proof | Aliasable opaque `ManagedNode` handles, one traced outgoing edge, exact frame/temporary roots and explicit nonmoving cycle collection in closed fail-fast executables/JIT | General classes, managed user-struct fields, checked-exception roots, stored interior pointers, implicit GC, native DLL/module graph managed ABI |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
 Only the grammar below is supported. Unsupported constructs diagnose rather than
@@ -92,7 +93,22 @@ There is no resize, general aliasable view or generic
 buffer or user-defined buffer representation. `TryAppend` is a bounded
 initialized-prefix adapter for compiler components, not an implementation of
 the proposed general `Buffer<T>`/`TryAdd` library contracts.
-The [source-line index candidate](../self-host/SourceLineIndex.terrum) uses it
+The separate `ManagedNode` proof copies handles without duplicating payloads
+or a cleanup obligation. `ManagedNode.TryCreate(value, out var node)` publishes
+only on true; `node.Value`, `SetValue`, `SetNext`, `ClearNext` and
+`TryGetNext(out var next)` access a scalar and a single nullable internal
+edge. A fixed local binding can mutate through its writable handle.
+`ManagedHeap.Collect()` walks typed active roots across generated frames,
+including staged call arguments, outputs and pending returns, then marks the
+one-edge graph and reclaims unmarked cycles. This bounded collector runs only
+at explicit calls and at executable entry teardown; it does not rely on
+reference counts, stack word scanning or hidden allocation-triggered GC.
+Managed handles cannot be placed in user structs, passed across external
+calls or DLL exports, or stored in semantic/native modules. The fail-fast
+profile admits closed executables/JIT and isolated native DLLs with scalar-only
+exports and private managed state; DLL callers must serialize calls and
+explicitly collect abandoned nodes before unload.
+The [source-line index candidate](../self-host/SourceLineIndex.terrum) uses `OwnedInt32Buffer`
 to build and own a line-start table, with binary-searched UTF-16 positions checked
 against host fixtures under both native failure policies.
 General borrowed references and stored loans remain unsupported.

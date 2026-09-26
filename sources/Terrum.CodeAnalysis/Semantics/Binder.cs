@@ -45,6 +45,7 @@ internal sealed class Binder
     private readonly CompilationReference? _reference;
     private readonly BoundRuntimePolicy _runtimePolicy;
     private bool _usesNativeBuffer;
+    private bool _usesManagedNode;
 
     internal Binder(SyntaxTree tree, CancellationToken cancellationToken)
         : this([tree], [], cancellationToken)
@@ -154,6 +155,16 @@ internal sealed class Binder
             {
                 _usesNativeBuffer = true;
             }
+            if ((item.Node.Kind == SyntaxKind.TypeName
+                    && NameText(item.Node) == NativeManagedNodeIntrinsics.TypeName)
+                || (item.Node.Kind == SyntaxKind.MemberAccessExpression
+                    && item.Node.Children[0] is SyntaxNode managedReceiver
+                    && managedReceiver.Kind == SyntaxKind.NameExpression
+                    && NameText(managedReceiver) is NativeManagedNodeIntrinsics.TypeName
+                        or NativeManagedNodeIntrinsics.HeapName))
+            {
+                _usesManagedNode = true;
+            }
             foreach (var child in item.Node.Children)
             {
                 if (child is SyntaxNode node)
@@ -186,7 +197,9 @@ internal sealed class Binder
                 {
                     var name = StructName(structure).Text;
                     var qualified = string.IsNullOrEmpty(_namespace) ? name : _namespace + "." + name;
-                    if (qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView" or "MutableInt32BufferView")
+                    if (qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
+                        or "MutableInt32BufferView"
+                        || name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName)
                     {
                         Report("TRM3003", "A compiler-owned native buffer or view type cannot be redeclared.", structure.Span);
                         continue;
@@ -214,6 +227,10 @@ internal sealed class Binder
         }
         _ = _structNames.TryAdd("ReadonlyInt32BufferView", PrimitiveType.ReadonlyInt32BufferView);
         _ = _structNames.TryAdd("MutableInt32BufferView", PrimitiveType.MutableInt32BufferView);
+        if (_usesManagedNode)
+        {
+            _ = _structNames.TryAdd(NativeManagedNodeIntrinsics.TypeName, PrimitiveType.ManagedNode);
+        }
         foreach (var index in _structDeclarations.Keys)
         {
             DeclareStruct(index);
@@ -265,6 +282,23 @@ internal sealed class Binder
                     null, null, _trees[0], NativeBufferIntrinsics.TypeName, false,
                     false, true, intrinsic.Variables[0].IsMutable && !intrinsic.IsStatic,
                     intrinsic.IsStatic, intrinsic.IsNoThrow, false, intrinsic));
+            }
+        }
+        if (_usesManagedNode)
+        {
+            foreach (var intrinsic in NativeManagedNodeIntrinsics.Functions)
+            {
+                if (!_functions.TryAdd(intrinsic.Name, _signatures.Count))
+                {
+                    Report("TRM3003", $"The compiler-owned operation '{intrinsic.Name}' cannot be redeclared.", _trees[0].Root.Span);
+                    return null;
+                }
+                var offset = intrinsic.IsStatic ? 0 : 1;
+                var parameters = intrinsic.Variables.Skip(offset)
+                    .Select(static variable => new Parameter(variable.Name, variable.Type, default, variable.IsOut));
+                _signatures.Add(new Signature(intrinsic.Name, intrinsic.ReturnType, [.. parameters],
+                    null, null, _trees[0], intrinsic.DeclaringStruct, false,
+                    false, true, false, intrinsic.IsStatic, intrinsic.IsNoThrow, false, intrinsic));
             }
         }
 
@@ -489,9 +523,10 @@ internal sealed class Binder
             var typeNode = (SyntaxNode)field.Children[^3];
             var fieldName = ((SyntaxTokenElement)field.Children[^2]).Token;
             var type = BindType(typeNode, allowVoid: false);
-            if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
+            if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
+                or PrimitiveType.ManagedNode)
             {
-                Report("TRM3023", "A native buffer view cannot be stored in a field.", field.Span);
+                Report("TRM3023", "A native buffer view or managed node cannot be stored in an inline struct.", field.Span);
             }
             if ((int)type >= 100 && !_laidOut.Contains((int)type - 100))
             {
@@ -743,6 +778,7 @@ internal sealed class Binder
             "bool" => PrimitiveType.Bool,
             "ReadonlyInt32BufferView" => PrimitiveType.ReadonlyInt32BufferView,
             "MutableInt32BufferView" => PrimitiveType.MutableInt32BufferView,
+            "ManagedNode" => PrimitiveType.ManagedNode,
             "void" when allowVoid => PrimitiveType.Void,
             _ => TryResolveStruct(name, out var structure) ? structure : (PrimitiveType?)null,
         };
@@ -912,6 +948,9 @@ internal sealed class Binder
             }
         }
 
+        var managedLocals = _scopes[^1].Values
+            .Where(slot => _variables[slot].Type == PrimitiveType.ManagedNode)
+            .Order().ToImmutableArray();
         _scopes.RemoveAt(_scopes.Count - 1);
         var bound = statements.ToImmutable();
         for (var index = bound.Length - 1; index >= 0; index--)
@@ -945,7 +984,10 @@ internal sealed class Binder
                         block.Span));
             }
         }
-        return new BoundBlock(bound, block.Span);
+        return new BoundBlock(bound, block.Span) {
+            IsManagedLexicalScope = true,
+            RetiredManagedLocals = managedLocals,
+        };
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unsupported syntax kinds are rejected by the default branch.")]
@@ -1180,6 +1222,9 @@ internal sealed class Binder
                             node.Span);
                     }
                 }
+                var managedLocals = _scopes[^1].Values
+                    .Where(slot => _variables[slot].Type == PrimitiveType.ManagedNode)
+                    .Order().ToImmutableArray();
                 _scopes.RemoveAt(_scopes.Count - 1);
                 var loopBody = new BoundBlock([body, iterator], node.Span);
                 var loop = new BoundWhile(condition, loopBody, node.Span);
@@ -1191,9 +1236,15 @@ internal sealed class Binder
                         initializer,
                         new BoundTryFinally(new BoundBlock([loop], node.Span),
                             new BoundBlock([new BoundDrop(owner.Variable, cleanupFunction, node.Span)], node.Span), node.Span),
-                    ], node.Span);
+                    ], node.Span) {
+                        IsManagedLexicalScope = true,
+                        RetiredManagedLocals = managedLocals,
+                    };
                 }
-                return new BoundBlock([initializer, loop], node.Span);
+                return new BoundBlock([initializer, loop], node.Span) {
+                    IsManagedLexicalScope = true,
+                    RetiredManagedLocals = managedLocals,
+                };
             }
 
             default:
@@ -1437,6 +1488,13 @@ internal sealed class Binder
                 {
                     expression = new BoundCall(intrinsic,
                         [BindReceiverLoan(receiverNode, PrimitiveType.OwnedInt32Buffer)], PrimitiveType.Int32, node.Span);
+                    break;
+                }
+                if (receiverType == PrimitiveType.ManagedNode && member == "Value"
+                    && TryFindFunction(NativeManagedNodeIntrinsics.TypeName + ".Value", out var nodeValue))
+                {
+                    expression = new BoundCall(nodeValue,
+                        [BindExpression(receiverNode, PrimitiveType.ManagedNode)], PrimitiveType.Int32, node.Span);
                     break;
                 }
                 if (receiverType is PrimitiveType fieldType && TryFindField(fieldType, member, out var field))
@@ -1722,6 +1780,11 @@ internal sealed class Binder
             {
                 receiver = left;
                 _ = TryFindFunction(NativeBufferIntrinsics.TypeName + "." + member, out function);
+            }
+            else if (type == PrimitiveType.ManagedNode)
+            {
+                receiver = left;
+                _ = TryFindFunction(NativeManagedNodeIntrinsics.TypeName + "." + member, out function);
             }
             else if (type is PrimitiveType structType && IsStruct(structType))
             {
@@ -2063,6 +2126,7 @@ internal sealed class Binder
                     }
                     var name = receiverType switch {
                         PrimitiveType.OwnedInt32Buffer => NativeBufferIntrinsics.TypeName + "." + member,
+                        PrimitiveType.ManagedNode => NativeManagedNodeIntrinsics.TypeName + "." + member,
                         PrimitiveType type when IsStruct(type) => _structs[(int)type - 100].Name + "." + member,
                         _ => NameText(callee),
                     };
@@ -2097,6 +2161,10 @@ internal sealed class Binder
                     return PrimitiveType.Int32;
                 }
                 if (receiverType == PrimitiveType.OwnedInt32Buffer && member is "Count" or "Capacity")
+                {
+                    return PrimitiveType.Int32;
+                }
+                if (receiverType == PrimitiveType.ManagedNode && member == "Value")
                 {
                     return PrimitiveType.Int32;
                 }
@@ -2229,6 +2297,7 @@ internal sealed class Binder
         PrimitiveType.OwnedInt32Buffer => NativeBufferIntrinsics.TypeName,
         PrimitiveType.ReadonlyInt32BufferView => "ReadonlyInt32BufferView",
         PrimitiveType.MutableInt32BufferView => "MutableInt32BufferView",
+        PrimitiveType.ManagedNode => "ManagedNode",
         _ when IsStruct(type) => _structs[(int)type - 100].Name,
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };

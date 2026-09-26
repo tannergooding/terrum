@@ -28,6 +28,10 @@ reading it in a loop; the owner remains live until the view's scope ends.
 The [writable buffer-view sample](../samples/native/mutable-buffer-view.terrum)
 returns 42 after an exclusive scoped update and a NoThrow in-place `Clear`
 followed by reuse of the same fixed-capacity owner.
+The [managed-node cycle sample](../samples/native/managed-node-cycle.terrum)
+returns 42 with `--runtime fail-fast`: collection reclaims an unreachable
+two-node cycle while preserving a rooted node and its child. This exercises
+the bounded managed-node runtime, not general class syntax or a collection library.
 
 | Program | Source | Design contract / expected behavior |
 |---|---|---|

@@ -5,8 +5,9 @@
 by-value arguments and conditional outputs), `native-14` (composite unique
 fields, including nested Copy fields, under either runtime policy),
 `native-15` (compiler-defined owned native `int32` buffer), `native-16`
-(lexical readonly slices of its initialized prefix), and `native-17`
-(lexical exclusive writable slices and in-place prefix reset)
+(lexical readonly slices of its initialized prefix), `native-17`
+(lexical exclusive writable slices and in-place prefix reset), and
+`native-18` (closed-image, fail-fast managed-node tracing proof)
 are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
@@ -42,7 +43,42 @@ a named mutable owner exclusively. Its `Length`, `Read(index)` and checked
 value expressions each evaluated once. No owner reads, mutation, move,
 replacement or drop, or another view of that owner, can overlap this lexical
 scope. A mutable view cannot be copied, passed, stored or returned.
-Allocation-failure and exactly-once-release behavior can be checked with
+
+The separate `native-18` proof exposes an opaque aliasable `ManagedNode`
+handle, not a pointer or a native owner. `ManagedNode.TryCreate(value, out
+var node)` returns false without publishing a handle when allocation fails;
+`node.Value`, `SetValue(value)`, `SetNext(other)`, `ClearNext()` and
+`TryGetNext(out var next)` access its scalar payload and one nullable internal
+edge. Copying a handle shares node identity. `ManagedHeap.Collect()` is an
+explicit, allocation-free safe point: it traces exact initialized managed
+locals, argument and output staging, return snapshots and suspended callers,
+then sweeps unreachable nodes, including cycles. A bounded 24-byte,
+nonmoving node has its managed edge at offset 0, allocation-list link at 8,
+`int32` payload at 16 and mark word at 20. Collection follows the sole edge
+without recursion or a mark-stack allocation; it does not run implicitly on
+allocation. Frame roots retire when their lexical block ends, and the
+executable/JIT callable entry invokes the same generated collector after
+`Main` returns and all source frames have unlinked. This drains surviving
+nodes before the JIT unregisters and releases its executable image; the
+JIT does not delegate reclamation to its worker process exit or CLR GC.
+The maximum live allocation count is 4,096; a full heap makes `TryCreate`
+return false rather than fabricate a result. `HeapFree` failure remains fatal.
+This is a single-threaded, image-private, fail-fast AOT/JIT proof with no
+general class syntax, checked-exception root unwind, managed user-struct
+fields, managed native exports/imports, persisted module graph ABI, finalizers,
+interior pointers, pinning or generational/concurrent collection. Native DLL
+emission admits only scalar by-value parameters and scalar or `void` results,
+with no `out` parameters and only private managed state; calls must be serialized.
+An export does **not** collect merely because it returns, so a
+caller must run an exported scalar collection proof to drain any abandoned
+nodes before unloading the DLL. There is no managed cross-DLL calling ABI
+or automatic unload teardown.
+The independent `scripts/check-managed-node-abi.cs` probe instruments the
+image's `HeapAlloc`/`HeapFree` imports. It checks cycle reclamation, retired
+frame roots, pointer-shaped scalar nonroots, allocation failure and fatal
+release failures through a separately compiled C caller.
+
+For owned buffers, allocation-failure and exactly-once-release behavior can be checked with
 the trusted native ABI probe in `scripts/check-owned-buffer-abi.cs`, which
 replaces the fixture DLL's `HeapAlloc`/`HeapFree` imports to inject a
 deterministic failed allocation and track live blocks; tests do not rely on

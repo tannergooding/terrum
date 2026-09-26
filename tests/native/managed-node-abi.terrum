@@ -1,0 +1,42 @@
+void AttachChild(ManagedNode parent) {
+    require ManagedNode.TryCreate(42, out var child);
+    parent.SetNext(child);
+}
+
+void DiscardCycle() {
+    require ManagedNode.TryCreate(1, out var first);
+    require ManagedNode.TryCreate(2, out var second);
+    first.SetNext(second);
+    second.SetNext(first);
+}
+
+public int32 Cycles() {
+    require ManagedNode.TryCreate(0, out var parent);
+    AttachChild(parent);
+    DiscardCycle();
+    require ManagedHeap.Collect() == 2;
+    require parent.TryGetNext(out var child);
+    return child.Value;
+}
+
+public int32 CollectWithScalar(uint64 value) {
+    return ManagedHeap.Collect();
+}
+
+public int32 AllocationFailure() {
+    if (ManagedNode.TryCreate(42, out var node)) {
+        return 0;
+    }
+    require ManagedHeap.Collect() == 0;
+    return 42;
+}
+
+public int32 RetainAcrossAllocationFailure() {
+    require ManagedNode.TryCreate(42, out var retained);
+    retained.SetNext(retained);
+    if (ManagedNode.TryCreate(0, out var unpublished)) {
+        return 0;
+    }
+    require ManagedHeap.Collect() == 0;
+    return retained.Value;
+}

@@ -34,9 +34,11 @@ public enum PrimitiveType
     ReadonlyInt32BufferView,
     /// <summary>A lexical, nonescaping exclusive writable range of an owned int32 buffer.</summary>
     MutableInt32BufferView,
+    /// <summary>An aliasable handle to a compiler-managed node in the bounded tracing profile.</summary>
+    ManagedNode,
 }
 
-/// <summary>Compiler-defined native buffer operations; user functions cannot declare these implementations.</summary>
+/// <summary>Compiler-defined native storage and managed graph operations; user functions cannot declare these implementations.</summary>
 public enum BoundIntrinsic
 {
     /// <summary>An ordinary source definition or imported declaration.</summary>
@@ -55,6 +57,20 @@ public enum BoundIntrinsic
     BufferTryAppend,
     /// <summary>Resets the initialized prefix of a live owner without freeing its allocation.</summary>
     BufferClear,
+    /// <summary>Creates a managed node and publishes its handle only on success.</summary>
+    NodeTryCreate,
+    /// <summary>Reads the scalar payload of a managed node.</summary>
+    NodeValue,
+    /// <summary>Replaces the scalar payload of a managed node.</summary>
+    NodeSetValue,
+    /// <summary>Connects one managed node to another.</summary>
+    NodeSetNext,
+    /// <summary>Clears the outgoing edge of a managed node.</summary>
+    NodeClearNext,
+    /// <summary>Copies an outgoing managed edge only when present.</summary>
+    NodeTryGetNext,
+    /// <summary>Traces exact roots and reclaims unreachable nodes, returning their count.</summary>
+    NodeCollect,
 }
 
 /// <summary>The verified behavior of compiler-generated checked failures.</summary>
@@ -169,7 +185,14 @@ public abstract record BoundStatement(TextSpan Span);
 /// <summary>A lexical block evaluated in source order.</summary>
 /// <param name="Statements">The statements.</param>
 /// <param name="Span">The source range.</param>
-public sealed record BoundBlock(ImmutableArray<BoundStatement> Statements, TextSpan Span) : BoundStatement(Span);
+public sealed record BoundBlock(ImmutableArray<BoundStatement> Statements, TextSpan Span) : BoundStatement(Span)
+{
+    /// <summary>Whether this block establishes a source lexical scope for managed locals.</summary>
+    public bool IsManagedLexicalScope { get; init; }
+
+    /// <summary>Managed local handles whose lexical roots retire at this block's exit.</summary>
+    public ImmutableArray<int> RetiredManagedLocals { get; init; } = [];
+}
 
 /// <summary>Initializes a previously vacant local slot.</summary>
 /// <param name="Variable">The local slot.</param>

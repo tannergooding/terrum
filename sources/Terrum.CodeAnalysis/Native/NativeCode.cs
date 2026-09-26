@@ -27,6 +27,15 @@ public sealed record NativeCode(byte[] Code, int EntryPoint, ImmutableArray<Nati
     /// <summary>Byte offsets into Data for all buffers, indexed by bound-program order.</summary>
     public ImmutableArray<int> BufferOffsets { get; init; } = [];
 
+    /// <summary>Code offsets for source functions in bound-program order; -1 denotes an external declaration.</summary>
+    public ImmutableArray<int> SourceFunctionOffsets { get; init; } = [];
+
+    /// <summary>Byte offset of optional per-execution managed-node state, following all host buffers.</summary>
+    public int ManagedRuntimeOffset { get; init; } = -1;
+
+    /// <summary>Byte length of compiler-supplied host buffer data, excluding managed runtime state.</summary>
+    public int HostDataLength { get; init; }
+
     /// <summary>Code displacements targeting locations in Data.</summary>
     public ImmutableArray<NativeDataFixup> DataFixups { get; init; } = [];
 

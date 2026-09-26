@@ -91,8 +91,12 @@ public static unsafe class NativeJit
             }
         }
 
-        if (code.BufferOffsets.Length != buffers.Length || readOnlyLength != code.ReadOnlyDataLength
-            || totalLength != code.Data.Length)
+        var runtimeOffset = code.ManagedRuntimeOffset < 0 ? (int)totalLength
+            : checked(((int)totalLength + 7) & ~7);
+        if (code.BufferOffsets.Length != buffers.Length || totalLength != code.HostDataLength
+            || readOnlyLength != code.ReadOnlyDataLength
+            || code.Data.Length != runtimeOffset + (code.ManagedRuntimeOffset < 0 ? 0 : 24)
+            || (code.ManagedRuntimeOffset >= 0 && code.ManagedRuntimeOffset != runtimeOffset))
         {
             throw new ArgumentException("Native buffer metadata does not match the bound program.", nameof(code));
         }
@@ -442,6 +446,10 @@ public static unsafe class NativeJit
             var snapshot = new byte[data.Length];
             new ReadOnlySpan<byte>((void*)(memory + readOnlyOffset), code.ReadOnlyDataLength).CopyTo(snapshot);
             new ReadOnlySpan<byte>((void*)(memory + writableOffset), writableLength).CopyTo(snapshot.AsSpan(code.ReadOnlyDataLength));
+            if (code.ManagedRuntimeOffset >= 0)
+            {
+                Array.Resize(ref snapshot, code.HostDataLength);
+            }
             return new NativeExecutionResult(exitCode, snapshot) { BufferOffsets = code.BufferOffsets };
         }
         finally

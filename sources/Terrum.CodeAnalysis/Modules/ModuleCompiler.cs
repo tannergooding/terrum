@@ -108,6 +108,19 @@ public static partial class ModuleCompiler
                 ? "native-15" : profile;
     }
 
+    private static void RejectManagedNodes(BoundProgram program)
+    {
+        if (program.Functions.Any(static function =>
+                function.Intrinsic >= BoundIntrinsic.NodeTryCreate
+                || function.ReturnType == PrimitiveType.ManagedNode
+                || function.Variables.Any(static variable => variable.Type == PrimitiveType.ManagedNode))
+            || program.Structures.Any(static structure =>
+                structure.Fields.Any(static field => field.Type == PrimitiveType.ManagedNode)))
+        {
+            throw new ModuleFormatException("Managed nodes have no persisted module runtime or ABI.");
+        }
+    }
+
     private static bool HasOwnedNativeBuffer(ImmutableArray<BoundStruct> structures,
         ImmutableArray<ModuleFunction> functions) =>
         Compilation.HasOwnedNativeBuffer(structures,
@@ -274,6 +287,7 @@ public static partial class ModuleCompiler
         {
             SemanticVerifier.Verify(program);
         }
+        RejectManagedNodes(program);
         if (!program.Buffers.IsDefaultOrEmpty)
         {
             throw new ModuleFormatException("Host buffers are not serializable module dependencies.");
@@ -359,6 +373,7 @@ public static partial class ModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(referenceProducer);
         SemanticVerifier.VerifyReferences(program);
+        RejectManagedNodes(program);
         if (!program.Buffers.IsDefaultOrEmpty)
         {
             throw new ModuleFormatException("Host buffers are not serializable module dependencies.");
@@ -1034,6 +1049,7 @@ public static partial class ModuleCompiler
 
     private static byte[] Write(Module module, BoundProgram program)
     {
+        RejectManagedNodes(program);
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         writer.Write(Magic);
@@ -1191,7 +1207,13 @@ public static partial class ModuleCompiler
             var fields = ImmutableArray.CreateBuilder<BoundStructField>(fieldCount);
             for (var field = 0; field < fieldCount; field++)
             {
-                fields.Add(new BoundStructField(GetString(reader), (PrimitiveType)reader.ReadInt32(),
+                var fieldName = GetString(reader);
+                var fieldType = (PrimitiveType)reader.ReadInt32();
+                if (fieldType == PrimitiveType.ManagedNode)
+                {
+                    throw new ModuleFormatException("Managed nodes have no persisted module ABI.");
+                }
+                fields.Add(new BoundStructField(fieldName, fieldType,
                     reader.ReadInt32(), reader.ReadInt32()) {
                     IsPrivate = GetBool(reader),
                     IsInternal = GetBool(reader),
@@ -1301,6 +1323,10 @@ public static partial class ModuleCompiler
     {
         var name = GetString(reader);
         var type = (PrimitiveType)reader.ReadInt32();
+        if (type == PrimitiveType.ManagedNode)
+        {
+            throw new ModuleFormatException("Managed nodes have no persisted module ABI.");
+        }
         if ((version < ReadonlyViewVersion && type == PrimitiveType.ReadonlyInt32BufferView)
             || (version < Version && type == PrimitiveType.MutableInt32BufferView))
         {
@@ -1314,6 +1340,10 @@ public static partial class ModuleCompiler
         var doesNotReturn = GetBool(reader);
         var isCleanup = version >= OwnershipVersion && GetBool(reader);
         var intrinsic = version >= BufferVersion ? (BoundIntrinsic)reader.ReadByte() : BoundIntrinsic.None;
+        if (intrinsic >= BoundIntrinsic.NodeTryCreate)
+        {
+            throw new ModuleFormatException("Managed nodes have no persisted module runtime.");
+        }
         if (version < Version && intrinsic == BoundIntrinsic.BufferClear)
         {
             throw new ModuleFormatException("Buffer.Clear requires semantic module version 17.");
@@ -1331,6 +1361,10 @@ public static partial class ModuleCompiler
         {
             var variableName = GetString(reader);
             var variableType = (PrimitiveType)reader.ReadInt32();
+            if (variableType == PrimitiveType.ManagedNode)
+            {
+                throw new ModuleFormatException("Managed nodes have no persisted module ABI.");
+            }
             if ((version < ReadonlyViewVersion && variableType == PrimitiveType.ReadonlyInt32BufferView)
                 || (version < Version && variableType == PrimitiveType.MutableInt32BufferView))
             {

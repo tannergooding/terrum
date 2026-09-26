@@ -194,6 +194,7 @@ public static class NativeEmitter
         }
         var selected = new List<(string Name, int Index)>(exports.Count);
         var names = new HashSet<string>(StringComparer.Ordinal);
+        var scalarExportsOnly = Compilation.GetNativeProfileVersion(program) == "native-18";
         foreach (var name in exports)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -211,7 +212,7 @@ public static class NativeEmitter
                     break;
                 }
             }
-            if (index < 0 || !Exportable(program, program.Functions[index]))
+            if (index < 0 || !Exportable(program, program.Functions[index], scalarExportsOnly))
             {
                 throw new ArgumentException($"'{name}' is not an accessible native library export.", nameof(exports));
             }
@@ -221,10 +222,10 @@ public static class NativeEmitter
         var imports = bindings is null ? null : SelectImports(program, bindings, cancellationToken);
         var compiler = new PeCompiler(program, cancellationToken, library: true, imports: imports);
         var code = compiler.Compile();
-        return (PeImage.BuildLibrary(code, [.. selected], program.Functions.Length), UsedImports(code, imports));
+        return (PeImage.BuildLibrary(code, [.. selected]), UsedImports(code, imports));
     }
 
-    private static bool Exportable(BoundProgram program, BoundFunction function)
+    private static bool Exportable(BoundProgram program, BoundFunction function, bool scalarExportsOnly)
     {
         if (function.IsPrivate || function.IsInternal || function.IsExternal)
         {
@@ -235,21 +236,34 @@ public static class NativeEmitter
         {
             return false;
         }
-        if (!PublicLayout(function.ReturnType))
+        if (!PublicLayout(function.ReturnType)
+            || (scalarExportsOnly && function.ReturnType != PrimitiveType.Void && !Scalar(function.ReturnType)))
         {
             return false;
         }
         for (var i = 0; i < function.ParameterCount; i++)
         {
-            if (!PublicLayout(function.Variables[i + (function.IsConstructor ? 1 : 0)].Type))
+            var parameter = function.Variables[i + (function.IsConstructor ? 1 : 0)];
+            if (!PublicLayout(parameter.Type)
+                || (scalarExportsOnly && (parameter.IsOut || !Scalar(parameter.Type))))
             {
                 return false;
             }
         }
         return true;
 
+        static bool Scalar(PrimitiveType type)
+        {
+            return type is PrimitiveType.Bool or PrimitiveType.Int32 or PrimitiveType.UInt32
+                or PrimitiveType.Char16 or PrimitiveType.Int64 or PrimitiveType.UInt64;
+        }
+
         bool PublicLayout(PrimitiveType type)
         {
+            if (type == PrimitiveType.ManagedNode)
+            {
+                return false;
+            }
             if ((int)type < 100)
             {
                 return true;
@@ -286,7 +300,7 @@ public static class NativeEmitter
     }
 }
 
-internal sealed class PeCompiler
+internal sealed partial class PeCompiler
 {
     // A sub-4 KiB frame cannot cross more than one guard page in its single allocation.
     // 32 bytes of outgoing home space and all outgoing stack arguments stay at the bottom of each frame.
@@ -318,6 +332,9 @@ internal sealed class PeCompiler
     private readonly List<NativeDataFixup> _dataFixups = [];
     private readonly int[] _bufferOffsets;
     private readonly byte[] _data;
+    private readonly bool _managedNodes;
+    private readonly int _managedRuntimeOffset;
+    private readonly int _hostDataLength;
     private readonly bool _checkedExceptions;
     private readonly List<NativeExceptionScope>[] _scopes;
     private readonly List<NativeExceptionScope> _entryScopes = [];
@@ -358,6 +375,12 @@ internal sealed class PeCompiler
         _outBases = new int[program.Functions.Length];
         _returnSlots = new int[program.Functions.Length];
         _liveSlots = new int[program.Functions.Length][];
+        _managedRootFrames = new int[program.Functions.Length];
+        _managedRootFlags = new Dictionary<int, int>[program.Functions.Length];
+        for (var index = 0; index < _managedRootFlags.Length; index++)
+        {
+            _managedRootFlags[index] = [];
+        }
         _constructedFieldSlots = new int[program.Functions.Length][];
         _replacementSlots = new int[program.Functions.Length];
         _cleanupArgumentSlots = new int[program.Functions.Length];
@@ -386,7 +409,13 @@ internal sealed class PeCompiler
                 readOnlyAt = checked(readOnlyAt + (buffer.Values.Length * 4));
             }
         }
-        _data = new byte[writableAt];
+        _hostDataLength = writableAt;
+        _managedNodes = program.Functions.Any(static function =>
+            function.Intrinsic >= BoundIntrinsic.NodeTryCreate
+            || function.ReturnType == PrimitiveType.ManagedNode
+            || function.Variables.Any(static variable => variable.Type == PrimitiveType.ManagedNode));
+        _managedRuntimeOffset = _managedNodes ? (writableAt + 7) & ~7 : -1;
+        _data = new byte[_managedNodes ? _managedRuntimeOffset + 24 : writableAt];
         for (var index = 0; index < program.Buffers.Length; index++)
         {
             var buffer = program.Buffers[index];
@@ -404,6 +433,7 @@ internal sealed class PeCompiler
         var (processEntry, processEnd) = EmitEntryAndFailureHelpers();
         EmitSourceFunctions();
         EmitCleanupFunclets();
+        EmitManagedCollector();
 
         foreach (var (offset, target) in _calls)
         {
@@ -463,6 +493,10 @@ internal sealed class PeCompiler
                 UsesParentFrame = true,
             });
         }
+        if (_managedNodes)
+        {
+            functions.Add(new NativeFunctionRange(_managedCollectorStart, _managedCollectorEnd, 88));
+        }
 
         return new NativeCode(_code.ToArray(), _entryStart,
             [.. functions],
@@ -471,8 +505,12 @@ internal sealed class PeCompiler
             Data = _data,
             ReadOnlyDataLength = _readOnlyDataLength,
             BufferOffsets = [.. _bufferOffsets],
+            SourceFunctionOffsets = [.. _program.Functions.Select((function, index) =>
+                function.IsExternal ? -1 : _starts[index])],
             DataFixups = [.. _dataFixups],
             NativeImports = [.. _nativeImportFixups],
+            ManagedRuntimeOffset = _managedRuntimeOffset,
+            HostDataLength = _hostDataLength,
         };
     }
 
@@ -571,6 +609,7 @@ internal sealed class PeCompiler
                 _cleanupArgumentSlots[i] = checked((int)((required + 15) & ~15L));
                 required = _cleanupArgumentSlots[i] + 16L;
             }
+            required = PrepareManagedRoots(i, function, spillSlots, required);
             required += 8; // Saved RBP lives above the addressable frame slots.
             if (required > MaximumFrame)
             {
@@ -679,9 +718,20 @@ internal sealed class PeCompiler
                     _code.Set(_liveSlots[i][slot]);
                 }
             }
+            if (function.Intrinsic == BoundIntrinsic.None)
+            {
+                RegisterManagedRoots(i);
+            }
             if (function.Intrinsic != BoundIntrinsic.None)
             {
-                EmitBufferIntrinsic(function.Intrinsic);
+                if (function.Intrinsic >= BoundIntrinsic.NodeTryCreate)
+                {
+                    EmitManagedIntrinsic(function.Intrinsic);
+                }
+                else
+                {
+                    EmitBufferIntrinsic(function.Intrinsic);
+                }
                 Epilog();
             }
             else
@@ -689,6 +739,7 @@ internal sealed class PeCompiler
                 Statement(function.Body);
                 if (function.ReturnType == PrimitiveType.Void)
                 {
+                    UnregisterManagedRoots(i);
                     Epilog();
                 }
             }
@@ -748,6 +799,14 @@ internal sealed class PeCompiler
             Prolog(40);
             var protectedStart = _code.Position;
             _calls.Add((_code.RelativeCall(), _program.EntryPoint));
+            if (_managedNodes)
+            {
+                _code.Bytes(0x89, 0x44, 0x24, 0x20);
+                _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), _managedRuntimeOffset));
+                _code.Bytes(0x48, 0x89, 0xD1);
+                _managedCollectorCalls.Add(_code.RelativeCall());
+                _code.Bytes(0x8B, 0x44, 0x24, 0x20);
+            }
             if (_checkedExceptions)
             {
                 _code.Byte(0x90); // keep the protected call continuation outside the epilog
@@ -950,7 +1009,8 @@ internal sealed class PeCompiler
         _program.Functions[_currentFunction].Variables[index].IsOut ? OutSlot(index) : Slot(index);
     private static bool IsStruct(PrimitiveType type) => (int)type >= 100;
     private static bool IsWide(PrimitiveType type) =>
-        type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.OwnedInt32Buffer;
+        type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.OwnedInt32Buffer
+            or PrimitiveType.ManagedNode;
     private int Size(PrimitiveType type) => ValueLayout.Size(type, _program.Structures);
     private bool IsIndirect(PrimitiveType type) => IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8);
     private bool IsUnique(PrimitiveType type) =>
@@ -1079,7 +1139,9 @@ internal sealed class PeCompiler
                 _code.Bytes(0x48, 0x8B, 0x00, 0xC7, 0x00);
                 _code.Int32(0);
                 break;
-            case BoundIntrinsic.None:
+            case BoundIntrinsic.None or BoundIntrinsic.NodeTryCreate or BoundIntrinsic.NodeValue
+                or BoundIntrinsic.NodeSetValue or BoundIntrinsic.NodeSetNext or BoundIntrinsic.NodeClearNext
+                or BoundIntrinsic.NodeTryGetNext or BoundIntrinsic.NodeCollect:
             default:
                 throw new InvalidOperationException("Unknown verified native buffer intrinsic.");
         }
@@ -1308,10 +1370,18 @@ internal sealed class PeCompiler
                 {
                     Statement(child);
                 }
+                foreach (var retired in block.RetiredManagedLocals)
+                {
+                    SetManagedRoot(OwnerPlace(retired), active: false);
+                }
                 break;
             case BoundLocal local:
                 Expression(local.Initializer, 0);
                 StoreValue(Slot(local.Variable), local.Initializer.Type);
+                if (local.Initializer.Type == PrimitiveType.ManagedNode)
+                {
+                    SetManagedRoot(Slot(local.Variable), active: true);
+                }
                 if (IsUnique(local.Initializer.Type))
                 {
                     _code.Set(_liveSlots[_currentFunction][local.Variable]);
@@ -1360,6 +1430,13 @@ internal sealed class PeCompiler
                 break;
             case BoundAssignment assignment:
                 Expression(assignment.Value, 0);
+                if (assignment.Value.Type == PrimitiveType.ManagedNode)
+                {
+                    var managedDestination = OwnerPlace(assignment.Variable);
+                    StoreValue(managedDestination, assignment.Value.Type);
+                    SetManagedRoot(managedDestination, active: true);
+                    break;
+                }
                 if (IsUnique(assignment.Value.Type))
                 {
                     StoreValue(_replacementSlots[_currentFunction], assignment.Value.Type);
@@ -1466,6 +1543,10 @@ internal sealed class PeCompiler
                     if (_cleanups.Count != 0)
                     {
                         StoreValue(PendingReturnSlot(), result.Value.Type);
+                        if (result.Value.Type == PrimitiveType.ManagedNode)
+                        {
+                            SetManagedRoot(PendingReturnSlot(), active: true);
+                        }
                     }
                 }
                 for (var index = _cleanups.Count - 1; index >= 0; index--)
@@ -1493,6 +1574,7 @@ internal sealed class PeCompiler
                 {
                     _code.Byte(0x90); // call-site continuation must not start at an unwind epilog
                 }
+                UnregisterManagedRoots(_currentFunction);
                 Epilog();
                 break;
             case BoundTryFinally cleanup:
@@ -1822,6 +1904,10 @@ internal sealed class PeCompiler
                     {
                         var scratch = Spill(argumentsBase + call.Arguments.Length + i);
                         ZeroStruct(scratch, IsIndirect(call.Arguments[i].Type) ? Size(call.Arguments[i].Type) : 8);
+                        if (call.Arguments[i].Type == PrimitiveType.ManagedNode)
+                        {
+                            SetManagedRoot(scratch, active: true);
+                        }
                         _code.Address(scratch);
                         _code.Store64(Spill(argumentsBase + i));
                     }
@@ -1835,6 +1921,10 @@ internal sealed class PeCompiler
                         else
                         {
                             StoreValue(Spill(argumentsBase + i), call.Arguments[i].Type);
+                            if (call.Arguments[i].Type == PrimitiveType.ManagedNode)
+                            {
+                                SetManagedRoot(Spill(argumentsBase + i), active: true);
+                            }
                         }
                         if (staged is not null && IsUnique(call.Arguments[i].Type)
                             && call.Arguments[i] is not (BoundReceiverLoan or BoundMutableReceiverLoan or BoundFieldLoan))
@@ -1861,6 +1951,11 @@ internal sealed class PeCompiler
                     if (argument is BoundOutArgument output && IsUnique(output.Type))
                     {
                         DropOwner(output.Variable);
+                    }
+                    if (argument is BoundOutArgument managedOutput
+                        && managedOutput.Type == PrimitiveType.ManagedNode)
+                    {
+                        SetManagedRoot(OwnerPlace(managedOutput.Variable), active: false);
                     }
                 }
                 var hidden = IsIndirect(call.Type) ? 1 : 0;
@@ -1936,6 +2031,10 @@ internal sealed class PeCompiler
                                     LoadValue(scratch, output.Type);
                                 }
                                 StoreValue(destination, output.Type);
+                                if (output.Type == PrimitiveType.ManagedNode)
+                                {
+                                    SetManagedRoot(destination, active: true);
+                                }
                                 if (IsUnique(output.Type))
                                 {
                                     _code.Set(_liveSlots[_currentFunction][output.Variable]);
@@ -1953,6 +2052,17 @@ internal sealed class PeCompiler
                             }
                         }
                         _code.PatchRelative(done, _code.Position);
+                    }
+                }
+                for (var i = 0; i < call.Arguments.Length; i++)
+                {
+                    if (call.Arguments[i].Type == PrimitiveType.ManagedNode)
+                    {
+                        SetManagedRoot(Spill(argumentsBase + i), active: false);
+                        if (call.Arguments[i] is BoundOutArgument)
+                        {
+                            SetManagedRoot(Spill(argumentsBase + call.Arguments.Length + i), active: false);
+                        }
                     }
                 }
                 break;

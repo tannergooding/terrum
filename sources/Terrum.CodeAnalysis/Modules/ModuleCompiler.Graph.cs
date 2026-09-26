@@ -81,6 +81,7 @@ public static partial class ModuleCompiler
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(exports);
         SemanticVerifier.VerifyLibraryReferences(program);
+        RejectManagedNodes(program);
         if (program.EntryPoint != -1 || !program.Buffers.IsDefaultOrEmpty
             || program.RuntimePolicy != dependencies.RuntimePolicy)
         {

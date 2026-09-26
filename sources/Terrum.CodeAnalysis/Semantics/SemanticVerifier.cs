@@ -64,6 +64,29 @@ public static class SemanticVerifier
         {
             throw Limit();
         }
+        foreach (var function in program.Functions)
+        {
+            if (function is null || function.Variables.IsDefault)
+            {
+                throw Invalid();
+            }
+            if (function.Variables.Length > MaximumVariables)
+            {
+                throw Limit();
+            }
+            if (function.Variables.Any(static variable => variable is null))
+            {
+                throw Invalid();
+            }
+        }
+        var usesManagedNodes = program.Functions.Any(static function => function.Intrinsic >= BoundIntrinsic.NodeTryCreate
+            || function.ReturnType == PrimitiveType.ManagedNode
+            || function.Variables.Any(static variable => variable.Type == PrimitiveType.ManagedNode));
+        if (usesManagedNodes && (program.RuntimePolicy != BoundRuntimePolicy.FailFast
+            || program.Functions.Any(static function => function.IsExternal)))
+        {
+            throw InvalidEffect(default, "Ownership");
+        }
         if (program.Structures.IsDefault || program.Structures.Length > MaximumVariables)
         {
             throw Invalid();
@@ -122,7 +145,8 @@ public static class SemanticVerifier
             layoutStates[index] = 1;
             var structure = program.Structures[index];
             if (structure is null || string.IsNullOrWhiteSpace(structure.Name)
-                || structure.Name == NativeBufferIntrinsics.TypeName || !structNames.Add(structure.Name)
+                || structure.Name is NativeBufferIntrinsics.TypeName or NativeManagedNodeIntrinsics.TypeName
+                    or NativeManagedNodeIntrinsics.HeapName || !structNames.Add(structure.Name)
                 || (structure.IsPrivate && structure.IsInternal)
                 || structure.Fields.IsDefaultOrEmpty || structure.Size is < 1 or > ValueLayout.MaximumSize)
             {
@@ -137,6 +161,10 @@ public static class SemanticVerifier
                 if (field is null || !ValidType(field.Type, allowVoid: false, program))
                 {
                     throw Invalid();
+                }
+                if (field.Type == PrimitiveType.ManagedNode)
+                {
+                    throw InvalidEffect(default, "Ownership");
                 }
                 var nested = (int)field.Type >= 100 ? (int)field.Type - 100 : -1;
                 if (nested >= program.Structures.Length)
@@ -196,19 +224,23 @@ public static class SemanticVerifier
             }
             if (function.Intrinsic != BoundIntrinsic.None)
             {
-                if (!NativeBufferIntrinsics.Matches(function))
+                if (!NativeBufferIntrinsics.Matches(function) && !NativeManagedNodeIntrinsics.Matches(function))
                 {
                     throw Invalid();
                 }
                 continue;
             }
-            if (function.Name.StartsWith(NativeBufferIntrinsics.TypeName + ".", StringComparison.Ordinal))
+            if (function.Name.StartsWith(NativeBufferIntrinsics.TypeName + ".", StringComparison.Ordinal)
+                || function.Name.StartsWith(NativeManagedNodeIntrinsics.TypeName + ".", StringComparison.Ordinal)
+                || function.Name.StartsWith(NativeManagedNodeIntrinsics.HeapName + ".", StringComparison.Ordinal))
             {
                 throw Invalid();
             }
             if (function.IsExternal && (!allowExternal || function.IsPrivate || function.IsInternal
                 || function.Body.Statements.IsDefault || !function.Body.Statements.IsEmpty
-                || function.Variables.Length != function.ParameterCount + (function.IsConstructor ? 1 : 0)))
+                || function.Variables.Length != function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                || function.ReturnType == PrimitiveType.ManagedNode
+                || function.Variables.Any(static variable => variable.Type == PrimitiveType.ManagedNode)))
             {
                 throw Invalid();
             }
@@ -363,6 +395,7 @@ public static class SemanticVerifier
             {
                 VerifyOwnerScopes(function.Body, function, program);
                 VerifyViewScopes(function.Body, function);
+                VerifyManagedRoots(function);
                 var returns = Statement(function.Body, initialized, fieldMasks, declarations, function, program, ref remaining, 0);
                 if (function.DoesNotReturn && !returns)
                 {
@@ -384,6 +417,226 @@ public static class SemanticVerifier
             {
                 exception.Data[FunctionIndexKey] = functionIndex;
                 throw;
+            }
+        }
+    }
+
+    private static void VerifyManagedRoots(BoundFunction function)
+    {
+        var retired = new HashSet<int>();
+        var active = new HashSet<int>();
+        var remaining = MaximumAnalysisVisits;
+        for (var slot = 0; slot < function.ParameterCount + (function.IsConstructor ? 1 : 0); slot++)
+        {
+            if (function.Variables[slot].Type == PrimitiveType.ManagedNode)
+            {
+                _ = active.Add(slot);
+            }
+        }
+
+        void Declare(int slot, HashSet<int> scope, TextSpan span)
+        {
+            if (slot < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                || slot >= function.Variables.Length || slot < 0
+                || function.Variables[slot].Type != PrimitiveType.ManagedNode
+                || !scope.Add(slot) || !active.Add(slot))
+            {
+                throw InvalidEffect(span, "Ownership");
+            }
+        }
+
+        void Expression(BoundExpression expression, HashSet<int> scope, int depth)
+        {
+            Count(ref remaining, depth);
+            if (expression is null)
+            {
+                throw Invalid();
+            }
+            switch (expression)
+            {
+                case BoundRead read when read.Type == PrimitiveType.ManagedNode:
+                    if (!active.Contains(read.Variable))
+                    {
+                        throw InvalidEffect(read.Span, "Ownership");
+                    }
+                    break;
+                case BoundOutArgument output when output.Type == PrimitiveType.ManagedNode:
+                    if (output.DeclaresVariable)
+                    {
+                        Declare(output.Variable, scope, output.Span);
+                    }
+                    else if (!active.Contains(output.Variable))
+                    {
+                        throw InvalidEffect(output.Span, "Ownership");
+                    }
+                    break;
+                case BoundCall call:
+                    if (call.Arguments.IsDefault)
+                    {
+                        throw Invalid();
+                    }
+                    foreach (var argument in call.Arguments)
+                    {
+                        Expression(argument, scope, depth + 1);
+                    }
+                    break;
+                case BoundUnary unary:
+                    Expression(unary.Operand, scope, depth + 1);
+                    break;
+                case BoundCast cast:
+                    Expression(cast.Operand, scope, depth + 1);
+                    break;
+                case BoundBinary binary:
+                    Expression(binary.Left, scope, depth + 1);
+                    Expression(binary.Right, scope, depth + 1);
+                    break;
+                case BoundFieldRead field:
+                    Expression(field.Receiver, scope, depth + 1);
+                    break;
+                case BoundFieldLoan loan:
+                    Expression(loan.Place, scope, depth + 1);
+                    break;
+                case BoundBufferRead buffer:
+                    Expression(buffer.Index, scope, depth + 1);
+                    break;
+                case BoundViewRead view:
+                    Expression(view.Index, scope, depth + 1);
+                    break;
+                case BoundConstant or BoundRead or BoundMove or BoundReceiverLoan
+                    or BoundMutableReceiverLoan or BoundOutArgument or BoundViewLength:
+                    break;
+                default:
+                    throw Invalid();
+            }
+        }
+
+        void Statement(BoundStatement statement, HashSet<int> scope, int depth)
+        {
+            Count(ref remaining, depth);
+            if (statement is null)
+            {
+                throw Invalid();
+            }
+            switch (statement)
+            {
+                case BoundBlock block:
+                    if (block.RetiredManagedLocals.IsDefault || block.Statements.IsDefault)
+                    {
+                        throw Invalid();
+                    }
+                    var nested = block.IsManagedLexicalScope ? new HashSet<int>() : scope;
+                    foreach (var child in block.Statements)
+                    {
+                        Statement(child, nested, depth + 1);
+                    }
+                    if (block.IsManagedLexicalScope)
+                    {
+                        if (nested.Count != block.RetiredManagedLocals.Length)
+                        {
+                            throw InvalidEffect(block.Span, "Ownership");
+                        }
+                        foreach (var slot in block.RetiredManagedLocals)
+                        {
+                            if (!nested.Remove(slot) || !active.Remove(slot) || !retired.Add(slot))
+                            {
+                                throw InvalidEffect(block.Span, "Ownership");
+                            }
+                        }
+                    }
+                    else if (!block.RetiredManagedLocals.IsEmpty)
+                    {
+                        throw InvalidEffect(block.Span, "Ownership");
+                    }
+                    break;
+                case BoundTryFinally cleanup:
+                    Statement(cleanup.Body, scope, depth + 1);
+                    Statement(cleanup.Finally, scope, depth + 1);
+                    break;
+                case BoundViewScope view:
+                    Expression(view.Start, scope, depth + 1);
+                    Expression(view.Length, scope, depth + 1);
+                    Statement(view.Body, scope, depth + 1);
+                    break;
+                case BoundTryCatch recovery:
+                    Statement(recovery.Body, scope, depth + 1);
+                    Statement(recovery.Catch, scope, depth + 1);
+                    if (recovery.Finally is not null)
+                    {
+                        Statement(recovery.Finally, scope, depth + 1);
+                    }
+                    break;
+                case BoundUnsafe unsafeBlock:
+                    Statement(unsafeBlock.Body, scope, depth + 1);
+                    break;
+                case BoundIf conditional:
+                    Expression(conditional.Condition, scope, depth + 1);
+                    Statement(conditional.Then, scope, depth + 1);
+                    if (conditional.Else is not null)
+                    {
+                        Statement(conditional.Else, scope, depth + 1);
+                    }
+                    break;
+                case BoundWhile loop:
+                    Expression(loop.Condition, scope, depth + 1);
+                    Statement(loop.Body, scope, depth + 1);
+                    break;
+                case BoundLocal local:
+                    Expression(local.Initializer, scope, depth + 1);
+                    if (local.Variable < 0 || local.Variable >= function.Variables.Length)
+                    {
+                        throw Invalid();
+                    }
+                    if (function.Variables[local.Variable].Type == PrimitiveType.ManagedNode)
+                    {
+                        Declare(local.Variable, scope, local.Span);
+                    }
+                    break;
+                case BoundAssignment assignment:
+                    Expression(assignment.Value, scope, depth + 1);
+                    if (assignment.Variable < 0 || assignment.Variable >= function.Variables.Length)
+                    {
+                        throw Invalid();
+                    }
+                    if (function.Variables[assignment.Variable].Type == PrimitiveType.ManagedNode
+                        && !active.Contains(assignment.Variable))
+                    {
+                        throw InvalidEffect(assignment.Span, "Ownership");
+                    }
+                    break;
+                case BoundFieldAssignment field:
+                    Expression(field.Value, scope, depth + 1);
+                    break;
+                case BoundBufferAssignment buffer:
+                    Expression(buffer.Index, scope, depth + 1);
+                    Expression(buffer.Value, scope, depth + 1);
+                    break;
+                case BoundViewSet view:
+                    Expression(view.Index, scope, depth + 1);
+                    Expression(view.Value, scope, depth + 1);
+                    break;
+                case BoundExpressionStatement effects:
+                    Expression(effects.Expression, scope, depth + 1);
+                    break;
+                case BoundRequire requirement:
+                    Expression(requirement.Condition, scope, depth + 1);
+                    break;
+                case BoundReturn result when result.Value is not null:
+                    Expression(result.Value, scope, depth + 1);
+                    break;
+                case BoundDrop or BoundDropConstructedFields or BoundOwnerDeclaration or BoundReturn:
+                    break;
+                default:
+                    throw Invalid();
+            }
+        }
+
+        Statement(function.Body, new HashSet<int>(), 0);
+        for (var slot = function.ParameterCount + (function.IsConstructor ? 1 : 0);
+            slot < function.Variables.Length; slot++)
+        {
+            if (function.Variables[slot].Type == PrimitiveType.ManagedNode && !retired.Contains(slot))
+            {
+                throw InvalidEffect(function.Variables[slot].Span, "Ownership");
             }
         }
     }
@@ -2076,6 +2329,7 @@ public static class SemanticVerifier
     private static bool ValidType(PrimitiveType type, bool allowVoid, BoundProgram program) =>
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
             or PrimitiveType.Char16 or PrimitiveType.Bool or PrimitiveType.OwnedInt32Buffer
+            or PrimitiveType.ManagedNode
             || (allowVoid && type == PrimitiveType.Void)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length);
 
