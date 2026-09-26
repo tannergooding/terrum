@@ -58,9 +58,10 @@ evaluation, copying, or restore. A diagnostic analyzer report attributed
 the trimming analyzer. Analyzer seconds overlap wall time and other analyzer
 work; they are not additive. CA5403/CA5390
 previously dominated a 23-minute rebuild but fell below 0.5 analyzer-seconds
-each after byte-emission changes; see [CA5403](../reports/CA5403.md) and
-[CA5390](../reports/CA5390.md). Keep CA1508 and trimming checks in the
-full-analysis checkpoint rather than removing useful diagnostics.
+each after byte-emission changes; see the
+[combined CA5390/CA5403 report](../reports/CA5390-CA5403.md). Keep CA1508
+and trimming checks in the full-analysis checkpoint rather than removing
+useful diagnostics.
 With only CA1508, CA5403 and CA5390 temporarily suppressed, repeated
 Release rebuilds took 2.7-3.0 seconds versus 1.2-1.3 seconds with all
 analyzers off; the temporary suppression was not committed.
