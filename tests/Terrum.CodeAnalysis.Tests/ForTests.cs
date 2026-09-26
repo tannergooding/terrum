@@ -48,8 +48,6 @@ public sealed class ForTests
     [InlineData("for (; false; i = 1) { mut int32 i = 0; } return 0;")]
     [InlineData("for (; false; 1i32 + 2) { } return 0;")]
     [InlineData("mut int32 i = 0; for (mut int32 i = 1; false;) { } return 0;")]
-    [InlineData("for (; false;) { break; } return 0;")]
-    [InlineData("for (; false;) { continue; } return 0;")]
     public void ForLoopsPreserveScopeTypeAndUnsupportedControlRules(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { " + body + " }"));

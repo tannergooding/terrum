@@ -257,6 +257,33 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     Console.Write($"{policy}: {capacityProof}");
 }
 
+foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+{
+    var transfers = Path.Combine(artifacts, $"managed-loop-transfer-abi-{policy}.dll");
+    var compileTransfers = new ProcessStartInfo("dotnet");
+    foreach (var argument in new[] { cli, "build-library",
+        Path.GetFullPath(Path.Combine("tests", "native", "managed-loop-transfer-abi.terrum")),
+        "--export", "LoopTransfers", "--export", "CollectWithScalar",
+        "-o", transfers, "--runtime", policy })
+    {
+        compileTransfers.ArgumentList.Add(argument);
+    }
+    var transferBuild = await Run(compileTransfers, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
+    await File.WriteAllTextAsync(Path.Combine(artifacts, $"managed-loop-transfer-abi-build-{policy}.log"),
+        transferBuild).ConfigureAwait(false);
+    var transferExecute = new ProcessStartInfo(executable);
+    transferExecute.ArgumentList.Add(transfers);
+    transferExecute.ArgumentList.Add("loop-transfers");
+    var transferProof = await Run(transferExecute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+    await File.WriteAllTextAsync(Path.Combine(artifacts, $"managed-loop-transfer-abi-proof-{policy}.log"),
+        transferProof).ConfigureAwait(false);
+    if (transferProof.Trim() != "managed-loop-transfers rounds=64 iterator=checked cleanup=checked roots=checked live=0")
+    {
+        throw new InvalidOperationException("The independent managed loop-transfer ABI proof did not complete.");
+    }
+    Console.Write($"{policy}: {transferProof}");
+}
+
 static async Task<string> Run(ProcessStartInfo start, TimeSpan timeout, int expectedExitCode = 0)
 {
     start.UseShellExecute = false;

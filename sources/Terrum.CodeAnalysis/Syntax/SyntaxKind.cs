@@ -105,4 +105,8 @@ public enum SyntaxKind
     IsNullExpression,
     /// <summary>A test that binds a non-null managed-handle snapshot on success.</summary>
     IsSomeExpression,
+    /// <summary>Exits the nearest enclosing loop.</summary>
+    BreakStatement,
+    /// <summary>Continues the nearest enclosing loop.</summary>
+    ContinueStatement,
 }

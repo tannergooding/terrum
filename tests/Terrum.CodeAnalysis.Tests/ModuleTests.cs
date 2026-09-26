@@ -22,20 +22,21 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class ModuleTests
 {
     [Theory]
-    [InlineData(BoundRuntimePolicy.FailFast, "managed-class-leaf")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "managed-class-leaf")]
-    [InlineData(BoundRuntimePolicy.FailFast, "managed-copy-class-leaf")]
-    [InlineData(BoundRuntimePolicy.CheckedExceptions, "managed-copy-class-leaf")]
-    public async Task SemanticClassLeafExecutesAfterConstructorAndOwnerRemappingAsync(
-        BoundRuntimePolicy policy, string sample)
+    [InlineData(BoundRuntimePolicy.FailFast, @"samples\native\graph\managed-class-leaf.terrum", "Leaf")]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions, @"samples\native\graph\managed-class-leaf.terrum", "Leaf")]
+    [InlineData(BoundRuntimePolicy.FailFast, @"samples\native\graph\managed-copy-class-leaf.terrum", "Leaf")]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions, @"samples\native\graph\managed-copy-class-leaf.terrum", "Leaf")]
+    [InlineData(BoundRuntimePolicy.FailFast, @"tests\native\managed-loop-transfer-abi.terrum", "LoopTransfers")]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions, @"tests\native\managed-loop-transfer-abi.terrum", "LoopTransfers")]
+    public async Task SemanticLeafExecutesAfterConstructorAndOwnerRemappingAsync(
+        BoundRuntimePolicy policy, string sample, string export)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        var source = await File.ReadAllTextAsync(Path.Combine(root, "samples", "native", "graph",
-            sample + ".terrum")).ConfigureAwait(true);
+        var source = await File.ReadAllTextAsync(Path.Combine(root, sample)).ConfigureAwait(true);
         var library = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), ["Leaf"]);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [export]);
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
             struct Cell {
                 public int64 Value;
                 public Cell(int64 value) { Value = value; }
@@ -47,7 +48,7 @@ public sealed class ModuleTests
             int32 Main() {
                 Cell first = new Cell(1i64);
                 Stamp second = new Stamp(2);
-                return Leaf() + (int32)first.Value + second.Value - 1;
+                return {{export}}() + (int32)first.Value + second.Value - 1;
             }
             """),
             ModuleCompiler.CreateReference(producer), runtimePolicy: policy);

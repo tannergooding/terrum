@@ -161,8 +161,7 @@ void PublishTrivia(int32 kind, int32 start, int32 end, int32 owner)
 int32 SkipTrivia(int32 initial, int32 owner)
 {
     mut int32 at = initial;
-    mut bool scanning = true;
-    while (at < Host.Source.Length && scanning)
+    while (at < Host.Source.Length)
     {
         int32 current = PeekUnit(at);
         int32 start = at;
@@ -217,7 +216,7 @@ int32 SkipTrivia(int32 initial, int32 owner)
 
         else
         {
-            scanning = false;
+            break;
         }
     }
 
@@ -508,15 +507,14 @@ int32 ScanString(int32 initial)
     int32 start = at;
     at = at + 1;
     mut bool terminated = false;
-    mut bool scanning = true;
-    while (at < Host.Source.Length && !IsNewline(PeekUnit(at)) && scanning)
+    while (at < Host.Source.Length && !IsNewline(PeekUnit(at)))
     {
         int32 current = PeekUnit(at);
         if (current == 34)
         {
             at = at + 1;
             terminated = true;
-            scanning = false;
+            break;
         }
         else if (current != 92)
         {
@@ -535,7 +533,7 @@ int32 ScanString(int32 initial)
             if (at == Host.Source.Length || IsNewline(PeekUnit(at)))
             {
                 Report(5, escapeStart, 1);
-                scanning = false;
+                break;
             }
             else
             {
@@ -612,8 +610,7 @@ int32 Scan()
             if (IsIdentifierStart(scalar))
             {
                 kind = 2;
-                mut bool scanning = true;
-                while (position < Host.Source.Length && scanning)
+                while (position < Host.Source.Length)
                 {
                     int32 next = ReadScalar(position);
                     if (IsIdentifierContinue(next))
@@ -622,7 +619,7 @@ int32 Scan()
                     }
                     else
                     {
-                        scanning = false;
+                        break;
                     }
                 }
                 kind = KeywordKind(start, position - start);

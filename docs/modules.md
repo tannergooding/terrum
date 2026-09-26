@@ -277,6 +277,13 @@ private Copy field. Collection is local to the leaf image; no DLL-unload heap
 cleanup of live objects is promised. For a runnable version 20 replacement,
 use the [Copy-field class leaf](../samples/native/graph/managed-copy-class-leaf.terrum)
 as the producer source in the [unchanged-root graph example](native-graph.md).
+Semantic version 21 records nearest-loop `break` and `continue` and uses a
+separate iterator-bearing loop tag when `continue` must run a `for` iterator.
+The original while tag and unchanged for lowering retain their existing
+bytes; producers, consumers, and class-free graph libraries write version 21
+only when they retain a loop transfer or explicit iterator. Readers reject the
+new tags in versions 18 through 20. Loop transfers do not change exported
+declarations, native runtime profiles, or module dependency policy.
 A consumer importing a unique type must also import the exported NoThrow
 cleanup methods of that type and its owning children. Their cleanup identities
 and Copy/unique distinctions participate in layout and signature compatibility;

@@ -361,6 +361,17 @@ internal sealed partial class PeCompiler
     private int _currentFunction;
     private bool _emittingFunclet;
     private readonly List<int> _cleanups = [];
+    private readonly List<NormalExit> _normalExits = [];
+    private readonly List<LoopTarget> _loopTargets = [];
+
+    private sealed record NormalExit(int Cleanup, ImmutableArray<int> RetiredRoots);
+
+    private sealed class LoopTarget(int exitDepth)
+    {
+        internal int ExitDepth { get; } = exitDepth;
+        internal List<int> Breaks { get; } = [];
+        internal List<int> Continues { get; } = [];
+    }
 
     internal PeCompiler(BoundProgram program, CancellationToken cancellationToken, bool library = false,
         IReadOnlyDictionary<int, NativeImportBinding>? imports = null)
@@ -648,6 +659,8 @@ internal sealed partial class PeCompiler
             _outBase = _outBases[i];
             _returnSlot = _returnSlots[i];
             _cleanups.Clear();
+            _normalExits.Clear();
+            _loopTargets.Clear();
             _code.Byte(0x55); // push rbp
             Prolog(_frame - 8);
             _code.Bytes(0x48, 0x89, 0xE5); // mov rbp,rsp
@@ -790,6 +803,8 @@ internal sealed partial class PeCompiler
             Prolog(_frame - 8);
             _code.Bytes(0x48, 0x89, 0xD5); // mov rbp,rdx: the source function's frame base
             _emittingFunclet = true;
+            _normalExits.Clear();
+            _loopTargets.Clear();
             Statement(body);
             if (_stagedOwners.TryGetValue(index, out var owners))
             {
@@ -923,7 +938,8 @@ internal sealed partial class PeCompiler
             || block.Statements.Any(child => ContainsCleanup(child, managedScopes)),
         BoundIf conditional => ContainsCleanup(conditional.Then, managedScopes)
             || (conditional.Else is not null && ContainsCleanup(conditional.Else, managedScopes)),
-        BoundWhile loop => ContainsCleanup(loop.Body, managedScopes),
+        BoundWhile loop => ContainsCleanup(loop.Body, managedScopes)
+            || (loop.Iterator is not null && ContainsCleanup(loop.Iterator, managedScopes)),
         BoundViewScope view => ContainsCleanup(view.Body, managedScopes),
         _ => false,
     };
@@ -969,7 +985,8 @@ internal sealed partial class PeCompiler
                         conditional.Else is null ? 0 : StatementSpills(conditional.Else, ref maximumArguments)));
             case BoundWhile loop:
                 return Math.Max(ExpressionSpills(loop.Condition, ref maximumArguments),
-                    StatementSpills(loop.Body, ref maximumArguments));
+                    Math.Max(StatementSpills(loop.Body, ref maximumArguments),
+                        loop.Iterator is null ? 0 : StatementSpills(loop.Iterator, ref maximumArguments)));
             case BoundTryFinally cleanup:
                 return Math.Max(StatementSpills(cleanup.Body, ref maximumArguments),
                     StatementSpills(cleanup.Finally, ref maximumArguments));
@@ -1423,6 +1440,10 @@ internal sealed partial class PeCompiler
                     }, _currentFunction, 0, 0));
                     _cleanups.Add(rootCleanup);
                 }
+                if (!block.RetiredManagedLocals.IsEmpty)
+                {
+                    _normalExits.Add(new NormalExit(rootCleanup, block.RetiredManagedLocals));
+                }
                 var rootScopeBegin = _code.Position;
                 foreach (var child in block.Statements)
                 {
@@ -1442,6 +1463,10 @@ internal sealed partial class PeCompiler
                     {
                         SetManagedRoot(OwnerPlace(retired), active: false);
                     }
+                }
+                if (!block.RetiredManagedLocals.IsEmpty)
+                {
+                    _normalExits.RemoveAt(_normalExits.Count - 1);
                 }
                 break;
             case BoundLocal local:
@@ -1731,6 +1756,7 @@ internal sealed partial class PeCompiler
                 var funclet = _funclets.Count;
                 _funclets.Add((cleanup.Finally, _currentFunction, 0, 0));
                 _cleanups.Add(funclet);
+                _normalExits.Add(new NormalExit(funclet, []));
                 var protectedBegin = _code.Position;
                 Statement(cleanup.Body);
                 if (_checkedExceptions && !_emittingFunclet)
@@ -1739,6 +1765,7 @@ internal sealed partial class PeCompiler
                 }
                 var protectedEnd = _code.Position;
                 _cleanups.RemoveAt(_cleanups.Count - 1);
+                _normalExits.RemoveAt(_normalExits.Count - 1);
                 if (_checkedExceptions && !_emittingFunclet && protectedBegin != protectedEnd)
                 {
                     _scopes[_currentFunction].Add(new NativeExceptionScope(protectedBegin, protectedEnd, -funclet - 1, 0));
@@ -1755,6 +1782,7 @@ internal sealed partial class PeCompiler
                     cleanupIndex = _funclets.Count;
                     _funclets.Add((recovery.Finally, _currentFunction, 0, 0));
                     _cleanups.Add(cleanupIndex);
+                    _normalExits.Add(new NormalExit(cleanupIndex, []));
                 }
                 var bodyBegin = _code.Position;
                 Statement(recovery.Body);
@@ -1776,6 +1804,7 @@ internal sealed partial class PeCompiler
                 if (cleanupIndex >= 0)
                 {
                     _cleanups.RemoveAt(_cleanups.Count - 1);
+                    _normalExits.RemoveAt(_normalExits.Count - 1);
                     _scopes[_currentFunction].Add(new NativeExceptionScope(bodyBegin, catchEnd, -cleanupIndex - 1, 0));
                     CallCleanup(cleanupIndex);
                 }
@@ -1803,9 +1832,49 @@ internal sealed partial class PeCompiler
                 Expression(loop.Condition, 0);
                 _code.Bytes(0x85, 0xC0);
                 var exit = _code.JumpIf(0x84);
+                var loopTarget = new LoopTarget(_normalExits.Count);
+                _loopTargets.Add(loopTarget);
                 Statement(loop.Body);
+                var iteratorStart = _code.Position;
+                if (loop.Iterator is not null)
+                {
+                    Statement(loop.Iterator);
+                }
+                foreach (var jump in loopTarget.Continues)
+                {
+                    _code.PatchRelative(jump, loop.Iterator is null ? start : iteratorStart);
+                }
+                _loopTargets.RemoveAt(_loopTargets.Count - 1);
                 _code.PatchRelative(_code.Jump(), start);
                 _code.PatchRelative(exit, _code.Position);
+                foreach (var jump in loopTarget.Breaks)
+                {
+                    _code.PatchRelative(jump, _code.Position);
+                }
+                break;
+            case BoundBreak or BoundContinue:
+                if (_loopTargets.Count == 0)
+                {
+                    throw new ArgumentException("Loop transfer has no verified target.", nameof(statement));
+                }
+                var target = _loopTargets[^1];
+                for (var index = _normalExits.Count - 1; index >= target.ExitDepth; index--)
+                {
+                    var normalExit = _normalExits[index];
+                    if (normalExit.Cleanup >= 0)
+                    {
+                        CallCleanup(normalExit.Cleanup);
+                    }
+                    else
+                    {
+                        foreach (var retired in normalExit.RetiredRoots)
+                        {
+                            SetManagedRoot(OwnerPlace(retired), active: false);
+                        }
+                    }
+                }
+                var transfer = _code.Jump();
+                (statement is BoundBreak ? target.Breaks : target.Continues).Add(transfer);
                 break;
             default:
                 throw new ArgumentException("Unknown native statement kind.", nameof(statement));

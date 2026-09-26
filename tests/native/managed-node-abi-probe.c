@@ -444,6 +444,24 @@ static int RunClassCapacityChecks(HMODULE image)
     return 0;
 }
 
+static int RunLoopTransferChecks(HMODULE image)
+{
+    Check transfer = (Check)GetProcAddress(image, "LoopTransfers");
+    Collect collect = (Collect)GetProcAddress(image, "CollectWithScalar");
+    VERIFY(transfer && collect, 140);
+    VERIFY(ReplaceImport(image, "HeapAlloc", (void*)TrackedAllocate), 141);
+    VERIFY(ReplaceImport(image, "HeapFree", (void*)TrackedRelease), 142);
+    for (int iteration = 0; iteration < 64; iteration++)
+    {
+        attempts = 0;
+        releases = 0;
+        VERIFY(transfer() == 42 && attempts == 5 && releases == 4
+            && LiveCount() == 1 && !invalid, 143);
+        VERIFY(collect(0) == 1 && releases == 5 && LiveCount() == 0 && !invalid, 144);
+    }
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if (argc != 2 && argc != 3)
@@ -488,13 +506,15 @@ int main(int argc, char** argv)
     int optional = checkedOptional || (argc == 3 && strcmp(argv[2], "optional") == 0);
     int chain = argc == 3 && strcmp(argv[2], "chain") == 0;
     int capacity = argc == 3 && strcmp(argv[2], "class-capacity") == 0;
-    if (argc == 3 && !unwind && !classes && !optional && !chain && !capacity)
+    int transfers = argc == 3 && strcmp(argv[2], "loop-transfers") == 0;
+    if (argc == 3 && !unwind && !classes && !optional && !chain && !capacity && !transfers)
     {
         fprintf(stderr, "Unknown managed-heap probe mode: %s.\n", argv[2]);
         FreeLibrary(image);
         return 2;
     }
-    int result = capacity ? RunClassCapacityChecks(image)
+    int result = transfers ? RunLoopTransferChecks(image)
+        : capacity ? RunClassCapacityChecks(image)
         : chain ? RunTokenChainChecks(image)
         : optional ? RunOptionalChecks(image, checkedOptional)
         : classes ? RunClassChecks(image, checkedClasses)
@@ -502,7 +522,9 @@ int main(int argc, char** argv)
     FreeLibrary(image);
     if (result == 0)
     {
-        puts(capacity
+        puts(transfers
+            ? "managed-loop-transfers rounds=64 iterator=checked cleanup=checked roots=checked live=0"
+            : capacity
             ? "managed-class-capacity rounds=2 live-limit=4096 refusal=checked reuse=checked live=0"
             : chain
             ? "managed-token-chain rounds=64 copy-values=checked reuse=checked allocation-failure=checked live=0"

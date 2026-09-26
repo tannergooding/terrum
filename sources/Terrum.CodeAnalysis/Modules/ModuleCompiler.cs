@@ -26,6 +26,7 @@ public static partial class ModuleCompiler
     private const int ManagedNodeVersion = 18;
     private const int ManagedClassVersion = 19;
     private const int Version = 20;
+    private const int LoopTransferVersion = 21;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -741,7 +742,7 @@ public static partial class ModuleCompiler
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Only nodes with nested expressions or statements need traversal.")]
     private static List<int> Calls(BoundStatement body, Action<PrimitiveType>? visitType = null,
-        Action<BoundViewScope>? visitView = null)
+        Action<BoundViewScope>? visitView = null, Action? visitLoopTransfer = null)
     {
         var calls = new List<int>();
         VisitStatement(body);
@@ -780,6 +781,14 @@ public static partial class ModuleCompiler
                 case BoundWhile loop:
                     VisitExpression(loop.Condition);
                     VisitStatement(loop.Body);
+                    if (loop.Iterator is not null)
+                    {
+                        visitLoopTransfer?.Invoke();
+                        VisitStatement(loop.Iterator);
+                    }
+                    break;
+                case BoundBreak or BoundContinue:
+                    visitLoopTransfer?.Invoke();
                     break;
                 case BoundTryFinally cleanup:
                     VisitStatement(cleanup.Body);
@@ -866,6 +875,19 @@ public static partial class ModuleCompiler
                     break;
             }
         }
+    }
+
+    private static bool HasLoopTransfer(ImmutableArray<ModuleFunction> functions)
+    {
+        var found = false;
+        foreach (var item in functions)
+        {
+            if (item.Function is BoundFunction function)
+            {
+                _ = Calls(function.Body, visitLoopTransfer: () => found = true);
+            }
+        }
+        return found;
     }
 
     private static string Contract(BoundFunction function, ImmutableArray<BoundStruct> structures)
@@ -1160,7 +1182,9 @@ public static partial class ModuleCompiler
             BoundWhile loop => loop with {
                 Condition = RemapExpression(loop.Condition, source, destination),
                 Body = RemapStatement(loop.Body, source, destination),
+                Iterator = loop.Iterator is null ? null : RemapStatement(loop.Iterator, source, destination),
             },
+            BoundBreak or BoundContinue => statement,
             BoundTryFinally cleanup => cleanup with {
                 Body = (BoundBlock)RemapStatement(cleanup.Body, source, destination),
                 Finally = (BoundBlock)RemapStatement(cleanup.Finally, source, destination),
@@ -1216,7 +1240,8 @@ public static partial class ModuleCompiler
         }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-        var version = module.Classes.IsEmpty ? ManagedNodeVersion
+        var version = HasLoopTransfer(module.Functions) ? LoopTransferVersion
+            : module.Classes.IsEmpty ? ManagedNodeVersion
             : module.Classes.Any(static @class => @class.Fields.Any(
                 static field => IsInlineClassField(field.Type))) ? Version : ManagedClassVersion;
         writer.Write(Magic);
@@ -1314,7 +1339,7 @@ public static partial class ModuleCompiler
             var entry = reader.ReadInt32();
             var (structures, structureNames) = ReadStructures(reader, version);
             var classes = version >= ManagedClassVersion ? ReadClasses(reader, structureNames, version) : [];
-            if (version >= ManagedClassVersion && classes.IsEmpty)
+            if (version is ManagedClassVersion or Version && classes.IsEmpty)
             {
                 throw new ModuleFormatException("Class module version requires private managed layouts.");
             }
@@ -1375,7 +1400,7 @@ public static partial class ModuleCompiler
         var version = reader.ReadInt32();
         if (version is not (10 or 11 or OwnershipVersion or TransferVersion or CompositeVersion
             or BufferVersion or ReadonlyViewVersion or WritableViewVersion or ManagedNodeVersion
-            or ManagedClassVersion or Version))
+            or ManagedClassVersion or Version or LoopTransferVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -1592,7 +1617,7 @@ public static partial class ModuleCompiler
             writer.Write(variable.IsOut);
             PutSpan(writer, variable.Span);
         }
-        PutStatement(writer, function.Body, names, ref remaining, 0);
+        PutStatement(writer, function.Body, names, ref remaining, 0, version);
     }
 
     private static BoundFunction GetFunction(BinaryReader reader, ref int remaining, int version)
@@ -1681,7 +1706,8 @@ public static partial class ModuleCompiler
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The preceding tag selection rejects unsupported statement kinds.")]
-    private static void PutStatement(BinaryWriter writer, BoundStatement statement, string[] names, ref int remaining, int depth)
+    private static void PutStatement(BinaryWriter writer, BoundStatement statement, string[] names,
+        ref int remaining, int depth, int version)
     {
         Step(ref remaining, depth);
         writer.Write(statement switch {
@@ -1690,7 +1716,8 @@ public static partial class ModuleCompiler
             BoundAssignment => (byte)3,
             BoundExpressionStatement => (byte)4,
             BoundIf => (byte)5,
-            BoundWhile => (byte)6,
+            BoundWhile { Iterator: not null } when version >= LoopTransferVersion => (byte)20,
+            BoundWhile { Iterator: null } => (byte)6,
             BoundRequire => (byte)7,
             BoundReturn => (byte)8,
             BoundFieldAssignment => (byte)9,
@@ -1702,6 +1729,8 @@ public static partial class ModuleCompiler
             BoundDropConstructedFields => (byte)15,
             BoundViewScope => (byte)16,
             BoundViewSet => (byte)17,
+            BoundBreak when version >= LoopTransferVersion => (byte)18,
+            BoundContinue when version >= LoopTransferVersion => (byte)19,
             _ => throw new ModuleFormatException("Unknown statement kind."),
         });
         PutSpan(writer, statement.Span);
@@ -1718,7 +1747,7 @@ public static partial class ModuleCompiler
                 writer.Write(block.Statements.Length);
                 foreach (var child in block.Statements)
                 {
-                    PutStatement(writer, child, names, ref remaining, depth + 1);
+                    PutStatement(writer, child, names, ref remaining, depth + 1, version);
                 }
                 break;
             case BoundLocal local:
@@ -1731,7 +1760,7 @@ public static partial class ModuleCompiler
                 PutExpression(writer, view.Owner, names, ref remaining, depth + 1);
                 PutExpression(writer, view.Start, names, ref remaining, depth + 1);
                 PutExpression(writer, view.Length, names, ref remaining, depth + 1);
-                PutStatement(writer, view.Body, names, ref remaining, depth + 1);
+                PutStatement(writer, view.Body, names, ref remaining, depth + 1, version);
                 break;
             case BoundViewSet write:
                 writer.Write(write.Variable);
@@ -1770,20 +1799,26 @@ public static partial class ModuleCompiler
                 break;
             case BoundIf conditional:
                 PutExpression(writer, conditional.Condition, names, ref remaining, depth + 1);
-                PutStatement(writer, conditional.Then, names, ref remaining, depth + 1);
+                PutStatement(writer, conditional.Then, names, ref remaining, depth + 1, version);
                 writer.Write(conditional.Else is not null);
                 if (conditional.Else is not null)
                 {
-                    PutStatement(writer, conditional.Else, names, ref remaining, depth + 1);
+                    PutStatement(writer, conditional.Else, names, ref remaining, depth + 1, version);
                 }
                 break;
             case BoundWhile loop:
                 PutExpression(writer, loop.Condition, names, ref remaining, depth + 1);
-                PutStatement(writer, loop.Body, names, ref remaining, depth + 1);
+                PutStatement(writer, loop.Body, names, ref remaining, depth + 1, version);
+                if (loop.Iterator is not null)
+                {
+                    PutStatement(writer, loop.Iterator, names, ref remaining, depth + 1, version);
+                }
+                break;
+            case BoundBreak or BoundContinue:
                 break;
             case BoundTryFinally cleanup:
-                PutStatement(writer, cleanup.Body, names, ref remaining, depth + 1);
-                PutStatement(writer, cleanup.Finally, names, ref remaining, depth + 1);
+                PutStatement(writer, cleanup.Body, names, ref remaining, depth + 1, version);
+                PutStatement(writer, cleanup.Finally, names, ref remaining, depth + 1, version);
                 break;
             case BoundDrop drop:
                 writer.Write(drop.Variable);
@@ -1799,15 +1834,15 @@ public static partial class ModuleCompiler
                 writer.Write(drop.IsOutput);
                 break;
             case BoundUnsafe unsafeBlock:
-                PutStatement(writer, unsafeBlock.Body, names, ref remaining, depth + 1);
+                PutStatement(writer, unsafeBlock.Body, names, ref remaining, depth + 1, version);
                 break;
             case BoundTryCatch recovery:
-                PutStatement(writer, recovery.Body, names, ref remaining, depth + 1);
-                PutStatement(writer, recovery.Catch, names, ref remaining, depth + 1);
+                PutStatement(writer, recovery.Body, names, ref remaining, depth + 1, version);
+                PutStatement(writer, recovery.Catch, names, ref remaining, depth + 1, version);
                 writer.Write(recovery.Finally is not null);
                 if (recovery.Finally is not null)
                 {
-                    PutStatement(writer, recovery.Finally, names, ref remaining, depth + 1);
+                    PutStatement(writer, recovery.Finally, names, ref remaining, depth + 1, version);
                 }
                 break;
             case BoundRequire requirement:
@@ -1938,6 +1973,15 @@ public static partial class ModuleCompiler
             case 17 when version >= WritableViewVersion:
                 return new BoundViewSet(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1, version),
                     GetExpression(reader, ref remaining, depth + 1, version), span);
+            case 18 when version >= LoopTransferVersion:
+                return new BoundBreak(span);
+            case 19 when version >= LoopTransferVersion:
+                return new BoundContinue(span);
+            case 20 when version >= LoopTransferVersion:
+                var loopCondition = GetExpression(reader, ref remaining, depth + 1, version);
+                var loopBody = GetStatement(reader, ref remaining, depth + 1, version);
+                var iterator = GetStatement(reader, ref remaining, depth + 1, version);
+                return new BoundWhile(loopCondition, loopBody, span) { Iterator = iterator };
             default:
                 throw new ModuleFormatException("Unknown statement kind.");
         }
@@ -2134,7 +2178,12 @@ public static partial class ModuleCompiler
             Then = ResolveStatement(conditional.Then, names),
             Else = conditional.Else is null ? null : ResolveStatement(conditional.Else, names),
         },
-        BoundWhile loop => loop with { Condition = ResolveExpression(loop.Condition, names), Body = ResolveStatement(loop.Body, names) },
+        BoundWhile loop => loop with {
+            Condition = ResolveExpression(loop.Condition, names),
+            Body = ResolveStatement(loop.Body, names),
+            Iterator = loop.Iterator is null ? null : ResolveStatement(loop.Iterator, names),
+        },
+        BoundBreak or BoundContinue => statement,
         BoundTryFinally cleanup => cleanup with { Body = (BoundBlock)ResolveStatement(cleanup.Body, names), Finally = (BoundBlock)ResolveStatement(cleanup.Finally, names) },
         BoundViewScope view => view with {
             Owner = ResolveExpression(view.Owner, names),

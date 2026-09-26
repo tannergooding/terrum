@@ -684,6 +684,10 @@ public static class SemanticVerifier
                 case BoundWhile loop:
                     Expression(loop.Condition, scope, depth + 1);
                     Statement(loop.Body, scope, depth + 1);
+                    if (loop.Iterator is not null)
+                    {
+                        Statement(loop.Iterator, scope, depth + 1);
+                    }
                     break;
                 case BoundLocal local:
                     Expression(local.Initializer, scope, depth + 1);
@@ -728,7 +732,8 @@ public static class SemanticVerifier
                 case BoundReturn result when result.Value is not null:
                     Expression(result.Value, scope, depth + 1);
                     break;
-                case BoundDrop or BoundDropConstructedFields or BoundOwnerDeclaration or BoundReturn:
+                case BoundDrop or BoundDropConstructedFields or BoundOwnerDeclaration or BoundReturn
+                    or BoundBreak or BoundContinue:
                     break;
                 default:
                     throw Invalid();
@@ -891,6 +896,10 @@ public static class SemanticVerifier
                     break;
                 case BoundWhile loop:
                     pending.Push((loop.Body, item.Depth + 1));
+                    if (loop.Iterator is not null)
+                    {
+                        pending.Push((loop.Iterator, item.Depth + 1));
+                    }
                     break;
             }
         }
@@ -1143,6 +1152,10 @@ public static class SemanticVerifier
                 case BoundWhile loop:
                     Expression(loop.Condition, depth + 1);
                     Statement(loop.Body, depth + 1);
+                    if (loop.Iterator is not null)
+                    {
+                        Statement(loop.Iterator, depth + 1);
+                    }
                     break;
                 case BoundTryFinally cleanup:
                     Statement(cleanup.Body, depth + 1);
@@ -1168,7 +1181,7 @@ public static class SemanticVerifier
                         Expression(result.Value, depth + 1);
                     }
                     break;
-                case BoundOwnerDeclaration or BoundDropConstructedFields:
+                case BoundOwnerDeclaration or BoundDropConstructedFields or BoundBreak or BoundContinue:
                     break;
                 default:
                     throw Invalid();
@@ -1267,6 +1280,10 @@ public static class SemanticVerifier
                     break;
                 case BoundWhile loop:
                     pending.Push((loop.Body, false, item.Depth + 1));
+                    if (loop.Iterator is not null)
+                    {
+                        pending.Push((loop.Iterator, false, item.Depth + 1));
+                    }
                     break;
                 case BoundTryCatch recovery:
                     if (recovery.Finally is not null)
@@ -1309,10 +1326,12 @@ public static class SemanticVerifier
 
     private static bool Statement(BoundStatement statement, bool[] initialized, uint[] fieldMasks, HashSet<int> declarations,
         BoundFunction function, BoundProgram program, ref int remaining, int depth, bool reachable = true,
-        List<CleanupScope>? cleanups = null, bool inCleanup = false, bool inUnsafe = false, FailureEdges? failures = null)
+        List<CleanupScope>? cleanups = null, bool inCleanup = false, bool inUnsafe = false, FailureEdges? failures = null,
+        List<LoopScope>? loops = null)
     {
         Count(ref remaining, depth);
         cleanups ??= [];
+        loops ??= [];
         if (!reachable)
         {
             failures = null;
@@ -1332,7 +1351,7 @@ public static class SemanticVerifier
                         throw Invalid();
                     }
                     var childReturns = Statement(child, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1,
-                        reachable && !returns, cleanups, inCleanup, inUnsafe, failures);
+                        reachable && !returns, cleanups, inCleanup, inUnsafe, failures, loops);
                     returns |= childReturns;
                 }
                 return returns;
@@ -1558,13 +1577,13 @@ public static class SemanticVerifier
                 var thenMasks = (uint[])fieldMasks.Clone();
                 MarkOutMasks(thenState, thenMasks, function, program);
                 var thenReturns = Statement(conditional.Then, thenState, thenMasks, declarations, function, program, ref remaining, depth + 1,
-                    reachable && thenReachable, cleanups, inCleanup, inUnsafe, failures);
+                    reachable && thenReachable, cleanups, inCleanup, inUnsafe, failures, loops);
                 var elseState = Outcome(conditional.Condition, beforeCondition, false, ref remaining);
                 var elseMasks = (uint[])fieldMasks.Clone();
                 MarkOutMasks(elseState, elseMasks, function, program);
                 var elseReturns = conditional.Else is not null
                     && Statement(conditional.Else, elseState, elseMasks, declarations, function, program, ref remaining, depth + 1,
-                        reachable && elseReachable, cleanups, inCleanup, inUnsafe, failures);
+                        reachable && elseReachable, cleanups, inCleanup, inUnsafe, failures, loops);
                 for (var i = 0; i < initialized.Length; i++)
                 {
                     initialized[i] = !thenReachable || thenReturns ? elseState[i]
@@ -1574,6 +1593,11 @@ public static class SemanticVerifier
                 }
                 return (!thenReachable || thenReturns) && (!elseReachable || elseReturns);
             case BoundWhile loop:
+                if (loop.Iterator is not (null or BoundAssignment or BoundExpressionStatement
+                    or BoundBlock { Statements.IsEmpty: true, IsManagedLexicalScope: false, RetiredManagedLocals.IsEmpty: true }))
+                {
+                    throw Invalid(loop.Span);
+                }
                 var entryState = (bool[])initialized.Clone();
                 var entryMasks = (uint[])fieldMasks.Clone();
                 var headState = (bool[])entryState.Clone();
@@ -1595,39 +1619,101 @@ public static class SemanticVerifier
                     MarkOutMasks(bodyState, bodyMasks, function, program);
                     var bodyReachable = CanBe(loop.Condition, true, ref remaining);
                     var exitReachable = CanBe(loop.Condition, false, ref remaining);
+                    var iteratorDeclarations = new HashSet<int>(iterationDeclarations);
+                    var loopScope = new LoopScope(cleanups.Count);
+                    loops.Add(loopScope);
                     var bodyReturns = Statement(loop.Body, bodyState, bodyMasks, iterationDeclarations, function, program, ref remaining, depth + 1,
-                        reachable && bodyReachable, cleanups, inCleanup, inUnsafe, failures);
+                        reachable && bodyReachable, cleanups, inCleanup, inUnsafe, failures, loops);
+                    loops.RemoveAt(loops.Count - 1);
                     var exitState = Outcome(loop.Condition, conditionInput, false, ref remaining);
                     var exitMasks = (uint[])conditionMasks.Clone();
                     MarkOutMasks(exitState, exitMasks, function, program);
-                    if (!bodyReachable || bodyReturns)
+                    var backEdges = new FailureEdges();
+                    if (bodyReachable && !bodyReturns)
                     {
-                        Array.Copy(exitState, initialized, initialized.Length);
-                        Array.Copy(exitMasks, fieldMasks, fieldMasks.Length);
-                        declarations.UnionWith(iterationDeclarations);
-                        return !exitReachable;
+                        backEdges.Add(bodyState, bodyMasks);
                     }
+                    if (loopScope.Continues.HasEdges)
+                    {
+                        backEdges.Add(loopScope.Continues.State, loopScope.Continues.Masks);
+                    }
+                    if (loop.Iterator is not null)
+                    {
+                        var iteratorState = backEdges.HasEdges ? backEdges.State : (bool[])bodyState.Clone();
+                        var iteratorMasks = backEdges.HasEdges ? backEdges.Masks : (uint[])bodyMasks.Clone();
+                        for (var slot = function.ParameterCount + (function.IsConstructor ? 1 : 0);
+                            slot < iteratorState.Length; slot++)
+                        {
+                            if (!iteratorDeclarations.Contains(slot))
+                            {
+                                iteratorState[slot] = false;
+                                iteratorMasks[slot] = 0;
+                            }
+                        }
+                        var iteratorReturns = Statement(loop.Iterator, iteratorState, iteratorMasks, iteratorDeclarations,
+                            function, program, ref remaining, depth + 1, reachable && backEdges.HasEdges,
+                            cleanups, inCleanup, inUnsafe, failures, loops);
+                        iterationDeclarations.UnionWith(iteratorDeclarations);
+                        backEdges = new FailureEdges();
+                        if (!iteratorReturns && bodyReachable && (loopScope.Continues.HasEdges || !bodyReturns))
+                        {
+                            backEdges.Add(iteratorState, iteratorMasks);
+                        }
+                    }
+                    var exits = new FailureEdges();
+                    if (exitReachable)
+                    {
+                        exits.Add(exitState, exitMasks);
+                    }
+                    if (loopScope.Breaks.HasEdges)
+                    {
+                        exits.Add(loopScope.Breaks.State, loopScope.Breaks.Masks);
+                    }
+                    var backState = backEdges.HasEdges ? backEdges.State : null;
+                    var backMasks = backEdges.HasEdges ? backEdges.Masks : null;
                     var changed = false;
                     for (var i = 0; i < headState.Length; i++)
                     {
-                        var nextState = entryState[i] && bodyState[i];
-                        var nextMask = entryMasks[i] & bodyMasks[i];
+                        var nextState = entryState[i] && (backState is null || backState[i]);
+                        var nextMask = entryMasks[i] & (backMasks is null ? uint.MaxValue : backMasks[i]);
                         changed |= nextState != headState[i] || nextMask != headMasks[i];
                         headState[i] = nextState;
                         headMasks[i] = nextMask;
                     }
                     if (!changed)
                     {
-                        Array.Copy(exitState, initialized, initialized.Length);
-                        Array.Copy(exitMasks, fieldMasks, fieldMasks.Length);
+                        if (exits.HasEdges)
+                        {
+                            Array.Copy(exits.State, initialized, initialized.Length);
+                            Array.Copy(exits.Masks, fieldMasks, fieldMasks.Length);
+                        }
                         declarations.UnionWith(iterationDeclarations);
-                        return !exitReachable;
+                        return !exits.HasEdges;
                     }
                 }
                 throw Limit();
+            case BoundBreak or BoundContinue:
+                if (loops.Count == 0)
+                {
+                    throw InvalidEffect(statement.Span, inCleanup ? "FinallyReturn" : "LoopTransfer");
+                }
+                var target = loops[^1];
+                var transferState = (bool[])initialized.Clone();
+                var transferMasks = (uint[])fieldMasks.Clone();
+                var transferDeclarations = new HashSet<int>(declarations);
+                for (var index = cleanups.Count - 1; index >= target.CleanupDepth; index--)
+                {
+                    VerifyCleanup(cleanups[index].Body, transferState, transferMasks, transferDeclarations,
+                        function, program, ref remaining, depth + 1, reachable, inUnsafe, cleanups[index].Visible);
+                }
+                if (reachable)
+                {
+                    (statement is BoundBreak ? target.Breaks : target.Continues).Add(transferState, transferMasks);
+                }
+                return true;
             case BoundTryFinally cleanup:
                 return TryFinallyStatement(cleanup, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth, reachable, cleanups, inCleanup, inUnsafe, failures);
+                    ref remaining, depth, reachable, cleanups, inCleanup, inUnsafe, failures, loops);
             case BoundViewScope view:
                 if (view.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                     || view.Variable >= initialized.Length || view.Variable < 0
@@ -1686,7 +1772,7 @@ public static class SemanticVerifier
                 failures?.Add(initialized, fieldMasks);
                 initialized[view.Variable] = true;
                 var viewReturns = Statement(view.Body, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, reachable, cleanups, inCleanup, inUnsafe, failures);
+                    ref remaining, depth + 1, reachable, cleanups, inCleanup, inUnsafe, failures, loops);
                 initialized[view.Variable] = false;
                 return viewReturns;
             case BoundUnsafe unsafeBlock:
@@ -1695,10 +1781,10 @@ public static class SemanticVerifier
                     throw Invalid(unsafeBlock.Span);
                 }
                 return Statement(unsafeBlock.Body, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, reachable, cleanups, inCleanup, inUnsafe: true, failures: failures);
+                    ref remaining, depth + 1, reachable, cleanups, inCleanup, inUnsafe: true, failures: failures, loops: loops);
             case BoundTryCatch recovery:
                 return TryCatchStatement(recovery, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth, reachable, cleanups, inCleanup, inUnsafe, failures);
+                    ref remaining, depth, reachable, cleanups, inCleanup, inUnsafe, failures, loops);
             case BoundRequire requirement:
                 var beforeRequirement = (bool[])initialized.Clone();
                 Expression(requirement.Condition, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
@@ -1815,7 +1901,7 @@ public static class SemanticVerifier
 
     private static bool TryFinallyStatement(BoundTryFinally cleanup, bool[] initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function, BoundProgram program, ref int remaining, int depth,
-        bool reachable, List<CleanupScope> cleanups, bool inCleanup, bool inUnsafe, FailureEdges? failures)
+        bool reachable, List<CleanupScope> cleanups, bool inCleanup, bool inUnsafe, FailureEdges? failures, List<LoopScope> loops)
     {
         if (cleanup.Body is null || cleanup.Finally is null)
         {
@@ -1826,7 +1912,7 @@ public static class SemanticVerifier
         var cleanupScope = new CleanupScope(cleanup.Finally, [.. declarations]);
         cleanups.Add(cleanupScope);
         var tryReturns = Statement(cleanup.Body, initialized, fieldMasks, declarations, function, program,
-            ref remaining, depth + 1, reachable, cleanups, inCleanup, inUnsafe, cleanupFailures);
+            ref remaining, depth + 1, reachable, cleanups, inCleanup, inUnsafe, cleanupFailures, loops);
         cleanups.RemoveAt(cleanups.Count - 1);
         if (cleanupFailures?.HasEdges == true)
         {
@@ -1862,7 +1948,7 @@ public static class SemanticVerifier
 
     private static bool TryCatchStatement(BoundTryCatch recovery, bool[] initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function, BoundProgram program, ref int remaining, int depth,
-        bool reachable, List<CleanupScope> cleanups, bool inCleanup, bool inUnsafe, FailureEdges? failures)
+        bool reachable, List<CleanupScope> cleanups, bool inCleanup, bool inUnsafe, FailureEdges? failures, List<LoopScope> loops)
     {
         if (!inUnsafe)
         {
@@ -1886,7 +1972,7 @@ public static class SemanticVerifier
             cleanups.Add(recoveryScope!);
         }
         var recoveryBodyReturns = Statement(recovery.Body, initialized, fieldMasks, declarations, function,
-            program, ref remaining, depth + 1, reachable, cleanups, inCleanup, inUnsafe, caughtFailures);
+            program, ref remaining, depth + 1, reachable, cleanups, inCleanup, inUnsafe, caughtFailures, loops);
         var catchState = caughtFailures.HasEdges ? caughtFailures.State : recoveryEntryState;
         var catchMasks = caughtFailures.HasEdges ? caughtFailures.Masks : recoveryEntryMasks;
         for (var index = 0; index < catchState.Length; index++)
@@ -1902,7 +1988,7 @@ public static class SemanticVerifier
             ? new FailureEdges() : null;
         var catchReturns = Statement(recovery.Catch, catchState, catchMasks, declarations, function,
             program, ref remaining, depth + 1, reachable && caughtFailures.HasEdges, cleanups,
-            inCleanup, inUnsafe, catchFailures);
+            inCleanup, inUnsafe, catchFailures, loops);
         if (recovery.Finally is not null)
         {
             cleanups.RemoveAt(cleanups.Count - 1);
@@ -1968,6 +2054,13 @@ public static class SemanticVerifier
 
     private sealed record CleanupScope(BoundBlock Body, HashSet<int> Visible);
 
+    private sealed class LoopScope(int cleanupDepth)
+    {
+        internal int CleanupDepth { get; } = cleanupDepth;
+        internal FailureEdges Breaks { get; } = new();
+        internal FailureEdges Continues { get; } = new();
+    }
+
     private static bool HasUnsupportedCleanupFlow(BoundStatement statement, BoundProgram program, ref int remaining, int depth)
     {
         Count(ref remaining, depth);
@@ -1990,7 +2083,11 @@ public static class SemanticVerifier
                     || (conditional.Else is not null && CanBe(conditional.Condition, false, ref remaining)
                         && HasUnsupportedCleanupFlow(conditional.Else, program, ref remaining, depth + 1));
             case BoundWhile loop:
-                return CanBe(loop.Condition, true, ref remaining);
+                return CanBe(loop.Condition, true, ref remaining)
+                    && loop is not {
+                        Condition: BoundConstant { Type: PrimitiveType.Bool, Value: 1 },
+                        Body: BoundBlock { Statements: [BoundBreak] },
+                    };
             case BoundTryFinally nested:
                 return HasUnsupportedCleanupFlow(nested.Body, program, ref remaining, depth + 1)
                     || HasUnsupportedCleanupFlow(nested.Finally, program, ref remaining, depth + 1);

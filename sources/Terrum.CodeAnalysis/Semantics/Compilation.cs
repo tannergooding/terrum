@@ -280,6 +280,10 @@ public sealed class Compilation
                     case BoundWhile loop:
                         expressions.Push(loop.Condition);
                         statements.Push(loop.Body);
+                        if (loop.Iterator is not null)
+                        {
+                            statements.Push(loop.Iterator);
+                        }
                         break;
                     case BoundTryFinally cleanup:
                         statements.Push(cleanup.Body);
@@ -308,7 +312,8 @@ public sealed class Compilation
                     case BoundReturn { Value: BoundExpression value }:
                         expressions.Push(value);
                         break;
-                    case BoundOwnerDeclaration or BoundDrop or BoundDropConstructedFields or BoundReturn:
+                    case BoundOwnerDeclaration or BoundDrop or BoundDropConstructedFields or BoundReturn
+                        or BoundBreak or BoundContinue:
                         break;
                     default:
                         throw new ArgumentException("Unknown bound statement.", nameof(program));

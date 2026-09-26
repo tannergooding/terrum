@@ -599,6 +599,13 @@ internal sealed class Parser
                 node = Node(SyntaxKind.ReturnStatement, children);
                 break;
             }
+            case TokenKind.BreakKeyword:
+            case TokenKind.ContinueKeyword:
+            {
+                var kind = Current.Kind == TokenKind.BreakKeyword ? SyntaxKind.BreakStatement : SyntaxKind.ContinueStatement;
+                node = Node(kind, [Take(), Expect(TokenKind.Semicolon)]);
+                break;
+            }
             case TokenKind.Semicolon:
             {
                 node = Node(SyntaxKind.EmptyStatement, [Take()]);

@@ -389,13 +389,14 @@ the same native call ABI; the no-return proof does not require a fabricated
 return value. General catch objects and GC root tracking remain unimplemented.
 
 Structured [`try`/`finally`](../samples/native/try-finally.terrum) executes
-cleanup on ordinary fallthrough and every normal return, from inner region
+cleanup on ordinary fallthrough, every normal return and exiting loop transfers, from inner region
 to outer. Body locals are not in scope in the cleanup block; shared outer
 locals remain accessible. Cleanup independently obeys NoThrow even within a
 MayThrow function: calls need declared NoThrow contracts, and potentially
 failing arithmetic, conversions and host-buffer access diagnose. A return
 from cleanup diagnoses. This bounded profile also rejects potentially executing
-cleanup loops and reachable calls declared `DoesNotReturn`; it does not infer
+cleanup loops other than `while (true) { break; }`, and reachable calls declared
+`DoesNotReturn`; it does not infer
 termination from the bodies or contracts of other NoThrow callees.
 The backend snapshots scalar and compact aggregate pending results before
 cleanup, then commits bool/out outputs only when the earlier return predicate
@@ -483,11 +484,21 @@ passing and mutating instance methods are not supported.
 
 For loops accept an optional initializer, boolean condition and iterator,
 with a braced body. Initialization runs once; each successful condition is
-followed by the body and then the iterator. Returning from the body skips the
-iterator. An omitted condition is true. Header locals are scoped to the loop;
+followed by the body and then the iterator. Returning or breaking from the body
+skips the iterator; continuing reaches it before the next condition.
+An omitted condition is true. Header locals are scoped to the loop;
 the iterator cannot access body locals. Use assignments such as `i = i + 1`:
-increment operators, comma-separated clauses, break and continue are not
-implemented. [The loop sample](../samples/native/for-loops.terrum) returns 285.
+increment operators and comma-separated clauses are not implemented.
+`break` and `continue` target the nearest loop and clean exited scopes inside-out,
+including `finally`, unique owners and exact managed roots. A `for` initializer's
+owner survives continue and retires on loop exit. Transfers out of `finally`
+are rejected; loops entirely within a `finally` may use their own transfers.
+Checked cleanup failures take the exception path instead of completing the
+transfer; fail-fast termination still does not unwind.
+[The loop sample](../samples/native/for-loops.terrum) returns 285.
+The [native loop-transfer fixture](../tests/native/managed-loop-transfer-abi.terrum)
+combines a retained initializer buffer, nested transfers/finally and managed
+cycles. Its C caller checks exact allocation/release counts under both policies.
 
 Other integer widths, floating point, character/text literals, shifts, classes,
 optional/generic/family binding, general borrowed references, ownership/cleanup,

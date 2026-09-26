@@ -36,6 +36,8 @@ internal sealed partial class Binder
     private string _namespace = "";
     private readonly List<BoundVariable> _variables = [];
     private readonly List<Dictionary<string, int>> _scopes = [];
+    private readonly List<LoopBinding> _loops = [];
+    private int _finallyLoopDepth;
     private PrimitiveType _returnType;
     private string? _currentStruct;
     private bool _constructor;
@@ -46,6 +48,11 @@ internal sealed partial class Binder
     private readonly BoundRuntimePolicy _runtimePolicy;
     private bool _usesNativeBuffer;
     private bool _usesManagedNode;
+
+    private sealed class LoopBinding
+    {
+        internal bool HasContinue { get; set; }
+    }
 
     internal Binder(SyntaxTree tree, CancellationToken cancellationToken)
         : this([tree], [], cancellationToken)
@@ -481,6 +488,7 @@ internal sealed partial class Binder
                 "DoesNotReturn" => ("TRM3018", "DoesNotReturn declarations must have no reachable normal return or fallthrough."),
                 "NormalReturn" => ("TRM3012", "Not all normally completing paths return a value."),
                 "FinallyReturn" => ("TRM3019", "A finally block cannot return or transfer control out of cleanup."),
+                "LoopTransfer" => ("TRM3008", "Loop transfer requires an enclosing loop."),
                 "FinallyNoReturn" => ("TRM3020", "Potentially nonreturning finally cleanup is unsupported in this bounded profile."),
                 "UnsafeRecovery" => ("TRM3021", "Checked failure recovery requires an unsafe block."),
                 "CheckedPolicy" => ("TRM3022", "Recovery requires the checked-exceptions runtime policy."),
@@ -1056,7 +1064,10 @@ internal sealed partial class Binder
             case SyntaxKind.TryFinallyStatement:
             {
                 var body = BindBlock((SyntaxNode)node.Children[1]);
+                var previousFloor = _finallyLoopDepth;
+                _finallyLoopDepth = Math.Max(previousFloor, _loops.Count);
                 var cleanup = BindBlock((SyntaxNode)node.Children[3]);
+                _finallyLoopDepth = previousFloor;
                 return new BoundTryFinally(body, cleanup, node.Span);
             }
 
@@ -1076,7 +1087,14 @@ internal sealed partial class Binder
                 }
                 var body = BindBlock((SyntaxNode)node.Children[1]);
                 var handler = BindBlock((SyntaxNode)node.Children[3]);
-                var cleanup = node.Children.Length > 4 ? BindBlock((SyntaxNode)node.Children[5]) : null;
+                BoundBlock? cleanup = null;
+                if (node.Children.Length > 4)
+                {
+                    var previousFloor = _finallyLoopDepth;
+                    _finallyLoopDepth = Math.Max(previousFloor, _loops.Count);
+                    cleanup = BindBlock((SyntaxNode)node.Children[5]);
+                    _finallyLoopDepth = previousFloor;
+                }
                 return new BoundTryCatch(body, handler, cleanup, node.Span);
             }
 
@@ -1245,8 +1263,29 @@ internal sealed partial class Binder
             }
 
             case SyntaxKind.WhileStatement:
-                return new BoundWhile(BindExpression((SyntaxNode)node.Children[2], PrimitiveType.Bool),
-                    BindBlock((SyntaxNode)node.Children[4]), node.Span);
+            {
+                var condition = BindExpression((SyntaxNode)node.Children[2], PrimitiveType.Bool);
+                _loops.Add(new LoopBinding());
+                var body = BindBlock((SyntaxNode)node.Children[4]);
+                _loops.RemoveAt(_loops.Count - 1);
+                return new BoundWhile(condition, body, node.Span);
+            }
+
+            case SyntaxKind.BreakStatement:
+            case SyntaxKind.ContinueStatement:
+            {
+                if (_loops.Count <= _finallyLoopDepth)
+                {
+                    Report(_loops.Count == 0 ? "TRM3008" : "TRM3019",
+                        _loops.Count == 0 ? "Loop transfer requires an enclosing loop."
+                            : "A finally block cannot transfer control out of cleanup.", node.Span);
+                }
+                else if (node.Kind == SyntaxKind.ContinueStatement)
+                {
+                    _loops[^1].HasContinue = true;
+                }
+                return node.Kind == SyntaxKind.BreakStatement ? new BoundBreak(node.Span) : new BoundContinue(node.Span);
+            }
 
             case SyntaxKind.ForStatement:
             {
@@ -1263,7 +1302,10 @@ internal sealed partial class Binder
                     ? new BoundConstant(1, PrimitiveType.Bool, conditionNode.Span)
                     : BindExpression(conditionNode, PrimitiveType.Bool);
                 var iterator = BindStatement((SyntaxNode)node.Children[6]);
+                var loopBinding = new LoopBinding();
+                _loops.Add(loopBinding);
                 var body = BindBlock((SyntaxNode)node.Children[8]);
+                _loops.RemoveAt(_loops.Count - 1);
                 for (var slot = firstVariable; slot < _variables.Count; slot++)
                 {
                     if (IsUnique(_variables[slot].Type)
@@ -1279,8 +1321,10 @@ internal sealed partial class Binder
                     .Where(slot => ManagedClassTypes.IsManaged(_variables[slot].Type))
                     .Order().ToImmutableArray();
                 _scopes.RemoveAt(_scopes.Count - 1);
-                var loopBody = new BoundBlock([body, iterator], node.Span);
-                var loop = new BoundWhile(condition, loopBody, node.Span);
+                var loopBody = loopBinding.HasContinue ? body : new BoundBlock([body, iterator], node.Span);
+                var loop = new BoundWhile(condition, loopBody, node.Span) {
+                    Iterator = loopBinding.HasContinue ? iterator : null,
+                };
                 if (initializer is BoundLocal owner && IsUnique(_variables[owner.Variable].Type))
                 {
                     var method = CleanupMethod(_variables[owner.Variable].Type);
@@ -1440,6 +1484,10 @@ internal sealed partial class Binder
                     break;
                 case BoundWhile loop:
                     Collect(loop.Body, sequential: false);
+                    if (loop.Iterator is not null)
+                    {
+                        Collect(loop.Iterator, sequential: false);
+                    }
                     break;
                 case BoundTryCatch recovery:
                     Collect(recovery.Body, sequential: false);

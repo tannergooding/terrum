@@ -306,9 +306,13 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Graph library cannot have an entry point.");
             }
             var (structures, names) = ReadStructures(reader, version);
-            if (version >= ManagedClassVersion)
+            if (version is >= ManagedClassVersion and not LoopTransferVersion)
             {
                 throw new ModuleFormatException("Graph libraries cannot use the private class module version.");
+            }
+            if (version == LoopTransferVersion && !ReadClasses(reader, names, version).IsEmpty)
+            {
+                throw new ModuleFormatException("Graph libraries cannot retain private classes.");
             }
             var imported = ReadImportedTypes(reader, structures.Length, names, expectedConsumer: true);
             var count = Count(reader, MaximumFunctions);

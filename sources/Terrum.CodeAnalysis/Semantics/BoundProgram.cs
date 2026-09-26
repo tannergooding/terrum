@@ -286,7 +286,17 @@ public sealed record BoundIf(BoundExpression Condition, BoundStatement Then, Bou
 /// <param name="Condition">A boolean condition.</param>
 /// <param name="Body">The loop body.</param>
 /// <param name="Span">The source range.</param>
-public sealed record BoundWhile(BoundExpression Condition, BoundStatement Body, TextSpan Span) : BoundStatement(Span);
+public sealed record BoundWhile(BoundExpression Condition, BoundStatement Body, TextSpan Span) : BoundStatement(Span)
+{
+    /// <summary>The scoped for-loop iterator, evaluated after body fallthrough or continue, before the next condition.</summary>
+    public BoundStatement? Iterator { get; init; }
+}
+
+/// <summary>Exits the nearest enclosing loop after leaving its nested lexical regions.</summary>
+public sealed record BoundBreak(TextSpan Span) : BoundStatement(Span);
+
+/// <summary>Continues the nearest enclosing loop after leaving its nested lexical regions.</summary>
+public sealed record BoundContinue(TextSpan Span) : BoundStatement(Span);
 
 /// <summary>A cleanup region for normal exits and checked exceptional unwinding, but not fail-fast termination.</summary>
 public sealed record BoundTryFinally(BoundBlock Body, BoundBlock Finally, TextSpan Span) : BoundStatement(Span);

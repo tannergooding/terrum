@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-12 and native-10 through native-20
+## Current boundary: syntax-13 and native-10 through native-20
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -17,7 +17,7 @@ general managed graphs and standard-library execution are not implemented.
 | Lexing | Pinned Unicode identifiers, ASCII numbers/tags, comments, leading trivia, strings, diagnostics, EOF | Interpolation, raw/character/native literals, directives |
 | Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, bounded reference classes, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Inheritance, unique/inline classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes/generics, public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; executable source-class and `ManagedNode` optionals; repeated `?` diagnoses | Scalar options, generic optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
-| Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, return, `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, break/continue, general switch/patterns, general exception objects/throw, async, compound assignment |
+| Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, nearest-loop `break`/`continue`, return, `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, labeled transfers, general switch/patterns, general exception objects/throw, async, compound assignment |
 | Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, explicit closed static-protocol calls, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations and lexical readonly/exclusive writable buffer slices | Character literals, partial owning-field moves, owning field replacement, general expression temporaries, general stored loans, evaluation outside the native profile, user-defined conversions, general overloads/generic calls, conditional expressions, constructor generic inference |
 | Managed storage | Aliasable `ManagedNode` and source-class handles, optional edges and non-null pattern snapshots, handle-free compact Copy fields in classes, descriptor-based cycle tracing, complete-publication class factories, exact frame/temporary roots and explicit nonmoving collection under both policies, including exceptional root retirement and escaping-frame unlink | Managed handles inside user structs, stored interior pointers, implicit GC, native DLL/module graph managed ABI |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
@@ -48,7 +48,7 @@ type        = (qualifiedName | "void") ("<" type ("," type)* ">")? "?"?
 mode        = "ref" | "mut" "ref" | "out"
 local       = localInitializer ";"
 localInitializer = "mut"? ("var" | type) name "=" expression
-statement   = block | local | if | while | for | tryStatement | unsafeStatement | return | require | assignment | expression ";" | ";"
+statement   = block | local | if | while | for | tryStatement | unsafeStatement | return | require | assignment | "break" ";" | "continue" ";" | expression ";" | ";"
 if          = "if" "(" expression ")" block ("else" (block | if))?
 while       = "while" "(" expression ")" block
 for         = "for" "(" initializer? ";" expression? ";" iterator? ")" block
@@ -162,12 +162,20 @@ to build and own a line-start table, with binary-searched UTF-16 positions check
 against host fixtures under both native failure policies.
 General borrowed references and stored loans remain unsupported.
 For-loop initialization runs once, followed by condition, body and iterator;
-the iterator does not run after a returning body. An omitted condition is true.
+the iterator does not run after a returning or breaking body. `continue` runs
+the iterator before testing the next condition. An omitted condition is true.
 Initializer locals remain in scope through the header and body, not afterward.
 The iterator cannot reference body locals. Multiple comma-separated clauses,
-increment/compound-assignment operators and break/continue are not implemented.
-The binder lowers the scoped loop to existing verified blocks and `while`
-operations; there is no separate machine-code or module-IR loop variant.
+increment/compound-assignment operators are not implemented.
+`break` and `continue` target the nearest enclosing loop. They run the normal
+cleanup of exited scopes, including nested `finally` and owner cleanup, and
+retire those scopes' managed roots; a `for` initializer remains live across
+continue and retires when the loop exits. A transfer cannot escape a `finally`,
+but a loop wholly inside that `finally` can use its own transfers.
+Flow verification distinguishes loop transfers from return and fallthrough
+when merging initialization and ownership states.
+The binder retains the legacy `while` lowering for unaffected loops and a
+distinct iterator target when a `for` needs it for `continue`.
 Braces are required on control bodies. Supported precedence, strongest
 first: postfix; unary `+ - ! ~ move`; `* / %`; `+ -`; `< <= > >=`; `== !=`; `&`; `^`;
 `|`; `&&`; `||`. Binary operators associate left. Lexing does not fuse angle
@@ -205,6 +213,9 @@ use a private specialization without publishing its template or witnesses.
 construction and descriptor-based tracing contract.
 `syntax-12` adds optional-presence patterns; `native-20` executes them for managed
 handles with exact roots and explicit absence.
+`syntax-13` adds nearest-loop `break` and `continue`, including scoped `for`
+iterators. Semantic modules use version 21 when retaining these operations;
+native profiles and exported contracts do not change.
 `[NoThrow]` on functions/constructors, `[DoesNotReturn]` on void functions and
 `[Cleanup]` on eligible unique instance methods are currently bound;
 unknown, duplicate and misplaced attributes diagnose rather
@@ -237,9 +248,11 @@ nonreturning calls can establish that proof. Unreachable syntax and IR still
 undergo type and initialization checks; an unreachable return is not evidence
 of normal completion. `BoundTryFinally` retains both regions, verifies NoThrow
 cleanup independently of the function's own effect, and runs it on normal
-fallthrough and returns, inside-out. `TRM3019` rejects returns inside cleanup;
-`TRM3020` conservatively rejects cleanup loops that may execute and reachable
-`DoesNotReturn` calls. This is not a termination proof for other NoThrow
+fallthrough, returns and exiting loop transfers, inside-out. `TRM3019` rejects
+returns and transfers escaping cleanup; a loop entirely inside cleanup may
+exit locally. `TRM3020` conservatively rejects potentially executing cleanup
+loops other than `while (true) { break; }`, and reachable `DoesNotReturn`
+calls. This is not a termination proof for other NoThrow
 callees. Return values are
 snapshotted before cleanup; bool/out publication is checked after all cleanup.
 Fail-fast checked failures do not unwind or run cleanup. Catch and other
