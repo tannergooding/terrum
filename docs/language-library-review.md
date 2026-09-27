@@ -262,6 +262,9 @@ indexing/folds, or forwarding. .NET's finite `Func`
 arities and recursive `Tuple<..., TRest>` are library conventions, not a
 language-level pack ([`Func`](https://learn.microsoft.com/en-us/dotnet/api/system.func-17),
 [`Tuple`](https://learn.microsoft.com/en-us/dotnet/api/system.tuple-8)).
+The built-in stored-callable family could instead be called `func`; its naming
+and relationship to `delegate` remain open, without requiring user-declared
+nominal delegate types.
 
 Agreed parameter-model examples:
 
@@ -275,7 +278,7 @@ accepted syntax**:
 
 ```terrum
 fnptr<int32, bool, int64> parse;  // (int32, bool) -> int64; result last
-delegate<int32, int32> map;       // int32 -> int32; one target/environment
+func<int32, int32> map;           // int32 -> int32; one target/environment
 tuple<int32, bool> state;         // ordered, heterogeneous inline values
 
 interface IMapper<TInput, TOutput>
@@ -324,28 +327,73 @@ contract. Whether to provide one callable protocol or separate readonly and
 mutable protocols, and the marker/notation, remain open; add a special
 signature family only if the concrete use case requires it.
 
-**Open callable type and invocation contracts:** distinguish a function
-signature from a value that stores a callable. One candidate notation is
-`fn<Args..., R>` for a closed signature, with `ptr<fn<...>>` for a raw code
-pointer and `delegate<fn<...>>` for a target plus environment. A flatter
-`func<...>`/`fnptr<...>` family is another candidate. These are alternatives
-for review, not selected syntax; in particular, the relationship between
-`func` and `fn`, and whether pointer nesting is part of the type model, remain
-unresolved.
+**Additional unapproved callable recommendation and open contracts:** a
+lifetime-aware, single-cast `func` and a raw ABI-level `fnptr` could share
+checked signature and witness machinery without sharing representation.
+The agreed alias direction is transparent naming, not nominal delegate
+identity; simple nominal wrappers are a separate feature. Alias syntax remains
+open. A static callable view may retain named parameters for source contracts
+and metadata, but parameter names are not ABI names. C# custom delegates have
+named parameters; generic `Func` types expose library-chosen `Invoke` parameter
+names. Under the proposed model, calls use the names from the declared
+callable view, not the target implementation. Renaming a public parameter can
+break source compatibility without changing the ABI. Named arguments retain
+source-order evaluation before assignment to their parameter positions.
 
-Calling convention belongs to the callable entry contract, not to `ptr` by
-itself or an inference from pointer representation. A delegate's `Invoke`
-entry ABI can differ from its underlying target's ABI; any adapter must declare
-and preserve the relevant effects and make capture, allocation, and other
-costs explicit. The contract must also distinguish static functions, unbound
-instance methods, and bound instance calls. An unbound method signature needs
-an explicit receiver whose access matches the method contract (for example,
-`C`/`write C` for a class handle or `ref<S>`/`write ref<S>` for a struct
-receiver); a raw code pointer alone cannot retain a bound receiver, so closed
-instance calls need an explicit environment/context or adapter. Native member
-function pointers are not generally raw code addresses: adjustment thunks and
-virtual dispatch can participate, so no blanket reinterpretation as a code
-pointer is implied.
+The signature-versus-value notation remains open. One candidate is
+`fn<Args..., R>` for a closed signature, with `ptr<fn<...>>` for a raw code
+pointer and `func<fn<...>>` for a stored callable; a flatter
+`func<...>`/`fnptr<...>` family is another. Neither is selected syntax. Type-use
+attributes for calling convention fit the existing design vocabulary; for
+example, `[CallConv(NativeCallingConvention.Winapi)] fnptr<...>` is only an
+illustration. A Terrum default versus explicit foreign convention, and any
+ergonomic special-casing for `fnptr` declarations or imports/exports, remain
+open. Calling convention belongs to the callable entry contract, not to `ptr`
+by itself or an inference from pointer representation; no implicit convention
+casts are proposed. A delegate's `Invoke` entry ABI can differ from its
+underlying target ABI, so an adapter must declare the boundary and preserve
+effects while making capture, allocation, and other costs explicit.
+
+The contract must distinguish static functions, unbound instance methods, and
+bound instance calls. This illustrative matrix records candidate semantics,
+not selected syntax:
+
+| Case | Raw `fnptr` candidate | Stored `func` candidate |
+|---|---|---|
+| Static | Points to a static function with ordinary arguments | Can store a static `M(T)` target |
+| Open instance | `fnptr<this T, void>` candidate passes the receiver explicitly | `func<this T, void>` candidate is invoked with the receiver explicitly |
+| Bound instance | Cannot retain a receiver; a pointer may target an adapter, but that adapter's origin is not part of the pointer contract | Can store a bound `C.M(T)` with an explicit environment/context |
+
+The `this` marker and its compatibility with ordinary `T` parameters remain
+open. It marks an open receiver role; it does not select a calling convention.
+An open receiver's access must match the method (for example, `C`/`write C`
+or `ref<S>`/`write ref<S>`). A plain `fnptr<T, void>` has an ordinary `T`
+argument, not a bound receiver. Native member-function pointers are not
+generally raw code addresses: adjustment thunks and virtual dispatch can
+participate, so no blanket reinterpretation as a code pointer is implied.
+
+**Generic callable and scalar/SIMD integration (proposal).** A closed
+`func<float32, float32>` does not promise vector implementations. Numeric
+kernels could instead require a generic functor whose `Invoke<T>` is checked
+against declared operation and storage capabilities, then specialized for the
+supported scalar and SIMD family members. Each raw function-pointer
+instantiation still has one closed signature and ABI.
+
+A later contextually generic lambda could implement that same functor
+contract. For example, `x => x * x` could be checked with symbolic `T` under a
+declared multiplication and Copy contract; it would not first become a scalar
+callback and then be reinterpreted for vector arguments. Captured scalar
+values need an explicit supported broadcast operation where appropriate.
+Generic admissibility alone does not establish elementwise equivalence:
+invocation counts, state changes, cross-lane operations, inactive lanes,
+tails, floating-point order and contraction remain part of the kernel's
+semantic contract. A readonly receiver is not a purity guarantee.
+
+The recommended staging is fixed-signature callables and contextual lambdas,
+then named generic functors with bounded scalar/SIMD contracts, then
+contextually generic lambdas as shorthand for those functors. Arbitrary pack
+manipulation, polymorphic callable erasure and automatic vectorization of an
+arbitrary scalar callback remain outside this recommendation.
 
 Formatting handlers remain typed writer streams with declared captures, not
 universal `ToString` or heterogeneous varargs; see §1.2. C variadics are a
