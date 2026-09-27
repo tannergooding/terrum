@@ -21,6 +21,8 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { uint64 value = 18446744073709551615; return int32(value % 1000); }")]
     [InlineData("int32 Main() { char16 value = 65535; return int32(value) - 65493; }")]
     [InlineData("int32 Main() { uint32 a = 4294967295; int64 b = 42; return int32(uint64(a) % 1000) - 295 + int32(b); }")]
+    [InlineData("int32 Main() { uint64 mask = 0xFFFFFFFFFFFFFFFF; return int32(mask % 0X100); }")]
+    [InlineData("int32 Main() { int64 value = -0x8000000000000000; if (value == int64.MinValue) { return 42; } return 0; }")]
     public async Task CompiledIntegerValuesEmitTheSameImageAsHostBuildAsync(string source)
     {
         var scanner = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -61,6 +63,10 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return 1i128; }")]
     [InlineData("int32 Main() { return 1.5; }")]
     [InlineData("int32 Main() { return 1e+; }")]
+    [InlineData("int32 Main() { return 0x; }")]
+    [InlineData("int32 Main() { return 0xG; }")]
+    [InlineData("int32 Main() { return 0xFFFFFFFFi64; }")]
+    [InlineData("int32 Main() { uint64 value = 0x10000000000000000; return 42; }")]
     public async Task CompiledIntegerFailuresRetainHostDiagnosticCodesAndSpansAsync(string source)
     {
         var scanner = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

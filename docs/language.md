@@ -329,9 +329,9 @@ through a hidden `int32`/`float64`. `int32(1234)`, `uint64(0xFFFFFFFF)` and
 `T(untypedLiteral)` uses the registered parser directly; `T(typedExpression)`
 is a checked explicit conversion. `new T(arguments)` remains nominal
 construction. Already-typed numbers never implicitly widen or narrow. The
-syntax-14 compiler executes contextual decimal integer literals without a
-fallback and checked numeric type-call conversions for `int32`, `uint32`,
-`int64`, `uint64` and `char16`; the hexadecimal and floating examples above
+syntax-15 compiler executes contextual decimal and hexadecimal integer
+literals without a fallback and checked numeric type-call conversions for
+`int32`, `uint32`, `int64`, `uint64` and `char16`; floating literals above
 remain target-only. Type/value-call binding preserves existing source-function
 and local shadowing/call precedence. `[ConstEval]` marks declarations eligible
 for bounded deterministic compile-time execution; `const T a = F()`
@@ -647,12 +647,13 @@ rebinding `this`, and general reference forms remain unsupported. Primitive
 `Buffer` views retain separate legacy access paths, and the coherent
 `out`-to-`init ref<T>` migration remains scheduled. Neither the fail-fast runtime nor bounded
 checked-exceptions proof is the language's future general exception runtime.
-The syntax-14 numeric compiler rejects width suffixes with `TRM0006` and no
-longer parses prefix casts. It supports contextual decimal integer literals
-without a fallback type and checked numeric type-call conversions for
-`int32`, `uint32`, `int64`, `uint64` and `char16`; hexadecimal/floating/custom
-literal parsing, digit separators, registered string targets and `[ConstEval]`
-execution remain unsupported.
+The syntax-15 numeric compiler rejects attached width suffixes with `TRM0006`,
+diagnoses a `0x`/`0X` prefix without an ASCII hex digit as `TRM0007`, and no
+longer parses prefix casts. It supports contextual decimal and hexadecimal
+integer literals without a fallback type and checked numeric type-call
+conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`.
+Floating/custom literal parsing, digit separators, registered string targets
+and `[ConstEval]` execution remain unsupported.
 Bounded ownership and lexical-view checks, source-defined managed classes,
 optional edges and explicit cycle tracing are implemented; general
 ownership/lifetime analysis, public managed module contracts and

@@ -65,14 +65,16 @@ forwarding through an existing `this` are supported receiver places. Public
 source visibility does not expose a public mutating-receiver ABI.
 It includes compilation-local constrained generic specialization, but not a
 public managed ABI, general interfaces/witnesses, array/view libraries, async,
-or the proposed libraries. The syntax-14 numeric front end rejects width
-suffixes with `TRM0006`, no longer parses prefix casts, and supports
-context-typed decimal integers plus checked type-call conversions for `int32`,
-`uint32`, `int64`, `uint64` and `char16`. The scanner-4 record shape is
-unchanged and retains recognized suffix tags only on diagnostic-bearing
-tokens. Hexadecimal/floating/custom literal parsing and `[ConstEval]` remain
-outside the executable profile. Examples in this review and `.api.terrum`
-files remain design material unless specifically identified as implemented.
+or the proposed libraries. The syntax-15 numeric front end rejects width
+suffixes with `TRM0006`, diagnoses a `0x`/`0X` prefix without an ASCII
+hexadecimal digit as `TRM0007`, no longer parses prefix casts, and supports
+contextual decimal and hexadecimal integer literals plus checked type-call
+conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`. The
+scanner-4 record shape is unchanged and retains recognized suffix tags only
+on diagnostic-bearing tokens. Floating/custom literal parsing and
+`[ConstEval]` remain outside the executable profile. Examples in this review
+and `.api.terrum` files remain design material unless specifically identified
+as implemented.
 
 ## 1. Make capabilities explicit and composable
 
@@ -612,9 +614,9 @@ float32 fraction = float32(0.1);
 float64 converted = float64(count);
 ```
 
-The syntax-14 executable profile supports decimal integer literals and the
-listed built-in conversion types; the hexadecimal and floating examples above
-illustrate target syntax only.
+The syntax-15 executable profile supports contextual decimal and hexadecimal
+integer literals and the supported built-in integer/code-unit conversion types;
+the floating-point examples above illustrate target syntax only.
 
 `T(untypedLiteral)` invokes the registered literal parser directly: it does
 not first manufacture an `int32` or `float64`. `T(typedExpression)` is an

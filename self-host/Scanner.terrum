@@ -384,8 +384,53 @@ void PublishInteger(int32 tokenIndex, bool overflow, uint64 magnitude, int32 tag
     Host.IntegerValues[0] = count + 1;
 }
 
+int32 ScanHexNumber(int32 initial, int32 tokenIndex)
+{
+    mut int32 at = initial + 2;
+    if (!IsHex(PeekUnit(at)))
+    {
+        Report(7, initial, 2);
+        return at;
+    }
+
+    mut uint64 magnitude = 0;
+    mut bool overflow = false;
+    while (IsHex(PeekUnit(at)))
+    {
+        if (!overflow)
+        {
+            uint64 digit = uint64(HexValue(PeekUnit(at)));
+            if (magnitude > (uint64.MaxValue - digit) / 16)
+            {
+                overflow = true;
+            }
+            else
+            {
+                magnitude = magnitude * 16 + digit;
+            }
+        }
+        at = at + 1;
+    }
+
+    mut int32 tag = 0;
+    int32 tagLength = ReadNumericTag(at);
+    if (tagLength != 0)
+    {
+        Report(6, at, tagLength);
+        tag = IntegerTag(at, tagLength);
+        at = at + tagLength;
+    }
+    PublishInteger(tokenIndex, overflow, magnitude, tag);
+    return at;
+}
+
 int32 ScanNumber(int32 initial, int32 tokenIndex)
 {
+    if (PeekUnit(initial) == 48 && (PeekUnit(initial + 1) == 120 || PeekUnit(initial + 1) == 88))
+    {
+        return ScanHexNumber(initial, tokenIndex);
+    }
+
     mut int32 at = initial;
     int32 start = at;
     mut uint64 magnitude = 0;

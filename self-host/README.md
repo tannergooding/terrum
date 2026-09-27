@@ -135,14 +135,15 @@ working contract notation, not an unchecked annotation accepted by the MVP.
 
 The scanner shares the host's generated Unicode ranges; classification,
 token boundaries, keywords, leading trivia and lexical diagnostic decisions
-execute in Terrum. Untagged decimal integer magnitudes through the unsigned
-64-bit range are decoded natively without assigning a default numeric type.
+execute in Terrum. Untagged decimal and hexadecimal (`0x`/`0X`) integer
+magnitudes through the unsigned 64-bit range are decoded natively without
+assigning a default numeric type. An empty hexadecimal prefix reports `TRM0007`.
 Attached width suffixes are lexical errors (`TRM0006`); scanner-4 retains
 recognized suffix-tag metadata only in the existing record for those rejected
-tokens, while valid integer records are untagged. Larger decimal magnitudes
-are reported as beyond the decoder's range, not lexical errors. Hexadecimal
-and floating literal binding, digit separators, custom literal parsers and
-`[ConstEval]` remain unsupported. Contextual decimal literal typing/range checks
+tokens, while valid integer records are untagged. Larger integer magnitudes
+are reported as beyond the decoder's range, not lexical errors. Floating
+literal binding, digit separators, custom literal parsers and `[ConstEval]`
+remain unsupported. Contextual integer literal typing/range checks
 and parser routines remain hosted, while
 `build-component` binds the scanner's validated integer records without a host
 magnitude-decoding fallback. The string-literal candidate

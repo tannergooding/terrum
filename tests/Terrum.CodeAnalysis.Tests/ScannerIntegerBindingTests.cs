@@ -33,6 +33,25 @@ public sealed class ScannerIntegerBindingTests
         Assert.Equal(42, Assert.IsType<BoundConstant>(hostResult.Value).Value);
     }
 
+    [Fact]
+    public void HexLiteralUsesTrustedDecoderWithoutChangingOrdinaryParsing()
+    {
+        const string Source = "int32 Main() { return 0x2A; }";
+        var lexical = Lexer.Lex(SourceText.From(Source));
+        var index = Array.FindIndex([.. lexical.Tokens], static token => token.Kind == TokenKind.NumericLiteral);
+        var decoded = Compilation.Create(SyntaxTree.Parse(lexical,
+            [new ScannerIntegerValue(index, "", false, 41)]));
+        Assert.False(decoded.HasErrors, string.Join(Environment.NewLine, decoded.Diagnostics));
+        var main = Assert.IsType<BoundProgram>(decoded.Program).Functions[0];
+        var result = Assert.IsType<BoundReturn>(Assert.Single(main.Body.Statements));
+        Assert.Equal(41, Assert.IsType<BoundConstant>(result.Value).Value);
+
+        var ordinary = Compilation.Create(SyntaxTree.Parse(Source));
+        var host = Assert.IsType<BoundProgram>(ordinary.Program).Functions[0];
+        var hostResult = Assert.IsType<BoundReturn>(Assert.Single(host.Body.Statements));
+        Assert.Equal(42, Assert.IsType<BoundConstant>(hostResult.Value).Value);
+    }
+
     [Theory]
     [InlineData("missing")]
     [InlineData("duplicate")]
@@ -64,6 +83,19 @@ public sealed class ScannerIntegerBindingTests
     public void RequiresNoIntegerRecordForFloatingFormsButRejectsAnInjectedRecord()
     {
         var lexical = Lexer.Lex(SourceText.From("int32 Main() { return 1.5; }"));
+        var index = Array.FindIndex([.. lexical.Tokens], static token => token.Kind == TokenKind.NumericLiteral);
+        _ = SyntaxTree.Parse(lexical, []);
+        _ = Assert.Throws<ArgumentException>(() => SyntaxTree.Parse(lexical,
+            [new ScannerIntegerValue(index, "", false, 1)]));
+    }
+
+    [Theory]
+    [InlineData("0x")]
+    [InlineData("0XG")]
+    [InlineData("0X")]
+    public void RequiresNoRecordForMalformedHexForms(string spelling)
+    {
+        var lexical = Lexer.Lex(SourceText.From($"int32 Main() {{ return {spelling}; }}"));
         var index = Array.FindIndex([.. lexical.Tokens], static token => token.Kind == TokenKind.NumericLiteral);
         _ = SyntaxTree.Parse(lexical, []);
         _ = Assert.Throws<ArgumentException>(() => SyntaxTree.Parse(lexical,

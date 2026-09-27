@@ -2297,7 +2297,7 @@ internal sealed partial class Binder
         var text = _tree.Source.GetSubText(token.Span);
         var digits = text.AsSpan();
 
-        if (digits.IndexOfAny('.', 'e', 'E') >= 0 || digits.IsEmpty || !AllDigits(digits))
+        if (digits.IsEmpty || ScannerHost.IntegerDigitCount(digits) != digits.Length)
         {
             Report("TRM3013", "Floating-point literals and unsupported numeric tags are not supported.", token.Span);
             return ErrorExpression(token.Span);
@@ -2316,17 +2316,7 @@ internal sealed partial class Binder
             PrimitiveType.Char16 => ushort.MaxValue,
             _ => int.MaxValue,
         };
-        ulong parsed;
-        if (_tree.HasDecodedIntegers)
-        {
-            if (_tree.GetDecodedInteger(token) is not { IsOverflow: false, Magnitude: ulong magnitude })
-            {
-                Report("TRM3013", "Integer literal is outside its destination range.", token.Span);
-                return ErrorExpression(token.Span);
-            }
-            parsed = magnitude;
-        }
-        else if (!ulong.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out parsed))
+        if (!TryIntegerMagnitude(token, out var parsed))
         {
             Report("TRM3013", "Integer literal is outside its destination range.", token.Span);
             return ErrorExpression(token.Span);
@@ -2352,34 +2342,33 @@ internal sealed partial class Binder
             return false;
         }
 
-        var text = _tree.Source.GetSubText(token.Span);
-        var digits = text.AsSpan();
-        if (digits.IsEmpty || !AllDigits(digits))
+        var digits = _tree.Source.GetSubText(token.Span).AsSpan();
+        if (digits.IsEmpty || ScannerHost.IntegerDigitCount(digits) != digits.Length)
         {
             return false;
         }
 
         var minimumMagnitude = type == PrimitiveType.Int32 ? 2147483648UL : 9223372036854775808UL;
-        if (_tree.HasDecodedIntegers)
-        {
-            return _tree.GetDecodedInteger(token) is { IsOverflow: false, Magnitude: ulong value }
-                && value == minimumMagnitude;
-        }
-        return ulong.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
-            && parsed == minimumMagnitude;
+        return TryIntegerMagnitude(token, out var parsed) && parsed == minimumMagnitude;
     }
 
-    private static bool AllDigits(ReadOnlySpan<char> text)
+    private bool TryIntegerMagnitude(SyntaxToken token, out ulong magnitude)
     {
-        foreach (var character in text)
+        if (_tree.HasDecodedIntegers)
         {
-            if (character is < '0' or > '9')
+            if (_tree.GetDecodedInteger(token) is { IsOverflow: false, Magnitude: ulong decoded })
             {
-                return false;
+                magnitude = decoded;
+                return true;
             }
+            magnitude = 0;
+            return false;
         }
 
-        return true;
+        var digits = _tree.Source.GetSubText(token.Span).AsSpan();
+        var hex = digits.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
+        return ulong.TryParse(hex ? digits[2..] : digits,
+            hex ? NumberStyles.AllowHexSpecifier : NumberStyles.None, CultureInfo.InvariantCulture, out magnitude);
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Only expressions supported by this profile contribute a known type.")]

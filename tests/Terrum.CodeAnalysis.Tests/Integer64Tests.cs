@@ -32,6 +32,12 @@ public sealed class Integer64Tests
     [InlineData("return int32(int64(2147483647)) == int32.MaxValue;", true)]
     [InlineData("return uint32(uint64(4294967295)) == uint32.MaxValue;", true)]
     [InlineData("return char16(uint64(65535)) == char16.MaxValue;", true)]
+    [InlineData("return uint64(0xFFFFFFFFFFFFFFFF) == uint64.MaxValue && 0X2A == uint64(42);", true)]
+    [InlineData("return int64(-0x8000000000000000) == int64.MinValue && int32(-0x80000000) == int32.MinValue;", true)]
+    [InlineData("return uint64(0XFFFFFFFFFFFFFFFF) / uint64(0xF) == uint64.MaxValue / 15;", true)]
+    [InlineData("return int32(0x1f32) == 7986 && char16(0xFFFF) == char16.MaxValue;", true)]
+    [InlineData("int64 value = (0X7FFFFFFF + 0x1); return value == 2147483648;", true)]
+    [InlineData("return int64(0x80000000) == 2147483648 && uint32(0XFFFFFFFF) == uint32.MaxValue;", true)]
     [InlineData("int64 value = 50000 * 50000; return value == 2500000000;", true)]
     [InlineData("int64 value = (50000 + 1) * (50000 - 1); return value == 2499999999;", true)]
     [InlineData("uint64 value = 65536 * 65536; return value == 4294967296;", true)]
@@ -57,6 +63,7 @@ public sealed class Integer64Tests
     [InlineData("int32 Main() { uint64 x = uint64(int64(-1)); return 0; }", unchecked((int)0xE0540001))]
     [InlineData("int32 Main() { uint32 x = uint32(uint64(4294967296)); return 0; }", unchecked((int)0xE0540001))]
     [InlineData("int32 Main() { char16 x = char16(uint64(65536)); return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { int32 x = int32(uint32(0xFFFFFFFF)); return 0; }", unchecked((int)0xE0540001))]
     public async Task WideFailuresUseCheckedRuntimePolicyAsync(string source, int expected)
     {
         await ExecuteBothAsync(Compile(source), expected).ConfigureAwait(true);
@@ -179,6 +186,13 @@ public sealed class Integer64Tests
     [InlineData("int32 Main() { var value = -(20 * 20); return 0; }")]
     [InlineData("int32 Main() { int32 value = 50000; int64 product = value * value; return 0; }")]
     [InlineData("int32 Main() { int64 value = int32(20) * 20; return 0; }")]
+    [InlineData("int32 Main() { var value = 0x2A; return 0; }")]
+    [InlineData("int32 Main() { int32 value = 0xFFFFFFFF; return 0; }")]
+    [InlineData("int32 Main() { int32 value = 0x80000000; return 0; }")]
+    [InlineData("int32 Main() { int64 value = 0x8000000000000000; return 0; }")]
+    [InlineData("int32 Main() { uint32 value = 0x100000000; return 0; }")]
+    [InlineData("int32 Main() { int64 value = -0x8000000000000001; return 0; }")]
+    [InlineData("int32 Main() { uint64 value = 0x10000000000000000; return 0; }")]
     public void WideInvalidSourcesAreDiagnosed(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));

@@ -298,16 +298,10 @@ public static class ScannerHost
 
             var spelling = source.Text.AsSpan(span.Start, span.Length);
             var digits = spelling[..^suffix.Length];
-            if (!spelling.EndsWith(suffix, StringComparison.Ordinal))
+            if (!spelling.EndsWith(suffix, StringComparison.Ordinal)
+                || IntegerDigitCount(digits) != digits.Length)
             {
-                throw new ArgumentException("Integer tag does not match its source token.", nameof(bytes));
-            }
-            foreach (var digit in digits)
-            {
-                if (digit is < '0' or > '9')
-                {
-                    throw new ArgumentException("Integer record refers to a noninteger token.", nameof(bytes));
-                }
+                throw new ArgumentException("Integer record does not match its source token.", nameof(bytes));
             }
 
             values.Add(new ScannerIntegerValue(tokenIndex, suffix,
@@ -317,6 +311,18 @@ public static class ScannerHost
         }
 
         return values.MoveToImmutable();
+    }
+
+    internal static int IntegerDigitCount(ReadOnlySpan<char> text)
+    {
+        var hex = text.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
+        var index = hex ? 2 : 0;
+        while (index < text.Length && (text[index] is >= '0' and <= '9'
+            || (hex && text[index] is (>= 'a' and <= 'f') or (>= 'A' and <= 'F'))))
+        {
+            index++;
+        }
+        return hex && index == 2 ? 0 : index;
     }
 
     internal static void ValidateIntegerValueCoverage(SourceText source,
@@ -337,11 +343,7 @@ public static class ScannerHost
             }
 
             var text = source.Text.AsSpan(token.Span.Start, token.Span.Length);
-            var digits = 0;
-            while (digits < text.Length && text[digits] is >= '0' and <= '9')
-            {
-                digits++;
-            }
+            var digits = IntegerDigitCount(text);
 
             var tag = text[digits..] switch {
                 [] => "",
@@ -403,7 +405,7 @@ public static class ScannerHost
             var code = BinaryPrimitives.ReadInt32LittleEndian(record);
             var start = BinaryPrimitives.ReadInt32LittleEndian(record[4..]);
             var length = BinaryPrimitives.ReadInt32LittleEndian(record[8..]);
-            if (code is < 1 or > 6 || start < 0 || start > source.Length
+            if (code is < 1 or > 7 || start < 0 || start > source.Length
                 || length <= 0 || length > source.Length - start)
             {
                 throw new ArgumentException("Invalid scanner diagnostic record.", nameof(bytes));
@@ -460,6 +462,7 @@ public static class ScannerHost
                 "TRM0004" => "An exponent requires at least one decimal digit.",
                 "TRM0005" => "Invalid string escape sequence.",
                 "TRM0006" => "Numeric width suffixes are not supported.",
+                "TRM0007" => "Hexadecimal prefix requires an ASCII hex digit.",
                 _ => throw new ArgumentException("Unknown scanner diagnostic.", nameof(diagnosticBytes)),
             };
             diagnostics.Add(new Diagnostic(diagnostic.Code, DiagnosticSeverity.Error, message, diagnostic.Span));

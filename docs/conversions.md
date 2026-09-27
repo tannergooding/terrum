@@ -1,13 +1,15 @@
 # Literal construction and numeric conversion
 
 The target language has one explicit conversion spelling: `T(expression)`.
-Syntax-14 implements checked numeric type-call conversions for `int32`,
+Syntax-14 implemented checked numeric type-call conversions for `int32`,
 `uint32`, `int64`, `uint64` and `char16`; prefix casts are no longer parsed,
-and attached width suffixes diagnose as `TRM0006`. Bare integer literals remain
-contextual and have no fallback type. The bounded executable profile currently
-constructs decimal integer literals and does not bind hexadecimal/floating
-literals, custom literal parsers or `[ConstEval]`. Numeric operators are
-checked by default in every build.
+and attached width suffixes diagnose as `TRM0006`. Syntax-15 adds contextual
+hexadecimal integer literals; a `0x`/`0X` prefix without an ASCII hex digit
+diagnoses as `TRM0007`. Bare integer literals remain contextual and have no
+fallback type. The bounded executable profile constructs decimal and
+hexadecimal integer literals; floating literals, custom literal parsers and
+`[ConstEval]` remain unsupported. Numeric operators are checked by default in
+every build.
 
 Representation and access are separate from numeric conversion. The canonical
 forms are `ref<T>`, `ptr<T>`, `box<T>`, `val<T>` and `own<T>`; `init ref<T>`
@@ -41,14 +43,15 @@ uint32 unsignedCount = uint32(count);     // Checked typed-value conversion.
 int64 wide = int64(count);
 uint64 wideUnsigned = uint64(unsignedCount);
 char16 codeUnit = char16(count);          // Range checked; not scalar validation.
-uint64 mask = uint64(0xFFFFFFFF);         // Target example: hex literal binding is unsupported.
+uint64 mask = uint64(0xFFFFFFFF);         // Hexadecimal integer parses directly as uint64.
+int32 hexValue = int32(0x1f32);           // The f32-looking tail is part of the hex value.
 float32 fraction = float32(0.1);          // Target example: floating literals are unsupported.
 float64 converted = float64(fraction);    // Target example: floating conversions are unsupported.
 var unknown = 1;                          // Error: no type context.
 ```
 
-The decimal integer and checked type-call examples above are executable; the
-hexadecimal and floating-point examples are target-only.
+The decimal and hexadecimal integer and checked type-call examples above are
+executable; the floating-point examples are target-only.
 
 In the target literal design, `T(untypedLiteral)` parses the original token
 directly as `T`; it does not construct an implicit `int32`/`float64` first.
@@ -94,7 +97,9 @@ parameters give the literals their context. This neither captures
 primary-constructor fields nor infers a concrete type from a constraint.
 Copy/move rules still apply.
 
-These are target binding rules, not current general compiler support. The
+These constructor-inference rules are target direction, not current general
+compiler support. Decimal and hexadecimal integer tokenization and contextual
+literal binding are implemented; general constructor inference is not. The
 current binder already uses typed operands before expected-result context and
 propagates expected `int32`, `uint32`, `int64`, or `uint64` types into untyped
 nested arithmetic, so `int64 x = 50000 * 50000` is supported. It rejects

@@ -46,6 +46,10 @@ public sealed class LexerTests
     [InlineData("1.foo", new[] { "1", ".", "foo" })]
     [InlineData(".5 2efoo", new[] { ".", "5", "2", "efoo" })]
     [InlineData("1else", new[] { "1", "else" })]
+    [InlineData("0x1f32 0XABCD+0x0 0x1e2", new[] { "0x1f32", "0XABCD", "+", "0x0", "0x1e2" })]
+    [InlineData("0x 0X 0xG 0x1g", new[] { "0x", "0X", "0x", "G", "0x1", "g" })]
+    [InlineData("0x1u32 0x1f32 0x1_2 0x1.2 0x1p2",
+        new[] { "0x1u32", "0x1f32", "0x1", "_2", "0x1", ".", "2", "0x1", "p2" })]
     [InlineData("12u32 42.3f64", new[] { "12u32", "42.3f64" })]
     [InlineData("10i32 0.1f32 2u128 4f16", new[] { "10i32", "0.1f32", "2u128", "4f16" })]
     [InlineData("1e2f32", new[] { "1e2f32" })]
@@ -55,6 +59,19 @@ public sealed class LexerTests
     {
         var tokens = Lexer.Lex(SourceText.From(text)).Tokens;
         Assert.Equal(expected, tokens.Where(t => t.Kind != TokenKind.EndOfFile).Select(t => t.Text));
+    }
+
+    [Theory]
+    [InlineData("0x", "TRM0007", 0, 2)]
+    [InlineData("0XG", "TRM0007", 0, 2)]
+    [InlineData("0x2Ai32", "TRM0006", 4, 3)]
+    [InlineData("0x2Au64", "TRM0006", 4, 3)]
+    public void HexPrefixAndAttachedWidthTagsRetainExactDiagnosticSpans(string text, string code, int start, int length)
+    {
+        var result = Lexer.Lex(SourceText.From(text));
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal(code, diagnostic.Code);
+        Assert.Equal(new TextSpan(start, length), diagnostic.Span);
     }
 
     [Theory]

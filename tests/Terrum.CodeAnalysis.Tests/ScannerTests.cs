@@ -166,6 +166,8 @@ public sealed class ScannerTests
     [InlineData("0 00 000000000000000000000000000000000000000001 256u8")]
     [InlineData("9223372036854775807 9223372036854775808i64 -9223372036854775808i64")]
     [InlineData("18446744073709551615 18446744073709551615u64 18446744073709551616")]
+    [InlineData("0x0 0X2A 0x1f32 0XFFFFFFFFFFFFFFFF 0x10000000000000000")]
+    [InlineData("0x 0X 0xG 0x1g 0x1u32 0x1f32 0x1_2 0x1.2 0x1p2")]
     [InlineData("18446744073709551616i128 340282366920938463463374607431768211455u128")]
     [InlineData("1i8 2i16 3i32 4i64 5i128 6u8 7u16 8u32 9u64 10u128")]
     [InlineData("1.25 2e+3 3E- 4e 5f32 6f128 7efoo 8i64extra 9i128\u200D")]
@@ -262,7 +264,7 @@ public sealed class ScannerTests
     [Theory]
     [InlineData(2, 1, 0, 1)]
     [InlineData(1, 0, 0, 1)]
-    [InlineData(1, 7, 0, 1)]
+    [InlineData(1, 8, 0, 1)]
     [InlineData(1, 1, -1, 1)]
     [InlineData(1, 1, 0, 0)]
     [InlineData(1, 1, 0, 2)]
@@ -346,6 +348,8 @@ public sealed class ScannerTests
     [InlineData("2147483648", int.MinValue, 0, 2147483648UL)]
     [InlineData("9223372036854775808", 0, int.MinValue, 9223372036854775808UL)]
     [InlineData("18446744073709551615", -1, -1, ulong.MaxValue)]
+    [InlineData("0xFFFFFFFFFFFFFFFF", -1, -1, ulong.MaxValue)]
+    [InlineData("0X8000000000000000", 0, int.MinValue, 9223372036854775808UL)]
     public void IntegerResultAdapterPreservesAll64MagnitudeBits(string text, int low, int high, ulong expected)
     {
         var source = SourceText.From(text);
@@ -424,12 +428,18 @@ public sealed class ScannerTests
                 }
             }
 
-            if (text.Length == 0 || !text.All(ch => ch is >= '0' and <= '9'))
+            var hex = text.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
+            if (text.Length == 0 || (hex
+                ? text.Length == 2 || !text.Skip(2).All(ch =>
+                    ch is (>= '0' and <= '9') or (>= 'a' and <= 'f') or (>= 'A' and <= 'F'))
+                : !text.All(ch => ch is >= '0' and <= '9')))
             {
                 continue;
             }
 
-            var value = BigInteger.Parse(text, NumberStyles.None, CultureInfo.InvariantCulture);
+            var value = hex
+                ? BigInteger.Parse("0" + text[2..], NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture)
+                : BigInteger.Parse(text, NumberStyles.None, CultureInfo.InvariantCulture);
             var overflow = value > ulong.MaxValue;
             var magnitude = overflow ? 0UL : (ulong)value;
             var status = overflow ? ScannerIntegerStatus.MagnitudeOverflow : ScannerIntegerStatus.Decoded;

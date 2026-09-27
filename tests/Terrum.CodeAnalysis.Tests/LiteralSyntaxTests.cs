@@ -46,6 +46,7 @@ public sealed class LiteralSyntaxTests
     [InlineData("int32 Main() { return 1i32; }", "TRM0006")]
     [InlineData("int32 Main() { return 1u64; }", "TRM0006")]
     [InlineData("int32 Main() { return 1.0f32; }", "TRM0006")]
+    [InlineData("int32 Main() { return 0x; }", "TRM0007")]
     [InlineData("int32 Main() { return 1_000; }", "TRM1001")]
     public void RejectsAttachedTagsAndUnsupportedSeparators(string source, string diagnostic)
     {

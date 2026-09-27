@@ -57,15 +57,18 @@ never encoded in a suffix. The lexer preserves the complete raw spelling;
 target selection, constant parsing and numeric range/target-format validation
 happen later.
 
-The syntax-14 parser rejects a recognized attached width suffix with `TRM0006`.
-The unchanged scanner-4 five-word integer record uses tag 0 for valid literals;
-recognized suffix tags remain only as metadata on rejected suffix tokens. The
-executable binder currently constructs decimal integer literals with an
-expected type and has no fallback numeric type. Although the lexical target
-grammar above describes hexadecimal and exponent forms, the bounded executable
-decoder does not yet bind nondecimal or floating literals. Digit separators,
-custom literal parsers, registered string-target execution and `[ConstEval]`
-also remain unsupported.
+The syntax-15 parser rejects a recognized attached width suffix with `TRM0006`
+and diagnoses a `0x`/`0X` prefix lacking an ASCII hex digit with `TRM0007`.
+Hex digits include `a` through `f`, so `0x1f32` is one integer token whose full
+value is hexadecimal; its `f32` tail is not a width suffix. A non-hex suffix
+such as `0x1u32` remains rejected as an attached width suffix. The unchanged
+scanner-4 five-word integer record uses tag 0 for valid decimal and
+hexadecimal literals; recognized suffix tags remain only as metadata on
+rejected suffix tokens. The executable binder constructs context-typed decimal
+and hexadecimal integer literals without a fallback numeric type. Fractional
+and exponent forms remain outside the executable numeric binder. Digit
+separators, custom literal parsers, registered string-target execution and
+`[ConstEval]` also remain unsupported.
 
 Strings are delimited by ASCII double quotes. Escapes supported are `\n`,
 `\r`, `\t`, `\\`, `\"`, `\0`, `\u` plus exactly four hexadecimal digits, and
@@ -85,8 +88,8 @@ runtime text's default encoding. The bounded parser now uses `T(expression)`
 for checked numeric conversions to `int32`, `uint32`, `int64`, `uint64` and
 `char16`; it has no numeric prefix-cast production. Source functions and local
 shadowing retain existing call precedence. Literal conversion remains distinct
-from raw tokenization, and nondecimal/floating/custom literal parsing is not
-executable support.
+from raw tokenization; floating and custom literal parsing are not executable
+support.
 
 Horizontal whitespace, line breaks, `//` comments up to but not including
 the break, and non-nesting `/* ... */` comments are leading trivia. The final
@@ -95,8 +98,9 @@ a diagnostic. Malformed surrogate units inside either comment form are
 diagnosed without changing the trivia text. Lexical diagnostic codes are
 `TRM0001` for bad characters or malformed surrogates, `TRM0002` for an
 unterminated string, `TRM0003` for an unterminated block comment, `TRM0004`
-for an incomplete exponent, `TRM0005` for an invalid escape, and `TRM0006`
-for an attached numeric width suffix. Every UTF-16 unit belongs exactly once
+for an incomplete exponent, `TRM0005` for an invalid escape, `TRM0006`
+for an attached numeric width suffix, and `TRM0007` for a hexadecimal prefix
+without a digit. Every UTF-16 unit belongs exactly once
 to either token text or its leading trivia, including invalid input.
 Diagnostics for malformed text do not replace or normalize source characters.
 

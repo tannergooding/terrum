@@ -253,61 +253,74 @@ public sealed class Lexer
     private TokenKind ReadNumber()
     {
         var start = _position;
-        while (!AtEnd && IsDigit(Current))
+        if (Current == '0' && Peek(1) is 'x' or 'X')
         {
-            _cancellationToken.ThrowIfCancellationRequested();
-            _position++;
-        }
-
-        if (Current == '.' && IsDigit(Peek(1)))
-        {
-            _position++;
-            while (!AtEnd && IsDigit(Current))
+            _position += 2;
+            if (!IsHex(Current))
+            {
+                Report("TRM0007", "Hexadecimal prefix requires an ASCII hex digit.", start, 2);
+                return TokenKind.NumericLiteral;
+            }
+            while (!AtEnd && IsHex(Current))
             {
                 _cancellationToken.ThrowIfCancellationRequested();
                 _position++;
             }
         }
-
-        var malformedExponent = false;
-        if (Current is 'e' or 'E')
+        else
         {
-            var afterExponent = _position + 1;
-            var sign = Peek(1) is '+' or '-';
-            var nextStartsIdentifier = afterExponent < _source.Length &&
-                TryScalar(afterExponent, out var scalar, out _) &&
-                (scalar == '_' || UnicodeXid.IsContinue(scalar));
-            if (IsDigit(Peek(sign ? 2 : 1)) || sign || !nextStartsIdentifier)
+            while (!AtEnd && IsDigit(Current))
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                _position++;
+            }
+
+            if (Current == '.' && IsDigit(Peek(1)))
             {
                 _position++;
-                if (sign)
+                while (!AtEnd && IsDigit(Current))
                 {
+                    _cancellationToken.ThrowIfCancellationRequested();
                     _position++;
                 }
-                if (!IsDigit(Current) || AtEnd)
+            }
+
+            if (Current is 'e' or 'E')
+            {
+                var afterExponent = _position + 1;
+                var sign = Peek(1) is '+' or '-';
+                var nextStartsIdentifier = afterExponent < _source.Length &&
+                    TryScalar(afterExponent, out var scalar, out _) &&
+                    (scalar == '_' || UnicodeXid.IsContinue(scalar));
+                if (IsDigit(Peek(sign ? 2 : 1)) || sign || !nextStartsIdentifier)
                 {
-                    malformedExponent = true;
-                    Report("TRM0004", "Exponent requires an ASCII digit.", start, _position - start);
-                }
-                else
-                {
-                    while (!AtEnd && IsDigit(Current))
+                    _position++;
+                    if (sign)
                     {
-                        _cancellationToken.ThrowIfCancellationRequested();
                         _position++;
+                    }
+                    if (!IsDigit(Current) || AtEnd)
+                    {
+                        Report("TRM0004", "Exponent requires an ASCII digit.", start, _position - start);
+                        return TokenKind.NumericLiteral;
+                    }
+                    else
+                    {
+                        while (!AtEnd && IsDigit(Current))
+                        {
+                            _cancellationToken.ThrowIfCancellationRequested();
+                            _position++;
+                        }
                     }
                 }
             }
         }
 
-        if (!malformedExponent)
+        var tagLength = ReadNumericTag();
+        if (tagLength != 0)
         {
-            var tagLength = ReadNumericTag();
-            if (tagLength != 0)
-            {
-                Report("TRM0006", "Numeric width suffixes are not supported.", _position, tagLength);
-                _position += tagLength;
-            }
+            Report("TRM0006", "Numeric width suffixes are not supported.", _position, tagLength);
+            _position += tagLength;
         }
 
         return TokenKind.NumericLiteral;
