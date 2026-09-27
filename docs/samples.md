@@ -118,6 +118,12 @@ then `&`, `|` and `^` to select bits from them. Its generic helpers declare
 only the nominal protocols they use; the concrete wrapper implements all six.
 The example uses ordinary inferred specializations, not primitive conformance,
 operator-body inference or built-in numeric interface names.
+The [comparison-protocol sample](../samples/native/static-protocol-comparison.terrum)
+exercises the six separately declared equality/comparison protocols through
+generic `Clamp`/`Within`/`Different` helpers and conditional equality
+selection. Its probe returns 42 under AOT and direct JIT, with scanner parity
+and private semantic/native servicing under both policies. It does not imply
+derived comparison laws or universal equality/hash behavior.
 
 | Program | Source | Design contract / expected behavior |
 |---|---|---|

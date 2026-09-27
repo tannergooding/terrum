@@ -4,11 +4,12 @@ These files are parallel design candidates, not a bootstrapped compiler.
 They are not linked into the C# implementation. The native profile executes
 the range, character, integer and nested token components and a bounded token scanner.
 The host test runner remains C#, even when it compiles and executes a candidate.
-The host parser's current language version is syntax-18; its qualified
+The host parser's current language version is syntax-19. Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle
 specializations described below. These reuse existing, feature-selected
 semantic contracts without changing the scanner record/schema, native profile
-or wire format.
+or wire format. Syntax-19 adds the bounded source-defined nominal comparison
+protocols without changing those formats or the native profile.
 
 Host fixtures retain syntax round trips and add native execution of
 `SourceRange`, `CharacterFacts`, `RangeTests`, `Token` and `TokenTests` with entry wrappers.
@@ -36,8 +37,11 @@ generic ABI remain unsupported. See the detailed
 Scalars support Copy-only helpers, not primitive operator witnesses.
 Explicit homogeneous Copy-struct witnesses support `+`, `-`, `*`, `/`, `%`,
 `&`, `|` and `^`; generic code still requires the corresponding declared
-nominal constraints. This is not yet the heterogeneous, comparison, shift
-or unary protocol machinery needed for a general numeric library.
+nominal constraints. Syntax-19 also implements six separately constrained
+nominal comparison protocols over homogeneous Copy structs with `bool`
+results; see the [bounded generic contract](../docs/implementation.md#bounded-generic-functions).
+No comparison law or universal equality/hash behavior is inferred. Heterogeneous,
+shift and unary protocol machinery remains unsupported.
 `build-component` uses the compiled scanner's records as the lexical input to
 the official host parser, binder and native emitter; the binder also consumes
 its decoded integer magnitudes. It does not re-lex or decode integer magnitudes

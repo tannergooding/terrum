@@ -1897,20 +1897,21 @@ internal sealed partial class Binder
         {
             var leftValue = BindExpression(leftNode, concrete);
             var rightValue = BindExpression(rightNode, concrete);
+            var comparisonResult = StaticOperatorResult(op.Kind, concrete);
             var name = _structs[(int)concrete - 100].Name + "." + OperatorName(op.Kind);
-            if (!TryFindFunction(name, out var method) || _signatures[method].ReturnType != concrete
+            if (!TryFindFunction(name, out var method) || _signatures[method].ReturnType != comparisonResult
                 || _signatures[method].Parameters.Length != 2
                 || _signatures[method].Parameters.Any(parameter => parameter.Type != concrete)
                 || !_signatures[method].IsStatic || !_signatures[method].IsOperator)
             {
                 Report("TRM3007", "No matching accessible static operator is declared.", op.Span);
-                return new BoundBinary(op.Kind, leftValue, rightValue, concrete, node.Span);
+                return new BoundBinary(op.Kind, leftValue, rightValue, comparisonResult, node.Span);
             }
             if (_signatures[method].IsPrivate && _currentStruct != _signatures[method].StructName)
             {
                 Report("TRM3011", "Private operator is inaccessible.", op.Span);
             }
-            return new BoundCall(method, [leftValue, rightValue], concrete, node.Span);
+            return new BoundCall(method, [leftValue, rightValue], comparisonResult, node.Span);
         }
         PrimitiveType? operandType;
         PrimitiveType resultType;

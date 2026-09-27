@@ -317,6 +317,8 @@ internal sealed class Parser
                 children.Add(Take());
                 children.Add(Current.Kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash
                     or TokenKind.Percent or TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret
+                    or TokenKind.EqualsEquals or TokenKind.BangEquals or TokenKind.Less or TokenKind.LessEquals
+                    or TokenKind.Greater or TokenKind.GreaterEquals
                     ? Take() : Expect(TokenKind.Plus));
                 children.Add(ParseParameters());
                 children.Add(Current.Kind == TokenKind.Semicolon ? Take() : ParseBlock());

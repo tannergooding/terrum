@@ -281,14 +281,17 @@ arguments and views remain unsupported. See the
 [bounded generic contract](implementation.md#bounded-generic-functions) for
 the precise implementation boundary.
 
-The executable operator-protocol subset supports homogeneous binary `+`, `-`,
-`*`, `/`, `%`, `&`, `|` and `^` declarations on explicitly conforming Copy
-structs. Each protocol still declares one static abstract operator with
-three type parameters. Unrelated protocols remain distinct even when their
-operator signatures match. Generic helpers need their own declared witnesses;
-primitive specialization, a concrete body's operations or a caller's stronger
-constraints cannot provide them implicitly. Unary, comparison, shift and
-heterogeneous operator protocols remain unimplemented.
+The bounded executable operator-protocol subset supports homogeneous binary
+`+`, `-`, `*`, `/`, `%`, `&`, `|` and `^` on explicitly conforming Copy
+structs. Syntax-19 implements distinct `==`,
+`!=`, `<`, `<=`, `>` and `>=` nominal protocols over homogeneous Copy operands
+with `bool` results. Generic use requires each operation's conformance and
+definition-site constraint; concrete operands may invoke their declared
+operator directly. Operator spelling does not imply `[NoThrow]` or
+derive complements or ordering laws. This does not establish universal equality,
+hashing, or managed identity policy, nor primitive/heterogeneous witnesses or
+a public generic ABI. See the detailed [bounded generic contract](implementation.md#bounded-generic-functions).
+Unary and shift protocols remain unsupported.
 
 The implementation does not infer unique/owning `T`, constructor or
 method type arguments, ordinary overloads, or partial `_` holes. It does not

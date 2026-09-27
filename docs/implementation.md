@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-18, semantic v32 managed consumers, native-10 through native-20
+## Current boundary: syntax-19, semantic v32 managed consumers, native-10 through native-20
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -435,10 +435,36 @@ semantic linking preserves private class identity remapping, and persisted
 native images retain their separate heap/root domains.
 `ManagedHeap.Collect` is available inside a generic body with its real
 intrinsic signature and effects; it grants no operations on opaque formals.
-This bounded substitution does not add generic class/struct declarations,
-managed fields inside user structs, unique/owning arguments, views, new
-operators or operator protocols, concurrency semantics, or a public
-generic/managed ABI.
+This managed-handle substitution does not add generic class/struct
+declarations, managed fields inside user structs, unique/owning arguments,
+views, concurrency semantics, or a public generic/managed ABI.
+
+**Comparison operator protocols (implemented; syntax-19).**
+
+The compilation-local protocol family uses one static abstract binary
+declaration per nominal protocol and the existing three-parameter interface
+shape (`TSelf`, `TOther`, `TResult`). Arithmetic and bitwise operators
+(`+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`) close over homogeneous `Copy`
+operands with result `T`, giving `(T, T) -> T`. Equality and comparison
+operators (`==`, `!=`, `<`, `<=`, `>`, `>=`) close over homogeneous `Copy`
+operands with result `bool`, giving `(T, T) -> bool`. These are separate
+nominal protocols, with source-declared names rather than compiler-known
+interface names. Each conformance and each generic operation constraint must
+name the corresponding protocol; one operator's conformance does not imply
+another operator or any comparison law.
+Concrete operands can invoke their declared operator directly without a
+protocol conformance; nominal witnesses are required for constrained generic use.
+Operator spelling does not imply `[NoThrow]`; the function and witness
+effects remain explicit and are checked under the declared constraints.
+
+Generic comparison-driven selection and conditional outputs retain the
+existing `Copy`, effect, and `bool`/`out` publication rules. These protocols
+do not define universal value equality, key equality/hash, or managed identity;
+they add no primitive or heterogeneous witnesses and no public generic ABI.
+`syntax-19` adds the comparison declarations and their bounded generic use.
+This adds no scanner-record/schema, semantic-wire-format or native-profile
+version.
+
 Forward calls, imported local templates, and direct/mutual recursion reuse
 closed specializations; recursion has the ordinary native call/stack behavior,
 not a compile-time evaluator or a termination guarantee. At most 32 templates
@@ -489,17 +515,22 @@ artifact versions do not change.
 bit-pattern construction for based literals. A missing binary digit diagnoses
 as `TRM0008`, and malformed separators as `TRM0009`. The scanner-4 record
 layout and semantic/native artifact versions do not change.
-`syntax-17` extends homogeneous static binary operator declarations with `-`,
-`/`, `%`, `&`, `|` and `^`, in addition to `+` and `*`. Each closed Copy-struct
+At the `syntax-17` milestone, homogeneous static binary operator declarations
+were extended with `-`, `/`, `%`, `&`, `|` and `^`, in addition to `+` and
+`*`. Each closed Copy-struct
 conformance and generic use still requires the matching nominal protocol and
-declared effects. Unary, comparison, shift and heterogeneous protocols remain
-unsupported. These specializations lower to existing concrete calls: scanner-4,
-semantic module versions and physical native ABIs are unchanged.
+declared effects. At that milestone, unary, comparison, shift and heterogeneous
+protocols were unsupported. These specializations lower to existing concrete
+calls: scanner-4, semantic module versions and physical native ABIs are
+unchanged.
 `syntax-18` recognizes qualified generic-call type arguments, including
 `write C` and `write C?`, for bounded generic specialization over existing
 source-class/`ManagedNode` handles. The managed generic producer examples use
 existing semantic v24 contracts; version selection remains feature-based.
 This does not change the scanner-4 record/schema, wire format or native profile.
+`syntax-19` adds the bounded nominal equality/comparison protocols described
+above. It does not change the scanner-4 record/schema, semantic wire format or
+native profile.
 `[NoThrow]` on functions/constructors, `[DoesNotReturn]` on void functions and
 `[Cleanup]` on eligible unique instance methods are currently bound;
 unknown, duplicate and misplaced attributes diagnose rather

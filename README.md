@@ -44,16 +44,20 @@ substitutions preserve readonly/write and supported optional qualification;
 they do not grant member, null-test or operator capabilities absent from the
 function's constraints. See the [bounded generic contract](docs/implementation.md#bounded-generic-functions)
 for inference, results, outputs, rooting and remaining limits.
-The current parser version is syntax-18, which recognizes qualified generic
+The current parser version is syntax-19. Syntax-18 recognizes qualified generic
 type arguments such as `write Record` and `write Record?`; managed generic
 producer examples use the existing semantic v24 managed contracts; other
 features still select their required versions. The native profile, wire
-format, scanner record and schema remain unchanged.
+format, scanner record and schema remain unchanged by syntax-19.
 Copy structs can explicitly implement homogeneous binary operator protocols
 for `+`, `-`, `*`, `/`, `%`, `&`, `|` and `^`. Generic bodies may use only the
 operators named by their constraints; identical signatures on unrelated
 protocols do not substitute for a declared witness. Primitive operations in
 those implementations retain their checked arithmetic and bitwise semantics.
+Six distinct homogeneous Copy-struct comparison protocols (`==`, `!=`, `<`,
+`<=`, `>` and `>=`) are implemented in syntax-19; they do not infer
+operator laws or universal equality/hash behavior. Details are in the
+[bounded generic contract](docs/implementation.md#bounded-generic-functions).
 
 Semantic v24 validates managed-class/`ManagedNode` access: `mut class`,
 writable `mut` class methods, readonly bare handles and explicit `write`

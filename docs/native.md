@@ -45,11 +45,13 @@ longer parsed. Based literals construct target-width bit patterns, while
 decimal literals retain numeric range semantics. Floating/custom literal
 parsing, registered literal targets and `[ConstEval]` remain outside this
 executable profile.
-The current parser version is syntax-18; qualified generic-call type arguments
-such as `write C` and `write C?` enable bounded managed-handle substitutions
-in compilation-local `Copy` templates. These reuse the existing managed
-contracts, with feature-dependent semantic version selection, and add no
-native-profile, scanner-record/schema or wire-format version.
+The current parser version is syntax-19. Syntax-18 qualified generic-call type
+arguments such as `write C` and `write C?` enable bounded managed-handle
+substitutions in compilation-local `Copy` templates. Syntax-19 adds the
+bounded nominal comparison protocols; neither changes the native profile,
+scanner record/schema or semantic wire format. Managed-handle substitutions
+reuse the existing managed contracts, with feature-dependent semantic version
+selection.
 
 Terrum has no built-in marshalling. Source or generated tooling defines and
 performs conversions and wrappers for imported C APIs; the compiler/runtime
@@ -331,6 +333,9 @@ also returns 42, using explicitly declared subtraction, division, remainder
 and bitwise `&`, `|`, `^` witnesses. The same concrete call lowering preserves
 ordinary checked arithmetic and declaration-site effect checks; bitwise
 spelling alone does not make an arbitrary operator implementation NoThrow.
+Syntax-19 implements the six nominal Copy-struct equality/comparison protocols
+(`==`, `!=`, `<`, `<=`, `>` and `>=`); see the
+[bounded generic contract](implementation.md#bounded-generic-functions).
 Templates and witnesses remain compilation-local. Bounded generic functions
 can also select existing source-class/`ManagedNode` handles as `Copy` type
 arguments, preserving their readonly/write and supported optional forms and

@@ -1,0 +1,93 @@
+interface Equality<TSelf, TOther, TResult> {
+    [NoThrow] static abstract TResult operator ==(TSelf left, TOther right);
+}
+
+interface Inequality<TSelf, TOther, TResult> {
+    [NoThrow] static abstract TResult operator !=(TSelf left, TOther right);
+}
+
+interface LessThan<TSelf, TOther, TResult> {
+    [NoThrow] static abstract TResult operator <(TSelf left, TOther right);
+}
+
+interface LessThanOrEqual<TSelf, TOther, TResult> {
+    [NoThrow] static abstract TResult operator <=(TSelf left, TOther right);
+}
+
+interface GreaterThan<TSelf, TOther, TResult> {
+    [NoThrow] static abstract TResult operator >(TSelf left, TOther right);
+}
+
+interface GreaterThanOrEqual<TSelf, TOther, TResult> {
+    [NoThrow] static abstract TResult operator >=(TSelf left, TOther right);
+}
+
+struct Rank : Equality<Rank, Rank, bool>, Inequality<Rank, Rank, bool>,
+    LessThan<Rank, Rank, bool>, LessThanOrEqual<Rank, Rank, bool>,
+    GreaterThan<Rank, Rank, bool>, GreaterThanOrEqual<Rank, Rank, bool> {
+    public int32 Value;
+
+    [NoThrow] public Rank(int32 value) { Value = value; }
+
+    [NoThrow] public static bool operator ==(Rank left, Rank right) {
+        return left.Value == right.Value;
+    }
+    [NoThrow] public static bool operator !=(Rank left, Rank right) {
+        return left.Value != right.Value;
+    }
+    [NoThrow] public static bool operator <(Rank left, Rank right) {
+        return left.Value < right.Value;
+    }
+    [NoThrow] public static bool operator <=(Rank left, Rank right) {
+        return left.Value <= right.Value;
+    }
+    [NoThrow] public static bool operator >(Rank left, Rank right) {
+        return left.Value > right.Value;
+    }
+    [NoThrow] public static bool operator >=(Rank left, Rank right) {
+        return left.Value >= right.Value;
+    }
+}
+
+[NoThrow] T Clamp<T>(T value, T lower, T upper)
+    where T : [Copy], LessThan<T, T, bool>, GreaterThan<T, T, bool> {
+    if (value < lower) { return lower; }
+    if (value > upper) { return upper; }
+    return value;
+}
+
+[NoThrow] bool Within<T>(T value, T lower, T upper)
+    where T : [Copy], GreaterThanOrEqual<T, T, bool>, LessThanOrEqual<T, T, bool> {
+    return value >= lower && value <= upper;
+}
+
+[NoThrow] bool Different<T>(T left, T right)
+    where T : [Copy], Inequality<T, T, bool> {
+    return left != right;
+}
+
+[NoThrow] bool TrySelectEqual<T>(T left, T right, out T result)
+    where T : [Copy], Equality<T, T, bool> {
+    if (left == right) {
+        result = left;
+        return true;
+    }
+    return false;
+}
+
+public int32 ComparisonProtocolProbe() {
+    var lower = new Rank(0);
+    var upper = new Rank(40);
+    var clamped = Clamp(new Rank(50), lower, upper);
+    require Within(clamped, lower, upper);
+    require Within(Clamp(new Rank(-5), lower, upper), lower, upper);
+    require Clamp(new Rank(20), lower, upper).Value == 20;
+    require Different(lower, upper);
+    require TrySelectEqual(clamped, upper, out var selected);
+    require !TrySelectEqual(lower, upper, out var absent);
+    return selected.Value + 2;
+}
+
+int32 Main() {
+    return ComparisonProtocolProbe();
+}
