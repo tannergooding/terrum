@@ -1,12 +1,16 @@
 # Calls, conditional outputs, and executable contracts
 
 **Proposal for review, not implementation authorization.** This document follows
-the accepted directions in [the language/library review](language-library-review.md).
+the accepted directions in [language](language.md) and [lifetimes](lifetimes.md).
 It records the clarified intent and proposes the remaining rules needed to make
 that intent consistent across source, verification, separate compilation, and
 execution. Proposed syntax is illustrative unless already accepted elsewhere.
 [Implementation](implementation.md) remains the executable support boundary.
-Concurrency has its own [memory-model proposal](memory-model.md).
+Concurrency follows the separately [accepted memory model](memory-model.md).
+The [pending-decision index](language-library-review.md) collects the remaining
+approvals across documents. Confirmed direction below is not awaiting approval
+again; the proposed refinements and their [status checklist](#6-approval-and-conformance-checklist)
+identify the remaining decisions.
 
 The central recommendation is one semantic model: implicit arguments expand to
 ordinary operations, conditional outputs carry ordinary checked state facts,
@@ -22,17 +26,15 @@ system for the prover.
 | Conditional outputs | APIs declare which outcomes provide initialized and/or non-null outputs | Use guarded postconditions as the semantic representation, with attributes only as equivalent sugar; publish only the states the declaration guarantees |
 | Contract timing | Prologue, preconditions, authored body including `finally`, postconditions, epilogue; exceptional departure has no normal-return postcondition | Put all observable body/ownership cleanup before postconditions, keep result storage provisional until checks pass, and restrict checks to surviving values or explicit snapshots |
 | Proofs and evaluation | Static checks are compile-time-only; implementation choices must not silently change the contract | Version a mandatory conservative proof profile and deterministic evaluator, including their resource-accounting rules |
-| Memory | Explicit checked opt-in for sharing, not an assumption that arbitrary aliasable objects are thread-safe | See the separate portable semantics, target profiles, and decision table in [memory model](memory-model.md) |
+| Memory | Explicit checked opt-in for sharing, not an assumption that arbitrary aliasable objects are thread-safe | Accepted separately; see the [memory model](memory-model.md) for its specification deliverables and target-profile work |
 | Documentation comments | Added as a topic for discussion; no documentation-comment syntax is selected | Structured API documentation with symbol-checked references and generated views of declared contracts, without making prose a source of semantics |
 
-The existing implicit-loan sections in [language](language.md),
-[lifetimes](lifetimes.md#parameter-only-implicit-readonly-loans), and
-[the earlier review](language-library-review.md) currently say the introduced
-loan is unconditionally call-scoped and nonescaping. That is stronger than the
-clarified direction. Integration must replace that extra restriction with the
-ordinary reference contract, including any declared result dependency. This
-proposal does not authorize changing implementation while those broader
-reference contracts are still unimplemented.
+The accepted implicit-loan rule in [language](language.md) and
+[lifetimes](lifetimes.md#parameter-only-implicit-readonly-loans) is ordinary
+readonly-reference equivalence, including declared result dependencies.
+`implicit` adds no unconditional call-scoped/noescape restriction.
+The concrete temporary-scope and proof mechanisms below remain proposals;
+this document does not authorize implementation of those unsettled details.
 
 ## 1. One call and reference model
 
@@ -586,21 +588,21 @@ validation.
 
 ## 6. Approval and conformance checklist
 
-| Decision | Recommended choice |
-|---|---|
-| Reference adaptation | Ordinary readonly references and ordinary explicit temporary semantics; no implicit-only escape prohibition |
-| Materialized temporary endpoint | End of the containing full-expression, including nested consumers; no automatic block/task lifetime extension |
-| Loan timing | Same as explicitly written reference operations; no special delayed activation |
-| Conditional contract surface | Guarded `ensure` plus checked initialization facts; attributes, if provided, are sugar for the same metadata |
-| Failure-output default | Preserve vacancy without a declared publication guarantee; null is an explicitly initialized value |
-| Possibly initialized owning output | Defer until a real state discriminator/cleanup protocol exists |
-| Normal-return endpoint | Body cleanup first, then postconditions, then mechanical publication/epilogue |
-| Consumed parameter observations | Only surviving values or explicit permitted entry snapshots; no after-destruction dereference |
-| Proof acceptance | Mandatory versioned conservative profile, independent of optimizer sophistication |
-| Constant-evaluation budget | Semantic accounting with declared limits; candidate defaults require parser-workload validation |
-| Documentation comments | Discuss a distinguished comment form, prose format, checked symbol links, declaration-derived contract documentation, inheritance, and packaging before selecting syntax |
+| Decision | Status | Contract or recommended choice |
+|---|---|---|
+| Reference adaptation | Accepted baseline | Ordinary readonly-reference semantics; no implicit-only escape prohibition |
+| Materialized temporary endpoint | Needs review | End of the containing full-expression, including nested consumers; no automatic block/task lifetime extension |
+| Loan timing | Accepted equivalence | Same as explicitly written reference operations; convenience syntax does not introduce a second loan model |
+| Conditional contract surface | Needs review | Guarded `ensure` plus checked initialization facts; attributes, if provided, are sugar for the same metadata |
+| Failure-output default | Review generalized contract; preserve current bounded behavior | Preserve vacancy without a declared publication guarantee; null is an explicitly initialized value |
+| Possibly initialized owning output | Needs review | Defer until a real state discriminator/cleanup protocol exists |
+| Normal-return ownership endpoint | Needs review | Include callee-owned parameter cleanup in body completion, before postconditions and mechanical publication/epilogue |
+| Consumed parameter observations | Needs review of snapshot facility | Only surviving values or explicit permitted entry snapshots; no after-destruction dereference or implicit graph snapshot |
+| Proof acceptance | Needs review | Mandatory versioned conservative profile, independent of optimizer sophistication |
+| Constant-evaluation budget | Needs review of accounting contract | Semantic accounting with declared limits; candidate defaults require parser-workload validation |
+| Documentation comments | Needs review | Discuss a distinguished comment form, prose format, checked symbol links, declaration-derived contract documentation, inheritance, and packaging before selecting syntax |
 
-Approval should be followed by focused canonical documentation changes and
+Approval of a remaining recommendation should be followed by canonical documentation changes and
 scheduled implementation, not immediate execution of the illustrative grammar.
 The minimum conformance corpus should cover:
 

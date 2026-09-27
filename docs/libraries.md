@@ -24,7 +24,8 @@ The API inventories deliberately mix signatures with selected algorithm bodies. 
 
 The selected operation surface is one flat static type, `MemoryPrimitives`.
 Prefixes identify the family at the use site: `AtomicRead`/`AtomicAdd`,
-`NonTemporalWrite`, and `CacheWriteBack`, alongside `Fence`/`CompilerFence`.
+`UnalignedRead`/`UnalignedWrite`, `NonTemporalWrite`, and `CacheWriteBack`,
+alongside `Fence`/`CompilerFence`.
 Owners, views and allocators retain their separate storage/lifetime duties.
 
 Storage capabilities do not silently change ordinary accesses. Explicit
@@ -34,6 +35,12 @@ orders; checked/unchecked selection is a separate declared arithmetic policy.
 The [memory-model library surface](memory-model.md#library-access-surface)
 specifies the operation families, result conventions and remaining details.
 This is accepted design, not an implemented library.
+
+Default atomic operations require supported lock-free implementations, not
+single instructions or wait freedom. Explicit built-in fallback APIs may use
+locks only under a compatible shared coordination protocol and declared
+dependencies. CAS requires a defined bitwise-comparison representation, not a
+user equality witness. Unaligned value access does not promise an atomic snapshot.
 
 ## Scalar mathematics, keys and conversion
 

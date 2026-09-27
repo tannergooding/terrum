@@ -1,10 +1,26 @@
 # Data layout and ABI contracts
 
-> **Design direction and proposal.** This document separates agreed primitive
-> memory guarantees from layout, interchange and procedure-call decisions that
-> still need target profiles. It does not freeze a universal Terrum managed ABI
-> or claim these facilities are implemented. See [implementation](implementation.md)
-> for current support and [memory model](memory-model.md) for concurrency rules.
+> **Accepted core contracts; remaining decisions are listed separately.** The
+> memory guarantees, opaque-layout direction and boundary-preservation rules
+> below are accepted. This is not a completed target ABI specification or a
+> universal Terrum managed ABI. Current support remains defined by
+> [implementation](implementation.md) and the [native profile](native.md);
+> concurrency semantics are defined by the [memory model](memory-model.md).
+
+## Status and review boundary
+
+| Status | Covered here |
+|---|---|
+| Accepted design | Primitive and eligible-wrapper access guarantees; no aggregate atomicity inferred from size; opaque layout by default; explicit Sequential, Union and Transparent contracts; separation of representation, calling convention, validity, ownership and sharing; preservation of published boundaries |
+| Implemented bounded profile | The existing Windows x64 compact-value and module ABIs. Their exact current contracts remain authoritative; they are not superseded by an unspecified future profile |
+| Needs policy or declaration review | Wrapper eligibility/declaration details, any checked overlapping-union subset, externally promised encodings not determined by a selected profile, and a future public managed boundary; see [remaining decisions](#remaining-decisions-requiring-review) |
+| Specification and implementation work | Recording chosen target rules, checking layouts and metadata, validating compatible replacement, and testing lowering against accepted guarantees; see [profile work](#profile-specification-and-implementation-work) |
+
+Unimplemented does not mean unapproved. Completing a table from an already
+selected target contract does not reopen the language policy; choosing a new
+observable representation or independently replaceable public boundary does.
+The cross-document [pending-decision index](language-library-review.md)
+tracks those review items without making the accepted core provisional.
 
 ## Contract layers
 
@@ -98,7 +114,7 @@ Sequential, Union and Transparent contracts constrain what may change.
 Sequential layout computes offsets and padding from declared order and
 alignment; it is not arbitrary user-selected offsets. Union support does not
 automatically make inactive-member access safe. See the
-[accepted layout direction](language-library-review.md#21-opaque-layout-and-explicit-abi-contracts).
+[accepted layout direction](language.md#types-and-operations).
 The currently implemented compact value/module layouts remain exact contracts,
 not an already implemented resilient-layout mechanism.
 
@@ -111,7 +127,8 @@ performing a floating-to-integer numeric conversion. Such helpers must not
 become unrestricted construction of references or invalid nominal values.
 
 Explicit unaligned operations are distinct from reinterpretation and from
-atomicity. A helper may assemble an unaligned value through smaller accesses
+atomicity. `MemoryPrimitives.UnalignedRead`/`UnalignedWrite` may assemble or
+store an unaligned value through smaller accesses
 without promising an atomic snapshot. Overlapping typed views require unsafe
 code or a checked abstraction that accounts for aliasing, initialization,
 lifetime, validity and concurrency. Any safe subset of overlapping union
@@ -121,6 +138,12 @@ The backend may implement a valid source operation with register bit moves or
 overlapping machine accesses when all observable source guarantees survive.
 It may not use that freedom to overwrite neighboring storage or introduce
 concurrency conflicts absent from the source.
+
+CAS support requires a defined bitwise-comparison representation. This is
+neither ordinary numeric equality nor automatic eligibility for any equally
+sized aggregate; unspecified padding cannot become an accidental comparison
+input. Representation helpers must still preserve nominal validity and access
+obligations.
 
 ## Private implementation versus independently replaceable boundaries
 
@@ -137,6 +160,11 @@ native object files, retained callbacks and runtime entry points can require
 stable coordination too. Public source visibility alone does not freeze all
 private layouts.
 
+Consumer-visible transfer/share capabilities likewise come from published
+declaration contracts, not inspection of the current private representation.
+An opaque layout may evolve while preserving a promised capability; a frozen
+layout alone does not prove sharing safety.
+
 The current module paths illustrate the distinction:
 
 - A persisted semantic consumer selects a compatible producer and both are
@@ -151,12 +179,32 @@ A future managed boundary also needs explicit root/barrier conventions,
 allocation and cleanup ownership, failure/unwind behavior and lifetime rules.
 A matching register convention alone is insufficient. Whether the boundary
 uses one stable managed ABI, versioned profiles or adapters remains open.
-No public managed-handle ABI is introduced by this proposal.
+No public managed-handle ABI is introduced by these contracts.
 
-## Remaining profile work
+## Remaining decisions requiring review
 
-Complete the primitive and wrapper eligibility tables, select target procedure-
-call profiles, and specify cross-module compatibility rules independently of
-internal lowering. Coordinate any checked union subset with the aliasing and
-lifetime model. API names and attributes remain proposals until approved;
-memory guarantees must not depend on an accidental current backend sequence.
+| Decision | Accepted boundary that the decision must preserve |
+|---|---|
+| Exact wrapper eligibility and declarations | Define which forms may promise primitive-carrier atomicity or Transparent ABI and how each promise is exposed. These are independent contracts; equal size, a single field or nominal identity alone does not establish every equivalence |
+| Any safe overlapping-union subset | Decide whether to admit a narrowly checked subset and its active-member, initialization, aliasing and lifetime conditions. Until then, matching fields do not establish safe access |
+| Additional externally promised representations | Choose an encoding or interchange rule only where the selected target/ABI does not already determine it. Storage layout is not a default serialization format, and no general reference encoding or SIMD ABI is selected here |
+| Future public managed boundary | Choose stable versus versioned profiles/adapters together with roots, barriers, allocation/cleanup ownership, failure and lifetime contracts. Private managed implementations do not imply a public managed-handle ABI |
+
+These decisions need not block unrelated compiler work. Keep unsupported forms
+unsupported until their contracts are selected; do not infer approval from a
+current backend representation.
+
+## Profile specification and implementation work
+
+For an already selected target contract, record primitive size, alignment,
+representation, access guarantees and procedure-call classification separately.
+Complete wrapper tables after the eligibility decision, and implement the
+corresponding layout, validity and metadata checks. Describe cross-module
+compatibility independently of private lowering, preserving existing artifact
+contracts and feature-version checks.
+
+Validate argument/result classification, padding and boundaries, non-tearing
+accesses, malformed metadata and compatible replacement across the supported
+AOT, JIT and module paths. Accepted memory guarantees must not depend on an
+accidental current backend sequence. This work does not authorize another
+architecture backend or silently settle the review items above.

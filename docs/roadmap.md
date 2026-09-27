@@ -26,7 +26,7 @@ The [language](language.md) defines accepted semantic direction, while
 | Homogeneous equality/comparison protocols (implemented; syntax-19) | Six distinct source-declared nominal `Copy`-struct protocols for `==`, `!=`, `<`, `<=`, `>` and `>=`, each with homogeneous operands and `bool` result using the existing three-parameter static-operator shape; each conformance and generic constraint is explicit; no derived laws, inferred `NoThrow`, universal equality/hash/identity policy, primitive or heterogeneous witnesses, or public generic ABI | Generic `Clamp`/`Within`/`Different` and conditional equality selection preserve declared effect and publication rules; missing/conflicting protocol witnesses reject; AOT/direct-JIT, scanner parity and private semantic/native servicing validated under both policies, with no wire-format or native-profile bump |
 | Async completion responsibility (scheduled after syntax/literal migration within the full runtime) | Task-like completion, including `Task<void>`, with every started operation joined by a structured owner, explicitly transferred to another responsible owner, or supervised under an error/lifetime/shutdown policy; no `async void`; cancellation is not completion or early borrow release | Ownership paths cannot silently discard completion/error obligations; cancellation and failure retain captures through actual completion and cleanup; synchronous `void` remains valid |
 | Resources and graphs (bounded ownership and tracing implemented) | Compact unique POD/composite owners, whole-owner transfers, receiver loans, recursive cleanup, reusable native `int32` storage and lexical slices; source-defined managed classes with complete-publication construction, optional edges, compact handle-free Copy fields and constructor arguments, rooted presence snapshots and descriptor-based cycle tracing; schedule value/lending/consuming iterator categories and allocator/relocation contracts; partial field moves, escaping views, arbitrary owning graphs and broader resource adapters remain open | AOT/JIT ownership and exact roots; independent native allocation failure, direct/indirect aggregate construction/unwind and release accounting; copied token/range values surviving source-link collection, source-class cycles, heterogeneous edges, shared aliases, pointer-shaped scalar nonroots, and 4,096-object collection/reuse fixtures; iterator loans retain declared backing dependencies, cursor-state loans cannot overlap invalidating advancement, and allocation failure preserves cleanup/publication invariants; broader managed layouts and GC stress remain outstanding |
-| General references and implicit readonly parameter loans (scheduled with loan/parameter metadata) | Parameter-only `implicit ref<T>` lets callers pass ordinary expressions by borrowing an eligible place or materializing a temporary; no Copy or ownership transfer solely to borrow; the call-scoped loan cannot escape, be captured or cross suspension; full `T` qualification/dependencies are preserved; applies to concrete/generic parameters and explicit extension receivers, not ordinary receiver defaults; existing APIs change only by explicit declaration; no standalone `implicit T`/`in T`, `view<T>` or representation attribute | Evaluate once; cleanup temporaries normally; prevent return/storage/capture/suspension escape; preserve nested write capability, backing, roots and ownership when copying a Copy `T`; reject stacking with writable/init/pointer contracts or arbitrary conversions; explicit and implicit readonly-ref forms share a signature; ordinary `F(value)` chooses by-value `F(T)` when both apply, explicit reference may select a reference overload; preserve source semantics under by-value/indirect ABI lowering, with no size threshold or adaptive type attribute |
+| General references and implicit readonly parameter loans (scheduled with loan/parameter metadata) | Parameter-only `implicit ref<T>` borrows an eligible place or materializes a temporary using ordinary readonly-reference semantics, with no Copy/ownership transfer solely to borrow and no extra implicit-only noescape rule; declared result/backing dependencies and full `T` qualification are preserved; applies to concrete/generic parameters and explicit extension receivers, not ordinary receiver defaults; existing APIs change only by declaration; no standalone `implicit T`/`in T`, `view<T>` or representation attribute | Evaluate once; apply ordinary reference lifetime, return, storage, capture and suspension checks; settle materialized-temporary scope before implementation; preserve nested write capability, backing, roots and ownership when copying a Copy `T`; reject stacking with writable/init/pointer contracts or arbitrary conversions; explicit and implicit readonly-ref forms share a signature; ordinary `F(value)` chooses by-value `F(T)` when both apply; preserve source semantics under by-value/indirect ABI lowering, with no size threshold or adaptive type attribute |
 | General separate compilation (bounded native graphs and catalog resolution implemented) | Versioned semantic contracts, persisted EXE/DLL graphs with up to sixteen producers, unique-compatible selection from explicit local candidates, private managed-state replacement and semantic-v31 compact `Copy` exports; semantic v32 supports private managed consumers through ordinary single-provider semantic consumers and native single-provider/module-set entry points using scalar and handle-free `Copy` contracts. Semantic modules share one heap/root domain and remap private class identities; persisted native images retain separate domains. Semantic v32 persisted native graphs additionally permit managed intermediate and root producers. Schedule checked opt-in Sequential, Union and Transparent layout/ABI contracts (no arbitrary user-selected field offsets), including transparent-wrapper metadata with nominal source identity and carrier equivalence only under checked argument/return classification and validity/ownership/cleanup rules; version-ordering policy and resilient layouts remain open | Compatible replacement preserves semantic consumers and native graph root/intermediate images, including frozen older wire formats and managed implementations at leaf, middle and root; distinct leaf identities coexist; caller roots survive imported calls and collection is image-local; replacing a semantic provider requires native relinking for a new PE, while compatible native package replacement retains the persisted consumer image; transparent wrappers match carrier classification across direct/indirect calls without implicit source conversions; malformed class layouts/construction/roots and ambiguous, incompatible or incomplete catalogs fail before execution; public managed-handle ABI, cross-image shared collection and larger layout evolution remain outstanding |
 | Managed-backed compact `Copy` exports (implemented; semantic v31) | Leaf producers may expose existing public, handle-free `Copy` values up to 16 bytes by value as parameters/results and through existing `bool`/`out` conditional outputs, including scalar outputs; private managed storage remains producer-local, and native ABI/profile versions do not change | Preserve nominal type provenance and public-field visibility for `Copy` types crossing the argument/result ABI, not automatically for the declaring owner; existing scalar-only static exports on public owners with private fields remain valid, and a static declaration on a unique owner does not transfer it; preserve `NoThrow` and existing value-ABI contracts; older headers reject expanded export shapes; no exported managed handles or unique values, nested managed-containing values, views, reference modes, mutating-receiver ABI or managed-leaf imports |
 | Managed graph participants and consumers (implemented; semantic v32) | Semantic v32 supports private managed consumers through ordinary single-provider semantic consumers and native single-provider/module-set entry points. Persisted acyclic native DLL graphs also permit managed roots and intermediate producers through scalar and handle-free public `Copy` by-value/result and `bool`/`out` contracts; each persisted image owns its heap and root chain, imported calls preserve caller roots, and collection is image-local. Semantic modules statically link into one heap/root domain and remap private class identities | AOT/root-only JIT leaf replacement with unchanged managed middle and root images under both runtime policies; semantic provider servicing and fresh static links; no cross-image handles, unique values, views, reference modes, cross-image shared collection, graph cycles, DLL-unload collection or native ABI/profile/package-format changes |
@@ -97,8 +97,9 @@ opt-in operations alongside primitive built-ins, not universal root methods or
 an obligation to make every value stringifiable. This library/witness work does
 not decide whether Terrum has a root type.
 
-Open design details are centralized in [language](language.md),
-[lifetimes](lifetimes.md), [type families](type-families.md),
+The [pending-decision index](language-library-review.md) distinguishes review
+items from accepted contracts and specification work. Detailed boundaries live
+in [language](language.md), [lifetimes](lifetimes.md), [type families](type-families.md),
 [conversions](conversions.md) and [libraries](libraries.md). They include
 generic member-contract refinement, stored-view ABI, inline class eligibility,
 exception/low-memory ABI, associated/conditional-conformance grammar and
@@ -109,3 +110,63 @@ async start policy, floating-destination conversion policies, scalable
 sharing ABI and final construction/annotation spellings. Accepted semantic
 policies are not reopened by these syntax/ABI questions; none should be
 silently fixed by a convenient host or machine instruction.
+
+## Language, semantic IL and metadata specification
+
+The long-term specification must cover both the source language and its
+execution/interchange contracts: comparable in scope to a language standard
+plus an infrastructure standard, without adopting CIL, CLR or their historical
+format choices. The semantic IL and metadata format are first-class work
+within full runtime/structured contracts and general separate compilation,
+not merely serialization details of the current compiler's private IR.
+
+Specify the source language, semantic operations and verifier, metadata/module
+interchange, and runtime/target profiles with explicit boundaries. The exact
+document organization, normative IL and wire encoding remain design work, not
+a selected new format. Cover declaration identities and references, types,
+generic constraints/witnesses, access/ownership/lifetime and output contracts,
+effects, capabilities, layouts and runtime dependencies.
+
+Format work must define version and feature negotiation, unknown-data handling,
+compatibility, deterministic/canonical encoding where promised, malformed-input
+rejection, validation limits and producer/consumer trust responsibilities.
+Keep source-language versions, semantic artifact formats and physical native
+profiles distinct. Establish conformance with independently exercised readers,
+writers and verifier cases rather than relying only on same-version round trips.
+
+The existing versioned semantic modules are implemented compatibility contracts
+and evidence for this work, not automatically the final general IL standard.
+Preserve supported historical artifacts and feature-dependent version selection;
+do not replace or freeze the current format merely to make the specification
+look complete. This work does not require a new backend or public managed ABI.
+
+## Memory-model implementation sequence
+
+The [memory model](memory-model.md) is accepted design, not implemented
+concurrency support. Integrate it through the four current areas above rather
+than introducing a parallel runtime or moving the work under Later capabilities.
+Each increment must preserve existing single-threaded behavior and remain
+honest about unsupported source and artifact contracts.
+
+| Order | Increment and dependencies | Required evidence |
+|---|---|---|
+| 1 | Preserve the existing baseline within full runtime/structured contracts: observable evaluation, checked arithmetic, cleanup, ordinary access widths and current unsafe-recovery behavior | Source/IR/AOT/JIT regressions establish that optimization introduces no invalid accesses or extra observable faults/effects; unsafe discovery does not create new repair/trap behavior; no claim that current unsafe blocks implement general caller-unsafe contracts |
+| 2 | Add declared caller-unsafe/trusted boundaries and producer-owned transfer/share capability rules alongside the scheduled reference/loan/parameter metadata work; integrate them with general separate compilation | Safe callers cannot erase obligations through wrappers or imports; generic bodies use published constraints; private-layout or JIT facts do not alter source binding; incompatible capability/safety changes reject without freezing otherwise opaque layouts |
+| 3 | Implement the bounded `MemoryPrimitives` value-access and scalar-atomic surface after typed access paths, representation eligibility and compile-time order binding are available; start with supported Windows x64 profiles | Separate atomicity, ordering and progress checks; defined bitwise CAS comparison; checked overflow leaves storage unchanged; unaligned access does not imply a snapshot; exact target capabilities and AOT/JIT/module parity; no hidden lock fallback |
+| 4 | Build checked handoff, immutable publication and scoped synchronization protocols on those primitives within resources/graphs and rich libraries; provide explicitly selected coordinated fallback where feasible | Publication and mixed-order litmus tests; guard/lifetime/alias enforcement; lock-free versus wait-free claims justified independently; fallback users across modules share one protocol; no unconditional read-elision prohibition when required effects are preserved |
+| 5 | Extend reference atomics only after collector-aware roots, barriers, safepoints and reclamation are defined; add explicit SIMD/non-temporal/cache operations as their layout, feature and memory-domain contracts become available | Concurrent collection/root safety before safe reference APIs; source ranges and per-location guarantees survive SIMD lowering; non-temporal completion precedes publication; cache maintenance does not masquerade as DMA coherence or persistence |
+
+Before implementing explicit concurrent operations, complete the formal
+mixed-order/fence rules and executable litmus cases. Preserve the accepted
+explicit acquire-release relay rule, not implicit relaxed-RMW release
+sequences. Exact declaration spellings, conditional-capability metadata,
+CAS order-pair validation and target tables are specification deliverables
+within these increments. This sequence does not authorize additional backend
+architectures, a public managed-handle ABI, or wholesale implementation of the
+design-only library inventories.
+
+Represent access, ordering and lifetime effects in checked IR before lowering
+the concurrent operations. Persist and validate the required contracts across
+semantic imports, native producers, module sets and graphs, with feature-based
+version selection and rejection under incompatible headers. Existing ordinary
+IR and lexical unsafe recovery do not already encode those new guarantees.

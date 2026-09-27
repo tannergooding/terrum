@@ -10,6 +10,22 @@ Terrum (TAIR-um), from TerraFX, is a proposed C#-shaped language for application
 - Exceptions propagate exceptional failures; expected alternatives use conditional outputs or explicit domain statuses. `require` is a safe checked failure; only catching/recovering requires unsafe authorization. Cleanup and `try/finally` do not. Unsafe recovery does not prove an object's invariant has survived. Platform callbacks must contain faults or terminate rather than unwind across a foreign ABI.
 - Type, declaration, interface and metadata contracts are authoritative. A compiler may infer private implementation facts but cannot silently publish stronger or weaker promises from a replaceable body. Consumers bind against the producer's resolved contracts and rule version, not their own reinterpretation of its source defaults. [Lifetimes](lifetimes.md) specifies this distinction for borrowed results.
 
+### Safe and unsafe boundaries
+
+The [memory model](memory-model.md) defines the accepted access, optimization
+and concurrency contracts. `unsafe` transfers proof obligations to the
+developer; it does not change specified operations, imply `unchecked`, or
+authorize arbitrary behavior when analysis discovers a violation. Existing
+explicit checks remain. Optional diagnostics may identify misuse without
+inserting repairs or changing the contract after inlining or specialization.
+
+A callable may expose caller-unsafe obligations or explicitly contain them
+behind a trusted safe contract. Safe clients still obey checked access,
+lifetime and sharing rules; a safe signature does not claim that its unsafe
+implementation was compiler-proven. These boundaries must survive imported
+metadata. General caller-unsafe/trusted declaration syntax and propagation
+remain to implement; current `unsafe` recovery is only a bounded subset.
+
 ### Types and operations
 
 Declarations are immutable by default. A bare local is fixed after initialization;
@@ -71,9 +87,13 @@ The accepted call-side readonly-borrow form is the parameter-only modifier
 `implicit ref<T>`, not `implicit T`, `in T`, or a qualifier inside `T` or
 `ref<T>`. Callers pass ordinary expressions, evaluated once: an eligible
 existing place is borrowed, otherwise a temporary is materialized and cleaned
-under normal call/unwind rules. The introduced slot loan is
-call-scoped/nonescaping and cannot be returned, stored, captured for later, or
-carried across suspension. It imposes no `[Copy]` requirement or ownership
+under ordinary lifetime/unwind rules. The introduced slot loan has the same
+semantics as an explicitly authored readonly `ref<T>`, including declared
+result and backing dependencies. `implicit` adds no special noescape or
+suspension restriction. References cannot outlive their backing; the precise
+materialized-temporary scope remains a
+[call-contract decision requiring review](language-contract-review.md#11-places-values-and-materialization).
+Borrowing imposes no `[Copy]` requirement or ownership
 transfer just to borrow. The slot is readonly, but `T` keeps its complete
 qualification and dependencies; for example, borrowing a descriptor does not
 erase `write` authority or backing/root obligations inside it. This is not
@@ -158,6 +178,14 @@ does not change the current module format's exact layout contracts.
 ### Interfaces, access and generic properties
 
 `where T : IFoo` requires a checked behavioral witness; `where T : [Sized]`, `[Copy]`, `[ManagedStorable]`, `[ThreadTransferable]`, `[ThreadShareable]`, `[TextCodeUnit]` or `[NativeComInterface]` asks for a compiler-verified property of the complete qualified form, **not** implementation of an `I...` interface or the mere presence of an attribute. Thread capabilities describe which checked transfer or concurrent-use contracts a complete form can satisfy; they do not imply that a value is currently shared, authorize mutation, or perform synchronization. Thread confinement is the default but does not bind a value to one OS thread or executor. `[Sized]` does not promise a size constant in shared generic code. `[TextCodeUnit]` admits `char8`, `char16`, `char32`, not arbitrary valid encoded text. Native COM additionally requires checked IID, inherited slots, signatures, layout and lifetime. User shape generation can provide witnesses or adapters only after checking costs, ownership and ABI.
+
+Thread-capability proofs can be derived from complete definitions and
+dependencies, but consumer-visible guarantees come from declaration contracts
+and producer-published rules, not incidental private layout. Generic bodies use
+declared constraints and published conditional rules; machine-code
+specialization cannot invent a missing source capability. A promised capability
+cannot silently disappear when an implementation changes. Capability stability,
+fixed layout and trivial-wrapper atomicity are separate contracts.
 
 No universal root is required to supply `Equals`, `GetHashCode`, or
 `ToString`, or to impose object-default boxing/allocation on every value; nor

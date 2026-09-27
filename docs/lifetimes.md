@@ -31,6 +31,12 @@ unwinding retires its root normally. An unsuccessful output is still uninitializ
 not an implicitly published null.
 The remaining lifetime constructs are rejected for execution.
 
+Transfer/share proofs cover the complete qualified form, including backing
+storage, retained roots and region dependencies. A readonly loan is not by
+itself permission for concurrent use. The [memory model](memory-model.md)
+defines checked sharing and trusted implementation boundaries; neither erases
+the lifetime obligations published by a safe interface.
+
 ## Three independent dependencies
 
 1. **Receiver's own storage:** a result can refer to the receiver *place* or its inline fields. An exclusive or scoped borrow of that place bounds the result. A returned reference to a local receiver's inline field cannot escape that receiver merely because another field contains a long-lived allocation.
@@ -64,7 +70,7 @@ reference parameter, not `implicit T` or `in T`, a qualifier inside `T` or
 `ref<T>`, a `view<T>` type, or a representation attribute. The caller passes
 an ordinary expression and it is evaluated once. If it denotes an eligible
 place, the call borrows that place's slot; otherwise the compiler materializes
-a temporary and cleans it according to ordinary call and unwind rules.
+a temporary and cleans it according to ordinary lifetime and unwind rules.
 Borrowing alone requires neither `[Copy]` nor ownership transfer.
 
 ```terrum
@@ -74,9 +80,14 @@ Inspect(record);
 Inspect(CreateRecord());
 ```
 
-The introduced loan is call-scoped and nonescaping: it cannot be returned as a
-reference, stored, retained by a capture, or carried across suspension. The
-loan restricts access to the outer slot only. The complete qualified `T`
+The introduced loan is an ordinary readonly reference. Return, storage,
+capture and suspension obey the same declared dependencies and lifetime rules
+as explicit `ref<T>`; `implicit` does not add an unconditional noescape rule.
+A reference into a materialized temporary cannot outlive that temporary.
+The precise temporary-scope rule still
+[requires review](language-contract-review.md#11-places-values-and-materialization),
+not a new lifetime system for implicit arguments.
+The loan restricts access to the outer slot only. The complete qualified `T`
 retains any write authority, backing, roots, ownership and dependency contracts
 already carried by its value; a Copy descriptor copied out of the slot keeps
 those same contracts. A readonly outer loan is not deep immutability, purity
