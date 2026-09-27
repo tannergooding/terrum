@@ -79,6 +79,13 @@ values up to 16 bytes through by-value parameters/results and existing
 conditional `bool`/`out` outputs, without exposing managed handles or private
 heap storage. This retains the existing value ABI and does not provide a
 public managed-handle ABI.
+Semantic v32 permits managed roots and intermediate producers only in
+persisted acyclic native DLL graphs through the same scalar and handle-free
+`Copy` value contracts. Ordinary semantic linking and consumer/module-set
+creation still reject private managed participants. Persisted images retain
+separate heaps and root chains; existing static linking of a managed leaf
+remains a separate single-image collection domain. This adds neither
+cross-image managed handles nor shared collection.
 It includes compilation-local constrained generic specialization, including
 bounded single-`T` inference for top-level function templates over `Copy`
 structs and existing scalar value types, but not primitive operator witnesses,

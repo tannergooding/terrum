@@ -68,7 +68,11 @@ public static unsafe class NativeJit
         {
             throw new PlatformNotSupportedException("Native JIT requires a Windows x64 process.");
         }
-        if (code.Data.Length != 0 || !code.BufferOffsets.IsEmpty)
+        if (!code.BufferOffsets.IsEmpty || code.HostDataLength != 0 || code.ReadOnlyDataLength != 0
+            || (code.ManagedRuntimeOffset < 0
+                ? code.Data.Length != 0
+                : code.ManagedRuntimeOffset != 0 || code.Data.Length != 24
+                    || code.Data.AsSpan().IndexOfAnyExcept((byte)0) >= 0))
         {
             throw new ArgumentException("Native graph consumers cannot contain host buffers.", nameof(code));
         }

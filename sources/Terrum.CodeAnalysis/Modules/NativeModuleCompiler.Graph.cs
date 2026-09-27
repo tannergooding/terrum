@@ -70,7 +70,8 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleContractException("Graph consumer and dependency runtime policies differ.");
         }
-        var contract = ModuleCompiler.CreateConsumerAgainstReference(program, GraphReference(providers));
+        var contract = ModuleCompiler.CreateConsumerAgainstReference(program, GraphReference(providers),
+            allowManagedParticipant: true);
         var imports = ModuleCompiler.GetConsumerSetDeclarations(contract);
         var bindings = GraphBindings(providers, imports);
         var declarations = NativeBindings(bindings);

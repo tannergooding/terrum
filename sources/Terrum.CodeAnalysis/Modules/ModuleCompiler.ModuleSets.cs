@@ -94,10 +94,15 @@ public static partial class ModuleCompiler
         return result;
     }
 
-    internal static byte[] CreateConsumerAgainstReference(BoundProgram program, CompilationReference reference)
+    internal static byte[] CreateConsumerAgainstReference(BoundProgram program, CompilationReference reference,
+        bool allowManagedParticipant = false)
     {
         ArgumentNullException.ThrowIfNull(program);
         SemanticVerifier.VerifyReferences(program);
+        if (!allowManagedParticipant)
+        {
+            RejectManagedNodes(program);
+        }
         if (!program.Buffers.IsDefaultOrEmpty)
         {
             throw new ModuleFormatException("Host buffers are not serializable module dependencies.");
@@ -112,6 +117,10 @@ public static partial class ModuleCompiler
         {
             if (function.IsExternal)
             {
+                if (HasPrivateManagedState(program) && !ManagedExportShape.Supported(function, program.Structures))
+                {
+                    throw new ModuleContractException($"Managed graph import '{function.Name}' crosses a non-Copy boundary.");
+                }
                 if (!available.TryGetValue(function.Name, out var export)
                     || !CompatibleContract(Contract(function, program.Structures),
                         Contract(export, reference.Structures))
@@ -154,6 +163,7 @@ public static partial class ModuleCompiler
                 ?? throw new ModuleFormatException("Missing consumer function."), program.Structures, structures),
         }).ToImmutableArray();
         var module = new Module(true, program.EntryPoint, structures, functions) {
+            Classes = [.. program.Classes.Select(@class => RemapClass(@class, program.Structures, structures))],
             ImportedStructures = imported.ToImmutable(),
             RuntimePolicy = program.RuntimePolicy,
         };
@@ -207,6 +217,12 @@ public static partial class ModuleCompiler
             }
         }
         RejectImportedTypeMembers(consumer.Functions, consumer.ImportedStructures);
+        if (HasPrivateManagedState(consumer) && consumer.Functions.Any(item => item.Import
+            && (!exports.TryGetValue(item.Name, out var actual)
+                || !ManagedExportShape.Supported(actual, reference.Structures))))
+        {
+            throw new ModuleContractException("Managed graph import crosses a non-Copy boundary.");
+        }
         var names = consumer.Functions.Select((item, index) => (item.Name, index))
             .ToDictionary(static item => item.Name, static item => item.index, StringComparer.Ordinal);
         var program = new BoundProgram([.. consumer.Functions.Select(item => item.Import
@@ -214,6 +230,7 @@ public static partial class ModuleCompiler
                 reference.Structures, consumer.Structures)
             : item.Function ?? throw new ModuleFormatException("Missing consumer body."))], consumer.EntryPoint) {
             Structures = consumer.Structures,
+            Classes = consumer.Classes,
             RuntimePolicy = consumer.RuntimePolicy,
         };
         try

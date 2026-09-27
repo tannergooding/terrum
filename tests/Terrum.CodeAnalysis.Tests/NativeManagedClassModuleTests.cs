@@ -422,7 +422,7 @@ public sealed partial class NativeManagedClassModuleTests
     }
 
     [Fact]
-    public void ManagedLeafCannotImportAnotherProvider()
+    public async Task ManagedGraphProducerCanImportScalarProviderAsync()
     {
         var policy = NativeRuntimePolicy.FailFast;
         var dependency = NativeModuleCompiler.CreateProducer(
@@ -431,7 +431,14 @@ public sealed partial class NativeManagedClassModuleTests
             "return result + External();", StringComparison.Ordinal);
         var imported = Compilation.CreateLibrary(SyntaxTree.Parse(source),
             NativeModuleCompiler.CreateReference(dependency), (BoundRuntimePolicy)policy);
-        Assert.True(imported.HasErrors, string.Join(Environment.NewLine, imported.Diagnostics));
+        Assert.False(imported.HasErrors, string.Join(Environment.NewLine, imported.Diagnostics));
+        var graph = NativeModuleCompiler.CreateGraphProducer(Assert.IsType<BoundProgram>(imported.Program),
+            ["Leaf"], "NodeB", [dependency], policy);
+        Assert.Equal(32, GraphSemanticVersion(graph));
+        var root = NativeModuleCompiler.CreateGraphConsumer(Compile("int32 Main() { return Leaf(); }",
+            policy, NativeModuleCompiler.CreateGraphReference([graph]), library: false), [graph], policy);
+        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(root, [graph, dependency],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
         var program = Compile(Sample("managed-class-leaf"), policy);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateGraphProducer(
             program, ["Leaf"], "NodeB", [dependency], policy));

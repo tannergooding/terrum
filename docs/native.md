@@ -130,14 +130,15 @@ through collecting cleanup. These use the same verified root metadata,
 collector and Windows unwind machinery as normal execution.
 This is a single-threaded, image-private AOT/JIT proof with no
 inheritance, managed user-struct
-fields, managed native exports/imports, persisted module graph ABI, finalizers,
+fields, public managed-handle ABI, finalizers,
 interior pointers, pinning or generational/concurrent collection. Native DLL
-emission admits only scalar by-value parameters and scalar or `void` results,
-with no `out` parameters and only private managed state; calls must be serialized.
-An export does **not** collect merely because it returns, so a
-caller must run an exported scalar collection proof to drain any abandoned
-nodes before unloading the DLL. There is no managed cross-DLL calling ABI
-or automatic unload teardown.
+emission for semantic v18-v30 admits only scalar by-value parameters and scalar
+or `void` results, with no `out` parameters; semantic v31 adds the bounded
+handle-free `Copy` value contracts described below. Managed state is private,
+and calls must be serialized. An export does **not** collect merely because it
+returns, so a caller must explicitly invoke the image's collection proof to
+drain abandoned nodes before unloading the DLL. There is no automatic unload
+teardown.
 The independent `scripts/check-managed-node-abi.cs` probe instruments the
 image's `HeapAlloc`/`HeapFree` imports. It checks cycle reclamation, retired
 frame roots, pointer-shaped scalar nonroots, allocation failure and fatal
@@ -152,8 +153,9 @@ Semantic module version 18 also permits a leaf producer to use private
 collector remain inside the producer DLL. A compatible replacement can add this
 private runtime without changing persisted consumer or intermediate images,
 under either AOT or root-only JIT. The leaf must explicitly collect unreachable
-objects; unloading a DLL does not run managed-heap teardown. Managed signatures,
-cross-image roots and source-class metadata remain unsupported
+objects; unloading a DLL does not run managed-heap teardown. Under the v18
+contract, managed signatures, cross-image roots and source-class metadata
+remain unsupported
 ([replacement proof](native-graph.md)).
 
 `native-19` adds up to 256 source-defined classes with explicit constructors and
@@ -251,8 +253,22 @@ by-value parameter/result and `bool`/`out` forms, including scalar outputs.
 Those snapshots use the existing native value ABI and do not expose private
 managed storage or handles; exported managed handles, unique values, nested
 managed-containing values, views, reference modes and mutating-receiver ABI
-remain unsupported. The managed-leaf import restriction and native physical
-ABI/profile versions are unchanged. Primitive
+remain unsupported. Under v31, a managed leaf could not import another
+producer. Native physical ABI/profile versions are unchanged. Semantic v32
+additionally permits managed roots and intermediate producers only in the
+persisted acyclic native graph path. These images communicate only through
+the established scalar and handle-free public
+`Copy` by-value/result and `bool`/`out` contracts; managed/unique values,
+views, reference modes and mutating-receiver ABI do not cross those boundaries.
+Each persisted native image has its own heap and root chain, imported calls
+preserve caller roots, and collection remains local to the image. Existing
+static linking of a managed leaf producer remains a one-image collection
+domain, separate from this DLL-graph support. Ordinary semantic linking and
+consumer/module-set creation continue to reject private managed participants.
+This adds no shared collector, managed-handle ABI or graph cycle, and changes
+neither native physical ABI/profile nor graph package format. See the
+[managed graph replacement example](native-graph.md).
+Primitive
 `OwnedInt32Buffer` views keep their separate legacy access rules; general
 `ref<T>`/view/`own<T>`/`init ref<T>` call-site implementations remain
 unsupported.

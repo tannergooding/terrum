@@ -300,7 +300,7 @@ association, optional-handle expressions and exact lexical roots, and validates
 the complete retained class/function table on reload. Class leaves select
 `native-19`, or `native-20` when optional handles occur; class-free modules keep
 their version 18 wire layout and historical profiles. Exports remain scalar/void
-by-value declarations, and a managed leaf cannot import another provider.
+by-value declarations, and a v19 managed leaf cannot import another provider.
 Source classes and managed handles never become imported module layouts or
 native DLL values. An optional-node-only program without a private source
 class remains outside this bounded module increment. Class leaves with
@@ -375,7 +375,7 @@ contracts and the existing Windows x64 aggregate classification remain part
 of the contract; returned or published snapshots are values independent of
 the producer's private managed heap. Managed handles, unique values, nested
 managed-containing values, views, reference modes and mutating-receiver ABI
-remain excluded, and managed leaves still cannot import another producer.
+remain excluded, and v31 managed leaves could not import another producer.
 Writers select semantic v31 when an expanded export contract requires it;
 scalar-only managed producers retain their prior required version, and older
 headers reject expanded contracts. This adds no syntax or native physical ABI
@@ -388,9 +388,21 @@ helpers remain private. Readers normalize private managed artifacts from
 versions 18 through 23 into explicitly qualified internal IR, translating
 legacy class/`ManagedNode` mutation authority into `write` exactly where it was
 previously granted, without widening the contract. A v18-v23 header containing
-v24 write identifiers is rejected. The native physical handle ABI and private
-managed-class boundary remain unchanged; semantic v31 adds only the compact
-`Copy` export contracts described above, not a public managed-handle ABI.
+v24 write identifiers is rejected. The native physical handle ABI and absence of a public managed-handle ABI
+remain unchanged. Semantic v32 permits managed roots and intermediate
+producers only in the persisted acyclic native graph path, subject to the
+scalar and compact `Copy` value boundary above; it does not create a shared
+collector or graph cycle. Each persisted image retains its own heap and roots,
+imported calls preserve caller roots, and collection remains image-local.
+Ordinary semantic linking and consumer/module-set creation continue to reject
+private managed participants. Existing static linking of a managed leaf
+producer remains a single-image collection domain, separate from this
+DLL-graph support. Writers select v32 for managed root/intermediate
+participation; managed leaves retain v31 or earlier when their own contracts
+need no newer version. Version-specific restrictions in v18-v30 remain in
+force for those artifacts; v31 retains its expanded managed-leaf `Copy`
+contract. No syntax, scanner, native physical ABI/profile or graph
+package-format version changes.
 A consumer importing a unique type must also import the exported NoThrow
 cleanup methods of that type and its owning children. Their cleanup identities
 and Copy/unique distinctions participate in layout and signature compatibility;

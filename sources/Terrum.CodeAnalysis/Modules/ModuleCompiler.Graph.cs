@@ -81,7 +81,6 @@ public static partial class ModuleCompiler
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(exports);
         SemanticVerifier.VerifyLibraryReferences(program);
-        RejectManagedNodes(program);
         if (program.EntryPoint != -1 || !program.Buffers.IsDefaultOrEmpty
             || program.RuntimePolicy != dependencies.RuntimePolicy)
         {
@@ -96,6 +95,11 @@ public static partial class ModuleCompiler
         var available = dependencies.Functions.ToDictionary(static item => item.Name, StringComparer.Ordinal);
         foreach (var function in program.Functions)
         {
+            if (HasPrivateManagedState(program) && (function.IsExternal || names.Contains(function.Name))
+                && !ManagedExportShape.Supported(function, program.Structures))
+            {
+                throw new ModuleContractException($"Managed graph boundary '{function.Name}' requires public Copy values.");
+            }
             if (names.Contains(function.Name) && (function.IsExternal || !Exportable(function, program.Structures)))
             {
                 throw new ModuleContractException($"Graph export '{function.Name}' is not a public implementation.");
@@ -149,6 +153,7 @@ public static partial class ModuleCompiler
         }).ToImmutableArray();
         RejectImportedTypeMembers(functions, importedTypes.ToImmutable());
         var module = new Module(true, -1, structures, functions) {
+            Classes = [.. program.Classes.Select(@class => RemapClass(@class, program.Structures, structures))],
             ImportedStructures = importedTypes.ToImmutable(),
             RuntimePolicy = program.RuntimePolicy,
         };
@@ -173,7 +178,8 @@ public static partial class ModuleCompiler
             if (names.Contains(item.Name))
             {
                 if (item.Import || item.Function is not BoundFunction function
-                    || !Exportable(function, module.Structures))
+                    || !Exportable(function, module.Structures)
+                    || (HasPrivateManagedState(module) && !ManagedExportShape.Supported(function, module.Structures)))
                 {
                     throw new ModuleFormatException($"Graph export '{item.Name}' has no public implementation.");
                 }
@@ -207,6 +213,12 @@ public static partial class ModuleCompiler
         var module = ReadGraphLibrary(contract);
         _ = CreateGraphReference(contract, exports, allowImportedCleanup);
         ValidateGraphImports(module, dependencies);
+        if (HasPrivateManagedState(module) && module.Functions.Any(item => item.Import
+            && (!dependencies.Functions.Any(function => function.Name == item.Name
+                && ManagedExportShape.Supported(function, dependencies.Structures)))))
+        {
+            throw new ModuleContractException("Managed graph import crosses a non-Copy boundary.");
+        }
         var indexes = module.Functions.Select((item, index) => (item.Name, index))
             .ToDictionary(static item => item.Name, static item => item.index, StringComparer.Ordinal);
         var external = dependencies.Functions.ToDictionary(static item => item.Name, StringComparer.Ordinal);
@@ -215,6 +227,7 @@ public static partial class ModuleCompiler
                 dependencies.Structures, module.Structures)
             : item.Function ?? throw new ModuleFormatException("Graph library implementation is missing."))], -1) {
             Structures = module.Structures,
+            Classes = module.Classes,
             RuntimePolicy = module.RuntimePolicy,
         };
         try
@@ -306,11 +319,12 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Graph library cannot have an entry point.");
             }
             var (structures, names) = ReadStructures(reader, version);
-            if (version is >= ManagedClassVersion and not LoopTransferVersion)
+            if (version is >= ManagedClassVersion and not (LoopTransferVersion or ManagedGraphParticipantVersion))
             {
                 throw new ModuleFormatException("Graph libraries cannot use the private class module version.");
             }
-            if (version == LoopTransferVersion && !ReadClasses(reader, names, version).IsEmpty)
+            var classes = version >= ManagedClassVersion ? ReadClasses(reader, names, version) : [];
+            if (version != ManagedGraphParticipantVersion && !classes.IsEmpty)
             {
                 throw new ModuleFormatException("Graph libraries cannot retain private classes.");
             }
@@ -320,14 +334,16 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Graph library has no functions.");
             }
-            var functions = ReadFunctions(reader, count, expectedConsumer: true, version, structures, []);
+            var functions = ReadFunctions(reader, count, expectedConsumer: true, version, structures, classes);
             var module = new Module(true, -1, structures, functions) {
+                Classes = classes,
                 ImportedStructures = imported,
                 RuntimePolicy = policy,
                 SerializedVersion = version,
                 SerializedProfile = profile,
             };
-            if (stream.Position != stream.Length || profile != RetainedNativeProfile(module))
+            if ((version == ManagedGraphParticipantVersion && !HasPrivateManagedState(module))
+                || stream.Position != stream.Length || profile != RetainedNativeProfile(module))
             {
                 throw new ModuleFormatException("Graph semantic profile or payload is invalid.");
             }

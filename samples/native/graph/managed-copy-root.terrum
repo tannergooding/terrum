@@ -1,0 +1,17 @@
+mut class Record {
+    public Snapshot Data;
+    public mut write Record? Next;
+    public Record(Snapshot data) {
+        Data = data;
+        Next = null;
+    }
+}
+
+int32 Main() {
+    require Record.TryCreate(ForwardSnapshot(), out var state);
+    state.Next = state;
+    int32 result = MiddleValue();
+    ManagedHeap.Collect();
+    require state.Data.Total + 2 == result;
+    return result;
+}

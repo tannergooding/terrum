@@ -247,6 +247,9 @@ public static partial class NativeModuleCompiler
         NativeModuleImageValidator.Validate(image, consumer, GraphImports(package), exports, policy,
             allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(consumer
                 ? ModuleCompiler.GetNativeProfileVersion(contract, true)
+                : ModuleCompiler.GetGraphProfile(contract)),
+            allowManagedRuntimeData: AllowsManagedRuntimeData(consumer
+                ? ModuleCompiler.GetNativeProfileVersion(contract, true)
                 : ModuleCompiler.GetGraphProfile(contract)));
         return package;
     }

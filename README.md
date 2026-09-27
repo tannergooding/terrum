@@ -78,7 +78,8 @@ without granting more authority than their original contract. Public scalar
 entry wrappers may call non-exported mutating methods; private helpers remain
 non-exported as well. The native handle ABI and private managed-state boundary
 are unchanged; semantic v31 permits managed-backed leaf producers to export
-compact handle-free `Copy` values without exposing managed handles.
+compact handle-free `Copy` values, and semantic v32 permits bounded managed
+participants in persisted acyclic native graphs without exposing handles.
 
 Semantic v27 permits ordinary `mut` methods on unique structs through an
 initialized named mutable owner or forwarded writable `this`. These loans

@@ -1,0 +1,21 @@
+class Record {
+    public Snapshot Data;
+    public Record(Snapshot data) {
+        Data = data;
+    }
+}
+
+Snapshot ReadMiddleSnapshot() {
+    require Record.TryCreate(ReadSnapshot(), out var record);
+    return record.Data;
+}
+
+public Snapshot ForwardSnapshot() {
+    Snapshot snapshot = ReadMiddleSnapshot();
+    ManagedHeap.Collect();
+    return snapshot;
+}
+
+public int32 MiddleValue() {
+    return ReadTotal(ForwardSnapshot()) + 2;
+}

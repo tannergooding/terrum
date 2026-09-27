@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-17, native-10 through native-20, semantic v31 managed-backed Copy exports
+## Current boundary: syntax-17, native-10 through native-20, semantic v32 managed native graphs
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -102,6 +102,23 @@ Writers require semantic v31 for these expanded export contracts; scalar-only
 managed producers retain their prior required version, and older headers reject
 the expanded contracts. This adds no syntax or scanner change and does not
 change the native physical ABI or profile versions.
+Semantic v32 permits managed roots and intermediate producers only in the
+persisted acyclic native graph path. Its imports and exports communicate only through the
+established scalar and handle-free public `Copy` by-value/result and
+`bool`/`out` contracts; managed or unique values, views, reference modes and
+mutating-receiver ABI still cannot cross a managed participant boundary.
+Each persisted native image retains its own heap and root chain, and calls
+preserve the caller's roots while another image runs. `ManagedHeap.Collect()`
+remains image-local. This does not enable private managed participants in
+ordinary semantic linking or consumer/module-set creation, which continue to
+reject them. Existing static linking of a managed leaf producer remains a
+single-image collection domain; it is separate from this persisted DLL-graph
+extension. There is no shared collector, managed-handle ABI or cyclic graph
+support.
+Semantic v32 is selected for managed root/intermediate participation;
+managed leaves retain v31 or earlier when their own contracts need no newer
+version. This adds no syntax, scanner, native physical ABI/profile or graph
+package-format change.
 
 | Surface | Implemented | Not yet implemented |
 |---|---|---|
@@ -295,16 +312,22 @@ or expression. Programs needing neither retain their historical versions and
 bytes regardless of managedness.
 The private managed-state boundary and absence of a public managed-handle ABI
 are unchanged. Semantic v31 expands leaf exports to managed-backed compact
-handle-free `Copy` values by value; earlier semantic versions retain their
-existing scalar-only export contracts.
-Optional-node-only modules,
-managed consumer declarations and managed imported/exported signatures still
-reject.
-Native packages validate its managed profile, heap imports and root metadata.
-The leaf's collection is image-local and explicit; neither public managed
-contracts nor DLL-unload collection are implemented. Unchanged persisted
-consumer/intermediate images accept a compatible replacement under AOT and
-root-only JIT.
+handle-free `Copy` values by value; semantic v32 permits managed roots and
+intermediate producers in persisted native DLL graphs using only scalar and
+handle-free `Copy` contracts across image boundaries. Managed handles, unique
+values, views and reference modes cannot cross those boundaries. Native
+packages validate each image's managed profile, heap imports and root
+metadata. Explicit collection is local to each persisted image, and imported
+calls preserve the caller's roots. Ordinary semantic linking and consumer or
+module-set creation continue to reject private managed participants. Existing
+static linking of a managed leaf producer remains a single-image collection
+domain, separate from the v32 persisted graph path. Managed handles do not
+cross images, and shared collection, graph cycles and DLL-unload collection
+remain unsupported. Writers select v32 for managed root/intermediate
+participation; managed leaves retain v31 or earlier when their retained
+contracts do not require a newer version.
+Compatible persisted consumer/intermediate images continue to work with leaf
+replacement under AOT and root-only JIT.
 The [source-line index candidate](../self-host/SourceLineIndex.terrum) uses `OwnedInt32Buffer`
 to build and own a line-start table, with binary-searched UTF-16 positions checked
 against host fixtures under both native failure policies.

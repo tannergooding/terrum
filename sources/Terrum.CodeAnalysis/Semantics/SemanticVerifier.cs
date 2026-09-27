@@ -87,7 +87,8 @@ public static class SemanticVerifier
             function.Intrinsic >= BoundIntrinsic.NodeTryCreate
             || ManagedClassTypes.IsManaged(function.ReturnType)
             || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type)));
-        if (usesManagedNodes && program.Functions.Any(static function => function.IsExternal))
+        if (usesManagedNodes && program.Functions.Any(function =>
+            function.IsExternal && !ManagedExportShape.Supported(function, program.Structures)))
         {
             throw InvalidEffect(default, "Ownership");
         }

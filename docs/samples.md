@@ -74,6 +74,13 @@ returns 40 with the original and 42 with the replacement, demonstrating
 semantic-v31 by-value and `bool`/`out` Copy exports without exposing the
 producer's private managed records. Exact AOT and root-only JIT commands are
 in the [native graph guide](native-graph.md).
+The [managed Copy middle](../samples/native/graph/managed-copy-middle.terrum)
+and [managed Copy root](../samples/native/graph/managed-copy-root.terrum)
+extend the same replacement to a managed intermediate and root. Both images
+keep private managed records while exchanging only the leaf's public
+handle-free `Snapshot` and scalar values; the unchanged graph returns 42 with
+the original leaf and 44 with the managed replacement under AOT and root-only
+JIT. See the [graph commands](native-graph.md).
 The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
 returns 46 through AOT and JIT. Two nominal Copy wrappers explicitly implement
 source-defined addition/multiplication protocols used by one constrained

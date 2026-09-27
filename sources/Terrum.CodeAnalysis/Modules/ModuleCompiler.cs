@@ -37,6 +37,7 @@ public static partial class ModuleCompiler
     private const int MutableBufferFieldReceiverVersion = 29;
     private const int MutableBufferFieldViewVersion = 30;
     private const int ManagedValueExportVersion = 31;
+    private const int ManagedGraphParticipantVersion = 32;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -1328,13 +1329,15 @@ public static partial class ModuleCompiler
 
     private static byte[] Write(Module module, BoundProgram program)
     {
-        if (module.Consumer)
+        if (module.Consumer && !HasPrivateManagedState(module))
         {
             RejectManagedNodes(program);
         }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-        var version = HasPrivateManagedState(module) && module.Functions.Any(static item =>
+        var version = module.Consumer && HasPrivateManagedState(module)
+            ? ManagedGraphParticipantVersion
+            : HasPrivateManagedState(module) && module.Functions.Any(static item =>
                 item.Import && item.Function is BoundFunction function && !ManagedExportShape.ScalarOnly(function))
                 ? ManagedValueExportVersion
             : module.Functions.Any(static item => item.Function is BoundFunction function
@@ -1521,6 +1524,10 @@ public static partial class ModuleCompiler
                 SerializedVersion = version,
                 SerializedProfile = profile,
             };
+            if (version == ManagedGraphParticipantVersion && (!expectedConsumer || !HasPrivateManagedState(module)))
+            {
+                throw new ModuleFormatException("Managed graph participant version requires private managed state.");
+            }
             if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
                 || !items.Any(static item => item.Import && item.Function is BoundFunction function
                     && !ManagedExportShape.ScalarOnly(function))))
@@ -1535,10 +1542,11 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Optional managed nodes require a private source-class leaf.");
             }
-            if (HasPrivateManagedState(module) && (expectedConsumer || module.Functions.Any(item =>
+            if (HasPrivateManagedState(module) && ((expectedConsumer && version < ManagedGraphParticipantVersion)
+                || (!expectedConsumer && module.Functions.Any(item =>
                     item.Import && (item.Function is not BoundFunction function
                         || !ManagedExportShape.Supported(function, structures)
-                        || (version < ManagedValueExportVersion && !ManagedExportShape.ScalarOnly(function))))))
+                        || (version < ManagedValueExportVersion && !ManagedExportShape.ScalarOnly(function)))))))
             {
                 throw new ModuleFormatException("Managed leaf references require versioned public Copy-value exports.");
             }
@@ -1570,7 +1578,8 @@ public static partial class ModuleCompiler
             or ManagedClassVersion or Version or LoopTransferVersion or AggregateClassFactoryVersion
             or StackClassFactoryVersion or ManagedAccessVersion or MutableStructReceiverVersion
             or MutableFieldReceiverVersion or UniqueMutableReceiverVersion or UniqueMutableFieldReceiverVersion
-            or MutableBufferFieldReceiverVersion or MutableBufferFieldViewVersion or ManagedValueExportVersion))
+            or MutableBufferFieldReceiverVersion or MutableBufferFieldViewVersion or ManagedValueExportVersion
+            or ManagedGraphParticipantVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -1737,11 +1746,12 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Managed-node handles cannot cross a module declaration.");
             }
-            if (ContractContainsOptionalType(contract) && (import || expectedConsumer))
+            if (ContractContainsOptionalType(contract)
+                && (import || (expectedConsumer && version < ManagedGraphParticipantVersion)))
             {
                 throw new ModuleFormatException("Optional managed handles have no persisted module ABI.");
             }
-            if (expectedConsumer && function is BoundFunction body && (UsesManagedNode(body)
+            if (version < ManagedGraphParticipantVersion && expectedConsumer && function is BoundFunction body && (UsesManagedNode(body)
                 || ManagedClassTypes.IsManaged(body.ReturnType)
                 || body.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type))))
             {
@@ -1761,7 +1771,7 @@ public static partial class ModuleCompiler
                 HasOwnershipTransfer = ownershipTransfer,
             });
         }
-        if (classes.Length != 0 && expectedConsumer)
+        if (classes.Length != 0 && expectedConsumer && version < ManagedGraphParticipantVersion)
         {
             throw new ModuleFormatException("Managed classes cannot be imported by consumers.");
         }

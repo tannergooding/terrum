@@ -11,6 +11,16 @@ policies, malformed images and import maps before the root process starts.
 Implementation hashes are not pinned: a compatible leaf implementation can
 replace an independently compiled package without changing the intermediate
 DLL or root EXE.
+Semantic v32 permits managed roots and intermediate producers only in this
+persisted acyclic native DLL graph path. Participants communicate only through
+the established scalar and handle-free public `Copy` value contracts. Each
+persisted image has its own heap and root chain; an imported call preserves
+the caller's roots, and `ManagedHeap.Collect()` remains local to the image
+where it runs. Ordinary semantic linking and consumer/module-set creation
+continue to reject private managed participants. Existing static linking of
+a managed leaf producer remains a separate, single-image collection domain.
+Managed handles never cross image boundaries, and graph cycles remain
+unsupported.
 
 `resolve-native-graph` accepts an explicitly listed local candidate catalog
 rather than an already selected closure. It validates every package, ignores
@@ -213,6 +223,37 @@ foreach ($policy in $policies) {
     $LASTEXITCODE # 42
     & $c run-native-graph-jit $root --provider $replacement --runtime $policy
     $LASTEXITCODE # 42
+}
+```
+
+The following graph places private managed records in both the root and the
+intermediate DLL. The middle exports `ForwardSnapshot` and `MiddleValue`;
+the root also retains a root-local managed cycle while calling into the middle.
+Both communicate with the managed leaf through the leaf's existing
+`Snapshot`/scalar contracts. The persisted root and middle are unchanged when
+the compatible managed leaf replaces the original. The root, middle and leaf
+have independent managed heaps and collection state; the samples deliberately
+do not compare collection counts across images.
+
+```powershell
+$policies = 'fail-fast', 'checked-exceptions'
+foreach ($policy in $policies) {
+    $original = "copy-original-$policy.trmn"
+    $replacement = "copy-managed-$policy.trmn"
+    $middle = "managed-copy-middle-$policy.trng"
+    $root = "managed-copy-root-$policy.trng"
+    & $c compile-native producer samples\native\graph\copy-contract-original.terrum NodeB --export ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $original --runtime $policy
+    & $c compile-native producer samples\native\graph\copy-contract-managed.terrum NodeB --export ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $replacement --runtime $policy
+    & $c compile-native-graph producer samples\native\graph\managed-copy-middle.terrum NodeA --provider $original --export ForwardSnapshot --export MiddleValue -o $middle --runtime $policy
+    & $c compile-native-graph consumer samples\native\graph\managed-copy-root.terrum --provider $middle --provider $original -o $root --runtime $policy
+    & $c run-native-graph $root --provider $middle --provider $original --runtime $policy
+    $LASTEXITCODE # 42
+    & $c run-native-graph-jit $root --provider $middle --provider $original --runtime $policy
+    $LASTEXITCODE # 42
+    & $c run-native-graph $root --provider $middle --provider $replacement --runtime $policy
+    $LASTEXITCODE # 44
+    & $c run-native-graph-jit $root --provider $middle --provider $replacement --runtime $policy
+    $LASTEXITCODE # 44
 }
 ```
 

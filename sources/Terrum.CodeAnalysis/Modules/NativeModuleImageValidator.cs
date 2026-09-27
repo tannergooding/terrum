@@ -54,10 +54,11 @@ internal static class NativeModuleImageValidator
                 throw Invalid();
             }
             var sections = headers.SectionHeaders;
-            var managedData = !isConsumer && allowManagedRuntimeData;
-            if (sections.Length != (isConsumer ? 4 : managedData ? 6 : 5)
+            var managedData = allowManagedRuntimeData;
+            if (sections.Length != (isConsumer ? managedData ? 5 : 4 : managedData ? 6 : 5)
                 || !sections.Select(static section => section.Name).SequenceEqual(isConsumer
-                    ? [".text", ".idata", ".pdata", ".xdata"]
+                    ? managedData ? [".text", ".idata", ".data", ".pdata", ".xdata"]
+                        : [".text", ".idata", ".pdata", ".xdata"]
                     : managedData ? [".text", ".idata", ".data", ".pdata", ".xdata", ".edata"]
                         : [".text", ".idata", ".pdata", ".xdata", ".edata"]))
             {
