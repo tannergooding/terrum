@@ -99,7 +99,8 @@ public struct InlineArray<T, const nuint N>
 // Target sketch: own<val<Text>> owns an inline Text payload; construction,
 // conversion, cleanup and lifecycle contracts remain separate.
 // This sketch's backing is contiguous; the final string representation remains open.
-[TextBuilder(nameof(Text.Create))]
+// Illustrative registered handler type; the concrete builder API remains open.
+[TextBuilder(typeof(TextBuilder))]
 public class Text : IFormattable
 {
     public TextSpan AsSpan();

@@ -1,8 +1,9 @@
 # Language and library improvement review
 
-**Design review; §§1.1–1.3 and the bounded collection-based `params`,
-callable, tuple, alias, and functor directions in §1.4 are accepted, as are the
-representation and safety directions in §§2.1–2.4.** The generic
+**Design review; §§1.1–1.3, the bounded collection-based `params`, callable,
+tuple, alias, and functor directions in §1.4, the representation and safety
+directions in §§2.1–2.4, and the compile-time/handler/specialization directions
+in §§3.1–3.3 are accepted.** The generic
 input/result/receiver representation follow-up remains open.
 Unresolved grammar and other proposals add no syntax/API promise
 or compiler authorization. The review draws on C#/.NET, Rust, Go, Swift, Kotlin, C++
@@ -50,8 +51,10 @@ forwarding through an existing `this` are supported receiver places. Public
 source visibility does not expose a public mutating-receiver ABI.
 It includes compilation-local constrained generic specialization, but not a
 public managed ABI, general interfaces/witnesses, array/view libraries, async,
-or the proposed libraries. Examples in this review and `.api.terrum` files
-remain design material.
+or the proposed libraries. The bounded numeric front end still accepts legacy
+width tags/prefix casts, and the scanner side record preserves that boundary;
+this does not change the target syntax in §3.1. Examples in this review and
+`.api.terrum` files remain design material.
 
 ## 1. Make capabilities explicit and composable
 
@@ -572,116 +575,185 @@ forms are also unsupported.
 
 ## 3. Make compile-time participation and code generation declared
 
-### 3.1 One checked participation model, multiple capabilities
+### 3.1 Checked type-call conversions, registered literals and const evaluation
 
-**Refinement proposal.** User-defined types should be able to participate in
-const-evaluation, typed literals, checked operators, compound assignment, and
-generic constraints through declarations that can be verified and published.
-Avoid compiler magic keyed to names or a handful of intrinsic types, but do not
-allow arbitrary user callbacks to execute inside the compiler without
-determinism and resource bounds. `[Pure]` alone does not imply const-evaluability.
-Registered literals/const-eval must be
-target-format and culture-independent, exclude ambient path/I/O, enforce
-resource budgets, preserve source error ranges, and validate through the normal
-constructor or witness contract. A baked consumer cannot change retroactively
-when its producer is replaced; require rebuild or reject mismatched
-compiler/rule/module/value-ABI dependencies, not assume the same body remains
-([.NET `const`](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/const)).
+**Accepted direction.** `T(expression)` is the single explicit conversion
+spelling. Remove both prefix casts and numeric width suffixes; bare literals
+remain contextual and have no fallback type. The unquoted numeric token keeps
+the language's radix, exponent and signed-minimum rules; digit-separator
+grammar/support is separate scheduled literal-frontend work. Context or an
+explicit target selects a registered parser that consumes
+the original token spelling and constructs the value directly in the target
+representation:
 
-The selected literal target may be written or established by an unambiguous
-context; literal construction still has no fallback type. The model should
-distinguish:
+```terrum
+int32 count = 1234;
+int32 same = int32(1234);
+uint64 mask = uint64(0xFFFFFFFF);
+float32 fraction = float32(0.1);
+float64 converted = float64(count);
+```
 
-- **literal parsing/construction**: validate a token against its resolved
-  contextual target or explicit type tag, with no fallback/intermediate type;
-- **const evaluation**: a restricted interpreter evaluates approved pure,
-  deterministic operations over validated constant values;
-- **checked runtime operators**: declared behavior, effects, and failure policy
-  apply in ordinary code;
-- **compound assignment**: a single-place operation with defined evaluation
-  count, aliasing, overflow, and whether it mutates in place or returns a value.
+`T(untypedLiteral)` invokes the registered literal parser directly: it does
+not first manufacture an `int32` or `float64`. `T(typedExpression)` is an
+explicit checked conversion and requires a built-in rule or declared
+conversion witness/operator. It never implies boxing, `write` authority,
+pinning or reinterpretation. `new T(arguments)` remains nominal construction;
+it is not the conversion form, and there is no reason to add `new int32(value)`.
+Type/value-call binding must distinguish a type target from an ordinary value
+call; this is a checked name-resolution rule, not a claim that the current
+parser/binder implements it.
 
-These can share capability declarations without sharing one execution model.
-Const-eval must not bypass validity, execute I/O, or assume target behavior
-([Rust const evaluation](https://doc.rust-lang.org/reference/const_eval.html)).
-Compound assignment should not lower to an
-unintended read/copy/write sequence for affine or large values. A declaration
-that participates in checked `+` does not automatically claim support for
-`+=`, saturating arithmetic, wrapping arithmetic, or constant evaluation.
+For example, `Port` is a nominal wrapper around `uint16`:
 
-C++ distinguishes `constexpr` functions that may run
-at runtime from `consteval` immediate functions
-([C++ constexpr](https://eel.is/c++draft/dcl.constexpr)). Rust procedural
-macros are explicitly unhygienic, execute in the compiler process with file
-and resource access, and can hang compilation
-([Rust procedural macros](https://doc.rust-lang.org/reference/procedural-macros.html)).
-That is a deliberate cost/expressiveness contrast, not a default Terrum model.
-Swift library evolution likewise distinguishes resilient binary evolution
-from frozen-layout optimization
-([Swift library evolution](https://www.swift.org/blog/library-evolution/)):
-a consumer-baked value must bind to compiler rules, producer, and value ABI
-versions rather than assuming a replacement body will recompute it.
+```terrum
+public struct Port : IParsable<Port>
+{
+    [Literal(LiteralKind.Integer), ConstEval]
+    public static bool TryParse(TextSpan text, init ref<Port> value);
 
-### 3.2 First-class handlers for target-directed construction
+    public static explicit operator Port(uint16 value);
 
-**Open proposal.** Interpolation, collection expressions, and future typed
-literal builders need a principled handler/build protocol. Treat them as
-explicit target-directed expansions that specify evaluation order, captured
-values, ownership transfer, partial failure, cleanup, and the result's
-representation. A handler can consume typed segments directly without
-allocating a temporary string; a builder can accept elements once without
-materializing an intermediate collection.
+    public Port(uint16 raw);
+}
 
-The language should require a registered handler contract, not select any
-method with a convenient name. Preserve the existing interpolation direction:
-evaluate every hole exactly once, left-to-right, into typed captures **before
-draining any segment**. C#'s [handler protocol](https://learn.microsoft.com/en-us/dotnet/csharp/advanced-topics/performance/interpolated-string-handler)
-can skip later holes after refusal; do not silently adopt that behavior. If
-lazy/conditional evaluation is useful, make it a separate construct with its
-own effects and ordering contract. Clean partially accepted unique values on
-refusal/failure, including remaining captured owners never accepted by the
-handler, exactly once; borrowed captures stay valid through drain. A scalar
-writer preflights room for the full encoding. Refusal stops later writes, not
-pre-evaluated hole effects or prior stream output. Builders publish only after
-success; refusal is not an implicit async continuation.
+Port parsed = 1234;           // Registered parser; no intermediate integer type.
+Port parsedExplicitly = Port(1234);
+Port converted = Port(raw);   // Explicit conversion from a typed uint16.
+Port constructed = new Port(raw);
+```
 
-### 3.3 Make specialization a declaration, not body-divination
+`[Literal(...)]` registers the ordinary text parser for a source token class;
+the method's name is irrelevant to registration. The `IParsable<TSelf>`
+contract is reused rather than introducing an `IntegerLiteral` carrier API.
+Registration may select the ordinary parser directly or a thin adapter for
+source-literal grammar over the same parsing implementation.
+Literal parsing consumes the complete borrowed `TextSpan`, must produce a
+valid representable constant, and on `false` leaves the initialization
+destination vacant. The registered parser must be `[ConstEval]`; literal
+construction never falls back to runtime parsing. The same parser remains an
+ordinary callable at runtime. Borrowing immutable literal text does not require
+allocating a `String`. Invalid spelling or target-range failure diagnoses at
+compile time. Registration does not add suffix syntax, a custom lexer, or a
+constructor/conversion search to guess a custom literal's type.
 
-**Open proposal.** First-class specialization can improve generic hot paths and
-enable target-specific implementations, but specialization must remain an
-implementation choice with declared applicability and semantic obligations.
-An explicit specialization may optimize a verified generic definition; it
-must not silently redefine its source contract or make AOT depend on a JIT.
-The generic implementation remains a valid fallback unless the declaration
-explicitly requires a target capability. This is a machine-code selection, not
-a semantic overload or a way to select a different algorithm contract.
+String text is likewise parsed by a registered target. `utf8z("Terrum")` and
+`utf16z("Terrum")` illustrate call-form targets, not lexer prefixes; those
+names are illustrative unless corresponding target types are defined. The
+target validates encoding, termination and embedded-zero policy. A zero-ended
+representation does not itself confer pointer lifetime or storage ownership.
+Escape decoding preserves the string payload. An ordinary parser call remains
+available when runtime parsing is intended.
 
-Validate that the specialized implementation preserves observable behavior,
-including checked failure/cleanup, effects, ownership, aliasing, access,
-published contracts, and floating-point guarantees (including FMA/reordering
-policy). Rust still treats specialization as unstable
-([Rust Unstable Book](https://doc.rust-lang.org/unstable-book/language-features/specialization.html)),
-which reinforces the coherence and contract burden rather than supplying a
-design to copy. A selected type or current body cannot legalize an invalid
-source escape or strengthen a public guarantee. Define code-size, versioning,
-and fallback rules before syntax; start with explicit target/library
-registrations. This is not a ban on semantic algorithm variants: e.g. strict
-and fast reductions may be distinct named APIs with different rounding,
-reordering, and effect contracts, not same-contract specialization.
+`[ConstEval]` marks a declaration that may be executed by the bounded,
+deterministic compile-time evaluator; a use-site requirement is separate:
 
-Keep generic semantics separate from code-generation strategy. Go's generic
-design addressed real costs in duplicated algorithms, reflection, interfaces,
-and generators; its FAQ describes shape-based code sharing and the difficulty
-of generic methods whose implementations could arise from unknown interface
-implementers ([Go generics rationale](https://go.dev/blog/why-generics);
-[Go generics FAQ](https://go.dev/doc/faq)).
-C# shares runtime code for reference-type instantiations but specializes
-value-type instantiations
-([C# generics at run time](https://learn.microsoft.com/en-us/dotnet/csharp/programming-guide/generics/generics-in-the-run-time)).
-Terrum's witness/representation contracts do not dictate monomorphization,
-shape sharing, or universal code sharing. Require viable AOT/JIT implementations
-with equivalent semantics; measure code size and workload before promising a
-strategy or calling any strategy free.
+```terrum
+[ConstEval]
+public static int32 Twice(int32 value) => value + value;
+
+const int32 baked = Twice(21); // The declaration requires a constant value.
+int32 required = const Twice(21); // This expression requires one; `required` is not const.
+int32 runtime = Twice(21); // Ordinary runtime call; optimization remains independent.
+```
+
+The `const` prefix requires compile-time evaluation; `const(expr)` is just that
+prefix followed by grouping. There is no `runtime(...)` opt-out, no separate
+consteval-only function category, and no extra compiler-phase branch for
+immediate functions. Every literal takes its registered constant-parsing path,
+including literals in otherwise ordinary local initializers. A constant
+requirement does not change type checking or overload resolution, and does not
+prevent an optimizer from folding an ordinary call when semantics permit.
+`MyType value = 1 + 2` is an ordinary expression: construct each literal under
+its own context, then bind `+`; do not stringify or fold the whole expression
+and pass it to a literal parser.
+
+The evaluator preserves target numeric semantics and signed-minimum handling;
+it is deterministic and resource-bounded, has no ambient I/O, and permits only
+checked local mutation and bounded temporaries. Published constants retain
+valid ownership/representation and record the producer, evaluator rule and
+value-ABI dependencies needed to keep baked results stable across replacement.
+`[Pure]` alone does not grant compile-time execution. Checked `operator +` can
+be independently `[ConstEval]`; it does not imply compound assignment,
+wrapping or saturating behavior. Built-in compound operations are
+language-provided. User compound assignment is an explicit contract:
+
+```terrum
+public static void operator +=(write ref<T> target, T value);
+```
+
+The place is evaluated once, then the right operand once. The operation does
+not imply a hidden read/copy/write sequence, especially for unique or large
+values. A user-defined `+` does not automatically provide `+=`; wrapping and
+saturating operators/conversions are separate declared contracts.
+
+### 3.2 Registered builders and parameter-directed handlers
+
+**Accepted direction.** Collection expressions and text/interpolation
+construction use an explicitly registered target handler type, not arbitrary
+same-named methods:
+
+```terrum
+[CollectionBuilder(typeof(ListBuilder<>))]
+public class List<T> { ... }
+
+[TextBuilder(typeof(TextBuilder))]
+public class Text { ... }
+```
+
+The associated library types and complete APIs remain design work. Collection
+elements follow ordinary checked construction, per-element copy/move, and
+normal slot/lifetime rules; a collection parameter is not a new ref-parameter
+mode. Explicit reference element types remain possible when storage and
+lifetime permit. Existing-collection versus expanded-argument overload binding
+still needs an exact rule.
+
+Parameter-directed streaming handlers declare their handler type and the
+parameter shape they accept. Holes are evaluated once, left-to-right, into
+typed captures before any segment drains. Ownership transfer, refusal,
+partial-failure cleanup, publication and borrowed-capture lifetime remain
+explicit. Refusal does not skip already evaluated holes or roll back prior
+output. This preserves ordinary evaluation even when a handler avoids a
+temporary string or collection.
+
+An expression handler may consume a declared typed operation graph; for
+example, `Tensor.Apply(destination, i => x[i] * y[i] + z[i])` is not an
+ordinary callback whose body the compiler guesses how to vectorize. Captures,
+backing and aliasing are explicit, and each handler declares its supported
+operation set. It cannot silently introduce FMA, reassociation, reordering,
+changed call/effect counts or different checked-failure behavior. Unsupported
+expressions diagnose or use a separately declared fallback. A target may treat
+the same capture as data or as code, but not by invoking an arbitrary host
+compiler callback or unbounded plugin by default. Detailed standard-library
+handler contracts remain scheduled work.
+
+### 3.3 Explicit, contract-preserving specialization
+
+**Accepted direction.** A specialization names the exact closed generic
+declaration and target requirements; it is not fuzzy string lookup, body
+divination or a new source overload:
+
+```terrum
+[Specialize(Scale<float32>, Requires = CpuFeature.Avx2, Priority = 100)]
+private static float32 ScaleAvx2(float32 value);
+```
+
+The generic body remains independently valid and source binding stays attached
+to its original closed generic declaration. Initial selectors are exact type
+arguments plus declared target capabilities. Explicit priority orders
+applicable candidates; overlapping ties reject rather than depending on
+import order. AOT publishes a portable baseline and eligible variants with
+CPU/OS dispatch; a declaration that explicitly requires a target may omit the
+fallback, but cannot secretly require a JIT.
+
+Every specialization preserves effects, access, lifetime, ownership, cleanup
+and floating-point contracts, including no implicit FMA. Strict and fast
+algorithms with different semantics are distinct APIs, not interchangeable
+specializations. Compiler checks can validate formal contracts but cannot
+prove arbitrary handwritten algorithms equivalent; implementations need
+differential tests or proof obligations against the generic definition/same
+operation graph. Generic sharing and monomorphization remain separate backend
+choices.
 
 ## 4. Make failures, functions, and async lifetimes explicit
 
@@ -878,9 +950,10 @@ trades generality for simplicity.
 | SIMD and tensor views | SIMD values carry vector ABI; tensors are higher-level logical multidimensional views over storage with explicit shape/stride contracts | Accepted distinction / library support scheduled |
 | Iteration, return representation and allocation | Preserve lifetime, ownership, cleanup and relocation contracts; physical by-value lowering does not imply a source loan | Accepted safety direction |
 | Context-specific underscore roles | Value discards evaluate and clean up; wildcard patterns do not consume the scrutinee; lambda names and generic inference holes are distinct contexts | Accepted semantic direction / grammar and support open |
-| Literals, consteval, operators, compound assignment | Bounded, hygienic, versioned constant evaluation distinct from runtime witnesses | Open |
-| Handlers and builders | Registered expansions; eager left-to-right holes, cleanup, and publish-on-success | Open |
-| Specialization | Same-contract optimization with fallback; semantic variants remain named APIs | Open |
+| Conversions, literals, and constant evaluation | One checked `T(expression)` conversion form; contextual registered literal parsing without suffixes or fallback types; bounded `[ConstEval]` with declaration capability and use-site requirement | Accepted direction / grammar migration and evaluator implementation scheduled |
+| Operators and compound assignment | Checked runtime operators are distinct from `[ConstEval]`; user `+=` is explicit single-place `write ref<T>` mutation, not inferred from `+` | Accepted direction / operator grammar and implementation scheduled |
+| Handlers and builders | Registered collection/text targets and parameter-directed streaming handlers; eager left-to-right typed captures, ownership cleanup and publish-on-success | Accepted direction / exact library APIs scheduled |
+| Specialization | Exact closed generic references and declared target requirements; same-contract AOT/JIT variants, explicit priority, reject tied overlap | Accepted direction / implementation scheduled |
 | Errors and propagation | Separate expected/domain results, exceptions, invariant defects, host failures, and cleanup | Accepted constraints / open refinement |
 | Callables, async, cancellation, structured concurrency | Completion, ownership, supervision, transfer, and revalidation remain explicit | Refinement / open |
 | Loop capture and callbacks | Capture, callback and scheduling facts need contracts | Open library contracts |
@@ -946,7 +1019,7 @@ failure -> clean private state and all still-owned captures exactly once
 ```
 
 Clean every unconsumed owner; loans stay valid through drain. Literals use
-their resolved target/tag, not a rounded intermediate; registration alone
+their registered target parser, not a rounded intermediate; registration alone
 does not make operations const-evaluable.
 
 **Shape versus storage.**

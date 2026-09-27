@@ -60,7 +60,7 @@ public interface IScalarIeee754<TSelf> : IScalarNumber<TSelf>
 }
 
 // PROVISIONAL protocols: implement only supported source/destination policy pairs.
-// Cast syntax selects the checked witness. Operator/witness lookup is still open.
+// T(expression) selects the checked witness. Operator/witness lookup is still open.
 public interface ICheckedConversion<TSelf, TSource>
     where TSelf : ICheckedConversion<TSelf, TSource>
 {
@@ -97,6 +97,7 @@ public struct int32
         return this;
     }
 
+    [Literal(LiteralKind.Integer), ConstEval]
     public static bool TryParse(TextSpan text, init ref<int32> value);
 
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
@@ -104,33 +105,33 @@ public struct int32
 
     public static bool TryAdd(int32 left, int32 right, init ref<int32> result)
     {
-        return TryNarrow((int64)left + (int64)right, out result);
+        return TryNarrow(int64(left) + int64(right), out result);
     }
 
     public static bool TrySubtract(int32 left, int32 right, init ref<int32> result)
     {
-        return TryNarrow((int64)left - (int64)right, out result);
+        return TryNarrow(int64(left) - int64(right), out result);
     }
 
     public static bool TryMultiply(int32 left, int32 right, init ref<int32> result)
     {
-        return TryNarrow((int64)left * (int64)right, out result);
+        return TryNarrow(int64(left) * int64(right), out result);
     }
 
     private static bool TryNarrow(int64 value, init ref<int32> result)
     {
-        if (value < (int64)MinValue || value > (int64)MaxValue)
+        if (value < int64(MinValue) || value > int64(MaxValue))
         {
             return false;
         }
 
-        result = (int32)value;
+        result = int32(value);
 
         return true;
     }
 
-    // Temporary syntax-only self-host fixture hook until cast syntax is parsed.
-    // Not the proposed permanent conversion API.
+    // Temporary syntax-only self-host fixture hook until type-call conversion
+    // syntax is supported in the self-host fixture. Not the proposed API.
     public static int32 FromChar16Checked(char16 value);
 
     public static int32 FromBits(uint32 bits);
@@ -141,7 +142,7 @@ public struct float32
       IFormattable,
       IScalarIeee754<float32>
 {
-    public static float32 Zero => 0.0f32;
+    public static float32 Zero => 0.0;
 
     // Numeric key equality treats all NaNs alike and -0 as +0.
     public int32 GetKeyHashCode()

@@ -44,7 +44,7 @@ public static void AddBias128(
     {
         // Inactive lanes do not read or write beyond the provided slices.
         var active = simd128mask<float32>.First(remainder);
-        var tail = simd128<float32>.LoadMasked(source.Slice(offset, remainder), active, 0.0f32);
+        var tail = simd128<float32>.LoadMasked(source.Slice(offset, remainder), active, 0.0);
         var result = AddBias<simd128<float32>, simd128mask<float32>>(tail, bias);
         simd128<float32>.StoreMasked(result, active, destination.Slice(offset, remainder));
     }

@@ -31,24 +31,35 @@ special discard handling. General discard, wildcard-pattern and generic-hole
 forms are unsupported. Expression statements or unused-local cleanup do not
 implement the distinct discard semantics.
 
-Numeric tokens use ASCII digits only:
+Target numeric literals are unsuffixed source tokens. Existing radix, exponent
+and signed-minimum behavior is preserved; a type is selected later by context
+or an explicit type-call target. Digit separators are not supported by the
+current lexer/scanner and their grammar is separate scheduled literal-frontend
+work. Width tags are not part of the target grammar, so spellings such as
+`10i32` are not typed numeric literals.
 
 ```text
-number   := digit+ ('.' digit+)? (('e' | 'E') ('+' | '-')? digit+)?
-digit    := '0'..'9'
+number          := decimalNumber | hexInteger
+decimalNumber   := digits ('.' digits)? (('e' | 'E') ('+' | '-')? digits)?
+hexInteger      := ('0x' | '0X') hexDigits
+digits          := digit+
+hexDigits       := hexDigit+
+digit           := '0'..'9'
+hexDigit        := digit | 'a'..'f' | 'A'..'F'
 ```
 
 A period starts a fraction only when followed by a digit. A sign is its own
 operator except within an exponent. An exponent without digits after a sign,
 or followed by a non-identifier character such as `;`, whitespace, or `.`
 without digits, is malformed; an `e` beginning another identifier (for
-example `1efoo` or `1else`) remains outside the numeric token. The
-defined primitive width tags `i8`, `i16`, `i32`, `i64`, `i128`, `u8`, `u16`,
-`u32`, `u64`, `u128`, `f16`, `f32`, `f64`, and `f128` may immediately follow
-the digits. They are recognized only when the following scalar cannot
-continue an identifier: `10i32` is one token, but `10i32extra` is `10` and
-`i32extra`. Other adjacent identifiers remain separate. The lexer preserves
-raw spelling; typing and numeric range/target-format validation happen later.
+example `1efoo` or `1else`) remains outside the numeric token. Numeric width is
+never encoded in a suffix. The lexer preserves the complete raw spelling;
+target selection, constant parsing and numeric range/target-format validation
+happen later.
+
+The bounded current scanner still exposes legacy integer width-tag metadata
+for its existing P0 component. That implementation boundary is scheduled for
+migration and does not define target source syntax.
 
 Strings are delimited by ASCII double quotes. Escapes supported are `\n`,
 `\r`, `\t`, `\\`, `\"`, `\0`, `\u` plus exactly four hexadecimal digits, and
@@ -56,13 +67,18 @@ Strings are delimited by ASCII double quotes. Escapes supported are `\n`,
 (not a surrogate or an out-of-range value). The original raw text, including
 invalid escapes, is preserved. A line break or EOF before a closing quote
 diagnoses an unterminated string without swallowing the next line. No
-interpolation is defined; `$` outside a string is a bad token.
+interpolation is defined; `$` outside a string is a bad token. Encoded text
+targets such as `utf8z("Terrum")` are ordinary type/call forms, not lexer
+prefixes or suffixed string tokens; the selected target parser validates
+encoding and terminator requirements without itself granting pointer lifetime.
 
 Single-quoted character literals in design samples are not implemented tokens.
 Their proposed scalar/target-representability contract is in
 [conversions](conversions.md#character-intent); it does not choose UTF-16 as
-runtime text's default encoding. Numeric literal construction and cast semantics
-are likewise binder work, distinct from the raw numeric token grammar above.
+runtime text's default encoding. Numeric literal construction and explicit
+`T(expression)` conversion are binder/evaluator work, distinct from the raw
+numeric token grammar above. The bounded current binder's prefix-cast spelling
+is legacy pending migration and is not the target form.
 
 Horizontal whitespace, line breaks, `//` comments up to but not including
 the break, and non-nesting `/* ... */` comments are leading trivia. The final

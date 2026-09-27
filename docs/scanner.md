@@ -6,6 +6,10 @@ classification, keyword and operator selection, numeric token boundaries,
 quoted strings and escapes, leading trivia and lexical diagnostics in Terrum.
 The C# host supplies buffers and pinned lexical data; it does not pretokenize
 or make source-dependent classification decisions for the component.
+The scanner-4 record contract below is the current implementation boundary,
+not the target numeric grammar: its integer side table still carries legacy
+suffix metadata. The accepted target grammar has no numeric width suffixes;
+migrating the scanner component and its adapter is scheduled compiler work.
 
 ```powershell
 dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll scan-component self-host\Scanner.terrum input.txt --runtime fail-fast --json

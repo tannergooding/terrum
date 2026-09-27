@@ -296,9 +296,41 @@ Declared [type families](type-families.md) can expose checked common operations 
 
 Width-explicit integers `int8` through `int128` and unsigned counterparts, distinct target-size `nint`/`nuint`, IEEE binary `float16/32/64/128`, `bfloat16`, IEEE decimal `decimal32/64/128`, raw `char8/16/32`, validated scalar `rune`, `bool` and `void` are the proposed families. `simd64/128/256/512<T>` are fixed ABI shapes; `simd<T>` is genuinely hardware-scalable and initially sizeless, not an unspecified preferred width. BID versus DPD decimal representation, native-integer names and precise vector-family syntax remain open; the decimal value semantics do not become CLR `System.Decimal`.
 
-Numeric literals have **no fallback type**: an expected type, typed operand or explicit tag must disambiguate; `var x = 1` and unconstrained `F(1)` diagnose. Contextual literal construction rounds/validates directly in the selected format; it is not conversion from a hidden `int32`/`float64`. Known arguments/targets may establish generic context first, but ambiguous cases diagnose and tags commit a type. Already-typed numbers require explicit conversions. Ordinary numeric casts select a published checked conversion; checked does not mean exact. Integer arithmetic and extent arithmetic are checked in every build. Division truncates toward zero; signed minimum divided by `-1` fails while its remainder is zero. Shift counts are checked; left shift is width-truncating bit manipulation, not checked multiplication. Wrapping and saturating operations are explicit. Floating operations use target-format round-to-nearest ties-even without implicit FMA, reassociation, ambient rounding or flush dependence; arithmetic NaNs canonicalize in the working profile, while bitcasts/copies preserve bits. [Conversion policies](conversions.md) distinguish range, fractional rounding, modulo narrowing, nonfinite handling and bit reinterpretation. Numeric-key comparer semantics (all NaNs equal, signed zeros equal, decimal cohorts normalized) are separate from IEEE operator equality.
+Numeric literals have **no fallback type**: an expected type or explicit
+target must disambiguate; `var x = 1` and unconstrained `F(1)` diagnose.
+Contextual construction rounds/validates directly in the selected format, not
+through a hidden `int32`/`float64`. `int32(1234)`, `uint64(0xFFFFFFFF)` and
+`float32(0.1)` illustrate direct target parsing. Width suffixes do not exist.
+`T(untypedLiteral)` uses the registered parser directly; `T(typedExpression)`
+is a checked explicit conversion. `new T(arguments)` remains nominal
+construction. Already-typed numbers never implicitly widen or narrow.
+Type/value-call binding must resolve a type target versus an ordinary callable;
+this target rule is not yet compiler support. `[ConstEval]` marks declarations
+eligible for bounded deterministic compile-time execution; `const T a = F()`
+requires a constant declaration value, while `T b = const F()` requires only
+the expression. Literal parsing always uses the registered compile-time
+parser, even in ordinary local initialization; there is no runtime fallback.
+The evaluator has no ambient I/O, preserves target semantics and recorded
+producer/rule/value-ABI dependencies, and permits only checked bounded
+evaluation. It does not change type checking, overload binding or optimizer
+freedom. A declaration with `operator +` needs a separate contract for
+`operator +=`; user compound assignment mutates its place once through
+`write ref<T>` without an implicit read/copy/write sequence. Wrapping and
+saturating operations remain explicit.
 
-Source text is UTF-8; runtime text has **no default encoding**. The single `TextSpan<TCodeUnit = void>` family has immutable validated `char8`/`char16`/`char32` members and a family-declared encoding-erased `void` specialization: bare `TextSpan` is exactly `TextSpan<void>`. Here `void` does not mean zero-size units or a default encoding. Erasure needs no text copy/transcoding and retains actual encoding, backing, access and lifetime/lease dependencies. Checked typed projection rejects a mismatched representation rather than transcoding; only known-code-unit forms expose typed `AsSpan` and contiguous-sequence conformance. Common `IsEmpty`, ordinal and formatting operations work on either form. A raw `AsSpan()` can forget text validity but not immutable backing, access, lifetime or rooting. Raw slices can split scalars; text slices must preserve scalar boundaries. Editing copies into mutable raw storage or a builder, then validates and freezes before publication; transferring an exclusively held initial buffer may avoid a copy only by revoking all writes. Readonly aliasing or validation alone cannot establish immutable text. Final storage, string facade, adaptive/block/RLE representation and projection ABI require experiments.
+Integer arithmetic and extent arithmetic are checked in every build. Division
+truncates toward zero; signed minimum divided by `-1` fails while its remainder
+is zero. Shift counts are checked; left shift is width-truncating bit
+manipulation, not checked multiplication. Floating operations use target-format
+round-to-nearest ties-even without implicit FMA, reassociation, ambient rounding
+or flush dependence; arithmetic NaNs canonicalize in the working profile,
+while bitcasts/copies preserve bits. [Conversion policies](conversions.md)
+distinguish range, fractional rounding, modulo narrowing, nonfinite handling
+and bit reinterpretation. Numeric-key comparer semantics (all NaNs equal,
+signed zeros equal, decimal cohorts normalized) are separate from IEEE
+operator equality.
+
+Source text is UTF-8; runtime text has **no default encoding**. The single `TextSpan<TCodeUnit = void>` family has immutable validated `char8`/`char16`/`char32` members and a family-declared encoding-erased `void` specialization: bare `TextSpan` is exactly `TextSpan<void>`. Here `void` does not mean zero-size units or a default encoding. Erasure needs no text copy/transcoding and retains actual encoding, backing, access and lifetime/lease dependencies. Checked typed projection rejects a mismatched representation rather than transcoding; only known-code-unit forms expose typed `AsSpan` and contiguous-sequence conformance. Common `IsEmpty`, ordinal and formatting operations work on either form. A raw `AsSpan()` can forget text validity but not immutable backing, access, lifetime or rooting. Raw slices can split scalars; text slices must preserve scalar boundaries. Editing copies into mutable raw storage or a builder, then validates and freezes before publication; transferring an exclusively held initial buffer may avoid a copy only by revoking all writes. Readonly aliasing or validation alone cannot establish immutable text. Registered string targets use ordinary calls such as `utf8z("Terrum")`, not lexer prefixes or suffix tokens; the target validates encoding, termination and embedded-zero rules without implying pointer lifetime. Final storage, string facade, adaptive/block/RLE representation and projection ABI require experiments.
 
 Design-only character literals carry one scalar, target-typed to a representable code-unit/scalar type without a numeric or UTF-16 fallback. Registered text targets provide `rune` context and forward scalar fragments directly through the writer protocol. A raw `char8` is not automatically a valid standalone UTF-8 scalar. Precise representability rules and the current unsupported-syntax boundary are in [conversions](conversions.md#character-intent).
 
@@ -382,7 +414,7 @@ The target parser contract is `IParsable<TSelf>.TryParse(TextSpan, init ref<TSel
 `require predicate;` is a normal user-facing checked boolean requirement: evaluate the predicate once, continue on true, and throw a requirement-failure exception on false **in every build**. It accepts general predicates (`require format.IsEmpty;`) and can lift a declared conditional initialization success so the initialized value is available afterward. Status APIs require an explicit success predicate, such as `require status == CalculateStatus.Success;`, using the declaration's output relationship. It is not a debug assertion, optimizer assumption, catch or silent status conversion; exceptional/partial-output cleanup remains intact. Metadata exposes resolved success/output/effect contracts to ordinary tools and consumers. The call-site requirement itself belongs to semantic code/IR, not a body-inferred public precondition or framework-private intrinsic. Boolean requirements and conditional outputs for the bounded native value profile are implemented. Explicit fail-fast terminates on false; the separate bounded checked policy propagates and can recover only four compiler-generated failure reasons. General exception identity/ABI remains unimplemented; completed compact owning
 outputs are cleaned up on false or checked exceptional exit.
 
-Formatting uses one `IFormattable` → `ITextWriter` protocol with typed fragments/values, no obligatory allocating formatter per type. Target-typed interpolation and collection expressions register explicit construction shapes, not arbitrary similarly named methods. Holes evaluate once left-to-right into typed captures before segments drain; borrowed-hole expression syntax and its capture contract remain provisional. Any eventual borrowed parameter type uses canonical `ref<T>`, but that type notation does not require explicit `ref<T>` syntax at the hole/call site. Named unique transfers require `move`. Nested formatting forwards the same writer so a Point and its scalar fields can reach a custom handler without temporary strings or boxing. Refusal stops future writes but cannot undo prior output or hole evaluation; no replay, rollback or transactional stream guarantee. Owning text publishes only after full validation/freeze and cleans partial storage. Collection spreads enumerate once in order; builders own accepted elements, clean rejected consumed elements and abandon partial state exactly once. Builder arguments, handler registration and resumable async formatting are open. Synchronous formatter refusal is not a resumable continuation.
+Formatting uses one `IFormattable` → `ITextWriter` protocol with typed fragments/values, no obligatory allocating formatter per type. Target-typed interpolation and collection expressions select registered handler types, such as `[TextBuilder(typeof(TextBuilder))]` or `[CollectionBuilder(typeof(ListBuilder<>))]`, not arbitrary similarly named methods. Holes evaluate once left-to-right into typed captures before segments drain; ownership, borrowing and refusal cleanup remain explicit. Named unique transfers require `move`. Nested formatting forwards the same writer so a Point and its scalar fields can reach a custom handler without temporary strings or boxing. Refusal stops future writes but cannot undo prior output or hole evaluation; no replay, rollback or transactional stream guarantee. Expression handlers may consume an explicitly supported typed operation graph, as in `Tensor.Apply(destination, i => x[i] * y[i] + z[i])`; this is not body-divined autovectorization of an ordinary callback. Unsupported expressions diagnose or require a separately declared fallback. Owning text publishes only after full validation/freeze and cleans partial storage. Collection spreads enumerate once in order; builders own accepted elements, clean rejected consumed elements and abandon partial state exactly once. Detailed standard-library APIs and resumable async formatting remain scheduled. Synchronous formatter refusal is not a resumable continuation.
 
 Allocation, GC, rooted reads/writes, blocking, suspension, I/O, atomics, throwing/no-throw, normal/no-return, cleanup and retirement are independently expressible effect bounds, finer-grained than Core/Foundation/Application dependency layers. `void` is the single zero-data result type, with value `()`, usable as a zero-argument `func<void>` and `Task<void>`; `Option<void>` still represents two states. A checked `[DoesNotReturn]` on a `void` call removes its normal continuation but retains exception/cleanup edges; `[NoThrow]` is separate. A verified implementation cannot normally return, including by completing a task that terminates *later*. There is no public `unit` or `never` primitive; the compiler may use internal bottom flow. Removing an exported no-return guarantee breaks callers that rely on it.
 
@@ -427,10 +459,13 @@ layouts are not yet implemented. Generic specialization, sharing and explicit sc
 The design examples use canonical `ref<T>`, `ptr<T>`, `box<T>`, `val<T>`,
 `own<T>`, `init ref<T>`, `mut`, and `write` forms, plus `move`, bracketed
 checked predicates, `[ViewOf]`, `[Captures]`, `[OutputWhen]`, `[Pure]`,
-`[MatchedAccess]`, `[Layout(Transparent)]`, `require`, `[TextTarget]`, `[TextBuilder]`,
-`[CollectionBuilder]`, `[NativeExport]`, `utf8z`/`utf16z` literals and generic
-trailing defaults as **illustrations**, not frozen syntax or implemented
-compiler promises. In particular, `out` remains the current bounded
+`[MatchedAccess]`, `[Layout(Transparent)]`, `require`, `[TextTarget]`,
+`[TextBuilder(typeof(...))]`, `[CollectionBuilder(typeof(...))]`,
+`[Literal(...)]`, `[ConstEval]`, `[Specialize(...)]`, `[NativeExport]`,
+`utf8z("...")`/`utf16z("...")` calls and generic trailing defaults as
+**illustrations**, not implemented compiler promises. Conversion calls use
+the accepted `T(expression)` form; width suffixes and prefix casts are not
+target syntax. In particular, `out` remains the current bounded
 implementation spelling while a coherent migration to initialization loans is
 planned; invocation spelling for `init ref` is open. Exact generic constraint,
 associated-type and extension-disambiguation syntax, inference-hole spelling,
@@ -487,6 +522,9 @@ rebinding `this`, and general reference forms remain unsupported. Primitive
 `Buffer` views retain separate legacy access paths, and the coherent
 `out`-to-`init ref<T>` migration remains scheduled. Neither the fail-fast runtime nor bounded
 checked-exceptions proof is the language's future general exception runtime.
+The bounded numeric compiler still accepts legacy width-suffix and prefix-cast
+grammar; unified `T(expression)` conversions, unsuffixed literal registration
+and `[ConstEval]` execution remain scheduled syntax/runtime work.
 Bounded ownership and lexical-view checks, source-defined managed classes,
 optional edges and explicit cycle tracing are implemented; general
 ownership/lifetime analysis, public managed module contracts and

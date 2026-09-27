@@ -9,6 +9,11 @@ namespace Terrum.Numerics;
 // contextual generic lambda must satisfy the same operation/Copy constraints.
 // Elementwise effects, call counts, inactive lanes, tails and FP ordering are
 // separate kernel contracts; scalar arithmetic is not auto-vectorized here.
+// An explicit specialization names the exact closed generic declaration and
+// target requirements, not a fuzzy implementation name:
+// [Specialize(Scale<float32>, Requires = CpuFeature.Avx2, Priority = 100)]
+// AOT retains a portable baseline unless a declaration explicitly requires
+// the target; dispatch also validates OS support and preserves source binding.
 
 // LOCAL PSEUDO-CODE: explicit family registration, not an interface or naming
 // convention. The checker validates each concrete width, element/mask pairing,
