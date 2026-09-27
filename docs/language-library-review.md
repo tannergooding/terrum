@@ -23,8 +23,10 @@ The follow-up [call/output/contract review](language-contract-review.md) records
 the clarified equivalence of implicit and explicit readonly references and
 proposes precise evaluation, publication, completion, and proof rules. The
 separate [memory-model proposal](memory-model.md) covers checked sharing and
-portable versus target-specific memory behavior. Both are for review; their
-new mechanisms are not approved language features or implementation work.
+portable versus target-specific memory behavior. Its thread-capability names
+and `MemoryPrimitives` API direction are accepted design; compiler, runtime
+and library support remain unimplemented, with remaining details identified
+there.
 
 ## Thesis
 

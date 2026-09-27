@@ -210,12 +210,20 @@ remain open; consumers must bind to a published contract, never inspect a body
 or silently switch to another policy.
 
 Named wrapping operations remain sufficient for the current sketches.
-If `unchecked` is added, it should select a declared wrapping **operator or
-conversion lexically**. It must not be dynamically ambient, flow into callees,
-disable bounds/niche/lifetime checks, or fall back for a user operator that lacks
-the required contract. General saturating-expression/block syntax remains open.
+When implemented, lexical `unchecked` selects a declared wrapping
+**operator, conversion, or arithmetic-function variant** at the use site;
+`AtomicAdd` is an example of a function family whose arithmetic policy may be
+selected explicitly. This is not ambient checkedness flowing into arbitrary
+callees. Prefer paired checked and wrapping declarations; exact syntax and
+metadata remain open, and a compile-time policy argument is one possible
+implementation. No unchecked block/parser form is established here. A missing
+requested variant does not fall back to checked behavior or another overload.
+Only arithmetic overflow behavior changes; bounds, niche validity, lifetime
+and other safety checks remain checked.
+General saturating-expression/block syntax remains open.
 Random counter wrapping and numeric-key bit hashing intentionally keep their
-explicit `AddWrapping` and `FromBits`/`ToBits` calls.
+explicit `AddWrapping` and `FromBits`/`ToBits` calls. See the
+[memory-model arithmetic policy](memory-model.md#arithmetic-policy).
 
 ## Character intent
 

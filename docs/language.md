@@ -157,7 +157,7 @@ does not change the current module format's exact layout contracts.
 
 ### Interfaces, access and generic properties
 
-`where T : IFoo` requires a checked behavioral witness; `where T : [Sized]`, `[Copy]`, `[ManagedStorable]`, `[Send]`, `[Sync]`, `[TextCodeUnit]` or `[NativeComInterface]` asks for a compiler-verified property of the complete form, **not** implementation of an `I...` interface or the mere presence of an attribute. `[Sized]` does not promise a size constant in shared generic code. `[TextCodeUnit]` admits `char8`, `char16`, `char32`, not arbitrary valid encoded text. Native COM additionally requires checked IID, inherited slots, signatures, layout and lifetime. User shape generation can provide witnesses or adapters only after checking costs, ownership and ABI.
+`where T : IFoo` requires a checked behavioral witness; `where T : [Sized]`, `[Copy]`, `[ManagedStorable]`, `[ThreadTransferable]`, `[ThreadShareable]`, `[TextCodeUnit]` or `[NativeComInterface]` asks for a compiler-verified property of the complete qualified form, **not** implementation of an `I...` interface or the mere presence of an attribute. Thread capabilities describe which checked transfer or concurrent-use contracts a complete form can satisfy; they do not imply that a value is currently shared, authorize mutation, or perform synchronization. Thread confinement is the default but does not bind a value to one OS thread or executor. `[Sized]` does not promise a size constant in shared generic code. `[TextCodeUnit]` admits `char8`, `char16`, `char32`, not arbitrary valid encoded text. Native COM additionally requires checked IID, inherited slots, signatures, layout and lifetime. User shape generation can provide witnesses or adapters only after checking costs, ownership and ABI.
 
 No universal root is required to supply `Equals`, `GetHashCode`, or
 `ToString`, or to impose object-default boxing/allocation on every value; nor
@@ -596,7 +596,25 @@ See the [native proof limits](native.md).
 
 Tracing GC handles aliased/cyclic application graphs; ownership handles deterministic native storage and resources. A unique owner may still refer to GC storage; a GC root does not keep a logically disposed native allocation valid. Distinguish storage acquisition, initialization, close, value destruction, storage release and eventual reclamation. Vacant/partially initialized/live/retired states, reverse-order partial cleanup, no-throw/non-suspending scope cleanup, direct destination construction and stable-address requirements must be checked. Replacing a live value builds the replacement before dropping the old one; explicit reconstruct-in-place may leave vacancy on failure. Pool leases revoke access on return; deferred dead-storage retirement differs from deferred live-value cleanup, with one retirement owner after commitment and explicit completion endpoints.
 
-Ordinary mutable access is local/nonconcurrent, not intrinsically bound to an OS thread. `[Send]` transfers actual authority; `[Sync]` governs sharing; neither follows from GC, `[Copy]` or readonly. A checked `ListWriteAccess` guard arbitrates *all* aliases/reentrancy before mutable span access, without silently registering failed static loans or becoming a cross-thread mutex. A managed `LinkedList<T>` retains node identity through remove/reinsert; `Clear` detaches even externally held nodes. Wrong-list/preflight failures leave the structure unchanged; enumeration fails after structural mutations, not mere payload replacement. Common collection semantics and examples are in [samples](samples.md) and [libraries](libraries.md).
+Values are thread-confined by default, not bound to a fixed OS thread or
+executor. `[ThreadTransferable]` describes a complete form that may cross a
+thread boundary under its checked transfer contract; it does not imply
+concurrent sharing. `[ThreadShareable]` describes a complete form whose
+declared access protocol permits concurrent use; it does not itself create
+concurrent aliases, grant mutation authority, or perform synchronization. Neither
+capability follows from GC, `[Copy]` or readonly. Reader/writer cardinality
+belongs to the checked access protocol, not a separate trait family. Ordinary
+access remains ordinary access: it does not turn `x++` into an atomic
+read-modify-write. Confinement or an exclusive guard can permit an ordinary
+increment; a potentially competing path needs an explicitly permitted
+operation or guard. A checked `ListWriteAccess` guard arbitrates *all*
+aliases/reentrancy before mutable span access, without silently registering
+failed static loans; it is not by itself a cross-thread mutex.
+A managed `LinkedList<T>` retains node identity through
+remove/reinsert; `Clear` detaches even externally held nodes. Wrong-list/
+preflight failures leave the structure unchanged; enumeration fails after
+structural mutations, not mere payload replacement. Common collection
+semantics and examples are in [samples](samples.md) and [libraries](libraries.md).
 
 Asynchronous operations return task-like completion, including `Task<void>` for
 no result; synchronous `void` remains valid, but `async void` is not permitted.
@@ -624,8 +642,8 @@ capture by default and explicit execution/affinity scopes for thread-bound/UI
 continuations, including cleanup and cancellation; this is not a frozen
 scheduler contract. No capture is **not** "always
 switch to a thread pool": synchronous continuation is possible, logical
-serialized authority need not mean one OS thread, and non-`Send`/affine state
-must never migrate unsafely. A caller's explicit UI obligation must remain
+serialized authority need not mean one OS thread, and nontransferable/affine
+state must never migrate unsafely. A caller's explicit UI obligation must remain
 valid across a library call without imposing it on every internal continuation.
 Scheduler/awaiter syntax, propagation and boundary validation still need
 design; there is no implemented async runtime.

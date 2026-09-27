@@ -20,6 +20,21 @@ and the API inventories below remain design contracts.
 
 The API inventories deliberately mix signatures with selected algorithm bodies. Unspecified bodies do not imply native exports or implementations. `[Copy]`, `[Sized]`, `[ManagedStorable]`, `[SimdElement]` and `[TextCodeUnit]` denote checked capability predicates rather than arbitrary user attributes. The [Foundation ownership inventory](../library/foundation.api.terrum) distinguishes a per-allocation **storage-and-release lease** from an owned **allocator context** retained by a growing vector. `Buffer<T>.Adopt` takes an existing allocation, validating byte extent, actual element alignment and required tracing capabilities; it does not create storage from a release token. Initial `Vector<T>` accepts `[Copy]` elements: `Reserve` obtains a new lease from its retained context, copies the initialized prefix, cleans partial copies on failure and publishes replacement storage only after success. The old allocation cannot be replaced while views borrow it. Affine/borrowed element storage, initialized prefixes, allocator-provider selection, write-guard enforcement and native GC barriers still need complete contracts. Additional proposed signatures and associated-family notation require language design and validation before they can become compiler acceptance fixtures.
 
+## Shared memory and explicit memory primitives
+
+The selected operation surface is one flat static type, `MemoryPrimitives`.
+Prefixes identify the family at the use site: `AtomicRead`/`AtomicAdd`,
+`NonTemporalWrite`, and `CacheWriteBack`, alongside `Fence`/`CompilerFence`.
+Owners, views and allocators retain their separate storage/lifetime duties.
+
+Storage capabilities do not silently change ordinary accesses. Explicit
+atomic reads default to acquire ordering, writes to release, and RMWs to SC
+plus full ordering. One compile-time-known `MemoryOrder` selects other valid
+orders; checked/unchecked selection is a separate declared arithmetic policy.
+The [memory-model library surface](memory-model.md#library-access-surface)
+specifies the operation families, result conventions and remaining details.
+This is accepted design, not an implemented library.
+
 ## Scalar mathematics, keys and conversion
 
 The executable [static-protocol sample](../samples/native/static-protocol-quadratic.terrum)
