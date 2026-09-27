@@ -18,14 +18,22 @@ Copy-only selection and numeric algorithms with scalar control flow, but not the
 generic spans, stored dependencies or host interfaces
 required by those sketches. The scanner consumes the shared host keyword catalog,
 including `abstract`, `operator` and `where`, without a second keyword table.
-Eligible top-level one-`T` templates support `Copy` structs and scalar value
-types (`bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`). The binder can
-infer a specialization from typed arguments or a typed existing `out`
-destination; explicit type arguments remain supported. Expected-result
-context fills an unresolved `T` before contextual literal binding, without
-a numeric default type. These specializations preserve definition-site
-`Copy`, operator and `[NoThrow]` requirements and remain compilation-local.
-Scalars support Copy-only helpers, not primitive operator witnesses.
+Eligible top-level templates support multiple independently constrained type
+parameters over `Copy` structs and scalar value types (`bool`, `char16`,
+`int32`, `uint32`, `int64`, `uint64`). A complete explicit argument list pins
+each position; the binder can infer corresponding parameters from typed
+arguments or typed existing `out` destinations. Expected-result context fills
+an unresolved parameter represented in the return type before contextual
+literal binding; inference supplies no numeric default and does not convert
+already typed arguments. Ordered specialization keys
+preserve parameter positions when a generic helper forwards them in swapped
+order. Each parameter preserves its independent definition-site `Copy` and
+operator constraints; the function's declared effects are checked against
+the operations those constraints permit, even when selected concrete types
+coincide. These specializations remain compilation-local. Partial holes, unique/managed type
+parameters, constructor/method inference, ordinary overloads and public
+generic ABI remain unsupported. Scalars support Copy-only helpers, not
+primitive operator witnesses.
 Explicit homogeneous Copy-struct witnesses support `+`, `-`, `*`, `/`, `%`,
 `&`, `|` and `^`; generic code still requires the corresponding declared
 nominal constraints. This is not yet the heterogeneous, comparison, shift

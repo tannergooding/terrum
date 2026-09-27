@@ -238,13 +238,21 @@ signature. All holes resolve at local binding; exported fields, aliases, and
 parameters cannot retain them. There is no wildcard/existential/higher-kinded
 meaning, and non-injective projections are not inverted. Ambiguity diagnoses.
 The broad inference order above is target direction, not a claim that general
-inference is implemented. The bounded compiler now infers one `T` for eligible
-top-level generic function templates over `Copy` structs or the existing
-scalar value types (`bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`)
-when typed arguments or a typed existing `out` destination uniquely establish
-the type.
-Expected-result context can fill an unresolved `T` as a bounded fallback
-before contextual argument binding. Explicit type arguments continue to work.
+inference is implemented. The bounded compiler now infers multiple
+independently constrained type parameters for eligible top-level generic
+function templates over `Copy` structs or the existing scalar value types
+(`bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`). A complete explicit
+type-argument list pins every position; typed arguments and typed existing
+`out` destinations establish their corresponding parameters independently.
+Expected-result context can fill an unresolved parameter represented in the
+return type before contextual argument binding. Contextual literals bind only
+after the parameter type is known. Explicit type arguments continue to work.
+Specialization keys are ordered tuples, so reversed helper forwarding keeps
+its argument positions distinct. Each parameter retains its own `Copy` and
+operator constraints; the function's declared effects are checked against the
+operations those constraints permit. Two parameters do not become
+interchangeable at definition time merely because a selected specialization
+uses the same concrete type for both.
 For a Copy-only identity function, `int64 result = Identity(42)` supplies
 the missing `T` through result context, while `var result = Identity(42)`
 rejects without type evidence. `Identity(int32(42))` fixes `T` to `int32`;
@@ -252,7 +260,9 @@ an outer result context cannot retarget that typed argument.
 An explicitly typed construction such as
 `new Value(42)` does provide its struct type; inferring a generic constructor's
 own type arguments remains unsupported. Inference does not implicitly
-construct a struct from a literal. Scalar specialization does not grant
+construct a struct from a literal. A complete type-argument list is required
+when explicit arguments are used; partial holes are unsupported. Scalar
+specialization does not grant
 primitive operator witnesses: arithmetic on `T` still needs an explicitly
 supported nominal conformance. Definition-site `Copy`,
 operator and `[NoThrow]` requirements remain authoritative for every inferred

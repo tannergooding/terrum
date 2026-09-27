@@ -37,17 +37,27 @@ as `TRM0009`. Prefix casts are no longer parsed. Floating literal binding,
 custom literal targets and `[ConstEval]` are not implemented yet; see the
 [implementation matrix](docs/implementation.md).
 
-The bounded generic profile supports one `T` over eligible `Copy` structs
-and the existing scalar value types (`bool`, `char16`, `int32`, `uint32`,
-`int64`, `uint64`). Typed arguments and typed existing `out` destinations can
-select a specialization without writing `<T>`; an expected result can fill
-an unresolved `T` before contextual literal binding. Literals do not supply a
-default `T`. This preserves the template's declared `Copy`, operator and
-`[NoThrow]` contracts: scalar Copy-only specialization does not provide
-primitive operator witnesses. Unique/managed `T`, constructor or method
-inference, overload declarations, partial type-argument holes and a public
-generic ABI remain unsupported. An explicitly typed struct construction
-can establish `T` without enabling generic constructor inference.
+The bounded generic profile supports top-level function templates with
+multiple independently constrained type parameters over eligible `Copy`
+structs and the existing scalar value types (`bool`, `char16`, `int32`,
+`uint32`, `int64`, `uint64`). A complete explicit type-argument list fixes
+each position; typed arguments and typed existing `out` destinations infer
+each corresponding type independently. Expected-result context can fill an
+unresolved type parameter present in the return type before contextual
+literal binding. Contextual literals bind only after their type is resolved;
+inference neither defaults numeric types nor converts already typed arguments.
+Partial type-argument holes are unsupported. The ordered specialization key preserves
+parameter positions, including when a generic helper forwards them in swapped
+order. Each parameter retains its own `Copy` and operator constraints; the
+function's declared effects, including `[NoThrow]` where present, are checked
+against operations permitted by those constraints. Equal selected types do
+not merge distinct parameters.
+Scalar Copy-only specialization does not provide primitive operator witnesses
+or heterogeneous operator protocols.
+Unique/managed type parameters, constructor or method inference, overload
+declarations and a public generic ABI remain unsupported. An explicitly typed
+struct construction can establish a type parameter without enabling generic
+constructor inference.
 Copy structs can explicitly implement homogeneous binary operator protocols
 for `+`, `-`, `*`, `/`, `%`, `&`, `|` and `^`. Generic bodies may use only the
 operators named by their constraints; identical signatures on unrelated

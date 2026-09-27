@@ -89,13 +89,20 @@ collection. The same persisted consumer artifact returns 42 or 44 when
 `run-module` selects the original or managed provider; each `link-module`
 command emits a fresh PE for its selected provider. Exact commands for both
 runtime policies are in the [module guide](modules.md).
+The [multi-type generic sample](../samples/native/multi-type-generics.terrum)
+infers `int32` and the 16-byte `WidePair` independently in
+`TrySelectPair<TFirst, TSecond>`. Its reversed helper forwards the ordered
+specialization with type arguments swapped and publishes two different `out`
+types; false results leave both outputs vacant. The executable returns 42.
+This demonstrates bounded multi-parameter inference and helper composition,
+not partial holes, general inference or heterogeneous operator protocols.
 The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
 returns 46 through AOT and JIT. Two nominal Copy wrappers explicitly implement
 source-defined addition/multiplication protocols used by one constrained
 generic expression. The [integer-power sample](../samples/native/static-protocol-power.terrum)
 returns 42 using a structured generic algorithm and square helper for 32- and 64-bit wrappers.
-Its `Power(...)` and `Square(...)` calls infer the single `T` from typed `Copy`
-struct arguments; the caller supplies the identity. Scalar loop control does
+Each helper in this example has one `T`, inferred from typed `Copy` struct
+arguments; the caller supplies the identity. Scalar loop control does
 not grant extra operations on the type parameter, and helper calls must be
 justified by the caller's declared constraints. These remain closed
 compilation-local specializations, not general generic-library or public

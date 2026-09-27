@@ -89,8 +89,9 @@ heap/root domain, while persisted native images retain separate heaps and root
 chains. This adds neither cross-image managed handles nor cross-image shared
 collection.
 It includes compilation-local constrained generic specialization, including
-bounded single-`T` inference for top-level function templates over `Copy`
-structs and existing scalar value types, but not primitive operator witnesses,
+bounded inference of multiple independently constrained type parameters for
+top-level function templates over `Copy` structs and existing scalar value
+types, but not primitive operator witnesses,
 a public managed-handle ABI, general interfaces/witnesses,
 array/view libraries, async, or the proposed libraries. The syntax-16 numeric front end rejects width
 suffixes with `TRM0006`, diagnoses missing hexadecimal/binary digits as
@@ -1075,7 +1076,7 @@ trades generality for simplicity.
 | Mutable-array variance and root arrays | Writable storage is invariant; any readonly projection needs checked representation, access, and lifetime rules | Accepted invariant; projection/root-array policy open |
 | Universal object defaults | No universal object methods or automatic capabilities; opt-in equality/hash/format and separate diagnostic identity | Accepted direction |
 | Nominal witnesses and capability predicates | Checked `IFoo` witnesses remain distinct from `[Copy]`, storage, and family capabilities | Accepted baseline |
-| Generic/erased APIs, conditional witnesses, associated results, erasure, inference, overloads | Accepted policy; exact grammar, representations, dispatch and general compiler support are staged | Bounded top-level single-`T` inference for eligible `Copy` structs and existing scalar value types is implemented; scalars support Copy-only templates, not primitive operator witnesses; general inference and overload binding remain scheduled |
+| Generic/erased APIs, conditional witnesses, associated results, erasure, inference, overloads | Accepted policy; exact grammar, representations, dispatch and general compiler support are staged | Bounded top-level inference for multiple independently constrained type parameters over eligible `Copy` structs and existing scalar value types is implemented; ordered specialization preserves parameter positions and each parameter's `Copy`/operator constraints; function effects are checked against the constrained operations; scalars support Copy-only templates, not primitive operator witnesses; general inference and overload binding remain scheduled |
 | Implicit readonly parameter loans | Parameter-only `implicit ref<T>` borrowing; ordinary value matches take precedence; no adaptive result/view family or ordinary receiver change | Accepted direction / implementation scheduled |
 | Generic array/enum capabilities | Preserve independent capability predicates, unnamed enum values, open-by-default evolution and explicit case-set/layout contracts | Accepted direction / representation details open |
 | Layout and wrappers | Opaque by default; opt-in Sequential, Union and Transparent contracts; transparent wrappers remain nominal but are carrier-equivalent only under checked ABI, validity, ownership and cleanup contracts; no arbitrary user-selected field offsets | Accepted direction / exact syntax and ABI profiles open |

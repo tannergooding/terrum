@@ -858,13 +858,15 @@ internal sealed partial class Binder
         {
             name = name["write".Length..];
         }
-        if (_genericContext is GenericInstantiation generic && generic.Template.TypeParameter == name)
+        if (_genericContext is GenericInstantiation generic
+            && generic.Template.ParameterIndex(name) is var parameterIndex
+            && parameterIndex >= 0)
         {
             if (writable)
             {
                 Report("TRM3005", "write T requires a supported concrete managed handle.", node.Span);
             }
-            return generic.Type;
+            return generic.Types[parameterIndex];
         }
         var optional = node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.Question };
         if (optional)
@@ -2003,7 +2005,7 @@ internal sealed partial class Binder
         }
         else if (callee.Kind == SyntaxKind.GenericNameExpression)
         {
-            function = InstantiateGeneric(callee);
+            function = InstantiateGeneric(callee, (SyntaxNode)node.Children[1], expected);
         }
         else if (callee.Kind == SyntaxKind.MemberAccessExpression)
         {
@@ -2440,7 +2442,7 @@ internal sealed partial class Binder
                 var callee = (SyntaxNode)node.Children[0];
                 if (callee.Kind == SyntaxKind.GenericNameExpression)
                 {
-                    return GenericCallType(callee);
+                    return GenericCallType(callee, (SyntaxNode)node.Children[1]);
                 }
                 if (callee.Kind == SyntaxKind.NameExpression)
                 {

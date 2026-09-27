@@ -327,17 +327,23 @@ spelling alone does not make an arbitrary operator implementation NoThrow.
 Templates and witnesses are compilation-local, while an exported concrete
 wrapper and its transitive private helpers use the existing separately compiled
 contract format. No additional runtime generic dispatch or wire version is needed.
-The current bounded binder infers the single `T` in top-level function
-templates over eligible `Copy` structs and the scalar value types `bool`,
-`char16`, `int32`, `uint32`, `int64` and `uint64` from typed arguments or typed
-existing `out` destinations. Explicit type arguments remain valid, and
-expected-result context fills only an unresolved `T` before contextual
-literal binding. Scalars support Copy-only templates, not primitive
-operator witnesses. This keeps definition-site operator,
-`Copy` and `[NoThrow]` checks in force and records the selected closed
-specialization for private module servicing. It does not enable unique or
-managed `T`, constructor/method inference, general overloads, partial holes, or a
-public generic ABI.
+The bounded binder infers multiple independently constrained type parameters
+in top-level function templates over eligible `Copy` structs and the scalar
+value types `bool`, `char16`, `int32`, `uint32`, `int64` and `uint64`. A
+complete explicit type-argument list pins every position; typed arguments and
+typed existing `out` destinations establish corresponding parameters
+independently. Expected-result context can fill an unresolved parameter
+represented in the return type before contextual literal binding. Ordered
+specialization keys preserve parameter positions, including swapped helper
+forwarding. Each parameter has independent definition-site `Copy` and
+operator constraints; the function's declared effects, including `[NoThrow]`
+where present, are checked against operations permitted by those constraints.
+Formal parameters remain distinct during definition-site checking even when
+their supplied types coincide. The closed specialization is recorded for
+private module servicing. Scalars
+support Copy-only templates, not primitive operator witnesses. Unique or
+managed type parameters, constructor/method inference, general overloads,
+partial holes and a public generic ABI remain unsupported.
 See the
 [bounded grammar and constraints](implementation.md); this does not implement
 the proposed generic standard library or replaceable generic witnesses.

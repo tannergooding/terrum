@@ -1,0 +1,49 @@
+struct WidePair {
+    public int64 First;
+    public int64 Second;
+    [NoThrow] public WidePair(int64 first, int64 second) {
+        First = first;
+        Second = second;
+    }
+}
+
+[NoThrow] bool TrySelectPair<TFirst, TSecond>(
+    int32 index, TFirst first0, TSecond second0, TFirst first1, TSecond second1,
+    out TFirst first, out TSecond second)
+    where TFirst : [Copy]
+    where TSecond : [Copy] {
+    if (index == 0) {
+        first = first0;
+        second = second0;
+        return true;
+    }
+    if (index == 1) {
+        first = first1;
+        second = second1;
+        return true;
+    }
+    return false;
+}
+
+[NoThrow] bool TrySelectReversed<TFirst, TSecond>(
+    int32 index, TFirst first0, TSecond second0, TFirst first1, TSecond second1,
+    out TSecond second, out TFirst first)
+    where TFirst : [Copy]
+    where TSecond : [Copy] {
+    return TrySelectPair<TSecond, TFirst>(
+        index, second0, first0, second1, first1, out second, out first);
+}
+
+public int32 GenericPairProbe() {
+    var first = new WidePair(1, 0);
+    var second = new WidePair(2, 0);
+    require !TrySelectPair(2, int32(10), first, int32(40), second,
+        out var missingNumber, out var missingPair);
+    require TrySelectReversed(1, int32(10), first, int32(40), second,
+        out var selectedPair, out var selectedNumber);
+    return selectedNumber + int32(selectedPair.First + selectedPair.Second);
+}
+
+int32 Main() {
+    return GenericPairProbe();
+}
