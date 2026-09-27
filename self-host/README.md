@@ -114,9 +114,14 @@ and answers position queries by binary search over a scoped readonly slice of
 the initialized table. The slice borrows the owning field only for that query;
 it is not returned or stored in the index. The index retains only copied offsets
 and the source length; queries do not retain or reread the source grant. Construction
-reserves one word per source code unit plus one for the final line, a conservative
-single-pass bound rather than a resizing collection. Capacity and allocation
-failure follow the bounded `OwnedInt32Buffer` contract. This is not a stored
+counts lines before reserving exactly one word per line start, including the
+final empty line after a trailing break. The fill pass reuses the known first
+and final starts, so one- and two-line sources need no second scan. If every
+code unit ends a line, starts are filled directly from their ordinal positions.
+Other multiline sources trade a partial second scan for smaller storage; this
+is not a resizing collection. Capacity and allocation failure follow the bounded
+`OwnedInt32Buffer` contract: the capacity limit applies to line count rather
+than source length plus one. This is not a stored
 source view, managed line collection, or general allocator API.
 
 `IntegerFormatting` consumes and returns a unique workspace of at least twenty

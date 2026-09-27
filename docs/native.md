@@ -360,7 +360,7 @@ The probe also checks that only the low 32 bits of the
 even while a checked catch is available.
 
 The [owned source-line index](../self-host/SourceLineIndex.terrum) builds a
-line-start table with this storage and publishes a unique immutable index.
+line-start table with exactly one word per line start and publishes a unique immutable index.
 Its position queries use binary search over initialized words, without a
 retained source pointer or a general span/allocator API.
 

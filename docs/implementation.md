@@ -347,7 +347,11 @@ Compatible persisted consumer/intermediate images continue to work with leaf
 replacement under AOT and root-only JIT.
 The [source-line index candidate](../self-host/SourceLineIndex.terrum) uses `OwnedInt32Buffer`
 to build and own a line-start table, with binary-searched UTF-16 positions checked
-against host fixtures under both native failure policies.
+against host fixtures under both native failure policies. It reserves one word
+per actual line start rather than per source code unit, preserving maximum-sized
+sparse inputs within the existing buffer capacity. Construction counts first
+and fills unknown starts in a second scan; already known endpoints and fully
+dense single-unit breaks need no second source scan.
 General borrowed references and stored loans remain unsupported. The accepted
 `ref<T>`/`ptr<T>`/`box<T>`/`val<T>` forms, general `write` views, `own<T>` and
 `init ref<T>` invocation still require their respective representation,

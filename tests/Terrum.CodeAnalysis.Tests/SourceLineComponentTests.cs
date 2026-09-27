@@ -108,7 +108,7 @@ public sealed partial class SourceLineComponentTests
         await ExecuteAsync(program, NativeRuntimePolicy.FailFast).ConfigureAwait(true);
     }
 
-    private static async Task ExecuteAsync(BoundProgram program, NativeRuntimePolicy policy)
+    private static async Task ExecuteAsync(BoundProgram program, NativeRuntimePolicy policy, int expectedExit = 0)
     {
         var path = Path.Combine(RepositoryRoot(), "artifacts", $"source-lines-{Guid.NewGuid():N}.exe");
         try
@@ -129,7 +129,7 @@ public sealed partial class SourceLineComponentTests
                 }
                 throw;
             }
-            Assert.Equal(0, process.ExitCode);
+            Assert.Equal(expectedExit, process.ExitCode);
         }
         finally
         {

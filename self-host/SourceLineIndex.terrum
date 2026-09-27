@@ -13,25 +13,55 @@ public unique struct SourceLineIndex
 
     public static bool TryCreate(out SourceLineIndex index)
     {
-        // Each code unit can end a line, with one additional final line.
-        if (!OwnedInt32Buffer.TryCreate(Host.Source.Length + 1, out var created))
+        mut int32 lineCount = 0;
+        mut int32 position = 0;
+        while (true)
+        {
+            require TryReadSourceLine(position, out var content, out var includingBreak);
+            lineCount = lineCount + 1;
+            if (content.Length == includingBreak.Length)
+            {
+                break;
+            }
+            position = includingBreak.GetEnd();
+        }
+
+        int32 finalStart = position;
+        // No code can modify the source between counting and filling the starts.
+        if (!OwnedInt32Buffer.TryCreate(lineCount, out var created))
         {
             return false;
         }
 
         mut OwnedInt32Buffer starts = move created;
-        mut int32 position = 0;
-        while (true)
+        require starts.TryAppend(0);
+        mut int32 filled = 1;
+        if (lineCount - 1 == Host.Source.Length)
         {
-            require starts.TryAppend(position);
-            require TryReadSourceLine(position, out var content, out var includingBreak);
-            if (content.Length == includingBreak.Length)
+            // Each non-final line consumes at least one unit, so every unit is a break here.
+            while (filled < lineCount)
             {
-                index = new SourceLineIndex(move starts, Host.Source.Length);
-                return true;
+                require starts.TryAppend(filled);
+                filled = filled + 1;
             }
-            position = includingBreak.GetEnd();
         }
+        else
+        {
+            position = 0;
+            while (filled < lineCount - 1)
+            {
+                require TryReadSourceLine(position, out var content, out var includingBreak);
+                position = includingBreak.GetEnd();
+                require starts.TryAppend(position);
+                filled = filled + 1;
+            }
+            if (filled < lineCount)
+            {
+                require starts.TryAppend(finalStart);
+            }
+        }
+        index = new SourceLineIndex(move starts, Host.Source.Length);
+        return true;
     }
 
     [NoThrow]

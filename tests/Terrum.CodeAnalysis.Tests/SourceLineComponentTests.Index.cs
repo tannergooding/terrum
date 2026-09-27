@@ -69,6 +69,122 @@ public sealed partial class SourceLineComponentTests
     }
 
     [Theory]
+    [InlineData("", 1)]
+    [InlineData("plain", 1)]
+    [InlineData("\n", 2)]
+    [InlineData("a\r\n", 2)]
+    [InlineData("\r\nb", 2)]
+    [InlineData("\r\nx\n", 3)]
+    [InlineData("\n\n\n\n", 5)]
+    [InlineData("a\r\nb\rc\nd\u0085e\u2028f\u2029", 7)]
+    public async Task OwnedLineIndexReservesOnlyActualStartsAsync(string text, int expectedCount)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        var last = SourceText.From(text).GetLinePosition(text.Length);
+        var trees = await ReadIndexComponentsWithCapacityAsync().ConfigureAwait(true);
+        var entry = SyntaxTree.Parse($$"""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                require SourceLineIndex.TryCreate(out var index);
+                if (index.GetLineCount() != {{expectedCount}}
+                    || index.GetCapacityForTest() != {{expectedCount}}) { return 1; }
+                require index.TryGetPosition(Host.Source.Length, out var line, out var character);
+                if (line != {{last.Line}} || character != {{last.Character}}) { return 2; }
+                return 0;
+            }
+            """, "capacity-index-entry.terrum");
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var compilation = Compilation.Create(trees.Add(entry),
+                [new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false)],
+                (BoundRuntimePolicy)policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, true)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
+    public async Task SparseLineIndexFitsAtMaximumSourceLengthAsync(NativeRuntimePolicy policy, bool fewLines)
+    {
+        const int MaximumCapacity = 1_048_576;
+        var text = fewLines ? new string('a', MaximumCapacity - 3) + "\r\nb"
+            : new string('a', MaximumCapacity);
+        var trees = await ReadIndexComponentsWithCapacityAsync().ConfigureAwait(true);
+        var entry = SyntaxTree.Parse($$"""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (!SourceLineIndex.TryCreate(out var index)) { return 1; }
+                if (index.GetLineCount() != {{(fewLines ? 2 : 1)}}) { return 2; }
+                if (index.GetCapacityForTest() != {{(fewLines ? 2 : 1)}}) { return 4; }
+                require index.TryGetPosition(Host.Source.Length, out var line, out var character);
+                if (line != {{(fewLines ? 1 : 0)}}
+                    || character != {{(fewLines ? 1 : MaximumCapacity)}}) { return 3; }
+                return 0;
+            }
+            """, "sparse-index-entry.terrum");
+        var compilation = Compilation.Create(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false)],
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, true)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
+    public async Task DenseLineIndexHonorsExactBufferCapacityAsync(NativeRuntimePolicy policy, bool overflow)
+    {
+        const int MaximumCapacity = 1_048_576;
+        var text = new string('\n', overflow ? MaximumCapacity : MaximumCapacity - 1);
+        var trees = await ReadIndexComponentsWithCapacityAsync().ConfigureAwait(true);
+        var entry = SyntaxTree.Parse(overflow && policy == NativeRuntimePolicy.CheckedExceptions ? """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                unsafe {
+                    try {
+                        SourceLineIndex.TryCreate(out var index);
+                        return 1;
+                    } catch {
+                        if (!OwnedInt32Buffer.TryCreate(1, out var raw)) { return 2; }
+                        mut OwnedInt32Buffer next = move raw;
+                        if (!next.TryAppend(42) || next.Read(0) != 42) { return 3; }
+                        return 0;
+                    }
+                }
+            }
+            """ : overflow ? """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                SourceLineIndex.TryCreate(out var index);
+                return 1;
+            }
+            """ : """
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                if (!SourceLineIndex.TryCreate(out var index)) { return 1; }
+                if (index.GetLineCount() != Host.Source.Length + 1) { return 2; }
+                if (index.GetCapacityForTest() != Host.Source.Length + 1) { return 4; }
+                require index.TryGetPosition(Host.Source.Length, out var line, out var character);
+                if (line != Host.Source.Length || character != 0) { return 3; }
+                return 0;
+            }
+            """, "dense-index-entry.terrum");
+        var compilation = Compilation.Create(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false)],
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), policy,
+            overflow && policy == NativeRuntimePolicy.FailFast ? unchecked((int)0xE0540001) : 0)
+            .ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task OwnedLineIndexDoesNotRereadSourceAfterConstructionAsync(NativeRuntimePolicy policy)
@@ -110,6 +226,24 @@ public sealed partial class SourceLineComponentTests
         Assert.Contains(compilation.SourceDiagnostics, diagnostic => diagnostic.SyntaxTree == entry);
     }
 
+    [Fact]
+    public async Task OwnedLineIndexCannotReadOutputWithoutSuccessfulCreationAsync()
+    {
+        var trees = await ReadIndexComponentsAsync().ConfigureAwait(true);
+        var entry = SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                SourceLineIndex.TryCreate(out var index);
+                return index.GetLineCount();
+            }
+            """, "unpublished-index-entry.terrum");
+        var compilation = Compilation.Create(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, [], false)]);
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+        Assert.Contains(compilation.SourceDiagnostics, diagnostic => diagnostic.SyntaxTree == entry);
+    }
+
     private static async Task<ImmutableArray<SyntaxTree>> ReadIndexComponentsAsync()
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
@@ -119,5 +253,18 @@ public sealed partial class SourceLineComponentTests
         Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
         Assert.Equal(text, tree.Root.ToFullString());
         return trees.Add(tree);
+    }
+
+    private static async Task<ImmutableArray<SyntaxTree>> ReadIndexComponentsWithCapacityAsync()
+    {
+        var trees = await ReadIndexComponentsAsync().ConfigureAwait(true);
+        var source = trees[^1].Source;
+        var marker = source.Text.IndexOf("    [NoThrow]", StringComparison.Ordinal);
+        Assert.True(marker >= 0);
+        var instrumented = source.Text.Insert(marker,
+            "    public int32 GetCapacityForTest() { return _starts.Capacity; }\n\n");
+        var tree = SyntaxTree.Parse(instrumented, source.Path);
+        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        return trees.SetItem(trees.Length - 1, tree);
     }
 }
