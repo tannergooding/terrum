@@ -167,6 +167,9 @@ internal sealed partial class PeCompiler
                 case BoundOptionalLift lift:
                     CollectExpression(lift.Value, spill);
                     break;
+                case BoundReadonlyProjection projection:
+                    CollectExpression(projection.Value, spill);
+                    break;
                 case BoundIsNull test:
                     CollectExpression(test.Value, spill);
                     break;

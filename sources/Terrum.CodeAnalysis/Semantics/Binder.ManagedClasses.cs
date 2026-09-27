@@ -15,7 +15,7 @@ internal sealed partial class Binder
     private readonly Dictionary<int, (SyntaxTree Tree, SyntaxNode Declaration)> _classDeclarations = [];
 
     private bool IsClass(PrimitiveType type) => ManagedClassTypes.IsClass(type)
-        && (int)type - ManagedClassTypes.First < _classes.Count;
+        && ManagedClassTypes.ClassIndex(type) < _classes.Count;
 
     private void DeclareClassName(SyntaxTree tree, SyntaxNode declaration)
     {
@@ -31,7 +31,10 @@ internal sealed partial class Binder
             return;
         }
         var index = _classes.Count;
-        _classes.Add(new BoundClass(qualified, [], 0));
+        _classes.Add(new BoundClass(qualified, [], 0) {
+            IsMutable = declaration.Children.OfType<SyntaxTokenElement>().Any(static child =>
+                child.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.MutKeyword),
+        });
         _classDeclarations.Add(index, (tree, declaration));
     }
 
@@ -92,7 +95,7 @@ internal sealed partial class Binder
         var receiverName = NameText(receiver);
         var resolution = ResolveTypeName(receiverName, out var type);
         name = resolution == DeclaredTypeResolution.Unique
-            ? IsClass(type) ? _classes[(int)type - ManagedClassTypes.First].Name + "." + member
+            ? IsClass(type) ? _classes[ManagedClassTypes.ClassIndex(type)].Name + "." + member
                 : IsStruct(type) ? _structs[(int)type - 100].Name + "." + member
                 : receiverName + "." + member
             : receiverName + "." + member;
@@ -122,6 +125,7 @@ internal sealed partial class Binder
         SetContext(tree);
         var name = _classes[index].Name;
         var publicClass = false;
+        var mutableClass = false;
         foreach (var child in declaration.Children)
         {
             if (child is SyntaxNode {
@@ -134,12 +138,12 @@ internal sealed partial class Binder
             if (child is SyntaxTokenElement token)
             {
                 publicClass |= token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.PublicKeyword;
+                mutableClass |= token.Token.Kind == Terrum.CodeAnalysis.Lexing.TokenKind.MutKeyword;
                 if (token.Token.Kind is Terrum.CodeAnalysis.Lexing.TokenKind.UniqueKeyword
                     or Terrum.CodeAnalysis.Lexing.TokenKind.StaticKeyword
-                    or Terrum.CodeAnalysis.Lexing.TokenKind.MutKeyword
                     or Terrum.CodeAnalysis.Lexing.TokenKind.PrivateKeyword)
                 {
-                    Report("TRM3001", "Classes support only public or internal declaration visibility.", child.Span);
+                    Report("TRM3001", "Classes support public/internal visibility and optional mutability.", child.Span);
                 }
             }
         }
@@ -189,6 +193,10 @@ internal sealed partial class Binder
                     }
                 }
             }
+            if (mutable && !mutableClass)
+            {
+                Report("TRM3008", "Mutable fields require a mut class declaration.", child.Span);
+            }
             fields.Add(new BoundStructField(fieldToken.Token.Text, type, offset, width) {
                 IsMutable = mutable,
                 IsPrivate = !isPublic && !isInternal,
@@ -202,6 +210,7 @@ internal sealed partial class Binder
         }
         _classes[index] = new BoundClass(name, fields.ToImmutable(), (offset + 7) & ~7) {
             IsInternal = !publicClass,
+            IsMutable = mutableClass,
         };
     }
 
@@ -211,6 +220,10 @@ internal sealed partial class Binder
         {
             SetContext(tree);
             var type = (PrimitiveType)(ManagedClassTypes.First + index);
+            if (_classes[index].IsMutable)
+            {
+                type = ManagedClassTypes.Writable(type);
+            }
             var name = _classes[index].Name;
             if (!_functions.TryGetValue(name + ".#ctor", out var constructor))
             {
@@ -244,6 +257,10 @@ internal sealed partial class Binder
     {
         var type = (PrimitiveType)(ManagedClassTypes.First
             + _classes.FindIndex(item => item.Name == signature.StructName));
+        if (_classes[ManagedClassTypes.ClassIndex(type)].IsMutable)
+        {
+            type = ManagedClassTypes.Writable(type);
+        }
         var variables = signature.Parameters.Select(parameter =>
             new BoundVariable(parameter.Name, parameter.Type, false, parameter.Span) { IsOut = parameter.IsOut })
             .Append(new BoundVariable("$provisional", type, false, signature.Tree.Root.Span)).ToImmutableArray();

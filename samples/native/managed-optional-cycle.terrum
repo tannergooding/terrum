@@ -1,6 +1,6 @@
-class CycleNode {
+mut class CycleNode {
     public int32 Value;
-    public mut CycleNode? Next;
+    public mut write CycleNode? Next;
 
     public CycleNode(int32 value) {
         Value = value;
@@ -8,7 +8,7 @@ class CycleNode {
     }
 }
 
-bool TryPublish(bool enabled, out CycleNode? result) {
+bool TryPublish(bool enabled, out write CycleNode? result) {
     require CycleNode.TryCreate(20, out var first);
     if (!enabled) { return false; }
     require CycleNode.TryCreate(22, out var second);
@@ -18,7 +18,7 @@ bool TryPublish(bool enabled, out CycleNode? result) {
     return true;
 }
 
-CycleNode? Echo(CycleNode? value) { return value; }
+write CycleNode? Echo(write CycleNode? value) { return value; }
 
 int32 Main() {
     CycleNode? empty = Echo(null);
@@ -29,9 +29,9 @@ int32 Main() {
     if (ManagedHeap.Collect() != 1) { return 14; }
     {
         if (!TryPublish(true, out var cycle)) { return 3; }
-        mut CycleNode? returned = Echo(cycle);
+        mut write CycleNode? returned = Echo(cycle);
         require returned is some first;
-        mut CycleNode? cursor = returned;
+        mut write CycleNode? cursor = returned;
         mut int32 visits = 0;
         while (cursor is some current && visits < 2) {
             visits = visits + 1;

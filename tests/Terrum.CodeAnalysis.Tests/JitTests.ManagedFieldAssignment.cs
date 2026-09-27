@@ -8,20 +8,20 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed partial class JitTests
 {
     private const string ManagedFieldAssignmentDeclarations = """
-        class Leaf {
+        mut class Leaf {
             public mut int32 Value;
             public Leaf(int32 value) { Value = value; }
         }
-        class Pair {
-            public mut Leaf Left;
-            public Pair(Leaf left) { Left = left; }
+        mut class Pair {
+            public mut write Leaf Left;
+            public Pair(write Leaf left) { Left = left; }
         }
-        Pair Build() {
+        write Pair Build() {
             require Leaf.TryCreate(1, out var leaf);
             require Pair.TryCreate(leaf, out var pair);
             return pair;
         }
-        int32 ReplaceLeft(Pair pair, Leaf replacement) {
+        int32 ReplaceLeft(write Pair pair, write Leaf replacement) {
             pair.Left = replacement;
             require ManagedHeap.Collect() == 0;
             return 42;
@@ -35,7 +35,7 @@ public sealed partial class JitTests
     {
         var source = ManagedFieldAssignmentDeclarations + """
             int32 Main() {
-                Pair pair = Build();
+                write Pair pair = Build();
                 require Leaf.TryCreate(7, out var replacement);
                 pair.Left.Value = ReplaceLeft(pair, replacement);
                 require pair.Left.Value == 7;
@@ -55,7 +55,7 @@ public sealed partial class JitTests
     {
         var source = ManagedFieldAssignmentDeclarations + """
             int32 Main() {
-                Pair pair = Build();
+                write Pair pair = Build();
                 Leaf original = pair.Left;
                 require Leaf.TryCreate(7, out var replacement);
                 pair.Left.Value = ReplaceLeft(pair, replacement);
@@ -72,13 +72,13 @@ public sealed partial class JitTests
     public Task CheckedFieldAssignmentRetiresSelectedReceiverAfterRhsThrowsAsync()
     {
         var source = ManagedFieldAssignmentDeclarations + """
-            int32 FailAfterReplace(Pair pair, Leaf replacement) {
+            int32 FailAfterReplace(write Pair pair, write Leaf replacement) {
                 pair.Left = replacement;
                 require false;
                 return 42;
             }
             int32 Main() {
-                Pair pair = Build();
+                write Pair pair = Build();
                 require Leaf.TryCreate(7, out var replacement);
                 unsafe {
                     try {

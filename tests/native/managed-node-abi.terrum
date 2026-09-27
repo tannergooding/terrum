@@ -1,4 +1,4 @@
-void AttachChild(ManagedNode parent) {
+void AttachChild(write ManagedNode parent) {
     require ManagedNode.TryCreate(42, out var child);
     parent.SetNext(child);
 }

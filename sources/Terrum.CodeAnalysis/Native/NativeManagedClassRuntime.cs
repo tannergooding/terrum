@@ -11,7 +11,7 @@ internal sealed partial class PeCompiler
         var output = function.ParameterCount - 1;
         var provisional = function.ParameterCount;
         var type = function.Variables[output].Type;
-        var classIndex = (int)type - ManagedClassTypes.First;
+        var classIndex = ManagedClassTypes.ClassIndex(type);
         var @class = _program.Classes[classIndex];
         EmitManagedAllocation(classIndex + 1, @class.Size + 32);
         _code.Bytes(0x48, 0x85, 0xC0);

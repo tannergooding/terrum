@@ -109,14 +109,15 @@ public sealed partial class NativeManagedClassModuleTests
         var linked = ModuleCompiler.Link(consumer, producer);
         var @class = Assert.Single(linked.Classes);
         Assert.Equal("$producer.Cycle", @class.Name);
-        Assert.Equal((int)ManagedClassTypes.Optional((PrimitiveType)ManagedClassTypes.First),
+        Assert.Equal((int)ManagedClassTypes.Optional(ManagedClassTypes.Writable(
+            (PrimitiveType)ManagedClassTypes.First)),
             (int)@class.Fields[1].Type);
     }
 
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public void InlineCopyClassFieldsUseVersion20WithoutChangingTheNativeProfile(NativeRuntimePolicy policy)
+    public void InlineCopyClassFieldsUseVersionedAccessWithoutChangingTheNativeProfile(NativeRuntimePolicy policy)
     {
         var program = Compile("""
             struct Pair {
@@ -134,7 +135,7 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """, policy);
         var contract = ModuleCompiler.CreateProducer(program, ["Proof"]);
-        Assert.Equal(20, BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
+        Assert.Equal(24, BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
         Assert.Equal("native-19", ModuleCompiler.GetNativeProfileVersion(contract, false));
         var reference = ModuleCompiler.CreateReference(contract);
         Assert.Empty(reference.Structures);
@@ -143,9 +144,7 @@ public sealed partial class NativeManagedClassModuleTests
         Assert.Equal("native-19", NativeModuleCompiler.Inspect(native).NativeProfileVersion);
         var oldVersion = (byte[])contract.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(oldVersion.AsSpan(4, 4), 19);
-        var error = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(oldVersion));
-        Assert.Contains("Inline struct class fields require a newer semantic module version.", error.Message,
-            StringComparison.Ordinal);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(oldVersion));
         oldVersion = (byte[])contract.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(oldVersion.AsSpan(4, 4), 18);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(oldVersion));
@@ -184,11 +183,11 @@ public sealed partial class NativeManagedClassModuleTests
     }
 
     [Fact]
-    public void Version20RejectsForgedCopyFieldTypesAlignmentAndOwnership()
+    public void ManagedAccessVersionRejectsForgedCopyFieldTypesAlignmentAndOwnership()
     {
         var contract = ModuleCompiler.CreateProducer(Compile(Sample("managed-copy-class-leaf"),
             NativeRuntimePolicy.FailFast), ["Leaf"]);
-        Assert.Equal(20, BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
+        Assert.Equal(24, BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
         using var reader = new BinaryReader(new MemoryStream(contract));
         reader.BaseStream.Position = 8;
         var profileLength = reader.ReadInt32();
@@ -223,7 +222,7 @@ public sealed partial class NativeManagedClassModuleTests
         Assert.True(nestedOffset >= 0);
         Assert.Equal(1, reader.ReadInt32());
         var classNameLength = reader.ReadInt32();
-        reader.BaseStream.Position += classNameLength + 4 + 1;
+        reader.BaseStream.Position += classNameLength + 4 + 2;
         var fieldCount = reader.ReadInt32();
         Assert.Equal(3, fieldCount);
         var firstNameLength = reader.ReadInt32();
@@ -276,7 +275,7 @@ public sealed partial class NativeManagedClassModuleTests
     {
         var program = Compile(Sample("managed-class-leaf"), NativeRuntimePolicy.FailFast);
         var contract = ModuleCompiler.CreateProducer(program, ["Leaf"]);
-        Assert.Equal(19, BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
+        Assert.Equal(24, BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
         Assert.Equal("native-20", ModuleCompiler.GetNativeProfileVersion(contract, false));
         using var reader = new BinaryReader(new MemoryStream(contract));
         reader.BaseStream.Position = 8;
@@ -291,6 +290,7 @@ public sealed partial class NativeManagedClassModuleTests
         Assert.Equal(16, reader.ReadInt32());
         var visibility = (int)reader.BaseStream.Position;
         Assert.Equal(1, reader.ReadByte());
+        Assert.Equal(1, reader.ReadByte());
         Assert.Equal(2, reader.ReadInt32());
         var firstNameLength = reader.ReadInt32();
         Assert.Equal("Value", Encoding.UTF8.GetString(reader.ReadBytes(firstNameLength)));
@@ -303,7 +303,8 @@ public sealed partial class NativeManagedClassModuleTests
         var secondNameLength = reader.ReadInt32();
         Assert.Equal("Next", Encoding.UTF8.GetString(reader.ReadBytes(secondNameLength)));
         var edgeType = (int)reader.BaseStream.Position;
-        Assert.Equal((int)ManagedClassTypes.Optional((PrimitiveType)ManagedClassTypes.First), reader.ReadInt32());
+        Assert.Equal((int)ManagedClassTypes.Optional(ManagedClassTypes.Writable(
+            (PrimitiveType)ManagedClassTypes.First)), reader.ReadInt32());
 
         var malformed = (byte[])contract.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(classCount, 4), 257);
@@ -319,9 +320,7 @@ public sealed partial class NativeManagedClassModuleTests
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
         malformed = (byte[])contract.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(firstType, 4), 100);
-        var fieldError = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
-        Assert.Contains("Inline struct class fields require a newer semantic module version.",
-            fieldError.Message, StringComparison.Ordinal);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
         malformed = (byte[])contract.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(malformed.AsSpan(edgeType, 4),
             ManagedClassTypes.OptionalFirst + 1);

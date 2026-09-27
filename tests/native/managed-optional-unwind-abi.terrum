@@ -1,4 +1,4 @@
-void FailWithSnapshots(OptionalEdges edges) {
+void FailWithSnapshots(write OptionalEdges edges) {
     if (edges.Item is some item) {
         if (edges.Node is some node) {
             edges.Item = null;

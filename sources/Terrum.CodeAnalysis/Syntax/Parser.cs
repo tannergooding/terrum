@@ -401,10 +401,12 @@ internal sealed class Parser
     private SyntaxNode ParseType()
     {
         Enter();
-        var children = new List<SyntaxElement>
+        var children = new List<SyntaxElement>();
+        if (Current.Kind == TokenKind.WriteKeyword)
         {
-            Current.Kind == TokenKind.VoidKeyword ? Take() : Expect(TokenKind.Identifier),
-        };
+            children.Add(Take());
+        }
+        children.Add(Current.Kind == TokenKind.VoidKeyword ? Take() : Expect(TokenKind.Identifier));
 
         while (Current.Kind == TokenKind.Dot)
         {
@@ -674,12 +676,12 @@ internal sealed class Parser
 
     private bool LooksLikeLocal()
     {
-        if (Current.Kind != TokenKind.Identifier)
+        var offset = Current.Kind == TokenKind.WriteKeyword ? 1 : 0;
+        if (Peek(offset).Kind != TokenKind.Identifier)
         {
             return false;
         }
-
-        var offset = 1;
+        offset++;
 
         while (Peek(offset).Kind == TokenKind.Dot && Peek(offset + 1).Kind == TokenKind.Identifier)
         {
@@ -953,7 +955,8 @@ internal sealed class Parser
     private static bool IsModifier(TokenKind kind)
         => kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword or TokenKind.PrivateKeyword or TokenKind.StaticKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword;
 
-    private static bool IsTypeStart(TokenKind kind) => kind is TokenKind.Identifier or TokenKind.VoidKeyword;
+    private static bool IsTypeStart(TokenKind kind) => kind is TokenKind.Identifier or TokenKind.VoidKeyword
+        or TokenKind.WriteKeyword;
 
     private static int UnaryPrecedence(TokenKind kind) => kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde or TokenKind.MoveKeyword ? 11 : 0;
 

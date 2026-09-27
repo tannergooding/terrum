@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
@@ -9,16 +10,15 @@ internal static class ValueLayout
 {
     internal const int MaximumSize = 16;
 
+    [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Unsupported values have no executable layout.")]
     internal static int Size(PrimitiveType type, IReadOnlyList<BoundStruct> structures) => type switch {
         PrimitiveType.Bool => 1,
         PrimitiveType.Char16 => 2,
         PrimitiveType.Int32 or PrimitiveType.UInt32 => 4,
-        PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.OwnedInt32Buffer
-            or PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode => 8,
-        _ when ManagedClassTypes.IsOptional(type) => 8,
+        PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.OwnedInt32Buffer => 8,
+        _ when ManagedClassTypes.IsManaged(type) => 8,
         PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView => 16,
         PrimitiveType.Void => 0,
-        _ when ManagedClassTypes.IsClass(type) => 8,
         _ when (int)type >= 100 && (int)type < ManagedClassTypes.First
             && (int)type - 100 < structures.Count => structures[(int)type - 100].Size,
         _ => 0,

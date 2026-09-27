@@ -1,4 +1,4 @@
-ManagedNode MakeLoopNode(int32 value) {
+write ManagedNode MakeLoopNode(int32 value) {
     require ManagedNode.TryCreate(value, out var node);
     return node;
 }

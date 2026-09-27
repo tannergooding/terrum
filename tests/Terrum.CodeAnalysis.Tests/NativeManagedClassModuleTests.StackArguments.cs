@@ -18,17 +18,17 @@ public sealed partial class NativeManagedClassModuleTests
     [InlineData(NativeRuntimePolicy.FailFast, true)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
-    public void ClassStackArgumentsRequireVersion23AlongsideCopyAndLoopFeatures(
+    public void ClassStackArgumentsRetainVersionedManagedAccessAlongsideCopyAndLoopFeatures(
         NativeRuntimePolicy policy, bool copyArgument)
     {
         var source = StackArgumentLeaf(copyArgument) + "int32 Loop() { while (true) { break; } return 0; }";
         var producer = ModuleCompiler.CreateProducer(Compile(source, policy), ["Leaf"]);
-        Assert.Equal(23, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(24, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         Assert.Equal("native-20", ModuleCompiler.GetNativeProfileVersion(producer, false));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.Empty(reference.Structures);
         Assert.Equal("Leaf", Assert.Single(reference.Functions).Name);
-        foreach (var version in new[] { 19, 20, 21, 22 })
+        foreach (var version in new[] { 19, 20, 21, 22, 23 })
         {
             var downgraded = (byte[])producer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), version);
@@ -48,7 +48,7 @@ public sealed partial class NativeManagedClassModuleTests
         var consumerHash = SHA256.HashData(consumer);
         var program = Compile(StackArgumentLeaf(copyArgument: true), policy);
         var replacement = ModuleCompiler.CreateProducer(program, ["Leaf"]);
-        Assert.Equal(23, BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
+        Assert.Equal(24, BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
         var linked = ModuleCompiler.Link(consumer, replacement);
         Assert.Equal(44, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
         Assert.Equal(consumerHash, SHA256.HashData(consumer));

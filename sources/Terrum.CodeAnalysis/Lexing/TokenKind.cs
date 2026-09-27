@@ -165,4 +165,6 @@ public enum TokenKind
     OperatorKeyword,
     /// <summary>The <c>where</c> keyword.</summary>
     WhereKeyword,
+    /// <summary>The write capability qualifier.</summary>
+    WriteKeyword,
 }

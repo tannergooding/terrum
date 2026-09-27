@@ -14,10 +14,10 @@ struct Stamp {
     }
 }
 
-class Cycle {
+mut class Cycle {
     public bool Ready;
     public Stamp Data;
-    public mut Cycle? Next;
+    public mut write Cycle? Next;
 
     public Cycle(int32 value) {
         Ready = true;

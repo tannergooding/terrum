@@ -35,9 +35,9 @@ public sealed partial class JitTests
     public Task ConstructorCompletesOptionalFieldsBeforeSelfCycleAsync(bool checkedFailures)
     {
         const string Source = """
-            class Cycle {
+            mut class Cycle {
                 public int32 Value;
-                public mut Cycle? Next;
+                public mut write Cycle? Next;
 
                 public Cycle(int32 value) {
                     Value = value;
@@ -70,7 +70,7 @@ public sealed partial class JitTests
                 public int32 Value;
                 public Leaf(int32 value) { Value = value; }
             }
-            class Host {
+            mut class Host {
                 public mut Leaf? Edge;
                 public Host(Leaf? edge) { Edge = edge; }
             }

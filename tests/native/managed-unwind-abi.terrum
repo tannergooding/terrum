@@ -1,4 +1,4 @@
-ManagedNode MakeNode(int32 value) {
+write ManagedNode MakeNode(int32 value) {
     require ManagedNode.TryCreate(value, out var node);
     return node;
 }
@@ -11,7 +11,7 @@ void FailCycle() {
     require false;
 }
 
-ManagedNode FailNode() {
+write ManagedNode FailNode() {
     var node = MakeNode(2);
     node.SetNext(node);
     require false;
@@ -22,7 +22,7 @@ int32 ReadPair(ManagedNode first, ManagedNode second) {
     return first.Value + second.Value;
 }
 
-bool FailOutput(out ManagedNode node) {
+bool FailOutput(out write ManagedNode node) {
     require ManagedNode.TryCreate(1, out node);
     node.SetNext(node);
     require false;

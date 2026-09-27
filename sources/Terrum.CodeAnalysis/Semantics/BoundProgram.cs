@@ -1,5 +1,6 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
+using System;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using Terrum.CodeAnalysis.Lexing;
@@ -38,6 +39,10 @@ public enum PrimitiveType
     ManagedNode,
     /// <summary>An explicitly nullable managed-node handle.</summary>
     OptionalManagedNode,
+    /// <summary>A writable handle to a compiler-managed node.</summary>
+    WriteManagedNode,
+    /// <summary>An explicitly nullable writable managed-node handle.</summary>
+    OptionalWriteManagedNode,
 }
 
 /// <summary>Disjoint source-class type identifiers start above the complete inline-struct range.</summary>
@@ -47,27 +52,112 @@ public static class ManagedClassTypes
     public const int First = 1024;
     /// <summary>The first nullable class handle; class identifiers remain disjoint.</summary>
     public const int OptionalFirst = First + 256;
+    /// <summary>The first writable source-class handle.</summary>
+    public const int WriteFirst = OptionalFirst + 256;
+    /// <summary>The first nullable writable source-class handle.</summary>
+    public const int OptionalWriteFirst = WriteFirst + 256;
 
     /// <summary>The bounded per-object payload size, independent of compact inline values.</summary>
     public const int MaximumPayload = 128;
 
     /// <summary>Whether a type is a source-defined managed class handle.</summary>
-    public static bool IsClass(PrimitiveType type) => (int)type is >= First and < OptionalFirst;
+    public static bool IsClass(PrimitiveType type) => (int)type is (>= First and < OptionalFirst)
+        or (>= WriteFirst and < OptionalWriteFirst);
 
     /// <summary>Whether a type is an optional managed handle.</summary>
-    public static bool IsOptional(PrimitiveType type) => type == PrimitiveType.OptionalManagedNode
-        || ((int)type >= OptionalFirst && (int)type < OptionalFirst + 256);
+    public static bool IsOptional(PrimitiveType type) => type is PrimitiveType.OptionalManagedNode
+        or PrimitiveType.OptionalWriteManagedNode
+        || (int)type is (>= OptionalFirst and < WriteFirst)
+            or (>= OptionalWriteFirst and < OptionalWriteFirst + 256);
+
+    /// <summary>The declaration index shared by all qualified forms of a class.</summary>
+    public static int ClassIndex(PrimitiveType type) => (int)type switch {
+        >= First and < WriteFirst => ((int)type - First) % 256,
+        >= WriteFirst and < OptionalWriteFirst + 256 => ((int)type - WriteFirst) % 256,
+        _ => throw new ArgumentOutOfRangeException(nameof(type)),
+    };
+
+    /// <summary>Whether the handle grants writable referent access.</summary>
+    public static bool IsWritable(PrimitiveType type) => type is PrimitiveType.WriteManagedNode
+        or PrimitiveType.OptionalWriteManagedNode
+        || (int)type is >= WriteFirst and < OptionalWriteFirst + 256;
+
+    /// <summary>The readonly projection of a handle, preserving nullability.</summary>
+    public static PrimitiveType Readonly(PrimitiveType type)
+    {
+        if (type == PrimitiveType.WriteManagedNode)
+        {
+            return PrimitiveType.ManagedNode;
+        }
+        if (type == PrimitiveType.OptionalWriteManagedNode)
+        {
+            return PrimitiveType.OptionalManagedNode;
+        }
+        return (int)type is >= WriteFirst and < OptionalWriteFirst + 256
+            ? (PrimitiveType)((int)type - 512) : type;
+    }
+
+    /// <summary>The writable form of a managed handle, preserving nullability.</summary>
+    public static PrimitiveType Writable(PrimitiveType type)
+    {
+        if (type == PrimitiveType.ManagedNode)
+        {
+            return PrimitiveType.WriteManagedNode;
+        }
+        if (type == PrimitiveType.OptionalManagedNode)
+        {
+            return PrimitiveType.OptionalWriteManagedNode;
+        }
+        if ((int)type is >= First and < WriteFirst)
+        {
+            return (PrimitiveType)((int)type + 512);
+        }
+        if (!IsWritable(type))
+        {
+            throw new ArgumentOutOfRangeException(nameof(type));
+        }
+        return type;
+    }
 
     /// <summary>The non-null type stored by an optional managed handle.</summary>
-    public static PrimitiveType Required(PrimitiveType type) => type == PrimitiveType.OptionalManagedNode
-        ? PrimitiveType.ManagedNode : (PrimitiveType)((int)type - 256);
+    public static PrimitiveType Required(PrimitiveType type)
+    {
+        if (type == PrimitiveType.OptionalManagedNode)
+        {
+            return PrimitiveType.ManagedNode;
+        }
+        if (type == PrimitiveType.OptionalWriteManagedNode)
+        {
+            return PrimitiveType.WriteManagedNode;
+        }
+        if (!IsOptional(type))
+        {
+            throw new ArgumentOutOfRangeException(nameof(type));
+        }
+        return (PrimitiveType)((int)type - 256);
+    }
 
     /// <summary>The optional form of an existing managed handle.</summary>
-    public static PrimitiveType Optional(PrimitiveType type) => type == PrimitiveType.ManagedNode
-        ? PrimitiveType.OptionalManagedNode : (PrimitiveType)((int)type + 256);
+    public static PrimitiveType Optional(PrimitiveType type)
+    {
+        if (type == PrimitiveType.ManagedNode)
+        {
+            return PrimitiveType.OptionalManagedNode;
+        }
+        if (type == PrimitiveType.WriteManagedNode)
+        {
+            return PrimitiveType.OptionalWriteManagedNode;
+        }
+        if (!IsClass(type))
+        {
+            throw new ArgumentOutOfRangeException(nameof(type));
+        }
+        return (PrimitiveType)((int)type + 256);
+    }
 
     /// <summary>Whether a type is a managed reference handled by the image-private collector.</summary>
-    public static bool IsManaged(PrimitiveType type) => type == PrimitiveType.ManagedNode
+    public static bool IsManaged(PrimitiveType type) => type is PrimitiveType.ManagedNode
+        or PrimitiveType.WriteManagedNode
         || IsClass(type) || IsOptional(type);
 }
 
@@ -140,6 +230,8 @@ public sealed record BoundClass(string Name, ImmutableArray<BoundStructField> Fi
 {
     /// <summary>Whether access is limited to the current compilation.</summary>
     public bool IsInternal { get; init; }
+    /// <summary>Whether writable handles to this class may be published.</summary>
+    public bool IsMutable { get; init; }
 }
 
 /// <summary>A compact value type of at most sixteen bytes, with no references or aliases.</summary>
@@ -354,6 +446,9 @@ public sealed record BoundNull(PrimitiveType Type, TextSpan Span) : BoundExpress
 
 /// <summary>Widens a known non-null handle without changing its pointer bits.</summary>
 public sealed record BoundOptionalLift(BoundExpression Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
+/// <summary>Projects a writable managed handle to readonly without changing its pointer bits.</summary>
+public sealed record BoundReadonlyProjection(BoundExpression Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
 /// <summary>Tests an optional handle for absence.</summary>
 public sealed record BoundIsNull(BoundExpression Value, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span);

@@ -12,6 +12,18 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class ParserTests
 {
     [Theory]
+    [InlineData("mut class Leaf { public mut int32 Value; public Leaf(int32 value) { Value = value; } public mut void Set(int32 value) { Value = value; } }")]
+    [InlineData("bool Create(out write ManagedNode node) { return ManagedNode.TryCreate(42, out node); }")]
+    [InlineData("mut class Link { public mut write Link? Next; public Link() { Next = null; } }")]
+    [InlineData("void Update(write ManagedNode node) { node.SetValue(42); }")]
+    public void ParsesManagedWriteCapabilitiesWithoutLosingSource(string source)
+    {
+        var tree = SyntaxTree.Parse(source);
+        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        AssertLossless(tree);
+    }
+
+    [Theory]
     [InlineData("int32")]
     [InlineData("uint32")]
     [InlineData("int64")]

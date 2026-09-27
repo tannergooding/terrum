@@ -1,13 +1,13 @@
-class Leaf {
+mut class Leaf {
     public mut int32 Value;
     [NoThrow] public Leaf(int32 value) { Value = value; }
 }
 
-class Pair {
-    public Leaf First;
+mut class Pair {
+    public write Leaf First;
     public Leaf Second;
     public ManagedNode Extra;
-    [NoThrow] public Pair(Leaf first, Leaf second, ManagedNode extra) {
+    [NoThrow] public Pair(write Leaf first, Leaf second, ManagedNode extra) {
         First = first;
         Second = second;
         Extra = extra;
@@ -63,18 +63,18 @@ class CopyBox {
     [NoThrow] public CopyBox(int32 marker, bool ready, uint64 bits, FactoryPayload value) { Value = value; }
 }
 
-class ReplaceableEdge {
-    public mut Leaf Item;
-    [NoThrow] public ReplaceableEdge(Leaf item) { Item = item; }
+mut class ReplaceableEdge {
+    public mut write Leaf Item;
+    [NoThrow] public ReplaceableEdge(write Leaf item) { Item = item; }
 }
 
-ReplaceableEdge CreateReplaceableEdge() {
+write ReplaceableEdge CreateReplaceableEdge() {
     require Leaf.TryCreate(1, out var item);
     require ReplaceableEdge.TryCreate(item, out var edge);
     return edge;
 }
 
-int32 ReplaceAndCollect(ReplaceableEdge edge) {
+int32 ReplaceAndCollect(write ReplaceableEdge edge) {
     require Leaf.TryCreate(7, out var replacement);
     edge.Item = replacement;
     require ManagedHeap.Collect() == 0;
@@ -113,7 +113,7 @@ public int32 AliasUpdates() {
     require ManagedNode.TryCreate(0, out var extra);
     extra.SetNext(extra);
     require Pair.TryCreate(child, child, extra, out var pair);
-    var alias = pair.First;
+    write Leaf alias = pair.First;
     alias.Value = 21;
     require ManagedHeap.Collect() == 0;
     return pair.Sum();

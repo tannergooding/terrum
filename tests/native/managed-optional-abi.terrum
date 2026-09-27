@@ -1,5 +1,5 @@
-class Link {
-    public mut Link? Next;
+mut class Link {
+    public mut write Link? Next;
     public int32 Value;
     public Link(int32 value) {
         Next = null;
@@ -7,10 +7,10 @@ class Link {
     }
 }
 
-class OptionalEdges {
-    public mut Link? Item;
-    public mut ManagedNode? Node;
-    public OptionalEdges(Link? item, ManagedNode? node) {
+mut class OptionalEdges {
+    public mut write Link? Item;
+    public mut write ManagedNode? Node;
+    public OptionalEdges(write Link? item, write ManagedNode? node) {
         Item = null;
         ManagedHeap.Collect();
         Node = node;
@@ -30,14 +30,14 @@ void DiscardPairCycle() {
     second.Next = first;
 }
 
-OptionalEdges CreateOptionalEdges() {
+write OptionalEdges CreateOptionalEdges() {
     require Link.TryCreate(42, out var item);
     require ManagedNode.TryCreate(7, out var node);
     require OptionalEdges.TryCreate(item, node, out var edges);
     return edges;
 }
 
-int32 ReadSnapshot(OptionalEdges edges) {
+int32 ReadSnapshot(write OptionalEdges edges) {
     if (edges.Item is some item) {
         if (edges.Node is some node) {
             edges.Item = null;
@@ -50,7 +50,7 @@ int32 ReadSnapshot(OptionalEdges edges) {
     return 0;
 }
 
-bool TryNull(bool success, out Link? value) {
+bool TryNull(bool success, out write Link? value) {
     if (success) {
         value = null;
         return true;
@@ -85,7 +85,7 @@ public int32 OptionalNullOutput() {
 }
 
 public int32 OptionalAllocationFailure() {
-    Link? absent = null;
+    write Link? absent = null;
     if (OptionalEdges.TryCreate(absent, null, out var unpublished)) {
         return 0;
     }

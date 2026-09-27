@@ -28,7 +28,7 @@ public sealed partial class JitTests
                 public int64 Right;
                 public Wide(int64 left, int64 right) { Left = left; Right = right; }
             }
-            class Box {
+            mut class Box {
                 public bool Ready;
                 public mut Token Current;
                 public mut Wide Numbers;
@@ -85,24 +85,24 @@ public sealed partial class JitTests
                 public int64 Payload;
                 public Data(int32 kind) { Kind = kind; Payload = 1234567890123i64; }
             }
-            class Leaf {
+            mut class Leaf {
                 public mut Data Value;
                 public Leaf(int32 kind) { Value = new Data(kind); }
             }
-            class Holder {
-                public mut Leaf Target;
-                public Holder(Leaf target) { Target = target; }
+            mut class Holder {
+                public mut write Leaf Target;
+                public Holder(write Leaf target) { Target = target; }
             }
-            Leaf CreateOld() {
+            write Leaf CreateOld() {
                 require Leaf.TryCreate(1, out var old);
                 return old;
             }
-            Data Replace(Holder holder, Leaf replacement, Data next) {
+            Data Replace(write Holder holder, write Leaf replacement, Data next) {
                 holder.Target = replacement;
                 require ManagedHeap.Collect() == 0;
                 return next;
             }
-            int32 ReplaceKind(Holder holder, Leaf replacement) {
+            int32 ReplaceKind(write Holder holder, write Leaf replacement) {
                 holder.Target = replacement;
                 require ManagedHeap.Collect() == 0;
                 return 42;
@@ -149,19 +149,19 @@ public sealed partial class JitTests
                 public int32 Last;
                 public Data(int32 kind) { Kind = kind; Other = 2; Last = 3; }
             }
-            class Leaf {
+            mut class Leaf {
                 public mut Data Value;
                 public Leaf(int32 kind) { Value = new Data(kind); }
             }
-            class Holder {
-                public mut Leaf Target;
-                public Holder(Leaf target) { Target = target; }
+            mut class Holder {
+                public mut write Leaf Target;
+                public Holder(write Leaf target) { Target = target; }
             }
-            Leaf CreateOld() {
+            write Leaf CreateOld() {
                 require Leaf.TryCreate(1, out var old);
                 return old;
             }
-            Data Fail(Holder holder, Leaf replacement) {
+            Data Fail(write Holder holder, write Leaf replacement) {
                 holder.Target = replacement;
                 require false;
                 return new Data(42);

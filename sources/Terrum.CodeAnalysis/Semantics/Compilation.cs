@@ -156,8 +156,9 @@ public sealed class Compilation
             return "native-19";
         }
         if (program.Functions.Any(static function => function.Intrinsic >= BoundIntrinsic.NodeTryCreate
-            || function.ReturnType == PrimitiveType.ManagedNode
-            || function.Variables.Any(static variable => variable.Type == PrimitiveType.ManagedNode)))
+            || function.ReturnType is PrimitiveType.ManagedNode or PrimitiveType.WriteManagedNode
+            || function.Variables.Any(static variable => variable.Type is PrimitiveType.ManagedNode
+                or PrimitiveType.WriteManagedNode)))
         {
             return "native-18";
         }

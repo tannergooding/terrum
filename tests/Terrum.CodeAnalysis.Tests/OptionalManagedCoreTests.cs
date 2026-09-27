@@ -13,9 +13,9 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class OptionalManagedCoreTests
 {
     private const string Source = """
-        class Link {
+        mut class Link {
             public int32 Value;
-            public mut Link? Next;
+            public mut write Link? Next;
             public Link(int32 value) {
                 Value = value;
                 Next = null;

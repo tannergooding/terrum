@@ -20,7 +20,7 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class NativeManagedNodeTests
 {
     private const string Cycle = """
-        bool Retain(out ManagedNode result) {
+        bool Retain(out write ManagedNode result) {
             require ManagedNode.TryCreate(40, out var head);
             require ManagedNode.TryCreate(2, out var child);
             head.SetNext(child);
@@ -33,7 +33,7 @@ public sealed class NativeManagedNodeTests
             first.SetNext(second);
             second.SetNext(first);
         }
-        int32 Inspect(ManagedNode kept) {
+        int32 Inspect(write ManagedNode kept) {
             int32 freed = ManagedHeap.Collect();
             require freed == 2;
             require kept.TryGetNext(out var next);
@@ -43,7 +43,7 @@ public sealed class NativeManagedNodeTests
         int32 Main() {
             require Retain(out var kept);
             CreateCycle();
-            ManagedNode alias = kept;
+            write ManagedNode alias = kept;
             return Inspect(alias);
         }
         """;
@@ -89,7 +89,7 @@ public sealed class NativeManagedNodeTests
     public async Task ClearingAnEdgeMakesItsChildCollectibleAsync()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            bool Build(out ManagedNode result) {
+            bool Build(out write ManagedNode result) {
                 require ManagedNode.TryCreate(40, out var parent);
                 require ManagedNode.TryCreate(2, out var child);
                 parent.SetNext(child);
@@ -113,7 +113,7 @@ public sealed class NativeManagedNodeTests
     public async Task ForConditionAndIteratorManagedOutputsRetireAfterTheLoopAsync()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            bool Make(int32 value, out ManagedNode result) {
+            bool Make(int32 value, out write ManagedNode result) {
                 if (value == 1) { return false; }
                 return ManagedNode.TryCreate(value, out result);
             }

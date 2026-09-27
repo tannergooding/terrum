@@ -11,6 +11,40 @@ public sealed partial class JitTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public Task WritableOptionalFieldProjectionAndReadonlyReceiverArgumentAgreeAcrossAotAndJitAsync(
+        bool checkedFailures)
+    {
+        const string Source = """
+            mut class Leaf {
+                public mut int32 Value;
+                public Leaf(int32 value) { Value = value; }
+            }
+            class Holder {
+                public write Leaf? Child;
+                public Holder(write Leaf child) { Child = child; }
+                public void Update(write Leaf target) { target.Value = 42; }
+            }
+            bool Create(out write Leaf result) {
+                return Leaf.TryCreate(40, out result);
+            }
+            int32 Main() {
+                require Create(out var leaf);
+                require Holder.TryCreate(leaf, out var holder);
+                write Leaf? optional = holder.Child;
+                require optional is some projected;
+                holder.Update(projected);
+                require holder.Child is some field;
+                require field.Value == 42 && ManagedHeap.Collect() == 0;
+                return leaf.Value;
+            }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task ManagedClassSampleAgreesBetweenAotAndJitAsync(bool checkedFailures)
     {
         var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "samples", "native",
@@ -49,16 +83,16 @@ public sealed partial class JitTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public Task MutableLeafFieldCanBeWrittenThroughImmutableManagedHandleChainAsync(bool checkedFailures)
+    public Task ExplicitlyWritableLeafFieldCanBeWrittenThroughReadonlyManagedHandleChainAsync(bool checkedFailures)
     {
         const string Source = """
-            class Leaf {
+            mut class Leaf {
                 public mut int32 Value;
                 public Leaf(int32 value) { Value = value; }
             }
             class Pair {
-                public Leaf Left;
-                public Pair(Leaf left) { Left = left; }
+                public write Leaf Left;
+                public Pair(write Leaf left) { Left = left; }
             }
             class Wrapper {
                 public Pair Parent;

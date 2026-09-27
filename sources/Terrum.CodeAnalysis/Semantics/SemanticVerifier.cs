@@ -156,7 +156,7 @@ public static class SemanticVerifier
                 var width = ValueLayout.Size(field.Type, program.Structures);
                 var alignment = width == 0 ? 1 : ValueLayout.Alignment(field.Type, program.Structures);
                 offset = (offset + alignment - 1) & -alignment;
-                if (field.Size != width || field.Offset != offset
+                if (field.Size != width || field.Offset != offset || (field.IsMutable && !@class.IsMutable)
                     || width is < 1 or > ValueLayout.MaximumSize
                     || offset + width > ManagedClassTypes.MaximumPayload
                     || string.IsNullOrWhiteSpace(field.Name) || !fieldNames.Add(field.Name)
@@ -338,8 +338,14 @@ public static class SemanticVerifier
                     || (function.IsConstructor && function.IsStatic)
                     || (!function.IsStatic && (function.Variables.IsEmpty
                         || function.Variables[0].Name != "this"
-                        || function.Variables[0].Type != (PrimitiveType)(declaringType >= ManagedClassTypes.First
-                            ? declaringType : 100 + declaringType)
+                        || ManagedClassTypes.Readonly(function.Variables[0].Type)
+                            != (PrimitiveType)(declaringType >= ManagedClassTypes.First
+                                ? declaringType : 100 + declaringType)
+                        || (declaringType >= ManagedClassTypes.First
+                            && ManagedClassTypes.IsWritable(function.Variables[0].Type)
+                            && !program.Classes[declaringType - ManagedClassTypes.First].IsMutable)
+                        || (declaringType >= ManagedClassTypes.First && !function.IsClassConstructor
+                            && function.Variables[0].IsMutable)
                         || (!function.IsConstructor && function.ParameterCount < 1))))
                 {
                     throw Invalid();
@@ -411,7 +417,8 @@ public static class SemanticVerifier
             var classType = (PrimitiveType)(ManagedClassTypes.First + classIndex);
             if (program.Functions.Count(function => function.IsClassConstructor
                 && function.DeclaringStruct == @class.Name
-                && function.Variables[0].Type == classType) != 1
+                && function.Variables[0].Type == (@class.IsMutable
+                    ? ManagedClassTypes.Writable(classType) : classType)) != 1
                 || program.Functions.Count(function => function.Intrinsic == BoundIntrinsic.ClassTryCreate
                     && function.DeclaringStruct == @class.Name) != 1)
             {
@@ -577,6 +584,9 @@ public static class SemanticVerifier
                     break;
                 case BoundOptionalLift lift:
                     Expression(lift.Value, scope, depth + 1);
+                    break;
+                case BoundReadonlyProjection projection:
+                    Expression(projection.Value, scope, depth + 1);
                     break;
                 case BoundIsNull test:
                     Expression(test.Value, scope, depth + 1);
@@ -1006,6 +1016,9 @@ public static class SemanticVerifier
                     break;
                 case BoundOptionalLift lift:
                     Expression(lift.Value, depth + 1, acquiringRoot);
+                    break;
+                case BoundReadonlyProjection projection:
+                    Expression(projection.Value, depth + 1, acquiringRoot);
                     break;
                 case BoundIsNull test:
                     Expression(test.Value, depth + 1, acquiringRoot);
@@ -1454,6 +1467,13 @@ public static class SemanticVerifier
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
                 var targetField = Fields(program, ownerType)[fieldAssignment.Field];
+                if (ManagedClassTypes.IsClass(ownerType) && !ManagedClassTypes.IsWritable(ownerType)
+                    && !((function.IsConstructor || function.IsClassConstructor)
+                        && fieldAssignment.Variable == 0 && fieldAssignment.NestedFields.IsEmpty)
+                    && (fieldAssignment.NestedFields.IsEmpty || !ManagedClassTypes.IsClass(targetField.Type)))
+                {
+                    throw Invalid();
+                }
                 if (IsUnique(program, targetField.Type)
                     && (!function.IsConstructor || fieldAssignment.Variable != 0
                         || !fieldAssignment.NestedFields.IsEmpty
@@ -1485,6 +1505,12 @@ public static class SemanticVerifier
                         throw Invalid();
                     }
                     targetField = Fields(program, nestedType)[nestedField];
+                    if (ManagedClassTypes.IsClass(nestedType) && !ManagedClassTypes.IsWritable(nestedType)
+                        && (index == fieldAssignment.NestedFields.Length - 1
+                            || !ManagedClassTypes.IsClass(targetField.Type)))
+                    {
+                        throw Invalid();
+                    }
                     if (IsUnique(program, nestedType))
                     {
                         throw InvalidEffect(fieldAssignment.Span, "Ownership");
@@ -2199,6 +2225,15 @@ public static class SemanticVerifier
                 Expression(lift.Value, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures);
                 break;
+            case BoundReadonlyProjection projection:
+                if (projection.Value is null || !ManagedClassTypes.IsWritable(projection.Value.Type)
+                    || projection.Type != ManagedClassTypes.Readonly(projection.Value.Type))
+                {
+                    throw Invalid();
+                }
+                Expression(projection.Value, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+                break;
             case BoundIsNull test:
                 if (test.Value is null || !ManagedClassTypes.IsOptional(test.Value.Type))
                 {
@@ -2595,16 +2630,18 @@ public static class SemanticVerifier
             or PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode
             || (allowVoid && type == PrimitiveType.Void)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length)
-            || (ManagedClassTypes.IsClass(type)
-                && (int)type - ManagedClassTypes.First < program.Classes.Length)
-            || (ManagedClassTypes.IsOptional(type) && type != PrimitiveType.OptionalManagedNode
-                && (int)type - ManagedClassTypes.OptionalFirst < program.Classes.Length);
+            || (ManagedClassTypes.IsManaged(type) && (ManagedClassTypes.Readonly(type) is
+                PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode))
+            || ((ManagedClassTypes.IsClass(type) || (ManagedClassTypes.IsOptional(type)
+                && type is not (PrimitiveType.OptionalManagedNode or PrimitiveType.OptionalWriteManagedNode)))
+                && ManagedClassTypes.ClassIndex(type) < program.Classes.Length
+                && (!ManagedClassTypes.IsWritable(type)
+                    || program.Classes[ManagedClassTypes.ClassIndex(type)].IsMutable));
 
     internal static bool IsClassArgumentType(PrimitiveType type, IReadOnlyList<BoundStruct> structures) =>
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
             or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool
-            or PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode
-            || ManagedClassTypes.IsClass(type) || ManagedClassTypes.IsOptional(type)
+            || ManagedClassTypes.IsManaged(type)
             || ((int)type >= 100 && (int)type - 100 < structures.Count
                 && !structures[(int)type - 100].IsUnique);
 
@@ -2634,8 +2671,9 @@ public static class SemanticVerifier
             || constructor.ParameterCount < 1 || constructor.ParameterCount > MaximumArguments
             || constructor.Variables.Length < constructor.ParameterCount
             || !ManagedClassTypes.IsClass(type)
-            || (int)type - ManagedClassTypes.First >= program.Classes.Length
-            || program.Classes[(int)type - ManagedClassTypes.First].Name != name
+            || ManagedClassTypes.ClassIndex(type) >= program.Classes.Length
+            || program.Classes[ManagedClassTypes.ClassIndex(type)].Name != name
+            || ManagedClassTypes.IsWritable(type) != program.Classes[ManagedClassTypes.ClassIndex(type)].IsMutable
             || !constructor.IsClassConstructor || constructor.DeclaringStruct != name
             || function.IsPrivate != constructor.IsPrivate
             || function.IsInternal != !constructor.IsPrivate
@@ -2681,6 +2719,7 @@ public static class SemanticVerifier
             BoundUnary unary => InvalidatesReservedOwner(unary.Operand, variable, ref remaining, depth + 1),
             BoundCast cast => InvalidatesReservedOwner(cast.Operand, variable, ref remaining, depth + 1),
             BoundOptionalLift lift => InvalidatesReservedOwner(lift.Value, variable, ref remaining, depth + 1),
+            BoundReadonlyProjection projection => InvalidatesReservedOwner(projection.Value, variable, ref remaining, depth + 1),
             BoundIsNull test => InvalidatesReservedOwner(test.Value, variable, ref remaining, depth + 1),
             BoundIsSome pattern => InvalidatesReservedOwner(pattern.Value, variable, ref remaining, depth + 1),
             BoundBinary binary => InvalidatesReservedOwner(binary.Left, variable, ref remaining, depth + 1)
@@ -2707,19 +2746,19 @@ public static class SemanticVerifier
 
     private static bool HasFields(BoundProgram program, PrimitiveType type) =>
         ManagedClassTypes.IsClass(type)
-            ? (int)type - ManagedClassTypes.First < program.Classes.Length
+            ? ManagedClassTypes.ClassIndex(type) < program.Classes.Length
             : (int)type >= 100 && (int)type < ManagedClassTypes.First
                 && (int)type - 100 < program.Structures.Length;
 
     private static ImmutableArray<BoundStructField> Fields(BoundProgram program, PrimitiveType type) =>
-        ManagedClassTypes.IsClass(type) ? program.Classes[(int)type - ManagedClassTypes.First].Fields
+        ManagedClassTypes.IsClass(type) ? program.Classes[ManagedClassTypes.ClassIndex(type)].Fields
             : program.Structures[(int)type - 100].Fields;
 
     private static bool CanAccessField(BoundFunction function, BoundProgram program, PrimitiveType type,
         int field) =>
         ManagedClassTypes.IsClass(type)
-            ? !program.Classes[(int)type - ManagedClassTypes.First].Fields[field].IsPrivate
-                || function.DeclaringStruct == program.Classes[(int)type - ManagedClassTypes.First].Name
+            ? !program.Classes[ManagedClassTypes.ClassIndex(type)].Fields[field].IsPrivate
+                || function.DeclaringStruct == program.Classes[ManagedClassTypes.ClassIndex(type)].Name
             : CanAccessField(function, program.Structures[(int)type - 100], field);
 
     private static bool CanAccessField(BoundFunction function, BoundStruct structure, int field) =>
@@ -2835,6 +2874,9 @@ public static class SemanticVerifier
                 break;
             case BoundOptionalLift lift:
                 VacateNestedOutputs(lift.Value, state, ref remaining);
+                break;
+            case BoundReadonlyProjection projection:
+                VacateNestedOutputs(projection.Value, state, ref remaining);
                 break;
             case BoundIsNull test:
                 VacateNestedOutputs(test.Value, state, ref remaining);

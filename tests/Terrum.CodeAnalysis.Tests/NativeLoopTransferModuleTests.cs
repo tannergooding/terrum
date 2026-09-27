@@ -169,7 +169,7 @@ public sealed class NativeLoopTransferModuleTests
     }
 
     [Fact]
-    public void Versions18Through20RejectNewTagsAndPreserveOldWriters()
+    public void ClassAccessVersionsRejectForgedTagsAndPreserveScalarWriters()
     {
         var policy = NativeRuntimePolicy.FailFast;
         var oldProgram = Compile("public int32 Leaf() { return 42; }", policy);
@@ -183,12 +183,12 @@ public sealed class NativeLoopTransferModuleTests
             public int32 Leaf() { require Box.TryCreate(out var box); return box.Value; }
             """, policy);
         var classOnly = ModuleCompiler.CreateProducer(classProgram, ["Leaf"]);
-        Assert.Equal(19, VersionOf(classOnly));
+        Assert.Equal(24, VersionOf(classOnly));
         _ = ModuleCompiler.CreateReference(classOnly);
         var copyProgram = Compile(File.ReadAllText(Path.Combine(RepositoryRoot(),
             "samples", "native", "graph", "managed-copy-class-leaf.terrum")), policy);
         var copy = ModuleCompiler.CreateProducer(copyProgram, ["Leaf"]);
-        Assert.Equal(20, VersionOf(copy));
+        Assert.Equal(24, VersionOf(copy));
         _ = ModuleCompiler.CreateReference(copy);
         foreach (var (legacy, program) in new[] {
             (old, oldProgram), (classOnly, classProgram), (copy, copyProgram),
@@ -200,7 +200,7 @@ public sealed class NativeLoopTransferModuleTests
             _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(invalid));
         }
         var transferred = ModuleCompiler.CreateProducer(Compile(ClassLeaf, policy), ["Leaf"]);
-        Assert.Equal(21, VersionOf(transferred));
+        Assert.Equal(24, VersionOf(transferred));
         var downgraded = (byte[])transferred.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 19);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded));

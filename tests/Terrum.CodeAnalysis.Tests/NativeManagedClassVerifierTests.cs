@@ -11,7 +11,7 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class NativeManagedClassVerifierTests
 {
     private const string Source = """
-        class Leaf {
+        mut class Leaf {
             public mut int32 Value;
             public Leaf(int32 value) { Value = value; }
         }
@@ -225,13 +225,13 @@ public sealed class NativeManagedClassVerifierTests
     }
 
     [Fact]
-    public void ClassMethodsCanWriteMutableFieldsThroughFixedReceivers()
+    public void MutableClassMethodsCanWriteFieldsThroughWritableReceivers()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            class Leaf {
+            mut class Leaf {
                 public mut int32 Value;
                 public Leaf(int32 value) { Value = value; }
-                public void Advance() {
+                public mut void Advance() {
                     Value = Value + 1;
                     this.Value = Value + 1;
                 }
@@ -300,16 +300,16 @@ public sealed class NativeManagedClassVerifierTests
     }
 
     [Fact]
-    public void PermitsWritesThroughFixedManagedEdgesToMutableFields()
+    public void PermitsWritesThroughExplicitlyWritableManagedEdges()
     {
         var source = """
-            class Leaf {
+            mut class Leaf {
                 public mut int32 Value;
                 public Leaf(int32 value) { Value = value; }
             }
             class Pair {
-                public Leaf Left;
-                public Pair(Leaf left) { Left = left; }
+                public write Leaf Left;
+                public Pair(write Leaf left) { Left = left; }
             }
             int32 Main() {
                 require Leaf.TryCreate(40, out var leaf);
@@ -321,6 +321,54 @@ public sealed class NativeManagedClassVerifierTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         SemanticVerifier.Verify(Assert.IsType<BoundProgram>(compilation.Program));
+    }
+
+    [Fact]
+    public void ForgedReadonlyProjectionAndReadonlyFieldWriteCannotManufactureAuthority()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            mut class Leaf {
+                public mut int32 Value;
+                public Leaf(int32 value) { Value = value; }
+            }
+            int32 Observe(Leaf leaf) { return leaf.Value; }
+            int32 Main() {
+                require Leaf.TryCreate(40, out var leaf);
+                Leaf view = leaf;
+                leaf.Value = 42;
+                return Observe(leaf);
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var main = program.Functions[program.EntryPoint];
+        var view = Array.FindIndex(main.Variables.ToArray(),
+            static variable => variable.Name == "view");
+        var projection = new BoundReadonlyProjection(
+            new BoundRead(view, (PrimitiveType)ManagedClassTypes.First, main.Span),
+            (PrimitiveType)ManagedClassTypes.First, main.Span);
+        var returned = Assert.IsType<BoundReturn>(main.Body.Statements[^1]);
+        var call = Assert.IsType<BoundCall>(returned.Value);
+        var forged = main with {
+            Body = main.Body with {
+                Statements = main.Body.Statements.SetItem(main.Body.Statements.Length - 1,
+                    returned with { Value = call with { Arguments = call.Arguments.SetItem(0, projection) } }),
+            },
+        };
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+            Functions = program.Functions.SetItem(program.EntryPoint, forged),
+        }));
+
+        var assignment = Assert.Single(main.Body.Statements.OfType<BoundFieldAssignment>());
+        var index = main.Body.Statements.IndexOf(assignment);
+        forged = main with {
+            Body = main.Body with {
+                Statements = main.Body.Statements.SetItem(index, assignment with { Variable = view }),
+            },
+        };
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+            Functions = program.Functions.SetItem(program.EntryPoint, forged),
+        }));
     }
 
     private static BoundProgram Compile()

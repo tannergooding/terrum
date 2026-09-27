@@ -427,6 +427,7 @@ public sealed class Lexer
         "void" => TokenKind.VoidKeyword,
         "var" => TokenKind.VarKeyword,
         "mut" => TokenKind.MutKeyword,
+        "write" => TokenKind.WriteKeyword,
         "ref" => TokenKind.RefKeyword,
         "out" => TokenKind.OutKeyword,
         "if" => TokenKind.IfKeyword,

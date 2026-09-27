@@ -58,7 +58,7 @@ public sealed class NativeManagedNodeModuleTests
 
     [Theory]
     [InlineData("public ManagedNode Leak() { require ManagedNode.TryCreate(42, out var node); return node; }", "Leak")]
-    [InlineData("public bool Leak(out ManagedNode node) { return ManagedNode.TryCreate(42, out node); }", "Leak")]
+    [InlineData("public bool Leak(out write ManagedNode node) { return ManagedNode.TryCreate(42, out node); }", "Leak")]
     public void ManagedHandlesCannotCrossNativePackageExports(string source, string export)
     {
         var program = Compile(source, NativeRuntimePolicy.FailFast);
@@ -89,7 +89,7 @@ public sealed class NativeManagedNodeModuleTests
     {
         var program = Compile(Sample(), NativeRuntimePolicy.FailFast);
         var contract = ModuleCompiler.CreateProducer(program, ["Leaf"]);
-        Assert.Equal(18, BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
+        Assert.Equal(24, BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)));
         Assert.Equal("native-18", ModuleCompiler.GetNativeProfileVersion(contract, false));
         var profile = (byte[])contract.Clone();
         var label = Encoding.UTF8.GetBytes("native-18");

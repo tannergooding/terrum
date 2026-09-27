@@ -12,17 +12,17 @@ internal static class NativeManagedNodeIntrinsics
 
     internal static ImmutableArray<BoundFunction> Functions { get; } = [
         Function(BoundIntrinsic.NodeTryCreate, TypeName, "TryCreate", PrimitiveType.Bool,
-            [Variable("value", PrimitiveType.Int32), Variable("node", PrimitiveType.ManagedNode, isOut: true)]),
+            [Variable("value", PrimitiveType.Int32), Variable("node", PrimitiveType.WriteManagedNode, isOut: true)]),
         Function(BoundIntrinsic.NodeValue, TypeName, "Value", PrimitiveType.Int32,
             [Variable("this", PrimitiveType.ManagedNode)]),
         Function(BoundIntrinsic.NodeSetValue, TypeName, "SetValue", PrimitiveType.Void,
-            [Variable("this", PrimitiveType.ManagedNode), Variable("value", PrimitiveType.Int32)]),
+            [Variable("this", PrimitiveType.WriteManagedNode), Variable("value", PrimitiveType.Int32)]),
         Function(BoundIntrinsic.NodeSetNext, TypeName, "SetNext", PrimitiveType.Void,
-            [Variable("this", PrimitiveType.ManagedNode), Variable("next", PrimitiveType.ManagedNode)]),
+            [Variable("this", PrimitiveType.WriteManagedNode), Variable("next", PrimitiveType.WriteManagedNode)]),
         Function(BoundIntrinsic.NodeClearNext, TypeName, "ClearNext", PrimitiveType.Void,
-            [Variable("this", PrimitiveType.ManagedNode)]),
+            [Variable("this", PrimitiveType.WriteManagedNode)]),
         Function(BoundIntrinsic.NodeTryGetNext, TypeName, "TryGetNext", PrimitiveType.Bool,
-            [Variable("this", PrimitiveType.ManagedNode), Variable("next", PrimitiveType.ManagedNode, isOut: true)]),
+            [Variable("this", PrimitiveType.ManagedNode), Variable("next", PrimitiveType.WriteManagedNode, isOut: true)]),
         Function(BoundIntrinsic.NodeCollect, HeapName, "Collect", PrimitiveType.Int32, []),
     ];
 

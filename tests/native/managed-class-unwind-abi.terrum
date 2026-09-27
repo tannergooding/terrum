@@ -32,7 +32,7 @@ public void EscapeConstructorToNative() {
         new FactoryPayload(42i64), retained, false, out var unpublished);
 }
 
-int32 ReplaceCollectAndFail(ReplaceableEdge edge) {
+int32 ReplaceCollectAndFail(write ReplaceableEdge edge) {
     var result = ReplaceAndCollect(edge);
     require false;
     return result;

@@ -60,7 +60,7 @@ public sealed partial class JitTests
             if (depth == 0) { return ManagedHeap.Collect(); }
             return CollectNested(depth - 1);
         }
-        void Attach(ManagedNode parent) {
+        void Attach(write ManagedNode parent) {
             require ManagedNode.TryCreate(42, out var child);
             parent.SetNext(child);
         }
@@ -101,7 +101,7 @@ public sealed partial class JitTests
         }
         """)]
     [InlineData("""
-        bool Refuse(out ManagedNode result) {
+        bool Refuse(out write ManagedNode result) {
             require ManagedNode.TryCreate(42, out var created);
             result = created;
             return false;
@@ -113,7 +113,7 @@ public sealed partial class JitTests
         }
         """)]
     [InlineData("""
-        bool CreateAndCollect(out ManagedNode result) {
+        bool CreateAndCollect(out write ManagedNode result) {
             require ManagedNode.TryCreate(42, out result);
             require ManagedHeap.Collect() == 0;
             return true;
@@ -125,23 +125,23 @@ public sealed partial class JitTests
         }
         """)]
     [InlineData("""
-        ManagedNode Create() {
+        write ManagedNode Create() {
             require ManagedNode.TryCreate(1, out var node);
             return node;
         }
-        bool Refuse(out ManagedNode result) {
+        bool Refuse(out write ManagedNode result) {
             require ManagedNode.TryCreate(2, out result);
             return false;
         }
         int32 Main() {
-            mut ManagedNode current = Create();
+            mut write ManagedNode current = Create();
             if (Refuse(out current)) { return 1; }
             if (ManagedHeap.Collect() != 2) { return 2; }
             return 42;
         }
         """)]
     [InlineData("""
-        void Attach(ManagedNode parent) {
+        void Attach(write ManagedNode parent) {
             require ManagedNode.TryCreate(42, out var child);
             parent.SetNext(child);
         }
@@ -156,7 +156,7 @@ public sealed partial class JitTests
         }
         """)]
     [InlineData("""
-        bool CreatePair(out ManagedNode first, out ManagedNode second) {
+        bool CreatePair(out write ManagedNode first, out write ManagedNode second) {
             require ManagedNode.TryCreate(20, out first);
             require ManagedHeap.Collect() == 0;
             require ManagedNode.TryCreate(22, out second);
@@ -204,7 +204,7 @@ public sealed partial class JitTests
         }
         int32 Main() {
             require ManagedNode.TryCreate(20, out var original);
-            mut ManagedNode current = original;
+            mut write ManagedNode current = original;
             {
                 require ManagedNode.TryCreate(22, out var replacement);
                 current = replacement;
@@ -229,12 +229,12 @@ public sealed partial class JitTests
         }
         """)]
     [InlineData("""
-        ManagedNode Create() {
+        write ManagedNode Create() {
             require ManagedNode.TryCreate(0, out var node);
             return node;
         }
         int32 Main() {
-            for (ManagedNode node = Create(); node.Value < 1; node.SetValue(node.Value + 1)) {
+            for (write ManagedNode node = Create(); node.Value < 1; node.SetValue(node.Value + 1)) {
                 require ManagedHeap.Collect() == 0;
             }
             if (ManagedHeap.Collect() != 1) { return 1; }
@@ -244,7 +244,7 @@ public sealed partial class JitTests
     [InlineData("""
         int32 Main() {
             require ManagedNode.TryCreate(0, out var head);
-            mut ManagedNode tail = head;
+            mut write ManagedNode tail = head;
             mut int32 count = 1;
             while (count < 4096) {
                 require ManagedNode.TryCreate(count, out var next);

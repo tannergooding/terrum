@@ -1,4 +1,4 @@
-class Leaf {
+mut class Leaf {
     public mut int32 Value;
     public int32 Stamp;
 
@@ -10,13 +10,13 @@ class Leaf {
     public int32 Get() { return Value; }
 }
 
-class Pair {
-    public Leaf Left;
+mut class Pair {
+    public write Leaf Left;
     public mut Leaf Right;
     public ManagedNode Edge;
     public int32 Serial;
 
-    public Pair(Leaf left, Leaf right, ManagedNode edge) {
+    public Pair(write Leaf left, Leaf right, ManagedNode edge) {
         Left = left;
         require ManagedHeap.Collect() == 0;
         Right = right;
@@ -27,7 +27,7 @@ class Pair {
     public int32 Total() { return Left.Get() + Right.Get() + Edge.Value; }
 }
 
-bool Build(out Pair result) {
+bool Build(out write Pair result) {
     require Leaf.TryCreate(19, 1, out var left);
     require Leaf.TryCreate(3, 2, out var right);
     require ManagedNode.TryCreate(1, out var edge);
@@ -37,7 +37,7 @@ bool Build(out Pair result) {
 
 int32 Main() {
     require Build(out var pair);
-    Leaf alias = pair.Left;
+    write Leaf alias = pair.Left;
     Pair same = pair;
     alias.Value = 38;
     if (ManagedHeap.Collect() != 0) { return 1; }

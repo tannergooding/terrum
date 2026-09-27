@@ -60,7 +60,7 @@ public sealed partial class JitTests
         }
         """)]
     [InlineData("""
-        bool CreateAndFail(out ManagedNode result) {
+        bool CreateAndFail(out write ManagedNode result) {
             require ManagedNode.TryCreate(42, out result);
             require false;
             return true;
@@ -136,7 +136,7 @@ public sealed partial class JitTests
         }
         """)]
     [InlineData("""
-        bool Refuse(out ManagedNode result) {
+        bool Refuse(out write ManagedNode result) {
             require ManagedNode.TryCreate(42, out result);
             return false;
         }

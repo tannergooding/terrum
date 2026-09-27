@@ -12,8 +12,93 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NativeManagedClassTests
 {
+    [Theory]
+    [InlineData("write int32 value = 42;")]
+    [InlineData("write Leaf value = leaf;")]
+    [InlineData("write Pair value = new Pair(42);")]
+    [InlineData("Span<mut Leaf> value = leaf;")]
+    public void WriteQualifierDoesNotOpenUnsupportedTypes(string declaration)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            class Leaf {
+                public int32 Value;
+                public Leaf(int32 value) { Value = value; }
+            }
+            struct Pair {
+                public int32 Value;
+                public Pair(int32 value) { Value = value; }
+            }
+            int32 Main() {
+                require Leaf.TryCreate(42, out var leaf);
+            """ + declaration + " return leaf.Value; }"));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData("mut Leaf alias = leaf; alias.Value = 0;")]
+    [InlineData("Leaf alias = leaf; alias.Value = 0;")]
+    [InlineData("Leaf? alias = leaf; require alias is some projected; projected.Value = 0;")]
+    [InlineData("write Leaf writable = leaf; Leaf view = writable; view.Value = 0;")]
+    public void LocalRebindingAndReadonlyProjectionsDoNotUpgradeReferentAccess(string body)
+    {
+        var source = """
+            mut class Leaf {
+                public mut int32 Value;
+                public Leaf(int32 value) { Value = value; }
+            }
+            int32 Main() {
+                require Leaf.TryCreate(42, out var leaf);
+            """ + body + """
+                return leaf.Value;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData("mut class Leaf { public mut int32 Value; public Leaf(int32 value) { Value = value; } } bool Forward(out Leaf leaf) { return Leaf.TryCreate(42, out leaf); }")]
+    [InlineData("bool Forward(out ManagedNode node) { return ManagedNode.TryCreate(42, out node); }")]
+    public void FactoryOutputsRequireExactWritableStorage(string source)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData("""
+        mut class Leaf {
+            public mut int32 Value;
+            public Leaf(int32 value) { Value = value; }
+            public mut void Reset() { Value = 0; }
+        }
+        int32 Main() {
+            require Leaf.TryCreate(42, out var writable);
+            Leaf view = writable;
+            view.Reset();
+            return writable.Value;
+        }
+        """)]
+    [InlineData("""
+        int32 Main() {
+            require ManagedNode.TryCreate(42, out var writable);
+            ManagedNode view = writable;
+            view.SetValue(0);
+            return writable.Value;
+        }
+        """)]
+    public void ReadonlyReceiversCannotCallMutatingMethods(string source)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
     private const string Leaf = """
-        class Leaf {
+        mut class Leaf {
             public mut int32 Value;
             private int32 Secret;
             public Leaf(int32 value) { Value = value; Secret = value; }
@@ -27,15 +112,15 @@ public sealed class NativeManagedClassTests
     public void RetainsHeterogeneousClassAndNodeEdges(BoundRuntimePolicy policy)
     {
         var source = """
-            class Leaf {
+            mut class Leaf {
                 public mut int32 Value;
                 public Leaf(int32 value) { Value = value; }
             }
-            class Pair {
-                public Leaf Left;
+            mut class Pair {
+                public write Leaf Left;
                 public mut Leaf Right;
                 public ManagedNode Edge;
-                public Pair(Leaf left, Leaf right, ManagedNode edge) {
+                public Pair(write Leaf left, Leaf right, ManagedNode edge) {
                     Left = left;
                     require ManagedHeap.Collect() == 0;
                     Right = right;
@@ -47,7 +132,7 @@ public sealed class NativeManagedClassTests
                 require Leaf.TryCreate(20, out var right);
                 require ManagedNode.TryCreate(2, out var edge);
                 require Pair.TryCreate(left, right, edge, out var pair);
-                Leaf alias = pair.Left;
+                write Leaf alias = pair.Left;
                 alias.Value = 21;
                 return pair.Left.Value + pair.Right.Value + pair.Edge.Value - 1;
             }

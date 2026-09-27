@@ -13,9 +13,9 @@ public sealed partial class JitTests
     public Task FullClassHeapTracesLongOptionalCycleAndReusesEverySlotAsync(bool checkedFailures)
     {
         const string Source = """
-            class Link {
+            mut class Link {
                 public int32 Value;
-                public mut Link? Next;
+                public mut write Link? Next;
                 public Link(int32 value) {
                     Value = value;
                     Next = null;
@@ -24,8 +24,8 @@ public sealed partial class JitTests
             int32 Main() {
                 for (mut int32 round = 0; round < 2; round = round + 1) {
                     {
-                        mut Link? head = null;
-                        mut Link? oldest = null;
+                        mut write Link? head = null;
+                        mut write Link? oldest = null;
                         for (mut int32 i = 0; i < 4096; i = i + 1) {
                             require Link.TryCreate(i, out var node);
                             node.Next = head;
@@ -61,7 +61,7 @@ public sealed partial class JitTests
                 public int32 Value;
                 public Leaf(int32 value) { Value = value; }
             }
-            class Mixed {
+            mut class Mixed {
                 public mut Leaf? First;
                 public uint64 Impostor;
                 public mut Leaf? Second;
@@ -75,7 +75,7 @@ public sealed partial class JitTests
                     Third = second;
                 }
             }
-            Mixed Create() {
+            write Mixed Create() {
                 require Leaf.TryCreate(40, out var first);
                 require Leaf.TryCreate(2, out var second);
                 require ManagedNode.TryCreate(7, out var node);

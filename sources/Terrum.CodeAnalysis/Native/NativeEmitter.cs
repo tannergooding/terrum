@@ -1019,6 +1019,8 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(cast.Operand, ref maximumArguments);
             case BoundOptionalLift lift:
                 return ExpressionSpills(lift.Value, ref maximumArguments);
+            case BoundReadonlyProjection projection:
+                return ExpressionSpills(projection.Value, ref maximumArguments);
             case BoundIsNull test:
                 return ExpressionSpills(test.Value, ref maximumArguments);
             case BoundIsSome pattern:
@@ -1078,8 +1080,7 @@ internal sealed partial class PeCompiler
         (int)type is >= 100 and < ManagedClassTypes.First;
     private static bool IsWide(PrimitiveType type) =>
         type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.OwnedInt32Buffer
-            or PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode
-            || ManagedClassTypes.IsClass(type) || ManagedClassTypes.IsOptional(type);
+            || ManagedClassTypes.IsManaged(type);
     private int Size(PrimitiveType type) => ValueLayout.Size(type, _program.Structures);
     private bool IsIndirect(PrimitiveType type) => IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8);
     private bool IsUnique(PrimitiveType type) =>
@@ -1598,7 +1599,7 @@ internal sealed partial class PeCompiler
                 var variable = _program.Functions[_currentFunction].Variables[fieldAssignment.Variable];
                 var fieldType = variable.Type;
                 var classField = ManagedClassTypes.IsClass(fieldType);
-                var field = classField ? _program.Classes[(int)fieldType - ManagedClassTypes.First]
+                var field = classField ? _program.Classes[ManagedClassTypes.ClassIndex(fieldType)]
                     .Fields[fieldAssignment.Field] : _program.Structures[(int)fieldType - 100].Fields[fieldAssignment.Field];
                 var destination = (variable.IsOut ? OutSlot(fieldAssignment.Variable) : Slot(fieldAssignment.Variable))
                     + field.Offset;
@@ -1613,7 +1614,7 @@ internal sealed partial class PeCompiler
                         {
                             _code.PointerOffset(32 + inlineOffset + field.Offset);
                             _code.Bytes(0x48, 0x8B, 0x00);
-                            field = _program.Classes[(int)containingType - ManagedClassTypes.First]
+                            field = _program.Classes[ManagedClassTypes.ClassIndex(containingType)]
                                 .Fields[nestedField];
                             inlineOffset = 0;
                         }
@@ -1970,6 +1971,9 @@ internal sealed partial class PeCompiler
             case BoundOptionalLift lift:
                 Expression(lift.Value, spill);
                 break;
+            case BoundReadonlyProjection projection:
+                Expression(projection.Value, spill);
+                break;
             case BoundIsNull test:
                 Expression(test.Value, spill);
                 _code.Bytes(0x48, 0x85, 0xC0, 0x0F, 0x94, 0xC0, 0x0F, 0xB6, 0xC0);
@@ -2027,8 +2031,8 @@ internal sealed partial class PeCompiler
                 if (ManagedClassTypes.IsClass(fieldRead.Receiver.Type))
                 {
                     Expression(fieldRead.Receiver, spill);
-                    var classField = _program.Classes[(int)fieldRead.Receiver.Type
-                        - ManagedClassTypes.First].Fields[fieldRead.Field];
+                    var classField = _program.Classes[ManagedClassTypes.ClassIndex(
+                        fieldRead.Receiver.Type)].Fields[fieldRead.Field];
                     if (IsIndirect(classField.Type))
                     {
                         _code.PointerOffset(32 + classField.Offset);

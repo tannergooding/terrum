@@ -1,8 +1,8 @@
 namespace Terrum.CodeAnalysis;
 
-class ManagedTokenLink {
+mut class ManagedTokenLink {
     public Token Value;
-    public mut ManagedTokenLink? Next;
+    public mut write ManagedTokenLink? Next;
 
     public ManagedTokenLink(Token token) {
         require token.Kind >= 0;
@@ -11,9 +11,9 @@ class ManagedTokenLink {
     }
 }
 
-class ManagedTokenChain {
-    private mut ManagedTokenLink? _first;
-    private mut ManagedTokenLink? _last;
+mut class ManagedTokenChain {
+    private mut write ManagedTokenLink? _first;
+    private mut write ManagedTokenLink? _last;
     private mut int32 _count;
     private mut int32 _version;
 
@@ -27,7 +27,7 @@ class ManagedTokenChain {
     public int32 GetCount() { return _count; }
     public int32 GetVersion() { return _version; }
 
-    public bool TryAppend(int32 kind, int32 sourceOffset, int32 sourceLength) {
+    public mut bool TryAppend(int32 kind, int32 sourceOffset, int32 sourceLength) {
         // Bound per-chain heap use and linear indexed reads to 64 links.
         if (kind < 0 || _count == 64 || _version == int32.MaxValue) {
             return false;
@@ -72,7 +72,7 @@ class ManagedTokenChain {
         return false;
     }
 
-    public bool TryClear() {
+    public mut bool TryClear() {
         if (_count == 0 || _version == int32.MaxValue) { return false; }
         _first = null;
         _last = null;

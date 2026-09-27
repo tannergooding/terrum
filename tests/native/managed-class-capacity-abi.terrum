@@ -1,6 +1,6 @@
-class CapacityLink {
+mut class CapacityLink {
     public int32 Value;
-    public mut CapacityLink? Next;
+    public mut write CapacityLink? Next;
 
     public CapacityLink(int32 value) {
         Value = value;
@@ -10,7 +10,7 @@ class CapacityLink {
 
 public int32 CapacityCycle() {
     require CapacityLink.TryCreate(0, out var first);
-    mut CapacityLink last = first;
+    mut write CapacityLink last = first;
     for (mut int32 index = 1; index < 4096; index = index + 1) {
         require CapacityLink.TryCreate(index, out var created);
         last.Next = created;

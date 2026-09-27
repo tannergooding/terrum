@@ -1,6 +1,6 @@
-class Cycle {
+mut class Cycle {
     public int32 Value;
-    public mut Cycle? Next;
+    public mut write Cycle? Next;
 
     public Cycle(int32 value) {
         Value = value;
@@ -8,9 +8,9 @@ class Cycle {
     }
 }
 
-Cycle? Keep(Cycle? value) { return value; }
+write Cycle? Keep(write Cycle? value) { return value; }
 
-bool TryKeep(Cycle? value, out Cycle? result) {
+bool TryKeep(write Cycle? value, out write Cycle? result) {
     if (value is null) { return false; }
     result = value;
     return true;
@@ -19,7 +19,7 @@ bool TryKeep(Cycle? value, out Cycle? result) {
 int32 MakeValue() {
     require Cycle.TryCreate(20, out var first);
     require Cycle.TryCreate(22, out var second);
-    Cycle? echoed = Keep(first);
+    write Cycle? echoed = Keep(first);
     require TryKeep(echoed, out var kept);
     require kept is some root;
     root.Next = second;

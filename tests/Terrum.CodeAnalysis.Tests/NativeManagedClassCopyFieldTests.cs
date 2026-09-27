@@ -129,7 +129,7 @@ public sealed class NativeManagedClassCopyFieldTests
                 public mut int32 Value;
                 public Small(int32 value) { Value = value; }
             }
-            class Box {
+            mut class Box {
                 public mut Small Data;
                 public Box() { Data = new Small(1); }
             }
@@ -156,7 +156,7 @@ public sealed class NativeManagedClassCopyFieldTests
                 public mut int32 Value;
                 public Small(int32 value) { Value = value; }
             }
-            class Box {
+            mut class Box {
                 public mut Small Data;
                 public Box() {
                     Data.Value = 42;

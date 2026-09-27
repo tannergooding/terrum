@@ -123,7 +123,7 @@ public sealed partial class JitTests
                 public int32 Third;
                 public Data(int32 first) { First = first; Second = 20; Third = 22; }
             }
-            class Source {
+            mut class Source {
                 public mut Data Value;
                 public Source(Data value) { Value = value; }
             }
@@ -136,7 +136,7 @@ public sealed partial class JitTests
                     Child = child;
                 }
             }
-            ManagedNode Replace(Source source) {
+            ManagedNode Replace(write Source source) {
                 source.Value = new Data(7);
                 require ManagedNode.TryCreate(2, out var child);
                 require ManagedHeap.Collect() == 0;

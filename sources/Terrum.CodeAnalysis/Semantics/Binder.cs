@@ -408,8 +408,15 @@ internal sealed partial class Binder
             if (signature.StructName is not null && _hasReceiver)
             {
                 var receiverType = ResolveDeclaredType(signature.StructName);
+                if (IsClass(receiverType)
+                    && _classes[ManagedClassTypes.ClassIndex(receiverType)].IsMutable
+                    && (signature.IsMutable || signature.IsClassConstructor))
+                {
+                    receiverType = ManagedClassTypes.Writable(receiverType);
+                }
                 _ = AddVariable("this", receiverType,
-                    signature.IsConstructor || signature.IsClassConstructor || signature.IsMutable, declaration.Span);
+                    signature.IsConstructor || signature.IsClassConstructor
+                        || (signature.IsMutable && !IsClass(receiverType)), declaration.Span);
             }
 
             foreach (var parameter in signature.Parameters)
@@ -743,9 +750,11 @@ internal sealed partial class Binder
             isPrivate = containingType is not null;
             isInternal = containingType is null;
         }
-        if (containingType is not null && isMutable && !constructor)
+        if (containingType is not null && isMutable && !constructor
+            && (!TryResolveClass(Qualify(containingType), out var mutableOwner)
+                || !_classes[ManagedClassTypes.ClassIndex(mutableOwner)].IsMutable || isStatic))
         {
-            Report("TRM3001", "Mutating instance methods require a receiver write-back ABI not present in this value profile.", declaration.Span);
+            Report("TRM3001", "A mut method requires a mut class instance receiver.", declaration.Span);
         }
 
         var returnNode = constructor ? null : (SyntaxNode)declaration.Children[operatorDeclaration ? ^5 : ^4];
@@ -845,8 +854,17 @@ internal sealed partial class Binder
     private PrimitiveType BindType(SyntaxNode node, bool allowVoid)
     {
         var name = NameText(node);
+        var writable = node.Children[0] is SyntaxTokenElement { Token.Kind: TokenKind.WriteKeyword };
+        if (writable)
+        {
+            name = name["write".Length..];
+        }
         if (_genericContext is GenericInstantiation generic && generic.Template.TypeParameter == name)
         {
+            if (writable)
+            {
+                Report("TRM3005", "write T requires a supported concrete managed handle.", node.Span);
+            }
             return generic.Type;
         }
         var optional = node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.Question };
@@ -869,6 +887,24 @@ internal sealed partial class Binder
             _ => resolution == DeclaredTypeResolution.Unique ? resolved : (PrimitiveType?)null,
         };
 
+        if (type is null)
+        {
+            Report("TRM3005", resolution == DeclaredTypeResolution.Ambiguous
+                ? $"Type '{name}' is ambiguous across declared and imported types."
+                : $"Type '{name}' is not supported here.", node.Span);
+        }
+        if (writable && type is PrimitiveType resolvedType)
+        {
+            if (resolvedType == PrimitiveType.ManagedNode
+                || (IsClass(resolvedType) && _classes[ManagedClassTypes.ClassIndex(resolvedType)].IsMutable))
+            {
+                type = ManagedClassTypes.Writable(resolvedType);
+            }
+            else
+            {
+                Report("TRM3005", "write requires a mutable managed class or ManagedNode handle.", node.Span);
+            }
+        }
         if (optional && type is PrimitiveType required)
         {
             if (!ManagedClassTypes.IsManaged(required) || ManagedClassTypes.IsOptional(required))
@@ -879,12 +915,6 @@ internal sealed partial class Binder
             {
                 type = ManagedClassTypes.Optional(required);
             }
-        }
-        if (type is null)
-        {
-            Report("TRM3005", resolution == DeclaredTypeResolution.Ambiguous
-                ? $"Type '{name}' is ambiguous across declared and imported types."
-                : $"Type '{name}' is not supported here.", node.Span);
         }
 
         return type ?? PrimitiveType.Int32;
@@ -1172,7 +1202,7 @@ internal sealed partial class Binder
                         {
                             Report("TRM3008", "An immutable receiver cannot be mutated.", target.Span);
                         }
-                        CheckFieldMutation(ResolveDeclaredType(_currentStruct), ownField, _constructor, target.Span);
+                        CheckFieldMutation(_variables[0].Type, ownField, _constructor, target.Span);
                         return new BoundFieldAssignment(0, ownField,
                             BindExpression(valueNode, GetField(ResolveDeclaredType(_currentStruct), ownField).Type), node.Span);
                     }
@@ -1448,6 +1478,10 @@ internal sealed partial class Binder
     private void CheckFieldMutation(PrimitiveType type, int field, bool constructingReceiver, TextSpan span)
     {
         var declaration = GetField(type, field);
+        if (IsClass(type) && !ManagedClassTypes.IsWritable(type) && !constructingReceiver)
+        {
+            Report("TRM3008", "Field assignment requires a writable managed handle.", span);
+        }
         if (!constructingReceiver && !declaration.IsMutable)
         {
             Report("TRM3008", $"Field '{declaration.Name}' is read-only after construction; assignment requires a mut field.", span);
@@ -1583,7 +1617,7 @@ internal sealed partial class Binder
                     && TryFindField(ResolveDeclaredType(_currentStruct), token.Text, out var field))
                 {
                     var structure = ResolveDeclaredType(_currentStruct);
-                    expression = new BoundFieldRead(new BoundRead(0, structure, node.Span),
+                    expression = new BoundFieldRead(new BoundRead(0, _variables[0].Type, node.Span),
                         field, GetField(structure, field).Type, node.Span);
                 }
                 else
@@ -1647,7 +1681,8 @@ internal sealed partial class Binder
                         [BindReceiverLoan(receiverNode, PrimitiveType.OwnedInt32Buffer)], PrimitiveType.Int32, node.Span);
                     break;
                 }
-                if (receiverType == PrimitiveType.ManagedNode && member == "Value"
+                if (receiverType is PrimitiveType nodeType
+                    && ManagedClassTypes.Readonly(nodeType) == PrimitiveType.ManagedNode && member == "Value"
                     && TryFindFunction(NativeManagedNodeIntrinsics.TypeName + ".Value", out var nodeValue))
                 {
                     expression = new BoundCall(nodeValue,
@@ -1811,10 +1846,23 @@ internal sealed partial class Binder
                 break;
         }
 
+        if (expected is PrimitiveType readonlyExpected
+            && ManagedClassTypes.IsWritable(expression.Type)
+            && ManagedClassTypes.Readonly(expression.Type) == readonlyExpected)
+        {
+            expression = new BoundReadonlyProjection(expression, readonlyExpected, node.Span);
+        }
         if (expected is PrimitiveType optionalExpected
             && ManagedClassTypes.IsOptional(optionalExpected)
-            && expression.Type == ManagedClassTypes.Required(optionalExpected))
+            && (expression.Type == ManagedClassTypes.Required(optionalExpected)
+                || (ManagedClassTypes.IsWritable(expression.Type)
+                    && ManagedClassTypes.Readonly(expression.Type) == ManagedClassTypes.Required(optionalExpected))))
         {
+            if (expression.Type != ManagedClassTypes.Required(optionalExpected))
+            {
+                expression = new BoundReadonlyProjection(expression,
+                    ManagedClassTypes.Required(optionalExpected), node.Span);
+            }
             expression = new BoundOptionalLift(expression, optionalExpected, node.Span);
         }
         if (expected is not null && expression.Type != expected)
@@ -1974,7 +2022,7 @@ internal sealed partial class Binder
                 receiver = left;
                 _ = TryFindFunction(NativeBufferIntrinsics.TypeName + "." + member, out function);
             }
-            else if (type == PrimitiveType.ManagedNode)
+            else if (ManagedClassTypes.Readonly(type ?? PrimitiveType.Void) == PrimitiveType.ManagedNode)
             {
                 receiver = left;
                 _ = TryFindFunction(NativeManagedNodeIntrinsics.TypeName + "." + member, out function);
@@ -1982,7 +2030,7 @@ internal sealed partial class Binder
             else if (type is PrimitiveType classType && IsClass(classType))
             {
                 receiver = left;
-                _ = TryFindFunction(_classes[(int)classType - ManagedClassTypes.First].Name + "." + member,
+                _ = TryFindFunction(_classes[ManagedClassTypes.ClassIndex(classType)].Name + "." + member,
                     out function);
             }
             else if (type is PrimitiveType structType && IsStruct(structType))
@@ -2030,7 +2078,10 @@ internal sealed partial class Binder
         var receiverCount = 0;
         if (receiver is not null && signature is not null)
         {
-            var receiverType = ResolveDeclaredType(ownerName!);
+            var receiverType = signature.External?.Variables[0].Type
+                ?? (signature.IsMutable && IsClass(ResolveDeclaredType(ownerName!))
+                    ? ManagedClassTypes.Writable(ResolveDeclaredType(ownerName!))
+                    : ResolveDeclaredType(ownerName!));
             bound.Add(signature.External?.Intrinsic is BoundIntrinsic.BufferSet or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear
                 ? BindMutableReceiverLoan(receiver, receiver.Span)
                 : IsUnique(receiverType) && !signature.IsCleanup
@@ -2042,10 +2093,13 @@ internal sealed partial class Binder
         {
             if (_currentStruct == signature.StructName && _variables.Count > 0 && _variables[0].Name == "this")
             {
-                var receiverType = ResolveDeclaredType(ownerName!);
+                var receiverType = signature.External?.Variables[0].Type
+                    ?? (signature.IsMutable && IsClass(ResolveDeclaredType(ownerName!))
+                        ? ManagedClassTypes.Writable(ResolveDeclaredType(ownerName!))
+                        : ResolveDeclaredType(ownerName!));
                 bound.Add(IsUnique(receiverType) && !signature.IsCleanup
                     ? new BoundReceiverLoan(0, receiverType, node.Span)
-                    : new BoundRead(0, receiverType, node.Span));
+                    : BindImplicitReceiver(receiverType, node.Span));
                 receiverCount = 1;
             }
             else
@@ -2156,7 +2210,7 @@ internal sealed partial class Binder
     {
         if (IsStruct(type) || IsClass(type))
         {
-            var fields = IsClass(type) ? _classes[(int)type - ManagedClassTypes.First].Fields
+            var fields = IsClass(type) ? _classes[ManagedClassTypes.ClassIndex(type)].Fields
                 : _structs[(int)type - 100].Fields;
             for (var i = 0; i < fields.Length; i++)
             {
@@ -2172,13 +2226,20 @@ internal sealed partial class Binder
     }
 
     private BoundStructField GetField(PrimitiveType type, int field) => IsClass(type)
-        ? _classes[(int)type - ManagedClassTypes.First].Fields[field]
+        ? _classes[ManagedClassTypes.ClassIndex(type)].Fields[field]
         : _structs[(int)type - 100].Fields[field];
+
+    private BoundExpression BindImplicitReceiver(PrimitiveType type, TextSpan span)
+    {
+        var receiver = new BoundRead(0, _variables[0].Type, span);
+        return ManagedClassTypes.IsWritable(receiver.Type) && ManagedClassTypes.Readonly(receiver.Type) == type
+            ? new BoundReadonlyProjection(receiver, type, span) : receiver;
+    }
 
     private void CheckFieldAccess(PrimitiveType type, int field, TextSpan span)
     {
         if (GetField(type, field).IsPrivate
-            && (IsClass(type) ? _classes[(int)type - ManagedClassTypes.First].Name
+            && (IsClass(type) ? _classes[ManagedClassTypes.ClassIndex(type)].Name
                 : _structs[(int)type - 100].Name) != (string.IsNullOrEmpty(_namespace)
                 ? _currentStruct : _namespace + "." + _currentStruct))
         {
@@ -2366,8 +2427,9 @@ internal sealed partial class Binder
                     }
                     var name = receiverType switch {
                         PrimitiveType.OwnedInt32Buffer => NativeBufferIntrinsics.TypeName + "." + member,
-                        PrimitiveType.ManagedNode => NativeManagedNodeIntrinsics.TypeName + "." + member,
-                        PrimitiveType type when IsClass(type) => _classes[(int)type - ManagedClassTypes.First].Name + "." + member,
+                        PrimitiveType type when ManagedClassTypes.Readonly(type) == PrimitiveType.ManagedNode
+                            => NativeManagedNodeIntrinsics.TypeName + "." + member,
+                        PrimitiveType type when IsClass(type) => _classes[ManagedClassTypes.ClassIndex(type)].Name + "." + member,
                         PrimitiveType type when IsStruct(type) => _structs[(int)type - 100].Name + "." + member,
                         _ => ResolveStaticMember(left, member, out var staticMember)
                             == DeclaredTypeResolution.Ambiguous ? "" : staticMember,
@@ -2406,7 +2468,8 @@ internal sealed partial class Binder
                 {
                     return PrimitiveType.Int32;
                 }
-                if (receiverType == PrimitiveType.ManagedNode && member == "Value")
+                if (receiverType is PrimitiveType nodeType
+                    && ManagedClassTypes.Readonly(nodeType) == PrimitiveType.ManagedNode && member == "Value")
                 {
                     return PrimitiveType.Int32;
                 }
@@ -2540,10 +2603,14 @@ internal sealed partial class Binder
         PrimitiveType.ReadonlyInt32BufferView => "ReadonlyInt32BufferView",
         PrimitiveType.MutableInt32BufferView => "MutableInt32BufferView",
         PrimitiveType.ManagedNode => "ManagedNode",
+        PrimitiveType.WriteManagedNode => "write ManagedNode",
         PrimitiveType.OptionalManagedNode => "ManagedNode?",
+        PrimitiveType.OptionalWriteManagedNode => "write ManagedNode?",
         _ when ManagedClassTypes.IsOptional(type) =>
-            _classes[(int)type - ManagedClassTypes.OptionalFirst].Name + "?",
-        _ when IsClass(type) => _classes[(int)type - ManagedClassTypes.First].Name,
+            (ManagedClassTypes.IsWritable(type) ? "write " : "")
+                + _classes[ManagedClassTypes.ClassIndex(type)].Name + "?",
+        _ when IsClass(type) => (ManagedClassTypes.IsWritable(type) ? "write " : "")
+            + _classes[ManagedClassTypes.ClassIndex(type)].Name,
         _ when IsStruct(type) => _structs[(int)type - 100].Name,
         _ => throw new ArgumentOutOfRangeException(nameof(type)),
     };

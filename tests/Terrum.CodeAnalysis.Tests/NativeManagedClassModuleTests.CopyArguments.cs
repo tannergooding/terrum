@@ -20,7 +20,7 @@ public sealed partial class NativeManagedClassModuleTests
     [InlineData(NativeRuntimePolicy.FailFast, true)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
-    public void CopyFactoryArgumentsRequireVersion22EvenWithoutCopyFields(
+    public void CopyFactoryArgumentsRetainVersionedManagedAccessEvenWithoutCopyFields(
         NativeRuntimePolicy policy, bool storeCopy)
     {
         var field = storeCopy ? "public Payload Value;" : "public int64 Value;";
@@ -42,12 +42,12 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """, policy);
         var producer = ModuleCompiler.CreateProducer(program, ["Proof"]);
-        Assert.Equal(22, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Equal(24, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
         Assert.Equal("native-19", ModuleCompiler.GetNativeProfileVersion(producer, false));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.Empty(reference.Structures);
         Assert.Equal("Proof", Assert.Single(reference.Functions).Name);
-        foreach (var version in new[] { 19, 20, 21 })
+        foreach (var version in new[] { 19, 20, 21, 22, 23 })
         {
             var downgraded = (byte[])producer.Clone();
             BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), version);
@@ -79,7 +79,7 @@ public sealed partial class NativeManagedClassModuleTests
             """, policy, ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var replacement = ModuleCompiler.CreateProducer(Compile(CopyArgumentLeaf(), policy), ["Leaf"]);
-        Assert.Equal(22, BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
+        Assert.Equal(24, BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
         var program = ModuleCompiler.Link(consumer, replacement);
         Assert.Equal(["Cell", "Stamp", "$producer.Cell", "$producer.Stamp"],
             program.Structures.Select(static structure => structure.Name));
