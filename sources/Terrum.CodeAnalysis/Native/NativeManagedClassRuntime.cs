@@ -31,15 +31,9 @@ internal sealed partial class PeCompiler
         var constructorBegin = _code.Position;
         for (var index = 0; index < output; index++)
         {
-            if (IsWide(function.Variables[index].Type))
-            {
-                _code.Load64(Slot(index));
-            }
-            else
-            {
-                _code.Load(Slot(index));
-            }
-            _code.MoveArgument(index + 1, IsWide(function.Variables[index].Type));
+            var argumentType = function.Variables[index].Type;
+            LoadValue(Slot(index), argumentType);
+            _code.MoveArgument(index + 1, IsStruct(argumentType) || IsWide(argumentType));
         }
         _code.Load64(Slot(provisional));
         _code.MoveArgument(0, true);

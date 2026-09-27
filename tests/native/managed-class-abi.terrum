@@ -16,19 +16,42 @@ class Pair {
     public int32 Sum() { return First.Value + Second.Value + Extra.Value; }
 }
 
-class CollectingPair {
-    public Leaf Left;
-    public Leaf Right;
-    [NoThrow] public CollectingPair(Leaf child) {
-        Left = child;
-        ManagedHeap.Collect();
-        Right = child;
+struct FactoryPayload {
+    public int64 First;
+    public int32 Second;
+    public int32 Third;
+    [NoThrow] public FactoryPayload(int64 first) {
+        First = first;
+        Second = 20;
+        Third = 22;
     }
 }
 
+class CollectingPair {
+    public Leaf Left;
+    public Leaf Right;
+    public FactoryPayload Data;
+    [NoThrow] public CollectingPair(Leaf child, FactoryPayload data) {
+        Left = child;
+        ManagedHeap.Collect();
+        Right = child;
+        Data = data;
+    }
+}
+
+struct PointerBits {
+    public uint64 Value;
+    [NoThrow] public PointerBits(uint64 value) { Value = value; }
+}
+
 class ScalarBox {
-    public uint64 Bits;
-    [NoThrow] public ScalarBox(uint64 bits) { Bits = bits; }
+    public PointerBits Bits;
+    [NoThrow] public ScalarBox(PointerBits bits) { Bits = bits; }
+}
+
+class CopyBox {
+    public FactoryPayload Value;
+    [NoThrow] public CopyBox(FactoryPayload value) { Value = value; }
 }
 
 class ReplaceableEdge {
@@ -90,9 +113,10 @@ public int32 AliasUpdates() {
 public int32 DuringConstruction() {
     DiscardLeaf();
     require Leaf.TryCreate(42, out var child);
-    require CollectingPair.TryCreate(child, out var pair);
+    require CollectingPair.TryCreate(child, new FactoryPayload(-9223372036854775808i64), out var pair);
     require ManagedHeap.Collect() == 0;
     require pair.Left.Value == pair.Right.Value;
+    require pair.Data.First == -9223372036854775808i64 && pair.Data.Second == 20 && pair.Data.Third == 22;
     return pair.Left.Value;
 }
 
@@ -103,14 +127,14 @@ public int32 CreateLoose() {
 }
 
 public int32 ScalarNonRoot(uint64 bits) {
-    require ScalarBox.TryCreate(bits, out var box);
+    require ScalarBox.TryCreate(new PointerBits(bits), out var box);
     require ManagedHeap.Collect() == 2;
-    require box.Bits == bits;
+    require box.Bits.Value == bits;
     return 42;
 }
 
 public int32 AllocationFailure() {
-    if (Leaf.TryCreate(42, out var unpublished)) {
+    if (CopyBox.TryCreate(new FactoryPayload(42i64), out var unpublished)) {
         return 0;
     }
     require ManagedHeap.Collect() == 0;
@@ -119,7 +143,7 @@ public int32 AllocationFailure() {
 
 public int32 RetainAcrossAllocationFailure() {
     require Leaf.TryCreate(42, out var retained);
-    if (CollectingPair.TryCreate(retained, out var unpublished)) {
+    if (CollectingPair.TryCreate(retained, new FactoryPayload(42i64), out var unpublished)) {
         return 0;
     }
     require ManagedHeap.Collect() == 0;

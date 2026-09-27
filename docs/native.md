@@ -103,8 +103,9 @@ cross-image roots and source-class metadata remain unsupported
 
 `native-19` adds up to 256 source-defined classes with explicit constructors and
 at most 16 scalar, compact Copy or non-null managed-reference fields in a payload of at most
-128 bytes. Constructor arguments are limited to three scalars or managed handles;
-inline values, unique owners and borrowed views are not accepted by the factory.
+128 bytes. Constructor arguments are limited to three by-value scalars, managed
+handles or handle-free Copy structs of at most 16 bytes; unique owners and
+borrowed views are not accepted by the factory.
 Class values are eight-byte aliasable handles, not inline copies.
 `C.TryCreate(arguments, out var value)` is a compiler-owned allocation adapter:
 it returns false only for allocation failure or the shared 4,096-object cap.
@@ -125,20 +126,26 @@ static managed roots and managed class values in inline structs remain
 unsupported. Required references do not permit bootstrapping a cycle by leaking
 partial objects. Optional fields in `native-20` provide an explicit construction
 path for source-defined cycles.
-Class metadata is image-private: version 19 and 20 semantic/native leaf modules can
+Class metadata is image-private: versioned semantic/native leaf modules can
 retain it internally, but native DLL exports remain scalar-only.
 Executable class payloads also admit acyclic, handle-free Copy struct fields
 of at most 16 bytes, within the same 128-byte payload bound. Whole-value reads
 and writes copy all bytes; nested field access preserves declared mutability
 and construction checks. These aggregates contribute no managed descriptor
-slots. They cannot contain managed handles, owners or views, and factories
-still cannot take aggregate arguments. Version 20 persists these inline fields
+slots. They cannot contain managed handles, owners or views. Version 20 persists these inline fields
 and their private nested layouts; version 19 continues rejecting them rather
 than reinterpreting its existing wire contract.
+Factories also accept compact Copy arguments through the same direct/indirect
+Windows x64 aggregate convention as ordinary calls. Values are snapshotted before
+later argument effects and copied into constructor parameter storage; no caller
+storage loan survives construction. Version 22 retains aggregate constructor
+signatures and private layouts, without changing the scalar native export ABI.
+Earlier semantic versions continue rejecting aggregate factory arguments.
 The [class sample](../samples/native/managed-classes.terrum)
 returns 42 through shared aliases and heterogeneous managed edges. The independent
 C heap probe checks multiple-edge liveness, pointer-shaped scalar nonroots,
-allocation failure, collection during construction, and exact provisional-object
+allocation failure, direct/indirect Copy arguments, collection during construction,
+and exact provisional-object
 release through both Terrum and native catch boundaries. It also checks selected
 assignment-target roots across edge replacement, collection and checked failure.
 The managed token-chain probe additionally stores complete 12-byte tokens,

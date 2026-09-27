@@ -284,6 +284,13 @@ bytes; producers, consumers, and class-free graph libraries write version 21
 only when they retain a loop transfer or explicit iterator. Readers reject the
 new tags in versions 18 through 20. Loop transfers do not change exported
 declarations, native runtime profiles, or module dependency policy.
+Semantic version 22 admits compact handle-free Copy struct parameters in private
+class constructor/factory signatures. It retains and remaps their nested private
+layouts even when the constructor stores only scalar fields. Versions 19 through
+21 reject these parameters rather than interpreting them with the former
+scalar/handle factory convention. Unaffected modules retain their older writer
+versions and bytes. The new signatures stay private behind scalar exports;
+native graph replacement does not rewrite root or intermediate images.
 A consumer importing a unique type must also import the exported NoThrow
 cleanup methods of that type and its owning children. Their cleanup identities
 and Copy/unique distinctions participate in layout and signature compatibility;

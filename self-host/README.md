@@ -102,6 +102,9 @@ starts, capacity exhaustion and version overflow before publishing a mutation.
 Allocation refusal leaves the existing chain unchanged. Indexed reads return
 independent Copy tokens that remain valid after the links are collected;
 no link handle or retained source view escapes the chain.
+The link factory receives a complete `Token`, preserving the already checked
+`SourceRange` instead of decomposing and reconstructing it during allocation.
+Its constructor still checks the nonnegative token category before publication.
 Clear drops its private links and increments the version; explicit collection
 reclaims them once the operation's temporary roots have retired.
 This exercises compact inline Copy fields alongside optional managed edges, not a

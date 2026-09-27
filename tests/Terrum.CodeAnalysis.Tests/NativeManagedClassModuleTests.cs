@@ -16,7 +16,7 @@ using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
 
-public sealed class NativeManagedClassModuleTests
+public sealed partial class NativeManagedClassModuleTests
 {
     private const string Middle = "public int32 Middle() { return Leaf() + 1; }";
     private const string Root = "int32 Main() { Middle(); return Middle() + 1; }";

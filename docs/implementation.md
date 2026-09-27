@@ -127,7 +127,12 @@ field access, visibility and partial-construction checks remain mandatory.
 Class fields may contain acyclic handle-free Copy structs up to 16 bytes, including
 nested compact values. Those fields are copied as complete values, not traced as
 potential pointers. Unique owners, views and managed handles inside structs are
-not admitted by this extension. Factories still accept only scalar/handle arguments.
+not admitted by this extension. Factories accept at most three by-value
+scalar, managed-handle or handle-free compact Copy arguments. Copy arguments
+are complete snapshots, including when later arguments mutate their source;
+the factory forwards them through the existing direct/indirect aggregate ABI.
+Neither the provisional object nor managed arguments can disappear during
+constructor collection. Copy payloads are not conservative roots.
 Classes have no inheritance, inline class representation or public managed
 module ABI; `new C(...)` is rejected rather than inventing an allocation exception.
 `native-20` adds `C?` and `ManagedNode?`, contextual `null`, non-null-to-optional
@@ -149,6 +154,10 @@ Class-free modules retain the version 18 format. Classes with inline Copy fields
 use version 20, retaining their private nested layouts and remapping type IDs
 during semantic linking. Version 19 still rejects those fields and remains the
 writer format for scalar/reference-only classes.
+Classes whose constructors accept Copy structs require version 22, including
+constructors that retain only scalar portions of those arguments. Older
+versions reject aggregate constructor parameters. The native profile, scalar
+export boundary and private-leaf dependency restriction remain unchanged.
 Optional-node-only modules,
 managed consumer declarations and managed imported/exported signatures still
 reject.

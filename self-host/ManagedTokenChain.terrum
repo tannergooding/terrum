@@ -4,10 +4,9 @@ class ManagedTokenLink {
     public Token Value;
     public mut ManagedTokenLink? Next;
 
-    public ManagedTokenLink(int32 kind, int32 sourceOffset, int32 sourceLength) {
-        require kind >= 0;
-        require SourceRange.TryCreate(sourceOffset, sourceLength, out var range);
-        Value = new Token(kind, range);
+    public ManagedTokenLink(Token token) {
+        require token.Kind >= 0;
+        Value = token;
         Next = null;
     }
 }
@@ -39,7 +38,7 @@ class ManagedTokenChain {
         if (_last is some previous) {
             if (range.Start < previous.Value.Range.Start) { return false; }
         }
-        if (!ManagedTokenLink.TryCreate(kind, range.Start, range.Length, out var created)) {
+        if (!ManagedTokenLink.TryCreate(new Token(kind, range), out var created)) {
             return false;
         }
         if (_last is some last) {

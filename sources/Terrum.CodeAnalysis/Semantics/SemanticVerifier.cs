@@ -369,7 +369,7 @@ public static class SemanticVerifier
                 || function.Name != function.DeclaringStruct + ".#ctor"
                 || function.ParameterCount is < 1 or > 4
                 || function.Variables.Skip(1).Take(function.ParameterCount - 1)
-                    .Any(static variable => variable.IsOut || !IsClassArgumentType(variable.Type))))
+                    .Any(variable => variable.IsOut || !IsClassArgumentType(variable.Type, program.Structures))))
             {
                 throw Invalid();
             }
@@ -2600,11 +2600,13 @@ public static class SemanticVerifier
             || (ManagedClassTypes.IsOptional(type) && type != PrimitiveType.OptionalManagedNode
                 && (int)type - ManagedClassTypes.OptionalFirst < program.Classes.Length);
 
-    internal static bool IsClassArgumentType(PrimitiveType type) =>
+    internal static bool IsClassArgumentType(PrimitiveType type, IReadOnlyList<BoundStruct> structures) =>
         type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
             or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool
             or PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode
-            || ManagedClassTypes.IsClass(type) || ManagedClassTypes.IsOptional(type);
+            || ManagedClassTypes.IsClass(type) || ManagedClassTypes.IsOptional(type)
+            || ((int)type >= 100 && (int)type - 100 < structures.Count
+                && !structures[(int)type - 100].IsUnique);
 
     private static bool IsUnique(BoundProgram program, PrimitiveType type) =>
         type == PrimitiveType.OwnedInt32Buffer
@@ -2651,7 +2653,7 @@ public static class SemanticVerifier
             if (function.Variables[parameter].Type != constructor.Variables[parameter + 1].Type
                 || function.Variables[parameter].IsOut || function.Variables[parameter].IsMutable
                 || constructor.Variables[parameter + 1].IsOut
-                || !IsClassArgumentType(function.Variables[parameter].Type))
+                || !IsClassArgumentType(function.Variables[parameter].Type, program.Structures))
             {
                 throw Invalid();
             }

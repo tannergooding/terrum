@@ -27,6 +27,7 @@ public static partial class ModuleCompiler
     private const int ManagedClassVersion = 19;
     private const int Version = 20;
     private const int LoopTransferVersion = 21;
+    private const int AggregateClassFactoryVersion = 22;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -174,6 +175,12 @@ public static partial class ModuleCompiler
 
     private static bool IsInlineClassField(PrimitiveType type) =>
         (int)type >= 100 && !ManagedClassTypes.IsManaged(type);
+
+    private static bool HasAggregateClassArguments(BoundFunction function) =>
+        (function.IsClassConstructor || function.Intrinsic == BoundIntrinsic.ClassTryCreate)
+        && function.Variables.Skip(function.IsClassConstructor ? 1 : 0)
+            .Take(function.ParameterCount - 1)
+            .Any(static variable => IsInlineClassField(variable.Type));
 
     private static bool UsesManagedNode(BoundFunction function) =>
         function.Intrinsic is >= BoundIntrinsic.NodeTryCreate and <= BoundIntrinsic.NodeCollect
@@ -1240,7 +1247,9 @@ public static partial class ModuleCompiler
         }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-        var version = HasLoopTransfer(module.Functions) ? LoopTransferVersion
+        var version = module.Functions.Any(static item => item.Function is BoundFunction function
+                && HasAggregateClassArguments(function)) ? AggregateClassFactoryVersion
+            : HasLoopTransfer(module.Functions) ? LoopTransferVersion
             : module.Classes.IsEmpty ? ManagedNodeVersion
             : module.Classes.Any(static @class => @class.Fields.Any(
                 static field => IsInlineClassField(field.Type))) ? Version : ManagedClassVersion;
@@ -1339,7 +1348,7 @@ public static partial class ModuleCompiler
             var entry = reader.ReadInt32();
             var (structures, structureNames) = ReadStructures(reader, version);
             var classes = version >= ManagedClassVersion ? ReadClasses(reader, structureNames, version) : [];
-            if (version is ManagedClassVersion or Version && classes.IsEmpty)
+            if (version is ManagedClassVersion or Version or AggregateClassFactoryVersion && classes.IsEmpty)
             {
                 throw new ModuleFormatException("Class module version requires private managed layouts.");
             }
@@ -1355,6 +1364,11 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Module entry point is invalid.");
             }
             var items = ReadFunctions(reader, count, expectedConsumer, version, structures, classes);
+            if (version == AggregateClassFactoryVersion && !items.Any(static item =>
+                    item.Function is BoundFunction function && HasAggregateClassArguments(function)))
+            {
+                throw new ModuleFormatException("Class factory module version requires aggregate arguments.");
+            }
             var module = new Module(expectedConsumer, entry, structures, items) {
                 Classes = classes,
                 ImportedStructures = importedTypes,
@@ -1400,7 +1414,7 @@ public static partial class ModuleCompiler
         var version = reader.ReadInt32();
         if (version is not (10 or 11 or OwnershipVersion or TransferVersion or CompositeVersion
             or BufferVersion or ReadonlyViewVersion or WritableViewVersion or ManagedNodeVersion
-            or ManagedClassVersion or Version or LoopTransferVersion))
+            or ManagedClassVersion or Version or LoopTransferVersion or AggregateClassFactoryVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -1543,6 +1557,11 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Invalid module declaration.");
             }
             var function = hasBody ? GetFunction(reader, ref remaining, version) : null;
+            if (version < AggregateClassFactoryVersion && function is BoundFunction classFunction
+                && HasAggregateClassArguments(classFunction))
+            {
+                throw new ModuleFormatException("Aggregate class arguments require semantic module version 22.");
+            }
             if (!expectedConsumer && import && function is BoundFunction exported
                 && !Exportable(exported, structures))
             {

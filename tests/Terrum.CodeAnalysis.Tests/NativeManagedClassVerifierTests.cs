@@ -92,10 +92,10 @@ public sealed class NativeManagedClassVerifierTests
     }
 
     [Theory]
-    [InlineData("struct Copy { public int64 Value; public Copy(int64 value) { Value = value; } }")]
-    [InlineData("struct Copy { public int64 First; public int64 Second; public Copy(int64 value) { First = value; Second = value; } }")]
-    [InlineData("unique struct Copy { public int32 Value; public Copy(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} }")]
-    public void RejectsInlineAndOwningClassConstructorArguments(string declaration)
+    [InlineData("struct Copy { public int64 Value; public Copy(int64 value) { Value = value; } }", true)]
+    [InlineData("struct Copy { public int64 First; public int64 Second; public Copy(int64 value) { First = value; Second = value; } }", true)]
+    [InlineData("unique struct Copy { public int32 Value; public Copy(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} }", false)]
+    public void ClassConstructorArgumentsRequireCopyRatherThanOwningValues(string declaration, bool allowed)
     {
         var source = declaration + Environment.NewLine + """
             class Leaf {
@@ -105,9 +105,16 @@ public sealed class NativeManagedClassVerifierTests
             int32 Main() { return 0; }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.Null(compilation.Program);
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011"
-            && diagnostic.Message.Contains("scalar or managed-handle", StringComparison.Ordinal));
+        if (allowed)
+        {
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            SemanticVerifier.Verify(Assert.IsType<BoundProgram>(compilation.Program));
+        }
+        else
+        {
+            Assert.Null(compilation.Program);
+            Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
+        }
     }
 
     [Fact]
