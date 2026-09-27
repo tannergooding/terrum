@@ -49,7 +49,7 @@ public static class SemanticVerifier
     }
 
     private static void VerifyCore(BoundProgram program, bool requireEntryPoint, bool allowExternal = false,
-        bool allowScalarCollectionProof = false)
+        bool allowGenericProofDependencies = false)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (program.Functions.IsDefaultOrEmpty || (requireEntryPoint
@@ -88,14 +88,9 @@ public static class SemanticVerifier
             function.Intrinsic >= BoundIntrinsic.NodeTryCreate
             || ManagedClassTypes.IsManaged(function.ReturnType)
             || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type)));
-        // An isolated generic proof may call the real scalar collection intrinsic while
-        // its opaque Copy parameters remain external. Executable and persisted IR never use this exception.
-        var scalarCollectionProof = allowScalarCollectionProof && program.Classes.IsEmpty
-            && program.Functions.All(static function =>
-                (function.Intrinsic is BoundIntrinsic.None or BoundIntrinsic.NodeCollect)
-                && !ManagedClassTypes.IsManaged(function.ReturnType)
-                && !function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type)));
-        if (usesManagedNodes && !scalarCollectionProof && program.Functions.Any(function =>
+        // Isolated definition-site proofs may use private managed declarations, but executable
+        // and persisted programs must still enforce the public external-call boundary.
+        if (usesManagedNodes && !allowGenericProofDependencies && program.Functions.Any(function =>
             function.IsExternal && !ManagedExportShape.Supported(function, program.Structures)))
         {
             throw InvalidEffect(default, "Ownership");
@@ -316,11 +311,12 @@ public static class SemanticVerifier
             {
                 throw Invalid();
             }
-            if (function.IsExternal && (!allowExternal || function.IsPrivate || function.IsInternal
+            if (function.IsExternal && (!allowExternal
                 || function.Body.Statements.IsDefault || !function.Body.Statements.IsEmpty
                 || function.Variables.Length != function.ParameterCount + (function.IsConstructor ? 1 : 0)
-                || ManagedClassTypes.IsManaged(function.ReturnType)
-                || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type))))
+                || (!allowGenericProofDependencies && (function.IsPrivate || function.IsInternal
+                    || ManagedClassTypes.IsManaged(function.ReturnType)
+                    || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type))))))
             {
                 throw Invalid();
             }
@@ -425,12 +421,13 @@ public static class SemanticVerifier
         {
             var @class = program.Classes[classIndex];
             var classType = (PrimitiveType)(ManagedClassTypes.First + classIndex);
-            if (program.Functions.Count(function => function.IsClassConstructor
-                && function.DeclaringStruct == @class.Name
-                && function.Variables[0].Type == (@class.IsMutable
-                    ? ManagedClassTypes.Writable(classType) : classType)) != 1
-                || program.Functions.Count(function => function.Intrinsic == BoundIntrinsic.ClassTryCreate
-                    && function.DeclaringStruct == @class.Name) != 1)
+            if (!allowGenericProofDependencies
+                && (program.Functions.Count(function => function.IsClassConstructor
+                    && function.DeclaringStruct == @class.Name
+                    && function.Variables[0].Type == (@class.IsMutable
+                        ? ManagedClassTypes.Writable(classType) : classType)) != 1
+                    || program.Functions.Count(function => function.Intrinsic == BoundIntrinsic.ClassTryCreate
+                        && function.DeclaringStruct == @class.Name) != 1))
             {
                 throw Invalid();
             }
@@ -1339,12 +1336,12 @@ public static class SemanticVerifier
     }
 
     internal static bool TryVerifySource(BoundProgram program, out int functionIndex, out TextSpan span, out bool exceededWorkLimit,
-        out string? invalidEffect, bool allowScalarCollectionProof = false)
+        out string? invalidEffect, bool allowGenericProofDependencies = false)
     {
         try
         {
             VerifyCore(program, requireEntryPoint: program.EntryPoint != -1, allowExternal: true,
-                allowScalarCollectionProof: allowScalarCollectionProof);
+                allowGenericProofDependencies: allowGenericProofDependencies);
             functionIndex = -1;
             span = default;
             exceededWorkLimit = false;

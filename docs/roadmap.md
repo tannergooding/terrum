@@ -98,6 +98,13 @@ effects, and keep concrete witnesses distinct from formal constraints. This
 adds no source syntax, semantic wire version, native profile or public generic
 ABI; closed specializations remain ordinary private verified functions.
 
+The same stage admits concrete source-class factories and members inside
+templates, retaining existing handle qualifications, cyclic descriptor layouts,
+conditional outputs and managed rooting. Only isolated definition proofs may
+use declaration-only managed dependencies; executable and persisted checks
+remain unchanged. This uses existing `TryCreate`, not a new construction form
+or public managed boundary.
+
 Within Rich libraries, define operation-specific checked witnesses for value
 equality, identity where supported, key equality paired with a compatible hash,
 invariant machine-readable formatting, and display/debug rendering. These are

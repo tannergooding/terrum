@@ -51,6 +51,35 @@ internal sealed partial class Binder
     private PrimitiveType? HydrateProofType(PrimitiveType sourceType)
     {
         var source = _genericProofSource ?? throw new InvalidOperationException("Missing generic proof source.");
+        if (ManagedClassTypes.IsManaged(sourceType))
+        {
+            if ((int)sourceType < ManagedClassTypes.First)
+            {
+                return sourceType;
+            }
+            var @class = source._classes[ManagedClassTypes.ClassIndex(sourceType)];
+            if (!_classNames.TryGetValue(@class.Name, out var mapped))
+            {
+                mapped = (PrimitiveType)(ManagedClassTypes.First + _classes.Count);
+                _classNames.Add(@class.Name, mapped);
+                _classes.Add(@class with { Fields = [] });
+                var classFields = ImmutableArray.CreateBuilder<BoundStructField>(@class.Fields.Length);
+                foreach (var field in @class.Fields)
+                {
+                    if (HydrateProofType(field.Type) is not PrimitiveType fieldType)
+                    {
+                        return null;
+                    }
+                    classFields.Add(field with { Type = fieldType });
+                }
+                _classes[ManagedClassTypes.ClassIndex(mapped)] = @class with { Fields = classFields.MoveToImmutable() };
+            }
+            if (ManagedClassTypes.IsWritable(sourceType))
+            {
+                mapped = ManagedClassTypes.Writable(mapped);
+            }
+            return ManagedClassTypes.IsOptional(sourceType) ? ManagedClassTypes.Optional(mapped) : mapped;
+        }
         if (!source.IsStruct(sourceType))
         {
             return sourceType is PrimitiveType.Void or PrimitiveType.Bool or PrimitiveType.Char16
@@ -109,18 +138,25 @@ internal sealed partial class Binder
         if (owner is not null)
         {
             if (!source._structNames.TryGetValue(owner, out var sourceType)
-                || HydrateProofType(sourceType) is not PrimitiveType mapped)
+                && !source._classNames.TryGetValue(owner, out sourceType))
             {
                 return false;
             }
-            receiver = mapped;
+            if (HydrateProofType(sourceType) is not PrimitiveType mapped)
+            {
+                return false;
+            }
+            receiver = source.IsClass(sourceType) && declaration.IsMutable
+                ? ManagedClassTypes.Writable(mapped) : mapped;
         }
         var variables = ImmutableArray.CreateBuilder<BoundVariable>();
         if (receiver is PrimitiveType receiverType && !declaration.IsStatic)
         {
             variables.Add(new BoundVariable("this", receiverType,
                 declaration.External?.Variables[0].IsMutable
-                    ?? (declaration.IsConstructor || declaration.IsMutable), declaration.Tree.Root.Span));
+                    ?? (declaration.IsConstructor
+                        || (declaration.IsMutable && !ManagedClassTypes.IsClass(receiverType))),
+                declaration.Tree.Root.Span));
         }
         variables.AddRange(parameters.Select(parameter => new BoundVariable(parameter.Name,
             parameter.Type, parameter.IsOut, parameter.Span) { IsOut = parameter.IsOut }));
@@ -637,10 +673,6 @@ internal sealed partial class Binder
                             !enclosing.Template.TypeParameters[callerIndex].Operations.ContainsValue(protocol));
                     }
                 }
-                if (ManagedClassTypes.IsManaged(item.type))
-                {
-                    return true;
-                }
             }
             return required.Any()
                 && (!IsStruct(item.type) || !_conformances.TryGetValue(typeNames[item.index], out var witnesses)
@@ -824,10 +856,11 @@ internal sealed partial class Binder
             functions[symbolicIndex] = function;
             var proof = new BoundProgram(functions.ToImmutable(), -1) {
                 Structures = [.. proofBinder._structs],
+                Classes = [.. proofBinder._classes],
                 RuntimePolicy = _runtimePolicy,
             };
             if (!SemanticVerifier.TryVerifySource(proof, out _, out var span, out var limit, out var effect,
-                allowScalarCollectionProof: true))
+                allowGenericProofDependencies: true))
             {
                 var code = effect switch {
                     "NoThrow" => "TRM3017",

@@ -508,9 +508,19 @@ consume its function/type budget. Concrete witnesses and declared effects apply
 to that concrete type, never to an unrelated unconstrained formal. Proof-only
 declarations remain outside executable IR and persisted imports.
 
+Concrete source classes can also participate through their existing
+`C.TryCreate(..., out result)` factories, fields and methods. Lazy proof
+descriptors preserve cyclic class layouts, readonly/write/optional handle
+qualification and declared effects. This does not add `new C(...)` or grant
+class operations to symbolic `T`. The isolated proof checks declarations
+without importing constructor bodies; executable and persisted programs still
+require complete constructor/factory pairs and reject external signatures
+containing managed handles. Closed specializations use the ordinary managed roots and
+conditional-publication rules.
+
 General interface dispatch, primitive operator conformance, general generic inference,
-member access on a type parameter, concrete managed-type construction inside
-templates and public generic/witness metadata remain unsupported. A public concrete wrapper may
+member access on a type parameter and public generic/witness metadata remain
+unsupported. A public concrete wrapper may
 use a private specialization without publishing its template or witnesses.
 `syntax-11` adds source class declarations; `native-19` adds their bounded
 construction and descriptor-based tracing contract.

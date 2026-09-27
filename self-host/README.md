@@ -32,7 +32,10 @@ qualification; `Copy` does not grant member, null-test or operator
 capabilities. These specializations remain compilation-local. Unique/owning
 arguments, views, generic classes/structs, managed fields inside user structs,
 partial holes, constructor/method inference, ordinary overloads and public
-generic ABI remain unsupported. See the detailed
+generic ABI remain unsupported. Concrete source-class `TryCreate` factories,
+fields and methods may be used inside a template without granting those
+operations to symbolic type parameters; existing handle qualifications,
+conditional outputs and rooting still apply. See the detailed
 [generic implementation boundary](../docs/implementation.md#bounded-generic-functions).
 Scalars support Copy-only helpers, not primitive operator witnesses.
 Explicit homogeneous Copy-struct witnesses support `+`, `-`, `*`, `/`, `%`,

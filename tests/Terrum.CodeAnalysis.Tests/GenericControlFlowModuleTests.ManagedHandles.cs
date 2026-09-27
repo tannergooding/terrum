@@ -22,6 +22,7 @@ public sealed partial class GenericControlFlowModuleTests
             public int32 Value;
             public mut write Cell? Next;
             public Cell(int32 value) { Value = value; Next = null; }
+            public static int32 Expected() { return 41; }
         }
         class Marker {
             public int32 Value;
@@ -50,6 +51,14 @@ public sealed partial class GenericControlFlowModuleTests
             where A : [Copy] where B : [Copy] {
             return false;
         }
+        T CreateAndRead<T>(T value) where T : [Copy] {
+            if (Models.Cell.TryCreate(41, out var fresh)) {
+                fresh.Next = fresh;
+                ManagedHeap.Collect();
+                require fresh.Value == Models.Cell.Expected();
+            }
+            return value;
+        }
         write Cell CollectAndReturn(write Cell value) {
             require ManagedHeap.Collect() >= 0;
             return value;
@@ -63,7 +72,7 @@ public sealed partial class GenericControlFlowModuleTests
             }
             require Marker.TryCreate(2, out var marker);
             var live = Forward<write Models.Cell, write Models.Cell, Marker>(
-                Identity<write Cell>(root), CollectAndReturn(root), marker);
+                Identity<write Cell>(CreateAndRead(root)), CollectAndReturn(root), marker);
             require Publish(live, new Pair(1, 2), out var writable, out var pair);
             Cell read = Identity<Cell>(writable);
             Cell inferredReadonly = Identity(writable);
@@ -120,6 +129,8 @@ public sealed partial class GenericControlFlowModuleTests
             function.Name == "Models.Identity<write ManagedNode?>");
         Assert.Contains(program.Functions, static function =>
             function.Name == "Models.Forward<int32, write Models.Cell, Models.Pair>");
+        Assert.Contains(program.Functions, static function =>
+            function.Name == "Models.CreateAndRead<write Models.Cell>");
         Assert.DoesNotContain(program.Functions, static function => function.IsExternal
             || function.Name.Contains('$', StringComparison.Ordinal));
         Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(program, policy)).ConfigureAwait(true));
@@ -175,6 +186,8 @@ public sealed partial class GenericControlFlowModuleTests
             linked.Classes.Select(static @class => @class.Name));
         Assert.Contains(linked.Functions, static function =>
             function.Name == "$producer.Models.Identity<write Models.Cell?>");
+        Assert.Contains(linked.Functions, static function =>
+            function.Name == "$producer.Models.CreateAndRead<write Models.Cell>");
         Assert.Equal(40, await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original),
             policy)).ConfigureAwait(true));
         Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));

@@ -593,6 +593,171 @@ public sealed class StaticProtocolCompositionTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void ConcreteCyclicManagedFactoriesBindInCopyTemplates(bool instantiate)
+    {
+        var entry = instantiate
+            ? "int32 Main() { return Forward(int32(42)); }"
+            : "int32 Main() { return 0; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            mut class First {
+                public mut write Second? Next;
+                public First() { Next = null; }
+                public mut void Set(write Second next) { Next = next; }
+            }
+            mut class Second {
+                public mut write First? Next;
+                public Second() { Next = null; }
+                public mut void Set(write First next) { Next = next; }
+            }
+            U Select<A, U>(A first, U second)
+                where A : [Copy] where U : [Copy] { return second; }
+            T Forward<T>(T value) where T : [Copy] {
+                require First.TryCreate(out var first);
+                require Second.TryCreate(out var second);
+                first.Set(second);
+                second.Set(first);
+                First read = first;
+                First? optional = read;
+                require optional is some present && present.Next is some follower;
+                require ManagedHeap.Collect() == 0;
+                return Select<First, T>(read, value);
+            }
+            """ + entry));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(2, program.Classes.Length);
+        Assert.DoesNotContain(program.Functions, function => function.IsExternal
+            || function.Name.Contains('$', StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(false, "Cell? empty = null;")]
+    [InlineData(true, "Cell? empty = null;")]
+    [InlineData(false, "write Cell? empty = null;")]
+    [InlineData(true, "write Cell? empty = null;")]
+    [InlineData(false, "Model.Cell? empty = null;")]
+    [InlineData(true, "Model.Cell? empty = null;")]
+    [InlineData(false, "write Model.Cell? empty = null;")]
+    [InlineData(true, "write Model.Cell? empty = null;")]
+    [InlineData(false, "return Second<Model.Cell?, T>(null, value);")]
+    [InlineData(true, "return Second<Model.Cell?, T>(null, value);")]
+    [InlineData(false, "return Second<write Model.Cell?, T>(null, value);")]
+    [InlineData(true, "return Second<write Model.Cell?, T>(null, value);")]
+    public void ConcreteManagedTypeNamesHydrateBeforeFactoryCalls(bool instantiate, string operation)
+    {
+        var entry = instantiate ? "int32 Main() { return Forward(int32(42)); }"
+            : "int32 Main() { return 0; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            namespace Model;
+            mut class Cell {
+                public mut int32 Value;
+                public Cell(int32 value) { Value = value; }
+            }
+            U Second<A, U>(A first, U second)
+                where A : [Copy] where U : [Copy] { return second; }
+            T Forward<T>(T value) where T : [Copy] {
+                {{operation}}
+                return value;
+            }
+            {{entry}}
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        _ = Assert.Single(program.Classes);
+        Assert.DoesNotContain(program.Functions, function => function.IsExternal
+            || function.Name.Contains('$', StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GenericFormalShadowsConcreteManagedClassDuringProof(bool instantiate)
+    {
+        var entry = instantiate ? "int32 Main() { return Forward(int32(42)); }"
+            : "int32 Main() { return 0; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            class T {
+                public int32 Value;
+                public T(int32 value) { Value = value; }
+            }
+            T Forward<T>(T value) where T : [Copy] {
+                require T.TryCreate(42, out var cell);
+                return value;
+            }
+            {{entry}}
+            """));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code is "TRM3007" or "TRM3011");
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData(false, "T.TryCreate(1, out var missing);")]
+    [InlineData(true, "T.TryCreate(1, out var missing);")]
+    [InlineData(false, "var missing = cell.Secret;")]
+    [InlineData(true, "var missing = cell.Secret;")]
+    [InlineData(false, "Cell read = cell; read.Set(1);")]
+    [InlineData(true, "Cell read = cell; read.Set(1);")]
+    [InlineData(false, "Cell? optional = cell; var missing = optional.Value;")]
+    [InlineData(true, "Cell? optional = cell; var missing = optional.Value;")]
+    public void ManagedProofRetainsFormalOpacityAndQualifiedAccess(bool instantiate, string operation)
+    {
+        var entry = instantiate ? "int32 Main() { return Forward(int32(42)); }"
+            : "int32 Main() { return 0; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            mut class Cell {
+                public mut int32 Value;
+                private int32 Secret;
+                public Cell(int32 value) { Value = value; Secret = value; }
+                public mut void Set(int32 value) { Value = value; }
+            }
+            T Forward<T>(T value) where T : [Copy] {
+                require Cell.TryCreate(42, out var cell);
+                {{operation}}
+                return value;
+            }
+            {{entry}}
+            """));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code is "TRM3007" or "TRM3011");
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void ConcreteManagedFactoryRetainsDeclaredEffectsInNoThrowProof(
+        bool constructorNoThrow, bool methodNoThrow)
+    {
+        var constructorAttribute = constructorNoThrow ? "[NoThrow] " : "";
+        var methodAttribute = methodNoThrow ? "[NoThrow] " : "";
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            class Cell {
+                public int32 Value;
+                {{constructorAttribute}}public Cell(int32 value) { Value = value; }
+                {{methodAttribute}}public int32 Read() { return Value; }
+            }
+            [NoThrow] T Forward<T>(T value) where T : [Copy] {
+                if (Cell.TryCreate(1, out var cell)) {
+                    var read = cell.Read();
+                }
+                return value;
+            }
+            int32 Main() { return 0; }
+            """));
+        if (constructorNoThrow && methodNoThrow)
+        {
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        }
+        else
+        {
+            Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3017");
+            Assert.Null(compilation.Program);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void RecursiveHelpersReuseClosedSpecializations(bool mutual)
     {
         var source = """

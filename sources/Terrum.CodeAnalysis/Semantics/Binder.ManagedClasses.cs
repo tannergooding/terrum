@@ -61,7 +61,8 @@ internal sealed partial class Binder
                 type = default;
                 return resolution;
             }
-            if (resolution == DeclaredTypeResolution.Unique && source.IsStruct(sourceType)
+            if (resolution == DeclaredTypeResolution.Unique
+                && (source.IsStruct(sourceType) || source.IsClass(sourceType))
                 && HydrateProofType(sourceType) is PrimitiveType mapped)
             {
                 type = mapped;

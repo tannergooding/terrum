@@ -2,6 +2,7 @@
 
 using System;
 using System.Linq;
+using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Xunit;
@@ -89,6 +90,86 @@ public sealed class NativeManagedClassVerifierTests
             }),
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+        malformed = program with {
+            Functions = program.Functions.SetItem(factoryIndex, factory with { Intrinsic = BoundIntrinsic.None }),
+        };
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+        malformed = program with {
+            Functions = program.Functions.SetItem(constructorIndex, constructor with {
+                DeclaringStruct = "Other",
+            }),
+        };
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+    }
+
+    [Fact]
+    public void ManagedProofExternalsCannotEnterPersistedConsumer()
+    {
+        var producerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Export() { return 42; }"));
+        Assert.False(producerCompilation.HasErrors,
+            string.Join(Environment.NewLine, producerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(producerCompilation.Program), ["Export"]);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            class Leaf {
+                public int32 Value;
+                public Leaf(int32 value) { Value = value; }
+            }
+            int32 Main() { return Export(); }
+            """), ModuleCompiler.CreateReference(producer));
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = Assert.IsType<BoundProgram>(consumerCompilation.Program);
+        Assert.NotEmpty(ModuleCompiler.CreateConsumer(consumer, producer));
+        var imported = Assert.Single(consumer.Functions, static function => function.IsExternal);
+        var malformed = consumer with {
+            Functions = consumer.Functions.Add(imported with {
+                Name = "UnusedManaged",
+                ReturnType = (PrimitiveType)ManagedClassTypes.First,
+            }),
+        };
+        var normalError = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(malformed));
+        Assert.Equal("Ownership", normalError.Data["Terrum.InvalidEffect"]);
+        var persistedError = Assert.Throws<ArgumentException>(() =>
+            ModuleCompiler.CreateConsumer(malformed, producer));
+        Assert.Equal("Ownership", persistedError.Data["Terrum.InvalidEffect"]);
+        var factoryIndex = FindFactory(consumer);
+        var factory = consumer.Functions[factoryIndex];
+        malformed = consumer with {
+            Functions = consumer.Functions.SetItem(factoryIndex, factory with { ClassConstructor = 4096 }),
+        };
+        _ = Assert.Throws<ArgumentException>(() =>
+            ModuleCompiler.CreateConsumer(malformed, producer));
+        malformed = consumer with {
+            Functions = consumer.Functions.SetItem(factoryIndex, factory with { Intrinsic = BoundIntrinsic.None }),
+        };
+        _ = Assert.Throws<ArgumentException>(() =>
+            ModuleCompiler.CreateConsumer(malformed, producer));
+    }
+
+    [Fact]
+    public void ClassDescriptorWithoutConstructionPairCannotEnterLibraryOrProducer()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            class Leaf {
+                public int32 Value;
+                public Leaf(int32 value) { Value = value; }
+            }
+            public int32 Export() { return 42; }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        SemanticVerifier.VerifyLibrary(program);
+        Assert.NotEmpty(ModuleCompiler.CreateProducer(program, ["Export"]));
+        var descriptorOnly = program with {
+            Functions = [Assert.Single(program.Functions, static function => function.Name == "Export")],
+        };
+        _ = Assert.Single(descriptorOnly.Classes);
+        Assert.Equal(-1, descriptorOnly.EntryPoint);
+        Assert.Equal("Export", Assert.Single(descriptorOnly.Functions).Name);
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(descriptorOnly));
+        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(descriptorOnly, ["Export"]));
     }
 
     [Theory]

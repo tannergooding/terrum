@@ -9,6 +9,67 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConcreteManagedFactoryInCopyTemplatePreservesConditionalOutputsAsync(bool checkedFailures)
+    {
+        const string Source = """
+            class Cell {
+                public int32 Value;
+                public Cell(int32 value) { Value = value; }
+            }
+            bool TryForward<T>(T value, bool succeed, out T result) where T : [Copy] {
+                if (Cell.TryCreate(40, out var cell)) {
+                    ManagedHeap.Collect();
+                    require cell.Value == 40;
+                }
+                if (succeed) { result = value; return true; }
+                return false;
+            }
+            int32 Main() {
+                require !TryForward(int32(1), false, out var absent);
+                require TryForward(int32(42), true, out var answer);
+                return answer;
+            }
+            """;
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    public Task ConcreteManagedFactoryInCopyTemplateRetainsCheckedFailureCleanupAsync()
+    {
+        const string Source = """
+            class Cell {
+                public int32 Value;
+                public Cell(int32 value) {
+                    Value = value;
+                    require value != 0;
+                }
+            }
+            int32 CreateOrRecover<T>(T value) where T : [Copy] {
+                unsafe {
+                    try {
+                        if (Cell.TryCreate(0, out var incomplete)) { return 1; }
+                        return 2;
+                    } catch {
+                        require ManagedHeap.Collect() == 0;
+                        return 42;
+                    }
+                }
+            }
+            int32 Main() { return CreateOrRecover(int32(1)); }
+            """;
+        return AssertCheckedExecutionAsync(Source, 42);
+    }
+
     private const string CompositionValue = """
         interface Addition<A, B, C> { static abstract C operator +(A left, B right); }
         struct Value : Addition<Value, Value, Value> {
