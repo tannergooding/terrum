@@ -20,6 +20,103 @@ public sealed partial class GenericControlFlowModuleTests
     private const string Stub = "public int32 PowerProbe() { return 40; }";
     private const string Middle = "public int32 Middle() { return PowerProbe() + 1; }";
     private const string Root = "int32 Main() { Middle(); return Middle() + 1; }";
+    private const string ConcreteHelperReplacement = """
+        struct Value {
+            public int32 Number;
+            public Value(int32 number) { Number = number; }
+        }
+        T Forward<T>(T value) where T : [Copy] {
+            return Second<Value, T>(new Value(1), value);
+        }
+        U Second<A, U>(A first, U second)
+            where A : [Copy] where U : [Copy] { return second; }
+        public int32 Read() { return Forward(int32(42)); }
+        """;
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task ConcreteHelperArgumentsStayPrivateAcrossCompatibleProducerReplacementAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string Original = "public int32 Read() { return 40; }";
+        const string Source = """
+            struct Value {
+                public int32 Number;
+                public Value(int32 number) { Number = number; }
+            }
+            int32 Main() { return Read(); }
+            """;
+        var stub = ModuleCompiler.CreateProducer(Compile(Original, policy), ["Read"]);
+        var consumer = ModuleCompiler.CreateConsumer(Compile(Source, policy,
+            ModuleCompiler.CreateReference(stub), library: false), stub);
+        var replacement = ModuleCompiler.CreateProducer(Compile(ConcreteHelperReplacement, policy), ["Read"]);
+        Assert.Equal("Read", Assert.Single(ModuleCompiler.CreateReference(replacement).Functions).Name);
+        var linked = ModuleCompiler.Link(consumer, replacement);
+        Assert.Contains(linked.Structures, structure => structure.Name == "$producer.Value");
+        Assert.Contains(linked.Functions, function => function.Name == "$producer.Second<Value, int32>");
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.Equal(42, NativeJit.Execute(linked, policy));
+
+        var nativeStub = NativeModuleCompiler.CreateProducer(Compile(Original, policy), ["Read"], "Leaf", policy);
+        var nativeConsumer = NativeModuleCompiler.CreateConsumer(Compile(Source, policy,
+            NativeModuleCompiler.CreateReference(nativeStub), library: false), nativeStub, policy);
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(Compile(ConcreteHelperReplacement, policy),
+            ["Read"], "Leaf", policy);
+        Assert.Equal(40, await NativeModuleCompiler.RunAsync(nativeConsumer, nativeStub,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(true));
+        Assert.Equal(42, await NativeModuleCompiler.RunAsync(nativeConsumer, nativeReplacement,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task GenericProofUsesImportedConcreteCopyDeclarationsAsync(NativeRuntimePolicy policy)
+    {
+        var producer = ModuleCompiler.CreateProducer(Compile("""
+            public struct Box {
+                public int32 Number;
+                public Box(int32 number) { Number = number; }
+            }
+            """, policy), ["Box.#ctor"]);
+        var consumer = ModuleCompiler.CreateConsumer(Compile("""
+            T Forward<T>(T value) where T : [Copy] {
+                return Second<Box, T>(new Box(1), value);
+            }
+            U Second<A, U>(A first, U second)
+                where A : [Copy] where U : [Copy] { return second; }
+            int32 Main() { return Forward(int32(42)); }
+            """, policy, ModuleCompiler.CreateReference(producer), library: false), producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.Equal(42, NativeJit.Execute(linked, policy));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task GenericProofInfersImportedFactoryReturnWithoutTypeSyntaxAsync(NativeRuntimePolicy policy)
+    {
+        var producer = ModuleCompiler.CreateProducer(Compile("""
+            public struct Box {
+                public int32 Number;
+                public Box(int32 number) { Number = number; }
+                public static Box Create() { return new Box(1); }
+            }
+            """, policy), ["Box.Create"]);
+        var consumer = ModuleCompiler.CreateConsumer(Compile("""
+            T Forward<T>(T value) where T : [Copy] {
+                return Second(Box.Create(), value);
+            }
+            U Second<A, U>(A first, U second)
+                where A : [Copy] where U : [Copy] { return second; }
+            int32 Main() { return Forward(int32(42)); }
+            """, policy, ModuleCompiler.CreateReference(producer), library: false), producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.Equal(42, NativeJit.Execute(linked, policy));
+    }
 
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]

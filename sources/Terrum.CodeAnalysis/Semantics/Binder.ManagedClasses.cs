@@ -47,6 +47,27 @@ internal sealed partial class Binder
 
     private DeclaredTypeResolution ResolveTypeName(string name, out PrimitiveType type)
     {
+        if (_genericContext is GenericInstantiation generic
+            && generic.Template.ParameterIndex(name) is var index && index >= 0)
+        {
+            type = generic.Types[index];
+            return DeclaredTypeResolution.Unique;
+        }
+        if (_genericProofSource is Binder source)
+        {
+            var resolution = source.ResolveTypeName(name, out var sourceType);
+            if (resolution == DeclaredTypeResolution.Ambiguous)
+            {
+                type = default;
+                return resolution;
+            }
+            if (resolution == DeclaredTypeResolution.Unique && source.IsStruct(sourceType)
+                && HydrateProofType(sourceType) is PrimitiveType mapped)
+            {
+                type = mapped;
+                return DeclaredTypeResolution.Unique;
+            }
+        }
         var candidates = new HashSet<PrimitiveType>();
         if (name.Contains('.', StringComparison.Ordinal))
         {
@@ -97,6 +118,9 @@ internal sealed partial class Binder
         name = resolution == DeclaredTypeResolution.Unique
             ? IsClass(type) ? _classes[ManagedClassTypes.ClassIndex(type)].Name + "." + member
                 : IsStruct(type) ? _structs[(int)type - 100].Name + "." + member
+                : _genericContext is GenericInstantiation generic
+                    && generic.Template.ParameterIndex(receiverName) >= 0
+                    ? TypeName(type) + "." + member
                 : receiverName + "." + member
             : receiverName + "." + member;
         return resolution;

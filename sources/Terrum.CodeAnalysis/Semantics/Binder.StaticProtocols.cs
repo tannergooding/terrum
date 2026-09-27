@@ -46,6 +46,103 @@ internal sealed partial class Binder
     }
     internal sealed record GenericInstantiation(GenericTemplate Template, ImmutableArray<PrimitiveType> Types);
     private ImmutableArray<BoundFunction>.Builder? _genericProofFunctions;
+    private Binder? _genericProofSource;
+
+    private PrimitiveType? HydrateProofType(PrimitiveType sourceType)
+    {
+        var source = _genericProofSource ?? throw new InvalidOperationException("Missing generic proof source.");
+        if (!source.IsStruct(sourceType))
+        {
+            return sourceType is PrimitiveType.Void or PrimitiveType.Bool or PrimitiveType.Char16
+                or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                ? sourceType : null;
+        }
+        var structure = source._structs[(int)sourceType - 100];
+        if (structure.IsUnique)
+        {
+            return null;
+        }
+        if (_structNames.TryGetValue(structure.Name, out var existing))
+        {
+            return existing;
+        }
+        var fields = ImmutableArray.CreateBuilder<BoundStructField>(structure.Fields.Length);
+        foreach (var field in structure.Fields)
+        {
+            if (HydrateProofType(field.Type) is not PrimitiveType fieldType)
+            {
+                return null;
+            }
+            fields.Add(field with { Type = fieldType });
+        }
+        var result = (PrimitiveType)(100 + _structs.Count);
+        _structNames.Add(structure.Name, result);
+        _structs.Add(structure with { Fields = fields.MoveToImmutable() });
+        if (source._conformances.TryGetValue(structure.Name, out var witnesses))
+        {
+            _conformances.Add(structure.Name, witnesses);
+        }
+        return result;
+    }
+
+    private bool HydrateProofFunction(int sourceIndex)
+    {
+        var source = _genericProofSource ?? throw new InvalidOperationException("Missing generic proof source.");
+        var declaration = source._signatures[sourceIndex];
+        if (declaration.IsCleanup || declaration.IsClassConstructor
+            || HydrateProofType(declaration.ReturnType) is not PrimitiveType result)
+        {
+            return false;
+        }
+        var parameters = ImmutableArray.CreateBuilder<Parameter>(declaration.Parameters.Length);
+        foreach (var parameter in declaration.Parameters)
+        {
+            if (HydrateProofType(parameter.Type) is not PrimitiveType type)
+            {
+                return false;
+            }
+            parameters.Add(parameter with { Type = type });
+        }
+        var owner = declaration.StructName is null ? null
+            : declaration.Name[..declaration.Name.LastIndexOf('.', StringComparison.Ordinal)];
+        PrimitiveType? receiver = null;
+        if (owner is not null)
+        {
+            if (!source._structNames.TryGetValue(owner, out var sourceType)
+                || HydrateProofType(sourceType) is not PrimitiveType mapped)
+            {
+                return false;
+            }
+            receiver = mapped;
+        }
+        var variables = ImmutableArray.CreateBuilder<BoundVariable>();
+        if (receiver is PrimitiveType receiverType && !declaration.IsStatic)
+        {
+            variables.Add(new BoundVariable("this", receiverType,
+                declaration.External?.Variables[0].IsMutable
+                    ?? (declaration.IsConstructor || declaration.IsMutable), declaration.Tree.Root.Span));
+        }
+        variables.AddRange(parameters.Select(parameter => new BoundVariable(parameter.Name,
+            parameter.Type, parameter.IsOut, parameter.Span) { IsOut = parameter.IsOut }));
+        var external = new BoundFunction(declaration.Name, result, variables.ToImmutable(),
+            parameters.Count + (receiver is not null && !declaration.IsStatic && !declaration.IsConstructor ? 1 : 0),
+            new BoundBlock([], declaration.Tree.Root.Span), declaration.Tree.Root.Span) {
+            IsExternal = true,
+            IsConstructor = declaration.IsConstructor,
+            IsStatic = declaration.IsStatic,
+            IsNoThrow = declaration.IsNoThrow,
+            DoesNotReturn = declaration.DoesNotReturn,
+            DeclaringStruct = owner,
+        };
+        _functions.Add(declaration.Name, _signatures.Count);
+        _signatures.Add(declaration with {
+            ReturnType = result,
+            Parameters = parameters.MoveToImmutable(),
+            External = external,
+        });
+        (_genericProofFunctions ?? throw new InvalidOperationException("Missing generic proof functions.")).Add(external);
+        return true;
+    }
 
     private static bool IsStaticBinaryOperator(TokenKind kind) => kind is TokenKind.Plus or TokenKind.Minus
         or TokenKind.Star or TokenKind.Slash or TokenKind.Percent or TokenKind.Ampersand
@@ -527,19 +624,33 @@ internal sealed partial class Binder
                 callee.Span);
             return -1;
         }
-        if (_genericContext is GenericInstantiation enclosing && types.Select((type, index) => (type, index)).Any(item =>
-            !(template.TypeParameters[item.index].Operations.Count == 0
-                && !IsStruct(item.type) && !ManagedClassTypes.IsManaged(item.type))
-            && !Enumerable.Range(0, enclosing.Types.Length).Any(callerIndex =>
-                enclosing.Types[callerIndex] == item.type
-                && template.TypeParameters[item.index].Operations.Values.All(protocol =>
-                    enclosing.Template.TypeParameters[callerIndex].Operations.ContainsValue(protocol)))))
+        var typeNames = types.Select(type => IsStruct(type) ? _structs[(int)type - 100].Name : TypeName(type)).ToArray();
+        if (types.Select((type, index) => (type, index)).Any(item => {
+            var required = template.TypeParameters[item.index].Operations.Values;
+            if (_genericProofFunctions is not null && _genericContext is GenericInstantiation enclosing)
+            {
+                for (var callerIndex = 0; callerIndex < enclosing.Types.Length; callerIndex++)
+                {
+                    if (enclosing.Types[callerIndex] == item.type)
+                    {
+                        return required.Any(protocol =>
+                            !enclosing.Template.TypeParameters[callerIndex].Operations.ContainsValue(protocol));
+                    }
+                }
+                if (ManagedClassTypes.IsManaged(item.type))
+                {
+                    return true;
+                }
+            }
+            return required.Any()
+                && (!IsStruct(item.type) || !_conformances.TryGetValue(typeNames[item.index], out var witnesses)
+                    || required.Any(protocol => !witnesses.Contains(protocol)));
+        }))
         {
-            Report("TRM3007", "A constrained helper call requires the current type parameter and its declared protocol witnesses.",
+            Report("TRM3007", "A helper call requires declared protocol witnesses for every selected Copy type.",
                 callee.Span);
             return -1;
         }
-        var typeNames = types.Select(type => IsStruct(type) ? _structs[(int)type - 100].Name : TypeName(type)).ToArray();
         var instantiated = template.Name + "<" + string.Join(", ", typeNames) + ">";
         if (_functions.TryGetValue(instantiated, out var existing))
         {
@@ -551,11 +662,7 @@ internal sealed partial class Binder
             Report("TRM3016", "Closed generic specialization limit exceeded.", callee.Span);
             return -1;
         }
-        if (types.Select((type, index) => (type, index)).Any(item =>
-            (IsStruct(item.type) && _structs[(int)item.type - 100].IsUnique)
-            || (_genericProofFunctions is null && template.TypeParameters[item.index].Operations.Count != 0
-                && (!IsStruct(item.type) || !_conformances.TryGetValue(typeNames[item.index], out var witnesses)
-                    || template.TypeParameters[item.index].Operations.Values.Any(protocol => !witnesses.Contains(protocol))))))
+        if (types.Any(type => IsStruct(type) && _structs[(int)type - 100].IsUnique))
         {
             Report("TRM3007", "Generic type arguments lack their declared Copy static protocol witnesses.", callee.Span);
             return -1;
@@ -616,6 +723,7 @@ internal sealed partial class Binder
             var functions = ImmutableArray.CreateBuilder<BoundFunction>();
             var probeTypes = ImmutableArray.CreateBuilder<PrimitiveType>(template.TypeParameters.Length);
             proofBinder._genericProofFunctions = functions;
+            proofBinder._genericProofSource = this;
             var collect = NativeManagedNodeIntrinsics.Functions.Single(static function =>
                 function.Intrinsic == BoundIntrinsic.NodeCollect);
             proofBinder._functions.Add(collect.Name, proofBinder._signatures.Count);
@@ -626,7 +734,8 @@ internal sealed partial class Binder
             for (var parameterIndex = 0; parameterIndex < template.TypeParameters.Length; parameterIndex++)
             {
                 var probeName = template.TypeParameters.Length == 1 ? "$T" : "$T" + parameterIndex;
-                var probeType = (PrimitiveType)(100 + parameterIndex);
+                // Symbolic formals must not alias any concrete Copy structure in this proof.
+                var probeType = (PrimitiveType)(100 + proofBinder._structs.Count);
                 probeTypes.Add(probeType);
                 proofBinder._structs.Add(new BoundStruct(probeName,
                     [new BoundStructField("$opaque", PrimitiveType.Int32, 0, 4) { IsPrivate = true }], 4) {

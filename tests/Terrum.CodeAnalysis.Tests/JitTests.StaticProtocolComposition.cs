@@ -22,6 +22,33 @@ public sealed partial class JitTests
         """;
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConcreteCopyStructHelperArgumentsExecuteAcrossIndirectValuesAsync(bool checkedFailures)
+    {
+        var source = CompositionValue + """
+            T Forward<T>(T value) where T : [Copy] {
+                var fixedValue = Second<T, Value>(value, new Value(19, 23));
+                return Second<Value, T>(fixedValue, value);
+            }
+            U Second<A, U>(A first, U second)
+                where A : [Copy] where U : [Copy] { return second; }
+            int32 Main() {
+                var result = Forward(new Value(40, 2));
+                return int32(result.First + result.Second);
+            }
+            """;
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
     [InlineData(true, false)]

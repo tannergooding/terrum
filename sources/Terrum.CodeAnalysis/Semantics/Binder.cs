@@ -1045,8 +1045,7 @@ internal sealed partial class Binder
     }
 
     private bool TryResolveStruct(string name, out PrimitiveType type) =>
-        ResolveTypeName(name, out type) == DeclaredTypeResolution.Unique
-            && !ManagedClassTypes.IsClass(type);
+        ResolveTypeName(name, out type) == DeclaredTypeResolution.Unique && IsStruct(type);
 
     private BoundBlock BindBlock(SyntaxNode block)
     {
@@ -2610,6 +2609,11 @@ internal sealed partial class Binder
 
     private bool TryFindFunction(string name, out int function)
     {
+        if (_genericProofSource is Binder source && source.TryFindFunction(name, out var sourceIndex)
+            && !_functions.ContainsKey(source._signatures[sourceIndex].Name))
+        {
+            _ = HydrateProofFunction(sourceIndex);
+        }
         if (_functions.TryGetValue(name, out function))
         {
             return true;

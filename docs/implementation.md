@@ -498,10 +498,19 @@ Copy-only templates also specialize for `bool`, `char16`, `int32`, `uint32`,
 `int64` and `uint64`, using their existing concrete argument/result ABI.
 This permits scalar selection and conditional output, not new arithmetic
 rights on symbolic `T`.
+
+A template can also compose helpers using concrete eligible `Copy` structs
+alongside its symbolic parameters. Normal binding resolves concrete constructors,
+factories, fields and methods, including imported declarations and inferred
+helper results. The isolated definition proof brings in only reached
+declarations and their nested value layouts; unrelated declarations do not
+consume its function/type budget. Concrete witnesses and declared effects apply
+to that concrete type, never to an unrelated unconstrained formal. Proof-only
+declarations remain outside executable IR and persisted imports.
+
 General interface dispatch, primitive operator conformance, general generic inference,
-concrete type arguments inside templates, member access on a
-type parameter and public
-generic/witness metadata remain unsupported. A public concrete wrapper may
+member access on a type parameter, concrete managed-type construction inside
+templates and public generic/witness metadata remain unsupported. A public concrete wrapper may
 use a private specialization without publishing its template or witnesses.
 `syntax-11` adds source class declarations; `native-19` adds their bounded
 construction and descriptor-based tracing contract.

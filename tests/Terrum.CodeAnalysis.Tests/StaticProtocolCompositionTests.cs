@@ -275,6 +275,322 @@ public sealed class StaticProtocolCompositionTests
     }
 
     [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void ConcreteCopyStructArgumentsInTemplatesRetainTheirOwnWitnesses(bool instantiate, bool scalar)
+    {
+        var entry = instantiate
+            ? scalar ? "int32 Main() { return Forward(int32(42)); }"
+                : "int32 Main() { return Forward(new Value(42)).Number; }"
+            : "int32 Main() { return 0; }";
+        var compilation = Compilation.Create(SyntaxTree.Parse(Protocols + Value + """
+            T Forward<T>(T value) where T : [Copy] {
+                var fixedValue = SelectSecond<T, Value>(value, new Value(1));
+                return SelectSecond<Value, T>(fixedValue + fixedValue, value);
+            }
+            U SelectSecond<A, U>(A first, U second)
+                where A : [Copy] where U : [Copy] { return second; }
+            """ + entry));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(instantiate ? scalar ? 3 : 2 : 0, program.Functions.Count(function =>
+            function.Name.Contains('<', StringComparison.Ordinal)));
+        Assert.DoesNotContain(program.Functions, function => function.IsExternal
+            || function.Name.Contains('$', StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ConcreteNestedCopyFieldsAreRemappedInSymbolicProof()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Inner {
+                public int32 Number;
+                public Inner(int32 number) { Number = number; }
+            }
+            struct Outer {
+                public Inner Item;
+                public Outer(Inner item) { Item = item; }
+            }
+            T Forward<T>(T value) where T : [Copy] {
+                return Second<Outer, T>(new Outer(new Inner(1)), value);
+            }
+            U Second<A, U>(A first, U second)
+                where A : [Copy] where U : [Copy] { return second; }
+            int32 Main() { return Forward(int32(42)); }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Theory]
+    [InlineData("Value", false)]
+    [InlineData("Other", false)]
+    [InlineData("Owner", true)]
+    public void ConcreteTypeArgumentsCannotBorrowAnUnrelatedFormalWitnessOrUniqueOwner(
+        string selected, bool unique)
+    {
+        var declaration = unique
+            ? "unique struct Owner { public int32 Number; public Owner(int32 number) { Number = number; } }"
+            : "struct Other { public int32 Number; public Other(int32 number) { Number = number; } }";
+        var protocol = unique ? "" : Protocols + Value;
+        var body = selected == "Value"
+            ? "return Combine<Value,T>(new Value(1), value);"
+            : $"return Combine<{selected},T>(new {selected}(1), value);";
+        var compilation = Compilation.Create(SyntaxTree.Parse(protocol + declaration + $$"""
+            T Forward<T>(T value) where T : [Copy] { {{body}} }
+            U Combine<A, U>(A first, U second)
+                where A : Addition<A, A, A>, [Copy] where U : [Copy] { return second; }
+            int32 Main() { return 0; }
+            """));
+        if (selected == "Value")
+        {
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        }
+        else
+        {
+            Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code is "TRM3007" or "TRM3011");
+            Assert.Null(compilation.Program);
+        }
+    }
+
+    [Fact]
+    public void ConcreteWitnessCannotJustifyAnOperationOnAnUnrelatedTypeParameter()
+    {
+        var compilation = Compile("""
+            T Forward<T>(T value) where T : [Copy] {
+                return Combine<T, Value>(value, new Value(1));
+            }
+            A Combine<A, U>(A first, U second)
+                where A : Addition<A, A, A>, [Copy] where U : [Copy] { return first; }
+            """, instantiate: true);
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ConcreteOperationsKeepTheirDeclaredEffectsInGenericDefinitions(bool constructorNoThrow)
+    {
+        var declaration = constructorNoThrow ? "[NoThrow] " : "";
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            struct Value {
+                public int32 Number;
+                {{declaration}}public Value(int32 number) { Number = number; }
+            }
+            [NoThrow] T Forward<T>(T value) where T : [Copy] {
+                return Second<Value, T>(new Value(1), value);
+            }
+            [NoThrow] U Second<A, U>(A first, U second)
+                where A : [Copy] where U : [Copy] { return second; }
+            int32 Main() { return 0; }
+            """));
+        if (constructorNoThrow)
+        {
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        }
+        else
+        {
+            Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3017");
+            Assert.Null(compilation.Program);
+        }
+    }
+
+    [Fact]
+    public void UnreferencedStructsDoNotExhaustGenericProofTypes()
+    {
+        var source = new StringBuilder();
+        for (var i = 0; i < 255; i++)
+        {
+            _ = source.Append("struct S").Append(i.ToString(CultureInfo.InvariantCulture))
+                .Append(" { public int32 Value; }");
+        }
+        _ = source.Append("""
+            T Identity<T>(T value) where T : [Copy] { return value; }
+            int32 Main() { return 0; }
+            """);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Fact]
+    public void UnrelatedDeclarationsDoNotExhaustGenericProofFunctions()
+    {
+        var source = new StringBuilder();
+        for (var i = 0; i < 1023; i++)
+        {
+            _ = source.Append("int32 F").Append(i.ToString(CultureInfo.InvariantCulture))
+                .Append("() { return 0; }");
+        }
+        _ = source.Append("""
+            T Identity<T>(T value) where T : [Copy] { return value; }
+            int32 Main() { return 0; }
+            """);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source.ToString()));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Equal(1024, Assert.IsType<BoundProgram>(compilation.Program).Functions.Length);
+    }
+
+    [Theory]
+    [InlineData("Create()", "Value Create() { return new Value(1); }")]
+    [InlineData("Value.Create()", "")]
+    [InlineData("new Outer(new Value(1)).Get()", "")]
+    [InlineData("Outer.Create().Get()", "")]
+    [InlineData("created.Get()", "")]
+    public void ConcreteFactoryReturnsSeedGenericProofDependencies(string first, string factory)
+    {
+        var local = first == "created.Get()" ? "var created = Outer.Create();" : "";
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            struct Value {
+                public int32 Number;
+                public Value(int32 number) { Number = number; }
+                public static Value Create() { return new Value(1); }
+            }
+            struct Outer {
+                public Value Item;
+                public Outer(Value item) { Item = item; }
+                public Value Get() { return Item; }
+                public static Outer Create() { return new Outer(new Value(1)); }
+            }
+            {{factory}}
+            T Forward<T>(T value) where T : [Copy] {
+                {{local}}
+                return Second({{first}}, value);
+            }
+            U Second<A, U>(A first, U second)
+                where A : [Copy] where U : [Copy] { return second; }
+            int32 Main() { return Forward(int32(42)); }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var functions = Assert.IsType<BoundProgram>(compilation.Program).Functions;
+        Assert.Contains(functions, function => function.Name == "Second<Value, int32>");
+        Assert.DoesNotContain(functions, function => function.IsExternal
+            || function.Name.Contains('$', StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ConcreteFactoryCallsRetainTheirDeclaredEffectsInGenericProof(bool factoryNoThrow)
+    {
+        var attribute = factoryNoThrow ? "[NoThrow] " : "";
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            struct Value {
+                public int32 Number;
+                [NoThrow] public Value(int32 number) { Number = number; }
+            }
+            {{attribute}}Value Create() { return new Value(1); }
+            [NoThrow] T Forward<T>(T value) where T : [Copy] {
+                return Second(Create(), value);
+            }
+            [NoThrow] U Second<A, U>(A first, U second)
+                where A : [Copy] where U : [Copy] { return second; }
+            int32 Main() { return 0; }
+            """));
+        if (factoryNoThrow)
+        {
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        }
+        else
+        {
+            Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3017");
+            Assert.Null(compilation.Program);
+        }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void InferredHelperResultsRetainConcreteMemberAndOperatorBindings(bool siblingScope, bool add)
+    {
+        var preceding = siblingScope
+            ? "{ var created = Outer.Create(); var unused = created.Get(); }" : "";
+        var selected = add
+            ? "created.Get() + created.Get()" : "created.Get()";
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            interface Addition<A, B, C> { static abstract C operator +(A left, B right); }
+            struct Value : Addition<Value, Value, Value> {
+                public int32 Number;
+                public Value(int32 number) { Number = number; }
+                public static Value operator +(Value left, Value right) {
+                    return new Value(left.Number + right.Number);
+                }
+            }
+            struct Outer {
+                public Value Item;
+                public Outer(Value item) { Item = item; }
+                public static Outer Create() { return new Outer(new Value(1)); }
+                public Value Get() { return Item; }
+            }
+            A Identity<A>(A item) where A : [Copy] { return item; }
+            U Second<A, U>(A first, U second)
+                where A : [Copy] where U : [Copy] { return second; }
+            T Forward<T>(T value) where T : [Copy] {
+                {{preceding}}
+                var first = Outer.Create();
+                var created = Identity(first);
+                return Second({{selected}}, value);
+            }
+            int32 Main() { return Forward(int32(42)); }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var functions = Assert.IsType<BoundProgram>(compilation.Program).Functions;
+        Assert.Contains(functions, function => function.Name == "Second<Value, int32>");
+        Assert.DoesNotContain(functions, function => function.IsExternal
+            || function.Name.Contains('$', StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]
+    [InlineData(true, true, true)]
+    public void GenericFormalShadowsConcreteTypeDuringProofAndInstantiation(
+        bool instantiate, bool structArgument, bool staticCall)
+    {
+        var entry = !instantiate ? "int32 Main() { return 0; }"
+            : structArgument ? "int32 Main() { return Read(new Value(1)); }"
+            : "int32 Main() { return Read(int32(1)); }";
+        var body = staticCall ? "return T.Read();" : "return new T(42).Number;";
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            struct T {
+                public int32 Number;
+                public T(int32 number) { Number = number; }
+                public static int32 Read() { return 42; }
+            }
+            struct Value {
+                public int32 Number;
+                public Value(int32 number) { Number = number; }
+            }
+            int32 Read<T>(T value) where T : [Copy] { {{body}} }
+            {{entry}}
+            """));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void QualifiedConcreteTypeBypassesSameNamedGenericFormal()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            namespace Model;
+            struct T {
+                public int32 Number;
+                public T(int32 number) { Number = number; }
+                public static int32 Read() { return 1; }
+            }
+            int32 Probe<T>(T value) where T : [Copy] {
+                return new Model.T(41).Number + Model.T.Read();
+            }
+            int32 Main() { return Probe(int32(1)); }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void RecursiveHelpersReuseClosedSpecializations(bool mutual)

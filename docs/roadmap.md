@@ -90,6 +90,14 @@ semantic checks, not a plugin loader or wholesale translation of every design
 sample. Stabilize syntax accessors while extending the grammar; keep
 diagnostics/source mappings usable on incomplete input.
 
+Concrete `Copy` helper composition is implemented within the bounded generic
+stage: templates can combine concrete local/imported value types and symbolic
+formals using normal declaration lookup and inference. Isolated proof contexts
+load only reached declarations and nested layouts, preserve accessibility and
+effects, and keep concrete witnesses distinct from formal constraints. This
+adds no source syntax, semantic wire version, native profile or public generic
+ABI; closed specializations remain ordinary private verified functions.
+
 Within Rich libraries, define operation-specific checked witnesses for value
 equality, identity where supported, key equality paired with a compatible hash,
 invariant machine-readable formatting, and display/debug rendering. These are
