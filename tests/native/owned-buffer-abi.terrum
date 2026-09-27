@@ -63,6 +63,38 @@ public int32 FieldMutation() {
     return owner.Read(0);
 }
 
+unique struct FieldViewOwner {
+    public int32 Guard;
+    private mut OwnedInt32Buffer _words;
+
+    public FieldViewOwner(OwnedInt32Buffer words) {
+        Guard = 7;
+        _words = move words;
+    }
+    public mut int32 Rewrite() {
+        mut MutableInt32BufferView view = _words.SliceMutable(1, 1);
+        view.Set(0, view.Read(0) + 1);
+        return view.Read(0);
+    }
+    public mut void FailView() {
+        mut MutableInt32BufferView view = _words.SliceMutable(1, 1);
+        view.Set(0, 42);
+        view.Set(1, 99);
+    }
+    public int32 Count() { return _words.Count; }
+    public int32 Read(int32 index) { return _words.Read(index); }
+}
+
+public int32 FieldViewMutation() {
+    require OwnedInt32Buffer.TryCreate(2, out var raw);
+    mut OwnedInt32Buffer words = move raw;
+    require words.TryAppend(40);
+    require words.TryAppend(1);
+    mut FieldViewOwner owner = new FieldViewOwner(move words);
+    if (owner.Rewrite() != 2 || owner.Guard != 7) { return 0; }
+    return owner.Read(0) + owner.Read(1);
+}
+
 public unique struct Envelope {
     public OwnedInt32Buffer Data;
 

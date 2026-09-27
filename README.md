@@ -84,6 +84,9 @@ Semantic v28 extends nested mutable-field loans through fully initialized
 unique roots and unique child structs without consuming those owners.
 Semantic v29 admits `OwnedInt32Buffer.Set`, `TryAppend` and `Clear` through
 writable owning fields, retaining root reservation and recursive release.
+Semantic v30 admits lexical `SliceMutable` views from those fields. An active
+view excludes access through the entire containing root, including sibling
+fields, until normal scope exit or checked unwind ends the loan.
 Nested receivers such as `outer.Inner.Mutate()` require a writable root and
 writable fields along the complete path; readonly fields cannot be bypassed.
 Partially initialized roots, temporary or managed-class-field receiver places,

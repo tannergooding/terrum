@@ -88,8 +88,8 @@ public sealed class MutableOwningBufferFieldTests
     [Theory]
     [InlineData("ReadonlyInt32BufferView view = owner.Words.Slice(0, 1); owner.Words.Clear();")]
     [InlineData("ReadonlyInt32BufferView view = owner.Words.Slice(0, 1); owner.Words.TryAppend(1);")]
-    [InlineData("mut MutableInt32BufferView view = owner.Words.SliceMutable(0, 1);")]
-    public void ActiveViewOrFieldSliceMutableIsNotAWritableFieldReceiver(string operation)
+    [InlineData("ReadonlyInt32BufferView view = owner.Words.Slice(0, 1); mut MutableInt32BufferView other = owner.Words.SliceMutable(0, 1);")]
+    public void ActiveReadonlyViewBlocksFieldMutationAndExclusiveAcquisition(string operation)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Owner + """
             int32 Main() {

@@ -39,3 +39,19 @@ public int32 RecoverField() {
     }
     return 0;
 }
+
+public int32 RecoverFieldView() {
+    require OwnedInt32Buffer.TryCreate(2, out var raw);
+    mut OwnedInt32Buffer words = move raw;
+    require words.TryAppend(40);
+    require words.TryAppend(1);
+    mut FieldViewOwner owner = new FieldViewOwner(move words);
+    unsafe {
+        try { owner.FailView(); }
+        catch {
+            if (owner.Guard != 7 || owner.Count() != 2 || owner.Read(0) != 40) { return 0; }
+            return owner.Read(1);
+        }
+    }
+    return 0;
+}

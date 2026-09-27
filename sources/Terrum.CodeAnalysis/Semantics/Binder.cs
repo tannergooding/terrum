@@ -1016,7 +1016,7 @@ internal sealed partial class Binder
         }
 
         var owner = writable ? BindMutableReceiverLoan((SyntaxNode)callee.Children[0],
-                PrimitiveType.OwnedInt32Buffer, callee.Span)
+                PrimitiveType.OwnedInt32Buffer, callee.Span, allowBufferField: true)
             : BindReceiverLoan((SyntaxNode)callee.Children[0], PrimitiveType.OwnedInt32Buffer);
         var start = BindExpression((SyntaxNode)arguments[0].Children[0], PrimitiveType.Int32);
         var length = BindExpression((SyntaxNode)arguments[1].Children[0], PrimitiveType.Int32);

@@ -23,6 +23,7 @@ Semantic version 28 extends nested mutable-field loans through fully
 initialized unique roots and children, preserving ownership and cleanup.
 Semantic version 29 admits writable owning-buffer field loans for `Set`,
 `TryAppend` and `Clear`, with no physical ABI change.
+Semantic version 30 extends lexical `SliceMutable` acquisition to those fields.
 Source visibility may be public or private. Named mutable locals, their
 writable nested fields, and forwarding through an existing writable `this`
 and its writable fields are supported receiver places. Older headers reject
@@ -69,8 +70,8 @@ is reserved before argument evaluation, and active views block mutation.
 The buffer remains owned by its containing value and is released by the
 same recursive cleanup. `Clear()` is NoThrow for an eligible live writable
 buffer place: it sets count to zero without freeing or reallocating the
-fixed-capacity storage. Mutable slice acquisition through a field remains
-unsupported; this does not implement the general `write`-view migration.
+fixed-capacity storage. Lexical mutable slices can also borrow those fields;
+this does not implement the general `write`-view migration.
 `ReadonlyInt32BufferView` captures a checked pointer/length descriptor in a
 16-byte local frame slot, with its root retained only in structured semantic
 IR. `Slice(start, length)` rejects negative or out-of-prefix ranges without
@@ -81,11 +82,16 @@ loops and nested cleanup. `Read(index)` checks the slice length using the same
 selected checked-failure policy. The view has no call/return ABI and cannot
 extend owner lifetime; neither GC rooting nor general aliasing is implied.
 `mut MutableInt32BufferView view = owner.SliceMutable(start, length);` reserves
-a named mutable owner exclusively. Its `Length`, `Read(index)` and checked
+a named mutable buffer or a writable buffer-field path through a fully
+initialized unique owner exclusively. Its `Length`, `Read(index)` and checked
 `Set(index, value)` access the captured initialized prefix, with index and
 value expressions each evaluated once. No owner reads, mutation, move,
 replacement or drop, or another view of that owner, can overlap this lexical
-scope. A mutable view cannot be copied, passed, stored or returned.
+scope. For a field view this exclusion covers the whole root, including
+scalar reads and other buffer fields. Range arguments may query that root
+before activation, but may not invalidate it. Ending a scope or unwinding
+ends only the loan, not the allocation's lifetime. A mutable view cannot be
+copied, passed, stored or returned.
 These two bounded slice intrinsics have their own lexical verifier rules;
 they are not a general `Span<T>` implementation or evidence that all
 reference/view access uses the accepted `mut`/`write` contract. Their access
@@ -313,7 +319,9 @@ deterministic failed allocation and track live blocks; tests do not rely on
 exhausting host memory. Owning-field mutation probes check append/full-capacity
 refusal, set, clear and reuse with one allocation and one final release,
 no live blocks and no invalid frees. A checked-index failure retains earlier
-writes and the initialized count before that release. The probe also checks that only the low 32 bits of the
+writes and the initialized count before that release. The same accounting
+covers mutable field-view updates and checked failures after a view write.
+The probe also checks that only the low 32 bits of the
 `HeapFree` BOOL result determine success, and that failed release terminates
 even while a checked catch is available.
 

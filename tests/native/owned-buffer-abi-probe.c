@@ -178,13 +178,16 @@ static int RunChecks(HMODULE image, int checked)
     Check recover = (Check)GetProcAddress(image, "Recover");
     Check fieldMutation = (Check)GetProcAddress(image, "FieldMutation");
     Check recoverField = (Check)GetProcAddress(image, "RecoverField");
+    Check fieldView = (Check)GetProcAddress(image, "FieldViewMutation");
+    Check recoverFieldView = (Check)GetProcAddress(image, "RecoverFieldView");
     Build workspace = (Build)GetProcAddress(image, "FormattingWorkspace");
     Format format = (Format)GetProcAddress(image, "FormatDigits");
     FormatSigned formatSigned = (FormatSigned)GetProcAddress(image, "FormatSignedDigits");
     Check recoverFormatting = (Check)GetProcAddress(image, "RecoverFormatting");
-    VERIFY(acquire && build && relay && consume && rebuild && tryRebuild && composite && fieldMutation, 10);
+    VERIFY(acquire && build && relay && consume && rebuild && tryRebuild && composite
+        && fieldMutation && fieldView, 10);
     VERIFY(workspace && format && formatSigned, 14);
-    VERIFY(!checked || (recover && recoverFormatting && recoverField), 11);
+    VERIFY(!checked || (recover && recoverFormatting && recoverField && recoverFieldView), 11);
     VERIFY(ReplaceImport(image, "HeapAlloc", (void*)TrackedAllocate), 12);
     VERIFY(ReplaceImport(image, "HeapFree", (void*)TrackedRelease), 13);
 
@@ -239,6 +242,9 @@ static int RunChecks(HMODULE image, int checked)
     Reset();
     VERIFY(fieldMutation() == 42, 52);
     VERIFY(attempts == 1 && releases == 1 && LiveCount() == 0 && !invalid, 53);
+    Reset();
+    VERIFY(fieldView() == 42, 54);
+    VERIFY(attempts == 1 && releases == 1 && LiveCount() == 0 && !invalid, 55);
 
     if (checked)
     {
@@ -248,6 +254,9 @@ static int RunChecks(HMODULE image, int checked)
         Reset();
         VERIFY(recoverField() == 42, 62);
         VERIFY(attempts == 1 && releases == 1 && LiveCount() == 0 && !invalid, 63);
+        Reset();
+        VERIFY(recoverFieldView() == 42, 64);
+        VERIFY(attempts == 1 && releases == 1 && LiveCount() == 0 && !invalid, 65);
     }
 
     Reset();
@@ -328,7 +337,7 @@ int main(int argc, char** argv)
     }
     if (result == 0)
     {
-        puts("owned-buffer-abi opaque=8 publication=checked views=scoped reuse=checked field=tracked heap=tracked live=0");
+        puts("owned-buffer-abi opaque=8 publication=checked views=scoped reuse=checked field=tracked field-view=tracked heap=tracked live=0");
     }
     return result;
 }

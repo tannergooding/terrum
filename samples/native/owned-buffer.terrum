@@ -22,6 +22,12 @@ unique struct BufferOwner
         _words.Clear();
     }
 
+    public mut void AddToFirst(int32 amount)
+    {
+        mut MutableInt32BufferView first = _words.SliceMutable(0, 1);
+        first.Set(0, first.Read(0) + amount);
+    }
+
     public int32 Read(int32 index)
     {
         return _words.Read(index);
@@ -44,9 +50,10 @@ int32 Main()
     mut BufferOwner owner = new BufferOwner(move words);
     owner.Set(1, owner.Read(1));
     owner.Clear();
-    if (!owner.TryAppend(40) || !owner.TryAppend(2))
+    if (!owner.TryAppend(39) || !owner.TryAppend(2))
     {
         return 4;
     }
+    owner.AddToFirst(1);
     return owner.Read(0) + owner.Read(1);
 }

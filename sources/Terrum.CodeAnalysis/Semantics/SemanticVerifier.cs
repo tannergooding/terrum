@@ -1010,6 +1010,9 @@ public static class SemanticVerifier
                 case BoundRead localRead when localRead.Type is PrimitiveType.ReadonlyInt32BufferView
                     or PrimitiveType.MutableInt32BufferView:
                     throw InvalidEffect(localRead.Span, "Ownership");
+                case BoundRead localRead when localRead.Variable < 0 || localRead.Variable >= roots.Length
+                    || (exclusive[localRead.Variable] && localRead.Variable != acquiringRoot):
+                    throw InvalidEffect(localRead.Span, "Ownership");
                 case BoundCall call:
                     if (call.Arguments.IsDefault)
                     {
@@ -1792,6 +1795,16 @@ public static class SemanticVerifier
                     }
                     _ = VerifyUniqueFieldPlace(fieldLoan.Place, initialized, fieldMasks,
                         function, program, ref remaining, depth + 1);
+                }
+                else if (view.Owner is BoundMutableFieldLoan mutableField)
+                {
+                    if (!view.IsMutable || mutableField.Type != PrimitiveType.OwnedInt32Buffer
+                        || mutableField.Place is null || mutableField.Place.Type != mutableField.Type)
+                    {
+                        throw InvalidEffect(mutableField.Span, "Ownership");
+                    }
+                    _ = VerifyMutableFieldPlace(mutableField.Place, initialized, function, program,
+                        ref remaining, depth + 1, allowBufferLeaf: true);
                 }
                 else
                 {

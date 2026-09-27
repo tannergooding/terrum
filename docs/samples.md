@@ -27,7 +27,9 @@ The [owned buffer sample](../samples/native/owned-buffer.terrum) returns 42
 under either runtime policy after appending, reading and updating the
 initialized prefix of a fixed-capacity native buffer. It then moves that
 allocation into a unique owner whose methods update, clear and reuse its
-private writable buffer field without moving it out.
+private writable buffer field without moving it out. One method updates the
+first element through a scoped mutable field slice; readonly queries resume
+after that loan ends.
 The [readonly buffer-view sample](../samples/native/readonly-buffer-view.terrum)
 returns 42 after checking a lexical slice of the initialized prefix and
 reading it in a loop; the owner remains live until the view's scope ends.

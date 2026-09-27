@@ -35,6 +35,7 @@ public static partial class ModuleCompiler
     private const int UniqueMutableReceiverVersion = 27;
     private const int UniqueMutableFieldReceiverVersion = 28;
     private const int MutableBufferFieldReceiverVersion = 29;
+    private const int MutableBufferFieldViewVersion = 30;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -952,6 +953,14 @@ public static partial class ModuleCompiler
         return found;
     }
 
+    private static bool HasMutableBufferFieldView(BoundFunction function)
+    {
+        var found = false;
+        _ = Calls(function.Body, visitView: view =>
+            found |= view.IsMutable && view.Owner is BoundMutableFieldLoan);
+        return found;
+    }
+
     private static bool HasUniqueMutableFieldLoan(BoundFunction function, ImmutableArray<BoundStruct> structures)
     {
         var found = false;
@@ -1334,6 +1343,8 @@ public static partial class ModuleCompiler
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         var version = module.Functions.Any(static item => item.Function is BoundFunction function
+                && HasMutableBufferFieldView(function)) ? MutableBufferFieldViewVersion
+            : module.Functions.Any(static item => item.Function is BoundFunction function
                 && HasMutableBufferFieldLoan(function)) ? MutableBufferFieldReceiverVersion
             : module.Functions.Any(item => item.Function is BoundFunction function
                 && HasUniqueMutableFieldLoan(function, module.Structures)) ? UniqueMutableFieldReceiverVersion
@@ -1489,6 +1500,11 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Mutable owning buffer fields require semantic module version 29.");
             }
+            if (version < MutableBufferFieldViewVersion && items.Any(static item =>
+                    item.Function is BoundFunction function && HasMutableBufferFieldView(function)))
+            {
+                throw new ModuleFormatException("Mutable owning buffer field views require semantic module version 30.");
+            }
             if (version == AggregateClassFactoryVersion && !items.Any(static item =>
                     item.Function is BoundFunction function && HasAggregateClassArguments(function)))
             {
@@ -1551,7 +1567,7 @@ public static partial class ModuleCompiler
             or ManagedClassVersion or Version or LoopTransferVersion or AggregateClassFactoryVersion
             or StackClassFactoryVersion or ManagedAccessVersion or MutableStructReceiverVersion
             or MutableFieldReceiverVersion or UniqueMutableReceiverVersion or UniqueMutableFieldReceiverVersion
-            or MutableBufferFieldReceiverVersion))
+            or MutableBufferFieldReceiverVersion or MutableBufferFieldViewVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }

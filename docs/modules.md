@@ -357,6 +357,12 @@ Semantic v29 admits mutable owning-buffer field loans only for the existing
 call arguments; earlier headers reject these loans, while programs requiring
 only earlier receiver contracts retain their versions. The physical native
 ABI and scalar-only public boundary do not change.
+Semantic v30 adds mutable `BoundViewScope` acquisitions whose owner is a
+writable buffer-field loan. Writers select v30 for that scoped contract;
+v29 and earlier headers reject it, while named mutable views and ordinary
+buffer-field calls retain their earlier versions. Field paths are remapped
+against private layouts, and linking revalidates initialization, writable
+access and whole-root exclusion.
 Programs requiring none of these contracts retain their existing versions and bytes
 regardless of managedness. The ordinary readonly/by-value receiver ABI is unchanged.
 Public scalar entry wrappers may call non-exported mutating methods; source

@@ -696,7 +696,10 @@ Earlier headers reject the broadened loan contract. Partially initialized roots,
 temporary and managed-class-field receivers remain unsupported. Semantic v29
 adds `OwnedInt32Buffer.Set`, `TryAppend` and `Clear` through writable owning
 fields, preserving root reservation, active-view exclusion and recursive
-release. Field `SliceMutable` acquisition,
+release. Semantic v30 permits lexical `SliceMutable` views through those
+fields, with whole-root exclusion until normal scope exit or checked unwind.
+The view cannot escape; ending its loan does not free the owner's buffer.
+Partial-constructor mutation,
 rebinding `this`, and general reference forms remain unsupported. Primitive
 `Buffer` views retain separate legacy access paths, and the coherent
 `out`-to-`init ref<T>` migration remains scheduled. Neither the fail-fast runtime nor bounded

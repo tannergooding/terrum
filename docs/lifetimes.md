@@ -272,8 +272,13 @@ not these mutable loans. `OwnedInt32Buffer.Set`, `TryAppend` and `Clear`
 can borrow writable buffer fields through fully initialized unique roots.
 Those calls reserve the containing root before argument evaluation and
 preserve its ownership and recursive release obligation; active slices
-block mutation through any path from that root. Mutable slice acquisition
-through a field remains unsupported.
+block mutation through any path from that root. A lexical `SliceMutable`
+from a writable buffer field reserves the same fully initialized root:
+range expressions run before activation and cannot invalidate it; while
+active, the view excludes all other root access, including sibling fields.
+Normal scope exit and checked unwind end only the loan, leaving prior writes
+intact and recursive release to the owner. Such views cannot escape or be
+copied, passed, stored, or returned.
 Cleanup is an explicit
 `[NoThrow] [Cleanup] public void Close()`-shaped contract on a unique
 instance method; the name itself has no special meaning. Compact owners can
