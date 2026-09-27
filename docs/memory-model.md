@@ -1,13 +1,16 @@
 # Memory model proposal
 
-> **Proposal for review.** This document is a concrete design proposal, not an
-> accepted language specification, implementation claim, ABI commitment, or
-> promise about any current Terrum target. Examples are pseudocode, not Terrum
-> syntax or library APIs. The recommendations below are intended to make the
-> remaining decisions reviewable; names in square brackets are provisional.
+> **Design direction and proposals for review.** The default access model and
+> primitive/trivial-wrapper atomicity baseline below record agreed direction.
+> Remaining formal rules, APIs and target profiles are proposals, not an
+> implemented language specification or a frozen ABI. Examples are pseudocode,
+> not implemented Terrum syntax or library APIs; names in square brackets are
+> provisional.
 
 Call sequencing, reference equivalence, output publication, and proof effects
 are covered by the companion [contract review](language-contract-review.md).
+[Data layout and ABI contracts](data-layout-and-abi.md) separates required
+primitive guarantees from physical layout, interchange and procedure calls.
 [Implementation](implementation.md) remains the executable support boundary;
 this document does not claim a concurrent runtime or these atomic APIs exist.
 
@@ -126,17 +129,26 @@ permission follows from writable or readonly access. The contract covers the
 complete type form, reachable authority and dependencies, not just an outer
 annotation.
 
-For permitted shared CPU access to ordinary cacheable memory, the first
-baseline is non-tearing, properly aligned primitive accesses up to the target
-pointer size, together with managed-reference accesses. The compiler and
-runtime must preserve this guarantee; it is not a guess based on current
-instruction selection. Exact types, alignment, overlapping accesses and
-target profiles still need specification.
+For permitted shared CPU access to ordinary coherent cacheable memory, naturally
+aligned primitive loads and stores up to the machine pointer size are atomic.
+Trivial wrappers preserve their primitive carrier's atomicity, and managed
+reference accesses are non-tearing. The compiler and runtime must provide the
+required storage alignment and preserve these guarantees; they are not guesses
+based on current instruction selection. Target profiles must document the
+concrete representation and access requirements.
 
-An ordinary access may satisfy that guarantee without an `Atomic<T>` wrapper.
-It does not make arbitrary pointer-sized structs or larger aggregates atomic,
-protect object lifetime, provide an indivisible increment, order independent
-locations, or guarantee a fresh value. Those are separate contracts.
+An ordinary access satisfies that guarantee without an `Atomic<T>` wrapper.
+A trivial wrapper here has one primitive carrier and preserves its storage
+and access contract; merely having a small total size is insufficient.
+For example, `struct S { int8 x; int8 y; }` contains two independently
+accessible fields. Its two-byte size does not promise an atomic whole-`S`
+load or store, even if a particular backend sometimes uses one instruction.
+Exact checked wrapper eligibility remains to specify.
+
+Nor is `x++` an atomic RMW: its update has the load/add/store behavior of
+`x = x + 1`, even when each load and store is individually atomic. Atomic
+access does not protect object lifetime, order independent locations, or
+guarantee a fresh value. Those are separate contracts.
 
 ### 4. Synchronization adds ordering and compound guarantees
 
@@ -160,13 +172,17 @@ nor the word `volatile` implies a cache flush, device ordering, or durability.
 
 ### Baseline guarantees to specify before choosing an API
 
-Terrum needs an explicit answer for each of the following, independent of
+The primitive/trivial-wrapper baseline above is agreed direction. The
+[layout and ABI companion](data-layout-and-abi.md) records its storage and
+interchange implications. The remaining details need explicit answers,
+independent of
 whether its eventual library exposes `Atomic<T>`, `Volatile.Read`, named
 acquire/release operations, or another surface:
 
-- Which ordinary scalar, reference, and aggregate accesses are non-tearing;
-  the exact width, alignment, overlapping-access, memory-type, and observer
-  conditions; and which guarantees are portable versus target-specific.
+- The concrete primitive/reference representation and alignment table,
+  checked trivial-wrapper eligibility, and any guarantees beyond the baseline.
+  Whole-aggregate atomicity does not follow from aggregate size. Explicit
+  unaligned and overlapping access have separate contracts below.
 - Which ordinary and ordered accesses the compiler may remove, merge,
   duplicate, widen, or speculate. A non-tearing instruction does not by
   itself require the compiler to issue every source-level read.
@@ -180,8 +196,8 @@ acquire/release operations, or another surface:
 - The additional guarantees of ordered loads/stores, atomic RMWs, locks, and
   fences, including their progress and lifetime obligations.
 
-This is the baseline-first direction for the review. It does not yet choose
-the ordinary-access guarantee table or adopt all .NET runtime behavior. The
+This baseline does not adopt all .NET runtime behavior or settle every
+target representation and synchronization rule. The
 explicit-order event model below is one candidate for expressing stronger
 operations, not a decision to import C++ atomic storage, race UB, or API rules.
 
@@ -589,15 +605,62 @@ target profile must publish a machine-readable capability table covering:
   feature is absent;
 - managed-reference/root-barrier support, if reference atomics are offered.
 
-Once a checked contract permits shared CPU access, the proposed first-sharing
-baseline guarantees non-tearing access for properly aligned primitive accesses
-no wider than the target pointer size and for references. That is a source
-contract the compiler must preserve, not a guess that today's instruction
-selection happens to use one instruction. The exact primitive set, alignment,
-representation, overlapping accesses, memory types, observer scope, and
-portable versus target-specific guarantees still need approval. Do not
-describe ordinary accesses as non-atomic merely because they are not
-operations on a dedicated atomic type.
+The agreed baseline covers naturally aligned primitive loads/stores no wider
+than the machine pointer, eligible trivial wrappers of those primitives, and
+managed references. It applies to ordinary coherent memory and the specified
+CPU observers. An `int32` storage location therefore has atomic ordinary
+loads/stores on the intended 32-/64-bit target profiles. Alignment and suitable
+lowering are implementation obligations. Do not describe ordinary accesses as
+non-atomic merely because they are not operations on a dedicated atomic type.
+This does not promise whole-aggregate atomicity or automatic interoperability
+with foreign bytewise writers.
+
+### Unaligned access
+
+Unaligned reads and writes must be explicit and have a target-defined
+contract. Some hardware supports non-tearing unaligned accesses within a
+cache line but not across a line boundary; other hardware faults or requires
+decomposition. Neither behavior is a portable guarantee. A profile must state
+the exact width, alignment, memory type and boundary conditions it supports,
+including any page-boundary restrictions.
+
+A checked unaligned helper can assemble a value from smaller valid accesses
+on a target that cannot load it directly. That provides an unaligned value
+access, not an atomic snapshot. An API promising an atomic unaligned access
+must meet its stronger target conditions or reject the operation. Ordinary
+aligned storage must not silently become unaligned through layout decisions.
+
+### Overlap, representation access, and unions
+
+Creating overlapping typed views or reinterpreting live storage is an unsafe
+boundary unless a specific checked abstraction establishes its validity.
+This is not a prohibition on ordinary checked aliases to the same object.
+The hazards include incompatible aliasing and mutation authority,
+initialization, lifetime, representation validity, and concurrent accesses of
+different widths. Atomicity of one access does not validate the others.
+
+Prefer explicit value-level helpers for supported representation operations:
+for example, obtaining the backing `int32` bits of a `float32`, or constructing
+the corresponding floating value from valid bits. Such a helper transfers a
+bit pattern; it does not create a second typed reference to the same storage.
+Its contract must distinguish bit preservation, including signed zero and NaN
+encodings, from numeric conversion. It must not become a general way to forge
+references, ownership or constrained wrapper values. API names remain open.
+
+Equal layouts or overlapping unions are not automatically safe. A narrowly
+checked union rule, potentially for matching fields, remains a proposal: it
+must define active-member access, initialization, representation validity,
+aliasing and lifetime. C and C++ common-member or union-punning rules are not
+implicitly imported. Matching field declarations alone do not grant permission.
+
+The compiler may use overlapping machine accesses, wider instructions, or
+register reinterpretation internally when it preserves the source contract.
+It may not introduce observable tearing, invalidate an alias, touch storage
+outside its permission, or overwrite an independently accessible neighbor.
+Unsafe source-level reinterpretation and a proven internal lowering are
+different permissions.
+
+### Wider atomics and progress
 
 For the dedicated-atomic-type option, a declared type must have correct atomic
 semantics on the selected profile, possibly through a runtime lock, or be
@@ -648,7 +711,7 @@ acquire/release edge does not replace a GC barrier. Raw native pointers and
 interior pointers need separate lifetime and reclamation contracts. The proposal
 is to defer general concurrent managed-reference APIs until this
 contract is established. Ordinary managed-reference loads/stores are included
-in the proposed non-tearing baseline; that does not by itself provide GC-safe
+in the agreed non-tearing baseline; that does not by itself provide GC-safe
 rooting across safepoints, ordered publication, atomic RMW, or reclamation.
 
 ## Architectural and microarchitectural boundaries
@@ -881,12 +944,13 @@ A matching function calling convention alone does not establish those facts.
 |---|---|---|
 | Type opt-in spelling and proof form | Keep `[Send]`/`[Sync]` as provisional vocabulary; require checked complete-form evidence and conditional generic proofs. | Different names or sealed capability interfaces; whether imported proofs use compiler certificates or trusted unsafe declarations. |
 | Default sharing | Ordinary mutable values and `List<T>` are not concurrently shareable. Readonly alone is insufficient. | Permit selected immutable-by-construction types through a separately verified deep-immutability capability. |
-| Ordinary-access baseline | Recommend non-tearing properly aligned primitive accesses up to pointer size and references once checked sharing permits concurrent access; specify exact types, alignment, representation, compiler transformations, coherence, and publication. Hardware access behavior is the descriptive starting point; language specifications are comparison evidence. | Exact portable versus target-specific guarantees, mixed-width accesses, and treatment of authorized concurrent ordinary accesses. |
+| Ordinary-access baseline (agreed direction) | Naturally aligned primitive loads/stores up to machine pointer size, their trivial wrappers, and managed references are non-tearing; small multi-field aggregates do not inherit whole-value atomicity. | Concrete target representations, checked wrapper eligibility, compiler transformations, coherence and publication beyond access indivisibility. |
+| Unaligned and overlapping access | Explicit target-defined unaligned operations; overlapping typed storage requires unsafe code or a specific checked abstraction. Value-level bit helpers do not introduce aliased views. | Supported unaligned atomic widths/boundaries, representation-helper APIs and any narrowly checked union cases. |
 | Conflicts outside a checked contract | Prevent them in safe code; specify unsafe-access outcomes without poisoning unrelated code or silently withdrawing baseline guarantees. | Which non-tearing, value, type-safety, and optimization guarantees remain, and how consequences can propagate from raced values. |
 | Stronger access model and API | Keep .NET-style ordered access/interlocked and explicit per-operation-order designs distinguishable; the event model above is a candidate, not the baseline. | Strong-default contract, atomic-object versus access-based rules, compare-exchange ordering, release sequences, and reconciliation of litmus outcomes with target guarantees. |
 | Fences and volatile | Consider C#-style acquire/release accesses for shared RAM separately from C++/Rust volatile I/O semantics; specify any full-fence contract explicitly. | Keyword versus APIs, standalone fences, and formal relation to ordinary and explicitly ordered accesses; device access remains a separate contract. |
 | Atomic widths and progress | Publish exact target profiles; correct atomic semantics may use a lock, with lock-free status separately stated. | Restrict the language to universally lock-free operations or reject types unsupported by any selected profile. |
-| Managed-reference atomics | Include ordinary reference accesses in the proposed non-tearing baseline; defer general concurrent reference APIs until roots, barriers, RMW, and reclamation are specified. | Add only a runtime-owned rooted atomic-reference abstraction. |
+| Managed-reference atomics | Ordinary reference accesses retain the agreed non-tearing baseline; defer general concurrent reference APIs until roots, barriers, RMW, and reclamation are specified. | Add only a runtime-owned rooted atomic-reference abstraction. |
 | SIMD/non-temporal operations | No implicit whole-vector indivisibility; explicit target profile for streaming operations and completion. | Portable or target-specific non-tearing widths and named vector-atomic/non-temporal APIs. |
 | Device/DMA/persistence | Separate unsafe or platform-checked APIs and ordering domains. | Which standard library layer owns those APIs and which operating systems/boards are supported. |
 | Foreign contracts | Unverified native/device claims remain unsafe and cannot create checked capabilities. | Define versioned FFI attestations and their trust/compatibility policy. |
