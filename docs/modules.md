@@ -291,6 +291,11 @@ layouts even when the constructor stores only scalar fields. Versions 19 through
 scalar/handle factory convention. Unaffected modules retain their older writer
 versions and bytes. The new signatures stay private behind scalar exports;
 native graph replacement does not rewrite root or intermediate images.
+Semantic version 23 admits class constructors with more than three inputs,
+up to 63 within the ordinary 64-argument receiver/output-inclusive bound.
+It composes with the earlier Copy-argument and loop-transfer features; readers
+of versions through 22 retain the three-input restriction. Native profiles and
+the private managed-leaf dependency policy do not change.
 A consumer importing a unique type must also import the exported NoThrow
 cleanup methods of that type and its owning children. Their cleanup identities
 and Copy/unique distinctions participate in layout and signature compatibility;

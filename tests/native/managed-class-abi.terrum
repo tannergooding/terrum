@@ -31,11 +31,20 @@ class CollectingPair {
     public Leaf Left;
     public Leaf Right;
     public FactoryPayload Data;
-    [NoThrow] public CollectingPair(Leaf child, FactoryPayload data) {
+    public int32 Marker;
+    public uint64 Bits;
+    public FactoryPayload First;
+    public bool Ready;
+    [NoThrow] public CollectingPair(int32 marker, uint64 bits, FactoryPayload first,
+        bool ready, Leaf child, FactoryPayload data) {
         Left = child;
         ManagedHeap.Collect();
         Right = child;
         Data = data;
+        Marker = marker;
+        Bits = bits;
+        First = first;
+        Ready = ready;
     }
 }
 
@@ -51,7 +60,7 @@ class ScalarBox {
 
 class CopyBox {
     public FactoryPayload Value;
-    [NoThrow] public CopyBox(FactoryPayload value) { Value = value; }
+    [NoThrow] public CopyBox(int32 marker, bool ready, uint64 bits, FactoryPayload value) { Value = value; }
 }
 
 class ReplaceableEdge {
@@ -113,10 +122,14 @@ public int32 AliasUpdates() {
 public int32 DuringConstruction() {
     DiscardLeaf();
     require Leaf.TryCreate(42, out var child);
-    require CollectingPair.TryCreate(child, new FactoryPayload(-9223372036854775808i64), out var pair);
+    require CollectingPair.TryCreate(42, 18446744073709551615u64,
+        new FactoryPayload(9223372036854775807i64), true, child,
+        new FactoryPayload(-9223372036854775808i64), out var pair);
     require ManagedHeap.Collect() == 0;
     require pair.Left.Value == pair.Right.Value;
     require pair.Data.First == -9223372036854775808i64 && pair.Data.Second == 20 && pair.Data.Third == 22;
+    require pair.Marker == 42 && pair.Bits == 18446744073709551615u64 && pair.Ready;
+    require pair.First.First == 9223372036854775807i64 && pair.First.Second == 20 && pair.First.Third == 22;
     return pair.Left.Value;
 }
 
@@ -134,7 +147,7 @@ public int32 ScalarNonRoot(uint64 bits) {
 }
 
 public int32 AllocationFailure() {
-    if (CopyBox.TryCreate(new FactoryPayload(42i64), out var unpublished)) {
+    if (CopyBox.TryCreate(42, true, 18446744073709551615u64, new FactoryPayload(42i64), out var unpublished)) {
         return 0;
     }
     require ManagedHeap.Collect() == 0;
@@ -143,7 +156,9 @@ public int32 AllocationFailure() {
 
 public int32 RetainAcrossAllocationFailure() {
     require Leaf.TryCreate(42, out var retained);
-    if (CollectingPair.TryCreate(retained, new FactoryPayload(42i64), out var unpublished)) {
+    if (CollectingPair.TryCreate(42, 18446744073709551615u64,
+        new FactoryPayload(9223372036854775807i64), true, retained,
+        new FactoryPayload(42i64), out var unpublished)) {
         return 0;
     }
     require ManagedHeap.Collect() == 0;

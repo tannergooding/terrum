@@ -218,11 +218,11 @@ internal sealed partial class Binder
                 continue;
             }
             var signature = _signatures[constructor];
-            if (!signature.IsClassConstructor || signature.Parameters.Length > 3
+            if (!signature.IsClassConstructor || signature.Parameters.Length >= SemanticVerifier.MaximumArguments
                 || signature.Parameters.Any(parameter => parameter.IsOut
                     || !SemanticVerifier.IsClassArgumentType(parameter.Type, _structs)))
             {
-                Report("TRM3011", "A class constructor takes at most three by-value scalar, managed-handle, or handle-free Copy parameters.",
+                Report("TRM3011", "A class constructor takes at most 63 by-value scalar, managed-handle, or handle-free Copy parameters.",
                     declaration.Span);
                 continue;
             }

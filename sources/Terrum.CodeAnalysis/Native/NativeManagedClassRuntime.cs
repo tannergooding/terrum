@@ -29,7 +29,12 @@ internal sealed partial class PeCompiler
         }
         SetManagedRoot(Slot(provisional), active: true);
         var constructorBegin = _code.Position;
-        for (var index = 0; index < output; index++)
+        for (var index = 3; index < output; index++)
+        {
+            LoadValue(Slot(index), function.Variables[index].Type);
+            _code.StoreOutgoing64(32 + (8 * (index - 3)));
+        }
+        for (var index = 0; index < output && index < 3; index++)
         {
             var argumentType = function.Variables[index].Type;
             LoadValue(Slot(index), argumentType);

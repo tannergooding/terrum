@@ -553,6 +553,10 @@ internal sealed partial class PeCompiler
             }
             var maximumArguments = 0;
             var spillSlots = StatementSpills(function.Body, ref maximumArguments);
+            if (function.Intrinsic == BoundIntrinsic.ClassTryCreate)
+            {
+                maximumArguments = Math.Max(maximumArguments, function.ParameterCount);
+            }
             var outParameters = 0;
             foreach (var variable in function.Variables)
             {

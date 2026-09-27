@@ -28,6 +28,7 @@ public static partial class ModuleCompiler
     private const int Version = 20;
     private const int LoopTransferVersion = 21;
     private const int AggregateClassFactoryVersion = 22;
+    private const int StackClassFactoryVersion = 23;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -181,6 +182,10 @@ public static partial class ModuleCompiler
         && function.Variables.Skip(function.IsClassConstructor ? 1 : 0)
             .Take(function.ParameterCount - 1)
             .Any(static variable => IsInlineClassField(variable.Type));
+
+    private static bool HasStackClassArguments(BoundFunction function) =>
+        (function.IsClassConstructor || function.Intrinsic == BoundIntrinsic.ClassTryCreate)
+        && function.ParameterCount > 4;
 
     private static bool UsesManagedNode(BoundFunction function) =>
         function.Intrinsic is >= BoundIntrinsic.NodeTryCreate and <= BoundIntrinsic.NodeCollect
@@ -1248,6 +1253,8 @@ public static partial class ModuleCompiler
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         var version = module.Functions.Any(static item => item.Function is BoundFunction function
+                && HasStackClassArguments(function)) ? StackClassFactoryVersion
+            : module.Functions.Any(static item => item.Function is BoundFunction function
                 && HasAggregateClassArguments(function)) ? AggregateClassFactoryVersion
             : HasLoopTransfer(module.Functions) ? LoopTransferVersion
             : module.Classes.IsEmpty ? ManagedNodeVersion
@@ -1348,7 +1355,8 @@ public static partial class ModuleCompiler
             var entry = reader.ReadInt32();
             var (structures, structureNames) = ReadStructures(reader, version);
             var classes = version >= ManagedClassVersion ? ReadClasses(reader, structureNames, version) : [];
-            if (version is ManagedClassVersion or Version or AggregateClassFactoryVersion && classes.IsEmpty)
+            if (version is ManagedClassVersion or Version or AggregateClassFactoryVersion
+                or StackClassFactoryVersion && classes.IsEmpty)
             {
                 throw new ModuleFormatException("Class module version requires private managed layouts.");
             }
@@ -1368,6 +1376,11 @@ public static partial class ModuleCompiler
                     item.Function is BoundFunction function && HasAggregateClassArguments(function)))
             {
                 throw new ModuleFormatException("Class factory module version requires aggregate arguments.");
+            }
+            if (version == StackClassFactoryVersion && !items.Any(static item =>
+                    item.Function is BoundFunction function && HasStackClassArguments(function)))
+            {
+                throw new ModuleFormatException("Class factory module version requires stack arguments.");
             }
             var module = new Module(expectedConsumer, entry, structures, items) {
                 Classes = classes,
@@ -1414,7 +1427,8 @@ public static partial class ModuleCompiler
         var version = reader.ReadInt32();
         if (version is not (10 or 11 or OwnershipVersion or TransferVersion or CompositeVersion
             or BufferVersion or ReadonlyViewVersion or WritableViewVersion or ManagedNodeVersion
-            or ManagedClassVersion or Version or LoopTransferVersion or AggregateClassFactoryVersion))
+            or ManagedClassVersion or Version or LoopTransferVersion or AggregateClassFactoryVersion
+            or StackClassFactoryVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -1561,6 +1575,11 @@ public static partial class ModuleCompiler
                 && HasAggregateClassArguments(classFunction))
             {
                 throw new ModuleFormatException("Aggregate class arguments require semantic module version 22.");
+            }
+            if (version < StackClassFactoryVersion && function is BoundFunction stackFunction
+                && HasStackClassArguments(stackFunction))
+            {
+                throw new ModuleFormatException("Class factory stack arguments require semantic module version 23.");
             }
             if (!expectedConsumer && import && function is BoundFunction exported
                 && !Exportable(exported, structures))

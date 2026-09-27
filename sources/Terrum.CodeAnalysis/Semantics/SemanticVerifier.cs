@@ -367,7 +367,7 @@ public static class SemanticVerifier
                 || function.DeclaringStruct is null || function.Variables.IsEmpty
                 || !ManagedClassTypes.IsClass(function.Variables[0].Type)
                 || function.Name != function.DeclaringStruct + ".#ctor"
-                || function.ParameterCount is < 1 or > 4
+                || function.ParameterCount < 1 || function.ParameterCount > MaximumArguments
                 || function.Variables.Skip(1).Take(function.ParameterCount - 1)
                     .Any(variable => variable.IsOut || !IsClassArgumentType(variable.Type, program.Structures))))
             {
@@ -2623,7 +2623,7 @@ public static class SemanticVerifier
             || function.IsClassConstructor || function.IsExternal
             || !function.IsStatic || function.IsCleanup || function.DoesNotReturn
             || function.Body.Statements.IsDefault || !function.Body.Statements.IsEmpty
-            || function.ParameterCount is < 1 or > 4
+            || function.ParameterCount < 1 || function.ParameterCount > MaximumArguments
             || function.Variables.Length != function.ParameterCount + 1)
         {
             throw Invalid();
@@ -2631,7 +2631,7 @@ public static class SemanticVerifier
         var constructor = program.Functions[constructorIndex];
         var type = function.Variables[function.ParameterCount - 1].Type;
         if (constructor is null || constructor.Variables.IsDefaultOrEmpty
-            || constructor.ParameterCount is < 1 or > 4
+            || constructor.ParameterCount < 1 || constructor.ParameterCount > MaximumArguments
             || constructor.Variables.Length < constructor.ParameterCount
             || !ManagedClassTypes.IsClass(type)
             || (int)type - ManagedClassTypes.First >= program.Classes.Length

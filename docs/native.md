@@ -103,9 +103,13 @@ cross-image roots and source-class metadata remain unsupported
 
 `native-19` adds up to 256 source-defined classes with explicit constructors and
 at most 16 scalar, compact Copy or non-null managed-reference fields in a payload of at most
-128 bytes. Constructor arguments are limited to three by-value scalars, managed
+128 bytes. Constructor arguments are limited to 63 by-value scalars, managed
 handles or handle-free Copy structs of at most 16 bytes; unique owners and
 borrowed views are not accepted by the factory.
+The generated receiver/output consumes the remaining position in the ordinary
+64-argument call bound. Stack arguments use the same Windows x64 slots and
+aggregate alignment as ordinary calls, with outgoing space reserved even in the
+compiler-generated factory. The existing page-safe frame limit still applies.
 Class values are eight-byte aliasable handles, not inline copies.
 `C.TryCreate(arguments, out var value)` is a compiler-owned allocation adapter:
 it returns false only for allocation failure or the shared 4,096-object cap.
@@ -141,6 +145,9 @@ later argument effects and copied into constructor parameter storage; no caller
 storage loan survives construction. Version 22 retains aggregate constructor
 signatures and private layouts, without changing the scalar native export ABI.
 Earlier semantic versions continue rejecting aggregate factory arguments.
+Version 23 admits constructor signatures with more than three inputs; earlier
+versions continue rejecting that arity. These remain private implementation
+details behind unchanged scalar exports.
 The [class sample](../samples/native/managed-classes.terrum)
 returns 42 through shared aliases and heterogeneous managed edges. The independent
 C heap probe checks multiple-edge liveness, pointer-shaped scalar nonroots,

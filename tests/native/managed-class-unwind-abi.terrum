@@ -2,7 +2,7 @@ class Broken {
     public Leaf Left;
     public Leaf Right;
     public FactoryPayload Value;
-    public Broken(Leaf child, bool complete, FactoryPayload value) {
+    public Broken(int32 marker, uint64 bits, bool ready, FactoryPayload value, Leaf child, bool complete) {
         Left = child;
         Value = value;
         require complete;
@@ -14,7 +14,8 @@ public int32 ConstructorFailure() {
     require Leaf.TryCreate(42, out var retained);
     unsafe {
         try {
-            if (Broken.TryCreate(retained, false, new FactoryPayload(42i64), out var unpublished)) {
+            if (Broken.TryCreate(42, 18446744073709551615u64, true,
+                new FactoryPayload(42i64), retained, false, out var unpublished)) {
                 return 0;
             }
             return 1;
@@ -27,7 +28,8 @@ public int32 ConstructorFailure() {
 
 public void EscapeConstructorToNative() {
     require Leaf.TryCreate(42, out var retained);
-    require Broken.TryCreate(retained, false, new FactoryPayload(42i64), out var unpublished);
+    require Broken.TryCreate(42, 18446744073709551615u64, true,
+        new FactoryPayload(42i64), retained, false, out var unpublished);
 }
 
 int32 ReplaceCollectAndFail(ReplaceableEdge edge) {

@@ -127,10 +127,12 @@ field access, visibility and partial-construction checks remain mandatory.
 Class fields may contain acyclic handle-free Copy structs up to 16 bytes, including
 nested compact values. Those fields are copied as complete values, not traced as
 potential pointers. Unique owners, views and managed handles inside structs are
-not admitted by this extension. Factories accept at most three by-value
+not admitted by this extension. Factories accept at most 63 by-value
 scalar, managed-handle or handle-free compact Copy arguments. Copy arguments
 are complete snapshots, including when later arguments mutate their source;
 the factory forwards them through the existing direct/indirect aggregate ABI.
+The ordinary 64-argument limit includes the factory's output or constructor's
+receiver. Arguments beyond the register positions use ordinary stack slots.
 Neither the provisional object nor managed arguments can disappear during
 constructor collection. Copy payloads are not conservative roots.
 Classes have no inheritance, inline class representation or public managed
@@ -158,6 +160,9 @@ Classes whose constructors accept Copy structs require version 22, including
 constructors that retain only scalar portions of those arguments. Older
 versions reject aggregate constructor parameters. The native profile, scalar
 export boundary and private-leaf dependency restriction remain unchanged.
+Constructor signatures with more than three inputs require version 23; older
+versions retain their original arity limit. High-arity functions retain the
+existing page-safe frame bound and exact roots for potentially managed spills.
 Optional-node-only modules,
 managed consumer declarations and managed imported/exported signatures still
 reject.

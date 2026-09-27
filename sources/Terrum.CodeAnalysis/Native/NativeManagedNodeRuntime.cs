@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using Terrum.CodeAnalysis.Semantics;
 
@@ -34,9 +35,15 @@ internal sealed partial class PeCompiler
             _ = roots.TryAdd(function.Variables[i].IsOut
                 ? OutSlotFor(functionIndex, function, i) : _slots[functionIndex][i], 0);
         }
+        // Large calls can otherwise spend more than the page-safe frame limit on
+        // root descriptors for scalar-only staging slots.
+        var managedSpills = spillSlots > 64 ? ManagedSpillSlots(function) : null;
         for (var spill = 0; spill < spillSlots; spill++)
         {
-            _ = roots.TryAdd(_spillBases[functionIndex] + (16 * spill), 0);
+            if (managedSpills is null || managedSpills.Contains(spill))
+            {
+                _ = roots.TryAdd(_spillBases[functionIndex] + (16 * spill), 0);
+            }
         }
         if (ManagedClassTypes.IsManaged(function.ReturnType) && needsReturnSnapshot)
         {
@@ -54,6 +61,158 @@ internal sealed partial class PeCompiler
             roots[slot] = checked((int)(at + 16 + (position++ * 16) + 8));
         }
         return at + 16 + (roots.Count * 16L);
+    }
+
+    [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Only expressions and statements with managed staging slots need descriptors.")]
+    private static HashSet<int> ManagedSpillSlots(BoundFunction function)
+    {
+        var slots = new HashSet<int>();
+        CollectStatement(function.Body);
+        return slots;
+
+        void CollectStatement(BoundStatement statement)
+        {
+            switch (statement)
+            {
+                case BoundBlock block:
+                    foreach (var child in block.Statements)
+                    {
+                        CollectStatement(child);
+                    }
+                    break;
+                case BoundViewScope view:
+                    CollectExpression(view.Start, 0);
+                    CollectExpression(view.Length, 1);
+                    CollectExpression(view.Owner, 2);
+                    CollectStatement(view.Body);
+                    break;
+                case BoundViewSet write:
+                    CollectExpression(write.Index, 0);
+                    CollectExpression(write.Value, 1);
+                    break;
+                case BoundLocal local:
+                    CollectExpression(local.Initializer, 0);
+                    break;
+                case BoundAssignment assignment:
+                    CollectExpression(assignment.Value, 0);
+                    break;
+                case BoundFieldAssignment assignment:
+                    if (ManagedClassTypes.IsClass(function.Variables[assignment.Variable].Type))
+                    {
+                        _ = slots.Add(0);
+                        CollectExpression(assignment.Value, 1);
+                    }
+                    else
+                    {
+                        CollectExpression(assignment.Value, 0);
+                    }
+                    break;
+                case BoundBufferAssignment assignment:
+                    CollectExpression(assignment.Index, 0);
+                    CollectExpression(assignment.Value, 1);
+                    break;
+                case BoundExpressionStatement expression:
+                    CollectExpression(expression.Expression, 0);
+                    break;
+                case BoundIf conditional:
+                    CollectExpression(conditional.Condition, 0);
+                    CollectStatement(conditional.Then);
+                    if (conditional.Else is not null)
+                    {
+                        CollectStatement(conditional.Else);
+                    }
+                    break;
+                case BoundWhile loop:
+                    CollectExpression(loop.Condition, 0);
+                    CollectStatement(loop.Body);
+                    if (loop.Iterator is not null)
+                    {
+                        CollectStatement(loop.Iterator);
+                    }
+                    break;
+                case BoundTryFinally cleanup:
+                    CollectStatement(cleanup.Body);
+                    CollectStatement(cleanup.Finally);
+                    break;
+                case BoundUnsafe unsafeBlock:
+                    CollectStatement(unsafeBlock.Body);
+                    break;
+                case BoundTryCatch recovery:
+                    CollectStatement(recovery.Body);
+                    CollectStatement(recovery.Catch);
+                    if (recovery.Finally is not null)
+                    {
+                        CollectStatement(recovery.Finally);
+                    }
+                    break;
+                case BoundRequire requirement:
+                    CollectExpression(requirement.Condition, 0);
+                    break;
+                case BoundReturn { Value: BoundExpression value }:
+                    CollectExpression(value, 0);
+                    break;
+            }
+        }
+
+        void CollectExpression(BoundExpression expression, int spill)
+        {
+            switch (expression)
+            {
+                case BoundUnary unary:
+                    CollectExpression(unary.Operand, spill);
+                    break;
+                case BoundCast cast:
+                    CollectExpression(cast.Operand, spill);
+                    break;
+                case BoundOptionalLift lift:
+                    CollectExpression(lift.Value, spill);
+                    break;
+                case BoundIsNull test:
+                    CollectExpression(test.Value, spill);
+                    break;
+                case BoundIsSome pattern:
+                    CollectExpression(pattern.Value, spill);
+                    break;
+                case BoundFieldRead field:
+                    CollectExpression(field.Receiver, spill);
+                    break;
+                case BoundBufferRead buffer:
+                    CollectExpression(buffer.Index, spill);
+                    break;
+                case BoundViewRead view:
+                    CollectExpression(view.Index, spill);
+                    break;
+                case BoundBinary binary:
+                    CollectExpression(binary.Left, spill);
+                    if (ManagedClassTypes.IsManaged(binary.Left.Type))
+                    {
+                        _ = slots.Add(spill);
+                    }
+                    CollectExpression(binary.Right,
+                        binary.Operator is Terrum.CodeAnalysis.Lexing.TokenKind.AmpersandAmpersand
+                            or Terrum.CodeAnalysis.Lexing.TokenKind.PipePipe ? spill : spill + 1);
+                    break;
+                case BoundCall call:
+                    var argumentsBase = spill + 1;
+                    for (var i = 0; i < call.Arguments.Length; i++)
+                    {
+                        var argument = call.Arguments[i];
+                        if (ManagedClassTypes.IsManaged(argument.Type))
+                        {
+                            _ = slots.Add(argumentsBase + i);
+                            if (argument is BoundOutArgument)
+                            {
+                                _ = slots.Add(argumentsBase + call.Arguments.Length + i);
+                            }
+                        }
+                        if (argument is not BoundOutArgument)
+                        {
+                            CollectExpression(argument, argumentsBase + (call.Arguments.Length * 2));
+                        }
+                    }
+                    break;
+            }
+        }
     }
     private int OutSlotFor(int functionIndex, BoundFunction function, int variable)
     {
