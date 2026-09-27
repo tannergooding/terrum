@@ -57,6 +57,48 @@ item. That relation must preserve the complete qualified item type and its
 ownership, backing and lifetime dependencies. Exact selection rules and ABI
 remain open library design.
 
+## Parameter-only implicit readonly loans
+
+`implicit ref<T>` is an accepted parameter-only modifier on a readonly
+reference parameter, not `implicit T` or `in T`, a qualifier inside `T` or
+`ref<T>`, a `view<T>` type, or a representation attribute. The caller passes
+an ordinary expression and it is evaluated once. If it denotes an eligible
+place, the call borrows that place's slot; otherwise the compiler materializes
+a temporary and cleans it according to ordinary call and unwind rules.
+Borrowing alone requires neither `[Copy]` nor ownership transfer.
+
+```terrum
+void Inspect(implicit ref<LargeRecord> record);
+
+Inspect(record);
+Inspect(CreateRecord());
+```
+
+The introduced loan is call-scoped and nonescaping: it cannot be returned as a
+reference, stored, retained by a capture, or carried across suspension. The
+loan restricts access to the outer slot only. The complete qualified `T`
+retains any write authority, backing, roots, ownership and dependency contracts
+already carried by its value; a Copy descriptor copied out of the slot keeps
+those same contracts. A readonly outer loan is not deep immutability, purity
+or exclusivity.
+
+The form is available for concrete/generic parameters and explicitly declared
+extension receivers, without changing ordinary instance-receiver defaults. It
+does not alter existing APIs unless they explicitly adopt the parameter
+contract. The modifier does not apply to `write ref<T>`, `init ref<T>`, or
+`ptr<T>` parameters and does not authorize arbitrary conversions. An explicit `ref<T>` and
+`implicit ref<T>` share one reference signature rather than forming distinct
+overloads. Preference between a by-value `T` overload and an
+`implicit ref<T>` overload is settled: ordinary `F(value)` selects `F(T)` when
+both are applicable, while an explicit reference argument may select a
+reference overload. Explicit and implicit readonly `ref<T>` alone cannot
+distinguish overloads. ABI lowering may choose a physical by-value or indirect
+form only while preserving the declared snapshot/loan, aliasing, ownership and
+lifetime semantics; there is no universal size threshold or adaptive type
+attribute. Results remain `T` or an explicit `ref<T>` with declared lifetime
+metadata; no adaptive generic value-or-loan result family is selected. This
+contract is accepted direction, not implemented compiler support.
+
 ## Erased interface storage is explicit
 
 An interface name `I` describes nominal behavior and an abstract payload, not

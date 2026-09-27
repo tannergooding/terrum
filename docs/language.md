@@ -67,6 +67,31 @@ remains open. Parameter-only `ref T`, `T*` and `T&` are not alternate
 representations. `mut` is not valid as a generic type-argument qualifier;
 use `write` when the referent capability itself is part of the type.
 
+The accepted call-side readonly-borrow form is the parameter-only modifier
+`implicit ref<T>`, not `implicit T`, `in T`, or a qualifier inside `T` or
+`ref<T>`. Callers pass ordinary expressions, evaluated once: an eligible
+existing place is borrowed, otherwise a temporary is materialized and cleaned
+under normal call/unwind rules. The introduced slot loan is
+call-scoped/nonescaping and cannot be returned, stored, captured for later, or
+carried across suspension. It imposes no `[Copy]` requirement or ownership
+transfer just to borrow. The slot is readonly, but `T` keeps its complete
+qualification and dependencies; for example, borrowing a descriptor does not
+erase `write` authority or backing/root obligations inside it. This is not
+deep immutability, purity or exclusivity. The modifier applies to concrete and
+generic parameters and explicitly declared extension receivers, not as a
+change to ordinary instance-receiver defaults. Existing APIs do not acquire
+this behavior automatically; it requires an explicit parameter declaration.
+The modifier does not apply to `write ref<T>`, `init ref<T>`, or `ptr<T>`
+parameters and does not authorize arbitrary conversion chains. It is not a distinct overload from
+an explicit readonly `ref<T>`; the priority between a by-value `T` overload
+and an `implicit ref<T>` overload is settled: for ordinary `F(value)`,
+`F(T)` wins when both are applicable. An explicit reference argument may
+select a reference overload; explicit and implicit readonly `ref<T>` alone
+cannot distinguish overloads. Physical ABI lowering preserves the declared
+value/loan semantics; no size threshold or adaptive type attribute is implied.
+No adaptive result family or change to default receiver semantics is selected.
+This accepted direction is not yet compiler support.
+
 Constructor initialization does not imply later mutation permission. Loans are
 place- and flow-sensitive, ending after last use; overlapping read loans are
 allowed, conflicting write loans are not. Qualified generic `T` preserves its
@@ -303,10 +328,13 @@ through a hidden `int32`/`float64`. `int32(1234)`, `uint64(0xFFFFFFFF)` and
 `float32(0.1)` illustrate direct target parsing. Width suffixes do not exist.
 `T(untypedLiteral)` uses the registered parser directly; `T(typedExpression)`
 is a checked explicit conversion. `new T(arguments)` remains nominal
-construction. Already-typed numbers never implicitly widen or narrow.
-Type/value-call binding must resolve a type target versus an ordinary callable;
-this target rule is not yet compiler support. `[ConstEval]` marks declarations
-eligible for bounded deterministic compile-time execution; `const T a = F()`
+construction. Already-typed numbers never implicitly widen or narrow. The
+syntax-14 compiler executes contextual decimal integer literals without a
+fallback and checked numeric type-call conversions for `int32`, `uint32`,
+`int64`, `uint64` and `char16`; the hexadecimal and floating examples above
+remain target-only. Type/value-call binding preserves existing source-function
+and local shadowing/call precedence. `[ConstEval]` marks declarations eligible
+for bounded deterministic compile-time execution; `const T a = F()`
 requires a constant declaration value, while `T b = const F()` requires only
 the expression. Literal parsing always uses the registered compile-time
 parser, even in ordinary local initialization; there is no runtime fallback.
@@ -558,11 +586,12 @@ checked predicates, `[ViewOf]`, `[Captures]`, `[OutputWhen]`, `[Pure]`,
 `[TextBuilder(typeof(...))]`, `[CollectionBuilder(typeof(...))]`,
 `[Literal(...)]`, `[ConstEval]`, `[Specialize(...)]`, `[NativeExport]`,
 `utf8z("...")`/`utf16z("...")` calls and generic trailing defaults as
-**illustrations**, not implemented compiler promises. Conversion calls use
-the accepted `T(expression)` form; width suffixes and prefix casts are not
-target syntax. In particular, `out` remains the current bounded
-implementation spelling while a coherent migration to initialization loans is
-planned; invocation spelling for `init ref` is open. Exact generic constraint,
+**illustrations**, not implemented compiler promises, except for the supported
+numeric `T(expression)` conversion subset. Attached width suffixes diagnose
+as `TRM0006`; prefix casts are not parsed. In particular, `out` remains the
+current bounded implementation spelling while a coherent migration to
+initialization loans is planned; invocation spelling for `init ref` is open.
+Exact generic constraint,
 associated-type and extension-disambiguation syntax, inference-hole spelling,
 closed-case marker/match grammar and compatibility-forwarder attributes/source
 visibility remain open. So do transparent-wrapper eligibility/ABI profiles,
@@ -583,9 +612,10 @@ same lowering through a JIT worker. Independently produced semantic modules
 support checked process-start replacement; the compiled Terrum scanner can
 supply the real front end's lexical input. These are not a general LMOD
 deployment model or a compiler bootstrap. The current subset rejects target
-`ref<T>`/`ptr<T>`/`box<T>`/`val<T>` forms, `own<T>`, general loans and
-`init ref<T>` invocation. The validated semantic-v24 class/`ManagedNode`
-access batch supports `mut class`, writable `mut` class receivers, readonly
+`ref<T>`/`ptr<T>`/`box<T>`/`val<T>` forms, `own<T>`, general loans including
+parameter-only `implicit ref<T>`, and `init ref<T>` invocation. The validated
+semantic-v24 class/`ManagedNode` access batch supports `mut class`, writable
+`mut` class receivers, readonly
 bare handles, and explicit `write` capability through fields, optionals,
 parameters, results and inference. Constructors initialize unpublished
 objects before publication; a writable child handle retains its capability
@@ -617,9 +647,12 @@ rebinding `this`, and general reference forms remain unsupported. Primitive
 `Buffer` views retain separate legacy access paths, and the coherent
 `out`-to-`init ref<T>` migration remains scheduled. Neither the fail-fast runtime nor bounded
 checked-exceptions proof is the language's future general exception runtime.
-The bounded numeric compiler still accepts legacy width-suffix and prefix-cast
-grammar; unified `T(expression)` conversions, unsuffixed literal registration
-and `[ConstEval]` execution remain scheduled syntax/runtime work.
+The syntax-14 numeric compiler rejects width suffixes with `TRM0006` and no
+longer parses prefix casts. It supports contextual decimal integer literals
+without a fallback type and checked numeric type-call conversions for
+`int32`, `uint32`, `int64`, `uint64` and `char16`; hexadecimal/floating/custom
+literal parsing, digit separators, registered string targets and `[ConstEval]`
+execution remain unsupported.
 Bounded ownership and lexical-view checks, source-defined managed classes,
 optional edges and explicit cycle tracing are implemented; general
 ownership/lifetime analysis, public managed module contracts and

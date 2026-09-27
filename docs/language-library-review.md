@@ -5,8 +5,13 @@ tuple, alias, and functor directions in §1.4, the representation and safety
 directions in §§2.1–2.4, and the compile-time/handler/specialization directions
 in §§3.1–3.3, plus the requirement/failure and single-target callable
 directions in §§4.1–4.2 and the no-orphaned-async-work direction in §4.3 are
-accepted.** The generic input/result/receiver representation follow-up remains
-open; task start/ownership mechanics and scheduler policy remain open.
+accepted.** The final representation direction accepts parameter-only
+`implicit ref<T>` borrowing, including by-value overload preference. It
+selects no adaptive result/view family and does not change ordinary receiver
+semantics. A future type-level opt-in is only a deferred possibility; no core
+feature, name or semantics are selected. Existing APIs are unchanged unless
+they explicitly adopt the parameter contract. Task start/ownership mechanics
+and scheduler policy remain open.
 Unresolved grammar and other proposals add no syntax/API promise
 or compiler authorization. The review draws on C#/.NET, Rust, Go, Swift, Kotlin, C++
 and Java experience without treating any one ecosystem as a template.
@@ -53,10 +58,14 @@ forwarding through an existing `this` are supported receiver places. Public
 source visibility does not expose a public mutating-receiver ABI.
 It includes compilation-local constrained generic specialization, but not a
 public managed ABI, general interfaces/witnesses, array/view libraries, async,
-or the proposed libraries. The bounded numeric front end still accepts legacy
-width tags/prefix casts, and the scanner side record preserves that boundary;
-this does not change the target syntax in §3.1. Examples in this review and
-`.api.terrum` files remain design material.
+or the proposed libraries. The syntax-14 numeric front end rejects width
+suffixes with `TRM0006`, no longer parses prefix casts, and supports
+context-typed decimal integers plus checked type-call conversions for `int32`,
+`uint32`, `int64`, `uint64` and `char16`. The scanner-4 record shape is
+unchanged and retains recognized suffix tags only on diagnostic-bearing
+tokens. Hexadecimal/floating/custom literal parsing and `[ConstEval]` remain
+outside the executable profile. Examples in this review and `.api.terrum`
+files remain design material unless specifically identified as implemented.
 
 ## 1. Make capabilities explicit and composable
 
@@ -596,15 +605,19 @@ float32 fraction = float32(0.1);
 float64 converted = float64(count);
 ```
 
+The syntax-14 executable profile supports decimal integer literals and the
+listed built-in conversion types; the hexadecimal and floating examples above
+illustrate target syntax only.
+
 `T(untypedLiteral)` invokes the registered literal parser directly: it does
 not first manufacture an `int32` or `float64`. `T(typedExpression)` is an
 explicit checked conversion and requires a built-in rule or declared
 conversion witness/operator. It never implies boxing, `write` authority,
 pinning or reinterpretation. `new T(arguments)` remains nominal construction;
 it is not the conversion form, and there is no reason to add `new int32(value)`.
-Type/value-call binding must distinguish a type target from an ordinary value
-call; this is a checked name-resolution rule, not a claim that the current
-parser/binder implements it.
+The implemented built-in type-call cases preserve existing source-function
+and local shadowing/call precedence. This bounded support does not implement
+custom literal registration or arbitrary user-defined conversion lookup.
 
 For example, `Port` is a nominal wrapper around `uint16`:
 
@@ -1021,6 +1034,7 @@ trades generality for simplicity.
 | Universal object defaults | No universal object methods or automatic capabilities; opt-in equality/hash/format and separate diagnostic identity | Accepted direction |
 | Nominal witnesses and capability predicates | Checked `IFoo` witnesses remain distinct from `[Copy]`, storage, and family capabilities | Accepted baseline |
 | Generic/erased APIs, conditional witnesses, associated results, erasure, inference, overloads | Accepted policy; exact grammar, representations, dispatch and general compiler support are staged | Accepted direction / scheduled |
+| Implicit readonly parameter loans | Parameter-only `implicit ref<T>` borrowing; ordinary value matches take precedence; no adaptive result/view family or ordinary receiver change | Accepted direction / implementation scheduled |
 | Generic array/enum capabilities | Preserve independent capability predicates, unnamed enum values, open-by-default evolution and explicit case-set/layout contracts | Accepted direction / representation details open |
 | Layout and wrappers | Opaque by default; opt-in Sequential, Union and Transparent contracts; transparent wrappers remain nominal but are carrier-equivalent only under checked ABI, validity, ownership and cleanup contracts; no arbitrary user-selected field offsets | Accepted direction / exact syntax and ABI profiles open |
 | Sealed concrete types | `sealed` controls inheritance; type/API evolution and case-set/layout promises are separate | Accepted direction |
@@ -1029,7 +1043,7 @@ trades generality for simplicity.
 | SIMD and tensor views | SIMD values carry vector ABI; tensors are higher-level logical multidimensional views over storage with explicit shape/stride contracts | Accepted distinction / library support scheduled |
 | Iteration, return representation and allocation | Preserve lifetime, ownership, cleanup and relocation contracts; physical by-value lowering does not imply a source loan | Accepted safety direction |
 | Context-specific underscore roles | Value discards evaluate and clean up; wildcard patterns do not consume the scrutinee; lambda names and generic inference holes are distinct contexts | Accepted semantic direction / grammar and support open |
-| Conversions, literals, and constant evaluation | One checked `T(expression)` conversion form; contextual registered literal parsing without suffixes or fallback types; bounded `[ConstEval]` with declaration capability and use-site requirement | Accepted direction / grammar migration and evaluator implementation scheduled |
+| Conversions, literals, and constant evaluation | One checked `T(expression)` conversion form; contextual literals without suffixes or fallback types; registered parsing and bounded `[ConstEval]` with declaration capability/use-site requirement | Conversion syntax and bounded built-in numeric subset implemented; custom registration and evaluator remain scheduled |
 | Operators and compound assignment | Checked runtime operators are distinct from `[ConstEval]`; user `+=` is explicit single-place `write ref<T>` mutation, not inferred from `+` | Accepted direction / operator grammar and implementation scheduled |
 | Handlers and builders | Registered collection/text targets and parameter-directed streaming handlers; eager left-to-right typed captures, ownership cleanup and publish-on-success | Accepted direction / exact library APIs scheduled |
 | Specialization | Exact closed generic references and declared target requirements; same-contract AOT/JIT variants, explicit priority, reject tied overlap | Accepted direction / implementation scheduled |
@@ -1148,45 +1162,52 @@ These comparisons inform Terrum recommendations, not automatic adoption or
 measured performance claims. [Source notes](references.md) cover the existing
 CoreLib and ABI research.
 
-## Open follow-up: generic input, result and receiver representation
+## Accepted parameter-only implicit readonly loans
 
-The representation policy for generic inputs, results and instance-extension
-receivers remains open. The earlier `View<T>` spelling was only a discussion
-placeholder; it is **not** an accepted type, family, name or grammar.
+The accepted opt-in form is the parameter-only modifier `implicit ref<T>`.
+`implicit` modifies a readonly reference parameter; it is not `implicit T` or
+`in T`, a qualifier inside `T` or `ref<T>`, a `view<T>`/`View<T>`
+representation, or a `ViewRepresentation` attribute. A caller supplies an ordinary expression:
+evaluate it once, borrow an eligible existing place, or materialize a temporary
+and clean it under normal call/exception cleanup. No `[Copy]` requirement or
+ownership transfer is imposed merely to borrow.
 
-Questions to resolve together:
+The introduced loan is of the argument's **slot**, is call-scoped and
+nonescaping, and cannot be returned, stored as a reference, retained by a
+capture, or carried across suspension. This does not erase dependencies already
+contained in the complete `T`: copying a `[Copy]` value out preserves its
+qualification and backing/root/dependency contracts. A readonly outer loan
+does not strip `write` authority inside `T`, imply deep immutability, or promise
+purity or exclusivity. The modifier applies to concrete and generic parameters
+and to explicitly declared extension receivers; it does not change ordinary
+instance receiver defaults. The modifier does not apply to `write ref<T>`,
+`init ref<T>`, or `ptr<T>` parameters and does not authorize arbitrary
+conversion chains.
 
-- How should ordinary instance and extension receiver conventions be chosen?
-  A class/reference receiver may be passed as `T self` (the handle); a value
-  receiver might be passed as `T self` or borrow storage as `ref<T> self`.
-  Class-versus-value alone cannot select the preferred form, and readonly
-  access does not imply by-reference passing. .NET `Vector128<T>` extensions
-  often intentionally take the receiver by value to avoid address-taking spills
-  that can defeat enregistration when a call is not inlined; even an `int32`
-  instance receiver can be cheaper by value than by reference. The policy must
-  account for register classification and ABI, addressability, inline and
-  non-inline paths, and caller spill/callee load versus register copy -- not
-  just `sizeof(T)`. If a mutating receiver must update original storage, it
-  still needs a writable borrow/writeback mechanism rather than mutating a
-  value copy. A writable value receiver would require `write ref<T>`; a
-  writable class referent is `write C`. `mut` on a class-handle binding permits
-  rebinding, not mutation of a readonly referent. A mutable value local, in
-  contrast, provides a writable place from which a checked mutable receiver
-  borrow may be formed.
-- Should classes and primitive values remain by-value while large or
-  noncopyable structs may use readonly loans? Parameters, results and instance
-  extensions may need different policies rather than one representation rule.
-- How should a published representation policy account for enregistration,
-  visibility and aliasing, which can make physical ABI optimization alone
-  unreliable? Generic optimization must not promise copy avoidance for every
-  `T`, nor silently turn a by-value snapshot into a loan of backing storage.
-- How are conditional backing dependencies and the complete qualification of
-  `T` preserved? How can separate compilation bind a stable published policy
-  and closed contract without relying on an incidental size threshold?
-- Can generic consumers use the chosen representation without an implicit
-  copy, while keeping rvalue and temporary escape, ownership transfer and
-  cleanup behavior well-defined?
-- How is `T` inferred without attempting to invert a non-injective
-  representation or projection?
+An explicit `ref<T>` parameter and `implicit ref<T>` have the same reference
+signature; the modifier is call-side loan/noescape contract metadata, not a
+second overload distinction. The preference between an applicable by-value
+`T` overload and an `implicit ref<T>` overload is settled: an ordinary
+`F(value)` match selects `F(T)` over `F(implicit ref<T>)`. An explicit
+reference argument may select a reference overload. A declaration cannot
+overload only on explicit versus implicit readonly `ref<T>`.
 
-No representation mechanism or syntax is selected by this follow-up.
+Physical by-value or indirect ABI lowering must preserve snapshot, borrow,
+ownership and lifetime semantics. There is no universal size threshold or
+adaptive type attribute. Returns remain `T` or an explicit `ref<T>` governed by
+existing lifetime metadata; a generic result that adaptively chooses value or
+loan is deferred until a concrete Terrum library need exists beyond family and
+associated-type contracts.
+
+Readonly access does not imply by-reference passing: `.NET Vector128<T>`
+extensions may deliberately use a by-value receiver to avoid address-taking
+spills on non-inlined paths, and even `int32` can remain better enregistered by
+value. Physical ABI lowering must account for target register classification,
+addressability, inlining and spill/load versus register-copy costs, not just
+`sizeof(T)`, while preserving the declared snapshot or loan semantics. An
+explicitly writable value receiver still needs a writeback mechanism;
+mutating a by-value copy does not update the caller's original storage.
+
+A future type-level opt-in might be considered, likely at a library/attribute
+layer rather than as a core-language feature. That is only a deferred
+possibility: no attribute name, mechanism or semantics are selected.
