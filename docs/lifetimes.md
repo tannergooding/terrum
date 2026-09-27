@@ -255,8 +255,15 @@ output destinations are dropped only when the call begins, not when earlier
 arguments are still being evaluated. In the bounded executable profile, a
 successful `out var` gains its own lexical cleanup scope; the target
 `init ref<T>` migration must preserve this publication and cleanup behavior.
-User-defined unique receiver loans remain synchronous
-and readonly and cannot be stored, consumed or passed as values. Cleanup is an explicit
+User-defined unique receiver loans remain synchronous and cannot be stored,
+consumed or passed as values. Ordinary methods default to readonly loans.
+A `mut` method requires an initialized named mutable owner or forwarding
+through its existing writable `this`; it may update mutable scalar and Copy
+fields, not replace owning fields. Its root is reserved before argument
+evaluation, so argument calls cannot move, replace or otherwise invalidate
+that owner. Mutation does not transfer ownership or change cleanup
+responsibility; updates before a checked failure remain visible.
+Cleanup is an explicit
 `[NoThrow] [Cleanup] public void Close()`-shaped contract on a unique
 instance method; the name itself has no special meaning. Compact owners can
 contain primitive, nested Copy and owning fields; partial construction cleans

@@ -104,4 +104,60 @@ public sealed partial class NativeManagedClassModuleTests
             apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
         Assert.Equal(nativeHash, SHA256.HashData(nativeConsumer));
     }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task UniqueMutableReceiverUsesVersion27WithPrivateProducerReplacementAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string Replacement = """
+            unique struct Owner {
+                public mut int32 Value;
+                public Owner(int32 value) { Value = value; }
+                public mut void Add(int32 amount) { Value = Value + amount; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            public int32 Leaf() {
+                mut Owner owner = new Owner(40);
+                owner.Add(2);
+                return owner.Value;
+            }
+            """;
+        const string Original = "public int32 Leaf() { return 1; }";
+        const string Consumer = "int32 Main() { return Leaf(); }";
+        var replacementProgram = Compile(Replacement, policy);
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateProducer(replacementProgram, ["Owner.Add"]));
+        var original = ModuleCompiler.CreateProducer(Compile(Original, policy), ["Leaf"]);
+        var consumer = ModuleCompiler.CreateConsumer(Compile(Consumer, policy,
+            ModuleCompiler.CreateReference(original), library: false), original);
+        var hash = SHA256.HashData(consumer);
+        var producer = ModuleCompiler.CreateProducer(replacementProgram, ["Leaf"]);
+        Assert.Equal(27, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Empty(ModuleCompiler.CreateReference(producer).Structures);
+        var downgraded = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 26);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded));
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(
+            ModuleCompiler.Link(consumer, producer), policy)).ConfigureAwait(true));
+        Assert.Equal(hash, SHA256.HashData(consumer));
+
+        var nativeOriginal = NativeModuleCompiler.CreateProducer(Compile(Original, policy), ["Leaf"], "NodeB", policy);
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(Consumer, policy,
+            NativeModuleCompiler.CreateGraphReference([nativeOriginal]), library: false),
+            [nativeOriginal], policy);
+        var nativeHash = SHA256.HashData(nativeConsumer);
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(replacementProgram, ["Leaf"], "NodeB", policy);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        var framework = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = framework.Parent?.Name
+            ?? throw new InvalidOperationException("Missing test configuration directory.");
+        var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
+            configuration, framework.Name, "terrumc.exe");
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.Equal(nativeHash, SHA256.HashData(nativeConsumer));
+    }
 }

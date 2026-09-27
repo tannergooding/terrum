@@ -44,18 +44,83 @@ public sealed class MutableStructReceiverTests
         Assert.Null(compilation.Program);
     }
 
-    [Fact]
-    public void UniqueStructMutationDoesNotClaimAnExclusiveLoanContract()
+    [Theory]
+    [InlineData("Owner owner = new Owner(41); owner.Increment();")]
+    [InlineData("new Owner(41).Increment();")]
+    [InlineData("mut Owner owner = new Owner(41); Owner moved = move owner; owner.Increment();")]
+    public void UniqueStructMutationRequiresAnInitializedWritablePlace(string body)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        const string Source = """
             unique struct Owner {
-                public int32 Value;
+                public mut int32 Value;
                 public Owner(int32 value) { Value = value; }
                 public mut void Increment() { Value = Value + 1; }
+                [NoThrow] [Cleanup] public void Close() {}
             }
-            """));
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source
+            + "int32 Main() { " + body + " return 0; }"));
         Assert.True(compilation.HasErrors);
         Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void UniqueMutableReceiverReservesRootBeforeArgumentMoves()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unique struct Owner {
+                public mut int32 Value;
+                public Owner(int32 value) { Value = value; }
+                public mut void Accept(Owner other) { Value = other.Value; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(42);
+                owner.Accept(move owner);
+                return 0;
+            }
+            """));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void ForgedReadonlyLoanCannotCallUniqueMutableMethod()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unique struct Owner {
+                public mut int32 Value;
+                public Owner(int32 value) { Value = value; }
+                public mut void Increment() { Value = Value + 1; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(41);
+                owner.Increment();
+                return owner.Value;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var main = program.Functions[program.EntryPoint];
+        var region = Assert.IsType<BoundTryFinally>(main.Body.Statements[1]);
+        var statement = Assert.IsType<BoundExpressionStatement>(region.Body.Statements[0]);
+        var call = Assert.IsType<BoundCall>(statement.Expression);
+        var loan = Assert.IsType<BoundMutableReceiverLoan>(Assert.Single(call.Arguments));
+        var forged = region with {
+            Body = region.Body with {
+                Statements = region.Body.Statements.SetItem(0, statement with {
+                    Expression = call with {
+                        Arguments = [new BoundReceiverLoan(loan.Variable, loan.Type, loan.Span)],
+                    },
+                }),
+            },
+        };
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+            Functions = program.Functions.SetItem(program.EntryPoint, main with {
+                Body = main.Body with { Statements = main.Body.Statements.SetItem(1, forged) },
+            }),
+        }));
     }
 
     [Theory]

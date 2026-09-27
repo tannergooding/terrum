@@ -751,10 +751,9 @@ internal sealed partial class Binder
         }
         if (containingType is not null && isMutable && !constructor
             && (isStatic || (TryResolveClass(Qualify(containingType), out var mutableOwner)
-                ? !_classes[ManagedClassTypes.ClassIndex(mutableOwner)].IsMutable
-                : _structs[(int)ResolveDeclaredType(containingType) - 100].IsUnique)))
+                && !_classes[ManagedClassTypes.ClassIndex(mutableOwner)].IsMutable)))
         {
-            Report("TRM3001", "A mut method requires a writable class or non-owning struct receiver.", declaration.Span);
+            Report("TRM3001", "A mut method requires a writable class or struct receiver.", declaration.Span);
         }
 
         var returnNode = constructor ? null : (SyntaxNode)declaration.Children[operatorDeclaration ? ^5 : ^4];

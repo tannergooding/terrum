@@ -353,7 +353,7 @@ public static class SemanticVerifier
                 }
                 if (!function.IsStatic && !function.IsConstructor
                     && declaringType < ManagedClassTypes.First && program.Structures[declaringType].IsUnique
-                    && (function.Variables[0].IsMutable || function.Variables[0].IsOut))
+                    && function.Variables[0].IsOut)
                 {
                     throw Invalid();
                 }
@@ -2609,8 +2609,7 @@ public static class SemanticVerifier
                                 && target.DeclaringStruct is not null && !target.IsStatic
                                 && !target.IsConstructor && target.Variables[0].IsMutable
                                 && HasFields(program, mutableLoan.Type)
-                                && !ManagedClassTypes.IsClass(mutableLoan.Type)
-                                && !IsUnique(program, mutableLoan.Type);
+                                && !ManagedClassTypes.IsClass(mutableLoan.Type);
                             if (i != 0 || (!bufferMutation && !structMutation)
                                 || mutableLoan.Variable < 0 || mutableLoan.Variable >= initialized.Length
                                 || (bufferMutation && mutableLoan.Type != PrimitiveType.OwnedInt32Buffer)
@@ -2641,6 +2640,7 @@ public static class SemanticVerifier
                             if (i != 0 || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
                                 || loan.Variable < 0 || loan.Variable >= initialized.Length
                                 || loan.Type != target.Variables[0].Type || !IsUnique(program, loan.Type)
+                                || target.Variables[0].IsMutable
                                 || !initialized[loan.Variable]
                                 || function.Variables[loan.Variable].Type != loan.Type)
                             {
@@ -2653,6 +2653,7 @@ public static class SemanticVerifier
                             if (i != 0 || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
                                 || fieldLoan.Place is null
                                 || fieldLoan.Type != target.Variables[0].Type
+                                || target.Variables[0].IsMutable
                                 || fieldLoan.Place.Type != fieldLoan.Type || !IsUnique(program, fieldLoan.Type))
                             {
                                 throw InvalidEffect(fieldLoan.Span, "Ownership");

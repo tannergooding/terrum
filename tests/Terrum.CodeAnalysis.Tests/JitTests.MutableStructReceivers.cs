@@ -10,6 +10,14 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
+    [Fact]
+    public async Task UniqueOwnerSampleAgreesBetweenAotAndJitAsync()
+    {
+        var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "samples", "native",
+            "unique-owner.terrum")).ConfigureAwait(true);
+        await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -25,6 +33,66 @@ public sealed partial class JitTests
         {
             await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task UniqueMutableReceiverUpdatesNamedOwnerAndForwardedThisAsync(bool checkedFailures)
+    {
+        const string Source = """
+            struct Payload {
+                public mut int32 Value;
+                public Payload(int32 value) { Value = value; }
+            }
+            unique struct Owner {
+                public mut int32 Value;
+                public mut Payload Data;
+                public Owner(int32 value) { Value = value; Data = new Payload(value); }
+                public mut void Advance(int32 amount) {
+                    Value = Value + amount;
+                    Data.Value = Data.Value + amount;
+                }
+                public mut void Forward(int32 amount) {
+                    Advance(amount);
+                    this.Advance(amount);
+                }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(20);
+                owner.Forward(11);
+                if (owner.Data.Value != 42) { return 1; }
+                return owner.Value;
+            }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
+    }
+
+    [Fact]
+    public Task CheckedFailureRetainsUniqueOwnerMutationAsync()
+    {
+        const string Source = """
+            unique struct Owner {
+                public mut int32 Value;
+                public Owner(int32 value) { Value = value; }
+                public mut void Fail() {
+                    Value = 42;
+                    require false;
+                }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(1);
+                unsafe {
+                    try { owner.Fail(); }
+                    catch { return owner.Value; }
+                }
+                return 0;
+            }
+            """;
+        return AssertCheckedExecutionAsync(Source, 42);
     }
 
     [Theory]

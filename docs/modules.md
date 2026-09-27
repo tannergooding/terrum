@@ -343,7 +343,11 @@ expressions; v25 and earlier headers reject the new expression tag. The
 serialized path uses field identities, not unchecked byte offsets, and is
 remapped and verified against the linked private layouts. Writers select v26
 only when a body contains such a loan; whole-local mutable receivers retain
-v25. Programs requiring neither retain their existing versions and bytes
+v25. Semantic v27 permits ordinary mutating methods on unique structs,
+retaining the existing pointer receiver lowering and cleanup contract.
+Readonly loans cannot target those methods, and earlier headers reject
+them even though the method/loan record shapes are unchanged.
+Programs requiring none of these contracts retain their existing versions and bytes
 regardless of managedness. The ordinary readonly/by-value receiver ABI is unchanged.
 Public scalar entry wrappers may call non-exported mutating methods; source
 `public` visibility does not expose a public mutating-receiver ABI, and private

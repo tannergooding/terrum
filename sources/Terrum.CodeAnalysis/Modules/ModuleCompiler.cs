@@ -32,6 +32,7 @@ public static partial class ModuleCompiler
     private const int ManagedAccessVersion = 24;
     private const int MutableStructReceiverVersion = 25;
     private const int MutableFieldReceiverVersion = 26;
+    private const int UniqueMutableReceiverVersion = 27;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -920,6 +921,14 @@ public static partial class ModuleCompiler
         && function.Variables[0].IsMutable
         && (int)function.Variables[0].Type is >= 100 and < ManagedClassTypes.First;
 
+    private static bool HasUniqueMutableReceiver(BoundFunction function,
+        ImmutableArray<BoundStruct> structures)
+    {
+        var index = function.Variables.IsDefaultOrEmpty ? -1 : (int)function.Variables[0].Type - 100;
+        return HasMutableStructReceiver(function) && index >= 0 && index < structures.Length
+            && structures[index].IsUnique;
+    }
+
     private static bool HasMutableFieldLoan(BoundFunction function)
     {
         var found = false;
@@ -1290,7 +1299,9 @@ public static partial class ModuleCompiler
         }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-        var version = module.Functions.Any(static item => item.Function is BoundFunction function
+        var version = module.Functions.Any(item => item.Function is BoundFunction function
+                && HasUniqueMutableReceiver(function, program.Structures)) ? UniqueMutableReceiverVersion
+            : module.Functions.Any(static item => item.Function is BoundFunction function
                 && HasMutableFieldLoan(function)) ? MutableFieldReceiverVersion
             : module.Functions.Any(static item => item.Function is BoundFunction function
                 && HasMutableStructReceiver(function)) ? MutableStructReceiverVersion
@@ -1425,6 +1436,11 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Mutable struct receivers require semantic module version 25.");
             }
+            if (version < UniqueMutableReceiverVersion && items.Any(item =>
+                    item.Function is BoundFunction function && HasUniqueMutableReceiver(function, structures)))
+            {
+                throw new ModuleFormatException("Mutable unique receivers require semantic module version 27.");
+            }
             if (version == AggregateClassFactoryVersion && !items.Any(static item =>
                     item.Function is BoundFunction function && HasAggregateClassArguments(function)))
             {
@@ -1486,7 +1502,7 @@ public static partial class ModuleCompiler
             or BufferVersion or ReadonlyViewVersion or WritableViewVersion or ManagedNodeVersion
             or ManagedClassVersion or Version or LoopTransferVersion or AggregateClassFactoryVersion
             or StackClassFactoryVersion or ManagedAccessVersion or MutableStructReceiverVersion
-            or MutableFieldReceiverVersion))
+            or MutableFieldReceiverVersion or UniqueMutableReceiverVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }

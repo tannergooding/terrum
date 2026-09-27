@@ -1,6 +1,6 @@
 // Run with --runtime checked-exceptions. This compact owner carries no OS resource.
 unique struct Lease {
-    public int32 Value;
+    public mut int32 Value;
 
     public Lease(int32 value) {
         Value = value;
@@ -12,15 +12,20 @@ unique struct Lease {
     [NoThrow] public int32 Read() {
         return Value;
     }
+
+    [NoThrow] public mut void Set(int32 value) {
+        Value = value;
+    }
 }
 
 Lease Make() {
-    Lease local = new Lease(42);
+    Lease local = new Lease(41);
     return move local;
 }
 
 int32 Main() {
     mut Lease current = Make();
+    current.Set(42);
     unsafe {
         try {
             current = new Lease(1 / 0);

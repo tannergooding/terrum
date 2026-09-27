@@ -65,7 +65,7 @@ retain copy behavior, and the ordinary nonmutating receiver ABI is unchanged.
 The verifier rejects forged mutable receiver loans from
 immutable places, while nested field writes through a valid receiver are
 allowed. Semantic v26 persists nested mutable-field loans, while v25 remains
-sufficient for whole-local receiver loans. Older module headers reject the
+sufficient for whole-local non-owning receiver loans. Older module headers reject the
 respective contracts; programs needing neither retain their versions and
 bytes regardless of managedness. Readers
 continue to normalize private managed artifacts from versions 18 through 23
@@ -74,9 +74,15 @@ entry wrappers may call non-exported mutating methods; private helpers remain
 non-exported as well. The native handle ABI and scalar-only public module
 boundary are unchanged.
 
-Nested receivers such as `outer.Inner.Mutate()` require a writable root and
-writable fields along the complete path; readonly fields cannot be bypassed.
-Unique/owning mutating receivers, temporary or managed-class-field receiver places,
+Semantic v27 permits ordinary `mut` methods on unique structs through an
+initialized named mutable owner or forwarded writable `this`. These loans
+update mutable scalar/Copy fields without transferring ownership, replacing
+owning fields, or changing cleanup responsibility. Readonly unique loans
+cannot call mutating methods; older module versions reject the new contract.
+
+Nested receivers such as `outer.Inner.Mutate()` require a writable non-owning
+root and writable fields along the complete path; readonly fields cannot be bypassed.
+Nested receiver paths through unique owners, temporary or managed-class-field receiver places,
 rebinding `this`, public exported mutating-receiver ABIs and general references
 remain unsupported. General reference/view/ownership forms and `init ref<T>`
 call-site grammar remain unsupported; the separate legacy buffer-view access

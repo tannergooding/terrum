@@ -17,6 +17,35 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class OwnershipTests
 {
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task MutatedUniqueOwnerCleansUpExactlyOnceWithUpdatedValueAsync(BoundRuntimePolicy policy)
+    {
+        const string Source = """
+            unique struct Owner {
+                public mut int32 Value;
+                public Owner(int32 value) { Value = value; }
+                public mut void Add(int32 amount) { Value = Value + amount; }
+                [NoThrow] [Cleanup] public void Close() {
+                    if (Host.Trace[0] == 0) { Host.Trace[0] = 1; }
+                    else { Host.Trace[0] = 2; }
+                    Host.Trace[1] = Value;
+                }
+            }
+            int32 Main() {
+                {
+                    mut Owner owner = new Owner(40);
+                    owner.Add(2);
+                    if (Host.Trace[0] != 0) { return 1; }
+                }
+                if (Host.Trace[0] == 1 && Host.Trace[1] == 42) { return 42; }
+                return 0;
+            }
+            """;
+        Assert.Equal(42, await RunNativeAsync(Source, policy).ConfigureAwait(true));
+    }
+
     private const string Owner = """
         unique struct Owner {
             public int32 Id;

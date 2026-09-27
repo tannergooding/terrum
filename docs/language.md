@@ -561,7 +561,11 @@ other effect bounds remain later implementation work. A compact
 `unique struct` proof checks named moves, by-value parameter transfer, and
 conditional owning `bool`/`out` publication with lexical NoThrow cleanup.
 Fresh constructor/factory results can transfer directly; a moved owner is
-vacant. Receiver loans remain synchronous and readonly. Compact owning fields
+vacant. Receiver loans remain synchronous and default to readonly. Ordinary
+`mut` methods can update mutable scalar/Copy fields through a named mutable
+owner or forwarded writable `this`, without transferring ownership or
+replacing owning fields. Root reservation prevents invalidating argument
+evaluation, and cleanup responsibility is unchanged. Compact owning fields
 have partial-construction cleanup in reverse actual acquisition order and
 complete-value recursive cleanup. The compiler-owned `OwnedInt32Buffer` adds
 checked native allocation, initialized-prefix operations and lexical readonly or
@@ -679,11 +683,13 @@ nested field writes through a valid receiver are allowed. These methods remain
 non-exported: public scalar entry wrappers may call them; source-level
 `public` visibility does not provide a public mutating-receiver ABI. Older
 module headers reject the v25 contract. Nested-field loan expressions require
-semantic v26; whole-local loans still use v25, and programs needing neither
+semantic v26; whole-local non-owning loans still use v25, and programs needing neither
 keep their prior semantic versions and bytes. Nested calls such as
 `outer.Inner.Mutate()` require writable containing storage and fields along
 the complete path; root reservation prevents invalidation during argument
-evaluation. Unique/owning mutating receivers,
+evaluation. Semantic v27 additionally permits ordinary mutating methods on
+initialized named mutable unique owners or forwarded writable `this`;
+earlier headers reject those methods. Nested receiver paths through unique owners,
 temporaries, managed-class-field receiver paths,
 rebinding `this`, and general reference forms remain unsupported. Primitive
 `Buffer` views retain separate legacy access paths, and the coherent

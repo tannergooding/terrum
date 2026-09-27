@@ -18,10 +18,11 @@ Semantic version 24 carries the validated class/`ManagedNode` access
 capability contract. Semantic version 25 adds the distinct `MutReceiver`
 contract for persisted, non-exported mutating methods on non-owning compact
 structs. Semantic version 26 adds nested mutable-field loan expressions.
+Semantic version 27 permits ordinary mutating methods on named unique owners.
 Source visibility may be public or private. Named mutable locals, their
 writable nested fields, and forwarding through an existing writable `this`
 and its writable fields are supported receiver places. Older headers reject
-the respective contracts. Whole-local loans retain v25; programs needing
+the respective contracts. Whole-local non-owning loans retain v25; programs needing
 neither retain their existing versions and bytes regardless of managedness.
 Readers normalize private managed artifacts
 from versions 18 through 23 into qualified internal IR, translating prior
@@ -212,10 +213,14 @@ a valid receiver borrow are allowed. Public scalar entry wrappers may call
 non-exported mutating methods, including source-public methods; private helper
 methods remain usable. Older headers reject the v25 contract. Nested
 mutable-field loan expressions require semantic v26; v25 remains sufficient
-for whole-local loans. The native/public ABI is unchanged.
+for whole-local non-owning loans. The native/public ABI is unchanged.
 Nested paths such as `outer.Inner.Mutate()` require writable storage and
 fields throughout; calls address the original subobject rather than a
-temporary copy followed by writeback. Unique/owning receivers,
+temporary copy followed by writeback. Semantic v27 permits ordinary mutating
+methods on initialized named mutable unique owners or forwarded writable
+`this`; scalar/Copy field mutation preserves the existing ownership and
+cleanup responsibility. Older headers reject those methods.
+Nested receiver paths through unique owners,
 temporary receivers, managed-class-field receiver paths, rebinding `this`,
 and public mutating-receiver ABI
 remain unsupported. The native physical handle ABI, image-private managed
@@ -433,8 +438,14 @@ even while other fields of its parent are under construction, without copying
 the child. A unique-returning constructor/factory result
 can initialize a local or be returned; a return of a named owner needs
 `move`. Instance method calls borrow a named unique receiver synchronously
-by pointer; this profile permits readonly methods, not captured/stored loans
-or mutating receiver methods. By-value parameters consume an explicit named
+by pointer. Ordinary methods default to readonly; a `mut` method requires
+an initialized named mutable owner or forwarded writable `this` and may
+update mutable scalar/Copy fields. It cannot replace owning fields or move
+`this`. Receiver reservation precedes argument evaluation and prevents
+invalidation of the original owner. The call does not transfer ownership
+or schedule an additional drop; checked failures preserve earlier field
+updates, and the owner is still cleaned exactly once. Captured/stored loans
+remain unsupported. By-value parameters consume an explicit named
 move or fresh result; the callee drops an unreturned owner on normal or
 checked exceptional exit. Earlier argument values remain caller-owned
 until all later arguments finish evaluating; an argument failure drops
@@ -467,7 +478,8 @@ not unwind. The separate `OwnedInt32Buffer` intrinsic allocates and frees
 one fixed-capacity process-heap block; arbitrary owning graphs, general
 OS-resource handles, stored loans and GC are not implied by this proof.
 The [sample](../samples/native/unique-owner.terrum)
-exercises checked recovery with a still-live owner.
+updates an owner through a mutating method, then exercises checked recovery
+after a failed replacement while preserving the updated, still-live owner.
 
 ## Checked normal-continuation contracts
 

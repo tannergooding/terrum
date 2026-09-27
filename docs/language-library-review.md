@@ -65,6 +65,9 @@ structs. Source visibility may be public or private; named mutable locals,
 their writable nested fields, and forwarding through an existing writable
 `this` and its writable fields are supported receiver places. Public
 source visibility does not expose a public mutating-receiver ABI.
+Semantic v27 additionally supports ordinary mutating methods on initialized
+named mutable unique owners and forwarded writable `this`, without changing
+cleanup responsibility or permitting owning-field replacement.
 It includes compilation-local constrained generic specialization, including
 bounded single-`T` inference for top-level function templates over `Copy`
 structs and existing scalar value types, but not primitive operator witnesses,
