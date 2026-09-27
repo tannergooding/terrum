@@ -14,37 +14,6 @@ primitive guarantees from physical layout, interchange and procedure calls.
 [Implementation](implementation.md) remains the executable support boundary;
 this document does not claim a concurrent runtime or these atomic APIs exist.
 
-## Goals and scope
-
-Terrum should give safe programs a portable, compiler-independent account of
-communication between concurrent executions without making ordinary
-application code depend on hardware-level concurrency details.
-
-> Safe code cannot concurrently access memory unless its checked contract
-> explicitly permits it. Ordinary code is nonconcurrent by default; mutation
-> authority does not change that. Once concurrent access is permitted, access
-> atomicity, ordering, publication, and lifetime guarantees govern what other
-> threads may observe.
-
-This is a restriction on safe sharing, not a claim that an ordinary access is
-intrinsically illegal or that every shared operation must use a special atomic
-type. A checked sharing contract may permit ordinary non-tearing accesses when
-its protocol makes them valid. Such permission does not prove that the
-program's higher-level algorithm preserves its invariants.
-
-Transfer and concurrent sharing are separate permissions. Transfer moves
-usable authority under a checked handoff contract; sharing permits concurrent
-aliases under a checked access protocol. Neither is implied by `mut`, `write`,
-or readonly access. Readonly limits one access path; it does not imply
-immutability, thread-safety, uniqueness, purity, or safety of references
-reachable through the value.
-
-This proposal covers ordinary cacheable memory and CPU-to-CPU communication.
-It deliberately separates that model from device registers, DMA, persistent
-storage, and side-channel security. Those domains have different observers,
-completion rules, and platform contracts; a CPU memory fence must not be
-presented as a universal operation on them.
-
 ## Definitions
 
 Hardware and language specifications do not use one universal vocabulary.
@@ -69,7 +38,7 @@ These terms describe independent dimensions; none is a synonym for
 | Sequential consistency (SC) | A specified set of operations admits one total order consistent with the required execution order. | A property of every non-tearing access, or a synonym for an unspecified "full barrier." |
 | Publication | A defined synchronization relation makes prior initialization or writes available to another execution under the relevant access contract. | A wall-clock freshness deadline, lifetime extension by itself, or atomicity of the whole published payload. |
 | Lifetime/reclamation | The period during which storage remains a valid object that may be accessed under its contract. | Mutual exclusion, safe publication, or an ordering edge merely because a pointer value is atomic. |
-| Ordinary access | An access without a separately requested ordering or RMW operation. A checked sharing contract may still permit it concurrently under a specified protocol. | That it tears, is automatically illegal when shared, is fresh, or can be freely merged/speculated in every context. Its baseline guarantees still need specification. |
+| Ordinary access | An access without a separately requested ordering or RMW operation. A checked sharing contract may still permit it concurrently under a specified protocol. | That it tears, is automatically illegal when shared, is fresh, or can be freely merged/speculated in every context. Ordering depends on the applicable access contract. |
 | Volatile access | A language- or platform-specific contract that must be qualified below; the word alone does not select one. | A portable cross-language meaning or an automatic atomic RMW. |
 | Readonly access | A restriction on mutation through one access path. | Immutability of reachable state or permission to share concurrently. |
 | Immutable value/graph | A value or defined reachable extent that cannot be changed through any permitted alias for the promised lifetime. | Transferability, safe publication, or thread-safety of external state it references. |
@@ -77,11 +46,27 @@ These terms describe independent dimensions; none is a synonym for
 | Sharing | A checked permission for concurrent aliases, governed by an access and lifetime protocol. | Correctness of every algorithm using those aliases. |
 | Mutation authority (`mut`, `write`) | Permission to update a place or referent as allowed by its declaration and access path. | Cross-thread permission, synchronization, or ownership transfer. |
 
-An ordinary aligned scalar load can therefore be atomic without being an
-acquire load. An ordinary scalar store can be atomic without being a release
-store. Even if both accesses in `counter = counter + 1` are non-tearing, the
-combined update can lose a competing increment. A single machine instruction
-does not by itself make that sequence an atomic RMW.
+## Goals and scope
+
+Terrum should give safe programs a portable, compiler-independent account of
+communication between concurrent executions without making ordinary
+application code depend on hardware-level concurrency details.
+
+> Safe code cannot concurrently access memory unless its checked contract
+> explicitly permits it. Ordinary code is nonconcurrent by default; mutation
+> authority does not change that. Once concurrent access is permitted, access
+> atomicity, ordering, publication, and lifetime guarantees govern what other
+> threads may observe.
+
+This model covers ordinary cacheable memory and CPU-to-CPU communication.
+Device registers, DMA, persistent storage and side channels have distinct
+observers and completion rules. A CPU fence is not a universal operation on
+those domains.
+
+The following access model records agreed direction. The later candidate
+formalism and target discussion explain its consequences and possible
+extensions. [Recommendations and decisions](#recommendations-and-decisions)
+at the end isolate the choices that still need approval.
 
 ## From single-threaded code to shared memory
 
@@ -123,11 +108,8 @@ See [non-temporal stores and cache management](#non-temporal-stores-and-cache-ma
 
 ### 3. Explicit sharing introduces observable access atomicity
 
-Transfer hands authority to another thread without granting simultaneous use;
-concurrent sharing admits competing observers under a checked contract. Neither
-permission follows from writable or readonly access. The contract covers the
-complete type form, reachable authority and dependencies, not just an outer
-annotation.
+Sharing admits competing observers under a contract covering the complete type
+form, reachable authority and dependencies, not just an outer annotation.
 
 For permitted shared CPU access to ordinary coherent cacheable memory, naturally
 aligned primitive loads and stores up to the machine pointer size are atomic.
@@ -143,7 +125,7 @@ and access contract; merely having a small total size is insufficient.
 For example, `struct S { int8 x; int8 y; }` contains two independently
 accessible fields. Its two-byte size does not promise an atomic whole-`S`
 load or store, even if a particular backend sometimes uses one instruction.
-Exact checked wrapper eligibility remains to specify.
+Exact wrapper eligibility belongs in the [layout companion](data-layout-and-abi.md).
 
 Nor is `x++` an atomic RMW: its update has the load/add/store behavior of
 `x = x + 1`, even when each load and store is individually atomic. Atomic
@@ -165,43 +147,7 @@ is excluded. A lock can instead protect a larger mutable payload: its
 indivisibility to other participants comes from excluding their access during
 the update, not from the payload's machine representation.
 
-Volatile accesses may provide the selected ordering contract; interlocked
-operations may combine indivisible updates with ordering. Exact API spellings,
-order strengths and standalone fence rules remain open. Neither a CPU fence
-nor the word `volatile` implies a cache flush, device ordering, or durability.
-
-### Baseline guarantees to specify before choosing an API
-
-The primitive/trivial-wrapper baseline above is agreed direction. The
-[layout and ABI companion](data-layout-and-abi.md) records its storage and
-interchange implications. The remaining details need explicit answers,
-independent of
-whether its eventual library exposes `Atomic<T>`, `Volatile.Read`, named
-acquire/release operations, or another surface:
-
-- The concrete primitive/reference representation and alignment table,
-  checked trivial-wrapper eligibility, and any guarantees beyond the baseline.
-  Whole-aggregate atomicity does not follow from aggregate size. Explicit
-  unaligned and overlapping access have separate contracts below.
-- Which ordinary and ordered accesses the compiler may remove, merge,
-  duplicate, widen, or speculate. A non-tearing instruction does not by
-  itself require the compiler to issue every source-level read.
-- The ordinary-access ordering and coherence baseline, including
-  data-dependent reads and reference publication. The .NET runtime specifies
-  some stronger guarantees here; they must be considered explicitly rather
-  than either inherited or discarded by adopting C++ terminology.
-- Which checked sharing protocols admit concurrent access, which access
-  mixtures are valid, and what value/optimization guarantees survive unsafe
-  races. Non-tearing hardware alone does not authorize sharing in safe Terrum.
-- The additional guarantees of ordered loads/stores, atomic RMWs, locks, and
-  fences, including their progress and lifetime obligations.
-
-This baseline does not adopt all .NET runtime behavior or settle every
-target representation and synchronization rule. The
-explicit-order event model below is one candidate for expressing stronger
-operations, not a decision to import C++ atomic storage, race UB, or API rules.
-
-### Comparative evidence, not normative vocabulary
+## Comparative evidence, not normative vocabulary
 
 | Context | Atomicity and synchronization vocabulary | Meaning of `volatile` |
 |---|---|---|
@@ -211,29 +157,10 @@ operations, not a decision to import C++ atomic storage, race UB, or API rules.
 | Rust | `Atomic*` operations follow the documented C++20-derived ordering model, translated to an access-based model. Rust's permitted access mixtures are not identical to C++ atomic-object rules. | `read_volatile`/`write_volatile` constrain observable accesses, principally for I/O. They do not provide atomic synchronization between threads. |
 | ISA/hardware | Manuals distinguish indivisible accesses, atomic RMW instructions, propagation/coherence properties, and ordering instructions or attributes. Ordinary loads/stores may already be indivisible for specified widths, alignment, memory types, and observers. | A processor does not implement a universal language-level `volatile` qualifier. It executes the instructions and memory attributes selected by the implementation. |
 
-The C# language minimum, ECMA CLI rules, and the stronger documented .NET
-runtime implementation contract are not the same specification. In particular,
-the C# field-type restrictions for `volatile` are not a list of every operation
-offered by `System.Threading.Volatile`. For example, its supported `double`
-read is atomic even on a 32-bit runtime, while an ordinary `double` read there
-need not be. Conversely, a volatile IL block copy may comprise several accesses;
-its ordering does not make the entire block one atomic snapshot.
-
-Nor does C# `volatile` mean "always read the latest value" or "bypass the CPU
-cache." Acquire/release ordering constrains what may be observed together when
-communication occurs; it supplies neither a wall-clock freshness deadline nor
-an atomic compound operation. A release write to a flag followed by an acquire
-read that observes it can publish earlier payload writes. The same inference
-does not follow from C++ `volatile` or Rust `read_volatile`.
-
-Use qualified terms such as **C# volatile**, **C++ volatile**, **Rust volatile
-I/O**, **atomic load/store**, and **atomic RMW** when comparing contracts.
-The language-specific contracts are comparative evidence, not selected Terrum
-semantics; atomic load/store and atomic RMW retain the definitions above.
-In the candidate formalism below, **explicit atomic access** denotes an
-explicitly requested atomic operation; it does not mean that all other
-accesses tear. A dedicated atomic storage type is one possible API, not part
-of the definition of atomicity.
+Qualify cross-language uses of `volatile`. None means "always read the latest
+value" or universally "bypass the CPU cache." The C# language minimum, CLI
+rules and .NET runtime contract are distinct specifications. This comparison
+does not select any of them as Terrum's foundation.
 
 ## Sharing capabilities are distinct
 
@@ -247,87 +174,49 @@ provisional labels already used in design discussion, not selected syntax.
 | Thread-affine | A value may be used only on its designated thread or executor. This is a separate capability/restriction, not a synonym for `Send` or `Sync`. | Transferability or concurrent sharing. |
 | Readonly | This access path cannot mutate the immediate place it denotes, as defined by the access model. | Deep readonly, immutable reachable objects, race freedom, or safe publication. |
 
-Safe code has no cross-thread access permission by default, but ordinary
-mutable access is not intrinsically tied to an operating-system thread.
-Ordinary `List<T>` is not concurrently shareable by default. It can become
-shareable only through an explicitly opted-in, checked complete-form contract,
-for example if every shared operation is internally synchronized and all
-values, callbacks, iterators, and references it exposes satisfy the
-corresponding contract. A checked contract may permit ordinary accesses within
-that protocol; the accesses do not thereby gain RMW or ordering guarantees
-beyond the protocol. Merely wrapping a list in a readonly handle or
-lock-shaped type does not prove this.
+Ordinary `List<T>` is not concurrently shareable by default. An opted-in
+synchronized implementation must account for every shared operation and
+exposed value, callback, iterator and reference. Its internal ordinary accesses
+receive the protocol's guarantees, not an implicit RMW contract. Merely adding
+a readonly handle or a lock-shaped wrapper is insufficient.
 
-The .NET comparison needs precision: `List<T>` does not supply synchronization
-for concurrent mutation, but that is not a blanket C++-style claim that any
-managed race makes the whole program undefined. The .NET runtime separately
-constrains memory access and optimizations, including preservation of
-single-thread consistency. Terrum's proposed difference is checked rejection
-of unauthorized sharing, rather than relying on callers to obey a collection's
-concurrency documentation. Its remaining unsafe-race policy still needs an
-explicit decision below.
+The proposed checker has these obligations:
 
-An opt-in must be a checked capability, not a magic trust attribute:
-
-- For source-defined types, the compiler verifies the implementation and its
-  reachable fields, captured values, returned aliases, callbacks, and
-  synchronization protocol. The checker should credit only specified
-  synchronization primitives and protocol forms; an unsupported custom
-  algorithm cannot opt in through a declaration alone.
+- Verify source implementations, reachable authority and synchronization
+  protocols. Credit supported primitives and protocol forms, not a declaration
+  claiming an unsupported custom algorithm is safe.
 - For generic types, the proof is conditional on the complete arguments. A
   `ConcurrentBox<T>` cannot be shareable for arbitrary `T` if it exposes
   unsynchronized access to `T`.
-- For opaque imported types, the provider must publish a versioned checked
-  contract that consumers can validate. A native or otherwise unverifiable
-  claim crosses an explicitly unsafe boundary and remains the caller's
-  responsibility.
-- Wrapper methods, guards, and projections cannot erase authority carried by
-  their contents. A wrapper cannot safely grant a raw reference that its
-  argument type or lifetime contract does not allow.
+- For opaque imported types, the provider publishes a versioned contract that
+  identifies its checked proof or explicitly trusted implementation boundary.
+  Consumers validate their use of that contract; a native implementation is
+  not thereby machine-checked.
+- Preserve authority and lifetime restrictions through wrappers and projections.
 
-Transfer is not sharing. Sending a mutable class handle while the source still
-has an independently usable alias to the same mutable object is not a transfer
-of exclusive authority. A retained but provably unusable alias during a
-temporary handoff is different; its access restrictions and return of authority
-must be checked. Conversely, a type may be safely transferred but not
-concurrently shared. If all access is restricted to one designated thread,
-that is thread-affinity rather than general transferability.
+Sending a mutable handle while retaining an independently usable alias does
+not transfer exclusive authority. A temporary handoff may retain an alias
+only if its unusability and the return of authority are checked.
 
-Readonly is shallow under the existing access direction. For example,
-`List<write C>` contains writable object handles even if the list's slots are
-readonly. Concurrently sharing the list must account for those object
-capabilities; marking the list handle or its slots readonly does not make the
-objects safe. Immutable bytes likewise do not make an entire object graph
-shareable when another reachable field carries writable authority.
+Readonly is shallow: `List<write C>` retains writable object handles even when
+its slots are readonly. A sharing proof must account for those capabilities.
+Similarly, a write guard is a synchronization mechanism only if its ordering,
+reentrancy and lifetime behavior establish that contract.
 
-`write` grants authority already present in the accessed place or reference;
-it does not create that authority, override nominal restrictions, or grant
-cross-thread synchronization. Multiple concurrent writers need an explicitly
-checked synchronized protocol or suitable atomic locations. A write guard
-that arbitrates aliases is only a synchronization mechanism if its complete
-acquire/release, reentrancy, and lifetime behavior is specified and verified;
-it is not automatically a mutex by virtue of its name.
-
-A verified synchronized wrapper can nevertheless be shareable without making
-its contained list independently shareable. It must exclusively encapsulate
-the relevant authority, serialize all access, and prevent references or
-callbacks from escaping the protected interval. Its generic requirements
-depend on what crosses that boundary: moving a value out and concurrently
-sharing a borrowed value are different contracts. Requiring every private
-field to be independently shareable would incorrectly exclude this pattern;
-merely annotating the wrapper would incorrectly admit unchecked aliases.
+A synchronized wrapper can be shareable without making its contained list
+independently shareable: encapsulate the authority, serialize access, and
+prevent protected references from escaping, including through callbacks.
+Moving a value out and sharing a borrow impose different generic requirements.
+Requiring every private field to be shareable would incorrectly reject this
+encapsulation pattern.
 
 ## Candidate event formalism
 
-This access-based event vocabulary is a candidate formalism, not an accepted
-ordinary-memory baseline. It describes what each access and checked sharing
-protocol guarantees, without requiring the C++ partition between ordinary and
-atomic objects or importing its unsafe-race consequences. A particular API
-may designate atomic accesses or define permitted ordinary access under a
-protocol. The coherence rules below describe a location with one specified
-access width and compatible non-tearing accesses. Which ordinary and explicitly
-ordered accesses share those rules, especially for overlapping widths, still
-needs specification. A dedicated atomic storage type is not a prerequisite.
+This proposed access-based formalism covers locations with one specified
+width and compatible non-tearing accesses, whether ordinary or explicitly
+ordered under their contract. It neither requires dedicated atomic objects
+nor defines incompatible overlapping-width accesses. Adoption and extensions
+are tracked in the [approval checklist](#approval-checklist).
 
 - A dynamic memory event identifies an execution, a storage object and byte
   range, an operation (read, write, or read-modify-write), and the access and
@@ -378,42 +267,23 @@ its validity depends on the sharing, ordering and lifetime contracts. An
 falls outside those permissions. Non-tearing ordinary accesses are not
 automatically illegal, and an explicit atomic access does not by itself
 authorize a conflicting ordinary access. A checked protocol may permit
-unordered non-tearing accesses and define their observations; the precise
-supported protocols remain to specify. "Data race" in a comparison with
-another language retains that language's definition, not an implied Terrum
-undefined-behavior rule.
+unordered non-tearing accesses and define their observations. "Data race" in a
+comparison with another language retains that language's definition, not an
+implied Terrum undefined-behavior rule.
 Accesses overlapping initialization, destruction, or reclamation must also
 obey the object's lifetime contract. Read/read overlap alone is not a conflict.
 
-The proposed safe-language rule is to reject or prevent conflicts that fall
-outside a checked concurrent-access contract. A non-tearing guarantee alone
-does not establish such a contract, order independent locations, or make an
-update indivisible. Safe code may use ordinary accesses within an explicitly
-permitted synchronization or sharing protocol; it may not assume that an
-uncontracted access is a polling, publication, or compound-update mechanism.
-
 Unsafe code, native code, and foreign devices can violate checked access
-contracts. The recommended boundary is local: specify which value and ordering
-guarantees remain at a violating location, without making unrelated code
-globally undefined solely because one location races. This proposal does not
-import C++'s rule that an ordinary data race makes the program undefined.
-In particular, do not silently withdraw an ordinary-access non-tearing
-guarantee merely by calling the access a data race. Memory-safety guarantees
-still apply only where independently established; a data race does not justify
-dereferencing a dangling pointer, accessing a destroyed object, or bypassing
-bounds and lifetime rules. This bounded-local-effects direction is preferred over
-whole-program undefined behavior, but its exact diagnostic and optimization
-consequences remain a language-design decision.
+contracts. This candidate does not import C++'s rule that an ordinary data race
+makes the program undefined. Its proposed value guarantees do not validate a
+dangling pointer, destroyed object, or out-of-bounds access.
 
-This is not a promise of fault containment. A raced value can influence later
-control flow, indexes, and other writes; its consequences can propagate beyond
-the original location. If unsafe code corrupts a pointer, lifetime, or runtime
-metadata, this policy does not restore the invariant or make continued
-execution safe. Before adopting the recommendation, specify allowed torn
-representations, remaining type-safety guarantees, and which optimizer
-assumptions survive exposure to unsafe code. A claim of local race semantics
-cannot coexist with an optimizer silently treating every unsafe race as
-permission for arbitrary whole-program behavior.
+Bounded access semantics are not fault containment: a raced value can affect
+control flow, indexes and subsequent writes beyond the original location.
+Corrupting a pointer, lifetime or runtime metadata can invalidate continued
+execution. The [unsafe-boundary recommendation](#unsafe-boundaries) separates
+these consequences from granting the optimizer arbitrary behavior merely
+because unauthorized concurrent access occurred.
 
 No-out-of-thin-air rule: a non-tearing shared read's value must be justified by
 an initial value or a permitted write event whose value is computed from
@@ -448,11 +318,8 @@ For locations covered by the candidate coherence rules:
 - A read-modify-write reads the modification immediately preceding its own
   write in `mo`; there is no intervening modification to that location.
 
-Exact formal wording and how initialization, destruction, and storage
-replacement interact with `mo` must be settled before this becomes normative.
-The intent is to provide a compact, auditable coherence model rather than
-inherit every corner of C++'s release-sequence, dependency-consume, and fence
-rules by accident.
+The intent is a compact, auditable coherence model, not accidental inheritance
+of C++'s release-sequence, dependency-consume and fence rules.
 
 Within the explicit-order candidate, one option is direct release-to-acquire
 communication only:
@@ -464,17 +331,12 @@ difference from importing a release-sequence rule. No dependency-only
 
 ## Candidate explicit-order surface
 
-The source API is open. One option is per-operation
-`relaxed`, `acquire`, `release`, `acq_rel`, and `seq_cst` ordering on checked
-atomic objects, or equivalent named operations. Another is a .NET-style surface
-with an ordinary-access baseline, ordered loads/stores, and strongly ordered
-interlocked operations. The table and litmus outcomes here describe the
-explicit-order candidate, not a selection between those designs.
-
-Convenience interlocked operations should have a strong, clearly documented
-default. Whether that is a formally specified SC order or a particular
-full-fence contract must be decided, not inferred from their names. It does not
-determine the baseline indivisibility of ordinary fields.
+The table and litmus outcomes describe a candidate explicit-order model,
+independent of eventual API spelling. Named operations or per-operation order
+arguments can express the same contracts. The
+[default-access recommendation](#shared-access-default) selects among these
+strengths; it does not change baseline indivisibility or require a dedicated
+atomic object.
 
 | Ordering | Read effect | Write effect | Inter-thread publication |
 |---|---|---|---|
@@ -488,19 +350,17 @@ The SC order must agree with the modification order of each atomic object for
 SC modifications. In the all-SC case, each load reads the last modification
 of that object preceding it in the SC order, or the initialized value if no
 such modification precedes it. These rules constrain the all-SC litmus tests
-below. The detailed
-interaction between SC operations and non-SC modifications must be formally
-specified rather than summarized as “everything is sequentially consistent.”
-In particular, relaxed atomics remain relaxed even in a program that uses SC
-operations elsewhere.
+below. This is not a complete formal definition for mixtures of SC and non-SC
+modifications. In particular, relaxed atomics remain relaxed even in a program
+that uses SC operations elsewhere.
 
 A failed compare-exchange is a read, not a release of a value it did not store.
 Its failure ordering must therefore be a supported load ordering, never release
 or acquire-release. The API must specify both success and failure ordering and
-whether spurious failure is possible. Recommend that only explicitly weak
-operations permit spurious failure; successful weak operations still provide
-their full atomicity/order contract. Exact legal ordering pairs and value/bit
-comparison rules belong to the atomic profile, not to arbitrary overload code.
+whether spurious failure is possible. A successful weak compare-exchange still
+provides its full atomicity/order contract. Failure ordering and spurious
+failure are distinct properties; proposed defaults appear under
+[Stronger operations and explicit fences](#stronger-operations-and-explicit-fences).
 
 ### Publication example
 
@@ -555,41 +415,26 @@ reader executions with each other. The proposal permits this result for
 release/acquire operations. An all-SC version must forbid it because the
 single SC order cannot place both readers' first observed store before their
 second observed initial value. In that version, both stores and all four loads
-are SC. The exact all-SC statement and pseudocode should be included in any
-eventual formal test suite. This permissive acquire/release result is a choice
+are SC. This permissive acquire/release result is a choice
 of the candidate model, not a conclusion that C#/.NET or every target mapping
-admits it. The selected baseline's propagation, ordering, and multicopy-atomicity
-guarantees must be reconciled with it before adoption.
+admits it. Stronger target behavior does not invalidate the weaker portable
+contract.
 
 ### Fences, `volatile`, and interlocked operations
 
-A fence is not a cache flush and does not force an immediate read by another
-execution. Its source contract must nevertheless describe real ordering
-effects, not dismiss them because no C++ atomic object is named. A .NET-style
-full fence and a C++ `atomic_thread_fence` obtain their meaning from their
-respective models. A Terrum fence would need a specified scope and interaction
-with ordinary accesses, ordered accesses, RMWs, and communication. If the
-explicit-order candidate is chosen, its `rf`/`sw`/SC rules must include fences.
+A full fence orders covered accesses on both sides; that alone does not
+define SC participation or an `sw` edge. A formal fence model must cover its
+interaction with ordinary accesses, ordered accesses, RMWs and communication.
+The .NET full-fence contract and C++ `atomic_thread_fence` are not interchangeable
+definitions. The
+[strong-operation recommendation](#stronger-operations-and-explicit-fences)
+deliberately asks for both SC and full-fence obligations, not one inferred
+from the other.
 
-C#-style acquire/release volatile accesses are a legitimate shared-RAM design
-option. They can publish ordinary payload through the specified communication
-pattern, but do not make a compound update indivisible or establish mutual
-exclusion. C++/Rust volatile access does not supply that inter-thread ordering.
-Consequently, "volatile is not atomic" and "volatile cannot publish" are not
-adequate unqualified rules. Choosing a Terrum spelling must follow the contract,
-not select it accidentally. Whether to expose a keyword, explicit ordered
-access APIs, or standalone fences remains open.
-
-Interlocked exchange, compare-exchange, and arithmetic updates provide atomic
-RMW behavior with an additional ordering contract. An interlocked API family
-may also contain atomic reads or barrier operations; not every member is
-necessarily an RMW. The .NET full-fence contract is a useful comparison, not an
-automatic proof of the SC rules in the candidate above. Backend intrinsics
-and runtime helpers must preserve whichever contract Terrum actually selects.
-
-Device-register access should still use a distinct platform-checked API with
-access width, side-effect, and ordering contracts. A shared-RAM volatile
-contract does not automatically provide MMIO semantics.
+Acquire/release shared-RAM access, possibly spelled `volatile`, can publish
+payload through the communication relation above. Device accesses instead
+obey their width, side-effect and ordering contracts. Neither "volatile is
+not atomic" nor "volatile cannot publish" is a useful unqualified rule.
 
 ## Access widths, representation, and progress guarantees
 
@@ -605,15 +450,11 @@ target profile must publish a machine-readable capability table covering:
   feature is absent;
 - managed-reference/root-barrier support, if reference atomics are offered.
 
-The agreed baseline covers naturally aligned primitive loads/stores no wider
-than the machine pointer, eligible trivial wrappers of those primitives, and
-managed references. It applies to ordinary coherent memory and the specified
-CPU observers. An `int32` storage location therefore has atomic ordinary
-loads/stores on the intended 32-/64-bit target profiles. Alignment and suitable
-lowering are implementation obligations. Do not describe ordinary accesses as
-non-atomic merely because they are not operations on a dedicated atomic type.
-This does not promise whole-aggregate atomicity or automatic interoperability
-with foreign bytewise writers.
+The [agreed baseline](#3-explicit-sharing-introduces-observable-access-atomicity)
+is a requirement on these profiles, not an optional capability. In particular,
+the implementation supplies aligned atomic `int32` loads/stores on intended
+32-/64-bit targets. Interoperability with foreign bytewise writers requires
+a separate compatible-access contract.
 
 ### Unaligned access
 
@@ -645,13 +486,12 @@ the corresponding floating value from valid bits. Such a helper transfers a
 bit pattern; it does not create a second typed reference to the same storage.
 Its contract must distinguish bit preservation, including signed zero and NaN
 encodings, from numeric conversion. It must not become a general way to forge
-references, ownership or constrained wrapper values. API names remain open.
+references, ownership or constrained wrapper values.
 
-Equal layouts or overlapping unions are not automatically safe. A narrowly
-checked union rule, potentially for matching fields, remains a proposal: it
-must define active-member access, initialization, representation validity,
-aliasing and lifetime. C and C++ common-member or union-punning rules are not
-implicitly imported. Matching field declarations alone do not grant permission.
+Equal layouts or matching fields alone do not make overlapping unions safe.
+A checked rule would also need valid active-member access, initialization,
+representation, aliasing and lifetime. C and C++ common-member or union-punning
+rules are not implicitly imported.
 
 The compiler may use overlapping machine accesses, wider instructions, or
 register reinterpretation internally when it preserves the source contract.
@@ -662,13 +502,10 @@ different permissions.
 
 ### Wider atomics and progress
 
-For the dedicated-atomic-type option, a declared type must have correct atomic
-semantics on the selected profile, possibly through a runtime lock, or be
-rejected for that target. A lock-backed implementation must clearly advertise
-that it is not lock-free and must not be used in signal/interrupt handlers,
-lock-free algorithms, or other contexts where reentrancy or progress matters.
-Lock freedom is a separate performance/progress property, never a prerequisite
-for the abstract atomic value/order guarantee.
+An offered atomic operation must meet its value/order contract on the selected
+profile or be rejected. If a runtime lock is permitted, advertise the fallback
+and reject it in contexts requiring lock freedom or incompatible reentrancy,
+such as signal/interrupt handlers.
 
 All accesses to a lock-backed atomic must use the same synchronization protocol,
 including across modules. Mixing a runtime-lock operation with a foreign native
@@ -681,21 +518,10 @@ success of an arbitrary polling loop. Such liveness/progress guarantees need
 their own primitive/runtime contract. A lock-free primitive does not make every
 algorithm built from it wait-free.
 
-Misaligned atomic access should be rejected unless the target profile
-explicitly guarantees the exact operation. The compiler must not silently
-split an access promised to be indivisible into separately observable parts.
-Combining smaller accesses, even individually non-tearing ones, does not
-create a larger atomic snapshot or update. A supported wide atomic must be
-represented as one indivisible
-operation by contract or not be available.
-
-In the dedicated-object candidate, distinct atomic objects must not overlap
-unless an explicit profile defines a
-single compatible access protocol. Two atomic operations on incompatible
-overlapping representations are invalid even though neither is ordinary.
-Replacing an object creates a new lifetime and modification order; reusing an
-address is not permission for readers from the old lifetime to keep accessing it.
-Initialization must be completed and published before concurrent atomic use.
+Do not split a promised indivisible operation into observable parts or combine
+incompatible overlapping protocols. Replacing an object starts a new lifetime
+and modification order; old readers do not gain permission to access the
+replacement. Initialization must complete and be published before shared use.
 
 `compareExchange` and other read-modify-write operations do not solve object
 reclamation. A pointer can be atomically removed while a reader still uses its
@@ -704,27 +530,18 @@ intervening changes. Safe reclamation needs an independently checked
 ownership/epoch/hazard/lease protocol. Atomic pointer bits do not keep a
 managed object rooted or a native allocation alive.
 
-If atomic references to managed objects are proposed, they need collector-aware
-loads/stores/RMWs, exact roots across safepoints, write barriers, and publication
-semantics. A collector write barrier is not a memory-ordering edge, and an
-acquire/release edge does not replace a GC barrier. Raw native pointers and
-interior pointers need separate lifetime and reclamation contracts. The proposal
-is to defer general concurrent managed-reference APIs until this
-contract is established. Ordinary managed-reference loads/stores are included
-in the agreed non-tearing baseline; that does not by itself provide GC-safe
-rooting across safepoints, ordered publication, atomic RMW, or reclamation.
+Managed-reference operations additionally need collector-aware loads/stores/RMWs,
+exact roots across safepoints, write barriers and publication. A GC barrier
+does not supply memory ordering, and acquire/release does not replace a GC
+barrier. Native and interior pointers need their own reclamation contracts.
+Reference indivisibility alone satisfies none of these lifetime obligations.
 
 ## Architectural and microarchitectural boundaries
 
-The language model must be architecture-neutral. A target profile maps its
-operations to verified ISA/runtime sequences and states which profiles it
-supports. The following is guidance for that work, not a frozen instruction
-selection table. Ordinary application code relies on the checked language
-contract; it should not need to reason about cache protocols or instruction
-sequences. These details matter to implementers validating a profile and to
-programs that explicitly use low-level concurrent or platform-specific
-operations. Claims below apply only to the stated memory type and observer
-domain, not to every device or address space on the same processor.
+A target profile maps the language contract to verified ISA/runtime sequences.
+The following is implementer guidance, not a frozen instruction-selection table.
+It applies only to the stated memory types and observers, not every address
+space or device on a processor.
 
 | Family | Informative profile concern | Requirement on a Terrum profile |
 |---|---|---|
@@ -755,12 +572,9 @@ More specifically:
   AM instructions, `_DB` variants additionally provide documented data-barrier
   behavior. That architectural completion is not a durability guarantee.
 
-Store buffers, load speculation, store forwarding, cache-coherence
-transactions, and writeback queues describe implementation behavior. A
-processor may forward a prior store to a later local load without that store
-having reached another core. Cache writeback is not publication. These
-microarchitectural mechanisms explain costs and why ordering instructions may
-be required; they do not define Terrum's `hb`, `mo`, or `rf` relations.
+Store buffers, speculation, forwarding and coherence transactions explain
+implementation costs, not Terrum's event relations. For example, forwarding
+can satisfy a local load before other cores see the prior store.
 
 Cache-line size, coherence granularity, page size, and page permissions are
 target/platform properties, not language constants. False sharing can make
@@ -928,41 +742,152 @@ compiler path:
 
 A safe wrapper around a native implementation requires an explicitly identified
 trust boundary and a defensible contract. Consumers can check its use of that
-contract, not prove arbitrary foreign machine code correct. If trusted unsafe
-implementations may provide capabilities, their obligations and provenance must
-be distinguished from machine-checked implementation proofs; a nominal attribute
-cannot disguise that trust. Exact admission of such providers remains an
-approval decision, not a claim that all callers must themselves be unsafe.
+contract, not prove arbitrary foreign machine code correct. For a trusted unsafe
+implementation, obligations and provenance are distinct from machine-checked
+proofs; a nominal attribute cannot disguise that trust. Checking a caller
+against an admitted trusted contract does not itself require unsafe callers.
 
 Cross-language synchronization additionally needs compatible atomic object
 layout, supported orders, lifetime/reclamation, and helper/progress protocols.
 A matching function calling convention alone does not establish those facts.
 
-## Decisions for approval
+## Recommendations and decisions
 
-| Question | Recommendation in this proposal | Alternatives / remaining decision |
-|---|---|---|
-| Type opt-in spelling and proof form | Keep `[Send]`/`[Sync]` as provisional vocabulary; require checked complete-form evidence and conditional generic proofs. | Different names or sealed capability interfaces; whether imported proofs use compiler certificates or trusted unsafe declarations. |
-| Default sharing | Ordinary mutable values and `List<T>` are not concurrently shareable. Readonly alone is insufficient. | Permit selected immutable-by-construction types through a separately verified deep-immutability capability. |
-| Ordinary-access baseline (agreed direction) | Naturally aligned primitive loads/stores up to machine pointer size, their trivial wrappers, and managed references are non-tearing; small multi-field aggregates do not inherit whole-value atomicity. | Concrete target representations, checked wrapper eligibility, compiler transformations, coherence and publication beyond access indivisibility. |
-| Unaligned and overlapping access | Explicit target-defined unaligned operations; overlapping typed storage requires unsafe code or a specific checked abstraction. Value-level bit helpers do not introduce aliased views. | Supported unaligned atomic widths/boundaries, representation-helper APIs and any narrowly checked union cases. |
-| Conflicts outside a checked contract | Prevent them in safe code; specify unsafe-access outcomes without poisoning unrelated code or silently withdrawing baseline guarantees. | Which non-tearing, value, type-safety, and optimization guarantees remain, and how consequences can propagate from raced values. |
-| Stronger access model and API | Keep .NET-style ordered access/interlocked and explicit per-operation-order designs distinguishable; the event model above is a candidate, not the baseline. | Strong-default contract, atomic-object versus access-based rules, compare-exchange ordering, release sequences, and reconciliation of litmus outcomes with target guarantees. |
-| Fences and volatile | Consider C#-style acquire/release accesses for shared RAM separately from C++/Rust volatile I/O semantics; specify any full-fence contract explicitly. | Keyword versus APIs, standalone fences, and formal relation to ordinary and explicitly ordered accesses; device access remains a separate contract. |
-| Atomic widths and progress | Publish exact target profiles; correct atomic semantics may use a lock, with lock-free status separately stated. | Restrict the language to universally lock-free operations or reject types unsupported by any selected profile. |
-| Managed-reference atomics | Ordinary reference accesses retain the agreed non-tearing baseline; defer general concurrent reference APIs until roots, barriers, RMW, and reclamation are specified. | Add only a runtime-owned rooted atomic-reference abstraction. |
-| SIMD/non-temporal operations | No implicit whole-vector indivisibility; explicit target profile for streaming operations and completion. | Portable or target-specific non-tearing widths and named vector-atomic/non-temporal APIs. |
-| Device/DMA/persistence | Separate unsafe or platform-checked APIs and ordering domains. | Which standard library layer owns those APIs and which operating systems/boards are supported. |
-| Foreign contracts | Unverified native/device claims remain unsafe and cannot create checked capabilities. | Define versioned FFI attestations and their trust/compatibility policy. |
+Primitive storage, alignment and wrapper eligibility belong in the
+[layout and ABI companion](data-layout-and-abi.md). Single-threaded optimization
+already has its rule: preserve observable source behavior. Those are not
+unresolved concurrency API choices.
+
+The remaining decisions concern explicitly concurrent access. The following
+recommendations are for review, not newly accepted language rules.
+
+### Shared-access default
+
+**Recommend acquire loads and release stores by default for directly shared
+mutable locations, with explicit relaxed overrides.** This is the shared-RAM
+ordering often called volatile; choose the contract before its spelling.
+It supports flag-based publication without an extra ordering annotation on
+every access.
+
+This default belongs to the checked concurrent-access path, not recursively
+to every field of a shareable object. A lock-protected payload uses ordinary
+accesses during the exclusive guard. An immutable published payload does not
+need repeated acquires on every field. A directly shared multi-field mutable
+value needs a checked protocol, not per-field volatility masquerading as an
+atomic snapshot. References and API boundaries must preserve the access
+contract rather than erase it to an unrestricted ordinary reference.
+
+Relaxed accesses remain non-tearing and coherent for supported locations;
+they are not thread-local accesses. For example, a statistics counter can use
+an explicitly relaxed RMW when its observation publishes no unrelated payload.
+A relaxed load/add/store can still lose increments.
+
+Relaxed-by-default sharing is the alternative. It avoids ordering costs unless
+requested, but a simple flag does not publish preceding data unless every
+relevant access selects the stronger operation. Acquire/release is the
+recommended balance because sharing is already an explicit, narrow opt-in.
+Unshared code retains optimization freedom, and performance-sensitive shared
+algorithms can opt into weaker ordering. This is a design tradeoff, not a
+measurement claiming acquire/release is free.
+
+### Shared-access observations and optimization
+
+Specify portable per-location coherence and explicit publication, not inherited
+x86-oriented or .NET ordinary-access behavior. Require a causally justified
+write or initial value as the source of a non-tearing read. Use explicit
+release/acquire communication in the initial profile, without dependency-only
+publication or implicit publication relay through a relaxed RMW. An acq-rel RMW
+can explicitly acquire and republish. Validate each lowering against its target
+memory model.
+
+**Recommend preserving potentially competing source accesses and their
+declared ordering.** Do not invent stores, duplicate loads, coalesce distinct
+shared accesses, or cache a polling load across iterations merely because
+doing so preserves single-threaded behavior. Apply this to explicit relaxed
+accesses too. Elimination or reordering requires proof under the concurrent
+contract, not just local value equality. Proven confinement, exclusive
+ownership, a held guard, or immutable publication can justify cheaper lowering.
+Further transformation rules need formal justification, not a historical
+architecture assumption.
+
+### Supported sharing protocols
+
+**Recommend checked handoff, immutable publication, scoped exclusive guards,
+and direct shared scalar/reference operations as the initial composable set.**
+Their proof obligations are described under
+[sharing capabilities](#sharing-capabilities-are-distinct). Defer general
+managed-reference APIs until collector-aware rooting, barriers and reclamation
+are specified; the family recommendation is not permission to ship bare
+atomic pointer operations as safe managed-reference operations.
+
+These protocols establish permitted access and memory safety, not arbitrary
+algorithmic correctness. Custom lock-free algorithms compose supported
+operations. Unsupported aliasing or lifetime mechanisms require an explicit
+trusted unsafe implementation boundary; a safe interface must not imply the
+compiler proved that implementation.
+
+### Stronger operations and explicit fences
+
+**Recommend default SC interlocked RMWs with full before/after ordering of
+covered memory accesses, plus explicitly weaker variants.** State both
+obligations: SC among selected operations and a full fence are not synonyms.
+Default strong compare-exchange has no spurious failure; its failure is an SC
+read with full before/after ordering, not a release of a value it did not store.
+Locks acquire on successful entry and release on exit. Expose a full fence
+with explicit scope and communication rules;
+initially defer weaker standalone fences until a concrete supported use
+requires them.
+
+Do not make ordered operations illegal merely because a particular caller
+currently has exclusive access. Generic and low-level code may use the same
+operation in either context under the same checked requirements. The concurrent
+optimization rules above govern elimination of redundant ordering.
+
+### Unsafe boundaries
+
+**Recommend preserving guarantees whose preconditions still hold.** A valid,
+aligned primitive location retains non-tearing access even if an unsafe caller
+violates the sharing discipline. Supply no undeclared publication edge, but
+do not turn that violation into permission for arbitrary whole-program
+behavior. Dangling pointers, invalid representations, out-of-bounds accesses
+and corrupted runtime state are separate violations; this is not recovery or
+fault containment. Exact optimizer treatment across unsafe boundaries remains
+to specify.
+
+### Approval checklist
+
+The substantive choices are:
+
+| Area | Decision still needed |
+|---|---|
+| Shared defaults | Approve the acquire/release recommendation, or choose relaxed-by-default shared access. |
+| Concurrent observations | Approve the conservative transformation rules and direct-release publication model, including no implicit relaxed-RMW relay. |
+| Synchronization surface | Approve strong interlocked defaults, explicit weaker variants, a full fence, and initially no weaker standalone fences. |
+| Checked and trusted protocols | Approve the initial protocol set and admission of explicitly trusted unsafe implementations; choose their proof/capability representation. |
+| Unsafe semantics | Approve the bounded access-guarantee direction rather than whole-program race UB, then define surviving optimizer and representation guarantees precisely. |
+| Wider-operation availability | Prefer advertised lock fallbacks where permitted, or require lock-free support and reject unsupported profiles. |
+
+After those choices, specification work remains:
+
+- Formalize mixed SC/non-SC and fence interactions, initialization/lifetime
+  boundaries, allowed compare-exchange ordering pairs and bit/value comparison.
+  Derive executable litmus cases and target mappings from those rules.
+- Choose access/ordering syntax, guard forms, generic capability proofs and
+  versioned imported-contract validation. Decide whether verified immutable
+  types receive derived sharing capabilities.
+- Define collector-aware reference operations and reclamation before enabling
+  their safe concurrent APIs.
+- Complete target capability tables and the layout companion's wrapper,
+  unaligned-access and representation-helper rules. Any checked union subset
+  needs separate approval; none follows from equal layouts.
+- Specify SIMD/non-temporal APIs and the platform ownership of device, DMA
+  and persistence contracts when those facilities enter implementation scope.
 
 ## Primary references consulted
 
-These references inform the proposal but do not select Terrum semantics. The
-.NET document is one useful runtime comparison, not the source of Terrum's
-baseline or a specification to inherit silently. C++ and Rust references
-explain distinct explicit-atomic and volatile contracts; they do not select
-Terrum's ordinary-access or unsafe-race model. Linux barrier/DMA guidance is
-operational platform guidance, not a portable language memory model.
+Language/runtime references are comparisons, ISA references constrain target
+lowering, and Linux references describe platform protocols. None automatically
+defines Terrum semantics.
 
 - [.NET runtime memory model](https://github.com/dotnet/runtime/blob/main/docs/design/specs/Memory-model.md) — checked for its distinctions among atomic accesses, ordering, volatile, unmanaged memory, and runtime-specific guarantees.
 - [C# atomicity of variable references](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/variables#96-atomicity-of-variable-references) and [volatile fields](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/classes#1554-volatile-fields) — ordinary read/write indivisibility is separate from atomic RMW and acquire/release field access.
