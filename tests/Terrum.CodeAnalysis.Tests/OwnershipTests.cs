@@ -17,6 +17,47 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class OwnershipTests
 {
+    [Fact]
+    public async Task CaughtFailureThroughUniqueChildPreservesWritesAndRecursiveCleanupAsync()
+    {
+        const string Source = """
+            unique struct Child {
+                public mut int32 Value;
+                public Child(int32 value) { Value = value; }
+                public mut void Fail() { Value = 42; require false; }
+                [NoThrow] [Cleanup] public void Close() {
+                    if (Host.Trace[0] == 0) { Host.Trace[0] = 1; }
+                    else { Host.Trace[0] = 2; }
+                    Host.Trace[2] = Value;
+                }
+            }
+            unique struct Owner {
+                public mut Child Nested;
+                public Owner(int32 value) { Nested = new Child(value); }
+                [NoThrow] [Cleanup] public void Close() {
+                    if (Host.Trace[1] == 0) { Host.Trace[1] = 1; }
+                    else { Host.Trace[1] = 2; }
+                    Host.Trace[3] = Nested.Value;
+                }
+            }
+            int32 Main() {
+                {
+                    mut Owner owner = new Owner(1);
+                    unsafe {
+                        try { owner.Nested.Fail(); }
+                        catch { if (owner.Nested.Value != 42) { return 1; } }
+                    }
+                    if (Host.Trace[0] != 0 || Host.Trace[1] != 0) { return 2; }
+                }
+                if (Host.Trace[0] == 1 && Host.Trace[1] == 1
+                    && Host.Trace[2] == 42 && Host.Trace[3] == 42) { return 42; }
+                return 0;
+            }
+            """;
+        Assert.Equal(42, await RunNativeAsync(Source, BoundRuntimePolicy.CheckedExceptions,
+            [0, 0, 0, 0]).ConfigureAwait(true));
+    }
+
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]

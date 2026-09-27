@@ -160,4 +160,123 @@ public sealed partial class NativeManagedClassModuleTests
             apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
         Assert.Equal(nativeHash, SHA256.HashData(nativeConsumer));
     }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task NestedUniqueFieldReceiverUsesVersion28WithPrivateProducerReplacementAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string Replacement = """
+            struct Leaf {
+                public mut int32 Value;
+                public Leaf(int32 value) { Value = value; }
+                public mut void Add(int32 amount) { Value = Value + amount; }
+            }
+            unique struct Child {
+                public mut Leaf Data;
+                public Child(int32 value) { Data = new Leaf(value); }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            unique struct Owner {
+                public mut Child Nested;
+                public Owner(int32 value) { Nested = new Child(value); }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            public int32 LeafValue() {
+                mut Owner owner = new Owner(40);
+                owner.Nested.Data.Add(2);
+                return owner.Nested.Data.Value;
+            }
+            """;
+        const string Original = "public int32 LeafValue() { return 1; }";
+        const string Consumer = "int32 Main() { return LeafValue(); }";
+        var replacementProgram = Compile(Replacement, policy);
+        var original = ModuleCompiler.CreateProducer(Compile(Original, policy), ["LeafValue"]);
+        var consumer = ModuleCompiler.CreateConsumer(Compile(Consumer, policy,
+            ModuleCompiler.CreateReference(original), library: false), original);
+        var hash = SHA256.HashData(consumer);
+        var producer = ModuleCompiler.CreateProducer(replacementProgram, ["LeafValue"]);
+        Assert.Equal(28, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        Assert.Empty(ModuleCompiler.CreateReference(producer).Structures);
+        var downgraded = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 27);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded));
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(
+            ModuleCompiler.Link(consumer, producer), policy)).ConfigureAwait(true));
+        Assert.Equal(hash, SHA256.HashData(consumer));
+
+        var nativeOriginal = NativeModuleCompiler.CreateProducer(Compile(Original, policy),
+            ["LeafValue"], "NodeB", policy);
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(Compile(Consumer, policy,
+            NativeModuleCompiler.CreateGraphReference([nativeOriginal]), library: false),
+            [nativeOriginal], policy);
+        var nativeHash = SHA256.HashData(nativeConsumer);
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(replacementProgram,
+            ["LeafValue"], "NodeB", policy);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        var framework = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = framework.Parent?.Name
+            ?? throw new InvalidOperationException("Missing test configuration directory.");
+        var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
+            configuration, framework.Name, "terrumc.exe");
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.Equal(nativeHash, SHA256.HashData(nativeConsumer));
+    }
+
+    [Theory]
+    [InlineData(false, 27)]
+    [InlineData(true, 28)]
+    public void PrivateUniqueReceiverVersionsUseRemappedStructureIndexes(bool nestedField, int version)
+    {
+        const string Unused = """
+            struct Unused {
+                public int32 Value;
+                public Unused(int32 value) { Value = value; }
+            }
+            """;
+        const string NamedOwner = """
+            unique struct Owner {
+                public mut int32 Value;
+                public Owner(int32 value) { Value = value; }
+                public mut void Add(int32 amount) { Value = Value + amount; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            public int32 LeafValue() {
+                mut Owner owner = new Owner(40);
+                owner.Add(2);
+                return owner.Value;
+            }
+            """;
+        const string NestedField = """
+            struct Leaf {
+                public mut int32 Value;
+                public Leaf(int32 value) { Value = value; }
+                public mut void Add(int32 amount) { Value = Value + amount; }
+            }
+            unique struct Owner {
+                public mut Leaf Nested;
+                public Owner(int32 value) { Nested = new Leaf(value); }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            public int32 LeafValue() {
+                mut Owner owner = new Owner(40);
+                owner.Nested.Add(2);
+                return owner.Nested.Value;
+            }
+            """;
+        var program = Compile(Unused + (nestedField ? NestedField : NamedOwner),
+            NativeRuntimePolicy.CheckedExceptions);
+        Assert.Equal("Unused", program.Structures[0].Name);
+        var producer = ModuleCompiler.CreateProducer(program, ["LeafValue"]);
+        Assert.Equal(version, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        var reference = ModuleCompiler.CreateReference(producer);
+        Assert.Equal("LeafValue", Assert.Single(reference.Functions).Name);
+        Assert.Empty(reference.Structures);
+        var downgraded = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), version - 1);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded));
+    }
 }

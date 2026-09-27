@@ -563,7 +563,7 @@ conditional owning `bool`/`out` publication with lexical NoThrow cleanup.
 Fresh constructor/factory results can transfer directly; a moved owner is
 vacant. Receiver loans remain synchronous and default to readonly. Ordinary
 `mut` methods can update mutable scalar/Copy fields through a named mutable
-owner or forwarded writable `this`, without transferring ownership or
+owner, its writable field paths, or forwarded writable `this`, without transferring ownership or
 replacing owning fields. Root reservation prevents invalidating argument
 evaluation, and cleanup responsibility is unchanged. Compact owning fields
 have partial-construction cleanup in reverse actual acquisition order and
@@ -689,7 +689,10 @@ keep their prior semantic versions and bytes. Nested calls such as
 the complete path; root reservation prevents invalidation during argument
 evaluation. Semantic v27 additionally permits ordinary mutating methods on
 initialized named mutable unique owners or forwarded writable `this`;
-earlier headers reject those methods. Nested receiver paths through unique owners,
+earlier headers reject those methods. Semantic v28 permits nested mutable
+field loans through fully initialized unique roots and children, with the
+same writable-path, root-reservation and recursive-cleanup invariants.
+Earlier headers reject the broadened loan contract. Partially initialized roots,
 temporaries, managed-class-field receiver paths,
 rebinding `this`, and general reference forms remain unsupported. Primitive
 `Buffer` views retain separate legacy access paths, and the coherent

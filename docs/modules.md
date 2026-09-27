@@ -347,6 +347,11 @@ v25. Semantic v27 permits ordinary mutating methods on unique structs,
 retaining the existing pointer receiver lowering and cleanup contract.
 Readonly loans cannot target those methods, and earlier headers reject
 them even though the method/loan record shapes are unchanged.
+Semantic v28 extends nested mutable-field loans through unique roots and
+children. Writer selection inspects the serialized function's field paths
+against the module's remapped layouts, including loans in symbolic call
+arguments. Earlier headers reject unique-root field loans; programs needing
+only the v25-v27 contracts retain their existing versions.
 Programs requiring none of these contracts retain their existing versions and bytes
 regardless of managedness. The ordinary readonly/by-value receiver ABI is unchanged.
 Public scalar entry wrappers may call non-exported mutating methods; source

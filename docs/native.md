@@ -19,6 +19,8 @@ capability contract. Semantic version 25 adds the distinct `MutReceiver`
 contract for persisted, non-exported mutating methods on non-owning compact
 structs. Semantic version 26 adds nested mutable-field loan expressions.
 Semantic version 27 permits ordinary mutating methods on named unique owners.
+Semantic version 28 extends nested mutable-field loans through fully
+initialized unique roots and children, preserving ownership and cleanup.
 Source visibility may be public or private. Named mutable locals, their
 writable nested fields, and forwarding through an existing writable `this`
 and its writable fields are supported receiver places. Older headers reject
@@ -220,7 +222,10 @@ temporary copy followed by writeback. Semantic v27 permits ordinary mutating
 methods on initialized named mutable unique owners or forwarded writable
 `this`; scalar/Copy field mutation preserves the existing ownership and
 cleanup responsibility. Older headers reject those methods.
-Nested receiver paths through unique owners,
+Semantic v28 also admits nested receiver paths through fully initialized
+unique roots and children, with writable fields throughout. It preserves
+the same root reservation and recursive cleanup responsibility.
+Partially initialized roots,
 temporary receivers, managed-class-field receiver paths, rebinding `this`,
 and public mutating-receiver ABI
 remain unsupported. The native physical handle ABI, image-private managed
@@ -431,15 +436,19 @@ and loop joins. Plain reads/copies of unique values, partial field moves,
 discarded owning results, and owning temporaries used as
 receivers diagnose. Owning fields are initialized once in sequential constructor
 flow, including straight-line `unsafe` wrappers. Branches, loops and nested
-exception regions cannot acquire owning fields in this profile; reinitialization
-or mutation through an owning child is not supported.
+exception regions cannot acquire owning fields in this profile;
+reinitialization and owning-field replacement are unsupported. Once the
+whole root is initialized, a writable path can borrow a unique child for
+an ordinary mutating method, without transferring or separately dropping
+that child. Mutation during partial construction remains unsupported.
 Readonly instance methods can synchronously borrow an initialized child field,
 even while other fields of its parent are under construction, without copying
 the child. A unique-returning constructor/factory result
 can initialize a local or be returned; a return of a named owner needs
 `move`. Instance method calls borrow a named unique receiver synchronously
 by pointer. Ordinary methods default to readonly; a `mut` method requires
-an initialized named mutable owner or forwarded writable `this` and may
+an initialized named mutable owner, a writable field path from that root,
+or forwarded writable `this` and may
 update mutable scalar/Copy fields. It cannot replace owning fields or move
 `this`. Receiver reservation precedes argument evaluation and prevents
 invalidation of the original owner. The call does not transfer ownership

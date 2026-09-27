@@ -96,6 +96,100 @@ public sealed partial class JitTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task NestedMutableReceiverThroughUniqueOwnerUpdatesOriginalAsync(bool checkedFailures)
+    {
+        const string Source = """
+            struct Leaf {
+                public mut int32 Value;
+                public Leaf(int32 value) { Value = value; }
+                public mut void Add(int32 amount) { Value = Value + amount; }
+            }
+            struct Middle {
+                public mut Leaf Nested;
+                public Middle(int32 value) { Nested = new Leaf(value); }
+            }
+            unique struct Owner {
+                public mut Middle Data;
+                public Owner(int32 value) { Data = new Middle(value); }
+                public mut void Forward(int32 amount) { Data.Nested.Add(amount); }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(20);
+                owner.Data.Nested.Add(11);
+                owner.Forward(11);
+                return owner.Data.Nested.Value;
+            }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task NestedUniqueChildReceiverUpdatesOriginalAsync(bool checkedFailures)
+    {
+        const string Source = """
+            struct Leaf {
+                public mut int32 Value;
+                public Leaf(int32 value) { Value = value; }
+                public mut void Add(int32 amount) { Value = Value + amount; }
+            }
+            unique struct Child {
+                public mut Leaf Data;
+                public Child(int32 value) { Data = new Leaf(value); }
+                public mut void Forward(int32 amount) { Data.Add(amount); }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            unique struct Owner {
+                public mut Child Nested;
+                public Owner(int32 value) { Nested = new Child(value); }
+                public mut void Forward(int32 amount) { Nested.Forward(amount); }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(20);
+                owner.Nested.Data.Add(11);
+                owner.Forward(11);
+                return owner.Nested.Data.Value;
+            }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task NestedMutableLoanPermitsReadonlyArgumentQueryAsync(bool checkedFailures)
+    {
+        const string Source = """
+            unique struct Child {
+                public mut int32 Value;
+                public Child(int32 value) { Value = value; }
+                [NoThrow] public int32 Read() { return Value; }
+                public mut void Add(int32 value) { Value = Value + value; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            unique struct Owner {
+                public mut Child Nested;
+                public Owner(int32 value) { Nested = new Child(value); }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(21);
+                owner.Nested.Add(owner.Nested.Read());
+                return owner.Nested.Value;
+            }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
+    }
+
+    [Theory]
     [InlineData(1, "bool", "false", "true", "if (Value) { return 42; } return 0;", "")]
     [InlineData(2, "char16", "char16(0)", "char16(42)", "return int32(Value);", "")]
     [InlineData(3, "bool", "false", "true", "if (Value) { return 42; } return 0;",

@@ -257,12 +257,18 @@ successful `out var` gains its own lexical cleanup scope; the target
 `init ref<T>` migration must preserve this publication and cleanup behavior.
 User-defined unique receiver loans remain synchronous and cannot be stored,
 consumed or passed as values. Ordinary methods default to readonly loans.
-A `mut` method requires an initialized named mutable owner or forwarding
-through its existing writable `this`; it may update mutable scalar and Copy
+A `mut` method requires a fully initialized named mutable owner, a writable
+field path from it, or forwarding through its existing writable `this`;
+it may update mutable scalar and Copy
 fields, not replace owning fields. Its root is reserved before argument
 evaluation, so argument calls cannot move, replace or otherwise invalidate
 that owner. Mutation does not transfer ownership or change cleanup
 responsibility; updates before a checked failure remain visible.
+Unique child structs may be borrowed through writable paths only after the
+whole root is initialized; the borrowed child is neither moved nor separately
+destroyed, and eventual recursive cleanup sees its updated state. Partial
+construction still permits only the existing readonly initialized-child loans,
+not these mutable loans. Buffer-child mutation remains unsupported.
 Cleanup is an explicit
 `[NoThrow] [Cleanup] public void Close()`-shaped contract on a unique
 instance method; the name itself has no special meaning. Compact owners can

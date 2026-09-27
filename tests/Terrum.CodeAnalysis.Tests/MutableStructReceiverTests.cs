@@ -157,13 +157,135 @@ public sealed class MutableStructReceiverTests
                 public ReadonlyOuter(int32 value) { Nested = new Middle(value); }
             }
             unique struct UniqueOuter {
-                public mut Middle Nested;
+                public Middle Nested;
                 public UniqueOuter(int32 value) { Nested = new Middle(value); }
             }
             int32 Main() {
             """ + body + " return 0; }"));
         Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
         Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData("Owner owner = new Owner(41); owner.Child.Increment(true);")]
+    [InlineData("mut Owner owner = new Owner(41); owner.Readonly.Increment(true);")]
+    [InlineData("new Owner(41).Child.Increment(true);")]
+    [InlineData("mut Owner owner = new Owner(41); Owner moved = move owner; owner.Child.Increment(true);")]
+    [InlineData("mut Owner owner = new Owner(41); owner.Child.Increment(Replace(out owner));")]
+    public void UniqueFieldReceiverRequiresInitializedWritableRootAndFields(string body)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unique struct Child {
+                public mut int32 Value;
+                public Child(int32 value) { Value = value; }
+                public mut void Increment(bool enabled) { if (enabled) { Value = Value + 1; } }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            unique struct Owner {
+                public mut Child Child;
+                public Child Readonly;
+                public Owner(int32 value) { Child = new Child(value); Readonly = new Child(value); }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            bool Replace(out Owner result) { result = new Owner(1); return true; }
+            int32 Main() {
+            """ + body + " return 0; }"));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void PartialUniqueConstructorCannotLoanInitializedChildBeforeWholeOwner()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            unique struct Child {
+                public mut int32 Value;
+                public Child(int32 value) { Value = value; }
+                public mut void Increment() { Value = Value + 1; }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            unique struct Owner {
+                public mut Child Nested;
+                public int32 Guard;
+                public Owner() {
+                    Nested = new Child(41);
+                    Nested.Increment();
+                    Guard = 0;
+                }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            """));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public void ForgedMutableFieldLoanThroughUniqueOwnerIsRejected(int mutation)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Leaf {
+                public mut int32 Value;
+                public Leaf(int32 value) { Value = value; }
+                public mut void Increment() { Value = Value + 1; }
+            }
+            unique struct Child {
+                public mut Leaf Data;
+                public Child(int32 value) { Data = new Leaf(value); }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            unique struct Owner {
+                public mut Child Active;
+                public Child Readonly;
+                public Owner(int32 value) {
+                    Active = new Child(value);
+                    Readonly = new Child(value);
+                }
+                [NoThrow] [Cleanup] public void Close() {}
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(41);
+                owner.Active.Data.Increment();
+                return owner.Active.Data.Value;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var main = program.Functions[program.EntryPoint];
+        var region = Assert.IsType<BoundTryFinally>(main.Body.Statements[1]);
+        var statement = Assert.IsType<BoundExpressionStatement>(region.Body.Statements[0]);
+        var call = Assert.IsType<BoundCall>(statement.Expression);
+        var loan = Assert.IsType<BoundMutableFieldLoan>(Assert.Single(call.Arguments));
+        var parent = Assert.IsType<BoundFieldRead>(loan.Place.Receiver);
+        var forgedPlace = mutation switch {
+            0 => loan.Place with { Field = 8 },
+            1 => loan.Place with { Type = PrimitiveType.Int32 },
+            2 => loan.Place with { Receiver = parent with { Field = 1 } },
+            3 => loan.Place with { Receiver = parent with { Type = PrimitiveType.Int32 } },
+            4 => loan.Place with {
+                Receiver = parent with { Receiver = new BoundRead(99, parent.Receiver.Type, parent.Span) },
+            },
+            _ => loan.Place with {
+                Receiver = parent with { Receiver = new BoundConstant(0, parent.Receiver.Type, parent.Span) },
+            },
+        };
+        var forged = region with {
+            Body = region.Body with {
+                Statements = region.Body.Statements.SetItem(0, statement with {
+                    Expression = call with { Arguments = [loan with { Place = forgedPlace }] },
+                }),
+            },
+        };
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+            Functions = program.Functions.SetItem(program.EntryPoint, main with {
+                Body = main.Body with { Statements = main.Body.Statements.SetItem(1, forged) },
+            }),
+        }));
     }
 
     [Fact]

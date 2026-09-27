@@ -963,14 +963,13 @@ internal sealed partial class Binder
         if (receiver.Kind is SyntaxKind.MemberAccessExpression or SyntaxKind.NameExpression)
         {
             var place = BindExpression(receiver, type);
-            if (place is BoundFieldRead leaf && leaf.Type == type && !IsUnique(type))
+            if (place is BoundFieldRead leaf && leaf.Type == type && IsStruct(type))
             {
                 BoundExpression current = leaf;
                 while (current is BoundFieldRead field)
                 {
                     var owner = field.Receiver.Type;
-                    if (!IsStruct(owner) || IsUnique(owner) || IsUnique(field.Type)
-                        || !GetField(owner, field.Field).IsMutable)
+                    if (!IsStruct(owner) || !GetField(owner, field.Field).IsMutable)
                     {
                         break;
                     }

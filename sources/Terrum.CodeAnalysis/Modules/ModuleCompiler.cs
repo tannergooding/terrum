@@ -33,6 +33,7 @@ public static partial class ModuleCompiler
     private const int MutableStructReceiverVersion = 25;
     private const int MutableFieldReceiverVersion = 26;
     private const int UniqueMutableReceiverVersion = 27;
+    private const int UniqueMutableFieldReceiverVersion = 28;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -760,7 +761,7 @@ public static partial class ModuleCompiler
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Only nodes with nested expressions or statements need traversal.")]
     private static List<int> Calls(BoundStatement body, Action<PrimitiveType>? visitType = null,
         Action<BoundViewScope>? visitView = null, Action? visitLoopTransfer = null,
-        Action? visitMutableFieldLoan = null)
+        Action<BoundMutableFieldLoan>? visitMutableFieldLoan = null)
     {
         var calls = new List<int>();
         VisitStatement(body);
@@ -860,6 +861,12 @@ public static partial class ModuleCompiler
                         VisitExpression(argument);
                     }
                     break;
+                case SymbolicCall symbolic:
+                    foreach (var argument in symbolic.Arguments)
+                    {
+                        VisitExpression(argument);
+                    }
+                    break;
                 case BoundUnary unary:
                     VisitExpression(unary.Operand);
                     break;
@@ -889,7 +896,7 @@ public static partial class ModuleCompiler
                     VisitExpression(loan.Place);
                     break;
                 case BoundMutableFieldLoan loan:
-                    visitMutableFieldLoan?.Invoke();
+                    visitMutableFieldLoan?.Invoke(loan);
                     VisitExpression(loan.Place);
                     break;
                 case BoundViewRead view:
@@ -932,7 +939,25 @@ public static partial class ModuleCompiler
     private static bool HasMutableFieldLoan(BoundFunction function)
     {
         var found = false;
-        _ = Calls(function.Body, visitMutableFieldLoan: () => found = true);
+        _ = Calls(function.Body, visitMutableFieldLoan: _ => found = true);
+        return found;
+    }
+
+    private static bool HasUniqueMutableFieldLoan(BoundFunction function, ImmutableArray<BoundStruct> structures)
+    {
+        var found = false;
+        _ = Calls(function.Body, visitMutableFieldLoan: loan => {
+            BoundExpression place = loan.Place;
+            while (place is BoundFieldRead field)
+            {
+                place = field.Receiver;
+            }
+            if (place is BoundRead root)
+            {
+                var index = (int)root.Type - 100;
+                found |= index >= 0 && index < structures.Length && structures[index].IsUnique;
+            }
+        });
         return found;
     }
 
@@ -1300,7 +1325,9 @@ public static partial class ModuleCompiler
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         var version = module.Functions.Any(item => item.Function is BoundFunction function
-                && HasUniqueMutableReceiver(function, program.Structures)) ? UniqueMutableReceiverVersion
+                && HasUniqueMutableFieldLoan(function, module.Structures)) ? UniqueMutableFieldReceiverVersion
+            : module.Functions.Any(item => item.Function is BoundFunction function
+                && HasUniqueMutableReceiver(function, module.Structures)) ? UniqueMutableReceiverVersion
             : module.Functions.Any(static item => item.Function is BoundFunction function
                 && HasMutableFieldLoan(function)) ? MutableFieldReceiverVersion
             : module.Functions.Any(static item => item.Function is BoundFunction function
@@ -1441,6 +1468,11 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Mutable unique receivers require semantic module version 27.");
             }
+            if (version < UniqueMutableFieldReceiverVersion && items.Any(item =>
+                    item.Function is BoundFunction function && HasUniqueMutableFieldLoan(function, structures)))
+            {
+                throw new ModuleFormatException("Mutable fields of unique owners require semantic module version 28.");
+            }
             if (version == AggregateClassFactoryVersion && !items.Any(static item =>
                     item.Function is BoundFunction function && HasAggregateClassArguments(function)))
             {
@@ -1502,7 +1534,7 @@ public static partial class ModuleCompiler
             or BufferVersion or ReadonlyViewVersion or WritableViewVersion or ManagedNodeVersion
             or ManagedClassVersion or Version or LoopTransferVersion or AggregateClassFactoryVersion
             or StackClassFactoryVersion or ManagedAccessVersion or MutableStructReceiverVersion
-            or MutableFieldReceiverVersion or UniqueMutableReceiverVersion))
+            or MutableFieldReceiverVersion or UniqueMutableReceiverVersion or UniqueMutableFieldReceiverVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }

@@ -80,9 +80,11 @@ update mutable scalar/Copy fields without transferring ownership, replacing
 owning fields, or changing cleanup responsibility. Readonly unique loans
 cannot call mutating methods; older module versions reject the new contract.
 
-Nested receivers such as `outer.Inner.Mutate()` require a writable non-owning
-root and writable fields along the complete path; readonly fields cannot be bypassed.
-Nested receiver paths through unique owners, temporary or managed-class-field receiver places,
+Semantic v28 extends nested mutable-field loans through fully initialized
+unique roots and unique child structs without consuming those owners.
+Nested receivers such as `outer.Inner.Mutate()` require a writable root and
+writable fields along the complete path; readonly fields cannot be bypassed.
+Partially initialized roots, temporary or managed-class-field receiver places,
 rebinding `this`, public exported mutating-receiver ABIs and general references
 remain unsupported. General reference/view/ownership forms and `init ref<T>`
 call-site grammar remain unsupported; the separate legacy buffer-view access

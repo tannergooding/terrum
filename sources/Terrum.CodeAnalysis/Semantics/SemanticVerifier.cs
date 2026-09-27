@@ -2210,13 +2210,11 @@ public static class SemanticVerifier
         }
         var owner = (int)place.Receiver.Type - 100;
         if (owner < 0 || owner >= program.Structures.Length
-            || program.Structures[owner].IsUnique
             || place.Field < 0 || place.Field >= program.Structures[owner].Fields.Length
             || !program.Structures[owner].Fields[place.Field].IsMutable
             || !CanAccessField(function, program.Structures[owner], place.Field)
             || place.Type != program.Structures[owner].Fields[place.Field].Type
-            || !HasFields(program, place.Type) || ManagedClassTypes.IsClass(place.Type)
-            || IsUnique(program, place.Type))
+            || !HasFields(program, place.Type) || ManagedClassTypes.IsClass(place.Type))
         {
             throw InvalidEffect(place.Span, "Ownership");
         }

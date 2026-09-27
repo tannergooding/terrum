@@ -47,15 +47,36 @@ struct Outer
     }
 }
 
+unique struct Owner
+{
+    public mut Outer Value;
+
+    public Owner(int32 value)
+    {
+        Value = new Outer(value);
+    }
+
+    public mut void Add(int32 amount)
+    {
+        this.Value.Add(amount);
+    }
+}
+
 int32 Main()
 {
     mut Outer value = new Outer(40);
     value.State.Current.Add(1);
     value.Add(1);
 
-    if (value.Guard != 11 || value.State.Guard != 7)
+    mut Owner owner = new Owner(40);
+    owner.Value.State.Current.Add(1);
+    owner.Add(1);
+
+    if (value.Guard != 11 || value.State.Guard != 7
+        || value.State.Current.Value != 42
+        || owner.Value.Guard != 11 || owner.Value.State.Guard != 7)
     {
         return 1;
     }
-    return value.State.Current.Value;
+    return owner.Value.State.Current.Value;
 }

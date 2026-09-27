@@ -33,10 +33,10 @@ The [writable buffer-view sample](../samples/native/mutable-buffer-view.terrum)
 returns 42 after an exclusive scoped update and a NoThrow in-place `Clear`
 followed by reuse of the same fixed-capacity owner.
 The [nested struct-receiver sample](../samples/native/nested-struct-receiver.terrum)
-returns 42 under either runtime policy. It mutates a nested counter through
-both a local field path and forwarded `this` receivers, while adjacent
-readonly fields retain their values. The methods update the original
-subobject rather than a copy.
+returns 42 under either runtime policy. It mutates nested counters in both
+a Copy local and a unique owner through field paths and forwarded `this`
+receivers, while adjacent readonly fields retain their values. The methods
+update the original subobject rather than a copy.
 The [managed-node cycle sample](../samples/native/managed-node-cycle.terrum)
 returns 42 under either runtime policy: collection reclaims an unreachable
 two-node cycle while preserving a rooted node and its child. This exercises

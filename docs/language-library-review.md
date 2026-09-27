@@ -68,6 +68,8 @@ source visibility does not expose a public mutating-receiver ABI.
 Semantic v27 additionally supports ordinary mutating methods on initialized
 named mutable unique owners and forwarded writable `this`, without changing
 cleanup responsibility or permitting owning-field replacement.
+Semantic v28 extends writable field paths through fully initialized unique
+roots and child structs, preserving the same ownership and cleanup rules.
 It includes compilation-local constrained generic specialization, including
 bounded single-`T` inference for top-level function templates over `Copy`
 structs and existing scalar value types, but not primitive operator witnesses,
