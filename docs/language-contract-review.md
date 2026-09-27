@@ -23,6 +23,7 @@ system for the prover.
 | Contract timing | Prologue, preconditions, authored body including `finally`, postconditions, epilogue; exceptional departure has no normal-return postcondition | Put all observable body/ownership cleanup before postconditions, keep result storage provisional until checks pass, and restrict checks to surviving values or explicit snapshots |
 | Proofs and evaluation | Static checks are compile-time-only; implementation choices must not silently change the contract | Version a mandatory conservative proof profile and deterministic evaluator, including their resource-accounting rules |
 | Memory | Explicit checked opt-in for sharing, not an assumption that arbitrary aliasable objects are thread-safe | See the separate portable semantics, target profiles, and decision table in [memory model](memory-model.md) |
+| Documentation comments | Added as a topic for discussion; no documentation-comment syntax is selected | Structured API documentation with symbol-checked references and generated views of declared contracts, without making prose a source of semantics |
 
 The existing implicit-loan sections in [language](language.md),
 [lifetimes](lifetimes.md#parameter-only-implicit-readonly-loans), and
@@ -531,7 +532,59 @@ A new proof profile can establish more programs, but selecting it is an
 explicit language/toolchain capability change. It must not silently reinterpret
 an unchanged consumer's publication, lifetime, or arithmetic contract.
 
-## 5. Approval and conformance checklist
+## 5. Documentation comments
+
+**Open proposal for a subsequent review.** Documentation comments need an
+explicit language/tooling contract rather than a formatter-specific convention.
+The following questions are scheduled for discussion; they do not select syntax
+or authorize implementation.
+
+Recommend a distinguished documentation-comment form with readable prose and
+a small structured vocabulary for API documentation. Markdown is a candidate
+for prose and examples; C#-style XML is an alternative to assess, not an
+inherited requirement. Ordinary line/block comments should remain ordinary
+trivia, and documentation must not alter program behavior.
+
+| Topic | Proposed direction / question to settle |
+|---|---|
+| Delimiters and attachment | Choose `///`, a distinguished block form, or both; define attachment across attributes, blank lines, multiple declarations, and generated/partial declarations |
+| Prose and structured content | Choose Markdown versus XML, or a precisely defined combination; cover summaries, remarks, parameters, type parameters, return values, conditional outputs, examples, and links without competing representations of the same field |
+| Symbol references | Check parameter/type-parameter names and API references against actual declarations; represent overloads, qualified types, and generic members without guessing from display text |
+| Declared contracts | Generate documentation for access, ownership, lifetime, publication, effects, pre/postconditions, and selected failure behavior from checked declaration metadata; prose explains intent, costs, and usage |
+| Inheritance and forwarding | Decide explicit documentation inheritance, interface-member documentation, aliases, and compatibility forwarders; inherit from a selected declaration rather than an arbitrary name match |
+| Diagnostics | Define malformed markup, unresolved references, stale parameter names, and missing public documentation separately; choose warning/build-policy behavior without changing executable semantics |
+| Examples | Support explicitly marked compilable examples with a declared language/target context; distinguish complete programs, fragments, and design-only pseudocode; execution is opt-in, not a side effect of rendering comments |
+| Distribution and tooling | Specify stable symbol identities, source versus compiled-package documentation, visibility/trimming, and IDE/site rendering; determine whether documentation is a separate artifact rather than retained runtime data |
+
+The key boundary is **declared semantics versus explanation**. A comment saying
+"non-null on true" must not grant initialization or nullability facts.
+Likewise, an exception description cannot authorize catching, change a
+requirement's failure selection, or imply cleanup after fail-fast. The
+corresponding language contracts remain authoritative. Generated API
+documentation should expose those contracts so authors do not have to maintain
+an independent annotation system inside comments.
+
+Doc inheritance must preserve that boundary: inheriting an interface's prose
+does not import extra effects or strengthen an implementation's guarantees.
+An implementation-specific note can explain behavior only within the checked
+contract it actually publishes. Automatically generated sections and authored
+prose need a defined presentation order and conflict policy.
+
+Documentation extraction should be deterministic and must not execute embedded
+code, fetch remote includes, or expose private declarations merely to resolve
+a link. Explicit documentation builds may enable separately configured example
+checks or dependencies. Changing prose alone should not invalidate executable
+ABI compatibility or change optimization decisions; documentation artifacts
+can have their own content identities.
+
+Before implementation, settle the source grammar, semantic reference format,
+attachment/inheritance rules, and package representation together. Conformance
+coverage should include exact comment preservation, declaration attachment,
+renamed parameters, overloaded/generic links, inherited documentation,
+unavailable dependencies, visibility filtering, and reproducible example
+validation.
+
+## 6. Approval and conformance checklist
 
 | Decision | Recommended choice |
 |---|---|
@@ -545,6 +598,7 @@ an unchanged consumer's publication, lifetime, or arithmetic contract.
 | Consumed parameter observations | Only surviving values or explicit permitted entry snapshots; no after-destruction dereference |
 | Proof acceptance | Mandatory versioned conservative profile, independent of optimizer sophistication |
 | Constant-evaluation budget | Semantic accounting with declared limits; candidate defaults require parser-workload validation |
+| Documentation comments | Discuss a distinguished comment form, prose format, checked symbol links, declaration-derived contract documentation, inheritance, and packaging before selecting syntax |
 
 Approval should be followed by focused canonical documentation changes and
 scheduled implementation, not immediate execution of the illustrative grammar.
