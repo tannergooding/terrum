@@ -17,11 +17,13 @@ CIL, LLVM, source translation or external linker dependency.
 Semantic version 24 carries the validated class/`ManagedNode` access
 capability contract. Semantic version 25 adds the distinct `MutReceiver`
 contract for persisted, non-exported mutating methods on non-owning compact
-structs. Source visibility may be public or private. Named mutable locals and
-forwarding through an existing `this` are supported receiver places; older
-headers reject methods requiring this contract. Version selection follows use
-of `MutReceiver`, not managedness, so programs that do not require v25 retain
-their existing versions and bytes. Readers normalize private managed artifacts
+structs. Semantic version 26 adds nested mutable-field loan expressions.
+Source visibility may be public or private. Named mutable locals, their
+writable nested fields, and forwarding through an existing writable `this`
+and its writable fields are supported receiver places. Older headers reject
+the respective contracts. Whole-local loans retain v25; programs needing
+neither retain their existing versions and bytes regardless of managedness.
+Readers normalize private managed artifacts
 from versions 18 through 23 into qualified internal IR, translating prior
 class/`ManagedNode` mutation authority to explicit `write` exactly where
 granted. A legacy header cannot contain v24 write identifiers.
@@ -200,18 +202,22 @@ identifiers under older headers. Semantic version 25 adds a separate
 `MutReceiver` contract for persisted, non-exported mutating methods on
 non-owning compact structs. Methods may be source-public or private, but source
 visibility does not expose a public mutating-receiver ABI. A receiver borrows a
-named mutable caller place, or is forwarded through an existing `this`, and
+named mutable caller place or its writable nested fields, or is forwarded
+through an existing writable `this` and its writable fields, and
 writes the original storage, including before a checked exception; readonly
 methods and by-value arguments retain copy behavior, and the ordinary
 readonly/by-value receiver ABI is unchanged. The verifier rejects forged
 mutable receiver loans from immutable places, while nested field writes inside
 a valid receiver borrow are allowed. Public scalar entry wrappers may call
 non-exported mutating methods, including source-public methods; private helper
-methods remain usable. Older headers reject the v25 contract. Version
-selection follows use of `MutReceiver`, not managedness, so programs not
-requiring it retain their existing versions and bytes. Unique/owning receivers,
-temporary receivers, nested-field receiver paths such as
-`outer.Inner.Mutate()`, rebinding `this`, and public mutating-receiver ABI
+methods remain usable. Older headers reject the v25 contract. Nested
+mutable-field loan expressions require semantic v26; v25 remains sufficient
+for whole-local loans. The native/public ABI is unchanged.
+Nested paths such as `outer.Inner.Mutate()` require writable storage and
+fields throughout; calls address the original subobject rather than a
+temporary copy followed by writeback. Unique/owning receivers,
+temporary receivers, managed-class-field receiver paths, rebinding `this`,
+and public mutating-receiver ABI
 remain unsupported. The native physical handle ABI, image-private managed
 state and scalar-only public exports are unchanged. Primitive
 `OwnedInt32Buffer` views keep their separate legacy access rules; general

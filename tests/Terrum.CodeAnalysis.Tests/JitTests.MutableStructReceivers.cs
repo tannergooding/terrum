@@ -1,5 +1,6 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
+using System.IO;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
@@ -9,6 +10,23 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NestedStructReceiverSampleAgreesBetweenAotAndJitAsync(bool checkedFailures)
+    {
+        var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "samples", "native",
+            "nested-struct-receiver.terrum")).ConfigureAwait(true);
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
+        }
+    }
+
     [Theory]
     [InlineData(1, "bool", "false", "true", "if (Value) { return 42; } return 0;", "")]
     [InlineData(2, "char16", "char16(0)", "char16(42)", "return int32(Value);", "")]
@@ -157,5 +175,104 @@ public sealed partial class JitTests
             }
             """;
         return AssertCheckedExecutionAsync(Source, 42);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task NestedMutableReceiverWritesOriginalAcrossForwardingAsync(bool checkedFailures)
+    {
+        const string Source = """
+            struct Leaf {
+                public mut int64 Value;
+                public Leaf(int64 value) { Value = value; }
+                public mut void Increment(int64 amount) { Value = Value + amount; }
+            }
+            struct Middle {
+                public mut Leaf Child;
+                public Middle(int64 value) { Child = new Leaf(value); }
+            }
+            struct Outer {
+                public mut Middle Nested;
+                public Outer(int64 value) { Nested = new Middle(value); }
+                public mut void Forward(int64 amount) { Nested.Child.Increment(amount); }
+            }
+            int32 Main() {
+                mut Outer owner = new Outer(20);
+                Outer snapshot = owner;
+                owner.Nested.Child.Increment(11);
+                owner.Forward(11);
+                if (snapshot.Nested.Child.Value != 20) { return 1; }
+                return int32(owner.Nested.Child.Value);
+            }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
+    }
+
+    [Fact]
+    public Task CheckedFailureRetainsWritesThroughNestedMutableReceiverAsync()
+    {
+        const string Source = """
+            struct Inner {
+                public mut int32 Value;
+                public Inner(int32 value) { Value = value; }
+                public mut void Fail() { Value = 42; require false; }
+            }
+            struct Outer {
+                public mut Inner Nested;
+                public Outer(int32 value) { Nested = new Inner(value); }
+            }
+            int32 Main() {
+                mut Outer owner = new Outer(1);
+                unsafe {
+                    try { owner.Nested.Fail(); }
+                    catch { return owner.Nested.Value; }
+                }
+                return 0;
+            }
+            """;
+        return AssertCheckedExecutionAsync(Source, 42);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task NestedReceiverAllowsReadonlyArgumentFromReservedRootAsync(bool checkedFailures)
+    {
+        const string Source = """
+            struct Inner {
+                public mut int32 Value;
+                public Inner(int32 value) { Value = value; }
+                public mut void Add(int32 amount) { Value = Value + amount; }
+            }
+            struct Middle {
+                public int32 Header;
+                public mut Inner Child;
+                public int32 Trailer;
+                public Middle(int32 value) {
+                    Header = 7;
+                    Child = new Inner(value);
+                    Trailer = 9;
+                }
+            }
+            struct Outer {
+                public int32 Prefix;
+                public mut Middle Nested;
+                public Outer(int32 value) {
+                    Prefix = 11;
+                    Nested = new Middle(value);
+                }
+            }
+            int32 Main() {
+                mut Outer owner = new Outer(21);
+                owner.Nested.Child.Add(owner.Nested.Child.Value);
+                if (owner.Prefix != 11 || owner.Nested.Header != 7
+                    || owner.Nested.Trailer != 9) { return 1; }
+                return owner.Nested.Child.Value;
+            }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
     }
 }

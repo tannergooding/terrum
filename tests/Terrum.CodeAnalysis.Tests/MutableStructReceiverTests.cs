@@ -58,6 +58,114 @@ public sealed class MutableStructReceiverTests
         Assert.Null(compilation.Program);
     }
 
+    [Theory]
+    [InlineData("Outer owner = new Outer(1); owner.Nested.Child.Increment(1);", "TRM3023")]
+    [InlineData("mut ReadonlyOuter owner = new ReadonlyOuter(1); owner.Nested.Child.Increment(1);", "TRM3023")]
+    [InlineData("mut Outer owner = new Outer(1); owner.Nested.Readonly.Increment(1);", "TRM3023")]
+    [InlineData("new Outer(1).Nested.Child.Increment(1);", "TRM3023")]
+    [InlineData("mut UniqueOuter owner = new UniqueOuter(1); owner.Nested.Child.Increment(1);", "TRM3023")]
+    [InlineData("mut Outer owner = new Outer(1); owner.Nested.Hidden.Increment(1);", "TRM3011")]
+    public void NestedReceiverRequiresWritableAccessibleNonOwningPlace(string body, string code)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Inner {
+                public mut int32 Value;
+                public Inner(int32 value) { Value = value; }
+                public mut void Increment(int32 amount) { Value = Value + amount; }
+            }
+            struct Middle {
+                public mut Inner Child;
+                public Inner Readonly;
+                private mut Inner Hidden;
+                public Middle(int32 value) {
+                    Child = new Inner(value);
+                    Readonly = new Inner(value);
+                    Hidden = new Inner(value);
+                }
+            }
+            struct Outer {
+                public mut Middle Nested;
+                public Outer(int32 value) { Nested = new Middle(value); }
+            }
+            struct ReadonlyOuter {
+                public Middle Nested;
+                public ReadonlyOuter(int32 value) { Nested = new Middle(value); }
+            }
+            unique struct UniqueOuter {
+                public mut Middle Nested;
+                public UniqueOuter(int32 value) { Nested = new Middle(value); }
+            }
+            int32 Main() {
+            """ + body + " return 0; }"));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void NestedReceiverReservesRootBeforeEvaluatingArguments()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Inner {
+                public mut int32 Value;
+                public Inner(int32 value) { Value = value; }
+                public mut void Add(bool replaced) { Value = Value + 1; }
+            }
+            struct Outer {
+                public mut Inner Nested;
+                public Outer(int32 value) { Nested = new Inner(value); }
+            }
+            bool Replace(out Outer result) { result = new Outer(1); return true; }
+            int32 Main() {
+                mut Outer owner = new Outer(41);
+                owner.Nested.Add(Replace(out owner));
+                return owner.Nested.Value;
+            }
+            """));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void ReadonlyThisCannotLoanItsMutableField()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            struct Inner {
+                public mut int32 Value;
+                public Inner(int32 value) { Value = value; }
+                public mut void Increment() { Value = Value + 1; }
+            }
+            struct Outer {
+                public mut Inner Nested;
+                public Outer(int32 value) { Nested = new Inner(value); }
+                public void Change() { Nested.Increment(); }
+            }
+            """));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
+    public void ManagedClassFieldCannotBecomeMutableStructReceiver()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Inner {
+                public mut int32 Value;
+                public Inner(int32 value) { Value = value; }
+                public mut void Increment() { Value = Value + 1; }
+            }
+            class Holder {
+                public mut Inner Nested;
+                public Holder(int32 value) { Nested = new Inner(value); }
+            }
+            int32 Main() {
+                require Holder.TryCreate(41, out var holder);
+                holder.Nested.Increment();
+                return 0;
+            }
+            """));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3023");
+        Assert.Null(compilation.Program);
+    }
     [Fact]
     public void MutableReceiverHasDistinctVerifiedPlaceContract()
     {
@@ -112,6 +220,67 @@ public sealed class MutableStructReceiverTests
             Body = main.Body with {
                 Statements = main.Body.Statements.SetItem(index,
                     new BoundExpressionStatement(forgedCall, call.Span)),
+            },
+        };
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+            Functions = program.Functions.SetItem(program.EntryPoint, forged),
+        }));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    public void ForgedNestedMutablePlacesAreRejected(int mutation)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Inner {
+                public mut int32 Value;
+                public Inner(int32 value) { Value = value; }
+                public mut void Increment(int32 amount) { Value = Value + amount; }
+            }
+            struct Outer {
+                public mut Inner Active;
+                public Inner Readonly;
+                public Outer(int32 value) {
+                    Active = new Inner(value);
+                    Readonly = new Inner(value);
+                }
+            }
+            int32 Main() {
+                mut Outer owner = new Outer(41);
+                Outer immutable = owner;
+                owner.Active.Increment(1);
+                return owner.Active.Value;
+            }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var main = program.Functions[program.EntryPoint];
+        var immutable = Array.FindIndex(main.Variables.ToArray(), variable => variable.Name == "immutable");
+        var index = Array.FindIndex(main.Body.Statements.ToArray(),
+            statement => statement is BoundExpressionStatement);
+        var statement = Assert.IsType<BoundExpressionStatement>(main.Body.Statements[index]);
+        var call = Assert.IsType<BoundCall>(statement.Expression);
+        var loan = Assert.IsType<BoundMutableFieldLoan>(call.Arguments[0]);
+        var forgedPlace = mutation switch {
+            0 => loan.Place with { Field = 9 },
+            1 => loan.Place with { Field = 1 },
+            2 => loan.Place with { Type = PrimitiveType.Int32 },
+            3 => loan.Place with {
+                Receiver = new BoundRead(immutable, loan.Place.Receiver.Type, loan.Place.Span),
+            },
+            _ => loan.Place with {
+                Receiver = new BoundConstant(0, loan.Place.Receiver.Type, loan.Place.Span),
+            },
+        };
+        var forged = main with {
+            Body = main.Body with {
+                Statements = main.Body.Statements.SetItem(index, statement with {
+                    Expression = call with { Arguments = call.Arguments.SetItem(0, loan with { Place = forgedPlace }) },
+                }),
             },
         };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {

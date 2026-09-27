@@ -2066,6 +2066,9 @@ internal sealed partial class PeCompiler
             case BoundFieldLoan fieldLoan:
                 EmitUniqueFieldPlace(fieldLoan.Place);
                 break;
+            case BoundMutableFieldLoan mutableField:
+                EmitUniqueFieldPlace(mutableField.Place);
+                break;
             case BoundMutableReceiverLoan mutableLoan:
                 if (mutableLoan.Variable == 0 && IsBorrowedReceiver())
                 {
@@ -2195,7 +2198,7 @@ internal sealed partial class PeCompiler
                 {
                     if (!IsUnique(call.Arguments[i].Type)
                         || call.Arguments[i] is BoundReceiverLoan or BoundMutableReceiverLoan
-                            or BoundFieldLoan or BoundOutArgument)
+                            or BoundFieldLoan or BoundMutableFieldLoan or BoundOutArgument)
                     {
                         continue;
                     }
@@ -2251,7 +2254,8 @@ internal sealed partial class PeCompiler
                     else
                     {
                         Expression(call.Arguments[i], argumentsBase + (call.Arguments.Length * 2));
-                        if (call.Arguments[i] is BoundReceiverLoan or BoundMutableReceiverLoan or BoundFieldLoan)
+                        if (call.Arguments[i] is BoundReceiverLoan or BoundMutableReceiverLoan
+                            or BoundFieldLoan or BoundMutableFieldLoan)
                         {
                             _code.Store64(Spill(argumentsBase + i));
                         }
@@ -2264,7 +2268,8 @@ internal sealed partial class PeCompiler
                             }
                         }
                         if (staged is not null && IsUnique(call.Arguments[i].Type)
-                            && call.Arguments[i] is not (BoundReceiverLoan or BoundMutableReceiverLoan or BoundFieldLoan))
+                            && call.Arguments[i] is not (BoundReceiverLoan or BoundMutableReceiverLoan
+                                or BoundFieldLoan or BoundMutableFieldLoan))
                         {
                             _code.Set(Spill(argumentsBase + call.Arguments.Length + i));
                         }
@@ -2298,7 +2303,8 @@ internal sealed partial class PeCompiler
                 var hidden = IsIndirect(call.Type) ? 1 : 0;
                 for (var i = Math.Max(0, 4 - hidden); i < call.Arguments.Length; i++)
                 {
-                    if (call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan or BoundFieldLoan)
+                    if (call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
+                        or BoundFieldLoan or BoundMutableFieldLoan)
                     {
                         _code.Load64(Spill(argumentsBase + i));
                     }
@@ -2310,7 +2316,8 @@ internal sealed partial class PeCompiler
                 }
                 for (var i = 0; i < Math.Min(4 - hidden, call.Arguments.Length); i++)
                 {
-                    if (call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan or BoundFieldLoan)
+                    if (call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
+                        or BoundFieldLoan or BoundMutableFieldLoan)
                     {
                         _code.Load64(Spill(argumentsBase + i));
                     }
@@ -2319,7 +2326,9 @@ internal sealed partial class PeCompiler
                         LoadValue(Spill(argumentsBase + i), call.Arguments[i].Type);
                     }
                     _code.MoveArgument(i + hidden,
-                        call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan or BoundFieldLoan || IsStruct(call.Arguments[i].Type) || IsWide(call.Arguments[i].Type));
+                        call.Arguments[i] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
+                            or BoundFieldLoan or BoundMutableFieldLoan
+                            || IsStruct(call.Arguments[i].Type) || IsWide(call.Arguments[i].Type));
                 }
                 if (hidden != 0)
                 {

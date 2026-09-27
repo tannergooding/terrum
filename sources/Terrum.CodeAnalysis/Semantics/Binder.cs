@@ -961,7 +961,30 @@ internal sealed partial class Binder
         {
             return new BoundMutableReceiverLoan(slot, type, span);
         }
-        Report("TRM3023", "Mutation requires a named mutable receiver place.", span);
+        if (receiver.Kind is SyntaxKind.MemberAccessExpression or SyntaxKind.NameExpression)
+        {
+            var place = BindExpression(receiver, type);
+            if (place is BoundFieldRead leaf && leaf.Type == type && !IsUnique(type))
+            {
+                BoundExpression current = leaf;
+                while (current is BoundFieldRead field)
+                {
+                    var owner = field.Receiver.Type;
+                    if (!IsStruct(owner) || IsUnique(owner) || IsUnique(field.Type)
+                        || !GetField(owner, field.Field).IsMutable)
+                    {
+                        break;
+                    }
+                    current = field.Receiver;
+                }
+                if (current is BoundRead root && root.Variable >= 0 && root.Variable < _variables.Count
+                    && root.Type == _variables[root.Variable].Type && _variables[root.Variable].IsMutable)
+                {
+                    return new BoundMutableFieldLoan(leaf, type, span);
+                }
+            }
+        }
+        Report("TRM3023", "Mutation requires a named mutable receiver or mutable struct-field place.", span);
         return ErrorExpression(span);
     }
 

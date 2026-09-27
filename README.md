@@ -57,22 +57,26 @@ a writable child handle retains its capability through a readonly parent,
 without deep-read propagation. Semantic v25 separately records non-exported
 `MutReceiver` methods on non-owning compact structs; source visibility may be
 public or private, but does not expose a mutating-receiver ABI. Called on a
-named mutable local, or forwarded through the existing `this` receiver, a
+named mutable local, a writable nested field of that local, or forwarded
+through the existing writable `this` receiver and its writable fields, a
 mutating method borrows and updates the original place, including
 writes before a checked exception; readonly methods and by-value arguments
 retain copy behavior, and the ordinary nonmutating receiver ABI is unchanged.
 The verifier rejects forged mutable receiver loans from
 immutable places, while nested field writes through a valid receiver are
-allowed. Older module headers reject the v25 receiver contract; programs not
-requiring it retain their versions and bytes regardless of managedness. Readers
+allowed. Semantic v26 persists nested mutable-field loans, while v25 remains
+sufficient for whole-local receiver loans. Older module headers reject the
+respective contracts; programs needing neither retain their versions and
+bytes regardless of managedness. Readers
 continue to normalize private managed artifacts from versions 18 through 23
 without granting more authority than their original contract. Public scalar
 entry wrappers may call non-exported mutating methods; private helpers remain
 non-exported as well. The native handle ABI and scalar-only public module
 boundary are unchanged.
 
-Unique/owning mutating receivers, temporary or nested-field receiver places
-(such as `outer.Inner.Mutate()`),
+Nested receivers such as `outer.Inner.Mutate()` require a writable root and
+writable fields along the complete path; readonly fields cannot be bypassed.
+Unique/owning mutating receivers, temporary or managed-class-field receiver places,
 rebinding `this`, public exported mutating-receiver ABIs and general references
 remain unsupported. General reference/view/ownership forms and `init ref<T>`
 call-site grammar remain unsupported; the separate legacy buffer-view access

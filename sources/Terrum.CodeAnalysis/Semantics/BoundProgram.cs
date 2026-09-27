@@ -480,6 +480,9 @@ public sealed record BoundViewRead(int Variable, BoundExpression Index, TextSpan
 /// <summary>A synchronous readonly loan of an initialized owning field place.</summary>
 public sealed record BoundFieldLoan(BoundFieldRead Place, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
+/// <summary>A reserved, nonescaping exclusive loan of a mutable field in a non-owning struct place.</summary>
+public sealed record BoundMutableFieldLoan(BoundFieldRead Place, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
 /// <summary>A checked unary operation.</summary>
 /// <param name="Operator">The operator token.</param>
 /// <param name="Operand">The input.</param>

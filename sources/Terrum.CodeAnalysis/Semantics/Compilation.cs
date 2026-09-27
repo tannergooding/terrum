@@ -227,6 +227,9 @@ public sealed class Compilation
                         case BoundFieldLoan loan:
                             expressions.Push(loan.Place);
                             break;
+                        case BoundMutableFieldLoan loan:
+                            expressions.Push(loan.Place);
+                            break;
                         case BoundViewRead view:
                             expressions.Push(view.Index);
                             break;

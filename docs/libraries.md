@@ -14,7 +14,7 @@ This is the proposed Terrum library contract, not the installed .NET library or 
 These are three coherent cumulative layers, **not** a feature-profile matrix for each allocator, SIMD width, encoding or collection. Namespaces describe functionality; referencing `Terrum.Collections` does not link every package or grant effects. An Application program can use Core's nonallocating kernels. Core does not promise that *all* error paths or callbacks allocate nothing; freestanding no-allocation execution additionally needs a compatible failure runtime. The initial native compiler does not yet implement these library layers. Optional hardware acceleration may use compatible software paths; a hardware-scalable register type with a target ABI is not secretly software-emulated as another type. Modules publish normalized public contracts, effects, lifetimes, generic witnesses and ABI obligations independently of linkage choice. Pinning an implementation does not expand `internal`/`private` access. Contract-bound replacement and AOT require actual metadata/binder support, not merely equal method names.
 
 The validated semantic-v24 source-class/`ManagedNode` access slice and
-semantic-v25 named mutable non-owning struct-receiver contract do not implement
+semantic-v25/v26 named and nested mutable non-owning struct-receiver contracts do not implement
 these general library layers: `List<T>`, `LinkedList<T>`, generic views/builders
 and the API inventories below remain design contracts.
 

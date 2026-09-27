@@ -31,6 +31,7 @@ public static partial class ModuleCompiler
     private const int StackClassFactoryVersion = 23;
     private const int ManagedAccessVersion = 24;
     private const int MutableStructReceiverVersion = 25;
+    private const int MutableFieldReceiverVersion = 26;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -757,7 +758,8 @@ public static partial class ModuleCompiler
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Only nodes with nested expressions or statements need traversal.")]
     private static List<int> Calls(BoundStatement body, Action<PrimitiveType>? visitType = null,
-        Action<BoundViewScope>? visitView = null, Action? visitLoopTransfer = null)
+        Action<BoundViewScope>? visitView = null, Action? visitLoopTransfer = null,
+        Action? visitMutableFieldLoan = null)
     {
         var calls = new List<int>();
         VisitStatement(body);
@@ -885,6 +887,10 @@ public static partial class ModuleCompiler
                 case BoundFieldLoan loan:
                     VisitExpression(loan.Place);
                     break;
+                case BoundMutableFieldLoan loan:
+                    visitMutableFieldLoan?.Invoke();
+                    VisitExpression(loan.Place);
+                    break;
                 case BoundViewRead view:
                     VisitExpression(view.Index);
                     break;
@@ -913,6 +919,13 @@ public static partial class ModuleCompiler
         && !function.IsClassConstructor && !function.IsCleanup && !function.Variables.IsEmpty
         && function.Variables[0].IsMutable
         && (int)function.Variables[0].Type is >= 100 and < ManagedClassTypes.First;
+
+    private static bool HasMutableFieldLoan(BoundFunction function)
+    {
+        var found = false;
+        _ = Calls(function.Body, visitMutableFieldLoan: () => found = true);
+        return found;
+    }
 
     private static string Contract(BoundFunction function, ImmutableArray<BoundStruct> structures)
     {
@@ -1140,6 +1153,10 @@ public static partial class ModuleCompiler
                 Type = RemapType(loan.Type, source, destination),
                 Place = (BoundFieldRead)RemapExpression(loan.Place, source, destination),
             },
+            BoundMutableFieldLoan loan => loan with {
+                Type = RemapType(loan.Type, source, destination),
+                Place = (BoundFieldRead)RemapExpression(loan.Place, source, destination),
+            },
             BoundMutableReceiverLoan loan => loan with { Type = RemapType(loan.Type, source, destination) },
             BoundViewLength => expression,
             BoundViewRead view => view with { Index = RemapExpression(view.Index, source, destination) },
@@ -1274,6 +1291,8 @@ public static partial class ModuleCompiler
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         var version = module.Functions.Any(static item => item.Function is BoundFunction function
+                && HasMutableFieldLoan(function)) ? MutableFieldReceiverVersion
+            : module.Functions.Any(static item => item.Function is BoundFunction function
                 && HasMutableStructReceiver(function)) ? MutableStructReceiverVersion
             : !module.Classes.IsEmpty || HasManagedNodes(module.Functions)
             ? ManagedAccessVersion
@@ -1466,7 +1485,8 @@ public static partial class ModuleCompiler
         if (version is not (10 or 11 or OwnershipVersion or TransferVersion or CompositeVersion
             or BufferVersion or ReadonlyViewVersion or WritableViewVersion or ManagedNodeVersion
             or ManagedClassVersion or Version or LoopTransferVersion or AggregateClassFactoryVersion
-            or StackClassFactoryVersion or ManagedAccessVersion or MutableStructReceiverVersion))
+            or StackClassFactoryVersion or ManagedAccessVersion or MutableStructReceiverVersion
+            or MutableFieldReceiverVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -2084,6 +2104,7 @@ public static partial class ModuleCompiler
             BoundMove => (byte)9,
             BoundReceiverLoan => (byte)10,
             BoundFieldLoan => (byte)11,
+            BoundMutableFieldLoan => (byte)20,
             BoundMutableReceiverLoan => (byte)12,
             BoundViewLength => (byte)13,
             BoundViewRead => (byte)14,
@@ -2122,6 +2143,9 @@ public static partial class ModuleCompiler
                 break;
             case BoundFieldLoan fieldLoan:
                 PutExpression(writer, fieldLoan.Place, names, ref remaining, depth + 1);
+                break;
+            case BoundMutableFieldLoan mutableField:
+                PutExpression(writer, mutableField.Place, names, ref remaining, depth + 1);
                 break;
             case BoundNull:
                 break;
@@ -2242,6 +2266,9 @@ public static partial class ModuleCompiler
                 return new BoundIsSome(GetExpression(reader, ref remaining, depth + 1, version), pattern, span);
             case 19 when version >= ManagedAccessVersion:
                 return new BoundReadonlyProjection(GetExpression(reader, ref remaining, depth + 1, version), type, span);
+            case 20 when version >= MutableFieldReceiverVersion:
+                return new BoundMutableFieldLoan(GetExpression(reader, ref remaining, depth + 1, version)
+                    as BoundFieldRead ?? throw new ModuleFormatException("Expected mutable field place."), type, span);
             default:
                 throw new ModuleFormatException("Unknown expression kind.");
         }
@@ -2313,6 +2340,7 @@ public static partial class ModuleCompiler
         BoundIsSome pattern => pattern with { Value = ResolveExpression(pattern.Value, names) },
         BoundFieldRead field => field with { Receiver = ResolveExpression(field.Receiver, names) },
         BoundFieldLoan loan => loan with { Place = (BoundFieldRead)ResolveExpression(loan.Place, names) },
+        BoundMutableFieldLoan loan => loan with { Place = (BoundFieldRead)ResolveExpression(loan.Place, names) },
         BoundViewRead view => view with { Index = ResolveExpression(view.Index, names) },
         _ => expression,
     };

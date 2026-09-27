@@ -59,9 +59,11 @@ The reviewed implementation baseline is `0597c8b`, with managed
 semantic-module v24: optional managed handles, source-defined classes, and
 explicit `write` authority for managed handles and mutable class receivers.
 The current bounded implementation also has a semantic-v25 `MutReceiver`
-contract for persisted, non-exported `mut` methods on non-owning compact
-structs. Source visibility may be public or private; named mutable locals and
-forwarding through an existing `this` are supported receiver places. Public
+contract, extended by v26 nested mutable-field loans, for persisted,
+non-exported `mut` methods on non-owning compact
+structs. Source visibility may be public or private; named mutable locals,
+their writable nested fields, and forwarding through an existing writable
+`this` and its writable fields are supported receiver places. Public
 source visibility does not expose a public mutating-receiver ABI.
 It includes compilation-local constrained generic specialization, including
 bounded single-`T` inference for top-level function templates over `Copy`

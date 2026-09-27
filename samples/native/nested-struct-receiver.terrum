@@ -1,0 +1,61 @@
+struct Counter
+{
+    public mut int32 Value;
+
+    public Counter(int32 value)
+    {
+        Value = value;
+    }
+
+    public mut void Add(int32 amount)
+    {
+        Value = Value + amount;
+    }
+}
+
+struct Inner
+{
+    public int32 Guard;
+    public mut Counter Current;
+
+    public Inner(int32 value)
+    {
+        Guard = 7;
+        Current = new Counter(value);
+    }
+
+    public mut void Add(int32 amount)
+    {
+        this.Current.Add(amount);
+    }
+}
+
+struct Outer
+{
+    public int32 Guard;
+    public mut Inner State;
+
+    public Outer(int32 value)
+    {
+        Guard = 11;
+        State = new Inner(value);
+    }
+
+    public mut void Add(int32 amount)
+    {
+        this.State.Add(amount);
+    }
+}
+
+int32 Main()
+{
+    mut Outer value = new Outer(40);
+    value.State.Current.Add(1);
+    value.Add(1);
+
+    if (value.Guard != 11 || value.State.Guard != 7)
+    {
+        return 1;
+    }
+    return value.State.Current.Value;
+}

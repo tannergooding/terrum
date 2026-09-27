@@ -612,6 +612,9 @@ public static class SemanticVerifier
                 case BoundFieldLoan loan:
                     Expression(loan.Place, scope, depth + 1);
                     break;
+                case BoundMutableFieldLoan loan:
+                    Expression(loan.Place, scope, depth + 1);
+                    break;
                 case BoundBufferRead buffer:
                     Expression(buffer.Index, scope, depth + 1);
                     break;
@@ -968,6 +971,14 @@ public static class SemanticVerifier
                         throw InvalidEffect(loan.Span, "Ownership");
                     }
                     break;
+                case BoundMutableFieldLoan loan:
+                    var mutableRoot = LoanRoot(loan, ref remaining, depth + 1);
+                    if (mutableRoot < 0 || mutableRoot >= roots.Length
+                        || roots[mutableRoot] != 0 || exclusive[mutableRoot])
+                    {
+                        throw InvalidEffect(loan.Span, "Ownership");
+                    }
+                    break;
                 case BoundReceiverLoan loan:
                     if (loan.Variable < 0 || loan.Variable >= roots.Length
                         || (exclusive[loan.Variable] && loan.Variable != acquiringRoot))
@@ -1229,11 +1240,11 @@ public static class SemanticVerifier
 
     private static int LoanRoot(BoundExpression owner, ref int remaining, int depth)
     {
-        if (owner is not BoundFieldLoan field)
+        if (owner is not (BoundFieldLoan or BoundMutableFieldLoan))
         {
             throw InvalidEffect(owner.Span, "Ownership");
         }
-        BoundExpression place = field.Place;
+        BoundExpression place = owner is BoundFieldLoan field ? field.Place : ((BoundMutableFieldLoan)owner).Place;
         while (place is BoundFieldRead nested)
         {
             Count(ref remaining, depth++);
@@ -2189,6 +2200,40 @@ public static class SemanticVerifier
         return root.Variable;
     }
 
+    private static int VerifyMutableFieldPlace(BoundFieldRead place, bool[] initialized,
+        BoundFunction function, BoundProgram program, ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        if (place is null || place.Receiver is null)
+        {
+            throw Invalid();
+        }
+        var owner = (int)place.Receiver.Type - 100;
+        if (owner < 0 || owner >= program.Structures.Length
+            || program.Structures[owner].IsUnique
+            || place.Field < 0 || place.Field >= program.Structures[owner].Fields.Length
+            || !program.Structures[owner].Fields[place.Field].IsMutable
+            || !CanAccessField(function, program.Structures[owner], place.Field)
+            || place.Type != program.Structures[owner].Fields[place.Field].Type
+            || !HasFields(program, place.Type) || ManagedClassTypes.IsClass(place.Type)
+            || IsUnique(program, place.Type))
+        {
+            throw InvalidEffect(place.Span, "Ownership");
+        }
+        if (place.Receiver is BoundFieldRead parent)
+        {
+            return VerifyMutableFieldPlace(parent, initialized, function, program, ref remaining, depth + 1);
+        }
+        if (place.Receiver is not BoundRead root || root.Variable < 0
+            || root.Variable >= initialized.Length || !initialized[root.Variable]
+            || root.Type != function.Variables[root.Variable].Type
+            || !function.Variables[root.Variable].IsMutable)
+        {
+            throw InvalidEffect(place.Span, "Ownership");
+        }
+        return root.Variable;
+    }
+
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Unsupported token kinds must remain invalid rather than becoming accepted operators.")]
     private static void Expression(BoundExpression expression, bool[] initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function,
@@ -2381,6 +2426,8 @@ public static class SemanticVerifier
                 throw InvalidEffect(loan.Span, "Ownership");
             case BoundMutableReceiverLoan mutableLoan:
                 throw InvalidEffect(mutableLoan.Span, "Ownership");
+            case BoundMutableFieldLoan mutableField:
+                throw InvalidEffect(mutableField.Span, "Ownership");
             case BoundFieldLoan fieldLoan:
                 throw InvalidEffect(fieldLoan.Span, "Ownership");
             case BoundOutArgument:
@@ -2511,7 +2558,7 @@ public static class SemanticVerifier
                 if (target.DeclaringStruct is not null && !target.IsStatic && !target.IsConstructor
                     && target.Variables[0].IsMutable
                     && (int)target.Variables[0].Type is >= 100 and < ManagedClassTypes.First
-                    && call.Arguments[0] is not BoundMutableReceiverLoan)
+                    && call.Arguments[0] is not (BoundMutableReceiverLoan or BoundMutableFieldLoan))
                 {
                     throw Invalid();
                 }
@@ -2575,6 +2622,19 @@ public static class SemanticVerifier
                                 throw InvalidEffect(mutableLoan.Span, "Ownership");
                             }
                             loanRoot = mutableLoan.Variable;
+                        }
+                        else if (argument is BoundMutableFieldLoan mutableField)
+                        {
+                            if (i != 0 || target.Intrinsic != BoundIntrinsic.None
+                                || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
+                                || !target.Variables[0].IsMutable || mutableField.Place is null
+                                || mutableField.Type != target.Variables[0].Type
+                                || mutableField.Place.Type != mutableField.Type)
+                            {
+                                throw InvalidEffect(mutableField.Span, "Ownership");
+                            }
+                            loanRoot = VerifyMutableFieldPlace(mutableField.Place, initialized,
+                                function, program, ref remaining, depth + 1);
                         }
                         else if (argument is BoundReceiverLoan loan)
                         {
@@ -2732,6 +2792,7 @@ public static class SemanticVerifier
             BoundMove move => move.Variable == variable,
             BoundOutArgument output => output.Variable == variable,
             BoundMutableReceiverLoan loan => loan.Variable == variable,
+            BoundMutableFieldLoan loan => LoanRoot(loan, ref remaining, depth + 1) == variable,
             BoundUnary unary => InvalidatesReservedOwner(unary.Operand, variable, ref remaining, depth + 1),
             BoundCast cast => InvalidatesReservedOwner(cast.Operand, variable, ref remaining, depth + 1),
             BoundOptionalLift lift => InvalidatesReservedOwner(lift.Value, variable, ref remaining, depth + 1),
@@ -2916,6 +2977,7 @@ public static class SemanticVerifier
             case BoundRead:
             case BoundReceiverLoan:
             case BoundMutableReceiverLoan:
+            case BoundMutableFieldLoan:
             case BoundFieldLoan:
                 break;
             case BoundMove move:

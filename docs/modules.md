@@ -336,10 +336,15 @@ Semantic version 24 carries the managed class/`ManagedNode` access contract.
 Semantic version 25 adds a distinct `MutReceiver` contract for persisted,
 non-exported mutating methods on non-owning compact structs. Source visibility
 may be public or private; methods can be invoked through named mutable locals
-or forwarded through an existing `this`. Older headers reject methods
-requiring this contract. Version selection follows use of the v25 contract,
-not managedness; programs that do not require it retain their existing
-versions and bytes. The ordinary readonly/by-value receiver ABI is unchanged.
+or their writable nested fields, or forwarded through an existing writable
+`this` and its writable fields. Older headers reject methods
+requiring this contract. Semantic version 26 adds nested mutable-field loan
+expressions; v25 and earlier headers reject the new expression tag. The
+serialized path uses field identities, not unchecked byte offsets, and is
+remapped and verified against the linked private layouts. Writers select v26
+only when a body contains such a loan; whole-local mutable receivers retain
+v25. Programs requiring neither retain their existing versions and bytes
+regardless of managedness. The ordinary readonly/by-value receiver ABI is unchanged.
 Public scalar entry wrappers may call non-exported mutating methods; source
 `public` visibility does not expose a public mutating-receiver ABI, and private
 helpers remain private. Readers normalize private managed artifacts from
