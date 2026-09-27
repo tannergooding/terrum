@@ -239,23 +239,29 @@ parameters cannot retain them. There is no wildcard/existential/higher-kinded
 meaning, and non-injective projections are not inverted. Ambiguity diagnoses.
 The broad inference order above is target direction, not a claim that general
 inference is implemented. The bounded compiler now infers one `T` for eligible
-top-level generic function templates over `Copy` structs when typed arguments
-or a typed existing `out` destination uniquely establish the struct type.
+top-level generic function templates over `Copy` structs or the existing
+scalar value types (`bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`)
+when typed arguments or a typed existing `out` destination uniquely establish
+the type.
 Expected-result context can fill an unresolved `T` as a bounded fallback
 before contextual argument binding. Explicit type arguments continue to work.
-This is not a general result-only inference promise.
-Uncontextualized primitive literals and typed primitive arguments do not
-establish a generic struct `T`. An explicitly typed construction such as
+For a Copy-only identity function, `int64 result = Identity(42)` supplies
+the missing `T` through result context, while `var result = Identity(42)`
+rejects without type evidence. `Identity(int32(42))` fixes `T` to `int32`;
+an outer result context cannot retarget that typed argument.
+An explicitly typed construction such as
 `new Value(42)` does provide its struct type; inferring a generic constructor's
 own type arguments remains unsupported. Inference does not implicitly
-construct a struct from a literal. Definition-site `Copy`,
+construct a struct from a literal. Scalar specialization does not grant
+primitive operator witnesses: arithmetic on `T` still needs an explicitly
+supported nominal conformance. Definition-site `Copy`,
 operator and `[NoThrow]` requirements remain authoritative for every inferred
 specialization, and a caller's stronger constraints are not borrowed to
 justify a weaker template. Inferred specializations remain compilation-local
 and preserve the existing private module-servicing contract, with no public
 generic ABI or artifact-version change.
 
-The implementation does not infer primitive or unique `T`, constructor or
+The implementation does not infer unique or managed `T`, constructor or
 method type arguments, ordinary overloads, or partial `_` holes. It does not
 add a struct-literal parser or public generic ABI. Contextual expected types
 still flow into untyped arithmetic (for example, `int64 x = 50000 * 50000`),

@@ -18,14 +18,16 @@ Copy-only selection and numeric algorithms with scalar control flow, but not the
 generic spans, stored dependencies or host interfaces
 required by those sketches. The scanner consumes the shared host keyword catalog,
 including `abstract`, `operator` and `where`, without a second keyword table.
-For eligible top-level one-`T` templates over `Copy` structs, the current
-static-protocol profile can infer a specialization from typed arguments or a
-typed existing `out` destination; explicit type arguments remain supported.
-Expected-result inference is a bounded fallback, not general result-only
-inference. These specializations preserve definition-site `Copy`, operator
-and `[NoThrow]` requirements and remain compilation-local. Primitive or
-unique `T`, constructor/method inference, ordinary overloads, partial holes and a
-public generic ABI remain unsupported.
+Eligible top-level one-`T` templates support `Copy` structs and scalar value
+types (`bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`). The binder can
+infer a specialization from typed arguments or a typed existing `out`
+destination; explicit type arguments remain supported. Expected-result
+context fills an unresolved `T` before contextual literal binding, without
+a numeric default type. These specializations preserve definition-site
+`Copy`, operator and `[NoThrow]` requirements and remain compilation-local.
+Scalars support Copy-only helpers, not primitive operator witnesses.
+Unique/managed `T`, constructor/method inference, ordinary overloads, partial
+holes and a public generic ABI remain unsupported.
 `build-component` uses the compiled scanner's records as the lexical input to
 the official host parser, binder and native emitter; the binder also consumes
 its decoded integer magnitudes. It does not re-lex or decode integer magnitudes
@@ -34,7 +36,7 @@ remain hosted in C#.
 
 | Candidate | Purpose | Gates before execution |
 |---|---|---|
-| [CopyAlgorithms](CopyAlgorithms.terrum) | NoThrow selection and conditional output of complete Copy values without operator witnesses | Composed AOT/JIT calls select nested tokens and ranges under both policies; invalid indices publish no value; no primitive conformance, borrowed views or generic runtime dispatch |
+| [CopyAlgorithms](CopyAlgorithms.terrum) | NoThrow selection and conditional output of complete Copy values without operator witnesses | Composed AOT/JIT calls select scalars, nested tokens and ranges under both policies; invalid indices publish no value; no primitive operator conformance, borrowed views or generic runtime dispatch |
 | [IntegerFacts](IntegerFacts.terrum) | Overflow-free signed-addition range predicate | Supported by the native profile; tested with native entry wrappers, not a full compiler bootstrap |
 | [WideIntegerFacts](WideIntegerFacts.terrum) | Checked signed addition and bounded decimal accumulation through the full unsigned 64-bit range | Executed as a separately compiled module with conditional wide outputs |
 | [WideIntegerTests](WideIntegerTests.terrum) | Signed extrema, invalid digits, decimal overflow and repeated output publication | Executed through AOT and JIT with a shared entry wrapper |

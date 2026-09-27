@@ -37,16 +37,17 @@ as `TRM0009`. Prefix casts are no longer parsed. Floating literal binding,
 custom literal targets and `[ConstEval]` are not implemented yet; see the
 [implementation matrix](docs/implementation.md).
 
-The bounded static-protocol profile also infers a single `T` for eligible
-top-level generic function templates over `Copy` struct types: typed arguments
-and typed existing `out` destinations can select the specialization without
-writing `<T>`. This preserves the template's declared `Copy`, operator and
-`[NoThrow]` contracts. It does not enable primitive or unique `T`, constructor
-or method inference, overload declarations, partial type-argument holes or a
-public generic ABI. Expected-result inference is only a bounded fallback, not
-a general result-only inference promise; primitive literals do not supply a
-default `T`. An explicitly typed struct construction can establish `T`
-without enabling generic constructor inference.
+The bounded generic profile supports one `T` over eligible `Copy` structs
+and the existing scalar value types (`bool`, `char16`, `int32`, `uint32`,
+`int64`, `uint64`). Typed arguments and typed existing `out` destinations can
+select a specialization without writing `<T>`; an expected result can fill
+an unresolved `T` before contextual literal binding. Literals do not supply a
+default `T`. This preserves the template's declared `Copy`, operator and
+`[NoThrow]` contracts: scalar Copy-only specialization does not provide
+primitive operator witnesses. Unique/managed `T`, constructor or method
+inference, overload declarations, partial type-argument holes and a public
+generic ABI remain unsupported. An explicitly typed struct construction
+can establish `T` without enabling generic constructor inference.
 
 Semantic v24 validates managed-class/`ManagedNode` access: `mut class`,
 writable `mut` class methods, readonly bare handles and explicit `write`

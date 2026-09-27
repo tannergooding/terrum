@@ -173,6 +173,48 @@ public sealed partial class JitTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task ScalarCopyHelpersPreserveValuesAndConditionalOutputsAsync(bool checkedFailures)
+    {
+        const string Source = """
+            using Terrum;
+            [NoThrow] T Choose<T>(bool first, T left, T right) where T : [Copy] {
+                return SelectCopy(first, left, right);
+            }
+            int32 Main() {
+                int64 contextual = Choose(true, 42, 0);
+                int64 typed = Choose<int64>(false, int64(0), int64(41));
+                int64 direct = SelectCopy<int64>(false, int64(0), int64(42));
+                int32 signed = SelectCopy(true, int32(42), int32(0));
+                uint64 wide = SelectCopy<uint64>(true, uint64(0xFFFFFFFFFFFFFFFF), uint64(0));
+                uint32 narrow = SelectCopy(false, uint32(0), uint32(42));
+                char16 codeUnit = SelectCopy<char16>(true, char16(65), char16(66));
+                bool selected = SelectCopy(false, true, false);
+                mut uint64 destination = uint64(7);
+                if (TrySelectCopy(2, wide, uint64(0), out destination)) { return 2; }
+                require TrySelectCopy(0, wide, uint64(0), out destination);
+                require TrySelectCopy(0, wide, uint64(0), out var output);
+                require TrySelectCopy(1, int32(0), signed, out var intOutput);
+                require TrySelectCopy(0, true, false, out var boolOutput);
+                if (contextual != 42 || typed != 41 || direct != 42 || intOutput != 42
+                    || wide != output || destination != wide || narrow != 42
+                    || codeUnit != char16(65) || selected || !boolOutput) { return 1; }
+                return int32(contextual);
+            }
+            """;
+        string[] components = [Path.Combine(RepositoryRoot(), "self-host", "CopyAlgorithms.terrum")];
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(Source, 42, components).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(Source, 42, components).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task InferredOutputCallsRespectConditionalPublicationAsync(bool checkedFailures)
     {
         const string Source = """

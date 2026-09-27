@@ -268,12 +268,15 @@ Templates and witnesses are compilation-local, while an exported concrete
 wrapper and its transitive private helpers use the existing separately compiled
 contract format. No additional runtime generic dispatch or wire version is needed.
 The current bounded binder infers the single `T` in top-level function
-templates over eligible `Copy` structs from typed arguments or typed existing
-`out` destinations; explicit type arguments remain valid, and expected-result
-context is only a bounded fallback. This keeps definition-site operator,
+templates over eligible `Copy` structs and the scalar value types `bool`,
+`char16`, `int32`, `uint32`, `int64` and `uint64` from typed arguments or typed
+existing `out` destinations. Explicit type arguments remain valid, and
+expected-result context fills only an unresolved `T` before contextual
+literal binding. Scalars support Copy-only templates, not primitive
+operator witnesses. This keeps definition-site operator,
 `Copy` and `[NoThrow]` checks in force and records the selected closed
-specialization for private module servicing. It does not enable primitive or
-unique `T`, constructor/method inference, general overloads, partial holes, or a
+specialization for private module servicing. It does not enable unique or
+managed `T`, constructor/method inference, general overloads, partial holes, or a
 public generic ABI.
 See the
 [bounded grammar and constraints](implementation.md); this does not implement

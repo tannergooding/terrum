@@ -113,19 +113,22 @@ Copy/move rules still apply.
 These constructor-inference rules are target direction, not current general
 compiler support. Decimal, hexadecimal and binary integer tokenization and
 contextual literal binding are implemented. The bounded binder infers one
-generic `T` for eligible top-level function templates over `Copy` structs:
+generic `T` for eligible top-level function templates over `Copy` structs
+or `bool`, `char16`, `int32`, `uint32`, `int64` and `uint64`:
 typed arguments or an existing typed `out` destination can establish `T`, and
 expected-result context can provide a bounded fallback before contextual
-argument binding. Explicit type arguments remain supported. There is no
-successful result-only case in this profile: a `T`-returning template must
-also take a `T` argument, and no untyped struct literal can acquire that type
-from the result context. The template's definition-site
+argument binding. Explicit type arguments remain supported. For a Copy-only
+`T Identity<T>(T value)`, `int64 result = Identity(42)` establishes `T` from
+the expected result before binding the literal. `var result = Identity(42)`
+has no such evidence and rejects. `Identity(int32(42))` establishes `int32`
+regardless of an outer result context. A `T`-returning template must also
+take a `T` argument; result context cannot manufacture a struct from a
+numeric literal. The template's definition-site
 `Copy`, operator and `[NoThrow]` requirements still govern specialization;
-inference cannot borrow stronger caller constraints. This does not infer
-primitive or unique `T`, constructor or method type arguments, ordinary
-overloads, or partial `_` holes. Numeric literal-only calls do not establish a generic
-struct type; expected-result fallback does not imply that a literal can be
-implicitly converted or used to invent a struct constructor. The current binder
+inference cannot borrow stronger caller constraints. Scalar specializations
+support Copy-only templates, not nominal primitive operator conformance.
+This does not infer unique or managed `T`, constructor or method type
+arguments, ordinary overloads, or partial `_` holes. The current binder
 already uses typed operands before expected-result context and
 propagates expected `int32`, `uint32`, `int64`, or `uint64` types into untyped
 nested arithmetic, so `int64 x = 50000 * 50000` is supported. It rejects
@@ -246,7 +249,7 @@ defined. A target validates encoding, terminator and embedded-zero policy;
 that does not grant pointer lifetime or storage ownership. Literal parsing
 borrows immutable source text and does not require an allocated `String`.
 
-Family declarations, generic inference, registration grammar and general
+Family declarations, general generic inference, registration grammar and general
 user-defined conversion witnesses remain future binder work. Boolean `require`
 and legacy conditional bool/out publication are implemented for the bounded
 native value profile. The target `init ref<T>` initialization-loan form

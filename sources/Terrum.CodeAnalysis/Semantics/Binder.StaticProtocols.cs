@@ -47,6 +47,10 @@ internal sealed partial class Binder
         _ => null,
     };
 
+    private bool IsCopyGenericType(PrimitiveType type) => type is PrimitiveType.Bool or PrimitiveType.Char16
+        or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+        || IsStruct(type);
+
     private void DeclareProtocols()
     {
         foreach (var tree in _trees)
@@ -326,7 +330,7 @@ internal sealed partial class Binder
         }
         var inferred = callArguments is null ? null
             : InferGenericType(template, callArguments, null, out _);
-        return inferred is PrimitiveType concrete && IsStruct(concrete)
+        return inferred is PrimitiveType concrete && IsCopyGenericType(concrete)
             ? concrete : null;
     }
 
@@ -427,9 +431,9 @@ internal sealed partial class Binder
                 }
             }
         }
-        if (template is null || concrete is not PrimitiveType type || !IsStruct(type))
+        if (template is null || concrete is not PrimitiveType type || !IsCopyGenericType(type))
         {
-            Report("TRM3011", "A generic call requires one unambiguous Copy struct type from explicit arguments, typed arguments, or its result context.",
+            Report("TRM3011", "A generic call requires one unambiguous Copy value type from explicit arguments, typed arguments, or its result context.",
                 callee.Span);
             return -1;
         }
@@ -441,7 +445,7 @@ internal sealed partial class Binder
                 callee.Span);
             return -1;
         }
-        var typeName = _structs[(int)type - 100].Name;
+        var typeName = IsStruct(type) ? _structs[(int)type - 100].Name : TypeName(type);
         var instantiated = template.Name + "<" + typeName + ">";
         if (_functions.TryGetValue(instantiated, out var existing))
         {
@@ -453,9 +457,9 @@ internal sealed partial class Binder
             Report("TRM3016", "Closed generic specialization limit exceeded.", callee.Span);
             return -1;
         }
-        if (_structs[(int)type - 100].IsUnique
+        if ((IsStruct(type) && _structs[(int)type - 100].IsUnique)
             || (template.Operations.Count != 0
-                && (!_conformances.TryGetValue(typeName, out var witnesses)
+                && (!IsStruct(type) || !_conformances.TryGetValue(typeName, out var witnesses)
                     || template.Operations.Values.Any(protocol => !witnesses.Contains(protocol)))))
         {
             Report("TRM3007", $"'{typeName}' lacks the declared Copy static protocol witnesses.", callee.Span);
@@ -614,6 +618,11 @@ internal sealed partial class Binder
         if (name.Contains('.', StringComparison.Ordinal))
         {
             return _structNames.TryGetValue(name, out type);
+        }
+        if (GenericScalarType(name) is PrimitiveType scalar)
+        {
+            type = scalar;
+            return true;
         }
         var candidates = new HashSet<PrimitiveType>();
         if (_structNames.TryGetValue(name, out var direct))
