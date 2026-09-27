@@ -8,21 +8,24 @@ namespace Triangle.Interop;
 public unique struct ComOwner<TInterface>
     where TInterface : [NativeComInterface]
 {
-    public TInterface* Pointer { get; }
+    public ptr<TInterface> Pointer { get; }
 
     public ComOwner<TInterface> Clone(); // AddRef; never an implicit handle copy.
 }
 
-public unique struct ComSlot<TInterface>
+// Address exposes write access to the pointer cell only, not to the COM object
+// referenced by that cell. The external interface receiver/access contract
+// must be supplied by checked COM metadata; this sketch leaves it unresolved.
+public mut unique struct ComSlot<TInterface>
     where TInterface : [NativeComInterface]
 {
     public ComSlot(); // Initializes the native pointer cell to null.
 
     public bool HasValue { get; }
 
-    public TInterface* Pointer { get; }
+    public ptr<TInterface> Pointer { get; }
 
-    public mut TInterface** Address();
+    public mut write ptr<ptr<TInterface>> Address();
 
     public mut ComOwner<TInterface> Take();
 }
@@ -41,14 +44,14 @@ public unique struct WindowOwner
 
 public unique struct ContextBindingsGuard
 {
-    public unsafe ContextBindingsGuard(ID3D11DeviceContext* context);
+    public unsafe ContextBindingsGuard(ptr<ID3D11DeviceContext> context);
 }
 
 public unique struct NativeUtf16Z
 {
     public static NativeUtf16Z FromApplicationAsset(TextSpan filename);
 
-    public char16* Pointer { get; }
+    public ptr<char16> Pointer { get; }
 }
 
 public static class NativeError
@@ -70,7 +73,7 @@ public static class NativeDiagnostics
 {
     public static void WriteHResult(HRESULT status, TextSpan operation);
 
-    public static unsafe void WriteCompilerOutput(ID3DBlob* blob);
+    public static unsafe void WriteCompilerOutput(ptr<ID3DBlob> blob);
 }
 
 public static class Runtime

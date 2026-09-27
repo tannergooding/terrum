@@ -1,4 +1,6 @@
-// Terrum source sketch. Conditional-output annotation spelling is provisional.
+// DESIGN ONLY: parameter declarations use target init ref<T>; body call sites
+// retain legacy out expressions as schematics until invocation syntax settles.
+// Conditional-output annotation spelling is provisional.
 using Terrum;
 
 public enum CalculateStatus : int32
@@ -41,7 +43,7 @@ public static int32 Main(Span<TextSpan> args)
 }
 
 [OutputWhen(nameof(result), CalculateStatus.Success)]
-public static CalculateStatus TryCalculate(int32 left, TextSpan operation, int32 right, out int32 result)
+public static CalculateStatus TryCalculate(int32 left, TextSpan operation, int32 right, init ref<int32> result)
 {
     if (operation.EqualsOrdinal('+'))
     {

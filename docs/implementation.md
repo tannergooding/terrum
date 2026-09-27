@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-13 and native-10 through native-20
+## Current boundary: syntax-13, native-10 through native-20, semantic v23
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -10,6 +10,12 @@ verified structured operations. A clean syntax result is deliberately not a
 valid-program claim: `var x = 1;` parses but semantic analysis rejects its missing
 numeric context. General ownership/lifetime checking, general semantic IL/LMOD,
 general managed graphs and standard-library execution are not implemented.
+The class/`ManagedNode` readonly-versus-writable access and mutable-receiver
+migration is in progress; the existing executable behavior below remains the
+legacy contract until the implementation and regressions are verified. The
+next semantic-module capability contract is planned as version 24, not yet
+implemented or written. Buffer-view and `out`-to-`init ref<T>` migration remain
+separate scheduled work.
 
 | Surface | Implemented | Not yet implemented |
 |---|---|---|
@@ -102,7 +108,11 @@ The separate `ManagedNode` proof copies handles without duplicating payloads
 or a cleanup obligation. `ManagedNode.TryCreate(value, out var node)` publishes
 only on true; `node.Value`, `SetValue`, `SetNext`, `ClearNext` and
 `TryGetNext(out var next)` access a scalar and a single nullable internal
-edge. A fixed local binding can mutate through its writable handle.
+edge. A fixed local binding can mutate through its writable handle. This is
+the current legacy intrinsic contract: a bare fixed handle can mutate the node,
+and its operations do not yet share the accepted `write` capability model. The
+`ManagedNode` portion of the readonly/writable and receiver migration is in
+progress; this description is not a claim that the target checks have landed.
 `ManagedHeap.Collect()` walks typed active roots across generated frames,
 including staged call arguments, outputs and pending returns, then follows
 descriptor-listed managed edges and reclaims unmarked cycles. This bounded collector runs only
@@ -137,6 +147,12 @@ Neither the provisional object nor managed arguments can disappear during
 constructor collection. Copy payloads are not conservative roots.
 Classes have no inheritance, inline class representation or public managed
 module ABI; `new C(...)` is rejected rather than inventing an allocation exception.
+The current source-class subset is also legacy access behavior: bare class
+handles can write declared mutable fields, class types do not retain nominal
+mutability in checked metadata, `mut class` is rejected, and writable `mut`
+instance-method receivers are not supported. The class part of the
+readonly/writable migration is in progress; until verified, these executable
+rules must not be read as the target language contract.
 `native-20` adds `C?` and `ManagedNode?`, contextual `null`, non-null-to-optional
 lifting, `is null` and `is some value`. Successful extraction creates a non-null
 handle snapshot; clearing the original edge does not invalidate it.
@@ -174,7 +190,13 @@ root-only JIT.
 The [source-line index candidate](../self-host/SourceLineIndex.terrum) uses `OwnedInt32Buffer`
 to build and own a line-start table, with binary-searched UTF-16 positions checked
 against host fixtures under both native failure policies.
-General borrowed references and stored loans remain unsupported.
+General borrowed references and stored loans remain unsupported. The accepted
+`ref<T>`/`ptr<T>`/`box<T>`/`val<T>` forms, general `write` views, `own<T>` and
+`init ref<T>` invocation still require their respective representation,
+lifetime, cleanup and ABI implementations; they are scheduled implementation
+work, not deferred to the Later capabilities bucket. The current explicit
+`bool`/`out` publication path remains in place until its coherent migration is
+implemented and verified.
 For-loop initialization runs once, followed by condition, body and iterator;
 the iterator does not run after a returning or breaking body. `continue` runs
 the iterator before testing the next condition. An omitted condition is true.

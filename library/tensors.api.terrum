@@ -23,10 +23,13 @@ public struct TensorSpan<T>
 {
     public TensorShape Shape { get; }
     public nuint ElementCount { get; }
+    // Access follows the source view and its element qualification.
     [MatchedAccess]
-    public ref T this[Span<nuint> indexes] { get; }
+    public ref<T> this[Span<nuint> indexes] { get; }
 
+    [MatchedAccess]
     public TensorSpan<T> Slice(Span<nuint> origin, Span<nuint> lengths);
+    [MatchedAccess]
     public TensorSpan<T> Transpose(Span<nuint> permutation);
 }
 
@@ -35,15 +38,15 @@ public static class TensorViews
     // Constructing a view preserves dependencies from storage AND shape.
     // A checked multi-source view contract is required; its syntax is not finalized.
     public static TensorSpan<T> View<T>(Span<T> storage, TensorShape shape, nuint origin);
-    public static mut TensorSpan<T> View<T>(mut Span<T> storage, TensorShape shape, nuint origin);
+    public static write TensorSpan<T> View<T>(write Span<T> storage, TensorShape shape, nuint origin);
 
     // No promise to flatten an arbitrary transposed/broadcast tensor as a
     // contiguous span. CopyTo requires equal logical shapes and either disjoint
     // backings or exactly identical per-index mappings (a no-op). Displaced or
     // differently strided overlap is rejected before writing; it never allocates
     // a hidden temporary. Copies require [Copy] independently of view capability.
-    public static bool TryAsDenseSpan<T>(TensorSpan<T> source, out Span<T> result);
-    public static void CopyTo<T>(TensorSpan<T> source, mut TensorSpan<T> destination)
+    public static bool TryAsDenseSpan<T>(TensorSpan<T> source, init ref<Span<T>> result);
+    public static void CopyTo<T>(TensorSpan<T> source, write TensorSpan<T> destination)
         where T : [Copy];
 }
 
@@ -51,7 +54,7 @@ public static class TensorViews
 // before writes. They neither allocate nor silently broadcast/reduce dimensions.
 public static class TensorPrimitives
 {
-    public static void Add<T>(Span<T> left, Span<T> right, mut Span<T> destination)
+    public static void Add<T>(Span<T> left, Span<T> right, write Span<T> destination)
         where T : IAdditionOperators<T, T, T>, [Copy];
 
     public static T Sum<T>(Span<T> source)
@@ -60,6 +63,6 @@ public static class TensorPrimitives
     public static T Dot<T>(Span<T> left, Span<T> right)
         where T : IAdditionOperators<T, T, T>, IMultiplyOperators<T, T, T>, IAdditiveIdentity<T, T>, [Copy];
 
-    public static void Add<T>(TensorSpan<T> left, TensorSpan<T> right, mut TensorSpan<T> destination)
+    public static void Add<T>(TensorSpan<T> left, TensorSpan<T> right, write TensorSpan<T> destination)
         where T : IAdditionOperators<T, T, T>, [Copy];
 }

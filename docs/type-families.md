@@ -2,6 +2,18 @@
 
 These are design contracts, not accepted syntax or implemented APIs. The spelling of family declarations, conditional members, extensions, witnesses and custom participation remains open. The local pseudo-code below labels relationships rather than specifying Terrum grammar.
 
+Family substitution preserves the complete qualification chosen by the caller.
+A concrete default-readonly type does not erase a caller-supplied `write`
+capability from `T`; constraints must state which access is required. `mut` is
+not valid as a generic argument qualifier. For example, a family member over
+`Span<T>` must distinguish descriptor rebinding (`mut Span<T>`), writable
+element slots (`write Span<T>`), and writable contained handles
+(`Span<write C>`). A writable-storage contract is invariant; a readonly
+projection is not automatically covariant and would need a checked
+representation/lifetime/cost proof. Generic `write T` is not a universal
+make-mutable transform; representation-aware mutation and its protocol
+constraints remain open.
+
 ## Explicit families
 
 A family opts in explicitly to type-argument expansion and declares its members, including any distinguished specialization. A shared name or generic arity does not establish membership. The checker must preserve each member's representation and ABI, validity, copying and moving, partial initialization and cleanup, tracing and write barriers, access and backing dependencies, and lifetime across projections. An erased member may need a representation tag, a checked dictionary or a changed descriptor ABI; none follows automatically from substituting `void`. Generic extension lookup alone cannot establish a member's validity, representation, interface witnesses or lifetime obligations. Family operations must not turn erased or borrowed views into owning values, invent a `default(T)`, or assume that all members are interchangeable. Projection is legal only where the declared relationship and its costs and effects are checked. This is a general facility, not an automatic rule that every `Type<T>` acquires `Type<void>`; `void` is no universal top or bottom type.
@@ -23,7 +35,7 @@ family TextSpan<TCodeUnit = void> {
     common bool EqualsOrdinal(TextSpan other);
     common bool EqualsOrdinal(rune other); // whole view is exactly one scalar
     common int32 CompareOrdinal(TextSpan other);
-    common bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
+    common bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
 
     when TCodeUnit : [TextCodeUnit] {
@@ -32,7 +44,7 @@ family TextSpan<TCodeUnit = void> {
         TextSpan<void> AsTextSpan();  // no copy or transcode
     }
     on TextSpan<void> {
-        bool TryProject<TRequested>(out TextSpan<TRequested> result)
+        bool TryProject<TRequested>(init ref<TextSpan<TRequested>> result)
             where TRequested : [TextCodeUnit]; // encoding checked
     }
 }
@@ -46,7 +58,7 @@ A target-typed single-scalar `'x'` literal has **no fallback type**. For `char8`
 
 ## Fixed and scalable vectors
 
-Fixed-width SIMD is a family of explicitly registered *members*, not an obligation for every vector to implement a nominal `ISimdVector` interface or call through a public witness service class. A member provides a concrete width, lane type and corresponding boolean mask shape through checked membership; common static operations are declared by the family and accessed naturally as `TVector.Splat(...)`, `simd128<float32>.Load(...)` and `simd128mask<float32>.First(...)`. Generic fixed-vector algorithms quantify over **any** registered member. Addition takes two operands of the same instantiation and produces that instantiation, while comparisons produce its matching mask, mask reductions produce `bool`, and lane reductions may produce the element type. Membership checking verifies width, element/mask granularity, operators, ABI and effects; similar names (`simd128` and `simd128mask`) are not evidence of membership. Other unrelated types continue to use granular generic-math protocols such as `IAdditionOperators<TSelf, TOther, TResult>` without becoming SIMD members.
+Fixed-width SIMD is a family of explicitly registered *members*, not an obligation for every vector to implement a nominal `ISimdVector` interface or call through a public witness service class. A member provides a concrete width, lane type and corresponding boolean mask shape through checked membership; common static operations are declared by the family and accessed naturally as `TVector.Splat(...)`, `simd128<float32>.Load(...)` and `simd128mask<float32>.First(...)`. Generic fixed-vector algorithms quantify over **any** registered member. Addition takes two operands of the same fully qualified instantiation and produces that instantiation, while comparisons produce its matching mask, mask reductions produce `bool`, and lane reductions may produce the element type. Writable stores require a writable view (`write Span<TElement>`), not a mutable descriptor (`mut Span<TElement>`). Membership checking verifies width, element/mask granularity, operators, ABI and effects; similar names (`simd128` and `simd128mask`) are not evidence of membership. Other unrelated types continue to use granular generic-math protocols such as `IAdditionOperators<TSelf, TOther, TResult>` without becoming SIMD members.
 
 **Local pseudo-code -- family registration and constraint spelling provisional:**
 

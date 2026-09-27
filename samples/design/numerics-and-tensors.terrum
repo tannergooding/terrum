@@ -1,4 +1,6 @@
-// DESIGN ONLY: the P0 syntax-only front end does not bind or run these APIs.
+// DESIGN ONLY: parameter declarations use target init ref<T>; body call sites
+// retain legacy out expressions as schematics until invocation syntax settles.
+// The P0 syntax-only front end does not bind or run these APIs.
 // Fixed-vector family constraints below are LOCAL PSEUDO-CODE, not grammar.
 using Terrum;
 using Terrum.Numerics;
@@ -16,7 +18,7 @@ public static TVector AddBias<TVector, TMask>(TVector value, float32 bias)
 // destination length but does not perform a runtime alias/overlap validation;
 // it is not a checked executable entry point until that precondition is proven.
 public static void AddBias128(
-    Span<float32> source, mut Span<float32> destination, float32 bias)
+    Span<float32> source, write Span<float32> destination, float32 bias)
 {
     if (destination.Length < source.Length)
     {
@@ -30,7 +32,7 @@ public static void AddBias128(
     {
         var block = simd128<float32>.Load(source.Slice(offset, width));
         var result = AddBias<simd128<float32>, simd128mask<float32>>(block, bias);
-        simd128<float32>.Store(result, mut destination.Slice(offset, width));
+        simd128<float32>.Store(result, destination.Slice(offset, width));
         offset = offset + width;
     }
 
@@ -42,7 +44,7 @@ public static void AddBias128(
         var active = simd128mask<float32>.First(remainder);
         var tail = simd128<float32>.LoadMasked(source.Slice(offset, remainder), active, 0.0f32);
         var result = AddBias<simd128<float32>, simd128mask<float32>>(tail, bias);
-        simd128<float32>.StoreMasked(result, active, mut destination.Slice(offset, remainder));
+        simd128<float32>.StoreMasked(result, active, destination.Slice(offset, remainder));
     }
 }
 
@@ -51,14 +53,14 @@ public static void AddBias128(
 public static float32 AddAndSum(
     Span<float32> leftStorage,
     Span<float32> rightStorage,
-    mut Span<float32> destinationStorage,
+    write Span<float32> destinationStorage,
     TensorShape shape)
 {
     var left = TensorViews.View(leftStorage, shape, 0);
     var right = TensorViews.View(rightStorage, shape, 0);
-    var destination = TensorViews.View(mut destinationStorage, shape, 0);
+    var destination = TensorViews.View(destinationStorage, shape, 0);
 
-    TensorPrimitives.Add(left, right, mut destination);
+    TensorPrimitives.Add(left, right, destination);
 
     if (TensorViews.TryAsDenseSpan(destination, out var dense))
     {

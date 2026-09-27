@@ -3,24 +3,26 @@ using Terrum;
 
 namespace Terrum.Collections.Algorithms;
 
+// Equality and key semantics are caller-selected capabilities, not inherited
+// universal object defaults. A key comparer pairs equality with its hash policy.
 public interface IEqualityComparer<T>
 {
-    bool Equals(ref T left, ref T right);
+    bool Equals(ref<T> left, ref<T> right);
 }
 
 public interface IKeyComparer<T> : IEqualityComparer<T>
 {
-    uint64 GetHashCode(ref T value);
+    uint64 GetHashCode(ref<T> value);
 }
 
 public interface IMapper<TSource, TResult>
 {
-    TResult Map(ref TSource value);
+    TResult Map(ref<TSource> value);
 }
 
 public interface IPredicate<T>
 {
-    bool Test(ref T value);
+    bool Test(ref<T> value);
 }
 
 public static class SpanAlgorithms
@@ -28,7 +30,7 @@ public static class SpanAlgorithms
     // Missing is a bool, not a sentinel. The comparer may be an inline struct:
     // constrained invocation never boxes it or snapshots source storage.
     public static bool TryIndexOf<T, TComparer>(
-        Span<T> source, ref T value, mut ref TComparer comparer, out nuint index)
+        Span<T> source, ref<T> value, write ref<TComparer> comparer, init ref<nuint> index)
         where TComparer : IEqualityComparer<T>;
 
     // Destination capacity is checked before invoking any callback. Source and
@@ -37,7 +39,7 @@ public static class SpanAlgorithms
     // Exactly one callback per visited element; a callback failure can leave
     // a valid written prefix without rolling it back.
     public static void Select<TSource, TResult, TMapper>(
-        Span<TSource> source, mut Span<TResult> destination, mut ref TMapper mapper)
+        Span<TSource> source, write Span<TResult> destination, write ref<TMapper> mapper)
         where TMapper : IMapper<TSource, TResult>;
 
     // Require destination.Length >= source.Length before calling predicate so a
@@ -47,7 +49,7 @@ public static class SpanAlgorithms
     // with write index <= read index. Reject displaced overlap before callbacks.
     // Return written count; callback failure may leave an accepted prefix.
     public static nuint Where<T, TPredicate>(
-        Span<T> source, mut Span<T> destination, mut ref TPredicate predicate)
+        Span<T> source, write Span<T> destination, write ref<TPredicate> predicate)
         where T : [Copy]
         where TPredicate : IPredicate<T>;
 }

@@ -17,6 +17,20 @@ add complete-publication construction and descriptor-based tracing. General
 stored loans and managed layouts, general exception objects and the standard library are not
 implemented.
 
+Design documents and `samples\design` describe the target contract separately
+from this executable subset: places default to readonly, `mut` applies to
+places/receivers, and `write` qualifies reference or view access. The target
+initialization-loan form is `init ref<T>`; current executable examples still
+use the legacy `bool`/`out` contract until compiler declarations and call sites
+are migrated together. Design sketches are not claims that these semantics or
+their syntax are implemented.
+
+The compiler currently rejects target `mut class` declarations and writable
+`mut` instance-method receivers. Existing executable class, buffer-view, and
+managed-node examples retain their legacy access behavior pending coordinated
+migration; they are not evidence that the target `mut`/`write` model is
+implemented.
+
 ## Build
 
 Use the exact .NET 11 RC SDK specified in `global.json`. The default commands

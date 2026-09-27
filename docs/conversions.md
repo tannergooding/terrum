@@ -6,6 +6,20 @@ remain design direction, not implemented floating-point or generic execution.
 Cast spelling follows C#; conversion-protocol names and declaration lookup
 remain provisional. Numeric operators are checked by default in every build.
 
+Representation and access are separate from numeric conversion. The canonical
+forms are `ref<T>`, `ptr<T>`, `box<T>`, `val<T>` and `own<T>`; `init ref<T>`
+denotes initialization of vacant storage, not general writable access. `write`
+qualifies access through a reference/view and neither creates authority nor
+changes immutable fields or nominal restrictions. `mut` applies to a place or
+receiver and is not a generic type-argument qualifier. A value with `write`
+access may be implicitly viewed through the corresponding readonly access path
+where that projection preserves representation, provenance, and lifetime; this
+is capability attenuation, not a type-wide rewrite. Readonly access never
+implicitly upgrades to `write`. Attenuation does not recursively rewrite
+nested type arguments or convert writable containers to differently qualified
+element types: mutable-storage contracts remain invariant. Other qualifier
+changes require an explicitly checked representation and lifetime contract.
+
 ## Context before construction
 
 A numeric literal has no initial `int32` or `float64` type. An unambiguous
@@ -104,7 +118,9 @@ signed/unsigned range failures use the explicitly selected native fail-fast
 policy, not catchable conversion exceptions.
 
 Family declarations, generic inference and user-defined conversions remain
-future binder work. Boolean `require` and conditional bool/out publication are
-implemented for the bounded native value profile; catchable requirement
+future binder work. Boolean `require` and legacy conditional bool/out
+publication are implemented for the bounded native value profile. The target
+`init ref<T>` initialization-loan form requires a coordinated declaration and
+call-site migration; catchable requirement
 exceptions and owning-output cleanup are not. The parser's rejection of
 repeated optional modifiers is independent of those later conversion protocols.

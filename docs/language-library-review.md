@@ -1,9 +1,9 @@
 # Language and library improvement review
 
-**Proposal, not accepted specification.** This cross-language synthesis adds
-no syntax/API promise or compiler authorization. It draws on C#/.NET, Rust,
-Go, Swift, Kotlin, C++ and Java experience without treating any one ecosystem as a
-template.
+**Design review; §§1.1 and 1.2 and the collection-based `params` direction in
+§1.4 record accepted directions.** Other proposals add no syntax/API promise
+or compiler authorization. The review draws on C#/.NET, Rust, Go, Swift, Kotlin, C++
+and Java experience without treating any one ecosystem as a template.
 [Language](language.md), [lifetimes](lifetimes.md), [type families](type-families.md),
 [conversions](conversions.md), and [libraries](libraries.md) remain authoritative;
 status follows [implementation](implementation.md) and [roadmap](roadmap.md).
@@ -45,19 +45,41 @@ specialization; examples and `.api.terrum` files remain design material.
 
 ## 1. Make capabilities explicit and composable
 
-### 1.1 Propose invariant mutable storage; consider read projections
+### 1.1 Accepted: readonly-by-default access and invariant writable storage
 
-**Proposal derived from accepted access rules, not a settled array contract:**
-make mutable generic storage invariant. Treating `Array<Derived>` as
-`Array<Base>` would permit storing a `Base` that is not a `Derived`. A read-only
-view might support covariance only through a checked per-element subtype
-projection. It must prove compatible physical representation or advertise
-explicit per-read conversion cost, preserve backing/lifetime, and attenuate
-writable access. This is read access, not graph immutability. Interface
-conversion may box/allocate and must advertise cost. No reinterpretation,
-materialization, or copy is implicit. The view may alias backing storage that
-remains mutable through other aliases; it grants no write authority and does
-not make the object graph immutable. Terrum has not committed to covariant views.
+Declarations are readonly by default. `mut T value` permits rebinding a local;
+`mut class C`/`mut struct S` declares mutable nominal storage; instance
+receivers are readonly unless the method is marked `mut`. `write` qualifies
+access through a reference/view and grants no authority that its source did not
+already possess; it does not override immutable fields or nominal restrictions.
+There is no explicit `read` keyword, deep-read type, or v1 frozen/deep-frozen
+type. Readonly is an access-path restriction, not graph immutability, alias
+uniqueness, purity, or thread safety.
+
+`mut Span<T>` permits descriptor rebinding, `write Span<T>` permits element
+slot writes, and `Span<write C>` permits writes through contained `C` handles
+without writable slots. Their combination composes these distinct permissions.
+`mut` is not a generic type-argument qualifier. A writable view or storage
+contract is invariant: treating `Array<Derived>` or a writable
+`Span<Derived>` as `Array<Base>`/`Span<Base>` could permit storing a value that
+is not a `Derived`. A readonly projection is not automatically covariant; any
+future projection must prove compatible representation, preserve
+backing/lifetime, and specify any per-read conversion cost. No
+reinterpretation, materialization, copy, or hidden conversion is implicit.
+Readonly access does not make aliased backing or its object graph immutable.
+
+The canonical reference representations are `ref<T>`, `ptr<T>`, `box<T>`,
+`val<T>` and `own<T>`. `init ref<T>` is an initialization loan to vacant
+storage, unreadable until full initialization/publication; it is not an
+arbitrary writable `ref<T>`. The bounded compiler still implements legacy
+`bool`/`out` publication, which must migrate coherently across declarations
+and call sites. It also rejects target `mut class` declarations and writable
+`mut` instance-method receivers, while legacy class handles can still write
+declared mutable fields; the current type metadata does not encode nominal
+mutability. These are implementation gaps, not revisions to the accepted
+model. Details and current support boundaries are in
+[language](language.md), [lifetimes](lifetimes.md) and
+[implementation](implementation.md).
 
 As contrast, .NET's reference-array covariance is not inherited by mutable
 `Span<T>`: its array constructor rejects covariant arrays unless the runtime
@@ -76,14 +98,16 @@ The CLR `Array` base is runtime-special, not an ordinary generic capability
 ([CoreLib `Array`](https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/System/Array.cs)).
 Managed graphs, unique buffers, and borrowed spans retain distinct ownership.
 
-### 1.2 Propose against universal object defaults
+### 1.2 Accepted: no universal object operation defaults
 
-**Proposal derived from opt-in capability and cost constraints, not an accepted
-root-type decision:** avoid universal inheritance of `Equals`, `GetHashCode`,
-`ToString`, boxing, or allocation by every value. Likewise, make behavioral
-`IEquatable<T>` and `IFormattable` conformance explicit, not implicit for every
-struct. This does not prohibit primitive-specific built-ins or compiler-
-verified capabilities.
+Do not require every value to inherit `Equals`, `GetHashCode`, or `ToString`,
+or require universal object-default boxing/allocation or automatic
+`IEquatable<T>` or `IFormattable` conformance. This rejects universal
+object-to-string behavior; it is **not** a claim that .NET `object` implements
+`IFormattable`, nor an objection to explicit formatting protocols.
+Primitive-specific built-ins and explicit compiler-verified capabilities
+remain valid. This direction does not settle whether Terrum has any root type
+at all; root-type existence is a separate open decision.
 
 Keep compiler diagnostic/type metadata distinct from user-visible operations:
 the compiler may need type identity for checking, diagnostics, or tools without
@@ -103,107 +127,233 @@ collection needs a choice of equality semantics. Floating `==`, NaN-aware
 numeric-key equality, bitwise identity, decimal cohort equality, and display
 text must not collapse into one universal override. A useful formatting
 protocol can be shared without promising that every value allocates a string.
-There should be a debugger/tool representation, but it need not be a language
-level `ToString` method.
+Compiler/debugger metadata may support tool representations, but that does not
+require a language-level `ToString` method.
 
 This separation also exists in .NET: [`Object`](https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/System/Object.cs)
 supplies object defaults; [`IFormattable`](https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/System/IFormattable.cs)
-is separate. Terrum may choose other defaults; this review recommends making
-their costs and semantics explicit.
+is separate and opt-in. Terrum preserves explicit formatting protocols without
+requiring every value to become a user-visible string.
 
-### 1.3 Keep generic and nongeneric APIs honest
+### 1.3 Open proposals: generic APIs and type-system policies
 
-**Refinement proposal.** Keep generic collections primary; do not duplicate
-their API graph in an erased hierarchy; use a narrow dynamic adapter only where
-heterogeneity needs explicit identity, ownership, lifetime, and dispatch cost.
-Compose constraints from operation-specific capabilities, not a universal
-“number” interface. Operators do not imply scalar/SIMD membership or copy/
-storage permission; C# static-abstract members are useful prior art
+**The proposals in §1.3 are not accepted as a whole.** Access categories
+follow accepted §1.1 and the canonical [language contract](language.md).
+Complete generic qualification follows the opening substitution rule in
+[type-family design](type-families.md#type-family-design) and the
+[library contract](libraries.md); writable storage remains invariant. These
+are settled inputs, not open §1.3 policies. Exact constraint syntax and
+additions explicitly labeled as proposals remain design questions; the
+accepted baselines called out below are not reopened.
+After the access/syntax-category documentation settles, revisit this section
+for any remaining duplicated wording; this does not adopt the proposals below.
+
+**Accepted capability baseline.** A nominal behavioral constraint such as
+`where T : IFoo` requires a checked witness; a property constraint such as
+`where T : [Copy]` is a compiler-verified capability predicate, not an
+interface witness. These capabilities are independent: behavior, family
+membership, Copy, and storage permission are not inferred from one another or
+from operator names. See the canonical [language](language.md),
+[library](libraries.md), and [type-family](type-families.md) contracts. §1.3
+does not reopen those distinctions.
+
+**Generic/erased API boundary (proposal).** Keep generic collections primary;
+do not duplicate their API graph in an erased hierarchy; use a narrow dynamic
+adapter only where heterogeneity needs explicit identity, ownership, lifetime,
+and dispatch cost. How APIs compose independent operation constraints without
+a universal “number” interface remains a design question.
+C# static-abstract members are useful prior art
 ([C# interfaces](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/interface#static-abstract-and-virtual-members)).
 
-Keep the existing conditional member-contract refinement distinct from
-behavioral conformance and family membership. Both need declared, versioned
-proofs, but refinement alone is not a witness; use neither a second
-`ISpecialSpan` nor an unsafe downcast.
+**Nominal/conditional witnesses and coherence (proposal).** The accepted
+nominal behavioral-witness distinction above is the baseline. How conditional
+member-contract refinement and family membership are declared, versioned, and
+checked for coherence remains open; refinement alone would not establish
+behavioral conformance. Do not treat a second `ISpecialSpan` or an unsafe
+downcast as an accepted answer.
 
-Associated results express targeted relationships without general higher-kinded
-types. Swift `Sequence.Element` hides the concrete sequence; Rust associated
-types and stable GATs can relate a lending result to `next`'s borrow
+**Associated types (proposal).** Associated results could express targeted
+relationships without general higher-kinded types. Swift `Sequence.Element`
+hides the concrete sequence; Rust associated types and stable GATs can relate
+a lending result to `next`'s borrow
 ([SE-0346](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0346-light-weight-same-type-syntax.md);
 [Rust associated types](https://doc.rust-lang.org/reference/items/traits.html);
 [GAT stabilization](https://blog.rust-lang.org/2022/10/28/gats-stabilization/)).
-Expose associated `E` only if one selected witness determines it; keep `E`
-explicit when one `T` has multiple relations. A borrowed result publishes its
-source dependency.
+One candidate policy is to expose associated `E` only when one selected
+witness determines it, and keep `E` explicit when one `T` has multiple
+relations. Borrowed-result dependencies follow the canonical
+[lifetime contract](lifetimes.md); this does not decide associated-type
+syntax or witness selection.
 
-For erasure, Swift opens one existential's hidden type for an eligible generic
-call; two values do not prove equal hidden `Self`, and dependent results cannot
-escape their proof/backing
+**Erasure and existential opening (proposal).** Swift opens one existential's
+hidden type for an eligible generic call; two values do not prove equal hidden
+`Self`, and dependent results cannot escape their proof/backing
 ([SE-0309](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0309-unlock-existential-types-for-all-protocols.md);
 [SE-0352](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0352-implicit-open-existentials.md)).
 Rust `dyn` excludes generic-method dispatch and most nonreceiver `Self` uses
 (`Self: Sized` methods may exist but are not dynamically callable)
 ([dyn compatibility](https://doc.rust-lang.org/reference/items/traits.html#dyn-compatibility)).
-Any Terrum `dyn ISequence<E>` must declare root, ownership/loan, representation,
-and dispatch; opening one value cannot guess a second's type or let dependent
-results escape.
+A proposed Terrum `dyn ISequence<E>` would need to settle root, ownership/loan,
+representation, and dispatch; opening one value cannot establish a second's
+hidden type or let dependent results escape.
 
-Resolution is not coherence. Kotlin extensions use the declared receiver and
-lose to members; they add neither member nor witness
+**Overload resolution and source compatibility (proposal).** Resolution is
+not coherence. Kotlin extensions use the declared receiver and lose to
+members; they add neither member nor witness
 ([Kotlin extensions](https://kotlinlang.org/docs/extensions.html)). Rust
 rejects overlapping implementations. C++ constrained-overload subsumption uses
 atomic constraint origins/mappings, not arbitrary logical equivalence
 ([Rust coherence](https://doc.rust-lang.org/reference/items/implementations.html#trait-implementation-coherence);
 [C++ ordering](https://eel.is/c++draft/temp.constr.order);
 [atomic constraints](https://eel.is/c++draft/temp.constr.atomic)).
-Terrum should publish producer-owned, versioned witnesses and reject overlaps,
-never resolve by import order. A newly applicable overload may change source
-meaning without changing old declarations, so source compatibility and
-recompilation matter alongside binary versioning.
+One candidate policy is producer-owned, versioned witnesses with overlap
+rejection rather than import-order resolution. A newly applicable overload
+could change source meaning without changing old declarations, so source
+compatibility and recompilation would matter alongside binary versioning.
 
-Inference is also a policy, not a universal rule. C++ relates parameter and
-argument types; Go solves some constraint equations and defaults untyped
-constants ([C++ deduction](https://eel.is/c++draft/temp.deduct.call);
-[Go inference](https://go.dev/ref/spec#Type_inference)). Terrum must define
-which relations participate and in what order. A constraint establishes
-admissibility, not `T` for `Parse<T>(text)` from `IParsable<T>` alone
+**Inference (proposal).** Inference is a policy, not a universal rule. C++
+relates parameter and argument types; Go solves some constraint equations and
+defaults untyped constants ([C++ deduction](https://eel.is/c++draft/temp.deduct.call);
+[Go inference](https://go.dev/ref/spec#Type_inference)). A Terrum inference
+proposal must define which relations participate and in what order. A
+constraint establishes admissibility, not necessarily `T` for `Parse<T>(text)`
+from `IParsable<T>` alone
 ([C# constraints](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/where-generic-type-constraint)).
-Expected-result inference remains open; typed arguments may infer `T` before a
-contextual literal is constructed, but `F(1)` has no fallback type.
+Expected-result inference remains open. Typed arguments may establish generic
+context before a contextual literal is constructed; numeric literal fallback
+and the unconstrained `F(1)` case follow the accepted
+[language contract](language.md), not this proposal.
 
-Keep enum storage distinct from numeric semantics: ordinary enums allow
-unnamed values; flags and closed unions are explicit. .NET's generic enum
-operations use enum constraints and underlying dispatch, not general numeric
-conformance ([CoreLib `Enum`](https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/System/Enum.cs)).
-For public case sets, distinguish closed exhaustiveness from evolvable sums
-with unknown-case handling. Swift non-exhaustive enums address library
+**Accepted enum baseline; public evolution remains open.** Integer-backed
+enums include unnamed underlying values; `[Flags]` explicitly defines
+bit-set operations. Closed nominal tagged unions have active-payload validity;
+overlapping native layout alone does not establish it. These accepted rules
+keep enum storage distinct from numeric semantics
+([language contract](language.md)). .NET's generic enum operations use enum
+constraints and underlying dispatch, not general numeric conformance
+([CoreLib `Enum`](https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/System/Enum.cs)).
+
+**Public enum evolution (proposal).** For public case sets, distinguish closed
+exhaustiveness from evolvable sums with unknown-case handling. Swift
+non-exhaustive enums address library
 evolution; Kotlin sealed subclasses are package/module scoped
 ([Swift SE-0192](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0192-non-exhaustive-enums.md);
 [Kotlin sealed classes](https://kotlinlang.org/docs/sealed-classes.html)).
-Neither closes integer enums or makes native layout a safe case test. Specify
-unknown-case/version policy; matching also needs one-time evaluation, unique
-result typing, and effects/cleanup.
-Retain **sealed-by-default** concrete types; use interfaces/composition or
-narrow explicit extension points, not implicit virtual overrides.
+Neither closes integer enums or makes native layout a safe case test. Unknown-
+case/version policy and match behavior remain proposals. Concrete types remain
+sealed by default under the canonical [language contract](language.md); that
+accepted default does not settle any of the enum evolution proposals here.
 
-### 1.4 Separate homogeneous parameters from type packs
+### 1.4 Collection-based `params` and callable/type-pack proposals
 
-**Open proposal:** compiler-recognized type packs could avoid a hand-maintained
-`Func` arity ladder, but must distinguish homogeneous from ordered
-heterogeneous parameters and specify per-element binding/ownership/effects,
-constraints, overload ambiguity, metadata, code size, and ABI. .NET has finite
-`Func` arities (16 inputs) and recursive `Tuple<..., TRest>` shapes -- library
-conventions, not a language-level pack ([`Func`](https://learn.microsoft.com/en-us/dotnet/api/system.func-17),
-[`Tuple`](https://learn.microsoft.com/en-us/dotnet/api/system.tuple-8)). A
-tuple's structural fields are not automatically a nominal record or transparent
-wrapper. C# `params` accepts a homogeneous collection shape, not a heterogeneous
-pack ([`params`](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/method-parameters#params-modifier)).
-A finite function-type baseline can precede packs; avoid implicit argument
-tuples or overload/ABI changes. Packs must not conflate bare
-`Task<void>` (no result) with erased `TextSpan<void>`, nor discard a unique
-`Task<T>` result and cleanup. A typed text projection checks recorded encoding
-and preserves backing/lifetime dependencies; typed `AsSpan()` drops text
-validity only, including for empty views.
+**Agreed collection-based `params` direction:** `params Collection<T>` with a
+common `Span<T>` form, using ordinary collection construction and element
+copy/move rules. The existing-collection versus expanded-element binding rule
+remains open. This mechanism is distinct from the following unapproved
+callable/tuple proposals.
+
+**Unapproved bounded-subset recommendation:** keep homogeneous `params`
+separate from heterogeneous type packs. A first subset could provide
+compiler-recognized `fnptr`, single-cast `delegate`, and ordered `tuple` type
+families at arbitrary supported arities, while each concrete function
+signature and tuple has a fixed, closed shape. This avoids a maintained
+`Func` arity ladder without introducing user-defined type-pack expansion, pack
+indexing/folds, or forwarding. .NET's finite `Func`
+arities and recursive `Tuple<..., TRest>` are library conventions, not a
+language-level pack ([`Func`](https://learn.microsoft.com/en-us/dotnet/api/system.func-17),
+[`Tuple`](https://learn.microsoft.com/en-us/dotnet/api/system.tuple-8)).
+
+Agreed parameter-model examples:
+
+```terrum
+void Consume<T>(params Collection<T> items);
+int32 Sum(params Span<int32> values);
+```
+
+The following callable/type-family spellings are **recommendations, not
+accepted syntax**:
+
+```terrum
+fnptr<int32, bool, int64> parse;  // (int32, bool) -> int64; result last
+delegate<int32, int32> map;       // int32 -> int32; one target/environment
+tuple<int32, bool> state;         // ordered, heterogeneous inline values
+
+interface IMapper<TInput, TOutput>
+{
+    TOutput Invoke(TInput value);      // readonly functor receiver
+}
+
+interface IStatefulMapper<TInput, TOutput>
+{
+    mut TOutput Invoke(TInput value);  // requires writable receiver access
+}
+```
+
+Expanded elements initialize new slots; they are not aliases of the caller's
+argument locals. `params` adds no special by-reference parameter mode for
+expanded arguments. An explicit reference type may still be an ordinary
+element value where the normal storage/loan rules permit it. Access uses the
+accepted `mut`/`write` and qualified-`T` rules in §1.1, with existing
+lifetime/storage construction contracts rather than a separate parameter
+system. Whether a call supplying an existing collection binds it as the
+collection argument or expands it as elements remains a rule to specify.
+
+`fnptr` would be a noncapturing raw callable with an explicit managed or native
+ABI and effect contract as appropriate. A delegate would contain one target
+and its environment, not a multicast list; capture, ownership, lifetime,
+boxing, and allocation would be explicit rather than hidden by conversion.
+A tuple would be inline ordered heterogeneous storage, not a parameter pack;
+its Copy eligibility follows all of its elements, not the argument list that
+created it. Its structural fields do not automatically make it a nominal
+record or transparent wrapper, and function arguments are not implicitly
+lowered to a tuple or given a different ABI. Any later pack design must also
+keep bare `Task<void>` (no result) distinct from encoding-erased
+`TextSpan<void>`, and preserve a unique `Task<T>` result and its cleanup.
+Typed text projection still checks the recorded encoding and preserves
+backing/lifetime dependencies; typed `AsSpan()` drops text validity only,
+including for empty views.
+
+Also review ordinary nominal functional interfaces/functors. A source-defined
+type with a known concrete signature can explicitly implement a callable
+protocol without packs. An optional checked `[Callable]` marker could permit
+`f(x)` as notation for a checked `Invoke`, but structural SAM conversion and
+implicit boxing are not recommended. A stateful inline functor needs a
+writable place or `write ref<T>`; a class functor with `mut Invoke` needs a
+`write` handle. Do not make `mut Invoke` silently satisfy a readonly `Invoke`
+contract. Whether to provide one callable protocol or separate readonly and
+mutable protocols, and the marker/notation, remain open; add a special
+signature family only if the concrete use case requires it.
+
+**Open callable type and invocation contracts:** distinguish a function
+signature from a value that stores a callable. One candidate notation is
+`fn<Args..., R>` for a closed signature, with `ptr<fn<...>>` for a raw code
+pointer and `delegate<fn<...>>` for a target plus environment. A flatter
+`func<...>`/`fnptr<...>` family is another candidate. These are alternatives
+for review, not selected syntax; in particular, the relationship between
+`func` and `fn`, and whether pointer nesting is part of the type model, remain
+unresolved.
+
+Calling convention belongs to the callable entry contract, not to `ptr` by
+itself or an inference from pointer representation. A delegate's `Invoke`
+entry ABI can differ from its underlying target's ABI; any adapter must declare
+and preserve the relevant effects and make capture, allocation, and other
+costs explicit. The contract must also distinguish static functions, unbound
+instance methods, and bound instance calls. An unbound method signature needs
+an explicit receiver whose access matches the method contract (for example,
+`C`/`write C` for a class handle or `ref<S>`/`write ref<S>` for a struct
+receiver); a raw code pointer alone cannot retain a bound receiver, so closed
+instance calls need an explicit environment/context or adapter. Native member
+function pointers are not generally raw code addresses: adjustment thunks and
+virtual dispatch can participate, so no blanket reinterpretation as a code
+pointer is implied.
+
+Formatting handlers remain typed writer streams with declared captures, not
+universal `ToString` or heterogeneous varargs; see §1.2. C variadics are a
+separate foreign-ABI/interop contract, not Terrum `params` or a type pack.
+Before any later pack proposal, settle collection-versus-expanded binding,
+constraints and overload ambiguity, per-element effects/ownership, tuple and
+callable representation, callable entry and target ABIs, static/unbound/bound
+instance representation, metadata/code-size costs, and managed/native ABI.
 
 ## 2. Make representation and cost visible
 
@@ -253,8 +403,10 @@ SIMD comparisons return a declared mask; whole-vector equality may return
 `bool`. Tails, inactive lanes, alignment, overlap, reduction order, CPU/OS
 selection, scalable ABI, and suspension restrictions are correctness contracts.
 Capabilities apply to the complete qualified form: `[Copy]` on a payload does
-not make `own T` or a borrowed `ref<T>` copyable. Access only attenuates:
-`mut Span<T>` may yield a read view, never a writable upgrade from one.
+not make `own<T>` or a borrowed `ref<T>` copyable. Access only attenuates:
+`mut Span<T>` permits descriptor rebinding but does not grant writable slots;
+it may yield a read view, never a writable upgrade from one. A writable
+projection requires existing write authority on the relevant backing.
 
 ### 2.3 Iteration and allocation are lifetime contracts
 
@@ -607,13 +759,15 @@ trades generality for simplicity.
 
 | Concern raised | Shared response in this review | Status |
 |---|---|---|
-| Mutable-array variance and root arrays | Invariant writes; any read projection needs checked representation, access, and lifetime rules | Proposed refinement / open |
-| Universal object defaults | Opt-in equality/hash/format; diagnostic identity stays distinct from user operations | Proposed refinement |
-| Generic APIs, witnesses, associated results, erasure, inference, overloads | Explicit dynamic boundary; selected witnesses and versioned resolution; defined inference order | Proposal / refinement |
-| Generic array/enum capabilities | Request checked nominal properties; separate enum storage, numeric behavior, flags, and exhaustiveness | Refinement |
+| Mutable-array variance and root arrays | Writable storage is invariant; any readonly projection needs checked representation, access, and lifetime rules | Accepted invariant; projection/root-array policy open |
+| Universal object defaults | No universal object methods or automatic capabilities; opt-in equality/hash/format and separate diagnostic identity | Accepted direction |
+| Nominal witnesses and capability predicates | Checked `IFoo` witnesses remain distinct from `[Copy]`, storage, and family capabilities | Accepted baseline |
+| Generic/erased APIs, conditional witnesses, associated results, erasure, inference, overloads | Remaining API and type-system policy choices | Proposal / refinement |
+| Generic array/enum capabilities | Preserve accepted enum storage/unnamed-value semantics and independent capability predicates; array projection and public case evolution remain open | Accepted baseline / open proposals |
 | Layout and wrappers | Opaque by default; transparent/native layouts preserve ABI, validity, and ownership | Accepted direction / open proposal |
 | Sealed concrete types | Preserve; favor interfaces/composition and explicit extension points | Accepted direction |
-| `Func`/`Tuple` packs | Heterogeneous packs need per-element ownership/effects and ABI; no implicit tuple lowering | Open |
+| Collection-based `params` | Ordinary collection construction and per-element copy/move; existing-collection versus expansion binding remains open | Agreed direction / binding rule open |
+| `fnptr`, delegate, tuple, and packs | Fixed closed callable/tuple families are a bounded recommendation; signature-versus-value types, ABI, and receiver representation remain open; no user-defined pack expansion | Unapproved recommendation / open |
 | Tensor, multidimensional, SoA/AoS | Separate shape, strides, storage, and truthful projections | Proposal |
 | Discards | One evaluation, vacancy, and cleanup rule across contexts | Refinement |
 | Literals, consteval, operators, compound assignment | Bounded, hygienic, versioned constant evaluation distinct from runtime witnesses | Open |
@@ -674,9 +828,9 @@ re-roots or erases its original ownership/backing dependency.
 
 ```text
 value: int32 = 42
-own Text result = $"item={value}"
+own<val<Text>> result = $"item={value}"
 
-resolve own Text's builder
+resolve own<val<Text>>'s builder
 evaluate/capture holes once, left-to-right
 drain typed literal/value segments into private builder state
 validate/freeze -> publish result

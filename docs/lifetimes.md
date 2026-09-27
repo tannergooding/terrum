@@ -1,10 +1,11 @@
 # Lifetime and access contracts
 
-This document specifies the accepted direction for checked loans, views and published member contracts, with **provisional notation** where the grammar is unresolved. It refines [language](language.md); [libraries](libraries.md) illustrates the span/text/collection protocols. Compact unique locals, explicit named moves, synchronous readonly receiver loans,
+This document specifies the accepted direction for checked loans, views and published member contracts, with **provisional notation** where the grammar is unresolved. It refines [language](language.md); [libraries](libraries.md) illustrates the span/text/collection protocols. Declaration places default to fixed/readonly: `mut` grants place rebinding or a writable receiver, while `write` grants capability through a reference/view. A writable referent is not created by changing the local descriptor, and neither qualifier overrides immutable fields or nominal access. The canonical representation forms are `ref<T>`, `ptr<T>`, `box<T>`, `val<T>`, and `own<T>`; `mut` is not a generic type-argument qualifier. Compact unique locals, explicit named moves, synchronous readonly receiver loans,
 the exclusive, call-bounded receiver loan of `OwnedInt32Buffer.Set` and
 `TryAppend`, and nonescaping lexical `ReadonlyInt32BufferView` locals obtained
 through `OwnedInt32Buffer.Slice`, and exclusive lexical
-`mut MutableInt32BufferView` locals obtained through `SliceMutable`, have
+`mut MutableInt32BufferView` locals obtained through `SliceMutable` (legacy
+implementation spelling, not the target `write` qualifier), have
 executable ownership checks today
 ([implementation](implementation.md)); a slice cannot be copied, passed,
 stored or returned, and is not the proposed generic `Span<T>`.
@@ -41,7 +42,8 @@ These relationships are not a single `scoped` bit. One result may borrow receive
 | Example | Required relationship |
 |---|---|
 | `InlineArray<T, N>` element loan | Receiver's inline storage and matched read/write authority |
-| `Span<T>` slice or its explicit `IContiguousSequence<T>.AsSpan()` | Original backing, bounds, access and guard, not automatically the local span descriptor place |
+| `Span<T>` slice or its explicit `IContiguousSequence<T>.AsSpan()` | Original backing, bounds, access and guard, not automatically the local span descriptor place; `mut Span<T>` only rebinds the descriptor, while `write Span<T>` lends writable slots |
+| `Span<write C>` | Readonly element slots containing independently writable class-handle capabilities; distinct from `write Span<C>` |
 | Known-code-unit `TextSpan<TCodeUnit>.AsSpan()` | Same backing, immutable read permission and validity-loss only; no writable alias |
 | Typed text erasure to `TextSpan<void>` and successful typed projection | Actual encoding, validity, backing/root/lease and access retained; no receiver-storage borrow invented or cleanup obligation duplicated |
 | Managed inline array elements | Tracked interior location and containing GC root/relocation |
@@ -50,7 +52,19 @@ These relationships are not a single `scoped` bit. One result may borrow receive
 | `SpanTextWriter<T>` storing a destination | Declared captured exclusive loan in writer; not the default noncapturing synchronous parameter |
 | Async write using an argument view | Operation-bounded capture until completion and cleanup; returned views inside the completed task retain their independent dependencies |
 
-The public nominal type is still **one `Span<T>`**, not `Span<T, TOwner>`. A scoped data/length descriptor can keep its owner/guard live separately; a stored, returned or erased view needs a verified source relationship or a defined fixed-size representation with opaque anchors. Owner-dependent per-instance sizes, implicit per-slice allocations, per-slice retains and a global pointer-to-owner registry are not defaults. A tracked managed interior may move with GC; native allocations containing managed elements additionally need scanning/barriers. Aliased managed interiors cannot claim exclusive-loan optimizer facts. The exact anchor layout, source selector and calling convention are open and must not be guessed by a hosted lowering.
+The public nominal type is still **one `Span<T>`**, not `Span<T, TOwner>`. Its
+unqualified form is readonly; `mut Span<T>` permits descriptor rebinding,
+`write Span<T>` grants writable slots, and a `write` element type grants a
+separate referent capability. A scoped data/length descriptor can keep its
+owner/guard live separately; a stored, returned or erased view needs a verified
+source relationship or a defined fixed-size representation with opaque
+anchors. Owner-dependent per-instance sizes, implicit per-slice allocations,
+per-slice retains and a global pointer-to-owner registry are not defaults. A
+tracked managed interior may move with GC; native allocations containing
+managed elements additionally need scanning/barriers. Aliased managed interiors
+cannot claim exclusive-loan optimizer facts. The exact anchor layout, source
+selector and calling convention are open and must not be guessed by a hosted
+lowering.
 
 ### Receiver-scoped versus receiver-unscoped
 
@@ -78,16 +92,38 @@ Public relationships come from declarations, language-versioned defaults and inh
 | Synchronous borrowed input | No retention beyond call, except its explicitly declared result relationship |
 | View result with one eligible receiver/input | Broad source relationship: result may borrow that source's own storage **or** forward its backing/access dependencies; no unrelated capture |
 | Multiple eligible sources | Explicit permitted source set; conservatively bound by **every** listed source, not by which branch today's body selects |
-| `bool` plus `out` | Outputs publish on true; false leaves destinations vacant and cleans partial results |
-| Other `out` | Initialize on every normal return absent explicit success policy |
+| `init ref<T>` without a conditional status | Destination starts vacant, is unreadable until complete initialization, and is initialized on every normal return |
+| Conditional `init ref<T>` | Publish only when the declared success condition holds; false/exception leaves the destination vacant and cleans partial initialization |
 | Declared `Task<TResult>` | May retain borrowed inputs/receiver until completion and required cleanup, whether or not the method is `async` |
 | Implemented interface/registered builder | Inherit the source, access, output and effect contract; no implementation-by-implementation repetition |
 
 An eligible view source can provide backing/borrowed access; outputs and independent scalars do not automatically qualify. A numeric parser's result is independent; a parser returning a view of input text retains the input dependency. A parameterless projection generally uses its receiver. An independent freshly allocated result needs its own owner/root and cost contract. More than one eligible input is not resolved by inspecting current control flow. Returning a view does **not** authorize storing it in an unrelated receiver. Constructor capture, exported callback factories and registrations need a declared destination/boundary. Local closures carry actual capture relationships; consuming a unique owner retains its ordinary transfer/cleanup rules rather than becoming an invisible borrowed capture.
 
-Working annotations `[ViewOf(From = nameof(source))]`, `[ViewOf(Access.Write)]`, `[Captures(nameof(value))]` and `[OutputWhen(nameof(result), Status.Success)]` express **exceptions to defaults**, not unchecked assertions, and their spelling is provisional. Writable guard projections lend existing exclusive authority and block overlapping extraction, not upgrade a readonly guard. Conditional failure/exception cleanup leaves `out` vacant; no `default(T)` is synthesized. A success-status local can carry an output fact to a later branch. Async `out` targets operation-owned or valid rooted caller storage through completion, never a borrowed startup stack address smuggled into a suspended task. Fault capture requires trusted containment.
+Working annotations `[ViewOf(From = nameof(source))]`,
+`[ViewOf(Access.Write)]`, `[Captures(nameof(value))]` and
+`[OutputWhen(nameof(result), Status.Success)]` express **exceptions to
+defaults**, not unchecked assertions, and their spelling is provisional.
+Writable guard projections lend existing exclusive authority and block
+overlapping extraction; they do not upgrade a readonly guard. Conditional
+failure/exception cleanup leaves an initialization destination vacant; no
+`default(T)` is synthesized. A success-status local can carry an output fact to
+a later branch. Async initialization targets operation-owned or valid rooted
+caller storage through completion, never a borrowed startup stack address
+smuggled into a suspended task. Fault capture requires trusted containment.
+The bounded executable profile still implements the legacy `bool`/`out`
+conditional-publication contract. The target notation is `init ref<T>`; migrate
+declaration and call sites coherently rather than treating `init ref` as a
+spelling alias for arbitrary writable `ref<T>`.
 
-Matched access follows the relevant source through wrappers, interface dispatch, generic calls, reflection and generated adapters. A structural readonly list may yield independently mutable element handles, but not writable list-owned node/link projections; graph-read additionally restricts references traversed from its root. Readonly-to-immutable promotion needs checked freeze/publication excluding all writable aliases. Purity and stable reads are separate contracts; a `[Pure]` call on mutable input is not automatically memoizable.
+Matched access follows the relevant source through wrappers, interface dispatch,
+generic calls, reflection and generated adapters. A structural readonly list may
+yield independently writable class-handle capabilities only when those
+capabilities are present in its element type; that does not grant writes to
+list-owned slots, nodes or links. Deep graph-read is a future proposal, not the
+v1 access model; it could restrict references traversed from a root. A
+separate immutable-graph/freeze contract would need checked publication
+excluding all writable aliases. Purity and stable reads are separate
+contracts; a `[Pure]` call on mutable input is not automatically memoizable.
 
 Store both the **broad interface contract** and the **resolved published implementation/member refinement**, including conditional relationships, source selectors, capture destinations, root/disposal requirements, rule versions and ABI layouts. A witness must satisfy the interface requirement and the member's claimed refinement must be checked against its body. An independently compiled generic caller sees the broad interface contract; only an explicit checked conditional contract can expose a type/witness refinement when its condition is proven. Devirtualization, specialization and implementation pinning cannot change source validity or substitute body inference for a published relationship. Tightening an interface from permission to borrow receiver storage to a no-borrow requirement rejects existing implementations that published that permission, even if today's bodies do not use it. Broadening a published scoped implementation to permit receiver-storage borrowing invalidates existing callers that relied on its no-borrow guarantee; it requires a breaking revision or explicit checked adapter. Dynamic binding and AOT/JIT replacement checks must reject added capture, weakened access, changed view source, new cleanup obligation or invalid refinement, not merely compare CLR-signature shapes. Compatible changes may be replaced contract-bound; stronger implementation-only facts are not implicitly upgraded in consumer metadata. ABI layout and roll-forward need explicit version-aware validation.
 
@@ -102,8 +138,10 @@ argument fails before invocation. A `bool`/`out` owner is published only on
 true; on false or exceptional exit its completed private output is dropped
 without manufacturing a readable caller value. Existing owners passed as
 output destinations are dropped only when the call begins, not when earlier
-arguments are still being evaluated. A successful `out var` gains its own
-lexical cleanup scope. User-defined unique receiver loans remain synchronous
+arguments are still being evaluated. In the bounded executable profile, a
+successful `out var` gains its own lexical cleanup scope; the target
+`init ref<T>` migration must preserve this publication and cleanup behavior.
+User-defined unique receiver loans remain synchronous
 and readonly and cannot be stored, consumed or passed as values. Cleanup is an explicit
 `[NoThrow] [Cleanup] public void Close()`-shaped contract on a unique
 instance method; the name itself has no special meaning. Compact owners can

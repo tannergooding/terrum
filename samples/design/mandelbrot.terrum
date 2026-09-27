@@ -1,4 +1,6 @@
-// Terrum source sketch. Writes an ASCII PBM image to stdout.
+// DESIGN ONLY: parameter declarations use target init ref<T>; body call sites
+// retain legacy out expressions as schematics until invocation syntax settles.
+// Writes an ASCII PBM image to stdout.
 using Terrum;
 
 public static int32 Main(Span<TextSpan> args)

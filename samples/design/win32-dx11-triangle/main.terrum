@@ -98,8 +98,10 @@ public static int32 Main(Span<TextSpan> args)
         using var swap = swapOutput.Take();
 
         using mut var factoryOutput = new ComSlot<IDXGIFactory>();
+        // COM's `void**` output ABI writes the pointer slot only. The cast does
+        // not establish access through the returned interface pointer.
         NativeError.ThrowIfFailed(swap.Pointer->GetParent(
-            IDXGIFactory.IidPointer, (void**)factoryOutput.Address()), "GetParent");
+            IDXGIFactory.IidPointer, (write ptr<ptr<void>>)factoryOutput.Address()), "GetParent");
 
         using var factory = factoryOutput.Take();
         NativeError.ThrowIfFailed(factory.Pointer->MakeWindowAssociation(
@@ -107,7 +109,7 @@ public static int32 Main(Span<TextSpan> args)
 
         using mut var backBufferOutput = new ComSlot<ID3D11Texture2D>();
         NativeError.ThrowIfFailed(swap.Pointer->GetBuffer(
-            0, ID3D11Texture2D.IidPointer, (void**)backBufferOutput.Address()), "GetBuffer");
+            0, ID3D11Texture2D.IidPointer, (write ptr<ptr<void>>)backBufferOutput.Address()), "GetBuffer");
 
         using var backBuffer = backBufferOutput.Take();
 
@@ -241,7 +243,7 @@ public static int32 Main(Span<TextSpan> args)
     }
 }
 
-private static unsafe ComOwner<ID3DBlob> CompileShader(char16* path, char8* entryPoint, char8* target)
+private static unsafe ComOwner<ID3DBlob> CompileShader(ptr<char16> path, ptr<char8> entryPoint, ptr<char8> target)
 {
     using mut var code = new ComSlot<ID3DBlob>();
     using mut var diagnostics = new ComSlot<ID3DBlob>();

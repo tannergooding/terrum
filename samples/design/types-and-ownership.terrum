@@ -1,4 +1,7 @@
-// Terrum source sketch.
+// DESIGN ONLY: parameter declarations use target init ref<T>; body call sites
+// retain legacy out expressions as schematics until invocation syntax settles.
+// own<val<Text>> is the native inline-payload direction; construction/conversion/
+// cleanup syntax and lifecycle support are not specified or claimed implemented.
 using Terrum;
 
 public struct Position
@@ -13,7 +16,7 @@ public struct Position
     }
 }
 
-public class Counter
+public mut class Counter
 {
     public mut int32 Value;
 
@@ -38,7 +41,7 @@ public static void Finish(Job job)
     Terminal.WriteLine(job.Id);
 }
 
-public static bool TryRead<T>(TextSpan text, out T value)
+public static bool TryRead<T>(TextSpan text, init ref<T> value)
     where T : IParsable<T>
 {
     return T.TryParse(text, out value);
@@ -51,8 +54,8 @@ public static int32 Main()
 
     Terminal.WriteLine(copiedPosition.X);
 
-    var counter = new Counter(10);
-    var alias = counter;
+    write Counter counter = new Counter(10);
+    write Counter alias = counter;
     alias.Value = 20;
 
     Terminal.WriteLine(counter.Value); // 20: a handle copy, not a payload copy.
@@ -84,7 +87,7 @@ public static int32 Main()
         return 2;
     }
 
-    using own Text priceText = $"{price}";
+    using own<val<Text>> priceText = $"{price}";
     Terminal.WriteLine(priceText.AsSpan());
 
     return 0;

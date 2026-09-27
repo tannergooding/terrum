@@ -1,4 +1,6 @@
-// Terrum source sketch. A deterministic fixture, not a statistical RNG.
+// DESIGN ONLY: a deterministic fixture, not a statistical RNG. `write ref<T>`
+// is the writable parameter form; call-site loan syntax retains legacy
+// spelling below and remains unresolved.
 using Terrum;
 
 public interface IRandom
@@ -11,7 +13,7 @@ public interface ISeedableRandom : IRandom
     mut void Reseed(uint32 seed);
 }
 
-public struct CounterRandom : ISeedableRandom
+public mut struct CounterRandom : ISeedableRandom
 {
     private mut uint32 _next;
 
@@ -34,7 +36,7 @@ public struct CounterRandom : ISeedableRandom
     }
 }
 
-public unique struct DifferentRandom<TRandom> : IRandom
+public mut unique struct DifferentRandom<TRandom> : IRandom
     where TRandom : IRandom, [Sized]
 {
     private mut TRandom _inner;
@@ -52,7 +54,7 @@ public unique struct DifferentRandom<TRandom> : IRandom
     }
 }
 
-public static uint32 Draw<TRandom>(mut ref TRandom random)
+public static uint32 Draw<TRandom>(write ref<TRandom> random)
     where TRandom : IRandom
 {
     return random.NextUInt32();

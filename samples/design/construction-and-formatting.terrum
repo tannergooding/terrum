@@ -1,4 +1,7 @@
-// Terrum source sketch. Target/handler registration and require are working syntax.
+// DESIGN ONLY: parameter declarations use target init ref<T>; body call sites
+// retain legacy out/ref expressions as schematics until invocation syntax settles.
+// Target/handler registration remains provisional; require is working syntax.
+// `own<val<Text>>` shows the native inline-payload direction, not settled lifecycle syntax.
 using Terrum;
 using Terrum.Collections;
 
@@ -13,7 +16,7 @@ public struct Point : IFormattable
         Y = y;
     }
 
-    public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
+    public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter
     {
         require format.IsEmpty;
@@ -23,7 +26,7 @@ public struct Point : IFormattable
 }
 
 [TextTarget(nameof(content))]
-public static void Forward<TContent>(TextWriter destination, TContent content)
+public static void Forward<TContent>(write TextWriter destination, TContent content)
     where TContent : IFormattable
 {
     destination.WriteLine(move content);
@@ -36,7 +39,7 @@ public static int32 Main()
     var point = new Point(x, 4);
     Forward(Terminal.Output, $"point = {ref point}");
 
-    using own Text saved = $"saved = {ref point}";
+    using own<val<Text>> saved = $"saved = {ref point}";
     Terminal.WriteLine(saved.AsSpan());
 
     List<int32> values = [x, 4];

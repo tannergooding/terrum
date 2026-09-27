@@ -1,14 +1,15 @@
-// DESIGN ONLY: family/conditional-member syntax is provisional; this is not
-// an executable example of the P0 syntax-only front end.
+// DESIGN ONLY: family/conditional-member syntax is provisional. Parameter
+// declarations use target init ref<T>; call sites retain legacy out/ref
+// expressions as schematics until target invocation syntax settles.
 using Terrum;
 
-public static bool HasContent<TSequence>(ref TSequence source)
+public static bool HasContent<TSequence>(ref<TSequence> source)
     where TSequence : IContiguousSequence<char8>
 {
     return source.AsSpan().Length != 0;
 }
 
-public static Span<char8> ReadUnits<TSequence>(ref TSequence source)
+public static Span<char8> ReadUnits<TSequence>(ref<TSequence> source)
     where TSequence : IContiguousSequence<char8>
 {
     return source.AsSpan();
@@ -19,7 +20,6 @@ public static int32 Main()
     TextSpan<char8> typed = "hello";
     TextSpan erased = typed.AsTextSpan();
     TextSpan<void> sameErasedMember = erased;
-
     if (erased.IsEmpty || !erased.EqualsOrdinal(typed.AsTextSpan()) ||
         !erased.TryProject<char8>(out var projected) ||
         erased.TryProject<char16>(out var wrongEncoding))

@@ -3,10 +3,12 @@ using Terrum;
 
 namespace Terrum.Collections;
 
+// `mut` applies to writable receiver/storage places; `write Span<T>` lends
+// access to backing slots without changing or rebinding the span descriptor.
 // An allocation-specific capability OWNS the actual backing allocation, its
 // address, byte extent, alignment and release action (including any provider
 // lifetime dependency). Merely retaining an allocator wrapper is not enough.
-public unique struct AllocationLease
+public mut unique struct AllocationLease
 {
     public nuint ByteLength { get; }
     public nuint Alignment { get; }
@@ -16,7 +18,7 @@ public unique struct AllocationLease
 // A move-only, independently valid provider handle for obtaining replacement
 // allocations. Vector owns this context for its entire lifetime; each buffer
 // separately owns its allocation lease. Providers may issue multiple handles.
-public unique struct AllocatorContext
+public mut unique struct AllocatorContext
 {
     public mut AllocationLease Allocate(nuint byteLength, nuint alignment);
     public mut void Dispose();
@@ -26,7 +28,7 @@ public unique struct AllocatorContext
 // EXISTING allocation, never conjures memory from a release-only token.
 // Checked creation verifies capacity * sizeof(T), actual base-address alignment,
 // and any required tracing/write-barrier support for the complete element layout.
-public unique struct Buffer<T>
+public mut unique struct Buffer<T>
     where T : [Sized]
 {
     public nuint Capacity { get; }
@@ -41,12 +43,12 @@ public unique struct Buffer<T>
 
     // Provisional name for an exclusive loan tied to this allocation's lease.
     [ViewOf(Access.Write)]
-    public mut Span<T> GetWriteAccess();
+    public mut write Span<T> GetWriteAccess();
 
     public mut void Clear();
 }
 
-public unique struct Vector<T>
+public mut unique struct Vector<T>
     where T : [Sized], [Copy]
 {
     public nuint Count { get; }

@@ -296,6 +296,15 @@ up to 63 within the ordinary 64-argument receiver/output-inclusive bound.
 It composes with the earlier Copy-argument and loop-transfer features; readers
 of versions through 22 retain the three-input restriction. Native profiles and
 the private managed-leaf dependency policy do not change.
+Version 23 is the current committed writer boundary. A semantic version 24
+capability contract is the next planned migration, not implemented or accepted
+by the current reader/writer. Its access metadata and wire representation are
+not yet specified. The migration must preserve each legacy version's checked
+behavior while conservatively normalizing artifacts into qualified internal
+IR; it must not infer writable authority absent from that artifact's contract.
+The private managed-class implementation boundary and scalar-only public
+exports remain unchanged. Until v24 code and compatibility tests land, no
+version-24 bytes or support should be claimed.
 A consumer importing a unique type must also import the exported NoThrow
 cleanup methods of that type and its owning children. Their cleanup identities
 and Copy/unique distinctions participate in layout and signature compatibility;

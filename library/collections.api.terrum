@@ -3,18 +3,20 @@ using Terrum;
 
 namespace Terrum.Collections;
 
+// `mut` requires writable receiver/storage places. `write` on a returned view
+// exposes existing element-slot authority; generic T retains its qualification.
 [CollectionBuilder(typeof(ListBuilder<>))]
-public class List<T>
+public mut class List<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
-    private mut ManagedBuffer<T> _items;
+    private mut write ManagedBuffer<T> _items;
     private mut nuint _count;
     private mut uint64 _version;
-    private AccessState _access;
+    private write AccessState _access;
 
     public List()
     {
-        _items = ManagedBuffer<T>.Empty;
+        _items = ManagedBuffer<T>.CreateEmpty();
         _count = 0;
         _version = 0;
         _access = new AccessState();
@@ -22,7 +24,7 @@ public class List<T>
 
     public nuint Count => _count;
 
-    public bool TryGet(nuint index, out T value)
+    public bool TryGet(nuint index, init ref<T> value)
     {
         _access.RequireRead();
 
@@ -60,35 +62,35 @@ public class List<T>
     public mut ListWriteAccess<T> GetWriteAccess();
 
     [ViewOf(Access.Write, To = nameof(access))]
-    public mut bool TryGetWriteAccess(out ListWriteAccess<T> access);
+    public mut bool TryGetWriteAccess(init ref<ListWriteAccess<T>> access);
 
     private mut void EnsureCapacity(nuint capacity);
 }
 
-public unique struct ListBuilder<T>
+public mut unique struct ListBuilder<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
     public ListBuilder(nuint capacityHint);
 
     public mut bool TryAdd(T value);
 
-    public mut bool TryBuild(out List<T> value);
+    public mut bool TryBuild(init ref<write List<T>> value);
 }
 
-public unique struct ListWriteAccess<T>
+public mut unique struct ListWriteAccess<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
     // View: this result cannot escape the guard or overlap another writable extraction.
     [ViewOf(Access.Write)]
-    public Span<T> Span { get; }
+    public write Span<T> Span { get; }
 }
 
-public class LinkedListNode<T>
+public mut class LinkedListNode<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
     private mut LinkedList<T>? _owner;
-    private mut LinkedListNode<T>? _previous;
-    private mut LinkedListNode<T>? _next;
+    private mut write LinkedListNode<T>? _previous;
+    private mut write LinkedListNode<T>? _next;
     private mut T _value;
 
     public LinkedListNode(T value)
@@ -101,20 +103,24 @@ public class LinkedListNode<T>
 
     public T Value { get; mut set; }
 
+    // Link traversal preserves the source node's access; a readonly node
+    // cannot expose writable links.
+    [MatchedAccess]
     public LinkedListNode<T>? Previous { get; }
 
+    [MatchedAccess]
     public LinkedListNode<T>? Next { get; }
 }
 
 [CollectionBuilder(typeof(LinkedListBuilder<>))]
-public class LinkedList<T>
+public mut class LinkedList<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
-    private mut LinkedListNode<T>? _first;
-    private mut LinkedListNode<T>? _last;
+    private mut write LinkedListNode<T>? _first;
+    private mut write LinkedListNode<T>? _last;
     private mut nuint _count;
     private mut uint64 _version;
-    private AccessState _access;
+    private write AccessState _access;
 
     public LinkedList()
     {
@@ -127,17 +133,21 @@ public class LinkedList<T>
 
     public nuint Count => _count;
 
+    // Node handles inherit list access so readonly traversal cannot mutate
+    // list-owned values or structural links.
+    [MatchedAccess]
     public LinkedListNode<T>? First { get; }
 
+    [MatchedAccess]
     public LinkedListNode<T>? Last { get; }
 
-    public mut LinkedListNode<T> AddLast(T value);
+    public mut write LinkedListNode<T> AddLast(T value);
 
-    public mut void AddLast(LinkedListNode<T> node);
+    public mut void AddLast(write LinkedListNode<T> node);
 
-    public mut void AddAfter(LinkedListNode<T> anchor, LinkedListNode<T> node);
+    public mut void AddAfter(write LinkedListNode<T> anchor, write LinkedListNode<T> node);
 
-    public mut void Remove(LinkedListNode<T> node);
+    public mut void Remove(write LinkedListNode<T> node);
 
     public mut void Clear();
 
@@ -147,7 +157,7 @@ public class LinkedList<T>
 // Builds privately in source order with a fresh node for each accepted element.
 // Failure/abandonment detaches and releases the partial chain exactly once;
 // TryBuild publishes the completed list and consumes the builder's ownership.
-public unique struct LinkedListBuilder<T>
+public mut unique struct LinkedListBuilder<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
     // Capacity is only a hint, not contiguous-storage or eager-node allocation.
@@ -155,10 +165,10 @@ public unique struct LinkedListBuilder<T>
 
     public mut bool TryAdd(T value);
 
-    public mut bool TryBuild(out LinkedList<T> value);
+    public mut bool TryBuild(init ref<write LinkedList<T>> value);
 }
 
-public unique struct LinkedListCursor<T>
+public mut unique struct LinkedListCursor<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
     public mut bool MoveNext();
@@ -167,17 +177,19 @@ public unique struct LinkedListCursor<T>
 }
 
 // Internal storage contracts; not user-facing collection-policy parameters.
-internal class ManagedBuffer<T>
+internal mut class ManagedBuffer<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
-    public static ManagedBuffer<T> Empty { get; }
+    // Each list gets fresh zero-capacity storage with write access; this is not
+    // a shared readonly empty singleton that can be upgraded by assignment.
+    public static write ManagedBuffer<T> CreateEmpty();
 
     public T ReadInitialized(nuint index);
 
     public mut void Initialize(nuint index, T value);
 }
 
-internal class AccessState
+internal mut class AccessState
 {
     public AccessState();
 

@@ -14,6 +14,13 @@ are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
+The latest semantic-module writer is version 23; semantic version 24's
+capability contract is planned, not implemented. The class/`ManagedNode`
+readonly/writable access and mutable-receiver migration is in progress, but
+does not change the stated support boundary until its implementation and
+regressions are verified. Existing `native-20` behavior below is the legacy
+executable contract, not proof that the accepted `mut`/`write` model is
+implemented.
 
 `OwnedInt32Buffer.TryCreate` accepts capacities from zero through 1,048,576
 elements. It allocates an eight-byte count/capacity header plus fixed element
@@ -45,13 +52,20 @@ a named mutable owner exclusively. Its `Length`, `Read(index)` and checked
 value expressions each evaluated once. No owner reads, mutation, move,
 replacement or drop, or another view of that owner, can overlap this lexical
 scope. A mutable view cannot be copied, passed, stored or returned.
+These two bounded slice intrinsics have their own lexical verifier rules;
+they are not a general `Span<T>` implementation or evidence that all
+reference/view access uses the accepted `mut`/`write` contract. Their access
+alignment is scheduled separately from the current class/`ManagedNode` batch.
 
 The separate `native-18` proof exposes an opaque aliasable `ManagedNode`
 handle, not a pointer or a native owner. `ManagedNode.TryCreate(value, out
 var node)` returns false without publishing a handle when allocation fails;
 `node.Value`, `SetValue(value)`, `SetNext(other)`, `ClearNext()` and
 `TryGetNext(out var next)` access its scalar payload and one nullable internal
-edge. Copying a handle shares node identity. `ManagedHeap.Collect()` is an
+edge. These intrinsic mutations currently work through a bare handle; the
+`ManagedNode` access path is part of the in-progress migration to explicit
+write capability and writable receiver checks. Copying a handle shares node
+identity. `ManagedHeap.Collect()` is an
 explicit, allocation-free safe point: it traces exact initialized managed
 locals, argument and output staging, return snapshots and suspended callers,
 then sweeps unreachable objects, including cycles. The current private object
@@ -121,8 +135,14 @@ collection; zeroed but uninitialized reference slots are collector-private,
 never readable source defaults. Checked constructor failure frees the
 unpublished allocation before propagating; fatal release failure still terminates.
 Fields are readonly after construction unless declared `mut`; a fixed handle
-binding may mutate writable fields of its referent. Private/internal access and
-partial-construction checks also apply through nested handle fields.
+binding may mutate writable fields of its referent. This is the legacy
+executable class rule: class types do not yet retain the accepted nominal
+mutability, a bare class handle can still write mutable fields, and `mut class`
+plus writable `mut` method receivers are not implemented. The class access
+migration is in progress; the target requires readonly handles by default and
+explicit `write` authority without bypassing field or nominal restrictions.
+Private/internal access and partial-construction checks also apply through
+nested handle fields.
 An assignment selects its target referent before evaluating its value and keeps
 that referent rooted across calls, collection and exceptional cleanup.
 `new C(...)`, inheritance, unique/inline classes,
@@ -595,6 +615,10 @@ assignment facts follow evaluated short-circuit paths, and `require` carries
 the true-path facts forward. Owning outputs remain unsupported. Checked-policy
 exceptional cleanup uses the same out scratch protocol and cannot publish
 partial outputs.
+This bool/`out` behavior is the current bounded implementation contract, not a
+synonym for the accepted `init ref<T>` initialization loan. Declaration and
+call-site migration is scheduled separately; call-site loan syntax remains
+open, and no syntax or implementation support is claimed here.
 
 [`self-host/SourceRange`](../self-host/SourceRange.terrum),
 [`CharacterFacts`](../self-host/CharacterFacts.terrum),

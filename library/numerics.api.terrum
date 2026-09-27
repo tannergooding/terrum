@@ -1,15 +1,19 @@
-// DESIGN ONLY: API signatures with selected implementations. Primitive representation omitted.
+// DESIGN ONLY: target API contracts with selected implementations. Primitive representation omitted.
+// The executable profile currently uses legacy bool/out publication; this
+// inventory shows its planned init ref<T> destination form. Call-site spelling
+// and coordinated migration are not yet implemented.
+// Bodies retain legacy out/ref call expressions as schematic examples.
 namespace Terrum;
 
 public interface IParsable<TSelf>
     where TSelf : IParsable<TSelf>
 {
-    static abstract bool TryParse(TextSpan text, out TSelf value);
+    static abstract bool TryParse(TextSpan text, init ref<TSelf> value);
 }
 
 public interface IFormattable
 {
-    bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
+    bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
 }
 
@@ -89,27 +93,27 @@ public struct int32
         return this;
     }
 
-    public static bool TryParse(TextSpan text, out int32 value);
+    public static bool TryParse(TextSpan text, init ref<int32> value);
 
-    public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
+    public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
 
-    public static bool TryAdd(int32 left, int32 right, out int32 result)
+    public static bool TryAdd(int32 left, int32 right, init ref<int32> result)
     {
         return TryNarrow((int64)left + (int64)right, out result);
     }
 
-    public static bool TrySubtract(int32 left, int32 right, out int32 result)
+    public static bool TrySubtract(int32 left, int32 right, init ref<int32> result)
     {
         return TryNarrow((int64)left - (int64)right, out result);
     }
 
-    public static bool TryMultiply(int32 left, int32 right, out int32 result)
+    public static bool TryMultiply(int32 left, int32 right, init ref<int32> result)
     {
         return TryNarrow((int64)left * (int64)right, out result);
     }
 
-    private static bool TryNarrow(int64 value, out int32 result)
+    private static bool TryNarrow(int64 value, init ref<int32> result)
     {
         if (value < (int64)MinValue || value > (int64)MaxValue)
         {
@@ -164,9 +168,9 @@ public struct float32
 
     public static uint32 ToBits(float32 value);
 
-    public static bool TryParse(TextSpan text, out float32 value);
+    public static bool TryParse(TextSpan text, init ref<float32> value);
 
-    public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
+    public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
 }
 
@@ -188,9 +192,9 @@ public struct decimal32
 
     public int32 GetKeyHashCode();
 
-    public static bool TryParse(TextSpan text, out decimal32 value);
+    public static bool TryParse(TextSpan text, init ref<decimal32> value);
 
-    public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
+    public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
 }
 
@@ -198,6 +202,6 @@ public struct uint32 : IFormattable
 {
     public static uint32 AddWrapping(uint32 left, uint32 right);
 
-    public bool TryFormat<TWriter>(mut ref TWriter writer, TextSpan format)
+    public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
 }
