@@ -338,6 +338,7 @@ public static class SemanticVerifier
                     || (function.IsConstructor && function.IsStatic)
                     || (!function.IsStatic && (function.Variables.IsEmpty
                         || function.Variables[0].Name != "this"
+                        || function.Variables[0].IsOut
                         || ManagedClassTypes.Readonly(function.Variables[0].Type)
                             != (PrimitiveType)(declaringType >= ManagedClassTypes.First
                                 ? declaringType : 100 + declaringType)
@@ -2507,6 +2508,13 @@ public static class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                if (target.DeclaringStruct is not null && !target.IsStatic && !target.IsConstructor
+                    && target.Variables[0].IsMutable
+                    && (int)target.Variables[0].Type is >= 100 and < ManagedClassTypes.First
+                    && call.Arguments[0] is not BoundMutableReceiverLoan)
+                {
+                    throw Invalid();
+                }
                 if (target.IsPrivate)
                 {
                     if (function.DeclaringStruct != target.DeclaringStruct)
@@ -2548,10 +2556,18 @@ public static class SemanticVerifier
                     {
                         if (argument is BoundMutableReceiverLoan mutableLoan)
                         {
-                            if (i != 0 || target.Intrinsic is not (BoundIntrinsic.BufferSet
-                                or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear)
+                            var bufferMutation = target.Intrinsic is BoundIntrinsic.BufferSet
+                                or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear;
+                            var structMutation = target.Intrinsic == BoundIntrinsic.None
+                                && target.DeclaringStruct is not null && !target.IsStatic
+                                && !target.IsConstructor && target.Variables[0].IsMutable
+                                && HasFields(program, mutableLoan.Type)
+                                && !ManagedClassTypes.IsClass(mutableLoan.Type)
+                                && !IsUnique(program, mutableLoan.Type);
+                            if (i != 0 || (!bufferMutation && !structMutation)
                                 || mutableLoan.Variable < 0 || mutableLoan.Variable >= initialized.Length
-                                || mutableLoan.Type != PrimitiveType.OwnedInt32Buffer
+                                || (bufferMutation && mutableLoan.Type != PrimitiveType.OwnedInt32Buffer)
+                                || mutableLoan.Type != target.Variables[0].Type
                                 || function.Variables[mutableLoan.Variable].Type != mutableLoan.Type
                                 || !function.Variables[mutableLoan.Variable].IsMutable
                                 || !initialized[mutableLoan.Variable])

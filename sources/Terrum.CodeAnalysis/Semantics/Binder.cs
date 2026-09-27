@@ -751,10 +751,11 @@ internal sealed partial class Binder
             isInternal = containingType is null;
         }
         if (containingType is not null && isMutable && !constructor
-            && (!TryResolveClass(Qualify(containingType), out var mutableOwner)
-                || !_classes[ManagedClassTypes.ClassIndex(mutableOwner)].IsMutable || isStatic))
+            && (isStatic || (TryResolveClass(Qualify(containingType), out var mutableOwner)
+                ? !_classes[ManagedClassTypes.ClassIndex(mutableOwner)].IsMutable
+                : _structs[(int)ResolveDeclaredType(containingType) - 100].IsUnique)))
         {
-            Report("TRM3001", "A mut method requires a mut class instance receiver.", declaration.Span);
+            Report("TRM3001", "A mut method requires a writable class or non-owning struct receiver.", declaration.Span);
         }
 
         var returnNode = constructor ? null : (SyntaxNode)declaration.Children[operatorDeclaration ? ^5 : ^4];
@@ -949,7 +950,7 @@ internal sealed partial class Binder
         return ErrorExpression(receiver.Span);
     }
 
-    private BoundExpression BindMutableReceiverLoan(SyntaxNode receiver, TextSpan span)
+    private BoundExpression BindMutableReceiverLoan(SyntaxNode receiver, PrimitiveType type, TextSpan span)
     {
         while (receiver.Kind == SyntaxKind.ParenthesizedExpression)
         {
@@ -957,11 +958,11 @@ internal sealed partial class Binder
         }
         if (receiver.Kind == SyntaxKind.NameExpression
             && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token.Text, out var slot)
-            && _variables[slot].Type == PrimitiveType.OwnedInt32Buffer && _variables[slot].IsMutable)
+            && _variables[slot].Type == type && _variables[slot].IsMutable)
         {
-            return new BoundMutableReceiverLoan(slot, PrimitiveType.OwnedInt32Buffer, span);
+            return new BoundMutableReceiverLoan(slot, type, span);
         }
-        Report("TRM3023", "Native buffer mutation requires a named mutable owner.", span);
+        Report("TRM3023", "Mutation requires a named mutable receiver place.", span);
         return ErrorExpression(span);
     }
 
@@ -992,7 +993,8 @@ internal sealed partial class Binder
                 new BoundBlock([], span), span) { IsMutable = writable };
         }
 
-        var owner = writable ? BindMutableReceiverLoan((SyntaxNode)callee.Children[0], callee.Span)
+        var owner = writable ? BindMutableReceiverLoan((SyntaxNode)callee.Children[0],
+                PrimitiveType.OwnedInt32Buffer, callee.Span)
             : BindReceiverLoan((SyntaxNode)callee.Children[0], PrimitiveType.OwnedInt32Buffer);
         var start = BindExpression((SyntaxNode)arguments[0].Children[0], PrimitiveType.Int32);
         var length = BindExpression((SyntaxNode)arguments[1].Children[0], PrimitiveType.Int32);
@@ -1211,7 +1213,11 @@ internal sealed partial class Binder
                     return new BoundBlock([], node.Span);
                 }
 
-                if (!_variables[slot].IsMutable)
+                if (slot == 0 && _hasReceiver && !_constructor)
+                {
+                    Report("TRM3008", "A method cannot rebind its receiver.", token.Span);
+                }
+                else if (!_variables[slot].IsMutable)
                 {
                     Report("TRM3008", $"Variable '{token.Text}' is immutable.", token.Span);
                 }
@@ -2083,7 +2089,9 @@ internal sealed partial class Binder
                     ? ManagedClassTypes.Writable(ResolveDeclaredType(ownerName!))
                     : ResolveDeclaredType(ownerName!));
             bound.Add(signature.External?.Intrinsic is BoundIntrinsic.BufferSet or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear
-                ? BindMutableReceiverLoan(receiver, receiver.Span)
+                ? BindMutableReceiverLoan(receiver, PrimitiveType.OwnedInt32Buffer, receiver.Span)
+                : signature.IsMutable && IsStruct(receiverType)
+                    ? BindMutableReceiverLoan(receiver, receiverType, receiver.Span)
                 : IsUnique(receiverType) && !signature.IsCleanup
                     ? BindReceiverLoan(receiver, receiverType)
                     : BindExpression(receiver, receiverType));
@@ -2097,7 +2105,11 @@ internal sealed partial class Binder
                     ?? (signature.IsMutable && IsClass(ResolveDeclaredType(ownerName!))
                         ? ManagedClassTypes.Writable(ResolveDeclaredType(ownerName!))
                         : ResolveDeclaredType(ownerName!));
-                bound.Add(IsUnique(receiverType) && !signature.IsCleanup
+                bound.Add(signature.IsMutable && IsStruct(receiverType)
+                    ? _variables[0].IsMutable
+                        ? new BoundMutableReceiverLoan(0, receiverType, node.Span)
+                        : ErrorMutableReceiver(node.Span)
+                    : IsUnique(receiverType) && !signature.IsCleanup
                     ? new BoundReceiverLoan(0, receiverType, node.Span)
                     : BindImplicitReceiver(receiverType, node.Span));
                 receiverCount = 1;
@@ -2142,7 +2154,7 @@ internal sealed partial class Binder
                 var slot = declares ? AddVariable(outName.Text, expectedParameter.Type, false, outName.Span)
                     : TryFindVariable(outName.Text, out var existing) ? existing : -1;
                 if (slot < 0 || _variables[slot].Type != expectedParameter.Type
-                    || (!declares && !_variables[slot].IsMutable))
+                    || (!declares && (!_variables[slot].IsMutable || (_hasReceiver && slot == 0))))
                 {
                     Report("TRM3011", "Output target must be a mutable local of matching type.", argument.Span);
                     bound.Add(ErrorExpression(argument.Span));
@@ -2234,6 +2246,12 @@ internal sealed partial class Binder
         var receiver = new BoundRead(0, _variables[0].Type, span);
         return ManagedClassTypes.IsWritable(receiver.Type) && ManagedClassTypes.Readonly(receiver.Type) == type
             ? new BoundReadonlyProjection(receiver, type, span) : receiver;
+    }
+
+    private BoundConstant ErrorMutableReceiver(TextSpan span)
+    {
+        Report("TRM3023", "Mutation requires a mutable receiver place.", span);
+        return ErrorExpression(span);
     }
 
     private void CheckFieldAccess(PrimitiveType type, int field, TextSpan span)

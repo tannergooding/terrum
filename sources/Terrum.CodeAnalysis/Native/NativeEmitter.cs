@@ -1092,7 +1092,8 @@ internal sealed partial class PeCompiler
     {
         var function = _program.Functions[_currentFunction];
         return function.DeclaringStruct is not null && !function.IsConstructor && !function.IsCleanup
-            && !function.IsStatic && IsUnique(function.Variables[0].Type);
+            && !function.IsStatic && (IsUnique(function.Variables[0].Type)
+                || (IsStruct(function.Variables[0].Type) && function.Variables[0].IsMutable));
     }
 
     private void EmitUniqueFieldPlace(BoundExpression expression)
@@ -1686,7 +1687,37 @@ internal sealed partial class PeCompiler
                         destination += field.Offset;
                     }
                     Expression(fieldAssignment.Value, 0);
-                    if (IsIndirect(field.Type))
+                    if (fieldAssignment.Variable == 0 && IsBorrowedReceiver())
+                    {
+                        StoreValue(Spill(0), field.Type);
+                        _code.Load64(Slot(0));
+                        _code.PointerOffset(destination - Slot(0));
+                        _code.Bytes(0x48, 0x89, 0xC2);
+                        LoadValue(Spill(0), field.Type);
+                        if (IsIndirect(field.Type))
+                        {
+                            _code.CopyMemory(field.Size);
+                        }
+                        else
+                        {
+                            switch (field.Size)
+                            {
+                                case 1:
+                                    _code.Bytes(0x88, 0x02);
+                                    break;
+                                case 2:
+                                    _code.Bytes(0x66, 0x89, 0x02);
+                                    break;
+                                case 4:
+                                    _code.Bytes(0x89, 0x02);
+                                    break;
+                                default:
+                                    _code.Bytes(0x48, 0x89, 0x02);
+                                    break;
+                            }
+                        }
+                    }
+                    else if (IsIndirect(field.Type))
                     {
                         CopyToFrame(destination, field.Size);
                     }
@@ -1992,8 +2023,19 @@ internal sealed partial class PeCompiler
                 _code.PatchRelative(patternDone, _code.Position);
                 break;
             case BoundRead read:
-                LoadValue(_program.Functions[_currentFunction].Variables[read.Variable].IsOut
-                    ? OutSlot(read.Variable) : Slot(read.Variable), read.Type);
+                if (read.Variable == 0 && IsBorrowedReceiver() && !IsUnique(read.Type))
+                {
+                    _code.Load64(Slot(0));
+                    if (!IsIndirect(read.Type))
+                    {
+                        _code.LoadPointerField(0, Size(read.Type));
+                    }
+                }
+                else
+                {
+                    LoadValue(_program.Functions[_currentFunction].Variables[read.Variable].IsOut
+                        ? OutSlot(read.Variable) : Slot(read.Variable), read.Type);
+                }
                 break;
             case BoundViewLength length:
                 _code.Load(Slot(length.Variable) + 8);
@@ -2025,7 +2067,14 @@ internal sealed partial class PeCompiler
                 EmitUniqueFieldPlace(fieldLoan.Place);
                 break;
             case BoundMutableReceiverLoan mutableLoan:
-                _code.Address(OwnerPlace(mutableLoan.Variable));
+                if (mutableLoan.Variable == 0 && IsBorrowedReceiver())
+                {
+                    _code.Load64(Slot(0));
+                }
+                else
+                {
+                    _code.Address(OwnerPlace(mutableLoan.Variable));
+                }
                 break;
             case BoundFieldRead fieldRead:
                 if (ManagedClassTypes.IsClass(fieldRead.Receiver.Type))

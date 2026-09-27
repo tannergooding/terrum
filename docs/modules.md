@@ -327,14 +327,22 @@ up to 63 within the ordinary 64-argument receiver/output-inclusive bound.
 It composes with the earlier Copy-argument and loop-transfer features; readers
 of versions through 22 retain the three-input restriction. Native profiles and
 the private managed-leaf dependency policy do not change.
-Semantic version 24 is the current managed-access contract. Newly compiled
-managed programs use v24; readers normalize private managed artifacts from
+Semantic version 24 carries the managed class/`ManagedNode` access contract.
+Semantic version 25 adds a distinct `MutReceiver` contract for persisted,
+non-exported mutating methods on non-owning compact structs. Source visibility
+may be public or private; methods can be invoked through named mutable locals
+or forwarded through an existing `this`. Older headers reject methods
+requiring this contract. Version selection follows use of the v25 contract,
+not managedness; programs that do not require it retain their existing
+versions and bytes. The ordinary readonly/by-value receiver ABI is unchanged.
+Public scalar entry wrappers may call non-exported mutating methods; source
+`public` visibility does not expose a public mutating-receiver ABI, and private
+helpers remain private. Readers normalize private managed artifacts from
 versions 18 through 23 into explicitly qualified internal IR, translating
 legacy class/`ManagedNode` mutation authority into `write` exactly where it was
 previously granted, without widening the contract. A v18-v23 header containing
-v24 write identifiers is rejected. Nonmanaged programs keep
-their historical versions and bytes. The native physical handle ABI, private
-managed-class boundary and scalar-only public exports remain unchanged.
+v24 write identifiers is rejected. The native physical handle ABI, private managed-class
+boundary and scalar-only public exports remain unchanged.
 A consumer importing a unique type must also import the exported NoThrow
 cleanup methods of that type and its owning children. Their cleanup identities
 and Copy/unique distinctions participate in layout and signature compatibility;

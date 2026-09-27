@@ -468,7 +468,7 @@ public sealed record BoundMove(int Variable, PrimitiveType Type, TextSpan Span) 
 /// <summary>A synchronous, nonescaping receiver loan; never a source value.</summary>
 public sealed record BoundReceiverLoan(int Variable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
-/// <summary>A reserved, nonescaping exclusive loan of a named mutable native buffer owner.</summary>
+/// <summary>A reserved, nonescaping exclusive loan of a named mutable receiver place.</summary>
 public sealed record BoundMutableReceiverLoan(int Variable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
 /// <summary>Reads the fixed length of an active lexical native buffer view.</summary>

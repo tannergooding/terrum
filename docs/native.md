@@ -15,11 +15,16 @@ the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
 Semantic version 24 carries the validated class/`ManagedNode` access
-capability contract. New managed programs use v24; readers normalize private
-managed artifacts from versions 18 through 23 into qualified internal IR,
-translating prior class/`ManagedNode` mutation authority to explicit `write`
-exactly where granted. Nonmanaged artifacts retain their historical versions
-and bytes, and a legacy header cannot contain v24 write identifiers.
+capability contract. Semantic version 25 adds the distinct `MutReceiver`
+contract for persisted, non-exported mutating methods on non-owning compact
+structs. Source visibility may be public or private. Named mutable locals and
+forwarding through an existing `this` are supported receiver places; older
+headers reject methods requiring this contract. Version selection follows use
+of `MutReceiver`, not managedness, so programs that do not require v25 retain
+their existing versions and bytes. Readers normalize private managed artifacts
+from versions 18 through 23 into qualified internal IR, translating prior
+class/`ManagedNode` mutation authority to explicit `write` exactly where
+granted. A legacy header cannot contain v24 write identifiers.
 The `native-18` through `native-20` labels below identify bounded runtime
 features; they do not imply that general references/views, ownership forms, or
 managed public ABI are implemented.
@@ -179,15 +184,30 @@ Earlier semantic versions continue rejecting aggregate factory arguments.
 Version 23 admits constructor signatures with more than three inputs; earlier
 versions continue rejecting that arity. These remain private implementation
 details behind unchanged scalar exports.
-Semantic version 24 adds the managed access capability contract for new
-managed programs. Its readers normalize private managed artifacts from versions
-18 through 23 into explicitly qualified IR without adding authority, and reject
-v24 write identifiers under older headers. Nonmanaged artifacts keep their
-historical version and bytes. The native physical handle ABI, image-private
-managed state and scalar-only public exports are unchanged. Primitive
-`OwnedInt32Buffer` views keep their separate legacy access rules; mutable
-struct receiver writeback and general `ref<T>`/view/`own<T>`/`init ref<T>`
-call-site implementations remain unsupported.
+Semantic version 24 carries the managed class/`ManagedNode` access contract;
+its readers normalize private managed artifacts from versions 18 through 23
+into explicitly qualified IR without adding authority, and reject v24 write
+identifiers under older headers. Semantic version 25 adds a separate
+`MutReceiver` contract for persisted, non-exported mutating methods on
+non-owning compact structs. Methods may be source-public or private, but source
+visibility does not expose a public mutating-receiver ABI. A receiver borrows a
+named mutable caller place, or is forwarded through an existing `this`, and
+writes the original storage, including before a checked exception; readonly
+methods and by-value arguments retain copy behavior, and the ordinary
+readonly/by-value receiver ABI is unchanged. The verifier rejects forged
+mutable receiver loans from immutable places, while nested field writes inside
+a valid receiver borrow are allowed. Public scalar entry wrappers may call
+non-exported mutating methods, including source-public methods; private helper
+methods remain usable. Older headers reject the v25 contract. Version
+selection follows use of `MutReceiver`, not managedness, so programs not
+requiring it retain their existing versions and bytes. Unique/owning receivers,
+temporary receivers, nested-field receiver paths such as
+`outer.Inner.Mutate()`, rebinding `this`, and public mutating-receiver ABI
+remain unsupported. The native physical handle ABI, image-private managed
+state and scalar-only public exports are unchanged. Primitive
+`OwnedInt32Buffer` views keep their separate legacy access rules; general
+`ref<T>`/view/`own<T>`/`init ref<T>` call-site implementations remain
+unsupported.
 The [class sample](../samples/native/managed-classes.terrum)
 returns 42 through shared aliases and heterogeneous managed edges. The independent
 C heap probe checks multiple-edge liveness, pointer-shaped scalar nonroots,

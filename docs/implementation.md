@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-13, native-10 through native-20, semantic v24
+## Current boundary: syntax-13, native-10 through native-20, semantic v25 receiver contract
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -10,22 +10,38 @@ verified structured operations. A clean syntax result is deliberately not a
 valid-program claim: `var x = 1;` parses but semantic analysis rejects its missing
 numeric context. General ownership/lifetime checking, general semantic IL/LMOD,
 general managed graphs and standard-library execution are not implemented.
-The semantic-v24 source-class/`ManagedNode` readonly-versus-writable and
-mutable-class-receiver contract is validated. New managed programs use v24;
-readers normalize private managed artifacts from versions 18 through 23 into
-qualified internal IR while preserving their former authority. Nonmanaged
-programs retain their existing versions and bytes. Primitive buffer-view
-alignment, mutable struct receiver writeback and `out`-to-`init ref<T>`
-migration remain separate scheduled work.
+Semantic v24 validates source-class/`ManagedNode` readonly-versus-writable
+access and mutable-class receivers. Semantic v25 adds a distinct persisted,
+non-exported `MutReceiver` contract for methods on non-owning compact structs;
+source visibility may be public or private, but does not expose a mutating-
+receiver ABI. Calling one on a named mutable local, or forwarding the existing
+receiver through `this`, borrows and updates that caller place,
+including writes before a checked exception; default-readonly methods and
+by-value arguments retain copy behavior, and the ordinary nonmutating receiver
+ABI is unchanged. The verifier rejects forged receiver
+loans from immutable places, and nested field writes within a valid receiver
+loan are allowed.
+
+Named mutable locals and forwarding through an existing `this` are supported
+receiver places. Unique or owning receivers, temporaries, nested-field receiver
+paths such as `outer.Inner.Mutate()`, rebinding `this`, public exported
+mutating-receiver ABI and general references remain unsupported.
+Older module headers reject the v25 `MutReceiver` contract; programs that do
+not need it retain their existing semantic versions and bytes. Primitive
+buffer-view alignment and the `out`-to-`init ref<T>` migration remain scheduled.
+Readers still normalize private managed artifacts from versions 18 through 23
+without granting more authority than their original contract. Writer version
+selection follows the `MutReceiver` contract, not managedness; programs not
+requiring v25 retain their prior versions and bytes.
 
 | Surface | Implemented | Not yet implemented |
 |---|---|---|
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
 | Lexing | Pinned Unicode identifiers, ASCII numbers/tags, comments, leading trivia, strings, diagnostics, EOF | Interpolation, raw/character/native literals, directives |
-| Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, bounded source classes including `mut class`, readonly default and writable `mut` class receivers, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Inheritance, unique/inline classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes/generics (struct and field attributes diagnose `TRM3001`), public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
+| Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, bounded source classes including `mut class`, readonly default and writable `mut` class receivers, non-owning compact-struct `mut` methods with named mutable-local receiver writeback, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Inheritance, unique/inline classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes/generics (struct and field attributes diagnose `TRM3001`), public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; source-class and `ManagedNode` optional handles with `write` capability preserved through fields, parameters, results and inference; repeated `?` diagnoses | Scalar options, generic optional normalization after substitution, family defaults/conditional conformance, general ownership/form qualifiers and general borrowed references, transparent-wrapper ABI contracts |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, nearest-loop `break`/`continue`, return, `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, labeled transfers, general switch/patterns and wildcard patterns, context-specific discard destinations, general exception objects/throw, async, compound assignment |
-| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, explicit closed static-protocol calls (generic source calls require explicit type arguments), generic signature-based result-type lookup, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, qualified source-class/`ManagedNode` writes and mutable-class receivers, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations and lexical readonly/exclusive writable buffer slices | Character literals, partial owning-field moves, owning field replacement, general expression temporaries, general stored loans, evaluation outside the native profile, user-defined conversions, ordinary overload declarations (rejected with `TRM3003`), generic argument/result/partial-hole inference, generic calls without explicit arguments, contextual discard/lambda `_` forms, conditional expressions, constructor generic inference |
+| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, explicit closed static-protocol calls (generic source calls require explicit type arguments), generic signature-based result-type lookup, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, qualified source-class/`ManagedNode` writes and mutable-class receivers, named-place writeback for non-owning compact-struct `mut` receivers, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations and lexical readonly/exclusive writable buffer slices | Character literals, partial owning-field moves, owning field replacement, general expression temporaries, temporary/nested/owning mutating-struct receivers, rebinding `this`, public mutating-receiver ABI, general stored loans/references, evaluation outside the native profile, user-defined conversions, ordinary overload declarations (rejected with `TRM3003`), generic argument/result/partial-hole inference, generic calls without explicit arguments, contextual discard/lambda `_` forms, conditional expressions, constructor generic inference |
 | Managed storage | Aliasable `ManagedNode` and source-class handles, optional edges and non-null pattern snapshots, readonly bare handles and explicit `write` capability, mutable-class receiver checks, qualified field/parameter/result/inference paths, handle-free compact Copy fields in classes, descriptor-based cycle tracing, complete-publication class factories, exact frame/temporary roots and explicit nonmoving collection under both policies, including exceptional root retirement and escaping-frame unlink | Managed handles inside user structs, stored interior pointers, implicit GC, native DLL/module graph managed ABI |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
@@ -186,11 +202,14 @@ Constructor signatures with more than three inputs require version 23; older
 versions retain their original arity limit. High-arity functions retain the
 existing page-safe frame bound and exact roots for potentially managed spills.
 Semantic version 24 records managed class/`ManagedNode` access capabilities.
-New managed programs use v24; readers normalize private managed artifacts from
-versions 18 through 23 into explicitly qualified internal IR, translating
-legacy class/`ManagedNode` mutation authority into `write` exactly where each
-older contract granted it. A v18-v23 header cannot contain v24 write
-identifiers. Nonmanaged programs retain their historical versions and bytes.
+Managed artifacts requiring only this contract use v24; readers normalize
+private managed artifacts from versions 18 through 23 into explicitly
+qualified internal IR, translating legacy class/`ManagedNode` mutation
+authority into `write` exactly where each older contract granted it. A v18-v23
+header cannot contain v24 write identifiers. Methods requiring the distinct
+v25 `MutReceiver` contract use v25, which older headers reject. Programs not
+requiring this contract retain their historical versions and bytes regardless
+of managedness.
 The private managed-leaf boundary and scalar-only public native ABI are
 unchanged.
 Optional-node-only modules,

@@ -43,6 +43,11 @@ systems ABIs require explicit foreign contracts; none is copied wholesale.
 The reviewed implementation baseline is `0597c8b`, with managed
 semantic-module v24: optional managed handles, source-defined classes, and
 explicit `write` authority for managed handles and mutable class receivers.
+The current bounded implementation also has a semantic-v25 `MutReceiver`
+contract for persisted, non-exported `mut` methods on non-owning compact
+structs. Source visibility may be public or private; named mutable locals and
+forwarding through an existing `this` are supported receiver places. Public
+source visibility does not expose a public mutating-receiver ABI.
 It includes compilation-local constrained generic specialization, but not a
 public managed ABI, general interfaces/witnesses, array/view libraries, async,
 or the proposed libraries. Examples in this review and `.api.terrum` files
@@ -76,8 +81,9 @@ Readonly access does not make aliased backing or its object graph immutable.
 The canonical reference representations are `ref<T>`, `ptr<T>`, `box<T>`,
 `val<T>` and `own<T>`. `init ref<T>` is an initialization loan to vacant
 storage, unreadable until full initialization/publication; it is not an
-arbitrary writable `ref<T>`. The validated semantic-v24 batch implements this access distinction for source
-classes and `ManagedNode`: `mut class` declarations and writable `mut` class
+arbitrary writable `ref<T>`. The validated semantic-v24 batch implements this
+access distinction for source classes and `ManagedNode`: `mut class`
+declarations and writable `mut` class
 receivers, readonly bare handles, and explicit `write` capability are retained
 through fields, optionals, parameters, results and inference. A writable child
 handle remains writable through a readonly parent; no deep-read propagation is

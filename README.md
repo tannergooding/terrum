@@ -26,21 +26,35 @@ are migrated together. Design sketches are not claims that these semantics or
 their broader syntax and library surface are implemented; the bounded
 class/`ManagedNode` exception is described next.
 
-The validated semantic-v24 managed-access batch supports `mut class`, writable
-`mut` class methods, readonly bare class handles and explicit `write` access for
-source classes and `ManagedNode`, including qualified fields, parameters,
-results, optionals and inferred values. Constructors initialize unpublished
-objects before publication. A writable child handle retains its capability
-through a readonly parent; this is not deep-read semantics. Semantic readers
-normalize private managed artifacts from versions 18 through 23 into
-qualified internal IR without granting more authority than the old contract.
-The native handle ABI and scalar-only public module boundary are unchanged.
+Semantic v24 validates managed-class/`ManagedNode` access: `mut class`,
+writable `mut` class methods, readonly bare handles and explicit `write`
+capability through qualified fields, parameters, results, optionals and
+inference. Constructors initialize unpublished objects before publication;
+a writable child handle retains its capability through a readonly parent,
+without deep-read propagation. Semantic v25 separately records non-exported
+`MutReceiver` methods on non-owning compact structs; source visibility may be
+public or private, but does not expose a mutating-receiver ABI. Called on a
+named mutable local, or forwarded through the existing `this` receiver, a
+mutating method borrows and updates the original place, including
+writes before a checked exception; readonly methods and by-value arguments
+retain copy behavior, and the ordinary nonmutating receiver ABI is unchanged.
+The verifier rejects forged mutable receiver loans from
+immutable places, while nested field writes through a valid receiver are
+allowed. Older module headers reject the v25 receiver contract; programs not
+requiring it retain their versions and bytes regardless of managedness. Readers
+continue to normalize private managed artifacts from versions 18 through 23
+without granting more authority than their original contract. Public scalar
+entry wrappers may call non-exported mutating methods; private helpers remain
+non-exported as well. The native handle ABI and scalar-only public module
+boundary are unchanged.
 
-General reference/view/ownership forms and `init ref<T>` call-site grammar
-remain unsupported; mutable struct receiver writeback and the separate legacy
-buffer-view access path also remain scheduled. These bounded class and node
-features do not imply general ownership/lifetime analysis or standard-library
-execution.
+Unique/owning mutating receivers, temporary or nested-field receiver places
+(such as `outer.Inner.Mutate()`),
+rebinding `this`, public exported mutating-receiver ABIs and general references
+remain unsupported. General reference/view/ownership forms and `init ref<T>`
+call-site grammar remain unsupported; the separate legacy buffer-view access
+path still needs alignment. These bounded features do not imply general
+ownership/lifetime analysis or standard-library execution.
 
 ## Build
 

@@ -30,6 +30,7 @@ public static partial class ModuleCompiler
     private const int AggregateClassFactoryVersion = 22;
     private const int StackClassFactoryVersion = 23;
     private const int ManagedAccessVersion = 24;
+    private const int MutableStructReceiverVersion = 25;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -907,6 +908,12 @@ public static partial class ModuleCompiler
         return found;
     }
 
+    private static bool HasMutableStructReceiver(BoundFunction function) =>
+        function.DeclaringStruct is not null && !function.IsStatic && !function.IsConstructor
+        && !function.IsClassConstructor && !function.IsCleanup && !function.Variables.IsEmpty
+        && function.Variables[0].IsMutable
+        && (int)function.Variables[0].Type is >= 100 and < ManagedClassTypes.First;
+
     private static string Contract(BoundFunction function, ImmutableArray<BoundStruct> structures)
     {
         var result = new StringBuilder();
@@ -924,6 +931,10 @@ public static partial class ModuleCompiler
             var parameter = function.Variables[i + (function.IsConstructor ? 1 : 0)];
             _ = result.Append('|').Append(parameter.IsOut ? "out:" : "in:")
                 .Append(ContractType(parameter.Type, structures));
+        }
+        if (HasMutableStructReceiver(function))
+        {
+            _ = result.Append("|MutReceiver");
         }
         if (function.IsCleanup)
         {
@@ -994,7 +1005,8 @@ public static partial class ModuleCompiler
     private static bool Exportable(BoundFunction function, ImmutableArray<BoundStruct> structures)
     {
         var parameterOffset = function.IsConstructor ? 1 : 0;
-        if (function.IsPrivate || function.IsInternal || function.ParameterCount < 0
+        if (function.IsPrivate || function.IsInternal || HasMutableStructReceiver(function)
+            || function.ParameterCount < 0
             || function.ParameterCount > function.Variables.Length - parameterOffset)
         {
             return false;
@@ -1261,7 +1273,9 @@ public static partial class ModuleCompiler
         }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-        var version = !module.Classes.IsEmpty || HasManagedNodes(module.Functions)
+        var version = module.Functions.Any(static item => item.Function is BoundFunction function
+                && HasMutableStructReceiver(function)) ? MutableStructReceiverVersion
+            : !module.Classes.IsEmpty || HasManagedNodes(module.Functions)
             ? ManagedAccessVersion
             : module.Functions.Any(static item => item.Function is BoundFunction function
                 && HasStackClassArguments(function)) ? StackClassFactoryVersion
@@ -1387,6 +1401,11 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Module entry point is invalid.");
             }
             var items = ReadFunctions(reader, count, expectedConsumer, version, structures, classes);
+            if (version < MutableStructReceiverVersion && items.Any(static item =>
+                    item.Function is BoundFunction function && HasMutableStructReceiver(function)))
+            {
+                throw new ModuleFormatException("Mutable struct receivers require semantic module version 25.");
+            }
             if (version == AggregateClassFactoryVersion && !items.Any(static item =>
                     item.Function is BoundFunction function && HasAggregateClassArguments(function)))
             {
@@ -1447,7 +1466,7 @@ public static partial class ModuleCompiler
         if (version is not (10 or 11 or OwnershipVersion or TransferVersion or CompositeVersion
             or BufferVersion or ReadonlyViewVersion or WritableViewVersion or ManagedNodeVersion
             or ManagedClassVersion or Version or LoopTransferVersion or AggregateClassFactoryVersion
-            or StackClassFactoryVersion or ManagedAccessVersion))
+            or StackClassFactoryVersion or ManagedAccessVersion or MutableStructReceiverVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }

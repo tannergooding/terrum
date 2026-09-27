@@ -464,12 +464,28 @@ invariant, output destinations require an exact qualified type, and value
 `write`-to-readonly attenuation is allowed. Semantic readers normalize private
 managed artifacts from versions 18 through 23 into qualified internal IR,
 translating legacy class/`ManagedNode` mutation authority to explicit `write`
-exactly where previously granted. Nonmanaged artifact
-versions and bytes remain unchanged. Native handle layout and the scalar-only
-public module boundary are unchanged. Primitive `Buffer` views retain separate
-legacy access paths;
-mutable struct receiver writeback and the coherent `out`-to-`init ref<T>`
-migration remain scheduled. Neither the fail-fast runtime nor bounded
+exactly where previously granted. Programs not requiring the semantic-v25
+`MutReceiver` contract retain their prior versions and bytes regardless of
+managedness. Native handle layout and the scalar-only public module boundary
+are unchanged.
+
+The semantic-v25 `MutReceiver` contract supports `mut` methods on non-owning
+compact structs as non-exported persisted calls. Source visibility may be
+public or private, but does not expose a public mutating-receiver ABI. A method
+invoked on a named mutable local, or forwarded through an existing `this`,
+borrows and writes the original place, including writes before a checked exception;
+default-readonly methods and by-value arguments preserve copy behavior, and
+the ordinary readonly/by-value receiver ABI is unchanged. The verifier rejects
+mutable receiver loans forged from immutable places, while
+nested field writes through a valid receiver are allowed. These methods remain
+non-exported: public scalar entry wrappers may call them; source-level
+`public` visibility does not provide a public mutating-receiver ABI. Older
+module headers reject the v25 contract; programs not requiring it keep their
+prior semantic versions and bytes. Unique/owning mutating receivers,
+temporaries, nested-field receiver paths such as `outer.Inner.Mutate()`,
+rebinding `this`, and general reference forms remain unsupported. Primitive
+`Buffer` views retain separate legacy access paths, and the coherent
+`out`-to-`init ref<T>` migration remains scheduled. Neither the fail-fast runtime nor bounded
 checked-exceptions proof is the language's future general exception runtime.
 Bounded ownership and lexical-view checks, source-defined managed classes,
 optional edges and explicit cycle tracing are implemented; general
