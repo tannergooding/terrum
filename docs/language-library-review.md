@@ -19,6 +19,13 @@ and Java experience without treating any one ecosystem as a template.
 [conversions](conversions.md), and [libraries](libraries.md) remain authoritative;
 status follows [implementation](implementation.md) and [roadmap](roadmap.md).
 
+The follow-up [call/output/contract review](language-contract-review.md) records
+the clarified equivalence of implicit and explicit readonly references and
+proposes precise evaluation, publication, completion, and proof rules. The
+separate [memory-model proposal](memory-model.md) covers checked sharing and
+portable versus target-specific memory behavior. Both are for review; their
+new mechanisms are not approved language features or implementation work.
+
 ## Thesis
 
 Prefer **explicit, composable contracts** over importing the CLR's universal
