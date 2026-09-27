@@ -1847,24 +1847,22 @@ internal sealed partial class Binder
                 break;
         }
 
-        if (expected is PrimitiveType readonlyExpected
-            && ManagedClassTypes.IsWritable(expression.Type)
-            && ManagedClassTypes.Readonly(expression.Type) == readonlyExpected)
+        if (expected is PrimitiveType target && expression.Type != target
+            && CanImplicitlyConvert(expression.Type, target))
         {
-            expression = new BoundReadonlyProjection(expression, readonlyExpected, node.Span);
-        }
-        if (expected is PrimitiveType optionalExpected
-            && ManagedClassTypes.IsOptional(optionalExpected)
-            && (expression.Type == ManagedClassTypes.Required(optionalExpected)
-                || (ManagedClassTypes.IsWritable(expression.Type)
-                    && ManagedClassTypes.Readonly(expression.Type) == ManagedClassTypes.Required(optionalExpected))))
-        {
-            if (expression.Type != ManagedClassTypes.Required(optionalExpected))
+            if (ManagedClassTypes.IsOptional(target) && !ManagedClassTypes.IsOptional(expression.Type))
             {
-                expression = new BoundReadonlyProjection(expression,
-                    ManagedClassTypes.Required(optionalExpected), node.Span);
+                if (expression.Type != ManagedClassTypes.Required(target))
+                {
+                    expression = new BoundReadonlyProjection(expression,
+                        ManagedClassTypes.Required(target), node.Span);
+                }
+                expression = new BoundOptionalLift(expression, target, node.Span);
             }
-            expression = new BoundOptionalLift(expression, optionalExpected, node.Span);
+            else
+            {
+                expression = new BoundReadonlyProjection(expression, target, node.Span);
+            }
         }
         if (expected is not null && expression.Type != expected)
         {
@@ -1872,6 +1870,19 @@ internal sealed partial class Binder
         }
 
         return expression;
+    }
+
+    private static bool CanImplicitlyConvert(PrimitiveType source, PrimitiveType target)
+    {
+        if (source == target)
+        {
+            return true;
+        }
+        var readonlySource = ManagedClassTypes.IsWritable(source) ? ManagedClassTypes.Readonly(source) : source;
+        return readonlySource == target
+            || (ManagedClassTypes.IsOptional(target)
+                && (source == ManagedClassTypes.Required(target)
+                    || readonlySource == ManagedClassTypes.Required(target)));
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unsupported operators are rejected by the default branch.")]

@@ -1,0 +1,67 @@
+struct Stamp {
+    public int64 First;
+    public int64 Second;
+    [NoThrow] public Stamp(int64 first, int64 second) {
+        First = first;
+        Second = second;
+    }
+}
+
+mut class Record {
+    public mut int32 Value;
+    public mut write Record? Next;
+    public Record(int32 value) {
+        Value = value;
+        Next = null;
+    }
+}
+
+write Record CreateRecord(int32 value) {
+    require Record.TryCreate(value, out var result);
+    result.Next = result;
+    return result;
+}
+
+T RetainAfterCollection<T, U>(T value, U witness)
+    where T : [Copy]
+    where U : [Copy] {
+    require ManagedHeap.Collect() == 0;
+    return value;
+}
+
+U RetainReversed<T, U>(T witness, U value)
+    where T : [Copy]
+    where U : [Copy] {
+    return RetainAfterCollection(value, witness);
+}
+
+[NoThrow] bool TrySelect<T>(bool enabled, T value, out T result)
+    where T : [Copy] {
+    if (!enabled) { return false; }
+    result = value;
+    return true;
+}
+
+int32 ReadSelectedRecord() {
+    var stamp = new Stamp(1, 1);
+    write Record writable = RetainAfterCollection<write Record, Stamp>(
+        CreateRecord(40), stamp);
+    Record readOnly = RetainReversed(stamp, writable);
+    write Record? optional = writable;
+    require !TrySelect(false, optional, out var missing);
+    require TrySelect<write Record?>(true, optional, out var selected);
+    require selected is some present;
+    present.Value = readOnly.Value + int32(stamp.First + stamp.Second);
+    require ManagedHeap.Collect() == 0;
+    return readOnly.Value;
+}
+
+public int32 ManagedGenericProbe() {
+    int32 result = ReadSelectedRecord();
+    require ManagedHeap.Collect() == 1;
+    return result;
+}
+
+int32 Main() {
+    return ManagedGenericProbe();
+}

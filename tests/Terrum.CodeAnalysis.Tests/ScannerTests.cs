@@ -169,6 +169,15 @@ public sealed class ScannerTests
     }
 
     [Fact]
+    public async Task ManagedGenericSampleAgreesWithCompiledScannerAsync()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var source = await File.ReadAllTextAsync(Path.Combine(root, "samples", "native",
+            "managed-generic-selection.terrum")).ConfigureAwait(true);
+        await CheckScannerAsync(source).ConfigureAwait(true);
+    }
+
+    [Fact]
     public async Task DiagnosticAndTokenBuffersHandleDenseInvalidInputAsync()
     {
         await CheckScannerAsync(new string('\uDC00', 256)).ConfigureAwait(true);

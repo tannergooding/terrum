@@ -146,13 +146,12 @@ public sealed class StaticProtocolInferenceTests
         Assert.Null(compilation.Program);
     }
 
-    [Theory]
-    [InlineData("require ManagedNode.TryCreate(1, out var node); var result = Identity(node);")]
-    [InlineData("require OwnedInt32Buffer.TryCreate(1, out var raw); mut OwnedInt32Buffer buffer = move raw; var result = Identity(buffer);")]
-    public void ManagedAndOwnedHandlesAreNotCopyGenericArguments(string body)
+    [Fact]
+    public void OwnedBufferIsNotACopyGenericArgument()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Values
-            + "int32 Main() { " + body + " return 0; }"));
+            + "int32 Main() { require OwnedInt32Buffer.TryCreate(1, out var raw);"
+            + " mut OwnedInt32Buffer buffer = move raw; var result = Identity(buffer); return 0; }"));
         Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
         Assert.Null(compilation.Program);
     }

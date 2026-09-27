@@ -37,27 +37,18 @@ as `TRM0009`. Prefix casts are no longer parsed. Floating literal binding,
 custom literal targets and `[ConstEval]` are not implemented yet; see the
 [implementation matrix](docs/implementation.md).
 
-The bounded generic profile supports top-level function templates with
-multiple independently constrained type parameters over eligible `Copy`
-structs and the existing scalar value types (`bool`, `char16`, `int32`,
-`uint32`, `int64`, `uint64`). A complete explicit type-argument list fixes
-each position; typed arguments and typed existing `out` destinations infer
-each corresponding type independently. Expected-result context can fill an
-unresolved type parameter present in the return type before contextual
-literal binding. Contextual literals bind only after their type is resolved;
-inference neither defaults numeric types nor converts already typed arguments.
-Partial type-argument holes are unsupported. The ordered specialization key preserves
-parameter positions, including when a generic helper forwards them in swapped
-order. Each parameter retains its own `Copy` and operator constraints; the
-function's declared effects, including `[NoThrow]` where present, are checked
-against operations permitted by those constraints. Equal selected types do
-not merge distinct parameters.
-Scalar Copy-only specialization does not provide primitive operator witnesses
-or heterogeneous operator protocols.
-Unique/managed type parameters, constructor or method inference, overload
-declarations and a public generic ABI remain unsupported. An explicitly typed
-struct construction can establish a type parameter without enabling generic
-constructor inference.
+The bounded profile specializes compilation-local top-level `Copy`-constrained
+function templates over multiple type parameters, including eligible scalars,
+`Copy` structs, and existing source-class/`ManagedNode` handles. Handle
+substitutions preserve readonly/write and supported optional qualification;
+they do not grant member, null-test or operator capabilities absent from the
+function's constraints. See the [bounded generic contract](docs/implementation.md#bounded-generic-functions)
+for inference, results, outputs, rooting and remaining limits.
+The current parser version is syntax-18, which recognizes qualified generic
+type arguments such as `write Record` and `write Record?`; managed generic
+producer examples use the existing semantic v24 managed contracts; other
+features still select their required versions. The native profile, wire
+format, scanner record and schema remain unchanged.
 Copy structs can explicitly implement homogeneous binary operator protocols
 for `+`, `-`, `*`, `/`, `%`, `&`, `|` and `^`. Generic bodies may use only the
 operators named by their constraints; identical signatures on unrelated

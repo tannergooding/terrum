@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-17, semantic v32 managed consumers, native-10 through native-20
+## Current boundary: syntax-18, semantic v32 managed consumers, native-10 through native-20
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -20,8 +20,10 @@ Hexadecimal and binary literals construct target-width bit patterns, while
 decimal literals retain numeric range semantics.
 Existing source function and local shadowing keeps its ordinary call-binding
 precedence. Top-level generic function templates support multiple independently
-constrained type parameters over eligible `Copy` structs and the scalar value
-types `bool`, `char16`, `int32`, `uint32`, `int64` and `uint64`. A complete
+constrained type parameters over eligible `Copy` structs, scalar value types,
+and existing source-class/`ManagedNode` handles. Handle substitutions preserve
+readonly/write and supported optional qualification; details are in
+[bounded generic functions](#bounded-generic-functions). A complete
 explicit type-argument list fixes each position; typed arguments and typed
 existing `out` destinations infer each corresponding parameter independently.
 Expected-result context can fill an unresolved parameter represented in the
@@ -33,7 +35,7 @@ has independent definition-site `Copy` and operator constraints; the function's
 declared effects, including `[NoThrow]` where present, are checked against the
 operations permitted by those constraints. Distinct parameters stay distinct
 even when they select the same type. Scalars support
-Copy-only templates, without primitive operator witnesses. Unique or managed
+Copy-only templates, without primitive operator witnesses. Unique/owning
 type parameters, constructor/method inference, ordinary overloads, partial
 holes and a public generic ABI remain unsupported. Floating literal binding,
 custom literal/string-target execution and `[ConstEval]` remain unsupported.
@@ -136,10 +138,10 @@ package-format change.
 |---|---|---|
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
 | Lexing | Pinned Unicode identifiers, ASCII decimal, `0x`/`0X` hexadecimal and `0b`/`0B` binary numeric tokens, digit separators, decimal fractional/exponent token boundaries, comments, leading trivia, strings, diagnostics including `TRM0006`–`TRM0009` for numeric suffixes, missing based digits and malformed separators, EOF; the scanner-4 integer record retains suffix metadata only for diagnostic-bearing tokens | Interpolation, raw/character/native literals, directives |
-| Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, bounded source classes including `mut class`, readonly default and writable `mut` class receivers, non-owning compact-struct `mut` methods with named mutable-local receiver writeback, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Inheritance, unique/inline classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes/generics (struct and field attributes diagnose `TRM3001`), parameter-only `implicit ref<T>` loan/noescape contracts, public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
-| Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; source-class and `ManagedNode` optional handles with `write` capability preserved through fields, parameters, results and inference; repeated `?` diagnoses | Scalar options, generic optional normalization after substitution, family defaults/conditional conformance, general ownership/form qualifiers and general borrowed references, transparent-wrapper ABI contracts |
+| Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, bounded source classes including `mut class`, readonly default and writable `mut` class receivers, non-owning compact-struct `mut` methods with named mutable-local receiver writeback, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Inheritance, unique/inline classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes and generic classes/structs (struct and field attributes diagnose `TRM3001`), parameter-only `implicit ref<T>` loan/noescape contracts, public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
+| Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; source-class and `ManagedNode` optional handles with `write` capability preserved through fields, parameters, results and inference; repeated `?` diagnoses | Scalar options, general generic optional normalization after substitution, family defaults/conditional conformance, general ownership/form qualifiers and general borrowed references, transparent-wrapper ABI contracts |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, nearest-loop `break`/`continue`, return, statement-form `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, labeled transfers, general switch/patterns and wildcard patterns, context-specific discard destinations, declaration pre/postconditions, `static require`/`static ensure` proofs, typed requirement-failure selection, general exception objects/throw, async, compound assignment |
-| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, context-typed decimal/hexadecimal/binary integer literals without fallback (based values construct target-width bit patterns), numeric digit separators, checked numeric type-call conversions for `int32`/`uint32`/`int64`/`uint64`/`char16`, member/index access, calls, explicit closed static-protocol calls, bounded inference of multiple independent type parameters for top-level generic function templates over eligible `Copy` structs or existing scalar value types from typed arguments or typed existing `out` destinations (expected-result context fills unresolved parameters present in the return type), generic signature-based result-type lookup, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique and initialized owning-field loans, qualified source-class/`ManagedNode` writes and mutable-class receivers, named-place and writable nested-field loans for compact-struct `mut` receivers including fully initialized unique roots/children, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations including `Set`/`TryAppend`/`Clear` and lexical `SliceMutable` through writable owning fields, and lexical readonly buffer slices | Floating/custom literal binding, registered literal/`[ConstEval]` execution, `require` output-expression form and exception-type selection, implicit `ref<T>` call-site loan introduction and temporary materialization, character literals, partial owning-field moves, owning field replacement, general expression temporaries, temporary/managed-class-field mutating-struct receivers, partial-constructor mutation, rebinding `this`, public mutating-receiver ABI, general stored loans/references, evaluation outside the native profile, user-defined conversions, unique/managed generic `T`, primitive operator conformance, general argument/result inference and partial holes, constructor/method inference, ordinary overload declarations (rejected with `TRM3003`), contextual discard/lambda `_` forms, conditional expressions |
+| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, context-typed decimal/hexadecimal/binary integer literals without fallback (based values construct target-width bit patterns), numeric digit separators, checked numeric type-call conversions for `int32`/`uint32`/`int64`/`uint64`/`char16`, member/index access, calls, explicit closed static-protocol calls, bounded inference of multiple independent type parameters for top-level generic function templates over eligible `Copy` structs, existing scalar value types and existing qualified source-class/`ManagedNode` handles (preserving readonly/write and supported optional qualification) from typed arguments or typed existing `out` destinations (expected-result context fills unresolved parameters present in the return type), generic signature-based result-type lookup, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique and initialized owning-field loans, qualified source-class/`ManagedNode` writes and mutable-class receivers, named-place and writable nested-field loans for compact-struct `mut` receivers including fully initialized unique roots/children, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations including `Set`/`TryAppend`/`Clear` and lexical `SliceMutable` through writable owning fields, and lexical readonly buffer slices | Floating/custom literal binding, registered literal/`[ConstEval]` execution, `require` output-expression form and exception-type selection, implicit `ref<T>` call-site loan introduction and temporary materialization, character literals, partial owning-field moves, owning field replacement, general expression temporaries, temporary/managed-class-field mutating-struct receivers, partial-constructor mutation, rebinding `this`, public mutating-receiver ABI, general stored loans/references, evaluation outside the native profile, user-defined conversions, unique/owning generic arguments, views, generic classes/structs, user structs containing managed fields, primitive operator conformance, general argument/result inference and partial holes, constructor/method inference, ordinary overload declarations (rejected with `TRM3003`), contextual discard/lambda `_` forms, conditional expressions |
 | Managed storage | Aliasable `ManagedNode` and source-class handles, optional edges and non-null pattern snapshots, readonly bare handles and explicit `write` capability, mutable-class receiver checks, qualified field/parameter/result/inference paths, handle-free compact Copy fields in classes, descriptor-based cycle tracing, complete-publication class factories, exact frame/temporary roots and explicit nonmoving collection under both policies, including exceptional root retirement and escaping-frame unlink | Managed handles inside user structs, stored interior pointers, implicit GC, native DLL/module graph managed-handle ABI |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
@@ -378,6 +380,9 @@ legacy checked numeric prefix casts for supported 32- and 64-bit integer types a
 `syntax-8` adds `unsafe` blocks and the parameterless checked-policy `catch`,
 with optional `finally`; a try requires at least one handler or cleanup clause.
 `syntax-9` adds `unique struct` declarations and `move` expressions.
+
+### Bounded generic functions
+
 `syntax-10` adds static operator interfaces, explicit struct conformance,
 generic function constraints and generic-name call expressions. Its executable
 subset is deliberately compilation-local: each interface has three type
@@ -386,8 +391,9 @@ parameters and one `static abstract` binary operator declaration (originally
 struct explicitly implements a closed homogeneous instance. Parameter/result
 types, accessibility and declared effects must match. An internal generic
 function may have multiple `[Copy]` type parameters with independent
-definition-site operator constraints, and may return or accept
-values of those types or supported scalars. Distinct parameters remain distinct
+definition-site operator constraints, and may return or accept values of those
+formal type parameters or supported scalars. A selected type parameter may be
+an existing source-class/`ManagedNode` handle. Distinct parameters remain distinct
 in the template contract even if a specialization selects the same concrete
 type for both. The function's declared effects are checked against the
 operations permitted by its constraints. Boolean-returning templates support conditional `out`
@@ -401,18 +407,38 @@ Structured bodies use assignments, blocks, `if`, `while`, scoped `for`,
 must come from its declared operator constraints. `[Copy]` alone suffices for
 helpers that only copy or select values; it grants no operators. The definition is checked
 even when never instantiated. Concrete capabilities cannot make an undeclared
-generic operation valid. Calls select a concrete Copy struct or supported
-scalar for each parameter, explicitly or through the bounded inference
-described above. An explicit type-argument list fixes every position; partial
-holes are unsupported.
+generic operation valid. Calls select a concrete Copy struct, supported scalar,
+or existing handle type for each parameter, explicitly or through the bounded
+inference described above. An explicit type-argument list fixes every
+position; partial holes are unsupported.
 Inside a template, helper calls use its current type parameters, explicitly
-or inferred. Swapped forwarding can use `TrySelectPair<TSecond, TFirst>(...)`
+or inferred; Copy-only helpers may also specialize concrete scalar types.
+Swapped forwarding can use `TrySelectPair<TSecond, TFirst>(...)`
 or let the reordered typed arguments establish the positions. Every nominal
 protocol required by the callee must be declared for the corresponding caller
 parameter. Identical
 operator signatures do not make distinct
 protocols interchangeable. Each callee is checked independently, and callers
 use its declared effects, not stronger facts inferred from its body.
+For a source-class or `ManagedNode` handle substitution, the complete supplied
+type retains its readonly/write and supported optional qualification.
+`[Copy]` permits copying the handle; it does not grant field, null-test or
+operator operations that are not otherwise available under the template's
+constraints. Typed arguments establish type parameters before expected-result
+fallback. A permitted result weakening, such as `write C` to readonly `C` or
+supported optional widening, can accept a result without retargeting the
+inferred type argument. Conditional outputs retain the existing exact type and
+qualification rules.
+Generic handle calls, results and conditional outputs use the existing
+precise-root and access contracts. Collection observes those roots as usual;
+semantic linking preserves private class identity remapping, and persisted
+native images retain their separate heap/root domains.
+`ManagedHeap.Collect` is available inside a generic body with its real
+intrinsic signature and effects; it grants no operations on opaque formals.
+This bounded substitution does not add generic class/struct declarations,
+managed fields inside user structs, unique/owning arguments, views, new
+operators or operator protocols, concurrency semantics, or a public
+generic/managed ABI.
 Forward calls, imported local templates, and direct/mutual recursion reuse
 closed specializations; recursion has the ordinary native call/stack behavior,
 not a compile-time evaluator or a termination guarantee. At most 32 templates
@@ -469,6 +495,11 @@ conformance and generic use still requires the matching nominal protocol and
 declared effects. Unary, comparison, shift and heterogeneous protocols remain
 unsupported. These specializations lower to existing concrete calls: scanner-4,
 semantic module versions and physical native ABIs are unchanged.
+`syntax-18` recognizes qualified generic-call type arguments, including
+`write C` and `write C?`, for bounded generic specialization over existing
+source-class/`ManagedNode` handles. The managed generic producer examples use
+existing semantic v24 contracts; version selection remains feature-based.
+This does not change the scanner-4 record/schema, wire format or native profile.
 `[NoThrow]` on functions/constructors, `[DoesNotReturn]` on void functions and
 `[Cleanup]` on eligible unique instance methods are currently bound;
 unknown, duplicate and misplaced attributes diagnose rather

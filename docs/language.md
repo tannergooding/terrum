@@ -241,7 +241,9 @@ The broad inference order above is target direction, not a claim that general
 inference is implemented. The bounded compiler now infers multiple
 independently constrained type parameters for eligible top-level generic
 function templates over `Copy` structs or the existing scalar value types
-(`bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`). A complete explicit
+(`bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`), and existing
+source-class/`ManagedNode` handles in their supported readonly/write and
+optional forms. A complete explicit
 type-argument list pins every position; typed arguments and typed existing
 `out` destinations establish their corresponding parameters independently.
 Expected-result context can fill an unresolved parameter represented in the
@@ -267,9 +269,17 @@ primitive operator witnesses: arithmetic on `T` still needs an explicitly
 supported nominal conformance. Definition-site `Copy`,
 operator and `[NoThrow]` requirements remain authoritative for every inferred
 specialization, and a caller's stronger constraints are not borrowed to
-justify a weaker template. Inferred specializations remain compilation-local
-and preserve the existing private module-servicing contract, with no public
-generic ABI or artifact-version change.
+justify a weaker template. A `write C` argument fixes `T` as `write C` before
+result-context fallback; an ordinary permitted weakening to `C` or supported
+optional widening may accept the result without retargeting `T`. Conditional
+outputs retain existing exact type and qualification rules. A `Copy`
+constraint on a handle does not grant field, null-test or operator operations.
+Managed-handle specializations remain compilation-local and use existing
+access/rooting behavior; this adds no public generic or managed-handle ABI.
+Generic classes/structs, managed fields inside user structs, unique/owning
+arguments and views remain unsupported. See the
+[bounded generic contract](implementation.md#bounded-generic-functions) for
+the precise implementation boundary.
 
 The executable operator-protocol subset supports homogeneous binary `+`, `-`,
 `*`, `/`, `%`, `&`, `|` and `^` declarations on explicitly conforming Copy
@@ -280,7 +290,7 @@ primitive specialization, a concrete body's operations or a caller's stronger
 constraints cannot provide them implicitly. Unary, comparison, shift and
 heterogeneous operator protocols remain unimplemented.
 
-The implementation does not infer unique or managed `T`, constructor or
+The implementation does not infer unique/owning `T`, constructor or
 method type arguments, ordinary overloads, or partial `_` holes. It does not
 add a struct-literal parser or public generic ABI. Contextual expected types
 still flow into untyped arithmetic (for example, `int64 x = 50000 * 50000`),

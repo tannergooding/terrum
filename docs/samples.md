@@ -96,6 +96,11 @@ specialization with type arguments swapped and publishes two different `out`
 types; false results leave both outputs vacant. The executable returns 42.
 This demonstrates bounded multi-parameter inference and helper composition,
 not partial holes, general inference or heterogeneous operator protocols.
+The [managed generic selection sample](../samples/native/managed-generic-selection.terrum)
+combines a 16-byte `Stamp` with qualified source-class handles and optional
+conditional outputs. It exercises readonly and
+writable aliases, collection during a generic call, and retirement of one
+unreachable cycle; the executable returns 42 without exposing a managed ABI.
 The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
 returns 46 through AOT and JIT. Two nominal Copy wrappers explicitly implement
 source-defined addition/multiplication protocols used by one constrained

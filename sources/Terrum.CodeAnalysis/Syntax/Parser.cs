@@ -116,7 +116,15 @@ internal sealed class Parser
             }
             else if (kind is TokenKind.Identifier or TokenKind.VoidKeyword)
             {
-                if (previous is not (TokenKind.Less or TokenKind.Comma or TokenKind.Dot))
+                if (previous is not (TokenKind.Less or TokenKind.Comma or TokenKind.Dot
+                    or TokenKind.WriteKeyword))
+                {
+                    return false;
+                }
+            }
+            else if (kind == TokenKind.WriteKeyword)
+            {
+                if (previous is not (TokenKind.Less or TokenKind.Comma))
                 {
                     return false;
                 }

@@ -76,7 +76,10 @@ internal sealed partial class Binder
 
     private bool IsCopyGenericType(PrimitiveType type) => type is PrimitiveType.Bool or PrimitiveType.Char16
         or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
-        || IsStruct(type);
+        || IsStruct(type)
+        || (ManagedClassTypes.IsManaged(type)
+            && ((int)type < ManagedClassTypes.First
+                || ManagedClassTypes.ClassIndex(type) < _classes.Count));
 
     private void DeclareProtocols()
     {
@@ -369,7 +372,7 @@ internal sealed partial class Binder
             var resolvedTypes = ImmutableArray.CreateBuilder<PrimitiveType>(arguments.Length);
             foreach (var argument in arguments)
             {
-                if (!TryResolveGenericArgument(NameText(argument), out var type))
+                if (!TryResolveGenericArgument(argument, out var type))
                 {
                     return null;
                 }
@@ -426,12 +429,18 @@ internal sealed partial class Binder
         if (template.ScalarReturnType is null && expected is PrimitiveType result)
         {
             var index = template.ReturnTypeParameterIndex;
-            if (inferred[index] is PrimitiveType established && established != result)
+            if (inferred[index] is PrimitiveType established)
             {
-                conflictingArguments = true;
-                return null;
+                if (!CanImplicitlyConvert(established, result))
+                {
+                    conflictingArguments = true;
+                    return null;
+                }
             }
-            inferred[index] = result;
+            else
+            {
+                inferred[index] = result;
+            }
         }
         return inferred.Any(static item => item is null) ? null
             : [.. inferred.Select(static item => item.GetValueOrDefault())];
@@ -474,7 +483,7 @@ internal sealed partial class Binder
             var resolvedTypes = ImmutableArray.CreateBuilder<PrimitiveType>(explicitArguments.Length);
             foreach (var argument in explicitArguments)
             {
-                if (!TryResolveGenericArgument(NameText(argument), out var resolved))
+                if (!TryResolveGenericArgument(argument, out var resolved))
                 {
                     break;
                 }
@@ -504,7 +513,9 @@ internal sealed partial class Binder
             return -1;
         }
         if (_genericContext is GenericInstantiation enclosing && types.Select((type, index) => (type, index)).Any(item =>
-            !Enumerable.Range(0, enclosing.Types.Length).Any(callerIndex =>
+            !(template.TypeParameters[item.index].Operations.Count == 0
+                && !IsStruct(item.type) && !ManagedClassTypes.IsManaged(item.type))
+            && !Enumerable.Range(0, enclosing.Types.Length).Any(callerIndex =>
                 enclosing.Types[callerIndex] == item.type
                 && template.TypeParameters[item.index].Operations.Values.All(protocol =>
                     enclosing.Template.TypeParameters[callerIndex].Operations.ContainsValue(protocol)))))
@@ -590,6 +601,13 @@ internal sealed partial class Binder
             var functions = ImmutableArray.CreateBuilder<BoundFunction>();
             var probeTypes = ImmutableArray.CreateBuilder<PrimitiveType>(template.TypeParameters.Length);
             proofBinder._genericProofFunctions = functions;
+            var collect = NativeManagedNodeIntrinsics.Functions.Single(static function =>
+                function.Intrinsic == BoundIntrinsic.NodeCollect);
+            proofBinder._functions.Add(collect.Name, proofBinder._signatures.Count);
+            proofBinder._signatures.Add(new Signature(collect.Name, collect.ReturnType, [],
+                null, null, template.Tree, collect.DeclaringStruct, false, false, true, false,
+                collect.IsStatic, collect.IsNoThrow, false, collect));
+            functions.Add(collect);
             for (var parameterIndex = 0; parameterIndex < template.TypeParameters.Length; parameterIndex++)
             {
                 var probeName = template.TypeParameters.Length == 1 ? "$T" : "$T" + parameterIndex;
@@ -683,7 +701,8 @@ internal sealed partial class Binder
                 Structures = [.. proofBinder._structs],
                 RuntimePolicy = _runtimePolicy,
             };
-            if (!SemanticVerifier.TryVerifySource(proof, out _, out var span, out var limit, out var effect))
+            if (!SemanticVerifier.TryVerifySource(proof, out _, out var span, out var limit, out var effect,
+                allowScalarCollectionProof: true))
             {
                 var code = effect switch {
                     "NoThrow" => "TRM3017",
@@ -702,41 +721,63 @@ internal sealed partial class Binder
 
     private string Qualify(string name) => string.IsNullOrEmpty(_namespace) ? name : _namespace + "." + name;
 
-    private bool TryResolveGenericArgument(string name, out PrimitiveType type)
+    private bool TryResolveGenericArgument(SyntaxNode argument, out PrimitiveType type)
     {
+        type = default;
+        if (argument.Kind != SyntaxKind.TypeName
+            || argument.Children.Any(static child => child is SyntaxNode))
+        {
+            return false;
+        }
+        var tokens = argument.Children.OfType<SyntaxTokenElement>().Select(static child => child.Token).ToArray();
+        var writable = tokens[0].Kind == TokenKind.WriteKeyword;
+        var optional = tokens[^1].Kind == TokenKind.Question;
+        var name = string.Join(".", tokens.Where(static token => token.Kind == TokenKind.Identifier)
+            .Select(static token => token.Text));
+        if (name.Length == 0)
+        {
+            return false;
+        }
         if (_genericContext is GenericInstantiation generic
             && generic.Template.ParameterIndex(name) is var index && index >= 0)
         {
+            if (writable || optional)
+            {
+                return false;
+            }
             type = generic.Types[index];
             return true;
-        }
-        if (name.Contains('.', StringComparison.Ordinal))
-        {
-            return _structNames.TryGetValue(name, out type);
         }
         if (GenericScalarType(name) is PrimitiveType scalar)
         {
             type = scalar;
-            return true;
         }
-        var candidates = new HashSet<PrimitiveType>();
-        if (_structNames.TryGetValue(name, out var direct))
+        else if (name == NativeManagedNodeIntrinsics.TypeName)
         {
-            _ = candidates.Add(direct);
+            type = PrimitiveType.ManagedNode;
         }
-        if (_structNames.TryGetValue(Qualify(name), out var local))
+        else if (ResolveTypeName(name, out type) != DeclaredTypeResolution.Unique)
         {
-            _ = candidates.Add(local);
+            return false;
         }
-        foreach (var imported in _usings)
+        if (writable)
         {
-            if (_structNames.TryGetValue(imported + "." + name, out var candidate))
+            if (type != PrimitiveType.ManagedNode
+                && (!IsClass(type) || !_classes[ManagedClassTypes.ClassIndex(type)].IsMutable))
             {
-                _ = candidates.Add(candidate);
+                return false;
             }
+            type = ManagedClassTypes.Writable(type);
         }
-        type = candidates.Count == 1 ? candidates.Single() : default;
-        return candidates.Count == 1;
+        if (optional)
+        {
+            if (!ManagedClassTypes.IsManaged(type))
+            {
+                return false;
+            }
+            type = ManagedClassTypes.Optional(type);
+        }
+        return true;
     }
 
     private string? FindProtocol(string name)

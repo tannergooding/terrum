@@ -112,32 +112,36 @@ Copy/move rules still apply.
 
 These constructor-inference rules are target direction, not current general
 compiler support. Decimal, hexadecimal and binary integer tokenization and
-contextual literal binding are implemented. The bounded binder infers one
-generic `T` for eligible top-level function templates over `Copy` structs
-or `bool`, `char16`, `int32`, `uint32`, `int64` and `uint64`:
-typed arguments or an existing typed `out` destination can establish `T`, and
-expected-result context can provide a bounded fallback before contextual
-argument binding. Explicit type arguments remain supported. For a Copy-only
+contextual literal binding are implemented. The bounded binder infers multiple
+generic type parameters for eligible top-level function templates over `Copy`
+structs, `bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`, and existing
+source-class/`ManagedNode` handles in their supported readonly/write and
+optional forms. Typed arguments and typed existing `out` destinations establish
+their corresponding parameters before expected-result context can fill an
+unresolved parameter. Explicit type arguments remain supported. For a Copy-only
 `T Identity<T>(T value)`, `int64 result = Identity(42)` establishes `T` from
 the expected result before binding the literal. `var result = Identity(42)`
 has no such evidence and rejects. `Identity(int32(42))` establishes `int32`
-regardless of an outer result context. A `T`-returning template must also
-take a `T` argument; result context cannot manufacture a struct from a
-numeric literal. The template's definition-site
-`Copy`, operator and `[NoThrow]` requirements still govern specialization;
-inference cannot borrow stronger caller constraints. Scalar specializations
-support Copy-only templates, not nominal primitive operator conformance.
-This does not infer unique or managed `T`, constructor or method type
-arguments, ordinary overloads, or partial `_` holes. The current binder
+regardless of an outer result context. Result context cannot manufacture a
+struct from a numeric literal. The template's definition-site `Copy` and
+operator constraints and declared
+effects still govern specialization; inference cannot borrow stronger caller
+constraints. A typed `write C` argument fixes `T` before result fallback, so an
+ordinary permitted result weakening to `C` or supported optional widening can
+accept the result without retargeting `T`. Conditional outputs retain existing
+exact type and qualification rules. Copying a handle does not grant field,
+null-test or operator operations. Scalar specializations support Copy-only
+templates, not nominal primitive operator conformance. This does not infer
+unique/owning arguments, views, generic classes/structs, managed fields inside
+user structs, constructor or method type arguments, ordinary overloads, or
+partial `_` holes. The current binder
 already uses typed operands before expected-result context and
 propagates expected `int32`, `uint32`, `int64`, or `uint64` types into untyped
 nested arithmetic, so `int64 x = 50000 * 50000` is supported. It rejects
 retargeting already-typed `int32` operands and leaves a literal without type
 context unresolved.
 Ordinary overloaded declarations are rejected with `TRM3003`. Inferred
-specializations remain compilation-local and use the existing private
-separately compiled module-servicing contract; the inference change adds no
-new call syntax, public generic ABI or artifact version. Generic
+specializations remain compilation-local and expose no public generic ABI. Generic
 signature-based result-type lookup remains distinct from type-argument
 inference. General argument/result inference, partial holes and constructor
 inference remain unsupported.

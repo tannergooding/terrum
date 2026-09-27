@@ -48,7 +48,8 @@ public static class SemanticVerifier
         VerifyCore(program, requireEntryPoint: false, allowExternal: true);
     }
 
-    private static void VerifyCore(BoundProgram program, bool requireEntryPoint, bool allowExternal = false)
+    private static void VerifyCore(BoundProgram program, bool requireEntryPoint, bool allowExternal = false,
+        bool allowScalarCollectionProof = false)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (program.Functions.IsDefaultOrEmpty || (requireEntryPoint
@@ -87,7 +88,14 @@ public static class SemanticVerifier
             function.Intrinsic >= BoundIntrinsic.NodeTryCreate
             || ManagedClassTypes.IsManaged(function.ReturnType)
             || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type)));
-        if (usesManagedNodes && program.Functions.Any(function =>
+        // An isolated generic proof may call the real scalar collection intrinsic while
+        // its opaque Copy parameters remain external. Executable and persisted IR never use this exception.
+        var scalarCollectionProof = allowScalarCollectionProof && program.Classes.IsEmpty
+            && program.Functions.All(static function =>
+                (function.Intrinsic is BoundIntrinsic.None or BoundIntrinsic.NodeCollect)
+                && !ManagedClassTypes.IsManaged(function.ReturnType)
+                && !function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type)));
+        if (usesManagedNodes && !scalarCollectionProof && program.Functions.Any(function =>
             function.IsExternal && !ManagedExportShape.Supported(function, program.Structures)))
         {
             throw InvalidEffect(default, "Ownership");
@@ -1331,11 +1339,12 @@ public static class SemanticVerifier
     }
 
     internal static bool TryVerifySource(BoundProgram program, out int functionIndex, out TextSpan span, out bool exceededWorkLimit,
-        out string? invalidEffect)
+        out string? invalidEffect, bool allowScalarCollectionProof = false)
     {
         try
         {
-            VerifyCore(program, requireEntryPoint: program.EntryPoint != -1, allowExternal: true);
+            VerifyCore(program, requireEntryPoint: program.EntryPoint != -1, allowExternal: true,
+                allowScalarCollectionProof: allowScalarCollectionProof);
             functionIndex = -1;
             span = default;
             exceededWorkLimit = false;

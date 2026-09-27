@@ -45,6 +45,11 @@ longer parsed. Based literals construct target-width bit patterns, while
 decimal literals retain numeric range semantics. Floating/custom literal
 parsing, registered literal targets and `[ConstEval]` remain outside this
 executable profile.
+The current parser version is syntax-18; qualified generic-call type arguments
+such as `write C` and `write C?` enable bounded managed-handle substitutions
+in compilation-local `Copy` templates. These reuse the existing managed
+contracts, with feature-dependent semantic version selection, and add no
+native-profile, scanner-record/schema or wire-format version.
 
 Terrum has no built-in marshalling. Source or generated tooling defines and
 performs conversions and wrappers for imported C APIs; the compiler/runtime
@@ -288,8 +293,10 @@ parameters, results, conditional outputs and class fields. They occupy eight
 bytes: zero is explicit absence, while a present value is an existing non-null
 handle. Neither integer zero nor an uninitialized slot can manufacture a valid
 non-null handle. `null` requires an optional target type; lifting a non-null
-handle does not allocate. Scalar options and generic option normalization are
-not part of this profile.
+handle does not allocate. Scalar options and general generic optional
+normalization remain outside this profile; bounded generic functions may use
+the existing optional source-class/`ManagedNode` handle forms described in the
+[generic implementation contract](implementation.md#bounded-generic-functions).
 
 `value is null` tests absence. `value is some item` snapshots the present
 non-null handle and publishes it only on the successful condition path,
@@ -324,29 +331,15 @@ also returns 42, using explicitly declared subtraction, division, remainder
 and bitwise `&`, `|`, `^` witnesses. The same concrete call lowering preserves
 ordinary checked arithmetic and declaration-site effect checks; bitwise
 spelling alone does not make an arbitrary operator implementation NoThrow.
-Templates and witnesses are compilation-local, while an exported concrete
-wrapper and its transitive private helpers use the existing separately compiled
-contract format. No additional runtime generic dispatch or wire version is needed.
-The bounded binder infers multiple independently constrained type parameters
-in top-level function templates over eligible `Copy` structs and the scalar
-value types `bool`, `char16`, `int32`, `uint32`, `int64` and `uint64`. A
-complete explicit type-argument list pins every position; typed arguments and
-typed existing `out` destinations establish corresponding parameters
-independently. Expected-result context can fill an unresolved parameter
-represented in the return type before contextual literal binding. Ordered
-specialization keys preserve parameter positions, including swapped helper
-forwarding. Each parameter has independent definition-site `Copy` and
-operator constraints; the function's declared effects, including `[NoThrow]`
-where present, are checked against operations permitted by those constraints.
-Formal parameters remain distinct during definition-site checking even when
-their supplied types coincide. The closed specialization is recorded for
-private module servicing. Scalars
-support Copy-only templates, not primitive operator witnesses. Unique or
-managed type parameters, constructor/method inference, general overloads,
-partial holes and a public generic ABI remain unsupported.
-See the
-[bounded grammar and constraints](implementation.md); this does not implement
-the proposed generic standard library or replaceable generic witnesses.
+Templates and witnesses remain compilation-local. Bounded generic functions
+can also select existing source-class/`ManagedNode` handles as `Copy` type
+arguments, preserving their readonly/write and supported optional forms and
+using the established access/rooting rules. This does not create a public
+generic or managed-handle ABI, or grant operations beyond the function's
+constraints. See the
+[bounded generic contract](implementation.md#bounded-generic-functions) for
+inference, results, outputs and remaining limits; this does not implement the
+proposed generic standard library or replaceable generic witnesses.
 
 For owned buffers, allocation-failure and exactly-once-release behavior can be checked with
 the trusted native ABI probe in `scripts/check-owned-buffer-abi.cs`, which
