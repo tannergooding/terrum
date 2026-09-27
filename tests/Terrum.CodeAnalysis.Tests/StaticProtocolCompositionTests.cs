@@ -39,6 +39,26 @@ public sealed class StaticProtocolCompositionTests
         }
         """;
 
+    [Fact]
+    public void TypedStructArgumentInfersCopyHelperThroughDefinitionSiteComposition()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Value {
+                public int32 Number;
+                public Value(int32 number) { Number = number; }
+            }
+            T Identity<T>(T value) where T : [Copy] { return value; }
+            U Forward<U>(U value) where U : [Copy] { return Identity(value); }
+            int32 Main() { return Forward(new Value(42)).Number; }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var names = Assert.IsType<BoundProgram>(compilation.Program).Functions.Select(function => function.Name);
+        Assert.Contains("Forward<Value>", names);
+        Assert.Contains("Identity<Value>", names);
+        Assert.DoesNotContain(Assert.IsType<BoundProgram>(compilation.Program).Functions,
+            function => function.IsExternal || function.Name.Contains('$', StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -71,7 +91,6 @@ public sealed class StaticProtocolCompositionTests
     [InlineData("return Double<T?>(value, true);", "Addition<T, T, T>", "TRM3007")]
     [InlineData("return Double<T>(value, value);", "Addition<T, T, T>", "TRM3007")]
     [InlineData("return Double<T>(value);", "Addition<T, T, T>", "TRM3011")]
-    [InlineData("return Double(value, true);", "Addition<T, T, T>", "TRM3011")]
     [InlineData("return Missing<T>(value);", "Addition<T, T, T>", "TRM3011")]
     [InlineData("T Double = value; return Double<T>(value, true);", "Addition<T, T, T>", "TRM3011")]
     public void InvalidCompositionRejectsAtDefinitionEvenWithRicherConcreteWitness(
@@ -149,29 +168,39 @@ public sealed class StaticProtocolCompositionTests
             && diagnostic.Diagnostic.Code == "TRM3007");
     }
 
-    [Fact]
-    public void SpecializationResolvesEachHelpersOwnNamespaceAndImports()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SpecializationResolvesEachHelpersOwnNamespaceAndImports(bool infer)
     {
+        var caller = """
+            using Contracts;
+            using Helpers;
+            namespace Callers;
+            T Compose<T>(T value) where T : Addition<T, T, T>, [Copy] {
+                return Double(value, true);
+            }
+            int32 Main() { return Compose(new Value(3)).Number; }
+            """;
+        var helper = """
+            using Contracts;
+            using Leaves;
+            namespace Helpers;
+            U Double<U>(U value, bool twice) where U : Addition<U, U, U>, [Copy] {
+                if (twice) { return Identity(value + value); }
+                return Identity(value);
+            }
+            """;
+        if (!infer)
+        {
+            caller = caller.Replace("return Double(value", "return Double<T>(value", StringComparison.Ordinal)
+                .Replace("return Compose(new Value", "return Compose<Value>(new Value", StringComparison.Ordinal);
+            helper = helper.Replace("return Identity(", "return Identity<U>(", StringComparison.Ordinal);
+        }
         var compilation = Compilation.Create([
             SyntaxTree.Parse("namespace Contracts;" + Protocols + Value),
-            SyntaxTree.Parse("""
-                using Contracts;
-                using Helpers;
-                namespace Callers;
-                T Compose<T>(T value) where T : Addition<T, T, T>, [Copy] {
-                    return Double<T>(value, true);
-                }
-                int32 Main() { return Compose<Value>(new Value(3)).Number; }
-                """),
-            SyntaxTree.Parse("""
-                using Contracts;
-                using Leaves;
-                namespace Helpers;
-                U Double<U>(U value, bool twice) where U : Addition<U, U, U>, [Copy] {
-                    if (twice) { return Identity<U>(value + value); }
-                    return Identity<U>(value);
-                }
-                """),
+            SyntaxTree.Parse(caller),
+            SyntaxTree.Parse(helper),
             SyntaxTree.Parse("""
                 using Contracts;
                 namespace Leaves;

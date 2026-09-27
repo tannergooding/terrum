@@ -63,9 +63,10 @@ contract for persisted, non-exported `mut` methods on non-owning compact
 structs. Source visibility may be public or private; named mutable locals and
 forwarding through an existing `this` are supported receiver places. Public
 source visibility does not expose a public mutating-receiver ABI.
-It includes compilation-local constrained generic specialization, but not a
-public managed ABI, general interfaces/witnesses, array/view libraries, async,
-or the proposed libraries. The syntax-16 numeric front end rejects width
+It includes compilation-local constrained generic specialization, including
+bounded single-`T` inference for top-level function templates over `Copy`
+structs, but not a public managed ABI, general interfaces/witnesses,
+array/view libraries, async, or the proposed libraries. The syntax-16 numeric front end rejects width
 suffixes with `TRM0006`, diagnoses missing hexadecimal/binary digits as
 `TRM0007`/`TRM0008` and malformed separators as `TRM0009`, no longer parses
 prefix casts, and supports contextual decimal/hexadecimal/binary integer
@@ -1048,7 +1049,7 @@ trades generality for simplicity.
 | Mutable-array variance and root arrays | Writable storage is invariant; any readonly projection needs checked representation, access, and lifetime rules | Accepted invariant; projection/root-array policy open |
 | Universal object defaults | No universal object methods or automatic capabilities; opt-in equality/hash/format and separate diagnostic identity | Accepted direction |
 | Nominal witnesses and capability predicates | Checked `IFoo` witnesses remain distinct from `[Copy]`, storage, and family capabilities | Accepted baseline |
-| Generic/erased APIs, conditional witnesses, associated results, erasure, inference, overloads | Accepted policy; exact grammar, representations, dispatch and general compiler support are staged | Accepted direction / scheduled |
+| Generic/erased APIs, conditional witnesses, associated results, erasure, inference, overloads | Accepted policy; exact grammar, representations, dispatch and general compiler support are staged | Bounded top-level single-`T` inference for eligible `Copy` structs is implemented; general inference and overload binding remain scheduled |
 | Implicit readonly parameter loans | Parameter-only `implicit ref<T>` borrowing; ordinary value matches take precedence; no adaptive result/view family or ordinary receiver change | Accepted direction / implementation scheduled |
 | Generic array/enum capabilities | Preserve independent capability predicates, unnamed enum values, open-by-default evolution and explicit case-set/layout contracts | Accepted direction / representation details open |
 | Layout and wrappers | Opaque by default; opt-in Sequential, Union and Transparent contracts; transparent wrappers remain nominal but are carrier-equivalent only under checked ABI, validity, ownership and cleanup contracts; no arbitrary user-selected field offsets | Accepted direction / exact syntax and ABI profiles open |

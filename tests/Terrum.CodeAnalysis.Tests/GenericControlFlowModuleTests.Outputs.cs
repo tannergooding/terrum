@@ -26,18 +26,23 @@ public sealed partial class GenericControlFlowModuleTests
         }
         [NoThrow] int32 Count<T>(T value, int32 count) where T : [Copy] { return count; }
         public int32 PowerProbe() {
-            if (TryCopy<Pair>(new Pair(1, 2), false, out var missing)) { return 1; }
-            require TryCopy<Pair>(new Pair(40, 2), true, out var result);
-            return int32(result.First + result.Second) + Count<Pair>(result, 0);
+            if (TryCopy(new Pair(1, 2), false, out var missing)) { return 1; }
+            require TryCopy(new Pair(40, 2), true, out var result);
+            return int32(result.First + result.Second) + Count(result, 0);
         }
         """;
 
     [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    [InlineData(NativeRuntimePolicy.FailFast, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, true)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
     public async Task GenericOutputSpecializationsPersistWithoutPublicWitnessesOrNewWireFormatAsync(
-        NativeRuntimePolicy policy)
+        NativeRuntimePolicy policy, bool infer)
     {
+        var source = infer ? OutputProducer : OutputProducer
+            .Replace("TryCopy(", "TryCopy<Pair>(", StringComparison.Ordinal)
+            .Replace("Count(", "Count<Pair>(", StringComparison.Ordinal);
         var original = ModuleCompiler.CreateProducer(Compile(Stub, policy), ["PowerProbe"]);
         var consumer = ModuleCompiler.CreateConsumer(Compile("""
             struct Pair {
@@ -50,7 +55,7 @@ public sealed partial class GenericControlFlowModuleTests
             }
             """, policy, ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
-        var replacement = ModuleCompiler.CreateProducer(Compile(OutputProducer, policy), ["PowerProbe"]);
+        var replacement = ModuleCompiler.CreateProducer(Compile(source, policy), ["PowerProbe"]);
         Assert.Equal(18, BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
         var reference = ModuleCompiler.CreateReference(replacement);
         Assert.Empty(reference.Structures);
@@ -72,7 +77,7 @@ public sealed partial class GenericControlFlowModuleTests
             NativeModuleCompiler.CreateGraphReference([middle]), library: false), [middle], policy);
         var rootHash = SHA256.HashData(root);
         var middleHash = SHA256.HashData(middle);
-        var nativeReplacement = NativeModuleCompiler.CreateProducer(Compile(OutputProducer, policy),
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(Compile(source, policy),
             ["PowerProbe"], "NodeB", policy);
         Assert.Equal(44, await NativeModuleCompiler.RunGraphAsync(root, [nativeReplacement, middle],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));

@@ -83,11 +83,13 @@ public sealed class StaticProtocolTests
     }
 
     [Fact]
-    public void ExplicitGenericArgumentsAreRequired()
+    public void TypedArgumentsInferTheSameClosedProtocolSpecialization()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(s_sample.Replace(
             "EvaluateQuadratic<Meters>(", "EvaluateQuadratic(", StringComparison.Ordinal)));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3011");
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Contains(Assert.IsType<BoundProgram>(compilation.Program).Functions,
+            function => function.Name == "EvaluateQuadratic<Meters>");
     }
 
     [Fact]

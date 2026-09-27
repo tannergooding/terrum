@@ -267,6 +267,14 @@ An exponent of zero returns the supplied identity without multiplying.
 Templates and witnesses are compilation-local, while an exported concrete
 wrapper and its transitive private helpers use the existing separately compiled
 contract format. No additional runtime generic dispatch or wire version is needed.
+The current bounded binder infers the single `T` in top-level function
+templates over eligible `Copy` structs from typed arguments or typed existing
+`out` destinations; explicit type arguments remain valid, and expected-result
+context is only a bounded fallback. This keeps definition-site operator,
+`Copy` and `[NoThrow]` checks in force and records the selected closed
+specialization for private module servicing. It does not enable primitive or
+unique `T`, constructor/method inference, general overloads, partial holes, or a
+public generic ABI.
 See the
 [bounded grammar and constraints](implementation.md); this does not implement
 the proposed generic standard library or replaceable generic witnesses.

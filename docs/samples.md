@@ -57,10 +57,12 @@ returns 46 through AOT and JIT. Two nominal Copy wrappers explicitly implement
 source-defined addition/multiplication protocols used by one constrained
 generic expression. The [integer-power sample](../samples/native/static-protocol-power.terrum)
 returns 42 using a structured generic algorithm and square helper for 32- and 64-bit wrappers.
-Its caller supplies the identity; scalar loop control does not grant extra
-operations on the type parameter, and helper calls must be justified by the
-caller's declared constraints. These are closed specializations, not
-general generic-library or public witness support.
+Its `Power(...)` and `Square(...)` calls infer the single `T` from typed `Copy`
+struct arguments; the caller supplies the identity. Scalar loop control does
+not grant extra operations on the type parameter, and helper calls must be
+justified by the caller's declared constraints. These remain closed
+compilation-local specializations, not general generic-library or public
+witness support.
 
 | Program | Source | Design contract / expected behavior |
 |---|---|---|

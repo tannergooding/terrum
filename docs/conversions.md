@@ -111,18 +111,33 @@ primary-constructor fields nor infers a concrete type from a constraint.
 Copy/move rules still apply.
 
 These constructor-inference rules are target direction, not current general
-compiler support. Decimal and hexadecimal integer tokenization and contextual
-literal binding are implemented; general constructor inference is not. The
-current binder already uses typed operands before expected-result context and
+compiler support. Decimal, hexadecimal and binary integer tokenization and
+contextual literal binding are implemented. The bounded binder infers one
+generic `T` for eligible top-level function templates over `Copy` structs:
+typed arguments or an existing typed `out` destination can establish `T`, and
+expected-result context can provide a bounded fallback before contextual
+argument binding. Explicit type arguments remain supported. There is no
+successful result-only case in this profile: a `T`-returning template must
+also take a `T` argument, and no untyped struct literal can acquire that type
+from the result context. The template's definition-site
+`Copy`, operator and `[NoThrow]` requirements still govern specialization;
+inference cannot borrow stronger caller constraints. This does not infer
+primitive or unique `T`, constructor or method type arguments, ordinary
+overloads, or partial `_` holes. Numeric literal-only calls do not establish a generic
+struct type; expected-result fallback does not imply that a literal can be
+implicitly converted or used to invent a struct constructor. The current binder
+already uses typed operands before expected-result context and
 propagates expected `int32`, `uint32`, `int64`, or `uint64` types into untyped
 nested arithmetic, so `int64 x = 50000 * 50000` is supported. It rejects
 retargeting already-typed `int32` operands and leaves a literal without type
 context unresolved.
-Ordinary overloaded declarations are rejected with `TRM3003`; generic source
-calls require explicit type arguments. Generic signature-based result-type
-lookup is implemented, but it does not infer type arguments from arguments or
-expected results. General argument/result inference, partial holes and
-constructor inference remain unsupported.
+Ordinary overloaded declarations are rejected with `TRM3003`. Inferred
+specializations remain compilation-local and use the existing private
+separately compiled module-servicing contract; the inference change adds no
+new call syntax, public generic ABI or artifact version. Generic
+signature-based result-type lookup remains distinct from type-argument
+inference. General argument/result inference, partial holes and constructor
+inference remain unsupported.
 
 ## Registered literal parsing and constant evaluation
 

@@ -1769,7 +1769,7 @@ internal sealed partial class Binder
                 break;
 
             case SyntaxKind.InvocationExpression:
-                expression = BindCall(node);
+                expression = BindCall(node, expected);
                 break;
 
             case SyntaxKind.ObjectCreationExpression:
@@ -1950,7 +1950,7 @@ internal sealed partial class Binder
         return new BoundBinary(op.Kind, left, right, resultType, node.Span);
     }
 
-    private BoundExpression BindCall(SyntaxNode node)
+    private BoundExpression BindCall(SyntaxNode node, PrimitiveType? expected)
     {
         var callee = (SyntaxNode)node.Children[0];
         var function = -1;
@@ -1964,11 +1964,18 @@ internal sealed partial class Binder
             }
             else if (!TryFindFunction(name.Text, out function))
             {
-                if (TryConversionTarget(callee, out var target))
+                if (FindGenericTemplate(name.Text) is not null)
+                {
+                    function = InstantiateGeneric(callee, (SyntaxNode)node.Children[1], expected);
+                }
+                else if (TryConversionTarget(callee, out var target))
                 {
                     return BindConversionCall(node, (SyntaxNode)node.Children[1], target);
                 }
-                Report("TRM3011", $"Unknown function '{name.Text}'.", name.Span);
+                else
+                {
+                    Report("TRM3011", $"Unknown function '{name.Text}'.", name.Span);
+                }
             }
         }
         else if (callee.Kind == SyntaxKind.GenericNameExpression)
@@ -2417,6 +2424,10 @@ internal sealed partial class Binder
                     if (!TryFindVariable(name, out _) && TryFindFunction(name, out var index))
                     {
                         return _signatures[index].ReturnType;
+                    }
+                    if (FindGenericTemplate(name) is not null)
+                    {
+                        return GenericCallType(callee, (SyntaxNode)node.Children[1]);
                     }
                     if (TryConversionTarget(callee, out var target))
                     {

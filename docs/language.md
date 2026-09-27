@@ -237,16 +237,30 @@ target. `func<_, int32> f = ToInt32` can fill a hole from one unique method
 signature. All holes resolve at local binding; exported fields, aliases, and
 parameters cannot retain them. There is no wildcard/existential/higher-kinded
 meaning, and non-injective projections are not inverted. Ambiguity diagnoses.
-These are target binding rules, not a claim that the inference feature is
-implemented. The current binder propagates expected `int32`, `uint32`, `int64`,
-or `uint64` types into nested untyped arithmetic, so
-`int64 x = 50000 * 50000` is valid; it rejects retargeting typed `int32`
-operands and leaves context-free literals unresolved. Ordinary overload
-declarations are rejected with `TRM3003`; generic source calls require
-explicit type arguments. Generic signature-based result-type lookup is
-implemented, but neither arguments nor expected results infer generic type
-arguments. Overload selection and general argument/result inference, including
-partial holes, remain scheduled.
+The broad inference order above is target direction, not a claim that general
+inference is implemented. The bounded compiler now infers one `T` for eligible
+top-level generic function templates over `Copy` structs when typed arguments
+or a typed existing `out` destination uniquely establish the struct type.
+Expected-result context can fill an unresolved `T` as a bounded fallback
+before contextual argument binding. Explicit type arguments continue to work.
+This is not a general result-only inference promise.
+Uncontextualized primitive literals and typed primitive arguments do not
+establish a generic struct `T`. An explicitly typed construction such as
+`new Value(42)` does provide its struct type; inferring a generic constructor's
+own type arguments remains unsupported. Inference does not implicitly
+construct a struct from a literal. Definition-site `Copy`,
+operator and `[NoThrow]` requirements remain authoritative for every inferred
+specialization, and a caller's stronger constraints are not borrowed to
+justify a weaker template. Inferred specializations remain compilation-local
+and preserve the existing private module-servicing contract, with no public
+generic ABI or artifact-version change.
+
+The implementation does not infer primitive or unique `T`, constructor or
+method type arguments, ordinary overloads, or partial `_` holes. It does not
+add a struct-literal parser or public generic ABI. Contextual expected types
+still flow into untyped arithmetic (for example, `int64 x = 50000 * 50000`),
+but do not retarget typed numeric operands. General overload selection and
+argument/result inference remain scheduled.
 
 Underscore has context-specific roles rather than one universal discard
 operation. In a discard-value context, evaluate once and apply ordinary value

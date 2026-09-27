@@ -307,16 +307,65 @@ internal sealed partial class Binder
         }
     }
 
-    private PrimitiveType? GenericCallType(SyntaxNode callee)
+    private PrimitiveType? GenericCallType(SyntaxNode callee, SyntaxNode? callArguments = null)
     {
         var name = ((SyntaxTokenElement)callee.Children[0]).Token.Text;
         if (TryFindVariable(name, out _) || FindGenericTemplate(name) is not GenericTemplate template)
         {
             return null;
         }
-        var arguments = ((SyntaxNode)callee.Children[1]).Children.OfType<SyntaxNode>().ToArray();
-        return arguments.Length == 1 && TryResolveGenericArgument(NameText(arguments[0]), out var type)
-            ? template.ScalarReturnType ?? type : null;
+        if (callee.Kind == SyntaxKind.GenericNameExpression)
+        {
+            var arguments = ((SyntaxNode)callee.Children[1]).Children.OfType<SyntaxNode>().ToArray();
+            return arguments.Length == 1 && TryResolveGenericArgument(NameText(arguments[0]), out var type)
+                ? template.ScalarReturnType ?? type : null;
+        }
+        if (template.ScalarReturnType is PrimitiveType scalar)
+        {
+            return scalar;
+        }
+        var inferred = callArguments is null ? null
+            : InferGenericType(template, callArguments, null, out _);
+        return inferred is PrimitiveType concrete && IsStruct(concrete)
+            ? concrete : null;
+    }
+
+    private PrimitiveType? InferGenericType(GenericTemplate template, SyntaxNode arguments,
+        PrimitiveType? expected, out bool conflictingArguments)
+    {
+        conflictingArguments = false;
+        PrimitiveType? inferred = null;
+        var supplied = arguments.Children.OfType<SyntaxNode>().ToArray();
+        for (var index = 0; index < Math.Min(supplied.Length, template.Parameters.Length); index++)
+        {
+            if (template.Parameters[index].ScalarType is not null)
+            {
+                continue;
+            }
+            var argument = supplied[index];
+            PrimitiveType? candidate = null;
+            if (argument.Children is [SyntaxNode value])
+            {
+                candidate = KnownType(value);
+            }
+            else if (template.Parameters[index].IsOut
+                && argument.Children is [SyntaxTokenElement { Token.Kind: TokenKind.OutKeyword },
+                    SyntaxNode { Kind: SyntaxKind.NameExpression } output])
+            {
+                candidate = KnownType(output);
+            }
+            if (candidate is not PrimitiveType typed)
+            {
+                continue;
+            }
+            if (inferred is PrimitiveType established && established != typed)
+            {
+                conflictingArguments = true;
+                return null;
+            }
+            inferred = typed;
+        }
+        return inferred ?? (template.ScalarReturnType is null ? expected : null);
     }
 
     private GenericTemplate? FindGenericTemplate(string name)
@@ -337,7 +386,7 @@ internal sealed partial class Binder
         return names.Count == 1 ? _templates[names.Single()] : null;
     }
 
-    private int InstantiateGeneric(SyntaxNode callee)
+    private int InstantiateGeneric(SyntaxNode callee, SyntaxNode? callArguments = null, PrimitiveType? expected = null)
     {
         _cancellationToken.ThrowIfCancellationRequested();
         var name = ((SyntaxTokenElement)callee.Children[0]).Token.Text;
@@ -347,24 +396,52 @@ internal sealed partial class Binder
             return -1;
         }
         var template = FindGenericTemplate(name);
-        var arguments = ((SyntaxNode)callee.Children[1]).Children.OfType<SyntaxNode>().ToArray();
-        if (_genericContext is GenericInstantiation caller
-            && (arguments.Length != 1 || NameText(arguments[0]) != caller.Template.TypeParameter
-                || (template is not null && template.Operations.Values.Any(protocol =>
-                    !caller.Template.Operations.ContainsValue(protocol)))))
+        var explicitArguments = callee.Kind == SyntaxKind.GenericNameExpression
+            ? ((SyntaxNode)callee.Children[1]).Children.OfType<SyntaxNode>().ToArray() : [];
+        if (_genericContext is GenericInstantiation caller && callArguments is null
+            && (explicitArguments.Length != 1
+                || NameText(explicitArguments[0]) != caller.Template.TypeParameter))
         {
             Report("TRM3007", "A constrained helper call requires the current type parameter and its declared protocol witnesses.",
                 callee.Span);
             return -1;
         }
-        if (template is null || arguments.Length != 1
-            || !TryResolveGenericArgument(NameText(arguments[0]), out var concrete)
-            || !IsStruct(concrete))
+        PrimitiveType? concrete = null;
+        if (template is not null)
         {
-            Report("TRM3011", "A generic call requires one explicit, unambiguous Copy struct or current type parameter argument.", callee.Span);
+            if (callArguments is null)
+            {
+                if (explicitArguments.Length == 1
+                    && TryResolveGenericArgument(NameText(explicitArguments[0]), out var resolved))
+                {
+                    concrete = resolved;
+                }
+            }
+            else
+            {
+                concrete = InferGenericType(template, callArguments, expected, out var conflicting);
+                if (conflicting)
+                {
+                    Report("TRM3007", "Typed arguments establish conflicting generic types.", callArguments.Span);
+                    return -1;
+                }
+            }
+        }
+        if (template is null || concrete is not PrimitiveType type || !IsStruct(type))
+        {
+            Report("TRM3011", "A generic call requires one unambiguous Copy struct type from explicit arguments, typed arguments, or its result context.",
+                callee.Span);
             return -1;
         }
-        var typeName = _structs[(int)concrete - 100].Name;
+        if (_genericContext is GenericInstantiation enclosing
+            && (type != enclosing.Type || template.Operations.Values.Any(protocol =>
+                !enclosing.Template.Operations.ContainsValue(protocol))))
+        {
+            Report("TRM3007", "A constrained helper call requires the current type parameter and its declared protocol witnesses.",
+                callee.Span);
+            return -1;
+        }
+        var typeName = _structs[(int)type - 100].Name;
         var instantiated = template.Name + "<" + typeName + ">";
         if (_functions.TryGetValue(instantiated, out var existing))
         {
@@ -376,7 +453,7 @@ internal sealed partial class Binder
             Report("TRM3016", "Closed generic specialization limit exceeded.", callee.Span);
             return -1;
         }
-        if (_structs[(int)concrete - 100].IsUnique
+        if (_structs[(int)type - 100].IsUnique
             || (template.Operations.Count != 0
                 && (!_conformances.TryGetValue(typeName, out var witnesses)
                     || template.Operations.Values.Any(protocol => !witnesses.Contains(protocol)))))
@@ -384,14 +461,14 @@ internal sealed partial class Binder
             Report("TRM3007", $"'{typeName}' lacks the declared Copy static protocol witnesses.", callee.Span);
             return -1;
         }
-        var parameters = template.Parameters.Select(parameter => new Parameter(parameter.Name, parameter.ScalarType ?? concrete,
+        var parameters = template.Parameters.Select(parameter => new Parameter(parameter.Name, parameter.ScalarType ?? type,
             callee.Span, parameter.IsOut)).ToImmutableArray();
         var index = _signatures.Count;
         _functions.Add(instantiated, index);
-        _signatures.Add(new Signature(instantiated, template.ScalarReturnType ?? concrete, parameters,
+        _signatures.Add(new Signature(instantiated, template.ScalarReturnType ?? type, parameters,
             template.Declaration.Children.OfType<SyntaxNode>().Last(static node => node.Kind == SyntaxKind.Block),
             template.Declaration, template.Tree, null, false, false, true, false, true, template.IsNoThrow, false) {
-            Generic = new GenericInstantiation(template, concrete),
+            Generic = new GenericInstantiation(template, type),
         });
         return index;
     }

@@ -18,6 +18,14 @@ Copy-only selection and numeric algorithms with scalar control flow, but not the
 generic spans, stored dependencies or host interfaces
 required by those sketches. The scanner consumes the shared host keyword catalog,
 including `abstract`, `operator` and `where`, without a second keyword table.
+For eligible top-level one-`T` templates over `Copy` structs, the current
+static-protocol profile can infer a specialization from typed arguments or a
+typed existing `out` destination; explicit type arguments remain supported.
+Expected-result inference is a bounded fallback, not general result-only
+inference. These specializations preserve definition-site `Copy`, operator
+and `[NoThrow]` requirements and remain compilation-local. Primitive or
+unique `T`, constructor/method inference, ordinary overloads, partial holes and a
+public generic ABI remain unsupported.
 `build-component` uses the compiled scanner's records as the lexical input to
 the official host parser, binder and native emitter; the binder also consumes
 its decoded integer magnitudes. It does not re-lex or decode integer magnitudes

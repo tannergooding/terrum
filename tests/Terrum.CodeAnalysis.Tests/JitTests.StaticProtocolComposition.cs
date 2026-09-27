@@ -22,9 +22,11 @@ public sealed partial class JitTests
         """;
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task CopyOnlyGenericSelectionPreservesNestedTokenValuesAsync(bool checkedFailures)
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task CopyOnlyGenericSelectionPreservesNestedTokenValuesAsync(bool checkedFailures, bool infer)
     {
         string[] components = [
             Path.Combine(RepositoryRoot(), "self-host", "SourceRange.terrum"),
@@ -35,15 +37,15 @@ public sealed partial class JitTests
             using Terrum;
             using Terrum.CodeAnalysis;
             [NoThrow] T Choose<T>(T first, T second) where T : [Copy] {
-                return SelectCopy<T>(false, SelectCopy<T>(true, first, second), second);
+                return SelectCopy(false, SelectCopy(true, first, second), second);
             }
             int32 Main() {
                 require SourceRange.TryCreate(12, 5, out var firstRange);
                 require SourceRange.TryCreate(42, 7, out var secondRange);
                 mut Token first = new Token(1, firstRange);
                 mut Token second = new Token(2, secondRange);
-                var chosen = Choose<Token>(first, second);
-                var range = Choose<SourceRange>(firstRange, secondRange);
+                var chosen = Choose(first, second);
+                var range = Choose(firstRange, secondRange);
                 first = new Token(3, secondRange);
                 second = new Token(4, firstRange);
                 if (chosen.Kind != 2 || chosen.Range.Start != 42 || chosen.Range.Length != 7
@@ -51,46 +53,60 @@ public sealed partial class JitTests
                 return chosen.Range.Start;
             }
             """;
+        var source = infer ? Source : Source.Replace("SelectCopy(", "SelectCopy<T>(", StringComparison.Ordinal)
+            .Replace("Choose(first, second)", "Choose<Token>(first, second)", StringComparison.Ordinal)
+            .Replace("Choose(firstRange, secondRange)", "Choose<SourceRange>(firstRange, secondRange)", StringComparison.Ordinal);
         if (checkedFailures)
         {
-            await AssertCheckedExecutionAsync(Source, 42, components).ConfigureAwait(true);
+            await AssertCheckedExecutionAsync(source, 42, components).ConfigureAwait(true);
         }
         else
         {
-            await AssertFailFastExecutionAsync(Source, 42, components).ConfigureAwait(true);
+            await AssertFailFastExecutionAsync(source, 42, components).ConfigureAwait(true);
         }
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task RecursiveGenericHelpersPreserveIndirectCopyResultsAsync(bool mutual)
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task RecursiveGenericHelpersPreserveIndirectCopyResultsAsync(bool mutual, bool infer)
     {
         var source = CompositionValue + """
             T Repeat<T>(T value, uint32 count) where T : Addition<T, T, T>, [Copy] {
                 if (count == 0) { return value; }
-                return Repeat<T>(value + value, count - 1);
+                return Repeat(value + value, count - 1);
             }
             int32 Main() {
-                var value = Repeat<Value>(new Value(2, 3), 3);
+                var value = Repeat(new Value(2, 3), 3);
                 return int32(value.First + value.Second) + 2;
             }
             """;
         if (mutual)
         {
-            source = source.Replace("return Repeat<T>", "return Again<T>", StringComparison.Ordinal)
+            source = source.Replace("return Repeat(value + value", "return Again(value + value", StringComparison.Ordinal)
                 + """
                 U Again<U>(U value, uint32 count) where U : Addition<U, U, U>, [Copy] {
-                    return Repeat<U>(value, count);
+                    return Repeat(value, count);
                 }
                 """;
+        }
+        if (!infer)
+        {
+            source = source.Replace("return Repeat(value + value", "return Repeat<T>(value + value", StringComparison.Ordinal)
+                .Replace("return Again(value + value", "return Again<T>(value + value", StringComparison.Ordinal)
+                .Replace("return Repeat(value, count)", "return Repeat<U>(value, count)", StringComparison.Ordinal)
+                .Replace("var value = Repeat(new Value", "var value = Repeat<Value>(new Value", StringComparison.Ordinal);
         }
         await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
 
-    [Fact]
-    public async Task ComposedHelpersPreserveMixedStackArgumentsAndNestedCopyTemporariesAsync()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ComposedHelpersPreserveMixedStackArgumentsAndNestedCopyTemporariesAsync(bool infer)
     {
         var source = CompositionValue + """
             T Compose<T>(T value, T extra) where T : Addition<T, T, T>, [Copy] {
@@ -103,13 +119,90 @@ public sealed partial class JitTests
                 return first + second + third + fourth;
             }
             int32 Main() {
-                var result = Compose<Value>(new Value(1, 2), new Value(3, 4));
+                var result = Compose(new Value(1, 2), new Value(3, 4));
                 if (result.First != 16 || result.Second != 24) { return 1; }
                 return 42;
             }
             """;
+        if (!infer)
+        {
+            source = source.Replace("var result = Compose(new Value", "var result = Compose<Value>(new Value",
+                StringComparison.Ordinal);
+        }
         await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InferredArgumentMethodWithMutableReceiverRunsExactlyOnceAsync(bool checkedFailures)
+    {
+        const string Source = """
+            struct Value {
+                public int32 Number;
+                public Value(int32 number) { Number = number; }
+            }
+            struct Counter {
+                public mut int32 Number;
+                public Counter(int32 number) { Number = number; }
+                public mut Value Next() {
+                    Number = Number + 1;
+                    return new Value(Number);
+                }
+            }
+            T Identity<T>(T value) where T : [Copy] { return value; }
+            int32 Read<T>(T value, int32 count) where T : [Copy] { return count; }
+            int32 Main() {
+                mut Counter counter = new Counter(40);
+                var result = Identity(Identity(counter.Next()));
+                if (counter.Number != 41 || result.Number != 41) { return 1; }
+                return Read(result, result.Number) + 1;
+            }
+            """;
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InferredOutputCallsRespectConditionalPublicationAsync(bool checkedFailures)
+    {
+        const string Source = """
+            struct Value {
+                public int32 Number;
+                public Value(int32 number) { Number = number; }
+            }
+            [NoThrow] bool None<T>(out T result) where T : [Copy] { return false; }
+            [NoThrow] bool TryCopy<T>(T value, bool publish, out T result) where T : [Copy] {
+                result = value;
+                return publish;
+            }
+            int32 Main() {
+                mut Value target = new Value(7);
+                if (None(out target)) { return 1; }
+                require TryCopy(new Value(42), true, out target);
+                if (target.Number != 42) { return 3; }
+                if (TryCopy(new Value(42), false, out target)) { return 2; }
+                require TryCopy(new Value(42), true, out var result);
+                return result.Number;
+            }
+            """;
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
+        }
     }
 
     [Fact]

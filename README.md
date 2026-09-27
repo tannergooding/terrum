@@ -37,6 +37,17 @@ as `TRM0009`. Prefix casts are no longer parsed. Floating literal binding,
 custom literal targets and `[ConstEval]` are not implemented yet; see the
 [implementation matrix](docs/implementation.md).
 
+The bounded static-protocol profile also infers a single `T` for eligible
+top-level generic function templates over `Copy` struct types: typed arguments
+and typed existing `out` destinations can select the specialization without
+writing `<T>`. This preserves the template's declared `Copy`, operator and
+`[NoThrow]` contracts. It does not enable primitive or unique `T`, constructor
+or method inference, overload declarations, partial type-argument holes or a
+public generic ABI. Expected-result inference is only a bounded fallback, not
+a general result-only inference promise; primitive literals do not supply a
+default `T`. An explicitly typed struct construction can establish `T`
+without enabling generic constructor inference.
+
 Semantic v24 validates managed-class/`ManagedNode` access: `mut class`,
 writable `mut` class methods, readonly bare handles and explicit `write`
 capability through qualified fields, parameters, results, optionals and
