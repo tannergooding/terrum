@@ -294,6 +294,11 @@ returns 42 using a structured generic body, scalar exponent and a separately
 specialized constrained square helper. Its repeated-squaring loop skips the final unused square:
 that operation could overflow even when the requested result is representable.
 An exponent of zero returns the supplied identity without multiplying.
+The [binary-protocol sample](../samples/native/static-protocol-binary.terrum)
+also returns 42, using explicitly declared subtraction, division, remainder
+and bitwise `&`, `|`, `^` witnesses. The same concrete call lowering preserves
+ordinary checked arithmetic and declaration-site effect checks; bitwise
+spelling alone does not make an arbitrary operator implementation NoThrow.
 Templates and witnesses are compilation-local, while an exported concrete
 wrapper and its transitive private helpers use the existing separately compiled
 contract format. No additional runtime generic dispatch or wire version is needed.

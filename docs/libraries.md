@@ -29,6 +29,12 @@ algorithm specialized for two wrappers. The [integer-power sample](../samples/na
 extends this to initialized generic locals, scalar loop control and a constrained
 square helper, with an explicit identity argument rather than implicit
 construction of a generic literal or default value.
+The [binary-protocol sample](../samples/native/static-protocol-binary.terrum)
+adds homogeneous subtraction, division, remainder and bitwise `&`, `|`, `^`
+witnesses. Its arithmetic and bit-selection helpers are separately constrained;
+the interfaces are source declarations, not an implicitly supplied numeric
+hierarchy. Comparisons, shifts, unary and heterogeneous operators remain outside
+this executable protocol subset.
 Helpers require only their declared constraints: the
 [Copy selection candidate](../self-host/CopyAlgorithms.terrum) needs no operator
 witness and composes over nested token/range values. Calls cannot acquire

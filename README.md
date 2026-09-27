@@ -48,6 +48,11 @@ primitive operator witnesses. Unique/managed `T`, constructor or method
 inference, overload declarations, partial type-argument holes and a public
 generic ABI remain unsupported. An explicitly typed struct construction
 can establish `T` without enabling generic constructor inference.
+Copy structs can explicitly implement homogeneous binary operator protocols
+for `+`, `-`, `*`, `/`, `%`, `&`, `|` and `^`. Generic bodies may use only the
+operators named by their constraints; identical signatures on unrelated
+protocols do not substitute for a declared witness. Primitive operations in
+those implementations retain their checked arithmetic and bitwise semantics.
 
 Semantic v24 validates managed-class/`ManagedNode` access: `mut class`,
 writable `mut` class methods, readonly bare handles and explicit `write`

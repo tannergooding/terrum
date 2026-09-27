@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Syntax;
@@ -24,18 +25,22 @@ internal sealed partial class Binder
         SyntaxTree Tree, bool IsNoThrow);
     internal sealed record GenericInstantiation(GenericTemplate Template, PrimitiveType Type);
 
-    private static string OperatorName(TokenKind kind)
-    {
-        if (kind == TokenKind.Plus)
-        {
-            return "op_Addition";
-        }
-        if (kind == TokenKind.Star)
-        {
-            return "op_Multiply";
-        }
-        throw new ArgumentOutOfRangeException(nameof(kind));
-    }
+    private static bool IsStaticBinaryOperator(TokenKind kind) => kind is TokenKind.Plus or TokenKind.Minus
+        or TokenKind.Star or TokenKind.Slash or TokenKind.Percent or TokenKind.Ampersand
+        or TokenKind.Pipe or TokenKind.Caret;
+
+    [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Only supported static binary operators have names.")]
+    private static string OperatorName(TokenKind kind) => kind switch {
+        TokenKind.Plus => "op_Addition",
+        TokenKind.Minus => "op_Subtraction",
+        TokenKind.Star => "op_Multiply",
+        TokenKind.Slash => "op_Division",
+        TokenKind.Percent => "op_Modulus",
+        TokenKind.Ampersand => "op_BitwiseAnd",
+        TokenKind.Pipe => "op_BitwiseOr",
+        TokenKind.Caret => "op_ExclusiveOr",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
 
     private static PrimitiveType? GenericScalarType(string name) => name switch {
         "int32" => PrimitiveType.Int32,
@@ -90,7 +95,7 @@ internal sealed partial class Binder
                 }
                 var member = members[0];
                 var op = member.Children.OfType<SyntaxTokenElement>()
-                    .FirstOrDefault(static child => child.Token.Kind is TokenKind.Plus or TokenKind.Star)?.Token.Kind;
+                    .FirstOrDefault(static child => IsStaticBinaryOperator(child.Token.Kind))?.Token.Kind;
                 var signature = member.Children.OfType<SyntaxNode>()
                     .Where(static child => child.Kind != SyntaxKind.Attribute).ToArray();
                 var formals = signature.FirstOrDefault(static child => child.Kind == SyntaxKind.ParameterList);
@@ -99,7 +104,7 @@ internal sealed partial class Binder
                     child.Kind == SyntaxKind.Attribute && NameText(child) == "[NoThrow]");
                 var noThrowCount = member.Children.OfType<SyntaxNode>().Count(static child =>
                     child.Kind == SyntaxKind.Attribute && NameText(child) == "[NoThrow]");
-                if (op is not (TokenKind.Plus or TokenKind.Star) || signature.Length != 2
+                if (op is not TokenKind operation || !IsStaticBinaryOperator(operation) || signature.Length != 2
                     || signature[0].Kind != SyntaxKind.TypeName
                     || NameText(signature[0]) != variables[2]
                     || arguments.Length != 2

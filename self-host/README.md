@@ -26,6 +26,10 @@ context fills an unresolved `T` before contextual literal binding, without
 a numeric default type. These specializations preserve definition-site
 `Copy`, operator and `[NoThrow]` requirements and remain compilation-local.
 Scalars support Copy-only helpers, not primitive operator witnesses.
+Explicit homogeneous Copy-struct witnesses support `+`, `-`, `*`, `/`, `%`,
+`&`, `|` and `^`; generic code still requires the corresponding declared
+nominal constraints. This is not yet the heterogeneous, comparison, shift
+or unary protocol machinery needed for a general numeric library.
 Unique/managed `T`, constructor/method inference, ordinary overloads, partial
 holes and a public generic ABI remain unsupported.
 `build-component` uses the compiled scanner's records as the lexical input to

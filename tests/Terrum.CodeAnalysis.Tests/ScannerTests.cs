@@ -151,6 +151,15 @@ public sealed class ScannerTests
     }
 
     [Fact]
+    public async Task ExtendedStaticProtocolSampleAgreesWithCompiledScannerAsync()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var source = await File.ReadAllTextAsync(Path.Combine(root, "samples", "native",
+            "static-protocol-binary.terrum")).ConfigureAwait(true);
+        await CheckScannerAsync(source).ConfigureAwait(true);
+    }
+
+    [Fact]
     public async Task DiagnosticAndTokenBuffersHandleDenseInvalidInputAsync()
     {
         await CheckScannerAsync(new string('\uDC00', 256)).ConfigureAwait(true);

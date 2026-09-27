@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-16, native-10 through native-20, semantic v30 mutable buffer-field views
+## Current boundary: syntax-17, native-10 through native-20, semantic v30 mutable buffer-field views
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -332,7 +332,8 @@ with optional `finally`; a try requires at least one handler or cleanup clause.
 `syntax-10` adds static operator interfaces, explicit struct conformance,
 generic function constraints and generic-name call expressions. Its executable
 subset is deliberately compilation-local: each interface has three type
-parameters and one `static abstract` `+` or `*` declaration; an internal Copy
+parameters and one `static abstract` binary operator declaration (originally
+`+` or `*`, extended in syntax-17); an internal Copy
 struct explicitly implements a closed homogeneous instance. Parameter/result
 types, accessibility and declared effects must match. An internal generic
 function has one `[Copy]` type parameter and returns that type or a supported
@@ -362,7 +363,15 @@ are admitted. These lower to ordinary verified calls.
 The [quadratic example](../samples/native/static-protocol-quadratic.terrum)
 executes for two distinct wrappers. The [integer-power example](../samples/native/static-protocol-power.terrum)
 combines scalar loop control with a constrained square helper and explicit
-caller-supplied identity. The [Copy selection candidate](../self-host/CopyAlgorithms.terrum)
+caller-supplied identity.
+The [binary-protocol example](../samples/native/static-protocol-binary.terrum)
+uses subtraction/division/remainder and explicit bitwise witnesses in
+separately constrained helpers. Witness bodies keep ordinary checked arithmetic:
+division by zero and signed division overflow fail; signed-minimum remainder
+by minus one yields zero. Bitwise primitives themselves do not fail, but an
+operator call still has its declaration's effects rather than effects inferred
+from its body.
+The [Copy selection candidate](../self-host/CopyAlgorithms.terrum)
 selects complete values without requiring operator conformance.
 Its `TrySelectCopy` variant publishes a selected value only for index zero or
 one. Scalar return typing and output modes remain part of each helper's declared
@@ -396,6 +405,12 @@ artifact versions do not change.
 bit-pattern construction for based literals. A missing binary digit diagnoses
 as `TRM0008`, and malformed separators as `TRM0009`. The scanner-4 record
 layout and semantic/native artifact versions do not change.
+`syntax-17` extends homogeneous static binary operator declarations with `-`,
+`/`, `%`, `&`, `|` and `^`, in addition to `+` and `*`. Each closed Copy-struct
+conformance and generic use still requires the matching nominal protocol and
+declared effects. Unary, comparison, shift and heterogeneous protocols remain
+unsupported. These specializations lower to existing concrete calls: scanner-4,
+semantic module versions and physical native ABIs are unchanged.
 `[NoThrow]` on functions/constructors, `[DoesNotReturn]` on void functions and
 `[Cleanup]` on eligible unique instance methods are currently bound;
 unknown, duplicate and misplaced attributes diagnose rather

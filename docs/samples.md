@@ -76,6 +76,12 @@ not grant extra operations on the type parameter, and helper calls must be
 justified by the caller's declared constraints. These remain closed
 compilation-local specializations, not general generic-library or public
 witness support.
+The [binary-protocol sample](../samples/native/static-protocol-binary.terrum)
+returns 42 using subtraction, division and remainder to compute two values,
+then `&`, `|` and `^` to select bits from them. Its generic helpers declare
+only the nominal protocols they use; the concrete wrapper implements all six.
+The example uses ordinary inferred specializations, not primitive conformance,
+operator-body inference or built-in numeric interface names.
 
 | Program | Source | Design contract / expected behavior |
 |---|---|---|

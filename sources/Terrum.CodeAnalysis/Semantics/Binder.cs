@@ -1880,7 +1880,7 @@ internal sealed partial class Binder
         var rightNode = (SyntaxNode)node.Children[2];
         var leftKnown = KnownType(leftNode);
         var rightKnown = KnownType(rightNode);
-        if (leftKnown is PrimitiveType concrete && IsStruct(concrete) && op.Kind is TokenKind.Plus or TokenKind.Star)
+        if (leftKnown is PrimitiveType concrete && IsStruct(concrete) && IsStaticBinaryOperator(op.Kind))
         {
             var leftValue = BindExpression(leftNode, concrete);
             var rightValue = BindExpression(rightNode, concrete);

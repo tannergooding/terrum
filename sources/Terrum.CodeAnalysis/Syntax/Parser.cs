@@ -307,7 +307,9 @@ internal sealed class Parser
             if (Current.Kind == TokenKind.OperatorKeyword)
             {
                 children.Add(Take());
-                children.Add(Current.Kind is TokenKind.Plus or TokenKind.Star ? Take() : Expect(TokenKind.Plus));
+                children.Add(Current.Kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash
+                    or TokenKind.Percent or TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret
+                    ? Take() : Expect(TokenKind.Plus));
                 children.Add(ParseParameters());
                 children.Add(Current.Kind == TokenKind.Semicolon ? Take() : ParseBlock());
                 kind = SyntaxKind.OperatorDeclaration;

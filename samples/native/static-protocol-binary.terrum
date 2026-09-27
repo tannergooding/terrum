@@ -1,0 +1,77 @@
+interface Subtraction<TSelf, TOther, TResult> {
+    static abstract TResult operator -(TSelf left, TOther right);
+}
+
+interface Division<TSelf, TOther, TResult> {
+    static abstract TResult operator /(TSelf left, TOther right);
+}
+
+interface Remainder<TSelf, TOther, TResult> {
+    static abstract TResult operator %(TSelf left, TOther right);
+}
+
+interface BitwiseAnd<TSelf, TOther, TResult> {
+    static abstract TResult operator &(TSelf left, TOther right);
+}
+
+interface BitwiseOr<TSelf, TOther, TResult> {
+    static abstract TResult operator |(TSelf left, TOther right);
+}
+
+interface ExclusiveOr<TSelf, TOther, TResult> {
+    static abstract TResult operator ^(TSelf left, TOther right);
+}
+
+struct Int32Value : Subtraction<Int32Value, Int32Value, Int32Value>,
+    Division<Int32Value, Int32Value, Int32Value>,
+    Remainder<Int32Value, Int32Value, Int32Value>,
+    BitwiseAnd<Int32Value, Int32Value, Int32Value>,
+    BitwiseOr<Int32Value, Int32Value, Int32Value>,
+    ExclusiveOr<Int32Value, Int32Value, Int32Value> {
+    public int32 Value;
+    public Int32Value(int32 value) { Value = value; }
+    public static Int32Value operator -(Int32Value left, Int32Value right) {
+        return new Int32Value(left.Value - right.Value);
+    }
+    public static Int32Value operator /(Int32Value left, Int32Value right) {
+        return new Int32Value(left.Value / right.Value);
+    }
+    public static Int32Value operator %(Int32Value left, Int32Value right) {
+        return new Int32Value(left.Value % right.Value);
+    }
+    public static Int32Value operator &(Int32Value left, Int32Value right) {
+        return new Int32Value(left.Value & right.Value);
+    }
+    public static Int32Value operator |(Int32Value left, Int32Value right) {
+        return new Int32Value(left.Value | right.Value);
+    }
+    public static Int32Value operator ^(Int32Value left, Int32Value right) {
+        return new Int32Value(left.Value ^ right.Value);
+    }
+}
+
+T WholeUnits<T>(T total, T unitSize, T adjustment)
+    where T : Subtraction<T, T, T>, Division<T, T, T>, [Copy] {
+    return (total - adjustment) / unitSize;
+}
+
+T RemainingUnits<T>(T total, T unitSize)
+    where T : Remainder<T, T, T>, [Copy] {
+    return total % unitSize;
+}
+
+T SelectBits<T>(T left, T right, T mask)
+    where T : BitwiseAnd<T, T, T>, BitwiseOr<T, T, T>, ExclusiveOr<T, T, T>, [Copy] {
+    return (left & mask) | (right ^ (right & mask));
+}
+
+public int32 BinaryProtocolProbe() {
+    var low = WholeUnits(new Int32Value(43), new Int32Value(4), new Int32Value(3));
+    var high = RemainingUnits(new Int32Value(99), new Int32Value(64));
+    var result = SelectBits(low, high, new Int32Value(0x0f));
+    return result.Value;
+}
+
+int32 Main() {
+    return BinaryProtocolProbe();
+}

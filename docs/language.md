@@ -261,6 +261,15 @@ justify a weaker template. Inferred specializations remain compilation-local
 and preserve the existing private module-servicing contract, with no public
 generic ABI or artifact-version change.
 
+The executable operator-protocol subset supports homogeneous binary `+`, `-`,
+`*`, `/`, `%`, `&`, `|` and `^` declarations on explicitly conforming Copy
+structs. Each protocol still declares one static abstract operator with
+three type parameters. Unrelated protocols remain distinct even when their
+operator signatures match. Generic helpers need their own declared witnesses;
+primitive specialization, a concrete body's operations or a caller's stronger
+constraints cannot provide them implicitly. Unary, comparison, shift and
+heterogeneous operator protocols remain unimplemented.
+
 The implementation does not infer unique or managed `T`, constructor or
 method type arguments, ordinary overloads, or partial `_` holes. It does not
 add a struct-literal parser or public generic ABI. Contextual expected types
