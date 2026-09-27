@@ -105,6 +105,12 @@ design targets, not executable APIs in the current native compiler.
 
 ## Views, shapes and tensor primitives
 
+SIMD values are vector/ABI representations; `TensorSpan<T>` is a higher-level
+logical multidimensional view over backing storage, analogous to `Span<T>` for
+one-dimensional ranges. Shape, strides and checked projection belong to the
+tensor contract, not to a vector's lane ABI; a tensor is not flattened or
+converted to SIMD merely because the element count matches.
+
 One `Span<T>` family carries qualified read/write authority and opaque backing
 dependencies, **not** an owner generic parameter. Bare `Span<C>` has a fixed
 descriptor, readonly slots, and readonly handles; `mut Span<C>` permits
@@ -161,6 +167,12 @@ writable structural node whose `Value` or links would mutate list-owned state.
 `GetWriteAccess`/`TryGetWriteAccess` are provisional names. Renaming is not needed to settle the invariant: acquisition checks all conflicting aliases, a view cannot outlive its exclusive guard, and cleanup releases authority exactly once.
 
 `LinkedListNode<T>` has stable **logical node identity**, not a promised machine address. Detached nodes remain usable and may be reinserted; attached nodes retain exactly one owner. Removal clears owner/links. `Clear` detaches *all* nodes, including externally retained nodes, and cannot merely drop the head/tail. Node values are accessors, never public writable fields that bypass guards. Membership/count/version are checked before nonthrowing link changes. A concrete `foreach` cursor need not box; structural mutation invalidates it, while payload replacement alone is not structural. Copy-, borrow-, consume- and snapshot-yielding iteration are separate operations.
+
+The inventory's `LinkedListCursor<T>.Current` is a by-value Copy result; it is
+not a general promise for every sequence. Future lending iteration may use an
+associated `Item<'a>` relation, but its selected contract must preserve the
+complete item type, source lifetime, access and ownership. No iterator result
+is silently changed to a loan because its payload is large.
 
 Both `List<T>` and `LinkedList<T>` participate in the same registered collection-expression protocol. `LinkedList<int32> pending = [10, 20]` constructs fresh nodes from element values; it does not move nodes out of another list or promise contiguous capacity. `LinkedListBuilder<T>.TryAdd` accepts values once in source order, and `TryBuild` publishes the private completed graph. Failure/abandonment detaches and releases all partially built nodes exactly once, preserving correct initialized-element cleanup; false publishes no default list. Existing node-based insertion remains a separate operation.
 

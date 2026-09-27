@@ -1,4 +1,5 @@
-// DESIGN ONLY: illustrative rank-dynamic tensor/primitive surface, not executable declarations.
+// DESIGN ONLY: logical rank-dynamic views over storage, not SIMD vector/ABI
+// values; this primitive/tensor surface is not executable declarations.
 using Terrum;
 
 namespace Terrum.Numerics.Tensors;

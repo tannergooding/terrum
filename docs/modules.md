@@ -39,6 +39,11 @@ Calls use symbolic function identities rather than binder-local indexes.
 Types use declaration names, visibility and ordered field layouts as their contract;
 public import keys include declaring-type and signature-type visibility, while
 the complete ordered layout is checked separately before execution.
+The target transparent-wrapper contract is nominal in Terrum but carrier-
+equivalent in ABI only after argument/return classification and validity,
+ownership, cleanup and layout requirements are checked; equal size/layout is
+not enough. The current module format has no such wrapper metadata and does not
+relax its exact layout checks.
 The target source-binding rule is stricter than simply storing a name: source
 compilation selects one declaration and its closed generic arguments, and
 records that binding. Linking or JIT loading validates and implements the
@@ -56,7 +61,8 @@ declaring type name.
 Only layouts referenced by retained consumer definitions and imported
 declarations are stored in the consumer. Imported layouts remain exact,
 including private fields of a public static member's owner; this is not resilient
-public layout evolution. Producer-only layouts and helpers have module-local
+public layout evolution. The target opaque/evolvable-by-default direction does
+not retroactively make these current module contracts resilient. Producer-only layouts and helpers have module-local
 identities at linking and may change independently. Private names can coincide
 with consumer-local names without binding to the wrong implementation.
 Compatible replacements may also add exports not requested by the consumer.

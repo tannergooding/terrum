@@ -2,6 +2,8 @@
 // retain legacy out expressions as schematics until invocation syntax settles.
 // The P0 syntax-only front end does not bind or run these APIs.
 // Fixed-vector family constraints below are LOCAL PSEUDO-CODE, not grammar.
+// SIMD types carry vector/lane ABI; TensorSpan is a separate logical
+// multidimensional view over storage, not a SIMD value or implicit flattening.
 using Terrum;
 using Terrum.Numerics;
 using Terrum.Numerics.Tensors;

@@ -24,6 +24,11 @@ The `native-18` through `native-20` labels below identify bounded runtime
 features; they do not imply that general references/views, ownership forms, or
 managed public ABI are implemented.
 
+Terrum has no built-in marshalling. Source or generated tooling defines and
+performs conversions and wrappers for imported C APIs; the compiler/runtime
+supply only the checked representations, ABI calls and ownership/lifetime
+primitives needed to expose those APIs safely.
+
 `OwnedInt32Buffer.TryCreate` accepts capacities from zero through 1,048,576
 elements. It allocates an eight-byte count/capacity header plus fixed element
 storage on the Windows process heap; zero capacity still has a live owner.
@@ -596,6 +601,11 @@ through temporary values or immutable receivers are rejected.
 Whole-value replacement through a mutable local remains valid even when its
 fields are read-only. `SourceRange` and `Token` retain read-only fields; updates
 construct and replace valid values rather than bypass their constructors.
+This is the current bounded `ValueLayout` profile. Struct and field attributes
+diagnose `TRM3001`, so no transparent/native layout attribute is currently
+honored; the 1–16-byte aggregate rules do not provide resilient module layouts.
+Field positions and padding are computed from declaration order, size and
+alignment; arbitrary explicit field offsets are not supported.
 Aggregates over 16 bytes, reference-containing aggregates and implicit
 construction are not implemented.
 
@@ -727,7 +737,11 @@ sizes use pointers to caller-owned 16-byte-aligned copies. Indirect results
 receive a hidden first argument in RCX, shifting explicit arguments by one
 position; the callee returns that storage address in RAX. These addresses are
 backend storage, not language pointers, escaping borrows or shared mutable
-references. Outputs use separate exact-size publication into the caller's
+references. This direct/indirect choice preserves the complete `T`'s source
+semantics; it does not itself introduce a loan of the original value's storage.
+A source-level borrowed result needs its own declared lifetime, access
+and alias contract. The current profiles have no general transparent-wrapper
+ABI contract. Outputs use separate exact-size publication into the caller's
 storage only on a true return.
 
 Unique instance receiver loans are an exception to by-value aggregate passing:
@@ -769,6 +783,8 @@ It checks owning output stack placement, true-only publication, unchanged
 false/partial/caught-failure output bytes, guard storage, repeated calls,
 and caught later-argument failure. Composite cases cover 8- and 16-byte owners,
 nested child loans, nonzero field offsets, and failed partial construction.
+The nonzero field offsets in these cases are computed from normal field order,
+size and alignment; they are not user-selected explicit offsets.
 The C fixture's cleanup methods are empty;
 Host.Trace execution tests, not this ABI probe, establish cleanup order and
 exactly-once effects. This remains a bounded test boundary, not a general

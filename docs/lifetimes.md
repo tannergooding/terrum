@@ -39,6 +39,24 @@ The remaining lifetime constructs are rejected for execution.
 
 These relationships are not a single `scoped` bit. One result may borrow receiver bytes, propagate several backing dependencies, and require a separate owner/guard to remain undisposed. Access qualifiers, affinity, rooting and capture destinations travel with the dependencies. Keeping a pointer numerically unchanged is not proof of validity. Empty/end slices retain the same root/guard obligations as nonempty slices.
 
+## By-value results and borrowed results
+
+A source return of `T` retains its declared semantics even when the physical
+ABI uses a hidden result-storage argument or copy elision. ABI-indirect storage
+does not itself introduce a loan of the original value's storage or permit
+skipping ordinary ownership/cleanup. Handles and loans already contained in
+the complete `T` retain their declared dependencies. A borrowed result's
+`ref<T>` representation must name the permitted source dependency, lifetime,
+access and alias relationship.
+Do not turn a large by-value result into a source borrow because of an
+incidental size threshold.
+
+No universal return keyword is implied. An associated iterator `Item<'a>` is
+a candidate when a selected sequence witness relates `next` to a borrowed
+item. That relation must preserve the complete qualified item type and its
+ownership, backing and lifetime dependencies. Exact selection rules and ABI
+remain open library design.
+
 ## Erased interface storage is explicit
 
 An interface name `I` describes nominal behavior and an abstract payload, not

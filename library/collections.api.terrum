@@ -171,6 +171,8 @@ public mut unique struct LinkedListBuilder<T>
     public mut bool TryBuild(init ref<write LinkedList<T>> value);
 }
 
+// This cursor yields a Copy value; lending/consuming item protocols are
+// separate contracts, not inferred from the cursor's implementation.
 public mut unique struct LinkedListCursor<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {

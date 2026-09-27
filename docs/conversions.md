@@ -19,6 +19,8 @@ implicitly upgrades to `write`. Attenuation does not recursively rewrite
 nested type arguments or convert writable containers to differently qualified
 element types: mutable-storage contracts remain invariant. Other qualifier
 changes require an explicitly checked representation and lifetime contract.
+Transparent ABI equivalence likewise does not make nominal wrapper types
+implicitly convertible in Terrum source.
 
 ## Context before construction
 

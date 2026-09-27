@@ -46,6 +46,10 @@ relations, the use must disambiguate them. The relationship policy is accepted
 direction, but declaration, witness-selection, and disambiguation syntax are
 not settled. Associated bindings do not replace independent `[Copy]`,
 access, ownership, or family constraints.
+For a lending iterator, `Item<'a>` is one candidate associated relation; it
+must retain the complete item's qualification and its declared backing and
+loan dependencies. The exact iterator/item selection and ABI are later library
+design, not an inference from the current method body.
 
 ## Text views
 

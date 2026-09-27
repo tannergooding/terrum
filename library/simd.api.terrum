@@ -1,4 +1,6 @@
 // DESIGN ONLY: conceptual SIMD contracts; family/witness syntax and target ABI are open.
+// SIMD members are vector values with lane/mask ABI; TensorSpan is a separate
+// higher-level logical view over storage, not another SIMD representation.
 namespace Terrum.Numerics;
 
 // Generic kernels may use a named generic functor checked at its definition

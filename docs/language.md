@@ -27,6 +27,12 @@ may still mutate independently writable arguments or stored handles, but may
 not write its own receiver fields or call a `mut` receiver method through a
 readonly `this`. A writable binding cannot upgrade a readonly referent.
 
+A source return of `T` preserves its declared semantics even if the selected
+ABI uses hidden result storage or copy elision. That lowering does not itself
+introduce a loan of the original value's storage. Handles and loans already
+contained in the complete `T` retain their declared dependencies. A borrowed
+result needs an explicit declared lifetime, access and alias relationship.
+
 The same distinction applies to views: bare `Span<C>` has a fixed descriptor,
 readonly element slots, and readonly `C` handles; `mut Span<C>` permits
 reassigning the descriptor only; `write Span<C>` permits writes to element
@@ -104,9 +110,25 @@ evolvable by default; an explicitly closed case-set promise makes adding a case
 a breaking change, ordinarily rejected before consumers bind to it. Union
 representations still require a valid active payload;
 an overlapping native layout does **not** establish a safe tagged union.
-`[Layout(Sequential)]`, `[Layout(Union)]` and explicit offsets need separate
-validated calling-ABI profiles. Structural `T | U` unions, especially
-overlapping alternatives, are undecided.
+The layout forms are `[Layout(Sequential)]`, `[Layout(Union)]` and
+`[Layout(Transparent)]`, each with a checked ABI contract. Sequential field
+offsets and padding are computed from declaration order, size and alignment;
+arbitrary user-specified field offsets are not supported. Structural `T | U`
+unions, especially overlapping alternatives, are undecided.
+
+Ordinary type layout is opaque. An accepted transparent-wrapper direction
+keeps the wrapper nominal for Terrum source checking while making an eligible
+simple wrapper carrier-equivalent under a checked ABI contract. Equal size or
+field layout alone is insufficient: argument/return classification,
+size/alignment, validity, ownership, cleanup and niche representation must
+match the declared carrier rules. Transparency does not permit reinterpret
+casts or implicit source conversion. `[Layout(Transparent)]` is illustrative
+of the existing layout-attribute convention, not settled spelling or
+eligibility grammar; the current compiler has no general transparent-wrapper
+ABI feature. Struct and field attributes currently diagnose `TRM3001`; the
+existing `ValueLayout` is limited to naturally aligned 1–16-byte aggregates
+and does not implement transparent layout. The target opaque/evolvable default
+does not change the current module format's exact layout contracts.
 
 ### Interfaces, access and generic properties
 
@@ -201,6 +223,21 @@ implemented, but neither arguments nor expected results infer generic type
 arguments. Overload selection and general argument/result inference, including
 partial holes, remain scheduled.
 
+Underscore has context-specific roles rather than one universal discard
+operation. In a discard-value context, evaluate once and apply ordinary value
+ownership and cleanup; in a wildcard pattern, match without binding or
+dropping the source; in a lambda parameter, omit the local name without
+changing argument evaluation or parameter mode. As a generic type-argument
+hole, `_` is filled only by unique inference, has no default or wildcard
+meaning, and cannot remain unresolved in an exported contract. These are
+target semantics; exact syntax and contexts remain open, and the compiler
+does not implement general discard, wildcard-pattern or generic-hole forms.
+The binder currently treats `_` as an ordinary identifier and assignment;
+expression statements and unused-local cleanup are not implementations of
+these contextual roles.
+The lexer continues to recognize underscore in identifiers outside
+grammar-defined special contexts; there is no blanket underscore reservation.
+
 Adding an interface member compatibly for existing implementations requires a
 default implementation that satisfies
 its declared contracts and a compatible witness/dispatch mechanism. Defaults
@@ -217,9 +254,9 @@ special `_` syntax. Missing known cases warn, guarded arms do not establish
 coverage merely by naming a case, and
 the initial form is a final unguarded wildcard. Missing-case warnings can be
 elevated; ordinary `_` suppresses them. For integer enums, diagnostics concern
-declared names while a fallback still accepts unnamed underlying values. Exact
-match grammar and the
-closed-case marker remain open. Unknown payloads must be safely rooted,
+declared names while a fallback still accepts unnamed underlying values.
+Exact match grammar and the closed-case marker remain open. Unknown payloads
+must be safely rooted,
 forwarded and disposed or the representation is rejected.
 
 One access-qualified `Span<T>` and one qualified collection-interface family avoid
@@ -378,7 +415,7 @@ Tasks are scope-owned and structured; cold start is a **recommendation**, not a 
 
 Recommended continuation policy: no ambient `SynchronizationContext`-style capture by default and no pervasive per-await `ConfigureAwait(false)`. Explicit execution/affinity scopes or declarations govern thread-bound/UI continuations, including cleanup and cancellation. Generic library code composes through those declared requirements without acquiring accidental UI dependencies. No capture is **not** "always switch to a thread pool": synchronous continuation is allowed, logical serialized authority need not mean one OS thread, and non-Send/affine state must never migrate unsafely. A caller's explicit UI obligation remains valid across a library call without imposing it on every internal continuation. Scheduler/awaiter syntax, propagation and boundary validation still need design; there is no implemented async runtime.
 
-Reflection respects visibility, access, lifetime and trimming. Symbol-resolved tokens and compiler-checked `[ConstantExpected]` names (including through wrappers) support safe bounded lookup; open-ended runtime discovery or private access needs a *different* privileged unsafe API, explicit authorization and retained targets. Retention of layout, executable bodies, descriptors and debugging data is independent. Author-authorized deterministic generation can inspect its own defining module's private members but cannot grant consumers friendship or bypass normal checks. Foreign declarations specify native symbols, calling conventions, layout, ownership, callback teardown, exception containment and marshaling costs; COM requires exact profiles, not behavioral-interface resemblance.
+Reflection respects visibility, access, lifetime and trimming. Symbol-resolved tokens and compiler-checked `[ConstantExpected]` names (including through wrappers) support safe bounded lookup; open-ended runtime discovery or private access needs a *different* privileged unsafe API, explicit authorization and retained targets. Retention of layout, executable bodies, descriptors and debugging data is independent. Author-authorized deterministic generation can inspect its own defining module's private members but cannot grant consumers friendship or bypass normal checks. Foreign interop uses source or generated tooling for marshalling; the compiler/runtime provide checked native symbols, calling conventions, representations, ownership, callback-lifetime and exception-containment prerequisites for safe imported-C APIs, not built-in value marshalling. COM requires exact profiles, not behavioral-interface resemblance.
 
 The proposed portable structured semantic IL carries typed blocks/arguments/edges, values and memory places, loop/exception/cleanup regions, roots, checked operations, construction and suspension, with validation of dominance, ownership and region consistency. It is **not** CLI IL. The initial backend lowers a smaller verified structured representation directly to Windows x64 machine code, without CIL or LLVM. LMOD remains a provisional versioned module container for semantic types/signatures, layout/ABI, bodies, dependencies, roots, foreign profiles and native caches. Contract-bound vs implementation-pinned replacement is independent of static vs dynamic linkage. Unchanged JIT/AOT consumers must reject incompatible capture, output, access, layout and effect changes; AOT-only deployment cannot secretly require a JIT. The bounded module implementation checks declaration-derived signatures,
 compact layouts, ownership/output modes and the supported effect promises before
@@ -390,7 +427,7 @@ layouts are not yet implemented. Generic specialization, sharing and explicit sc
 The design examples use canonical `ref<T>`, `ptr<T>`, `box<T>`, `val<T>`,
 `own<T>`, `init ref<T>`, `mut`, and `write` forms, plus `move`, bracketed
 checked predicates, `[ViewOf]`, `[Captures]`, `[OutputWhen]`, `[Pure]`,
-`[MatchedAccess]`, `require`, `[TextTarget]`, `[TextBuilder]`,
+`[MatchedAccess]`, `[Layout(Transparent)]`, `require`, `[TextTarget]`, `[TextBuilder]`,
 `[CollectionBuilder]`, `[NativeExport]`, `utf8z`/`utf16z` literals and generic
 trailing defaults as **illustrations**, not frozen syntax or implemented
 compiler promises. In particular, `out` remains the current bounded
@@ -398,7 +435,8 @@ implementation spelling while a coherent migration to initialization loans is
 planned; invocation spelling for `init ref` is open. Exact generic constraint,
 associated-type and extension-disambiguation syntax, inference-hole spelling,
 closed-case marker/match grammar and compatibility-forwarder attributes/source
-visibility remain open. So do conditional copy capabilities, first-class
+visibility remain open. So do transparent-wrapper eligibility/ABI profiles,
+conditional copy capabilities, first-class
 stored-loan ABI, erased-interface dispatch ABI, span-anchor layout/calling
 convention, inline `val<C>`, native ownership transitions, structural unions,
 decimal encoding, text storage, wither omission/overloads,

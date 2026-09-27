@@ -24,7 +24,12 @@ scalar is an error token, including Unicode digits at identifier start.
 Keywords are the lower-case ASCII spellings represented in `TokenKind`,
 including reserved future grammar such as `struct`, `unique`, `move`, `async`,
 and `try`; primitive type names remain identifiers. All other admissible
-spellings are identifiers.
+spellings are identifiers. In particular, the lexer does not reserve `_` as a
+global discard or type-hole token; any special role is contextual grammar. The
+current binder treats `_` as an ordinary identifier and assignment; it has no
+special discard handling. General discard, wildcard-pattern and generic-hole
+forms are unsupported. Expression statements or unused-local cleanup do not
+implement the distinct discard semantics.
 
 Numeric tokens use ASCII digits only:
 

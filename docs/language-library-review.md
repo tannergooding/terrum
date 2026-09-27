@@ -1,7 +1,9 @@
 # Language and library improvement review
 
 **Design review; §§1.1–1.3 and the bounded collection-based `params`,
-callable, tuple, alias, and functor directions in §1.4 are accepted.**
+callable, tuple, alias, and functor directions in §1.4 are accepted, as are the
+representation and safety directions in §§2.1–2.4.** The generic
+input/result/receiver representation follow-up remains open.
 Unresolved grammar and other proposals add no syntax/API promise
 or compiler authorization. The review draws on C#/.NET, Rust, Go, Swift, Kotlin, C++
 and Java experience without treating any one ecosystem as a template.
@@ -400,66 +402,95 @@ arbitrary scalar callbacks is included.
 
 ## 2. Make representation and cost visible
 
-### 2.1 Opaque layout and explicit ABI proposals
+### 2.1 Opaque layout and explicit ABI contracts
 
-**Accepted direction:** layout/ABI promises need explicit checked contracts.
-**Proposed default:** ordinary layout is opaque. **Open proposal:** a
-transparent single-field wrapper could promise a validated representation, not
-permission to erase validity, ownership, mutability, cleanup, niches, or ABI.
-It must preserve carrier ABI and narrower payload validity/ownership; equal
-bytes never permit arbitrary reinterpretation or automatically propagate every
-niche optimization. Construction and imports validate the wrapper's narrower
-invariant; layout equality never waives that check.
-Sequential/explicit/union layouts are opt-in per ABI and constrain servicing;
-interop separately declares calling convention, alignment, ownership, encoding,
-callbacks, and exception containment. .NET distinguishes unmanaged from
-blittable (`bool`/`char` differ) and native marshalling from managed layout
-([interop guidance](https://learn.microsoft.com/en-us/dotnet/standard/native-interop/best-practices#blittable-types)).
+**Accepted direction:** ordinary layout is opaque, and layout/ABI promises
+need explicit checked contracts. Sequential, Union and Transparent are
+distinct opt-in layout forms. Sequential field positions and padding are
+computed from field order, size and alignment; arbitrary user-specified field
+offsets are not supported. These contracts constrain servicing and do not
+follow from a type's current bytes.
+
+**Accepted transparent-wrapper direction:** an eligible simple wrapper stays
+nominal for Terrum type checking but is carrier-equivalent in the declared ABI.
+That is stronger than equal size or field layout: validation must cover
+argument and return classification, size/alignment, ownership, validity,
+cleanup and any niche representation. It does not permit blind
+reinterpretation, erase the wrapper's invariant, or create an implicit
+Terrum source conversion. Construction and imports still validate the
+wrapper's narrower contract. `[Layout(Transparent)]` illustrates how this
+could fit the existing layout-attribute convention; only the Transparent
+concept is accepted, not that exact spelling or its eligible-field grammar.
+The current binder rejects struct attributes and field attributes with
+`TRM3001`; it neither silently honors nor ignores a transparent/layout
+attribute. Its `ValueLayout` is the bounded, naturally aligned 1–16-byte
+aggregate profile, not transparent-wrapper support. The accepted opaque default
+does not retroactively make current module layouts resilient; those contracts
+remain exact.
+
 Rust [`repr(C)`/`repr(transparent)`](https://doc.rust-lang.org/reference/type-layout.html)
-specify representation, not Terrum validity/ownership: `repr(C)` does not
-recursively change nested layout or give a wrapper its field's call ABI;
-transparent requires one nontrivial
-field. Neither bypasses construction/import validation or allows blind
-reinterpretation.
+specify representation, not Terrum validity or ownership. `repr(C)` does not
+recursively change nested layout, while transparent representation carries a
+field's ABI only under its own checked rules. Neither precedent bypasses
+Terrum construction/import validation or allows arbitrary reinterpretation.
+For .NET comparisons, distinguish runtime marshalling from
+[`DisableRuntimeMarshalling`](https://learn.microsoft.com/en-us/dotnet/standard/native-interop/disabled-marshalling):
+supported unmanaged types without auto-layout fields are treated as blittable
+on that path.
+Terrum has no built-in marshalling: source or generated tooling owns
+conversions and wrappers. The compiler/runtime provide only the checked
+representation, ABI and lifetime/ownership prerequisites needed to expose safe
+APIs over imported C; they do not marshal values.
 
 Request required storage capabilities (`[Sized]`, managed-storable, copyable)
 separately from behavioral interfaces; sizeless values cannot silently become
 fields or array elements.
 
-### 2.2 Generic operations should not imply generic representation
+### 2.2 Keep SIMD ABI primitives distinct from tensor views
 
-**Refinement proposal.** Generic algorithms use declared capabilities without
+**Accepted direction:** generic algorithms use declared capabilities without
 boxing; constraints do not license representation erasure or value duplication.
-Constraints, static witnesses, and representation families solve distinct
-problems; avoid one universal mechanism.
+Constraints, static witnesses and representation families solve distinct
+problems. SIMD and tensor abstractions are related library tools, not one
+representation family.
 
 Keep vector/tensor concepts separate:
 
 - scalar arithmetic protocols;
-- fixed-width SIMD family membership and its lane-mask association;
+- fixed-width SIMD family membership, lane-mask association and ABI shape;
 - hardware-scalable, potentially sizeless vectors and their target ABI;
-- logical multidimensional shapes and their backing strides;
+- logical multidimensional tensor views, their shape metadata and backing
+  strides, analogous to a higher-level `Span<T>` over a one-dimensional range;
 - domain vectors such as geometric points, whose operations need not be
   arithmetic on a scalar number.
 
-SIMD comparisons return a declared mask; whole-vector equality may return
-`bool`. Tails, inactive lanes, alignment, overlap, reduction order, CPU/OS
-selection, scalable ABI, and suspension restrictions are correctness contracts.
-Capabilities apply to the complete qualified form: `[Copy]` on a payload does
-not make `own<T>` or a borrowed `ref<T>` copyable. Access only attenuates:
-`mut Span<T>` permits descriptor rebinding but does not grant writable slots;
-it may yield a read view, never a writable upgrade from one. A writable
-projection requires existing write authority on the relevant backing.
+SIMD types describe register/vector values and their ABI; tensor spans describe
+logical indexing over storage and may use shape metadata, arbitrary strides,
+and checked projections. A tensor is not a SIMD value, and flattening it does
+not follow merely from matching element counts. SIMD comparisons return a
+declared mask; whole-vector equality may return `bool`. Tails, inactive lanes,
+alignment, overlap, reduction order, CPU/OS selection, scalable ABI, and
+suspension restrictions are correctness contracts. Capabilities apply to the
+complete qualified form: `[Copy]` on a payload does not make `own<T>` or a
+borrowed `ref<T>` copyable. Access only attenuates: `mut Span<T>` permits
+descriptor rebinding but does not grant writable slots; it may yield a read
+view, never a writable upgrade from one. A writable projection requires
+existing write authority on the relevant backing.
 
-### 2.3 Iteration and allocation are lifetime contracts
+Handlers, functional interfaces and more broadly composable kernels remain
+important later standard-library work. They are not prerequisites for, or part
+of, settling the present SIMD-versus-tensor representation distinction.
 
-**Open library-contract proposal.** Do not infer that one `foreach`/`Range`
-surface makes every source interchangeable: collections may yield copied
-values, collection-tied loans, or iterator-state lending items. Specify
+### 2.3 Iteration, allocation and return representation are lifetime contracts
+
+**Accepted safety direction:** do not infer that one `foreach`/`Range` surface
+makes every source interchangeable. Collections may yield copied values,
+collection-tied loans, or iterator-state lending items. Contracts must state
 retention/invalidation, finite versus multipass behavior, effect reevaluation,
-mutation, and early-exit cleanup. Go 1.23 added range-over-function partly
-because `sync.Map.Range`, `flag.Visit`, and `filepath.Walk` exposed incompatible
-callbacks. Push and pull each have stopping/cleanup tradeoffs
+mutation, allocation/relocation and early-exit cleanup. Go 1.23 added
+range-over-function partly because `sync.Map.Range`, `flag.Visit`, and
+`filepath.Walk` exposed incompatible callbacks. Push and pull each have
+stopping/cleanup tradeoffs
 ([Go range functions](https://go.dev/blog/range-functions)).
 
 C++ `borrowed_range` permits iterators to outlive a temporary range object; it
@@ -479,10 +510,13 @@ across `Advance`, returned, or suspended without a separate contract. An owning
 iterator can instead transfer each item once; a generic algorithm must not
 silently copy a lending item.
 Where the selected sequence witness determines one item relation, an
-associated `Item<'a>` can express that `next(&'a mut self)` lends storage for
-`'a`; while the loan is live, advancing again is unavailable. If one
-implementation intentionally exposes multiple item relations, keep them
-explicit rather than guessing one associated type.
+associated `Item<'a>` is a candidate for expressing that `next(&'a mut self)`
+lends storage for `'a`; while the loan is live, advancing again is unavailable.
+The selected relation must carry the complete qualified item type, ownership,
+alias and lifetime dependencies. If one implementation intentionally exposes
+multiple item relations, keep them explicit rather than guessing one associated
+type. Selection and ABI remain open library design, not an inferred property
+of a method body.
 
 Allocator behavior is observable too. C++ allocator-aware move construction
 with an equal explicit allocator can be constant time; an unequal one can
@@ -495,18 +529,40 @@ universal default allocator.
 Expose allocator choice where storage policy belongs to the caller; test
 failure cleanup and publication.
 
-### 2.4 Discards need one meaning
+Returning `T` preserves its declared semantics even when the physical ABI uses
+indirect result storage or copy elision. That lowering does not itself
+introduce a loan of the original value's storage. Handles and loans already
+contained in the complete `T` retain their declared dependencies; a borrowed
+result requires explicit lifetime, ownership and alias relationships.
 
-**Refinement proposal.** Choose a single rule for discards (`_`) across
-deconstruction, assignment, pattern matching, and lambda parameters. It should
-mean “intentionally do not bind/use this value,” not inconsistently mean
-“fresh local” in one position and “wildcard” in another. Define binding versus
-wildcard, RHS evaluation/effects, temporary and unique cleanup, and the vacancy
-of failed conditional `out`; failure cleans partial owners and never creates
-`default(T)`. Discarding a task result is not detaching or
-supervising work. Tooling/diagnostics must report these meanings consistently.
-Keep `_` distinct from an uninitialized destination or omitted optional field.
-Audit prior examples before freezing a rule; conventions differ by context.
+### 2.4 Context-specific underscore roles
+
+**Accepted semantic direction; grammar and support remain open.** `_` marks an
+intentionally unnamed slot, but the slot's role is determined by context, not
+by one universal "ignore this" operation:
+
+- In a discard-value context, evaluate the expression once, preserve its
+  effects, and apply ordinary value ownership and cleanup.
+- In a wildcard pattern, match without binding; the pattern does not itself
+  consume or drop the matched source value.
+- In a lambda parameter position, omit the local binding while retaining
+  ordinary argument evaluation and parameter-mode rules.
+- In a generic type-argument position, `_` is an inference hole filled only
+  when the existing constraints and context determine one unique type. It has
+  no fallback/default, wildcard, or existential meaning; unresolved holes are
+  errors and cannot escape into exported contracts.
+
+Where assignment or deconstruction permits a discard destination, its value
+still follows the discard-value evaluation and cleanup rule. A failed
+conditional initialization remains vacant; it is not a discard or a
+`default(T)`. Discarding a task result does not detach or supervise its work.
+The spelling does not reserve every underscore-prefixed identifier, and the
+lexer may continue to recognize `_` as an identifier outside a grammar-defined
+context. Exact supported contexts and spellings must be specified separately.
+The current binder has no special discard handling: `_` follows ordinary
+identifier/assignment binding. Expression statements and unused-local cleanup
+do not implement the full discard contract; wildcard-pattern and generic-hole
+forms are also unsupported.
 
 ## 3. Make compile-time participation and code generation declared
 
@@ -809,18 +865,19 @@ trades generality for simplicity.
 | Nominal witnesses and capability predicates | Checked `IFoo` witnesses remain distinct from `[Copy]`, storage, and family capabilities | Accepted baseline |
 | Generic/erased APIs, conditional witnesses, associated results, erasure, inference, overloads | Accepted policy; exact grammar, representations, dispatch and general compiler support are staged | Accepted direction / scheduled |
 | Generic array/enum capabilities | Preserve independent capability predicates, unnamed enum values, open-by-default evolution and explicit case-set/layout contracts | Accepted direction / representation details open |
-| Layout and wrappers | Opaque by default; transparent/native layouts preserve ABI, validity, and ownership | Accepted direction / open proposal |
+| Layout and wrappers | Opaque by default; opt-in Sequential, Union and Transparent contracts; transparent wrappers remain nominal but are carrier-equivalent only under checked ABI, validity, ownership and cleanup contracts; no arbitrary user-selected field offsets | Accepted direction / exact syntax and ABI profiles open |
 | Sealed concrete types | `sealed` controls inheritance; type/API evolution and case-set/layout promises are separate | Accepted direction |
 | Collection-based `params` | Ordinary collection construction and per-element copy/move; existing-collection versus expansion binding remains open | Agreed direction / binding rule open |
 | `func`, `fnptr`, tuples, and packs | Bounded closed callable/tuple direction, transparent aliases, and checked callable witnesses; exact grammar, ABI annotations and generic callable contracts remain scheduled/open; no user-defined pack expansion | Accepted direction / scheduled details |
-| Tensor, multidimensional, SoA/AoS | Separate shape, strides, storage, and truthful projections | Proposal |
-| Discards | One evaluation, vacancy, and cleanup rule across contexts | Refinement |
+| SIMD and tensor views | SIMD values carry vector ABI; tensors are higher-level logical multidimensional views over storage with explicit shape/stride contracts | Accepted distinction / library support scheduled |
+| Iteration, return representation and allocation | Preserve lifetime, ownership, cleanup and relocation contracts; physical by-value lowering does not imply a source loan | Accepted safety direction |
+| Context-specific underscore roles | Value discards evaluate and clean up; wildcard patterns do not consume the scrutinee; lambda names and generic inference holes are distinct contexts | Accepted semantic direction / grammar and support open |
 | Literals, consteval, operators, compound assignment | Bounded, hygienic, versioned constant evaluation distinct from runtime witnesses | Open |
 | Handlers and builders | Registered expansions; eager left-to-right holes, cleanup, and publish-on-success | Open |
 | Specialization | Same-contract optimization with fallback; semantic variants remain named APIs | Open |
 | Errors and propagation | Separate expected/domain results, exceptions, invariant defects, host failures, and cleanup | Accepted constraints / open refinement |
 | Callables, async, cancellation, structured concurrency | Completion, ownership, supervision, transfer, and revalidation remain explicit | Refinement / open |
-| Iteration, allocation, loop capture, callbacks | Lending/invalidation and allocator costs; capture/callback facts need contracts | Open library contracts |
+| Loop capture and callbacks | Capture, callback and scheduling facts need contracts | Open library contracts |
 | Generic implementation strategy | AOT/JIT parity; sharing versus specialization is a backend choice | Open |
 
 Validate accepted contracts across AOT/JIT/module replacement while scheduling
@@ -938,3 +995,46 @@ Historical proposal limitations are not claims about every current compiler.
 These comparisons inform Terrum recommendations, not automatic adoption or
 measured performance claims. [Source notes](references.md) cover the existing
 CoreLib and ABI research.
+
+## Open follow-up: generic input, result and receiver representation
+
+The representation policy for generic inputs, results and instance-extension
+receivers remains open. The earlier `View<T>` spelling was only a discussion
+placeholder; it is **not** an accepted type, family, name or grammar.
+
+Questions to resolve together:
+
+- How should ordinary instance and extension receiver conventions be chosen?
+  A class/reference receiver may be passed as `T self` (the handle); a value
+  receiver might be passed as `T self` or borrow storage as `ref<T> self`.
+  Class-versus-value alone cannot select the preferred form, and readonly
+  access does not imply by-reference passing. .NET `Vector128<T>` extensions
+  often intentionally take the receiver by value to avoid address-taking spills
+  that can defeat enregistration when a call is not inlined; even an `int32`
+  instance receiver can be cheaper by value than by reference. The policy must
+  account for register classification and ABI, addressability, inline and
+  non-inline paths, and caller spill/callee load versus register copy -- not
+  just `sizeof(T)`. If a mutating receiver must update original storage, it
+  still needs a writable borrow/writeback mechanism rather than mutating a
+  value copy. A writable value receiver would require `write ref<T>`; a
+  writable class referent is `write C`. `mut` on a class-handle binding permits
+  rebinding, not mutation of a readonly referent. A mutable value local, in
+  contrast, provides a writable place from which a checked mutable receiver
+  borrow may be formed.
+- Should classes and primitive values remain by-value while large or
+  noncopyable structs may use readonly loans? Parameters, results and instance
+  extensions may need different policies rather than one representation rule.
+- How should a published representation policy account for enregistration,
+  visibility and aliasing, which can make physical ABI optimization alone
+  unreliable? Generic optimization must not promise copy avoidance for every
+  `T`, nor silently turn a by-value snapshot into a loan of backing storage.
+- How are conditional backing dependencies and the complete qualification of
+  `T` preserved? How can separate compilation bind a stable published policy
+  and closed contract without relying on an incidental size threshold?
+- Can generic consumers use the chosen representation without an implicit
+  copy, while keeping rvalue and temporary escape, ownership transfer and
+  cleanup behavior well-defined?
+- How is `T` inferred without attempting to invert a non-injective
+  representation or projection?
+
+No representation mechanism or syntax is selected by this follow-up.
