@@ -408,7 +408,6 @@ public sealed partial class NativeManagedClassModuleTests
     [InlineData("public Cycle Leak() { require Cycle.TryCreate(42, out var node); return node; }", "Leak")]
     [InlineData("public Cycle? Leak() { return null; }", "Leak")]
     [InlineData("public bool Leak(out Cycle? node) { node = null; return true; }", "Leak")]
-    [InlineData("public bool Leak(out int32 value) { value = 42; return true; }", "Leak")]
     public void ManagedClassHandlesCannotCrossNativeExports(string declaration, string export)
     {
         var source = """

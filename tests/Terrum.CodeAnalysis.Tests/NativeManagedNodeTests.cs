@@ -154,15 +154,11 @@ public sealed class NativeManagedNodeTests
     }
 
     [Theory]
-    [InlineData("CopyReturn", BoundRuntimePolicy.FailFast)]
-    [InlineData("CopyInput", BoundRuntimePolicy.FailFast)]
     [InlineData("UniqueReturn", BoundRuntimePolicy.FailFast)]
     [InlineData("OwnedOutput", BoundRuntimePolicy.FailFast)]
     [InlineData("OwnedInput", BoundRuntimePolicy.FailFast)]
-    [InlineData("OutScalar", BoundRuntimePolicy.FailFast)]
-    [InlineData("CopyReturn", BoundRuntimePolicy.CheckedExceptions)]
     [InlineData("OwnedInput", BoundRuntimePolicy.CheckedExceptions)]
-    public void ManagedImageRejectsNonScalarExportContracts(string name, BoundRuntimePolicy policy)
+    public void ManagedImageRejectsOwningExportContracts(string name, BoundRuntimePolicy policy)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(MixedLibrary), policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -176,8 +172,14 @@ public sealed class NativeManagedNodeTests
     [InlineData("Echo", BoundRuntimePolicy.FailFast)]
     [InlineData("Flag", BoundRuntimePolicy.FailFast)]
     [InlineData("Ping", BoundRuntimePolicy.FailFast)]
+    [InlineData("CopyReturn", BoundRuntimePolicy.FailFast)]
+    [InlineData("CopyInput", BoundRuntimePolicy.FailFast)]
+    [InlineData("OutScalar", BoundRuntimePolicy.FailFast)]
     [InlineData("Echo", BoundRuntimePolicy.CheckedExceptions)]
-    public void ManagedImageRetainsScalarAndVoidExports(string name, BoundRuntimePolicy policy)
+    [InlineData("CopyReturn", BoundRuntimePolicy.CheckedExceptions)]
+    [InlineData("CopyInput", BoundRuntimePolicy.CheckedExceptions)]
+    [InlineData("OutScalar", BoundRuntimePolicy.CheckedExceptions)]
+    public void ManagedImageRetainsCopyScalarAndVoidExports(string name, BoundRuntimePolicy policy)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(MixedLibrary), policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));

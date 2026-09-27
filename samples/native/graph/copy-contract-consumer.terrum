@@ -1,0 +1,7 @@
+int32 Main() {
+    Snapshot direct = ReadSnapshot();
+    require TryReadSnapshot(true, out var conditional);
+    require !TryReadSnapshot(false, out var vacant);
+    require ReadTotal(direct) == ReadTotal(conditional);
+    return ReadTotal(conditional);
+}

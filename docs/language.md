@@ -676,8 +676,8 @@ managed artifacts from versions 18 through 23 into qualified internal IR,
 translating legacy class/`ManagedNode` mutation authority to explicit `write`
 exactly where previously granted. Programs not requiring the semantic-v25
 `MutReceiver` contract or v26 nested mutable-field loans retain their prior versions and bytes regardless of
-managedness. Native handle layout and the scalar-only public module boundary
-are unchanged.
+managedness. Native handle layout and the absence of a public managed-handle
+ABI are unchanged.
 
 The semantic-v25 `MutReceiver` contract supports `mut` methods on non-owning
 compact structs as non-exported persisted calls. Source visibility may be
@@ -713,6 +713,11 @@ rebinding `this`, and general reference forms remain unsupported. Primitive
 `Buffer` views retain separate legacy access paths, and the coherent
 `out`-to-`init ref<T>` migration remains scheduled. Neither the fail-fast runtime nor bounded
 checked-exceptions proof is the language's future general exception runtime.
+Semantic v31 also permits managed-backed leaf modules to export public,
+handle-free compact `Copy` values up to 16 bytes through by-value parameters
+and results and existing conditional `bool`/`out` outputs. This does not expose
+managed handles or private heap storage, add reference modes, or change the
+native physical ABI.
 The syntax-16 numeric compiler rejects attached width suffixes with `TRM0006`,
 diagnoses missing hexadecimal and binary digits as `TRM0007` and `TRM0008`,
 and malformed separators as `TRM0009`; prefix casts are no longer parsed. It

@@ -194,7 +194,7 @@ public static class NativeEmitter
         }
         var selected = new List<(string Name, int Index)>(exports.Count);
         var names = new HashSet<string>(StringComparer.Ordinal);
-        var scalarExportsOnly = UsesManagedNodes(program);
+        var managedExports = UsesManagedNodes(program);
         foreach (var name in exports)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -212,7 +212,7 @@ public static class NativeEmitter
                     break;
                 }
             }
-            if (index < 0 || !Exportable(program, program.Functions[index], scalarExportsOnly))
+            if (index < 0 || !Exportable(program, program.Functions[index], managedExports))
             {
                 throw new ArgumentException($"'{name}' is not an accessible native library export.", nameof(exports));
             }
@@ -231,7 +231,7 @@ public static class NativeEmitter
         || ManagedClassTypes.IsManaged(function.ReturnType)
         || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type)));
 
-    private static bool Exportable(BoundProgram program, BoundFunction function, bool scalarExportsOnly)
+    private static bool Exportable(BoundProgram program, BoundFunction function, bool managedExports)
     {
         if (function.IsPrivate || function.IsInternal || function.IsExternal)
         {
@@ -243,26 +243,19 @@ public static class NativeEmitter
             return false;
         }
         if (!PublicLayout(function.ReturnType)
-            || (scalarExportsOnly && function.ReturnType != PrimitiveType.Void && !Scalar(function.ReturnType)))
+            || (managedExports && !ManagedExportShape.Supported(function, program.Structures)))
         {
             return false;
         }
         for (var i = 0; i < function.ParameterCount; i++)
         {
             var parameter = function.Variables[i + (function.IsConstructor ? 1 : 0)];
-            if (!PublicLayout(parameter.Type)
-                || (scalarExportsOnly && (parameter.IsOut || !Scalar(parameter.Type))))
+            if (!PublicLayout(parameter.Type))
             {
                 return false;
             }
         }
         return true;
-
-        static bool Scalar(PrimitiveType type)
-        {
-            return type is PrimitiveType.Bool or PrimitiveType.Int32 or PrimitiveType.UInt32
-                or PrimitiveType.Char16 or PrimitiveType.Int64 or PrimitiveType.UInt64;
-        }
 
         bool PublicLayout(PrimitiveType type)
         {

@@ -9,6 +9,13 @@
 typedef int32_t (*Check)(void);
 typedef int32_t (*Collect)(uint64_t);
 typedef void (*ThrowingExport)(void);
+typedef struct ExportValue { int64_t first; int64_t second; } ExportValue;
+typedef struct ExportSmall { int32_t value; } ExportSmall;
+typedef ExportValue (*CopyExport)(ExportValue);
+typedef ExportSmall (*CopySmall)(ExportSmall);
+typedef int32_t (*TryExport)(ExportValue, int32_t, ExportValue*, int32_t*);
+typedef int32_t (*TryExportScalar)(int32_t, int32_t, int32_t*);
+typedef int32_t (*FailExportValue)(ExportValue, ExportValue*, int32_t*);
 
 enum { TrackedCapacity = 4096 };
 static void* live[TrackedCapacity];
@@ -336,6 +343,73 @@ static int RunClassChecks(HMODULE image, int checkedUnwind)
     return 0;
 }
 
+static int RunClassValueChecks(HMODULE image, int checkedUnwind)
+{
+    CopyExport copy = (CopyExport)GetProcAddress(image, "CopyExport");
+    CopySmall small = (CopySmall)GetProcAddress(image, "CopySmall");
+    TryExport publish = (TryExport)GetProcAddress(image, "TryExport");
+    TryExportScalar scalar = (TryExportScalar)GetProcAddress(image, "TryExportScalar");
+    FailExportValue failure = (FailExportValue)GetProcAddress(image, "FailExportValue");
+    Collect collect = (Collect)GetProcAddress(image, "CollectWithScalar");
+    VERIFY(copy && small && publish && scalar && collect && (!checkedUnwind || failure), 150);
+    VERIFY(ReplaceImport(image, "HeapAlloc", (void*)TrackedAllocate), 151);
+    VERIFY(ReplaceImport(image, "HeapFree", (void*)TrackedRelease), 152);
+    for (int iteration = 0; iteration < 64; iteration++)
+    {
+        ExportValue input = { 40, 2 };
+        attempts = 0;
+        releases = 0;
+        ExportValue result = copy(input);
+        VERIFY(result.first == 40 && result.second == 2 && attempts == 1
+            && releases == 0 && LiveCount() == 1 && !invalid, 153);
+        VERIFY(collect(0) == 1 && releases == 1 && LiveCount() == 0 && !invalid, 154);
+        ExportSmall direct = { 42 };
+        VERIFY(small(direct).value == 42, 155);
+        VERIFY(attempts == 1 && releases == 1 && LiveCount() == 0 && !invalid, 156);
+
+        result.first = 7;
+        result.second = 9;
+        int32_t count = 11;
+        attempts = 0;
+        releases = 0;
+        VERIFY(publish(input, 0, &result, &count) == 0, 157);
+        VERIFY(result.first == 7 && result.second == 9 && count == 11
+            && attempts == 1 && releases == 0 && LiveCount() == 1 && !invalid, 158);
+        VERIFY(collect(0) == 1 && releases == 1 && LiveCount() == 0 && !invalid, 159);
+        attempts = 0;
+        releases = 0;
+        VERIFY(publish(input, 1, &result, &count) == 1, 160);
+        VERIFY(result.first == 40 && result.second == 2 && count == 42
+            && attempts == 1 && releases == 0 && LiveCount() == 1 && !invalid, 161);
+        VERIFY(collect(0) == 1 && releases == 1 && LiveCount() == 0 && !invalid, 162);
+        int32_t scalarResult = 7;
+        VERIFY(scalar(42, 0, &scalarResult) == 0 && scalarResult == 7, 163);
+        VERIFY(scalar(42, 1, &scalarResult) == 1 && scalarResult == 42, 164);
+
+        if (checkedUnwind)
+        {
+            result.first = 7;
+            result.second = 9;
+            count = 11;
+            attempts = 0;
+            releases = 0;
+            int caught = 0;
+            __try
+            {
+                failure(input, &result, &count);
+            }
+            __except (CatchRequirement(GetExceptionInformation()))
+            {
+                caught = 1;
+            }
+            VERIFY(caught && result.first == 7 && result.second == 9 && count == 11
+                && attempts == 1 && releases == 0 && LiveCount() == 1 && !invalid, 165);
+            VERIFY(collect(0) == 1 && releases == 1 && LiveCount() == 0 && !invalid, 166);
+        }
+    }
+    return 0;
+}
+
 static int RunOptionalChecks(HMODULE image, int checkedUnwind)
 {
     const char* names[] = { "OptionalCycles", "OptionalSnapshots", "OptionalNullOutput" };
@@ -502,12 +576,14 @@ int main(int argc, char** argv)
     int unwind = argc == 3 && strcmp(argv[2], "unwind") == 0;
     int checkedClasses = argc == 3 && strcmp(argv[2], "classes-checked") == 0;
     int classes = checkedClasses || (argc == 3 && strcmp(argv[2], "classes") == 0);
+    int checkedValues = argc == 3 && strcmp(argv[2], "classes-values-checked") == 0;
+    int values = checkedValues || (argc == 3 && strcmp(argv[2], "classes-values") == 0);
     int checkedOptional = argc == 3 && strcmp(argv[2], "optional-checked") == 0;
     int optional = checkedOptional || (argc == 3 && strcmp(argv[2], "optional") == 0);
     int chain = argc == 3 && strcmp(argv[2], "chain") == 0;
     int capacity = argc == 3 && strcmp(argv[2], "class-capacity") == 0;
     int transfers = argc == 3 && strcmp(argv[2], "loop-transfers") == 0;
-    if (argc == 3 && !unwind && !classes && !optional && !chain && !capacity && !transfers)
+    if (argc == 3 && !unwind && !classes && !values && !optional && !chain && !capacity && !transfers)
     {
         fprintf(stderr, "Unknown managed-heap probe mode: %s.\n", argv[2]);
         FreeLibrary(image);
@@ -518,6 +594,7 @@ int main(int argc, char** argv)
         : chain ? RunTokenChainChecks(image)
         : optional ? RunOptionalChecks(image, checkedOptional)
         : classes ? RunClassChecks(image, checkedClasses)
+        : values ? RunClassValueChecks(image, checkedValues)
         : unwind ? RunUnwindChecks(image) : RunChecks(image);
     FreeLibrary(image);
     if (result == 0)
@@ -532,6 +609,10 @@ int main(int argc, char** argv)
             ? checkedOptional
                 ? "managed-optionals rounds=64 cycles=checked snapshots=checked unwind=checked live=0"
                 : "managed-optionals rounds=64 cycles=checked snapshots=checked unwind=disabled live=0"
+            : values
+            ? checkedValues
+                ? "managed-class-values copy=16 direct=4 outputs=conditional unwind=checked live=0"
+                : "managed-class-values copy=16 direct=4 outputs=conditional unwind=disabled live=0"
             : classes
             ? checkedClasses
                 ? "managed-classes rounds=64 descriptors=checked construction=checked unwind=checked live=0"

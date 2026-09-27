@@ -194,8 +194,9 @@ static managed roots and managed class values in inline structs remain
 unsupported. Required references do not permit bootstrapping a cycle by leaking
 partial objects. Optional fields in `native-20` provide an explicit construction
 path for source-defined cycles.
-Class metadata is image-private: versioned semantic/native leaf modules can
-retain it internally, but native DLL exports remain scalar-only.
+At semantic versions 19 and 20, class metadata is image-private: versioned
+semantic/native leaf modules retain it internally, while public DLL exports
+remain scalar-only.
 Executable class payloads also admit acyclic, handle-free Copy struct fields
 of at most 16 bytes, within the same 128-byte payload bound. Whole-value reads
 and writes copy all bytes; nested field access preserves declared mutability
@@ -242,8 +243,16 @@ the same root reservation and recursive cleanup responsibility.
 Partially initialized roots,
 temporary receivers, managed-class-field receiver paths, rebinding `this`,
 and public mutating-receiver ABI
-remain unsupported. The native physical handle ABI, image-private managed
-state and scalar-only public exports are unchanged. Primitive
+remain unsupported. At semantic v28, the native physical handle ABI and
+image-private managed state were unchanged, and public exports remained
+scalar-only. Semantic v31 now permits managed-backed leaf producers to export
+public handle-free compact `Copy` values up to 16 bytes through the existing
+by-value parameter/result and `bool`/`out` forms, including scalar outputs.
+Those snapshots use the existing native value ABI and do not expose private
+managed storage or handles; exported managed handles, unique values, nested
+managed-containing values, views, reference modes and mutating-receiver ABI
+remain unsupported. The managed-leaf import restriction and native physical
+ABI/profile versions are unchanged. Primitive
 `OwnedInt32Buffer` views keep their separate legacy access rules; general
 `ref<T>`/view/`own<T>`/`init ref<T>` call-site implementations remain
 unsupported.

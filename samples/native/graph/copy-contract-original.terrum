@@ -1,0 +1,25 @@
+public struct Snapshot {
+    public int32 Count;
+    public int32 Total;
+    public int32 Version;
+    public Snapshot(int32 count, int32 total, int32 version) {
+        Count = count;
+        Total = total;
+        Version = version;
+    }
+}
+
+public Snapshot ReadSnapshot() {
+    return new Snapshot(2, 40, 1);
+}
+
+public bool TryReadSnapshot(bool available, out Snapshot snapshot) {
+    if (!available) { return false; }
+    snapshot = ReadSnapshot();
+    return true;
+}
+
+public int32 ReadTotal(Snapshot snapshot) {
+    require snapshot.Count == 2 && snapshot.Version == 1;
+    return snapshot.Total;
+}

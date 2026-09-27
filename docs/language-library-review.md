@@ -73,11 +73,16 @@ roots and child structs, preserving the same ownership and cleanup rules.
 Semantic v29 extends writable owning-field loans to the existing
 `OwnedInt32Buffer.Set`, `TryAppend` and `Clear` intrinsics. Semantic v30 adds
 lexical field `SliceMutable` acquisition with whole-root exclusion, not
-general reference/view access or escaping views.
+general reference/view access or escaping views. Semantic v31 permits
+managed-backed leaf producers to export public handle-free compact `Copy`
+values up to 16 bytes through by-value parameters/results and existing
+conditional `bool`/`out` outputs, without exposing managed handles or private
+heap storage. This retains the existing value ABI and does not provide a
+public managed-handle ABI.
 It includes compilation-local constrained generic specialization, including
 bounded single-`T` inference for top-level function templates over `Copy`
 structs and existing scalar value types, but not primitive operator witnesses,
-a public managed ABI, general interfaces/witnesses,
+a public managed-handle ABI, general interfaces/witnesses,
 array/view libraries, async, or the proposed libraries. The syntax-16 numeric front end rejects width
 suffixes with `TRM0006`, diagnoses missing hexadecimal/binary digits as
 `TRM0007`/`TRM0008` and malformed separators as `TRM0009`, no longer parses

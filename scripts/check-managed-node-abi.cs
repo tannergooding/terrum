@@ -108,6 +108,8 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         "--export", "AssignmentAcrossCollection",
         "--export", "CreateLoose", "--export", "ScalarNonRoot", "--export", "AllocationFailure",
         "--export", "RetainAcrossAllocationFailure", "--export", "CollectWithScalar",
+        "--export", "CopyExport", "--export", "CopySmall", "--export", "TryExport",
+        "--export", "TryExportScalar",
         "-o", classes, "--runtime", policy })
     {
         compileClasses.ArgumentList.Add(argument);
@@ -124,6 +126,8 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         compileClasses.ArgumentList.Add("EscapeConstructorToNative");
         compileClasses.ArgumentList.Add("--export");
         compileClasses.ArgumentList.Add("AssignmentFailure");
+        compileClasses.ArgumentList.Add("--export");
+        compileClasses.ArgumentList.Add("FailExportValue");
     }
     var classBuild = await Run(compileClasses, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
     await File.WriteAllTextAsync(Path.Combine(artifacts, $"managed-class-abi-build-{policy}.log"),
@@ -142,6 +146,17 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         throw new InvalidOperationException("The independent managed-class ABI proof did not complete.");
     }
     Console.Write($"{policy}: {classProof}");
+    var valueExecute = new ProcessStartInfo(executable);
+    valueExecute.ArgumentList.Add(classes);
+    valueExecute.ArgumentList.Add(checkedUnwind ? "classes-values-checked" : "classes-values");
+    var valueProof = await Run(valueExecute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+    await File.WriteAllTextAsync(Path.Combine(artifacts, $"managed-class-value-abi-proof-{policy}.log"),
+        valueProof).ConfigureAwait(false);
+    if (valueProof.Trim() != $"managed-class-values copy=16 direct=4 outputs=conditional unwind={(checkedUnwind ? "checked" : "disabled")} live=0")
+    {
+        throw new InvalidOperationException("The independent managed Copy-value ABI proof did not complete.");
+    }
+    Console.Write($"{policy}: {valueProof}");
     if (checkedUnwind)
     {
         var abandonFailure = new ProcessStartInfo(executable);

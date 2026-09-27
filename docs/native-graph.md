@@ -190,6 +190,32 @@ $LASTEXITCODE # 44
 $LASTEXITCODE # 44
 ```
 
+Semantic v31 also lets a managed-backed leaf export a public handle-free
+compact `Copy` value without exporting its private class or managed handles.
+The original and replacement below expose the same `Snapshot` type and
+`ReadSnapshot`, `TryReadSnapshot` and `ReadTotal` signatures. The unchanged
+consumer returns 40 with the original and 42 with the replacement. The managed
+implementation builds a private two-node cycle, copies out its `Snapshot`,
+collects both private records, then returns the independent value.
+
+```powershell
+$policies = 'fail-fast', 'checked-exceptions'
+foreach ($policy in $policies) {
+    $original = "copy-original-$policy.trmn"
+    $replacement = "copy-managed-$policy.trmn"
+    $root = "copy-root-$policy.trng"
+    & $c compile-native producer samples\native\graph\copy-contract-original.terrum NodeB --export ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $original --runtime $policy
+    & $c compile-native producer samples\native\graph\copy-contract-managed.terrum NodeB --export ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $replacement --runtime $policy
+    & $c compile-native-graph consumer samples\native\graph\copy-contract-consumer.terrum --provider $original -o $root --runtime $policy
+    & $c run-native-graph $root --provider $original --runtime $policy
+    $LASTEXITCODE # 40
+    & $c run-native-graph $root --provider $replacement --runtime $policy
+    $LASTEXITCODE # 42
+    & $c run-native-graph-jit $root --provider $replacement --runtime $policy
+    $LASTEXITCODE # 42
+}
+```
+
 Graph v2 packages carry the declared origin and cleanup owner of every
 retained type, separately from the actual PE imports reported by the same
 native emission. A graph DLL may return or bool/out-publish a dependency-owned

@@ -168,3 +168,38 @@ public int32 RetainAcrossAllocationFailure() {
 public int32 CollectWithScalar(uint64 bits) {
     return ManagedHeap.Collect();
 }
+
+public struct ExportValue {
+    public int64 First;
+    public int64 Second;
+    public ExportValue(int64 first, int64 second) { First = first; Second = second; }
+}
+
+public struct ExportSmall {
+    public int32 Value;
+    public ExportSmall(int32 value) { Value = value; }
+}
+
+class ExportBox {
+    public ExportValue Data;
+    public ExportBox(ExportValue value) { Data = value; }
+}
+
+public ExportValue CopyExport(ExportValue value) {
+    require ExportBox.TryCreate(value, out var box);
+    return box.Data;
+}
+
+public ExportSmall CopySmall(ExportSmall value) { return value; }
+
+public bool TryExport(ExportValue input, bool publish, out ExportValue result, out int32 count) {
+    require ExportBox.TryCreate(input, out var box);
+    result = box.Data;
+    count = 42;
+    return publish;
+}
+
+public bool TryExportScalar(int32 input, bool publish, out int32 result) {
+    result = input;
+    return publish;
+}

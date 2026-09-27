@@ -36,6 +36,7 @@ public static partial class ModuleCompiler
     private const int UniqueMutableFieldReceiverVersion = 28;
     private const int MutableBufferFieldReceiverVersion = 29;
     private const int MutableBufferFieldViewVersion = 30;
+    private const int ManagedValueExportVersion = 31;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -199,15 +200,6 @@ public static partial class ModuleCompiler
         || function.ReturnType is PrimitiveType.ManagedNode or PrimitiveType.WriteManagedNode
         || function.Variables.Any(static variable => variable.Type is PrimitiveType.ManagedNode
             or PrimitiveType.WriteManagedNode);
-
-    private static bool ScalarManagedExport(BoundFunction function) =>
-        (function.ReturnType == PrimitiveType.Void || ScalarManagedType(function.ReturnType))
-        && function.Variables.Skip(function.IsConstructor ? 1 : 0).Take(function.ParameterCount)
-            .All(static variable => !variable.IsOut && ScalarManagedType(variable.Type));
-
-    private static bool ScalarManagedType(PrimitiveType type) =>
-        type is PrimitiveType.Bool or PrimitiveType.Int32 or PrimitiveType.UInt32
-            or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16;
 
     private static bool HasOwnedNativeBuffer(ImmutableArray<BoundStruct> structures,
         ImmutableArray<ModuleFunction> functions) =>
@@ -449,7 +441,7 @@ public static partial class ModuleCompiler
         }
         if (indexes.Any(index => !Exportable(program.Functions[index], program.Structures))
             || (HasPrivateManagedState(program)
-                && indexes.Any(index => !ScalarManagedExport(program.Functions[index]))))
+                && indexes.Any(index => !ManagedExportShape.Supported(program.Functions[index], program.Structures))))
         {
             throw new ModuleContractException("Producer exports must have public, supported native declarations.");
         }
@@ -1342,7 +1334,10 @@ public static partial class ModuleCompiler
         }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-        var version = module.Functions.Any(static item => item.Function is BoundFunction function
+        var version = HasPrivateManagedState(module) && module.Functions.Any(static item =>
+                item.Import && item.Function is BoundFunction function && !ManagedExportShape.ScalarOnly(function))
+                ? ManagedValueExportVersion
+            : module.Functions.Any(static item => item.Function is BoundFunction function
                 && HasMutableBufferFieldView(function)) ? MutableBufferFieldViewVersion
             : module.Functions.Any(static item => item.Function is BoundFunction function
                 && HasMutableBufferFieldLoan(function)) ? MutableBufferFieldReceiverVersion
@@ -1526,6 +1521,12 @@ public static partial class ModuleCompiler
                 SerializedVersion = version,
                 SerializedProfile = profile,
             };
+            if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
+                || !items.Any(static item => item.Import && item.Function is BoundFunction function
+                    && !ManagedExportShape.ScalarOnly(function))))
+            {
+                throw new ModuleFormatException("Managed value export version requires an expanded managed declaration.");
+            }
             if (profile != RetainedNativeProfile(module))
             {
                 throw new ModuleFormatException("Module semantic profile does not match its retained contracts.");
@@ -1534,10 +1535,12 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Optional managed nodes require a private source-class leaf.");
             }
-            if (HasPrivateManagedState(module) && (expectedConsumer || module.Functions.Any(static item =>
-                    item.Import && (item.Function is not BoundFunction function || !ScalarManagedExport(function)))))
+            if (HasPrivateManagedState(module) && (expectedConsumer || module.Functions.Any(item =>
+                    item.Import && (item.Function is not BoundFunction function
+                        || !ManagedExportShape.Supported(function, structures)
+                        || (version < ManagedValueExportVersion && !ManagedExportShape.ScalarOnly(function))))))
             {
-                throw new ModuleFormatException("Managed leaf references require scalar-only exports.");
+                throw new ModuleFormatException("Managed leaf references require versioned public Copy-value exports.");
             }
             if (stream.Position != stream.Length || (expectedConsumer && items[entry].Import))
             {
@@ -1567,7 +1570,7 @@ public static partial class ModuleCompiler
             or ManagedClassVersion or Version or LoopTransferVersion or AggregateClassFactoryVersion
             or StackClassFactoryVersion or ManagedAccessVersion or MutableStructReceiverVersion
             or MutableFieldReceiverVersion or UniqueMutableReceiverVersion or UniqueMutableFieldReceiverVersion
-            or MutableBufferFieldReceiverVersion or MutableBufferFieldViewVersion))
+            or MutableBufferFieldReceiverVersion or MutableBufferFieldViewVersion or ManagedValueExportVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }

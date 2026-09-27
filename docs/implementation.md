@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-17, native-10 through native-20, semantic v30 mutable buffer-field views
+## Current boundary: syntax-17, native-10 through native-20, semantic v31 managed-backed Copy exports
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -86,6 +86,22 @@ Partial-constructor mutation and owning-field replacement remain unsupported.
 Earlier artifacts retain their existing bytes when they do not
 require a newer loan contract; older headers reject the respective broadened
 contract even though the field-path encoding is unchanged.
+Semantic v31 permits managed-backed leaf producers to export existing public,
+handle-free compact `Copy` structs of at most 16 bytes by value as parameters
+and results, and through the existing `bool`/`out` conditional-output contract,
+including scalar outputs. The existing Windows x64 value ABI and `NoThrow`
+contracts are unchanged. Public-field visibility and nominal type provenance
+requirements apply to each `Copy` type that crosses an argument or result ABI,
+not automatically to an export's declaring owner. Existing scalar-only static exports on public owner
+types with private fields remain valid, and a static declaration on a unique
+owner does not transfer that owner. Snapshots are independent values, not
+references into private managed storage. Managed handles, unique values,
+nested managed-containing values, views and mutating-receiver ABI
+remain excluded, as does importing another producer from a managed leaf.
+Writers require semantic v31 for these expanded export contracts; scalar-only
+managed producers retain their prior required version, and older headers reject
+the expanded contracts. This adds no syntax or scanner change and does not
+change the native physical ABI or profile versions.
 
 | Surface | Implemented | Not yet implemented |
 |---|---|---|
@@ -95,7 +111,7 @@ contract even though the field-path encoding is unchanged.
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; source-class and `ManagedNode` optional handles with `write` capability preserved through fields, parameters, results and inference; repeated `?` diagnoses | Scalar options, generic optional normalization after substitution, family defaults/conditional conformance, general ownership/form qualifiers and general borrowed references, transparent-wrapper ABI contracts |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, nearest-loop `break`/`continue`, return, statement-form `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, labeled transfers, general switch/patterns and wildcard patterns, context-specific discard destinations, declaration pre/postconditions, `static require`/`static ensure` proofs, typed requirement-failure selection, general exception objects/throw, async, compound assignment |
 | Expressions | Names, raw literals, `()`, grouping, unary/binary operations, context-typed decimal/hexadecimal/binary integer literals without fallback (based values construct target-width bit patterns), numeric digit separators, checked numeric type-call conversions for `int32`/`uint32`/`int64`/`uint64`/`char16`, member/index access, calls, explicit closed static-protocol calls, bounded inference of one `T` for top-level generic function templates over `Copy` structs or existing scalar value types from typed arguments or typed existing `out` destinations (expected-result context fills only an unresolved `T`), generic signature-based result-type lookup, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique and initialized owning-field loans, qualified source-class/`ManagedNode` writes and mutable-class receivers, named-place and writable nested-field loans for compact-struct `mut` receivers including fully initialized unique roots/children, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations including `Set`/`TryAppend`/`Clear` and lexical `SliceMutable` through writable owning fields, and lexical readonly buffer slices | Floating/custom literal binding, registered literal/`[ConstEval]` execution, `require` output-expression form and exception-type selection, implicit `ref<T>` call-site loan introduction and temporary materialization, character literals, partial owning-field moves, owning field replacement, general expression temporaries, temporary/managed-class-field mutating-struct receivers, partial-constructor mutation, rebinding `this`, public mutating-receiver ABI, general stored loans/references, evaluation outside the native profile, user-defined conversions, unique/managed generic `T`, primitive operator conformance, general argument/result/partial-hole inference, constructor/method inference, ordinary overload declarations (rejected with `TRM3003`), contextual discard/lambda `_` forms, conditional expressions |
-| Managed storage | Aliasable `ManagedNode` and source-class handles, optional edges and non-null pattern snapshots, readonly bare handles and explicit `write` capability, mutable-class receiver checks, qualified field/parameter/result/inference paths, handle-free compact Copy fields in classes, descriptor-based cycle tracing, complete-publication class factories, exact frame/temporary roots and explicit nonmoving collection under both policies, including exceptional root retirement and escaping-frame unlink | Managed handles inside user structs, stored interior pointers, implicit GC, native DLL/module graph managed ABI |
+| Managed storage | Aliasable `ManagedNode` and source-class handles, optional edges and non-null pattern snapshots, readonly bare handles and explicit `write` capability, mutable-class receiver checks, qualified field/parameter/result/inference paths, handle-free compact Copy fields in classes, descriptor-based cycle tracing, complete-publication class factories, exact frame/temporary roots and explicit nonmoving collection under both policies, including exceptional root retirement and escaping-frame unlink | Managed handles inside user structs, stored interior pointers, implicit GC, native DLL/module graph managed-handle ABI |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
 Only the grammar below is supported. Unsupported constructs diagnose rather than
@@ -198,8 +214,9 @@ at explicit calls and at executable entry teardown; it does not rely on
 reference counts, stack word scanning or hidden allocation-triggered GC.
 Managed handles cannot be placed in user structs or passed across external
 calls, DLL exports or public persisted module contracts. Both runtime
-policies admit closed executables/JIT and isolated native DLLs with scalar-only
-exports and private managed state; DLL callers must serialize calls and
+policies admit closed executables/JIT and isolated native DLLs with scalar
+exports and, under semantic v31, managed-backed compact handle-free `Copy`
+exports; managed state remains private. DLL callers must serialize calls and
 explicitly collect abandoned nodes before unload.
 Checked unwind retires departed lexical roots after their nested user cleanup,
 clears argument and unpublished output staging, and unlinks a root frame only
@@ -276,8 +293,10 @@ buffer-field views (v30).
 Older headers reject the respective contract
 or expression. Programs needing neither retain their historical versions and
 bytes regardless of managedness.
-The private managed-leaf boundary and scalar-only public native ABI are
-unchanged.
+The private managed-state boundary and absence of a public managed-handle ABI
+are unchanged. Semantic v31 expands leaf exports to managed-backed compact
+handle-free `Copy` values by value; earlier semantic versions retain their
+existing scalar-only export contracts.
 Optional-node-only modules,
 managed consumer declarations and managed imported/exported signatures still
 reject.

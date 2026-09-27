@@ -1,0 +1,44 @@
+public struct Snapshot {
+    public int32 Count;
+    public int32 Total;
+    public int32 Version;
+    public Snapshot(int32 count, int32 total, int32 version) {
+        Count = count;
+        Total = total;
+        Version = version;
+    }
+}
+
+mut class Record {
+    public Snapshot Data;
+    public mut write Record? Next;
+    public Record(Snapshot data) {
+        Data = data;
+        Next = null;
+    }
+}
+
+Snapshot ReadPrivateSnapshot() {
+    require Record.TryCreate(new Snapshot(2, 42, 1), out var first);
+    require Record.TryCreate(new Snapshot(0, 0, 0), out var second);
+    first.Next = second;
+    second.Next = first;
+    return first.Data;
+}
+
+public Snapshot ReadSnapshot() {
+    Snapshot snapshot = ReadPrivateSnapshot();
+    require ManagedHeap.Collect() == 2;
+    return snapshot;
+}
+
+public bool TryReadSnapshot(bool available, out Snapshot snapshot) {
+    if (!available) { return false; }
+    snapshot = ReadSnapshot();
+    return true;
+}
+
+public int32 ReadTotal(Snapshot snapshot) {
+    require snapshot.Count == 2 && snapshot.Version == 1;
+    return snapshot.Total;
+}

@@ -49,7 +49,7 @@ The [managed-class sample](../samples/native/managed-classes.terrum) returns 42
 under both policies. It constructs source-defined classes with multiple managed
 edges, collects during partial construction without publishing it, and updates
 a shared writable referent through an alias. This is not inheritance, optional
-reference fields, a public managed ABI or a general collection library.
+reference fields, a public managed-handle ABI or a general collection library.
 The [optional-cycle sample](../samples/native/managed-optional-cycle.terrum)
 adds explicitly initialized optional edges, source-defined cycles and non-null
 presence snapshots. The [managed token-chain candidate](../self-host/ManagedTokenChain.terrum)
@@ -65,6 +65,15 @@ class metadata, without exposing a managed module ABI.
 The [Copy-field class leaf](../samples/native/graph/managed-copy-class-leaf.terrum)
 persists nested private Copy layouts in semantic version 20 and replaces the
 same unchanged consumer/intermediate images.
+The [managed Copy export original](../samples/native/graph/copy-contract-original.terrum)
+and [managed Copy export replacement](../samples/native/graph/copy-contract-managed.terrum)
+share the same public `Snapshot` value contract; the replacement collects its
+private two-node managed cycle before returning the copied snapshot. The
+[unchanged consumer](../samples/native/graph/copy-contract-consumer.terrum)
+returns 40 with the original and 42 with the replacement, demonstrating
+semantic-v31 by-value and `bool`/`out` Copy exports without exposing the
+producer's private managed records. Exact AOT and root-only JIT commands are
+in the [native graph guide](native-graph.md).
 The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
 returns 46 through AOT and JIT. Two nominal Copy wrappers explicitly implement
 source-defined addition/multiplication protocols used by one constrained

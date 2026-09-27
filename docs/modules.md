@@ -355,14 +355,31 @@ only the v25-v27 contracts retain their existing versions.
 Semantic v29 admits mutable owning-buffer field loans only for the existing
 `Set`, `TryAppend` and `Clear` intrinsics. Version selection examines symbolic
 call arguments; earlier headers reject these loans, while programs requiring
-only earlier receiver contracts retain their versions. The physical native
-ABI and scalar-only public boundary do not change.
+only earlier receiver contracts retain their versions. At v29, the physical
+native ABI and then-current scalar-only public boundary did not change.
 Semantic v30 adds mutable `BoundViewScope` acquisitions whose owner is a
 writable buffer-field loan. Writers select v30 for that scoped contract;
 v29 and earlier headers reject it, while named mutable views and ordinary
 buffer-field calls retain their earlier versions. Field paths are remapped
 against private layouts, and linking revalidates initialization, writable
 access and whole-root exclusion.
+Semantic v31 permits managed-backed leaf producers to export existing public,
+handle-free compact `Copy` structs of at most 16 bytes as by-value parameters
+and results, and through the existing `bool`/`out` conditional-output contract,
+including scalar outputs. Public-field visibility and nominal type provenance
+apply to `Copy` types actually crossing an argument or result ABI, not
+automatically to the export's declaring owner. Existing scalar-only static
+exports on public owner types with private fields remain valid, and a static
+declaration on a unique owner does not transfer that owner. `NoThrow`
+contracts and the existing Windows x64 aggregate classification remain part
+of the contract; returned or published snapshots are values independent of
+the producer's private managed heap. Managed handles, unique values, nested
+managed-containing values, views, reference modes and mutating-receiver ABI
+remain excluded, and managed leaves still cannot import another producer.
+Writers select semantic v31 when an expanded export contract requires it;
+scalar-only managed producers retain their prior required version, and older
+headers reject expanded contracts. This adds no syntax or native physical ABI
+or profile version.
 Programs requiring none of these contracts retain their existing versions and bytes
 regardless of managedness. The ordinary readonly/by-value receiver ABI is unchanged.
 Public scalar entry wrappers may call non-exported mutating methods; source
@@ -371,8 +388,9 @@ helpers remain private. Readers normalize private managed artifacts from
 versions 18 through 23 into explicitly qualified internal IR, translating
 legacy class/`ManagedNode` mutation authority into `write` exactly where it was
 previously granted, without widening the contract. A v18-v23 header containing
-v24 write identifiers is rejected. The native physical handle ABI, private managed-class
-boundary and scalar-only public exports remain unchanged.
+v24 write identifiers is rejected. The native physical handle ABI and private
+managed-class boundary remain unchanged; semantic v31 adds only the compact
+`Copy` export contracts described above, not a public managed-handle ABI.
 A consumer importing a unique type must also import the exported NoThrow
 cleanup methods of that type and its owning children. Their cleanup identities
 and Copy/unique distinctions participate in layout and signature compatibility;

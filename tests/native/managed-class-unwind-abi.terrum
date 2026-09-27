@@ -51,3 +51,11 @@ public int32 AssignmentFailure() {
     require edge.Item.Value == 7;
     return 42;
 }
+
+public bool FailExportValue(ExportValue input, out ExportValue result, out int32 count) {
+    require ExportBox.TryCreate(input, out var box);
+    result = box.Data;
+    count = 99;
+    require false;
+    return true;
+}
