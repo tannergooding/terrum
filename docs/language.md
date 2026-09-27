@@ -329,12 +329,29 @@ through a hidden `int32`/`float64`. `int32(1234)`, `uint64(0xFFFFFFFF)` and
 `T(untypedLiteral)` uses the registered parser directly; `T(typedExpression)`
 is a checked explicit conversion. `new T(arguments)` remains nominal
 construction. Already-typed numbers never implicitly widen or narrow. The
-syntax-15 compiler executes contextual decimal and hexadecimal integer
-literals without a fallback and checked numeric type-call conversions for
-`int32`, `uint32`, `int64`, `uint64` and `char16`; floating literals above
-remain target-only. Type/value-call binding preserves existing source-function
-and local shadowing/call precedence. `[ConstEval]` marks declarations eligible
-for bounded deterministic compile-time execution; `const T a = F()`
+syntax-16 compiler executes contextual decimal, hexadecimal and binary integer
+literals without a fallback, digit separators, and checked numeric type-call
+conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`; floating
+literals above remain target-only. Type/value-call binding preserves existing
+source-function and local shadowing/call precedence.
+
+Decimal integer literals keep numeric range semantics, including the direct
+negative signed-minimum case. Hexadecimal and binary literals instead
+construct the expected target width as a bit pattern: `int32(0x8000_0000)` is
+`int32.MinValue`, `int32(0xFFFF_FFFF)` is `-1`, and `int64(0xFFFFFFFF)` is
+`4294967295`. Nonzero bits above the target width are rejected; leading zeroes
+and separators do not add significant bits. Once constructed, the value is
+typed normally and subsequent conversions remain checked:
+`int32(uint32(0xFFFF_FFFF))` fails, while
+`int64(int32(0xFFFF_FFFF))` yields `-1`. Unary minus on a based literal is
+ordinary checked arithmetic: with an `int32` context, `-0x8000_0000` fails and
+`-0xFFFF_FFFF` produces `1`; an `int64` context gives different initial bits
+and therefore different results. Binary literals use `0b`/`0B`; `_` runs may
+separate digits or follow a based prefix, but cannot trail a digit run or
+attach to a decimal point, exponent marker or sign.
+
+`[ConstEval]` marks declarations eligible for bounded deterministic
+compile-time execution; `const T a = F()`
 requires a constant declaration value, while `T b = const F()` requires only
 the expression. Literal parsing always uses the registered compile-time
 parser, even in ordinary local initialization; there is no runtime fallback.
@@ -647,13 +664,14 @@ rebinding `this`, and general reference forms remain unsupported. Primitive
 `Buffer` views retain separate legacy access paths, and the coherent
 `out`-to-`init ref<T>` migration remains scheduled. Neither the fail-fast runtime nor bounded
 checked-exceptions proof is the language's future general exception runtime.
-The syntax-15 numeric compiler rejects attached width suffixes with `TRM0006`,
-diagnoses a `0x`/`0X` prefix without an ASCII hex digit as `TRM0007`, and no
-longer parses prefix casts. It supports contextual decimal and hexadecimal
-integer literals without a fallback type and checked numeric type-call
+The syntax-16 numeric compiler rejects attached width suffixes with `TRM0006`,
+diagnoses missing hexadecimal and binary digits as `TRM0007` and `TRM0008`,
+and malformed separators as `TRM0009`; prefix casts are no longer parsed. It
+supports contextual decimal, hexadecimal and binary integer literals without
+a fallback type, numeric digit separators and checked numeric type-call
 conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`.
-Floating/custom literal parsing, digit separators, registered string targets
-and `[ConstEval]` execution remain unsupported.
+Floating/custom literal parsing, registered string targets and `[ConstEval]`
+execution remain unsupported.
 Bounded ownership and lexical-view checks, source-defined managed classes,
 optional edges and explicit cycle tracing are implemented; general
 ownership/lifetime analysis, public managed module contracts and

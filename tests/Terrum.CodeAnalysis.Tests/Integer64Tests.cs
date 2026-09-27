@@ -33,11 +33,25 @@ public sealed class Integer64Tests
     [InlineData("return uint32(uint64(4294967295)) == uint32.MaxValue;", true)]
     [InlineData("return char16(uint64(65535)) == char16.MaxValue;", true)]
     [InlineData("return uint64(0xFFFFFFFFFFFFFFFF) == uint64.MaxValue && 0X2A == uint64(42);", true)]
-    [InlineData("return int64(-0x8000000000000000) == int64.MinValue && int32(-0x80000000) == int32.MinValue;", true)]
+    [InlineData("return int64(0x8000000000000000) == int64.MinValue && int32(0x80000000) == int32.MinValue;", true)]
     [InlineData("return uint64(0XFFFFFFFFFFFFFFFF) / uint64(0xF) == uint64.MaxValue / 15;", true)]
     [InlineData("return int32(0x1f32) == 7986 && char16(0xFFFF) == char16.MaxValue;", true)]
     [InlineData("int64 value = (0X7FFFFFFF + 0x1); return value == 2147483648;", true)]
     [InlineData("return int64(0x80000000) == 2147483648 && uint32(0XFFFFFFFF) == uint32.MaxValue;", true)]
+    [InlineData("return int32(0xFFFFFFFF) == -1 && int32(0x80000000) == int32.MinValue;", true)]
+    [InlineData("return int32(0B11111111111111111111111111111111) == -1 && uint32(0b101010) == 42;", true)]
+    [InlineData("return int64(0xFFFFFFFF) == 4294967295 && int64(int32(0xFFFFFFFF)) == -1;", true)]
+    [InlineData("return int64(0xFFFFFFFFFFFFFFFF) == -1 && uint64(0xFFFFFFFFFFFFFFFF) == uint64.MaxValue;", true)]
+    [InlineData("return int32(0x000000000000000000FFFFFFFF) == -1 && int32(0b000000000000000000000000000000001) == 1;", true)]
+    [InlineData("return int32(-0xFFFFFFFF) == 1 && ~int32(0b0) == -1;", true)]
+    [InlineData("return ~int32(0x80000000) == int32.MaxValue && -int32(0b1) == -1;", true)]
+    [InlineData("return int32(0x_8000_0000) == int32.MinValue && int32(0b_11111111_11111111_11111111_11111111) == -1;", true)]
+    [InlineData("return int64(9_223_372_036_854_775_807) == int64.MaxValue && uint32(1__0_00) == 1000;", true)]
+    [InlineData("return int32(-2_147_483_648) == int32.MinValue && int64(-9_223_372_036_854_775_808) == int64.MinValue;", true)]
+    [InlineData("return int32(0x_0000_0000_FFFF_FFFF) == -1 && char16(0x_F_F_F_F) == char16.MaxValue;", true)]
+    [InlineData("return char16(0b1111111111111111) == char16.MaxValue && uint64(0B1) == 1;", true)]
+    [InlineData("return uint32(0B11111111111111111111111111111111) == uint32.MaxValue && int32(0b0) == 0;", true)]
+    [InlineData("int32 bits = (0b100000 | 0b001010); return bits == 42;", true)]
     [InlineData("int64 value = 50000 * 50000; return value == 2500000000;", true)]
     [InlineData("int64 value = (50000 + 1) * (50000 - 1); return value == 2499999999;", true)]
     [InlineData("uint64 value = 65536 * 65536; return value == 4294967296;", true)]
@@ -46,6 +60,26 @@ public sealed class Integer64Tests
     {
         var source = "int32 Main() { if (Check()) { return 42; } return 1; } bool Check() { " + body + " }";
         await ExecuteBothAsync(Compile(source), expected ? 42 : 1).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public async Task FullWidthBinaryBitsAndArbitraryLeadingZeroesAgreeAcrossAotAndCliJitAsync()
+    {
+        var signedMinimum = "0b_1" + new string('0', 63);
+        var unsignedMaximum = "0B___" + new string('1', 64);
+        var leadingZeroes = "0b___" + new string('0', 80) + "__1";
+        var source = $$"""
+            int32 Main() {
+                int64 signed = {{signedMinimum}};
+                uint64 unsigned = {{unsignedMaximum}};
+                int32 small = {{leadingZeroes}};
+                if (signed == int64.MinValue && unsigned == uint64.MaxValue && small == 1) {
+                    return 42;
+                }
+                return 0;
+            }
+            """;
+        await ExecuteBothAsync(Compile(source), 42).ConfigureAwait(true);
     }
 
     [Theory]
@@ -64,6 +98,9 @@ public sealed class Integer64Tests
     [InlineData("int32 Main() { uint32 x = uint32(uint64(4294967296)); return 0; }", unchecked((int)0xE0540001))]
     [InlineData("int32 Main() { char16 x = char16(uint64(65536)); return 0; }", unchecked((int)0xE0540001))]
     [InlineData("int32 Main() { int32 x = int32(uint32(0xFFFFFFFF)); return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { int32 x = -0x80000000; return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { int32 x = -0b10000000000000000000000000000000; return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { int64 x = -0x8000000000000000; return 0; }", unchecked((int)0xE0540001))]
     public async Task WideFailuresUseCheckedRuntimePolicyAsync(string source, int expected)
     {
         await ExecuteBothAsync(Compile(source), expected).ConfigureAwait(true);
@@ -187,12 +224,19 @@ public sealed class Integer64Tests
     [InlineData("int32 Main() { int32 value = 50000; int64 product = value * value; return 0; }")]
     [InlineData("int32 Main() { int64 value = int32(20) * 20; return 0; }")]
     [InlineData("int32 Main() { var value = 0x2A; return 0; }")]
-    [InlineData("int32 Main() { int32 value = 0xFFFFFFFF; return 0; }")]
-    [InlineData("int32 Main() { int32 value = 0x80000000; return 0; }")]
-    [InlineData("int32 Main() { int64 value = 0x8000000000000000; return 0; }")]
+    [InlineData("int32 Main() { int32 value = 0x100000000; return 0; }")]
+    [InlineData("int32 Main() { int32 value = 0x_1_0000_0000; return 0; }")]
+    [InlineData("int32 Main() { int32 value = 0b100000000000000000000000000000000; return 0; }")]
+    [InlineData("int32 Main() { int32 value = 4294967295; return 0; }")]
+    [InlineData("int32 Main() { var value = 0b101010; return 0; }")]
     [InlineData("int32 Main() { uint32 value = 0x100000000; return 0; }")]
-    [InlineData("int32 Main() { int64 value = -0x8000000000000001; return 0; }")]
+    [InlineData("int32 Main() { char16 value = 0x10000; return 0; }")]
+    [InlineData("int32 Main() { int64 value = -0x10000000000000000; return 0; }")]
     [InlineData("int32 Main() { uint64 value = 0x10000000000000000; return 0; }")]
+    [InlineData("int32 Main() { uint64 value = 0x_1_0000_0000_0000_0000; return 0; }")]
+    [InlineData("int32 Main() { int32 value = 2_147_483_648; return 0; }")]
+    [InlineData("int32 Main() { uint64 value = 18_446_744_073_709_551_616; return 0; }")]
+    [InlineData("int32 Main() { uint64 value = 0b10000000000000000000000000000000000000000000000000000000000000000; return 0; }")]
     public void WideInvalidSourcesAreDiagnosed(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));

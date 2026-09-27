@@ -31,21 +31,26 @@ special discard handling. General discard, wildcard-pattern and generic-hole
 forms are unsupported. Expression statements or unused-local cleanup do not
 implement the distinct discard semantics.
 
-Target numeric literals are unsuffixed source tokens. Target grammar preserves
-radix, exponent and signed-minimum behavior; a type is selected later by context
-or an explicit type-call target. Digit separators are not supported by the
-current lexer/scanner and their grammar is separate scheduled literal-frontend
-work. Width tags are not part of the target grammar, so spellings such as
-`10i32` are not typed numeric literals.
+Numeric tokens begin with a decimal digit and are unsuffixed. The syntax-16
+lexer recognizes decimal, hexadecimal and binary integer forms plus `_`
+separators in their digit runs; a type is selected later by context or an
+explicit type-call target. Decimal fractional/exponent forms retain their
+lexical separator grammar but are not executable numeric values. An
+underscore-starting spelling such as `_123` is an identifier, not a number.
+Width tags are not part of the target grammar, so spellings such as `10i32`
+are not typed numeric literals.
 
 ```text
-number          := decimalNumber | hexInteger
-decimalNumber   := digits ('.' digits)? (('e' | 'E') ('+' | '-')? digits)?
-hexInteger      := ('0x' | '0X') hexDigits
-digits          := digit+
-hexDigits       := hexDigit+
+number          := decimalNumber | hexInteger | binaryInteger
+decimalNumber   := decimalDigits ('.' decimalDigits)? (('e' | 'E') ('+' | '-')? decimalDigits)?
+hexInteger      := ('0x' | '0X') basedHexDigits
+binaryInteger   := ('0b' | '0B') basedBinaryDigits
+decimalDigits   := digit ('_'* digit)*
+basedHexDigits  := '_'* hexDigit ('_'* hexDigit)*
+basedBinaryDigits := '_'* binaryDigit ('_'* binaryDigit)*
 digit           := '0'..'9'
 hexDigit        := digit | 'a'..'f' | 'A'..'F'
+binaryDigit     := '0' | '1'
 ```
 
 A period starts a fraction only when followed by a digit. A sign is its own
@@ -57,18 +62,33 @@ never encoded in a suffix. The lexer preserves the complete raw spelling;
 target selection, constant parsing and numeric range/target-format validation
 happen later.
 
-The syntax-15 parser rejects a recognized attached width suffix with `TRM0006`
-and diagnoses a `0x`/`0X` prefix lacking an ASCII hex digit with `TRM0007`.
+The syntax-16 parser rejects a recognized attached width suffix with `TRM0006`,
+diagnoses a `0x`/`0X` prefix lacking an ASCII hex digit with `TRM0007`, and
+diagnoses a `0b`/`0B` prefix lacking an ASCII binary digit with `TRM0008`.
+Malformed digit separators in a numeric digit run diagnose as `TRM0009`. Runs
+of underscores are allowed between digits and immediately after a based
+prefix, but not at the end of a digit run or adjacent to its decimal point,
+exponent marker or sign. If an exponent sign has no following digit, the
+existing incomplete-exponent diagnostic `TRM0004` applies.
+An underscore-starting name such as `_123` remains an identifier, not a number.
 Hex digits include `a` through `f`, so `0x1f32` is one integer token whose full
 value is hexadecimal; its `f32` tail is not a width suffix. A non-hex suffix
 such as `0x1u32` remains rejected as an attached width suffix. The unchanged
-scanner-4 five-word integer record uses tag 0 for valid decimal and
-hexadecimal literals; recognized suffix tags remain only as metadata on
-rejected suffix tokens. The executable binder constructs context-typed decimal
-and hexadecimal integer literals without a fallback numeric type. Fractional
-and exponent forms remain outside the executable numeric binder. Digit
-separators, custom literal parsers, registered string-target execution and
-`[ConstEval]` also remain unsupported.
+scanner-4 five-word integer record uses tag 0 for valid decimal, hexadecimal
+and binary literals; recognized suffix tags remain only as metadata on
+rejected suffix tokens. The executable binder constructs context-typed
+decimal, hexadecimal and binary integer literals without a fallback numeric
+type. Decimal fractional and exponent forms accept digit separators
+lexically but remain outside the executable numeric binder. Custom literal
+parsers, registered string-target execution and `[ConstEval]` also remain
+unsupported.
+
+Decimal integer literals retain numeric range semantics, including the
+existing direct negative signed-minimum case. Hexadecimal and binary literals
+are target-width bit patterns: a signed target interprets the selected bits
+using its signed representation, while an unsigned target retains the
+unsigned value. Nonzero bits beyond the target width are rejected; leading
+zeroes and separators do not count as significant bits.
 
 Strings are delimited by ASCII double quotes. Escapes supported are `\n`,
 `\r`, `\t`, `\\`, `\"`, `\0`, `\u` plus exactly four hexadecimal digits, and
@@ -99,8 +119,9 @@ diagnosed without changing the trivia text. Lexical diagnostic codes are
 `TRM0001` for bad characters or malformed surrogates, `TRM0002` for an
 unterminated string, `TRM0003` for an unterminated block comment, `TRM0004`
 for an incomplete exponent, `TRM0005` for an invalid escape, `TRM0006`
-for an attached numeric width suffix, and `TRM0007` for a hexadecimal prefix
-without a digit. Every UTF-16 unit belongs exactly once
+for an attached numeric width suffix, `TRM0007` for a hexadecimal prefix
+without a digit, `TRM0008` for a binary prefix without a digit, and `TRM0009`
+for malformed digit separators. Every UTF-16 unit belongs exactly once
 to either token text or its leading trivia, including invalid input.
 Diagnostics for malformed text do not replace or normalize source characters.
 

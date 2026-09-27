@@ -4,12 +4,13 @@ The target language has one explicit conversion spelling: `T(expression)`.
 Syntax-14 implemented checked numeric type-call conversions for `int32`,
 `uint32`, `int64`, `uint64` and `char16`; prefix casts are no longer parsed,
 and attached width suffixes diagnose as `TRM0006`. Syntax-15 adds contextual
-hexadecimal integer literals; a `0x`/`0X` prefix without an ASCII hex digit
-diagnoses as `TRM0007`. Bare integer literals remain contextual and have no
-fallback type. The bounded executable profile constructs decimal and
-hexadecimal integer literals; floating literals, custom literal parsers and
-`[ConstEval]` remain unsupported. Numeric operators are checked by default in
-every build.
+hexadecimal integer literals; syntax-16 adds binary literals and digit
+separators. Missing hexadecimal and binary digits diagnose as `TRM0007` and
+`TRM0008`; malformed separators diagnose as `TRM0009`. Bare integer literals
+remain contextual and have no fallback type. The bounded executable profile
+constructs decimal, hexadecimal and binary integer literals; floating
+literals, custom literal parsers and `[ConstEval]` remain unsupported. Numeric
+operators are checked by default in every build.
 
 Representation and access are separate from numeric conversion. The canonical
 forms are `ref<T>`, `ptr<T>`, `box<T>`, `val<T>` and `own<T>`; `init ref<T>`
@@ -43,15 +44,27 @@ uint32 unsignedCount = uint32(count);     // Checked typed-value conversion.
 int64 wide = int64(count);
 uint64 wideUnsigned = uint64(unsignedCount);
 char16 codeUnit = char16(count);          // Range checked; not scalar validation.
-uint64 mask = uint64(0xFFFFFFFF);         // Hexadecimal integer parses directly as uint64.
+uint64 mask = uint64(0xFFFF_FFFF);        // Hexadecimal integer parses directly as uint64.
 int32 hexValue = int32(0x1f32);           // The f32-looking tail is part of the hex value.
+int32 signBit = int32(0x8000_0000);       // Based literals construct target-width bits.
+int32 allBits = int32(0x__FFFF_FFFF);     // Signed interpretation: -1.
+int64 unsigned32 = int64(0xFFFF_FFFF);    // 64-bit interpretation: +4294967295.
+int32 binaryBits = int32(0b_11111111_11111111_11111111_11111111); // -1.
+int32 groupedDecimal = 1__000;            // Repeated separators between digits are valid.
+int32 decimalMin = -2147483648;           // Decimal signed-minimum exception is unchanged.
+int32 negatedPattern = -0xFFFF_FFFF;      // Unary minus is checked arithmetic: +1.
 float32 fraction = float32(0.1);          // Target example: floating literals are unsupported.
 float64 converted = float64(fraction);    // Target example: floating conversions are unsupported.
 var unknown = 1;                          // Error: no type context.
 ```
 
-The decimal and hexadecimal integer and checked type-call examples above are
-executable; the floating-point examples are target-only.
+The decimal, hexadecimal, binary, and checked type-call examples above are
+executable; the floating-point examples are target-only. A value-based
+conversion still range-checks its source: `int32(uint32(0xFFFF_FFFF))` fails,
+while `int64(int32(0xFFFF_FFFF))` sign-extends the typed value to `-1`.
+Leading zeroes and separators do not increase a based literal's significant
+width; a nonzero bit beyond the destination width is rejected. For example,
+`int32(0x1_0000_0000)` is out of range.
 
 In the target literal design, `T(untypedLiteral)` parses the original token
 directly as `T`; it does not construct an implicit `int32`/`float64` first.
@@ -69,7 +82,7 @@ that yields a unique answer. For `F<T>(T left, T right)`, `F(knownInt32, 1)` can
 infer `T = int32`; unconstrained `F(1, 2)` cannot guess it. Competing viable
 numeric overloads without a unique contextual solution diagnose, rather than
 using a default width or an arbitrary ranking based on representable values.
-Negative integer literal construction must accommodate the signed minimum;
+Negative decimal integer literal construction must accommodate the signed minimum;
 it must not first overflow by constructing its positive magnitude in that type.
 
 The accepted generic inference order is: explicit type arguments pin their

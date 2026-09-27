@@ -4,7 +4,6 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -1729,7 +1728,7 @@ internal sealed partial class Binder
                 var operandType = op.Kind == TokenKind.Bang ? PrimitiveType.Bool
                     : KnownType(operandNode) ?? expected ?? PrimitiveType.Int32;
 
-                // The negative minimum cannot be represented as a positive operand of its signed type.
+                // A decimal negative minimum cannot be represented as a positive operand of its signed type.
                 if (op.Kind == TokenKind.Minus && operandNode.Kind == SyntaxKind.LiteralExpression &&
                     operandType is PrimitiveType.Int32 or PrimitiveType.Int64 &&
                     TryMinimumLiteral(((SyntaxTokenElement)operandNode.Children[0]).Token, operandType))
@@ -2309,8 +2308,12 @@ internal sealed partial class Binder
             Report("TRM3014", "An unsuffixed integer literal requires a numeric context.", token.Span);
         }
 
+        var based = ScannerHost.IntegerRadix(digits) != 10;
+        // Based literals construct the destination's bits; only nonzero bits beyond its width are out of range.
         ulong max = type switch {
             PrimitiveType.UInt32 => uint.MaxValue,
+            PrimitiveType.Int32 when based => uint.MaxValue,
+            PrimitiveType.Int64 when based => ulong.MaxValue,
             PrimitiveType.Int64 => long.MaxValue,
             PrimitiveType.UInt64 => ulong.MaxValue,
             PrimitiveType.Char16 => ushort.MaxValue,
@@ -2329,7 +2332,7 @@ internal sealed partial class Binder
 
         var value = type switch {
             PrimitiveType.UInt64 => unchecked((long)parsed),
-            PrimitiveType.Int64 => (long)parsed,
+            PrimitiveType.Int64 => unchecked((long)parsed),
             _ => unchecked((int)parsed),
         };
         return new BoundConstant(value, type ?? PrimitiveType.Int32, token.Span);
@@ -2343,7 +2346,8 @@ internal sealed partial class Binder
         }
 
         var digits = _tree.Source.GetSubText(token.Span).AsSpan();
-        if (digits.IsEmpty || ScannerHost.IntegerDigitCount(digits) != digits.Length)
+        if (digits.IsEmpty || ScannerHost.IntegerRadix(digits) != 10
+            || ScannerHost.IntegerDigitCount(digits) != digits.Length)
         {
             return false;
         }
@@ -2366,9 +2370,7 @@ internal sealed partial class Binder
         }
 
         var digits = _tree.Source.GetSubText(token.Span).AsSpan();
-        var hex = digits.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
-        return ulong.TryParse(hex ? digits[2..] : digits,
-            hex ? NumberStyles.AllowHexSpecifier : NumberStyles.None, CultureInfo.InvariantCulture, out magnitude);
+        return ScannerHost.TryParseIntegerMagnitude(digits, out magnitude);
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Only expressions supported by this profile contribute a known type.")]

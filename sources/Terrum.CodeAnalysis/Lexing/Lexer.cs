@@ -63,6 +63,12 @@ public sealed class Lexer
     private char Peek(int offset) => offset < _source.Length - _position ? _source[_position + offset] : '\0';
     private static bool IsDigit(char value) => value is >= '0' and <= '9';
     private static bool IsHex(char value) => IsDigit(value) || value is (>= 'a' and <= 'f') or (>= 'A' and <= 'F');
+    private static bool IsBinary(char value) => value is '0' or '1';
+    private static bool IsRadixDigit(char value, int radix) => radix switch {
+        16 => IsHex(value),
+        2 => IsBinary(value),
+        _ => IsDigit(value),
+    };
     private static bool IsNewline(char value) => value is '\r' or '\n' or '\u0085' or '\u2028' or '\u2029';
     private static bool IsSpace(char value) =>
         value is '\t' or '\v' or '\f' or ' ' or '\u00A0' or '\u1680'
@@ -253,36 +259,26 @@ public sealed class Lexer
     private TokenKind ReadNumber()
     {
         var start = _position;
-        if (Current == '0' && Peek(1) is 'x' or 'X')
+        if (Current == '0' && Peek(1) is 'x' or 'X' or 'b' or 'B')
         {
+            var hex = Peek(1) is 'x' or 'X';
             _position += 2;
-            if (!IsHex(Current))
+            if (!ReadDigitRun(hex ? 16 : 2, allowInitialSeparators: true))
             {
-                Report("TRM0007", "Hexadecimal prefix requires an ASCII hex digit.", start, 2);
+                Report(hex ? "TRM0007" : "TRM0008",
+                    hex ? "Hexadecimal prefix requires an ASCII hex digit."
+                        : "Binary prefix requires an ASCII binary digit.", start, 2);
                 return TokenKind.NumericLiteral;
-            }
-            while (!AtEnd && IsHex(Current))
-            {
-                _cancellationToken.ThrowIfCancellationRequested();
-                _position++;
             }
         }
         else
         {
-            while (!AtEnd && IsDigit(Current))
-            {
-                _cancellationToken.ThrowIfCancellationRequested();
-                _position++;
-            }
+            _ = ReadDigitRun(10);
 
             if (Current == '.' && IsDigit(Peek(1)))
             {
                 _position++;
-                while (!AtEnd && IsDigit(Current))
-                {
-                    _cancellationToken.ThrowIfCancellationRequested();
-                    _position++;
-                }
+                _ = ReadDigitRun(10);
             }
 
             if (Current is 'e' or 'E')
@@ -306,11 +302,7 @@ public sealed class Lexer
                     }
                     else
                     {
-                        while (!AtEnd && IsDigit(Current))
-                        {
-                            _cancellationToken.ThrowIfCancellationRequested();
-                            _position++;
-                        }
+                        _ = ReadDigitRun(10);
                     }
                 }
             }
@@ -324,6 +316,42 @@ public sealed class Lexer
         }
 
         return TokenKind.NumericLiteral;
+    }
+
+    private bool ReadDigitRun(int radix, bool allowInitialSeparators = false)
+    {
+        var hasDigit = false;
+        while (!AtEnd)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (IsRadixDigit(Current, radix))
+            {
+                hasDigit = true;
+                _position++;
+                continue;
+            }
+            if (Current != '_')
+            {
+                break;
+            }
+
+            var length = 1;
+            while (Peek(length) == '_')
+            {
+                length++;
+            }
+            if ((hasDigit || allowInitialSeparators) && IsRadixDigit(Peek(length), radix))
+            {
+                _position += length;
+                continue;
+            }
+            if (hasDigit)
+            {
+                Report("TRM0009", "Digit separators must appear between digits.", _position, length);
+            }
+            break;
+        }
+        return hasDigit;
     }
 
     private int ReadNumericTag()

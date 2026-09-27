@@ -26,13 +26,16 @@ are migrated together. Design sketches are not claims that these semantics or
 their broader syntax and library surface are implemented; the bounded
 class/`ManagedNode` exception is described next.
 
-The syntax-15 numeric subset constructs context-typed decimal and hexadecimal
-integers without a fallback type and supports checked `T(expression)`
-conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`. Attached
-width suffixes diagnose as `TRM0006`; a `0x`/`0X` prefix without an ASCII hex
-digit diagnoses as `TRM0007`; prefix casts are no longer parsed. Floating
-literal binding, digit separators, custom literal targets and `[ConstEval]`
-are not implemented yet; see the [implementation matrix](docs/implementation.md).
+The syntax-16 numeric subset constructs context-typed decimal, hexadecimal and
+binary integers without a fallback type and supports checked `T(expression)`
+conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`. Based
+integers construct target-width bit patterns; decimal literals retain numeric
+range semantics. `_` digit separators are supported in numeric digit runs.
+Attached width suffixes diagnose as `TRM0006`; missing hexadecimal and binary
+digits diagnose as `TRM0007` and `TRM0008`, and malformed separators diagnose
+as `TRM0009`. Prefix casts are no longer parsed. Floating literal binding,
+custom literal targets and `[ConstEval]` are not implemented yet; see the
+[implementation matrix](docs/implementation.md).
 
 Semantic v24 validates managed-class/`ManagedNode` access: `mut class`,
 writable `mut` class methods, readonly bare handles and explicit `write`

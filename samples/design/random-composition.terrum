@@ -1,8 +1,9 @@
 // DESIGN ONLY: a deterministic fixture, not a statistical RNG. `write ref<T>`
 // is the writable parameter form; call-site loan syntax retains legacy
-// spelling below and remains unresolved. Contextual hexadecimal integer
-// literals are supported; generic constructor inference and this broader
-// interface/library design are not executable features.
+// spelling below and remains unresolved. Contextual hexadecimal/binary
+// literals use target-width bit patterns and numeric separators are supported;
+// generic constructor inference and this broader interface/library design are
+// not executable features.
 using Terrum;
 
 public interface IRandom

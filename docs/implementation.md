@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-15, native-10 through native-20, semantic v25 receiver contract
+## Current boundary: syntax-16, native-10 through native-20, semantic v25 receiver contract
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -11,13 +11,16 @@ valid-program claim: `var x = 1;` parses but semantic analysis rejects its missi
 numeric context. General ownership/lifetime checking, general semantic IL/LMOD,
 general managed graphs and standard-library execution are not implemented.
 The current parser rejects attached numeric width suffixes with `TRM0006` and
-has no prefix-cast production. It supports context-typed decimal and
-hexadecimal integer literals without a fallback type and checked numeric
-type-call conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`.
-An empty `0x`/`0X` prefix without an ASCII hex digit diagnoses as `TRM0007`.
+has no prefix-cast production. It supports context-typed decimal, hexadecimal
+and binary integer literals without a fallback type, numeric digit separators,
+and checked numeric type-call conversions for `int32`, `uint32`, `int64`,
+`uint64` and `char16`. Empty `0x`/`0X` and `0b`/`0B` prefixes diagnose as
+`TRM0007` and `TRM0008`; malformed digit separators diagnose as `TRM0009`.
+Hexadecimal and binary literals construct target-width bit patterns, while
+decimal literals retain numeric range semantics.
 Existing source function and local shadowing keeps its ordinary call-binding
-precedence. Digit separators, floating literal binding, custom
-literal/string-target execution and `[ConstEval]` remain unsupported.
+precedence. Floating literal binding, custom literal/string-target execution
+and `[ConstEval]` remain unsupported.
 Semantic v24 validates source-class/`ManagedNode` readonly-versus-writable
 access and mutable-class receivers. Semantic v25 adds a distinct persisted,
 non-exported `MutReceiver` contract for methods on non-owning compact structs;
@@ -45,11 +48,11 @@ requiring v25 retain their prior versions and bytes.
 | Surface | Implemented | Not yet implemented |
 |---|---|---|
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
-| Lexing | Pinned Unicode identifiers, ASCII decimal and `0x`/`0X` hexadecimal integer tokens, decimal fractional/exponent token boundaries, comments, leading trivia, strings, diagnostics including `TRM0006` for attached numeric width suffixes and `TRM0007` for a missing hexadecimal digit, EOF; the scanner-4 integer record retains suffix metadata only for diagnostic-bearing tokens | Digit separators, interpolation, raw/character/native literals, directives |
+| Lexing | Pinned Unicode identifiers, ASCII decimal, `0x`/`0X` hexadecimal and `0b`/`0B` binary numeric tokens, digit separators, decimal fractional/exponent token boundaries, comments, leading trivia, strings, diagnostics including `TRM0006`–`TRM0009` for numeric suffixes, missing based digits and malformed separators, EOF; the scanner-4 integer record retains suffix metadata only for diagnostic-bearing tokens | Interpolation, raw/character/native literals, directives |
 | Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, bounded source classes including `mut class`, readonly default and writable `mut` class receivers, non-owning compact-struct `mut` methods with named mutable-local receiver writeback, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Inheritance, unique/inline classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes/generics (struct and field attributes diagnose `TRM3001`), parameter-only `implicit ref<T>` loan/noescape contracts, public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; source-class and `ManagedNode` optional handles with `write` capability preserved through fields, parameters, results and inference; repeated `?` diagnoses | Scalar options, generic optional normalization after substitution, family defaults/conditional conformance, general ownership/form qualifiers and general borrowed references, transparent-wrapper ABI contracts |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, nearest-loop `break`/`continue`, return, statement-form `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, labeled transfers, general switch/patterns and wildcard patterns, context-specific discard destinations, declaration pre/postconditions, `static require`/`static ensure` proofs, typed requirement-failure selection, general exception objects/throw, async, compound assignment |
-| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, context-typed decimal and hexadecimal integer literals without fallback, checked numeric type-call conversions for `int32`/`uint32`/`int64`/`uint64`/`char16`, member/index access, calls, explicit closed static-protocol calls (generic source calls require explicit type arguments), generic signature-based result-type lookup, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, qualified source-class/`ManagedNode` writes and mutable-class receivers, named-place writeback for non-owning compact-struct `mut` receivers, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations and lexical readonly/exclusive writable buffer slices | Floating/custom literal binding, digit separators, registered literal/`[ConstEval]` execution, `require` output-expression form and exception-type selection, implicit `ref<T>` call-site loan introduction and temporary materialization, character literals, partial owning-field moves, owning field replacement, general expression temporaries, temporary/nested/owning mutating-struct receivers, rebinding `this`, public mutating-receiver ABI, general stored loans/references, evaluation outside the native profile, user-defined conversions, ordinary overload declarations (rejected with `TRM3003`), generic argument/result/partial-hole inference, generic calls without explicit arguments, contextual discard/lambda `_` forms, conditional expressions, constructor generic inference |
+| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, context-typed decimal/hexadecimal/binary integer literals without fallback (based values construct target-width bit patterns), numeric digit separators, checked numeric type-call conversions for `int32`/`uint32`/`int64`/`uint64`/`char16`, member/index access, calls, explicit closed static-protocol calls (generic source calls require explicit type arguments), generic signature-based result-type lookup, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, qualified source-class/`ManagedNode` writes and mutable-class receivers, named-place writeback for non-owning compact-struct `mut` receivers, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations and lexical readonly/exclusive writable buffer slices | Floating/custom literal binding, registered literal/`[ConstEval]` execution, `require` output-expression form and exception-type selection, implicit `ref<T>` call-site loan introduction and temporary materialization, character literals, partial owning-field moves, owning field replacement, general expression temporaries, temporary/nested/owning mutating-struct receivers, rebinding `this`, public mutating-receiver ABI, general stored loans/references, evaluation outside the native profile, user-defined conversions, ordinary overload declarations (rejected with `TRM3003`), generic argument/result/partial-hole inference, generic calls without explicit arguments, contextual discard/lambda `_` forms, conditional expressions, constructor generic inference |
 | Managed storage | Aliasable `ManagedNode` and source-class handles, optional edges and non-null pattern snapshots, readonly bare handles and explicit `write` capability, mutable-class receiver checks, qualified field/parameter/result/inference paths, handle-free compact Copy fields in classes, descriptor-based cycle tracing, complete-publication class factories, exact frame/temporary roots and explicit nonmoving collection under both policies, including exceptional root retirement and escaping-frame unlink | Managed handles inside user structs, stored interior pointers, implicit GC, native DLL/module graph managed ABI |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
@@ -325,8 +328,14 @@ conversions, and gives decimal integer literals contextual typing. Attached
 numeric width suffixes diagnose as `TRM0006`.
 `syntax-15` adds contextual hexadecimal integer literals with `0x`/`0X`;
 `0x1f32` is one hexadecimal value, and a prefix with no following ASCII hex
-digit diagnoses as `TRM0007`. The scanner-4 record layout and semantic/native
+digit diagnoses as `TRM0007`. At syntax-15, based literals used nonnegative
+magnitude/range interpretation; syntax-16 supersedes that with target-width
+bit-pattern construction. The scanner-4 record layout and semantic/native
 artifact versions do not change.
+`syntax-16` adds `0b`/`0B` binary literals, digit separators, and target-width
+bit-pattern construction for based literals. A missing binary digit diagnoses
+as `TRM0008`, and malformed separators as `TRM0009`. The scanner-4 record
+layout and semantic/native artifact versions do not change.
 `[NoThrow]` on functions/constructors, `[DoesNotReturn]` on void functions and
 `[Cleanup]` on eligible unique instance methods are currently bound;
 unknown, duplicate and misplaced attributes diagnose rather

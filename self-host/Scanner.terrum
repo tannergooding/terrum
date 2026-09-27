@@ -384,29 +384,90 @@ void PublishInteger(int32 tokenIndex, bool overflow, uint64 magnitude, int32 tag
     Host.IntegerValues[0] = count + 1;
 }
 
-int32 ScanHexNumber(int32 initial, int32 tokenIndex)
+bool IsBasedDigit(int32 value, int32 radix)
+{
+    if (radix == 16)
+    {
+        return IsHex(value);
+    }
+    if (radix == 10)
+    {
+        return IsDigit(value);
+    }
+    return value == 48 || value == 49;
+}
+
+int32 SkipDigitSeparators(int32 at, int32 radix)
+{
+    mut int32 next = at;
+    while (PeekUnit(next) == 95)
+    {
+        next = next + 1;
+    }
+    if (IsBasedDigit(PeekUnit(next), radix))
+    {
+        return next;
+    }
+    Report(9, at, next - at);
+    return at;
+}
+
+int32 ScanBasedNumber(int32 initial, int32 tokenIndex, int32 radix)
 {
     mut int32 at = initial + 2;
-    if (!IsHex(PeekUnit(at)))
+    if (PeekUnit(at) == 95)
     {
-        Report(7, initial, 2);
+        mut int32 next = at;
+        while (PeekUnit(next) == 95)
+        {
+            next = next + 1;
+        }
+        if (IsBasedDigit(PeekUnit(next), radix))
+        {
+            at = next;
+        }
+    }
+    if (!IsBasedDigit(PeekUnit(at), radix))
+    {
+        if (radix == 16)
+        {
+            Report(7, initial, 2);
+        }
+        else
+        {
+            Report(8, initial, 2);
+        }
         return at;
     }
 
     mut uint64 magnitude = 0;
     mut bool overflow = false;
-    while (IsHex(PeekUnit(at)))
+    while (IsBasedDigit(PeekUnit(at), radix) || PeekUnit(at) == 95)
     {
+        if (PeekUnit(at) == 95)
+        {
+            int32 next = SkipDigitSeparators(at, radix);
+            if (next == at)
+            {
+                break;
+            }
+            at = next;
+            continue;
+        }
         if (!overflow)
         {
-            uint64 digit = uint64(HexValue(PeekUnit(at)));
-            if (magnitude > (uint64.MaxValue - digit) / 16)
+            mut uint64 digit = uint64(PeekUnit(at) - 48);
+            if (radix == 16)
+            {
+                digit = uint64(HexValue(PeekUnit(at)));
+            }
+            if (magnitude > (uint64.MaxValue - digit) / uint64(radix))
             {
                 overflow = true;
             }
             else
             {
-                magnitude = magnitude * 16 + digit;
+                magnitude = magnitude * uint64(radix) + digit;
             }
         }
         at = at + 1;
@@ -420,23 +481,44 @@ int32 ScanHexNumber(int32 initial, int32 tokenIndex)
         tag = IntegerTag(at, tagLength);
         at = at + tagLength;
     }
-    PublishInteger(tokenIndex, overflow, magnitude, tag);
+    if (tagLength == 0 || tag != 0)
+    {
+        PublishInteger(tokenIndex, overflow, magnitude, tag);
+    }
     return at;
 }
 
 int32 ScanNumber(int32 initial, int32 tokenIndex)
 {
-    if (PeekUnit(initial) == 48 && (PeekUnit(initial + 1) == 120 || PeekUnit(initial + 1) == 88))
+    if (PeekUnit(initial) == 48)
     {
-        return ScanHexNumber(initial, tokenIndex);
+        int32 prefix = PeekUnit(initial + 1);
+        if (prefix == 120 || prefix == 88)
+        {
+            return ScanBasedNumber(initial, tokenIndex, 16);
+        }
+        if (prefix == 98 || prefix == 66)
+        {
+            return ScanBasedNumber(initial, tokenIndex, 2);
+        }
     }
 
     mut int32 at = initial;
     int32 start = at;
     mut uint64 magnitude = 0;
     mut bool overflow = false;
-    while (IsDigit(PeekUnit(at)))
+    while (IsDigit(PeekUnit(at)) || PeekUnit(at) == 95)
     {
+        if (PeekUnit(at) == 95)
+        {
+            int32 next = SkipDigitSeparators(at, 10);
+            if (next == at)
+            {
+                break;
+            }
+            at = next;
+            continue;
+        }
         if (!overflow)
         {
             uint64 digit = uint64(PeekUnit(at) - 48);
@@ -458,8 +540,18 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
     {
         integerForm = false;
         at = at + 1;
-        while (IsDigit(PeekUnit(at)))
+        while (IsDigit(PeekUnit(at)) || PeekUnit(at) == 95)
         {
+            if (PeekUnit(at) == 95)
+            {
+                int32 next = SkipDigitSeparators(at, 10);
+                if (next == at)
+                {
+                    break;
+                }
+                at = next;
+                continue;
+            }
             at = at + 1;
         }
     }
@@ -500,8 +592,18 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
             }
             else
             {
-                while (IsDigit(PeekUnit(at)))
+                while (IsDigit(PeekUnit(at)) || PeekUnit(at) == 95)
                 {
+                    if (PeekUnit(at) == 95)
+                    {
+                        int32 next = SkipDigitSeparators(at, 10);
+                        if (next == at)
+                        {
+                            break;
+                        }
+                        at = next;
+                        continue;
+                    }
                     at = at + 1;
                 }
             }

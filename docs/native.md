@@ -28,13 +28,15 @@ granted. A legacy header cannot contain v24 write identifiers.
 The `native-18` through `native-20` labels below identify bounded runtime
 features; they do not imply that general references/views, ownership forms, or
 managed public ABI are implemented.
-The syntax-15 numeric surface uses unsuffixed contextual decimal and
-hexadecimal integers and checked `T(expression)` conversions for `int32`,
-`uint32`, `int64`, `uint64` and `char16`. Attached width suffixes diagnose as
-`TRM0006`; a `0x`/`0X` prefix without an ASCII hex digit diagnoses as
-`TRM0007`; prefix casts are no longer parsed. Floating/custom literal
-parsing, digit separators, registered literal targets and `[ConstEval]` remain
-outside this executable profile.
+The syntax-16 numeric surface uses unsuffixed contextual decimal, hexadecimal
+and binary integers, `_` digit separators, and checked `T(expression)`
+conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`. Attached
+width suffixes diagnose as `TRM0006`; missing hexadecimal/binary digits and
+malformed separators diagnose as `TRM0007`–`TRM0009`; prefix casts are no
+longer parsed. Based literals construct target-width bit patterns, while
+decimal literals retain numeric range semantics. Floating/custom literal
+parsing, registered literal targets and `[ConstEval]` remain outside this
+executable profile.
 
 Terrum has no built-in marshalling. Source or generated tooling defines and
 performs conversions and wrappers for imported C APIs; the compiler/runtime
@@ -547,7 +549,7 @@ only with another fail-fast package.
 |---|---|
 | Program | File-scoped namespaces, using directives, top-level/static/instance functions; parameterless `int32 Main()` or `void Main()`; multi-source executable/library compilation |
 | Types | `int32`, `uint32`, `int64`, `uint64`, `char16`, `bool`, `void` results; compact reference-free structs |
-| Literals/constants | Context-typed decimal and hexadecimal integers without a fallback type; primitive `MinValue`/`MaxValue`; booleans; unit `()` |
+| Literals/constants | Context-typed decimal, hexadecimal and binary integers without a fallback type; digit separators; based literals construct target-width bit patterns; primitive `MinValue`/`MaxValue`; booleans; unit `()` |
 | Variables | Initialized typed/inferred locals; immutable bindings by default, explicit `mut` assignments; lexical scopes |
 | Expressions | Direct calls, forward calls/recursion, constructors, field reads, checked numeric type-call conversions to `int32`, `uint32`, `int64`, `uint64` and `char16`; unary `+`, signed checked `-`, `~`, `!` |
 | Operators | Checked signed/unsigned `+ - * / %`, bitwise operations, signed/unsigned comparisons, same-type scalar equality, boolean operations; code-unit comparison but no `char16` arithmetic |
@@ -562,9 +564,10 @@ that storage contract: `int64`/`uint64` buffer descriptors are rejected.
 Literal context comes from declarations, parameters, return types or a known
 operand, not an implicit numeric fallback. `var x = 1` is rejected;
 `var x = 1i32` diagnoses as `TRM0006`, while `int32 x = 1` and
-`uint64 x = 0xFFFFFFFFFFFFFFFF` are accepted. A
-signed minimum literal can be constructed directly, without first overflowing
-its positive magnitude. Locals cannot be
+`uint64 x = 0xFFFF_FFFF_FFFF_FFFF` are accepted. A decimal signed minimum
+literal can be constructed directly, without first overflowing its positive
+magnitude; based literals instead select bit patterns at the expected target
+width. Locals cannot be
 read before declaration/initialization, immutable bindings cannot be assigned,
 conditions must be boolean and non-void functions must return on every normally
 completing path. Constant-true loops and declared nonreturning calls can remove

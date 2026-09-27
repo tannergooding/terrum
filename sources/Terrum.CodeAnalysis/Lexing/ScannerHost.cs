@@ -313,16 +313,77 @@ public static class ScannerHost
         return values.MoveToImmutable();
     }
 
+    internal static int IntegerRadix(ReadOnlySpan<char> text) =>
+        text.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? 16
+            : text.StartsWith("0b", StringComparison.OrdinalIgnoreCase) ? 2 : 10;
+
+    private static bool IsRadixDigit(char digit, int radix)
+    {
+        if (digit is >= '0' and <= '9')
+        {
+            return radix != 2 || digit <= '1';
+        }
+        if (radix == 16)
+        {
+            return digit is (>= 'a' and <= 'f') or (>= 'A' and <= 'F');
+        }
+        return false;
+    }
+
     internal static int IntegerDigitCount(ReadOnlySpan<char> text)
     {
-        var hex = text.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
-        var index = hex ? 2 : 0;
-        while (index < text.Length && (text[index] is >= '0' and <= '9'
-            || (hex && text[index] is (>= 'a' and <= 'f') or (>= 'A' and <= 'F'))))
+        var radix = IntegerRadix(text);
+        var index = radix == 10 ? 0 : 2;
+        var hasDigit = false;
+        while (index < text.Length)
         {
-            index++;
+            if (IsRadixDigit(text[index], radix))
+            {
+                hasDigit = true;
+                index++;
+                continue;
+            }
+            if (text[index] != '_' || (!hasDigit && radix == 10))
+            {
+                break;
+            }
+            var next = index + 1;
+            while (next < text.Length && text[next] == '_')
+            {
+                next++;
+            }
+            if (next == text.Length || !IsRadixDigit(text[next], radix))
+            {
+                break;
+            }
+            index = next;
         }
-        return hex && index == 2 ? 0 : index;
+        return hasDigit ? index : 0;
+    }
+
+    internal static bool TryParseIntegerMagnitude(ReadOnlySpan<char> text, out ulong magnitude)
+    {
+        var radix = IntegerRadix(text);
+        magnitude = 0;
+        for (var index = radix == 10 ? 0 : 2; index < text.Length; index++)
+        {
+            var character = text[index];
+            if (character == '_')
+            {
+                continue;
+            }
+            var digit = character switch {
+                >= '0' and <= '9' => character - '0',
+                >= 'a' and <= 'f' => character - 'a' + 10,
+                _ => character - 'A' + 10,
+            };
+            if (magnitude > (ulong.MaxValue - (uint)digit) / (uint)radix)
+            {
+                return false;
+            }
+            magnitude = (magnitude * (uint)radix) + (uint)digit;
+        }
+        return true;
     }
 
     internal static void ValidateIntegerValueCoverage(SourceText source,
@@ -405,7 +466,7 @@ public static class ScannerHost
             var code = BinaryPrimitives.ReadInt32LittleEndian(record);
             var start = BinaryPrimitives.ReadInt32LittleEndian(record[4..]);
             var length = BinaryPrimitives.ReadInt32LittleEndian(record[8..]);
-            if (code is < 1 or > 7 || start < 0 || start > source.Length
+            if (code is < 1 or > 9 || start < 0 || start > source.Length
                 || length <= 0 || length > source.Length - start)
             {
                 throw new ArgumentException("Invalid scanner diagnostic record.", nameof(bytes));
@@ -463,6 +524,8 @@ public static class ScannerHost
                 "TRM0005" => "Invalid string escape sequence.",
                 "TRM0006" => "Numeric width suffixes are not supported.",
                 "TRM0007" => "Hexadecimal prefix requires an ASCII hex digit.",
+                "TRM0008" => "Binary prefix requires an ASCII binary digit.",
+                "TRM0009" => "Digit separators must appear between digits.",
                 _ => throw new ArgumentException("Unknown scanner diagnostic.", nameof(diagnosticBytes)),
             };
             diagnostics.Add(new Diagnostic(diagnostic.Code, DiagnosticSeverity.Error, message, diagnostic.Span));

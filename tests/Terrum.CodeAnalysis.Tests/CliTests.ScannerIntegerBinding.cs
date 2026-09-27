@@ -22,7 +22,11 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { char16 value = 65535; return int32(value) - 65493; }")]
     [InlineData("int32 Main() { uint32 a = 4294967295; int64 b = 42; return int32(uint64(a) % 1000) - 295 + int32(b); }")]
     [InlineData("int32 Main() { uint64 mask = 0xFFFFFFFFFFFFFFFF; return int32(mask % 0X100); }")]
-    [InlineData("int32 Main() { int64 value = -0x8000000000000000; if (value == int64.MinValue) { return 42; } return 0; }")]
+    [InlineData("int32 Main() { int64 value = 0x8000000000000000; if (value == int64.MinValue) { return 42; } return 0; }")]
+    [InlineData("int32 Main() { int32 value = 0B11111111111111111111111111111111; if (value == -1) { return 42; } return 0; }")]
+    [InlineData("int32 Main() { int32 bits = 0b101010; return bits; }")]
+    [InlineData("int32 Main() { int32 bits = 0x_8000_0000; if (bits == int32.MinValue) { return 42; } return 0; }")]
+    [InlineData("int32 Main() { uint64 bits = 0b_11111111_11111111_11111111_11111111_11111111_11111111_11111111_11111111; return int32(bits % 1_000); }")]
     public async Task CompiledIntegerValuesEmitTheSameImageAsHostBuildAsync(string source)
     {
         var scanner = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -67,6 +71,27 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return 0xG; }")]
     [InlineData("int32 Main() { return 0xFFFFFFFFi64; }")]
     [InlineData("int32 Main() { uint64 value = 0x10000000000000000; return 42; }")]
+    [InlineData("int32 Main() { return 0b; }")]
+    [InlineData("int32 Main() { return 0B2; }")]
+    [InlineData("int32 Main() { return 0b102; }")]
+    [InlineData("int32 Main() { return 0b1_; }")]
+    [InlineData("int32 Main() { return 0x___; }")]
+    [InlineData("int32 Main() { return 0b___; }")]
+    [InlineData("int32 Main() { return 1__e2; }")]
+    [InlineData("int32 Main() { return 1._2; }")]
+    [InlineData("int32 Main() { return 1e_2; }")]
+    [InlineData("int32 Main() { return 1e+_2; }")]
+    [InlineData("int32 Main() { return 0x1_; }")]
+    [InlineData("int32 Main() { return 0b_1f32; }")]
+    [InlineData("int32 Main() { uint64 value = 0x_1_0000_0000_0000_0000; return 42; }")]
+    [InlineData("int32 Main() { uint64 value = 18_446_744_073_709_551_616; return 42; }")]
+    [InlineData("int32 Main() { return 1_000i32; }")]
+    [InlineData("int32 Main() { return 0b1.0; }")]
+    [InlineData("int32 Main() { return 0b1e2; }")]
+    [InlineData("int32 Main() { return 0b1f32; }")]
+    [InlineData("int32 Main() { return 0b1u32; }")]
+    [InlineData("int32 Main() { int32 value = 0b100000000000000000000000000000000; return 0; }")]
+    [InlineData("int32 Main() { uint64 value = 0b10000000000000000000000000000000000000000000000000000000000000000; return 0; }")]
     public async Task CompiledIntegerFailuresRetainHostDiagnosticCodesAndSpansAsync(string source)
     {
         var scanner = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

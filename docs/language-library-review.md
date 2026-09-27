@@ -65,13 +65,15 @@ forwarding through an existing `this` are supported receiver places. Public
 source visibility does not expose a public mutating-receiver ABI.
 It includes compilation-local constrained generic specialization, but not a
 public managed ABI, general interfaces/witnesses, array/view libraries, async,
-or the proposed libraries. The syntax-15 numeric front end rejects width
-suffixes with `TRM0006`, diagnoses a `0x`/`0X` prefix without an ASCII
-hexadecimal digit as `TRM0007`, no longer parses prefix casts, and supports
-contextual decimal and hexadecimal integer literals plus checked type-call
-conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`. The
-scanner-4 record shape is unchanged and retains recognized suffix tags only
-on diagnostic-bearing tokens. Floating/custom literal parsing and
+or the proposed libraries. The syntax-16 numeric front end rejects width
+suffixes with `TRM0006`, diagnoses missing hexadecimal/binary digits as
+`TRM0007`/`TRM0008` and malformed separators as `TRM0009`, no longer parses
+prefix casts, and supports contextual decimal/hexadecimal/binary integer
+literals, `_` separators and checked type-call conversions for `int32`,
+`uint32`, `int64`, `uint64` and `char16`. Based literals construct
+target-width bit patterns; decimal literals retain numeric range semantics.
+The scanner-4 record shape is unchanged and retains recognized suffix tags
+only on diagnostic-bearing tokens. Floating/custom literal parsing and
 `[ConstEval]` remain outside the executable profile. Examples in this review
 and `.api.terrum` files remain design material unless specifically identified
 as implemented.
@@ -609,14 +611,18 @@ representation:
 ```terrum
 int32 count = 1234;
 int32 same = int32(1234);
-uint64 mask = uint64(0xFFFFFFFF);
+uint64 mask = uint64(0xFFFF_FFFF);
+int32 allBits = int32(0xFFFF_FFFF); // -1
+int64 zeroExtended = int64(0xFFFFFFFF); // 4294967295
+int64 signExtended = int64(int32(0xFFFF_FFFF)); // -1
 float32 fraction = float32(0.1);
 float64 converted = float64(count);
 ```
 
-The syntax-15 executable profile supports contextual decimal and hexadecimal
-integer literals and the supported built-in integer/code-unit conversion types;
-the floating-point examples above illustrate target syntax only.
+The syntax-16 executable profile supports contextual decimal, hexadecimal and
+binary integer literals, digit separators, and the supported built-in
+integer/code-unit conversion types; the floating-point examples above
+illustrate target syntax only.
 
 `T(untypedLiteral)` invokes the registered literal parser directly: it does
 not first manufacture an `int32` or `float64`. `T(typedExpression)` is an

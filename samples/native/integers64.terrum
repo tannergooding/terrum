@@ -37,11 +37,11 @@ int32 Main()
     {
         return 1;
     }
-    if (value.Signed != -0x8000000000000000 || value.Unsigned != 0xFFFFFFFFFFFFFFFF)
+    if (value.Signed != 0x8000_0000_0000_0000 || value.Unsigned != 0xFFFF_FFFF_FFFF_FFFF)
     {
         return 2;
     }
-    if (Sum(1, 2, 3, 4, 32) != 42)
+    if (Sum(1, 2, 3, 4, 0b_10_0000) != 42)
     {
         return 3;
     }

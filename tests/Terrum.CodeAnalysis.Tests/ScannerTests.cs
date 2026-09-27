@@ -168,6 +168,12 @@ public sealed class ScannerTests
     [InlineData("18446744073709551615 18446744073709551615u64 18446744073709551616")]
     [InlineData("0x0 0X2A 0x1f32 0XFFFFFFFFFFFFFFFF 0x10000000000000000")]
     [InlineData("0x 0X 0xG 0x1g 0x1u32 0x1f32 0x1_2 0x1.2 0x1p2")]
+    [InlineData("0b0 0B1 0b101010 0B11111111111111111111111111111111 0b000000000000000000000000000000000000000000000000000000000000000001")]
+    [InlineData("0b 0B2 0b102 0b1u32 0b1f32 0b1_0 0b1.1 0b1p2")]
+    [InlineData("1_000 1__2 0x_FFFF_FFFF_FFFF_FFFF 0b___1010 0b_11111111_11111111_11111111_11111111")]
+    [InlineData("1_ 0x___ 0b___ 1_.2 1.2_3e+4_5 1.2_ 1e+2_3 1e+2_ 0b1_ 0xF__ 1_000i32 0b_1f32 0x_F_Fi32")]
+    [InlineData("0x_1_0000_0000_0000_0000 0b_1_0000000000000000000000000000000000000000000000000000000000000000")]
+    [InlineData("18_446_744_073_709_551_615 18_446_744_073_709_551_616 1_foo 0xF_tail 0b1_tail")]
     [InlineData("18446744073709551616i128 340282366920938463463374607431768211455u128")]
     [InlineData("1i8 2i16 3i32 4i64 5i128 6u8 7u16 8u32 9u64 10u128")]
     [InlineData("1.25 2e+3 3E- 4e 5f32 6f128 7efoo 8i64extra 9i128\u200D")]
@@ -264,7 +270,7 @@ public sealed class ScannerTests
     [Theory]
     [InlineData(2, 1, 0, 1)]
     [InlineData(1, 0, 0, 1)]
-    [InlineData(1, 8, 0, 1)]
+    [InlineData(1, 10, 0, 1)]
     [InlineData(1, 1, -1, 1)]
     [InlineData(1, 1, 0, 0)]
     [InlineData(1, 1, 0, 2)]
@@ -350,6 +356,7 @@ public sealed class ScannerTests
     [InlineData("18446744073709551615", -1, -1, ulong.MaxValue)]
     [InlineData("0xFFFFFFFFFFFFFFFF", -1, -1, ulong.MaxValue)]
     [InlineData("0X8000000000000000", 0, int.MinValue, 9223372036854775808UL)]
+    [InlineData("0b10000000000000000000000000000000", int.MinValue, 0, 2147483648UL)]
     public void IntegerResultAdapterPreservesAll64MagnitudeBits(string text, int low, int high, ulong expected)
     {
         var source = SourceText.From(text);
@@ -429,17 +436,21 @@ public sealed class ScannerTests
             }
 
             var hex = text.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
-            if (text.Length == 0 || (hex
-                ? text.Length == 2 || !text.Skip(2).All(ch =>
+            var binary = text.StartsWith("0b", StringComparison.OrdinalIgnoreCase);
+            var normalized = (hex || binary ? text[2..] : text).Replace("_", "", StringComparison.Ordinal);
+            if (normalized.Length == 0 || (hex
+                ? !normalized.All(ch =>
                     ch is (>= '0' and <= '9') or (>= 'a' and <= 'f') or (>= 'A' and <= 'F'))
-                : !text.All(ch => ch is >= '0' and <= '9')))
+                : binary ? !normalized.All(ch => ch is '0' or '1')
+                    : !normalized.All(ch => ch is >= '0' and <= '9')))
             {
                 continue;
             }
 
             var value = hex
-                ? BigInteger.Parse("0" + text[2..], NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture)
-                : BigInteger.Parse(text, NumberStyles.None, CultureInfo.InvariantCulture);
+                ? BigInteger.Parse("0" + normalized, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture)
+                : binary ? BigInteger.Parse("0" + normalized, NumberStyles.AllowBinarySpecifier, CultureInfo.InvariantCulture)
+                    : BigInteger.Parse(normalized, NumberStyles.None, CultureInfo.InvariantCulture);
             var overflow = value > ulong.MaxValue;
             var magnitude = overflow ? 0UL : (ulong)value;
             var status = overflow ? ScannerIntegerStatus.MagnitudeOverflow : ScannerIntegerStatus.Decoded;

@@ -47,9 +47,18 @@ public sealed class LexerTests
     [InlineData(".5 2efoo", new[] { ".", "5", "2", "efoo" })]
     [InlineData("1else", new[] { "1", "else" })]
     [InlineData("0x1f32 0XABCD+0x0 0x1e2", new[] { "0x1f32", "0XABCD", "+", "0x0", "0x1e2" })]
+    [InlineData("0b101010 0B0 0b1i32", new[] { "0b101010", "0B0", "0b1i32" })]
+    [InlineData("1_000 0x_8000_0000 0b___1010 1__2.3__4e+5_6",
+        new[] { "1_000", "0x_8000_0000", "0b___1010", "1__2.3__4e+5_6" })]
+    [InlineData("_123 1_000foo 1e+2_3 0x___FF 0B__1u32",
+        new[] { "_123", "1_000", "foo", "1e+2_3", "0x___FF", "0B__1u32" })]
+    [InlineData("1_foo 0xF_tail 0b1_tail",
+        new[] { "1", "_foo", "0xF", "_tail", "0b1", "_tail" })]
+    [InlineData("0b 0B2 0b102 0b1f32 0b1u64 0b1_0 0b1.1",
+        new[] { "0b", "0B", "2", "0b10", "2", "0b1f32", "0b1u64", "0b1_0", "0b1", ".", "1" })]
     [InlineData("0x 0X 0xG 0x1g", new[] { "0x", "0X", "0x", "G", "0x1", "g" })]
     [InlineData("0x1u32 0x1f32 0x1_2 0x1.2 0x1p2",
-        new[] { "0x1u32", "0x1f32", "0x1", "_2", "0x1", ".", "2", "0x1", "p2" })]
+        new[] { "0x1u32", "0x1f32", "0x1_2", "0x1", ".", "2", "0x1", "p2" })]
     [InlineData("12u32 42.3f64", new[] { "12u32", "42.3f64" })]
     [InlineData("10i32 0.1f32 2u128 4f16", new[] { "10i32", "0.1f32", "2u128", "4f16" })]
     [InlineData("1e2f32", new[] { "1e2f32" })]
@@ -62,10 +71,42 @@ public sealed class LexerTests
     }
 
     [Theory]
+    [InlineData("1_000")]
+    [InlineData("1__2")]
+    [InlineData("0x_8000_0000")]
+    [InlineData("0X___F_F32")]
+    [InlineData("0b_1000_0000")]
+    [InlineData("0B___1__0")]
+    [InlineData("1__2.3__4e+5_6")]
+    [InlineData("1.2_3E-4__5")]
+    public void ValidDigitSeparatorsPreserveOneNumericTokenWithoutDiagnostics(string text)
+    {
+        var result = Lexer.Lex(SourceText.From(text));
+        Assert.Empty(result.Diagnostics);
+        var token = Assert.Single(result.Tokens.Where(token => token.Kind != TokenKind.EndOfFile));
+        Assert.Equal(TokenKind.NumericLiteral, token.Kind);
+        Assert.Equal(text, token.Text);
+    }
+
+    [Theory]
     [InlineData("0x", "TRM0007", 0, 2)]
     [InlineData("0XG", "TRM0007", 0, 2)]
     [InlineData("0x2Ai32", "TRM0006", 4, 3)]
     [InlineData("0x2Au64", "TRM0006", 4, 3)]
+    [InlineData("0b", "TRM0008", 0, 2)]
+    [InlineData("0B2", "TRM0008", 0, 2)]
+    [InlineData("0b1f32", "TRM0006", 3, 3)]
+    [InlineData("0b1u64", "TRM0006", 3, 3)]
+    [InlineData("1_", "TRM0009", 1, 1)]
+    [InlineData("1___", "TRM0009", 1, 3)]
+    [InlineData("0xF__", "TRM0009", 3, 2)]
+    [InlineData("0b1_", "TRM0009", 3, 1)]
+    [InlineData("0x___", "TRM0007", 0, 2)]
+    [InlineData("0b__", "TRM0008", 0, 2)]
+    [InlineData("1_.2", "TRM0009", 1, 1)]
+    [InlineData("1.2_", "TRM0009", 3, 1)]
+    [InlineData("1e+2_", "TRM0009", 4, 1)]
+    [InlineData("0x_F__", "TRM0009", 4, 2)]
     public void HexPrefixAndAttachedWidthTagsRetainExactDiagnosticSpans(string text, string code, int start, int length)
     {
         var result = Lexer.Lex(SourceText.From(text));
