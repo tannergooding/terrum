@@ -79,13 +79,15 @@ values up to 16 bytes through by-value parameters/results and existing
 conditional `bool`/`out` outputs, without exposing managed handles or private
 heap storage. This retains the existing value ABI and does not provide a
 public managed-handle ABI.
-Semantic v32 permits managed roots and intermediate producers only in
-persisted acyclic native DLL graphs through the same scalar and handle-free
-`Copy` value contracts. Ordinary semantic linking and consumer/module-set
-creation still reject private managed participants. Persisted images retain
-separate heaps and root chains; existing static linking of a managed leaf
-remains a separate single-image collection domain. This adds neither
-cross-image managed handles nor shared collection.
+Semantic v32 supports private managed consumers through ordinary
+single-provider semantic consumers and native single-provider or module-set
+entry points, using scalar and handle-free public `Copy` value contracts.
+Persisted acyclic native graphs additionally permit managed roots and
+intermediate producers under those same boundary contracts. Semantic modules
+statically link into one image, remap private class identities, and use one
+heap/root domain, while persisted native images retain separate heaps and root
+chains. This adds neither cross-image managed handles nor cross-image shared
+collection.
 It includes compilation-local constrained generic specialization, including
 bounded single-`T` inference for top-level function templates over `Copy`
 structs and existing scalar value types, but not primitive operator witnesses,

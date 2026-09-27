@@ -255,18 +255,18 @@ managed storage or handles; exported managed handles, unique values, nested
 managed-containing values, views, reference modes and mutating-receiver ABI
 remain unsupported. Under v31, a managed leaf could not import another
 producer. Native physical ABI/profile versions are unchanged. Semantic v32
-additionally permits managed roots and intermediate producers only in the
-persisted acyclic native graph path. These images communicate only through
-the established scalar and handle-free public
+supports private managed consumers through ordinary single-provider semantic
+consumers and native single-provider/module-set entry points. Persisted acyclic
+native graphs additionally permit managed intermediate and root producers.
+These boundaries communicate only through the established scalar and handle-free public
 `Copy` by-value/result and `bool`/`out` contracts; managed/unique values,
 views, reference modes and mutating-receiver ABI do not cross those boundaries.
 Each persisted native image has its own heap and root chain, imported calls
-preserve caller roots, and collection remains local to the image. Existing
-static linking of a managed leaf producer remains a one-image collection
-domain, separate from this DLL-graph support. Ordinary semantic linking and
-consumer/module-set creation continue to reject private managed participants.
-This adds no shared collector, managed-handle ABI or graph cycle, and changes
-neither native physical ABI/profile nor graph package format. See the
+preserve caller roots, and collection remains local to the image. Semantic
+modules statically link into one image, remap private class identities, and
+use one collection domain. This adds no cross-image shared collection,
+managed-handle ABI or graph cycle, and changes neither native physical
+ABI/profile nor graph package format. See the
 [managed graph replacement example](native-graph.md).
 Primitive
 `OwnedInt32Buffer` views keep their separate legacy access rules; general

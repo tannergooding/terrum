@@ -36,8 +36,15 @@ declaration for type or cleanup contracts does not itself create an IAT entry.
 
 The set is intentionally leaf-only: it does not model transitive graphs,
 cycles, arbitrary version roll-forward, hot servicing, resilient layouts,
-or full LMOD. Two providers cannot both claim the same public type or
-qualified export name; case-insensitive DLL identities also cannot collide.
+or full LMOD. Semantic v32 permits a native-set consumer to retain private
+managed state, but image boundaries remain limited to scalar and
+public handle-free `Copy` value contracts, including existing conditional
+`bool`/`out` results. Handles, unique values, views, reference modes and
+mutating-receiver ABI do not cross the boundary; each persisted image has its
+own heap/root domain, while collection stays local. This uses the existing
+native profile and package versions and adds no physical ABI change. It does
+not add a dedicated native-set JIT API. Two providers cannot both claim the same public
+type or qualified export name; case-insensitive DLL identities also cannot collide.
 The selected dependencies must match exactly and each must supply a retained
 declaration; only emitted calls require machine imports.
 Implementation hashes are not pinned. These packages remain trusted native

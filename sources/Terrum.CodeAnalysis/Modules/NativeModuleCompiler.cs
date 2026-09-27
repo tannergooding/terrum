@@ -252,6 +252,8 @@ public static partial class NativeModuleCompiler
         }
         NativeModuleImageValidator.Validate(consumer.Image, isConsumer: true, groups, [], consumer.Policy,
             allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(
+                ModuleCompiler.GetNativeProfileVersion(consumer.Contract, true)),
+            allowManagedRuntimeData: AllowsManagedRuntimeData(
                 ModuleCompiler.GetNativeProfileVersion(consumer.Contract, true)));
     }
 

@@ -86,6 +86,8 @@ public static partial class NativeModuleCompiler
         }
         NativeModuleImageValidator.Validate(set.Image, true, Imports(set), [], set.Policy,
             allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(
+                ModuleCompiler.GetNativeProfileVersion(set.Contract, true)),
+            allowManagedRuntimeData: AllowsManagedRuntimeData(
                 ModuleCompiler.GetNativeProfileVersion(set.Contract, true)));
         return new NativeModuleSetInfo(ModuleCompiler.GetNativeProfileVersion(set.Contract, true), set.Policy,
             Convert.ToHexString(SHA256.HashData(set.Image)), [.. set.Dependencies.Select(static item => item.Identity)]);
@@ -235,6 +237,8 @@ public static partial class NativeModuleCompiler
         }
         NativeModuleImageValidator.Validate(set.Image, true, Imports(set), [], set.Policy,
             allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(
+                ModuleCompiler.GetNativeProfileVersion(set.Contract, true)),
+            allowManagedRuntimeData: AllowsManagedRuntimeData(
                 ModuleCompiler.GetNativeProfileVersion(set.Contract, true)));
     }
 

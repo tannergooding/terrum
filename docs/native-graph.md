@@ -11,16 +11,17 @@ policies, malformed images and import maps before the root process starts.
 Implementation hashes are not pinned: a compatible leaf implementation can
 replace an independently compiled package without changing the intermediate
 DLL or root EXE.
-Semantic v32 permits managed roots and intermediate producers only in this
-persisted acyclic native DLL graph path. Participants communicate only through
-the established scalar and handle-free public `Copy` value contracts. Each
+Semantic v32 permits managed roots and intermediate producers in persisted
+acyclic native DLL graphs. Participants communicate only through the
+established scalar and handle-free public `Copy` value contracts. Each
 persisted image has its own heap and root chain; an imported call preserves
 the caller's roots, and `ManagedHeap.Collect()` remains local to the image
-where it runs. Ordinary semantic linking and consumer/module-set creation
-continue to reject private managed participants. Existing static linking of
-a managed leaf producer remains a separate, single-image collection domain.
-Managed handles never cross image boundaries, and graph cycles remain
-unsupported.
+where it runs. Semantic v32 also supports private managed consumers through
+ordinary single-provider semantic linking and native single-provider or
+module-set entry points. Semantic linking places producer and consumer code in
+one image/heap domain and remaps private class identities; the persisted native
+graph continues to keep each image's heap separate. Managed handles never
+cross image boundaries, and graph cycles remain unsupported.
 
 `resolve-native-graph` accepts an explicitly listed local candidate catalog
 rather than an already selected closure. It validates every package, ignores

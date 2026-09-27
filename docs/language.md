@@ -677,12 +677,15 @@ translating legacy class/`ManagedNode` mutation authority to explicit `write`
 exactly where previously granted. Programs not requiring the semantic-v25
 `MutReceiver` contract or v26 nested mutable-field loans retain their prior versions and bytes regardless of
 managedness. Native handle layout and the absence of a public managed-handle
-ABI are unchanged. Semantic v32 additionally permits managed roots and
-intermediate producers only in persisted acyclic native DLL graphs, when image
+ABI are unchanged. Semantic v32 supports private managed consumers through
+existing single-provider semantic and native module entry points when
 boundaries carry the established scalar or handle-free public `Copy` value
-contracts. Ordinary semantic linking and consumer/module-set creation still
-reject private managed participants. Each persisted image retains its own
-heap and roots; this is not a public managed-handle ABI or shared collector.
+contracts. Persisted acyclic native graphs additionally permit managed
+intermediate and root producers under those same boundary contracts.
+Semantic modules statically link into one image, remap private class
+identities, and use one heap/root domain; persisted native images retain
+separate heaps and roots. This adds no public managed-handle ABI, semantic
+`LinkSet`, native-set JIT API, or cross-image shared collector.
 
 The semantic-v25 `MutReceiver` contract supports `mut` methods on non-owning
 compact structs as non-exported persisted calls. Source visibility may be

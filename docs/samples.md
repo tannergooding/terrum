@@ -81,6 +81,14 @@ keep private managed records while exchanging only the leaf's public
 handle-free `Snapshot` and scalar values; the unchanged graph returns 42 with
 the original leaf and 44 with the managed replacement under AOT and root-only
 JIT. See the [graph commands](native-graph.md).
+The [managed Copy semantic consumer](../samples/native/modules/managed-copy-consumer.terrum)
+uses the original and managed `Snapshot` providers above through the semantic
+v32 single-provider consumer contract. Its private `Record` deliberately
+shares a name with provider-private state, and remains rooted across provider
+collection. The same persisted consumer artifact returns 42 or 44 when
+`run-module` selects the original or managed provider; each `link-module`
+command emits a fresh PE for its selected provider. Exact commands for both
+runtime policies are in the [module guide](modules.md).
 The [static-protocol quadratic sample](../samples/native/static-protocol-quadratic.terrum)
 returns 46 through AOT and JIT. Two nominal Copy wrappers explicitly implement
 source-defined addition/multiplication protocols used by one constrained

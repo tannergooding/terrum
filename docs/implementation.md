@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-17, native-10 through native-20, semantic v32 managed native graphs
+## Current boundary: syntax-17, semantic v32 managed consumers, native-10 through native-20
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -102,22 +102,28 @@ Writers require semantic v31 for these expanded export contracts; scalar-only
 managed producers retain their prior required version, and older headers reject
 the expanded contracts. This adds no syntax or scanner change and does not
 change the native physical ABI or profile versions.
-Semantic v32 permits managed roots and intermediate producers only in the
-persisted acyclic native graph path. Its imports and exports communicate only through the
-established scalar and handle-free public `Copy` by-value/result and
+The semantic v32 persisted-graph contract permits managed roots and
+intermediate producers in acyclic native graphs. Their imports and exports
+communicate only through the established scalar and handle-free public `Copy`
+by-value/result and
 `bool`/`out` contracts; managed or unique values, views, reference modes and
 mutating-receiver ABI still cannot cross a managed participant boundary.
 Each persisted native image retains its own heap and root chain, and calls
 preserve the caller's roots while another image runs. `ManagedHeap.Collect()`
-remains image-local. This does not enable private managed participants in
-ordinary semantic linking or consumer/module-set creation, which continue to
-reject them. Existing static linking of a managed leaf producer remains a
-single-image collection domain; it is separate from this persisted DLL-graph
-extension. There is no shared collector, managed-handle ABI or cyclic graph
-support.
-Semantic v32 is selected for managed root/intermediate participation;
-managed leaves retain v31 or earlier when their own contracts need no newer
-version. This adds no syntax, scanner, native physical ABI/profile or graph
+remains image-local. Semantic v32 supports private managed consumers through
+the existing single-provider semantic `CreateConsumer`/`Link` path and native
+single-provider and module-set entry points. Semantic modules statically link
+into one image, remap private class identities, and use one heap/root domain.
+Persisted native EXE/DLL sets retain separate image heaps and root chains;
+calls preserve caller roots, and collection remains image-local. A compatible
+semantic provider can be selected on each
+`run-module` launch, which JITs from the persisted artifacts; `link-module`
+must emit a fresh PE for each selected provider. Native package replacement
+does not re-emit its persisted consumer image. Managed handles, unique values,
+views and reference modes cannot cross these boundaries; there is no
+cross-image shared collection, managed-handle ABI or cyclic graph support.
+This support adds no public semantic `LinkSet` or native-set JIT API. These
+contracts add no syntax, scanner, native physical ABI/profile or graph
 package-format change.
 
 | Surface | Implemented | Not yet implemented |
@@ -312,20 +318,15 @@ or expression. Programs needing neither retain their historical versions and
 bytes regardless of managedness.
 The private managed-state boundary and absence of a public managed-handle ABI
 are unchanged. Semantic v31 expands leaf exports to managed-backed compact
-handle-free `Copy` values by value; semantic v32 permits managed roots and
-intermediate producers in persisted native DLL graphs using only scalar and
-handle-free `Copy` contracts across image boundaries. Managed handles, unique
-values, views and reference modes cannot cross those boundaries. Native
-packages validate each image's managed profile, heap imports and root
-metadata. Explicit collection is local to each persisted image, and imported
-calls preserve the caller's roots. Ordinary semantic linking and consumer or
-module-set creation continue to reject private managed participants. Existing
-static linking of a managed leaf producer remains a single-image collection
-domain, separate from the v32 persisted graph path. Managed handles do not
-cross images, and shared collection, graph cycles and DLL-unload collection
-remain unsupported. Writers select v32 for managed root/intermediate
-participation; managed leaves retain v31 or earlier when their retained
-contracts do not require a newer version.
+handle-free `Copy` values by value. Semantic v32 supports private managed
+consumers through the existing single-provider semantic `CreateConsumer`/
+`Link` path and native single-provider/module-set entry points; persisted native graphs also
+permit managed roots and intermediate producers through the same scalar and
+handle-free `Copy` boundary. Semantic modules statically link into one image,
+remap private class identities, and share one heap/root domain. Persisted
+native images retain separate heaps and roots. Managed handles, unique values,
+views and reference modes cannot cross these boundaries. Cross-image shared
+collection, graph cycles and DLL-unload collection remain unsupported.
 Compatible persisted consumer/intermediate images continue to work with leaf
 replacement under AOT and root-only JIT.
 The [source-line index candidate](../self-host/SourceLineIndex.terrum) uses `OwnedInt32Buffer`

@@ -89,7 +89,7 @@ public static partial class ModuleCompiler
     {
         _ = ReadSet(producers);
         var reference = CreateReferenceSet(producers);
-        var result = CreateConsumerAgainstReference(program, reference);
+        var result = CreateConsumerAgainstReference(program, reference, allowManagedParticipant: true);
         ValidateConsumerSet(result, producers);
         return result;
     }

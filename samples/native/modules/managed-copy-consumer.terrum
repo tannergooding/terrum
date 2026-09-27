@@ -1,0 +1,23 @@
+mut class Record {
+    public Snapshot Data;
+    public mut write Record? Next;
+    public Record(Snapshot data) {
+        Data = data;
+        Next = null;
+    }
+}
+
+int32 ReadWithLocalRoot() {
+    require Record.TryCreate(ReadSnapshot(), out var state);
+    state.Next = state;
+    require TryReadSnapshot(true, out var again);
+    require state.Data.Total == again.Total;
+    require ManagedHeap.Collect() == 0;
+    return ReadTotal(state.Data) + 2;
+}
+
+int32 Main() {
+    int32 result = ReadWithLocalRoot();
+    require ManagedHeap.Collect() == 1;
+    return result;
+}

@@ -390,19 +390,49 @@ legacy class/`ManagedNode` mutation authority into `write` exactly where it was
 previously granted, without widening the contract. A v18-v23 header containing
 v24 write identifiers is rejected. The native physical handle ABI and absence of a public managed-handle ABI
 remain unchanged. Semantic v32 permits managed roots and intermediate
-producers only in the persisted acyclic native graph path, subject to the
-scalar and compact `Copy` value boundary above; it does not create a shared
-collector or graph cycle. Each persisted image retains its own heap and roots,
-imported calls preserve caller roots, and collection remains image-local.
-Ordinary semantic linking and consumer/module-set creation continue to reject
-private managed participants. Existing static linking of a managed leaf
-producer remains a single-image collection domain, separate from this
-DLL-graph support. Writers select v32 for managed root/intermediate
-participation; managed leaves retain v31 or earlier when their own contracts
-need no newer version. Version-specific restrictions in v18-v30 remain in
-force for those artifacts; v31 retains its expanded managed-leaf `Copy`
-contract. No syntax, scanner, native physical ABI/profile or graph
-package-format version changes.
+producers in persisted acyclic native graphs, subject to the scalar and
+compact `Copy` value boundary above; it does not create cross-image shared
+collection or graph cycles. Semantic v32 also supports private managed
+consumers through the existing single-provider semantic `CreateConsumer`/
+`Link` path and native single-provider and module-set entry points. Semantic modules
+statically link into one image, remap private class identities, and use one
+heap/root domain. Persisted native EXE/DLL sets retain separate image heaps
+and root chains; imported calls preserve caller roots, and collection remains
+image-local. A compatible semantic provider may be selected each time
+`run-module` starts; JIT code is generated from the persisted artifacts for
+that launch. `link-module` emits a fresh PE for the selected provider;
+replacing a semantic provider does not change an already linked PE. Native
+package replacement leaves the persisted consumer image unchanged. Managed
+handles, unique values, views, reference modes and mutating-receiver ABI
+cannot cross these boundaries. This adds no public semantic `LinkSet` or
+native-set JIT API, syntax, scanner, native physical ABI/profile or graph
+package-format change.
+
+For the managed `Snapshot` consumer, compile both compatible providers and one
+consumer artifact per policy. `run-module` services that same consumer
+artifact with either provider. `link-module` instead emits a fresh executable
+for each provider; it does not patch a previously linked PE:
+
+```powershell
+$cli = 'artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll'
+foreach ($policy in 'fail-fast', 'checked-exceptions') {
+    $suffix = $policy -replace '-', ''
+    $original = "artifacts\snapshot-original-$suffix.trm"
+    $replacement = "artifacts\snapshot-managed-$suffix.trm"
+    $consumer = "artifacts\snapshot-consumer-$suffix.trm"
+    $originalExe = "artifacts\snapshot-original-$suffix.exe"
+    $replacementExe = "artifacts\snapshot-managed-$suffix.exe"
+    dotnet $cli compile-module producer samples\native\graph\copy-contract-original.terrum ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $original --runtime $policy
+    dotnet $cli compile-module producer samples\native\graph\copy-contract-managed.terrum ReadSnapshot --export TryReadSnapshot --export ReadTotal -o $replacement --runtime $policy
+    dotnet $cli compile-module consumer samples\native\modules\managed-copy-consumer.terrum $original -o $consumer --runtime $policy
+    dotnet $cli run-module $consumer $original --runtime $policy # exits 42
+    dotnet $cli run-module $consumer $replacement --runtime $policy # exits 44
+    dotnet $cli link-module $consumer $original -o $originalExe --runtime $policy
+    & $originalExe # exits 42
+    dotnet $cli link-module $consumer $replacement -o $replacementExe --runtime $policy
+    & $replacementExe # exits 44
+}
+```
 A consumer importing a unique type must also import the exported NoThrow
 cleanup methods of that type and its owning children. Their cleanup identities
 and Copy/unique distinctions participate in layout and signature compatibility;

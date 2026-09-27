@@ -77,9 +77,17 @@ continue to normalize private managed artifacts from versions 18 through 23
 without granting more authority than their original contract. Public scalar
 entry wrappers may call non-exported mutating methods; private helpers remain
 non-exported as well. The native handle ABI and private managed-state boundary
-are unchanged; semantic v31 permits managed-backed leaf producers to export
-compact handle-free `Copy` values, and semantic v32 permits bounded managed
-participants in persisted acyclic native graphs without exposing handles.
+are unchanged. Semantic v31 permits managed-backed leaf producers to export
+existing public, handle-free compact `Copy` values up to 16 bytes through the
+by-value and existing `bool`/`out` contracts. Semantic v32 supports private
+managed consumers through ordinary single-provider semantic creation/linking
+and native single-provider/module-set entry points; it also permits managed
+roots and intermediate producers in persisted acyclic native graphs. Semantic
+modules combine provider and consumer code into one image, remap private class
+identities, and share one heap/root domain; persisted native images retain
+image-local heaps and roots. These contracts expose no managed handles and add
+no public semantic `LinkSet` or native-set JIT API. Native ABI/profile versions
+and the graph package format are unchanged.
 
 Semantic v27 permits ordinary `mut` methods on unique structs through an
 initialized named mutable owner or forwarded writable `this`. These loans
