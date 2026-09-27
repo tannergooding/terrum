@@ -17,6 +17,44 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class OwnershipTests
 {
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task MutatedBufferFieldRetainsOwnerAndDropsExactlyOnceAsync(BoundRuntimePolicy policy)
+    {
+        const string Source = """
+            unique struct Owner {
+                public mut OwnedInt32Buffer Words;
+                public mut int32 Latest;
+                public Owner(OwnedInt32Buffer words) { Words = move words; Latest = 0; }
+                public mut void Update() {
+                    Words.Set(0, 42);
+                    Latest = 42;
+                }
+                [NoThrow] [Cleanup] public void Close() {
+                    if (Host.Trace[0] == 0) { Host.Trace[0] = 1; }
+                    else { Host.Trace[0] = 2; }
+                    Host.Trace[1] = Latest;
+                    Host.Trace[2] = Words.Count;
+                }
+            }
+            int32 Main() {
+                {
+                    require OwnedInt32Buffer.TryCreate(1, out var raw);
+                    mut Owner owner = new Owner(move raw);
+                    require owner.Words.TryAppend(1);
+                    owner.Update();
+                    if (owner.Words.Read(0) != 42 || Host.Trace[0] != 0) { return 0; }
+                }
+                if (Host.Trace[0] == 1 && Host.Trace[1] == 42 && Host.Trace[2] == 1) {
+                    return 42;
+                }
+                return 0;
+            }
+            """;
+        Assert.Equal(42, await RunNativeAsync(Source, policy, [0, 0, 0]).ConfigureAwait(true));
+    }
+
     [Fact]
     public async Task CaughtFailureThroughUniqueChildPreservesWritesAndRecursiveCleanupAsync()
     {

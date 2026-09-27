@@ -352,6 +352,11 @@ children. Writer selection inspects the serialized function's field paths
 against the module's remapped layouts, including loans in symbolic call
 arguments. Earlier headers reject unique-root field loans; programs needing
 only the v25-v27 contracts retain their existing versions.
+Semantic v29 admits mutable owning-buffer field loans only for the existing
+`Set`, `TryAppend` and `Clear` intrinsics. Version selection examines symbolic
+call arguments; earlier headers reject these loans, while programs requiring
+only earlier receiver contracts retain their versions. The physical native
+ABI and scalar-only public boundary do not change.
 Programs requiring none of these contracts retain their existing versions and bytes
 regardless of managedness. The ordinary readonly/by-value receiver ABI is unchanged.
 Public scalar entry wrappers may call non-exported mutating methods; source

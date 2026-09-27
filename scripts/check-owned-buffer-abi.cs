@@ -42,6 +42,7 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         Path.GetFullPath(Path.Combine("tests", "native", "owned-buffer-abi.terrum")),
         "--export", "TryAcquire", "--export", "Build", "--export", "Relay", "--export", "Consume",
         "--export", "Rebuild", "--export", "TryRebuild", "--export", "Composite",
+        "--export", "FieldMutation",
         "--export", "FormattingWorkspace", "--export", "FormatDigits", "--export", "FormatSignedDigits",
         "--source", Path.GetFullPath(Path.Combine("self-host", "IntegerFormatting.terrum")),
         "-o", dll, "--runtime", policy })
@@ -56,6 +57,8 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         compile.ArgumentList.Add("Recover");
         compile.ArgumentList.Add("--export");
         compile.ArgumentList.Add("RecoverFormatting");
+        compile.ArgumentList.Add("--export");
+        compile.ArgumentList.Add("RecoverField");
     }
     var buildOutput = await Run(compile, TimeSpan.FromMinutes(2)).ConfigureAwait(false);
     await File.WriteAllTextAsync(Path.Combine(artifacts, $"owned-buffer-abi-build-{policy}.log"), buildOutput).ConfigureAwait(false);
@@ -64,7 +67,7 @@ foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
     execute.ArgumentList.Add(policy == "checked-exceptions" ? "checked" : "fail-fast");
     var proof = await Run(execute, TimeSpan.FromSeconds(10)).ConfigureAwait(false);
     await File.WriteAllTextAsync(Path.Combine(artifacts, $"owned-buffer-abi-proof-{policy}.log"), proof).ConfigureAwait(false);
-    if (proof.Trim() != "owned-buffer-abi opaque=8 publication=checked views=scoped reuse=checked heap=tracked live=0")
+    if (proof.Trim() != "owned-buffer-abi opaque=8 publication=checked views=scoped reuse=checked field=tracked heap=tracked live=0")
     {
         throw new InvalidOperationException("The independent owned-buffer ABI proof did not complete.");
     }

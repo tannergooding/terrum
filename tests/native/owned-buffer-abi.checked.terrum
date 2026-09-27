@@ -22,3 +22,20 @@ public int32 RecoverFormatting() {
         }
     }
 }
+
+public int32 RecoverField() {
+    require OwnedInt32Buffer.TryCreate(1, out var raw);
+    mut FieldOwner owner = new FieldOwner(move raw);
+    require owner.TryAppend(40);
+    unsafe {
+        try {
+            owner.Set(0, 42);
+            owner.Set(1, 99);
+        }
+        catch {
+            if (owner.Read(0) != 42 || owner.Count() != 1) { return 0; }
+            return 42;
+        }
+    }
+    return 0;
+}

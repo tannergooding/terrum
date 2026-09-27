@@ -1,3 +1,33 @@
+unique struct BufferOwner
+{
+    private mut OwnedInt32Buffer _words;
+
+    public BufferOwner(OwnedInt32Buffer words)
+    {
+        _words = move words;
+    }
+
+    public mut bool TryAppend(int32 value)
+    {
+        return _words.TryAppend(value);
+    }
+
+    public mut void Set(int32 index, int32 value)
+    {
+        _words.Set(index, value);
+    }
+
+    [NoThrow] public mut void Clear()
+    {
+        _words.Clear();
+    }
+
+    public int32 Read(int32 index)
+    {
+        return _words.Read(index);
+    }
+}
+
 int32 Main()
 {
     require OwnedInt32Buffer.TryCreate(3, out var created);
@@ -11,5 +41,12 @@ int32 Main()
     {
         return 3;
     }
-    return words.Read(0) + words.Read(1);
+    mut BufferOwner owner = new BufferOwner(move words);
+    owner.Set(1, owner.Read(1));
+    owner.Clear();
+    if (!owner.TryAppend(40) || !owner.TryAppend(2))
+    {
+        return 4;
+    }
+    return owner.Read(0) + owner.Read(1);
 }

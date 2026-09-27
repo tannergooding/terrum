@@ -38,6 +38,31 @@ public bool TryRebuild() {
     return OwnedInt32Buffer.TryCreate(1, out buffer);
 }
 
+unique struct FieldOwner {
+    private mut OwnedInt32Buffer _words;
+
+    public FieldOwner(OwnedInt32Buffer words) { _words = move words; }
+    public mut bool TryAppend(int32 value) { return _words.TryAppend(value); }
+    public mut void Set(int32 index, int32 value) { _words.Set(index, value); }
+    [NoThrow] public mut void Clear() { _words.Clear(); }
+    public int32 Count() { return _words.Count; }
+    public int32 Read(int32 index) { return _words.Read(index); }
+}
+
+public int32 FieldMutation() {
+    require OwnedInt32Buffer.TryCreate(2, out var raw);
+    mut FieldOwner owner = new FieldOwner(move raw);
+    require owner.TryAppend(40);
+    require owner.TryAppend(1);
+    if (owner.TryAppend(99) || owner.Count() != 2) { return 1; }
+    owner.Set(1, 2);
+    if (owner.Read(0) + owner.Read(1) != 42) { return 2; }
+    owner.Clear();
+    if (owner.Count() != 0) { return 3; }
+    require owner.TryAppend(42);
+    return owner.Read(0);
+}
+
 public unique struct Envelope {
     public OwnedInt32Buffer Data;
 

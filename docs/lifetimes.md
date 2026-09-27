@@ -268,7 +268,12 @@ Unique child structs may be borrowed through writable paths only after the
 whole root is initialized; the borrowed child is neither moved nor separately
 destroyed, and eventual recursive cleanup sees its updated state. Partial
 construction still permits only the existing readonly initialized-child loans,
-not these mutable loans. Buffer-child mutation remains unsupported.
+not these mutable loans. `OwnedInt32Buffer.Set`, `TryAppend` and `Clear`
+can borrow writable buffer fields through fully initialized unique roots.
+Those calls reserve the containing root before argument evaluation and
+preserve its ownership and recursive release obligation; active slices
+block mutation through any path from that root. Mutable slice acquisition
+through a field remains unsupported.
 Cleanup is an explicit
 `[NoThrow] [Cleanup] public void Close()`-shaped contract on a unique
 instance method; the name itself has no special meaning. Compact owners can

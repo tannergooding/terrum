@@ -21,6 +21,8 @@ structs. Semantic version 26 adds nested mutable-field loan expressions.
 Semantic version 27 permits ordinary mutating methods on named unique owners.
 Semantic version 28 extends nested mutable-field loans through fully
 initialized unique roots and children, preserving ownership and cleanup.
+Semantic version 29 admits writable owning-buffer field loans for `Set`,
+`TryAppend` and `Clear`, with no physical ABI change.
 Source visibility may be public or private. Named mutable locals, their
 writable nested fields, and forwarding through an existing writable `this`
 and its writable fields are supported receiver places. Older headers reject
@@ -60,9 +62,15 @@ Whole-owner move, by-value call/return and true-only output transfer the
 obligation; lexical and recursive composite cleanup release it exactly once.
 `HeapFree` failure is a fatal process invariant error (`0xE0540005`), not a
 recoverable checked failure or a fabricated successful release. The buffer
-operations do not store receiver loans or resize backing memory. `Clear()`
-is NoThrow for a live named mutable owner: it sets count to zero without
-freeing or reallocating the fixed-capacity storage.
+operations do not store receiver loans or resize backing memory. `Set`,
+`TryAppend` and `Clear` also accept writable field paths through fully
+initialized unique owners, including forwarded writable `this`. The root
+is reserved before argument evaluation, and active views block mutation.
+The buffer remains owned by its containing value and is released by the
+same recursive cleanup. `Clear()` is NoThrow for an eligible live writable
+buffer place: it sets count to zero without freeing or reallocating the
+fixed-capacity storage. Mutable slice acquisition through a field remains
+unsupported; this does not implement the general `write`-view migration.
 `ReadonlyInt32BufferView` captures a checked pointer/length descriptor in a
 16-byte local frame slot, with its root retained only in structured semantic
 IR. `Slice(start, length)` rejects negative or out-of-prefix ranges without
@@ -302,7 +310,10 @@ For owned buffers, allocation-failure and exactly-once-release behavior can be c
 the trusted native ABI probe in `scripts/check-owned-buffer-abi.cs`, which
 replaces the fixture DLL's `HeapAlloc`/`HeapFree` imports to inject a
 deterministic failed allocation and track live blocks; tests do not rely on
-exhausting host memory. It also checks that only the low 32 bits of the
+exhausting host memory. Owning-field mutation probes check append/full-capacity
+refusal, set, clear and reuse with one allocation and one final release,
+no live blocks and no invalid frees. A checked-index failure retains earlier
+writes and the initialized count before that release. The probe also checks that only the low 32 bits of the
 `HeapFree` BOOL result determine success, and that failed release terminates
 even while a checked catch is available.
 

@@ -2201,7 +2201,7 @@ public static class SemanticVerifier
     }
 
     private static int VerifyMutableFieldPlace(BoundFieldRead place, bool[] initialized,
-        BoundFunction function, BoundProgram program, ref int remaining, int depth)
+        BoundFunction function, BoundProgram program, ref int remaining, int depth, bool allowBufferLeaf = false)
     {
         Count(ref remaining, depth);
         if (place is null || place.Receiver is null)
@@ -2214,7 +2214,8 @@ public static class SemanticVerifier
             || !program.Structures[owner].Fields[place.Field].IsMutable
             || !CanAccessField(function, program.Structures[owner], place.Field)
             || place.Type != program.Structures[owner].Fields[place.Field].Type
-            || !HasFields(program, place.Type) || ManagedClassTypes.IsClass(place.Type))
+            || (!(allowBufferLeaf && place.Type == PrimitiveType.OwnedInt32Buffer)
+                && (!HasFields(program, place.Type) || ManagedClassTypes.IsClass(place.Type))))
         {
             throw InvalidEffect(place.Span, "Ownership");
         }
@@ -2622,16 +2623,19 @@ public static class SemanticVerifier
                         }
                         else if (argument is BoundMutableFieldLoan mutableField)
                         {
-                            if (i != 0 || target.Intrinsic != BoundIntrinsic.None
+                            var bufferMutation = target.Intrinsic is BoundIntrinsic.BufferSet
+                                or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear;
+                            if (i != 0 || (target.Intrinsic != BoundIntrinsic.None && !bufferMutation)
                                 || target.DeclaringStruct is null || target.IsStatic || target.IsConstructor
                                 || !target.Variables[0].IsMutable || mutableField.Place is null
                                 || mutableField.Type != target.Variables[0].Type
-                                || mutableField.Place.Type != mutableField.Type)
+                                || mutableField.Place.Type != mutableField.Type
+                                || (bufferMutation && mutableField.Type != PrimitiveType.OwnedInt32Buffer))
                             {
                                 throw InvalidEffect(mutableField.Span, "Ownership");
                             }
                             loanRoot = VerifyMutableFieldPlace(mutableField.Place, initialized,
-                                function, program, ref remaining, depth + 1);
+                                function, program, ref remaining, depth + 1, bufferMutation);
                         }
                         else if (argument is BoundReceiverLoan loan)
                         {

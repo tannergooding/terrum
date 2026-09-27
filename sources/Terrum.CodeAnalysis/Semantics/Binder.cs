@@ -948,7 +948,8 @@ internal sealed partial class Binder
         return ErrorExpression(receiver.Span);
     }
 
-    private BoundExpression BindMutableReceiverLoan(SyntaxNode receiver, PrimitiveType type, TextSpan span)
+    private BoundExpression BindMutableReceiverLoan(SyntaxNode receiver, PrimitiveType type, TextSpan span,
+        bool allowBufferField = false)
     {
         while (receiver.Kind == SyntaxKind.ParenthesizedExpression)
         {
@@ -963,7 +964,8 @@ internal sealed partial class Binder
         if (receiver.Kind is SyntaxKind.MemberAccessExpression or SyntaxKind.NameExpression)
         {
             var place = BindExpression(receiver, type);
-            if (place is BoundFieldRead leaf && leaf.Type == type && IsStruct(type))
+            if (place is BoundFieldRead leaf && leaf.Type == type
+                && (IsStruct(type) || (allowBufferField && type == PrimitiveType.OwnedInt32Buffer)))
             {
                 BoundExpression current = leaf;
                 while (current is BoundFieldRead field)
@@ -2131,7 +2133,8 @@ internal sealed partial class Binder
                     ? ManagedClassTypes.Writable(ResolveDeclaredType(ownerName!))
                     : ResolveDeclaredType(ownerName!));
             bound.Add(signature.External?.Intrinsic is BoundIntrinsic.BufferSet or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear
-                ? BindMutableReceiverLoan(receiver, PrimitiveType.OwnedInt32Buffer, receiver.Span)
+                ? BindMutableReceiverLoan(receiver, PrimitiveType.OwnedInt32Buffer, receiver.Span,
+                    allowBufferField: true)
                 : signature.IsMutable && IsStruct(receiverType)
                     ? BindMutableReceiverLoan(receiver, receiverType, receiver.Span)
                 : IsUnique(receiverType) && !signature.IsCleanup

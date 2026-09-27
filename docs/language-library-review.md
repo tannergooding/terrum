@@ -70,6 +70,9 @@ named mutable unique owners and forwarded writable `this`, without changing
 cleanup responsibility or permitting owning-field replacement.
 Semantic v28 extends writable field paths through fully initialized unique
 roots and child structs, preserving the same ownership and cleanup rules.
+Semantic v29 extends writable owning-field loans to the existing
+`OwnedInt32Buffer.Set`, `TryAppend` and `Clear` intrinsics, not general
+reference/view access or field `SliceMutable` acquisition.
 It includes compilation-local constrained generic specialization, including
 bounded single-`T` inference for top-level function templates over `Copy`
 structs and existing scalar value types, but not primitive operator witnesses,

@@ -176,13 +176,15 @@ static int RunChecks(HMODULE image, int checked)
     TryRebuild tryRebuild = (TryRebuild)GetProcAddress(image, "TryRebuild");
     Check composite = (Check)GetProcAddress(image, "Composite");
     Check recover = (Check)GetProcAddress(image, "Recover");
+    Check fieldMutation = (Check)GetProcAddress(image, "FieldMutation");
+    Check recoverField = (Check)GetProcAddress(image, "RecoverField");
     Build workspace = (Build)GetProcAddress(image, "FormattingWorkspace");
     Format format = (Format)GetProcAddress(image, "FormatDigits");
     FormatSigned formatSigned = (FormatSigned)GetProcAddress(image, "FormatSignedDigits");
     Check recoverFormatting = (Check)GetProcAddress(image, "RecoverFormatting");
-    VERIFY(acquire && build && relay && consume && rebuild && tryRebuild && composite, 10);
+    VERIFY(acquire && build && relay && consume && rebuild && tryRebuild && composite && fieldMutation, 10);
     VERIFY(workspace && format && formatSigned, 14);
-    VERIFY(!checked || (recover && recoverFormatting), 11);
+    VERIFY(!checked || (recover && recoverFormatting && recoverField), 11);
     VERIFY(ReplaceImport(image, "HeapAlloc", (void*)TrackedAllocate), 12);
     VERIFY(ReplaceImport(image, "HeapFree", (void*)TrackedRelease), 13);
 
@@ -234,11 +236,18 @@ static int RunChecks(HMODULE image, int checked)
     VERIFY(composite() == 42, 50);
     VERIFY(attempts == 1 && releases == 1 && LiveCount() == 0 && !invalid, 51);
 
+    Reset();
+    VERIFY(fieldMutation() == 42, 52);
+    VERIFY(attempts == 1 && releases == 1 && LiveCount() == 0 && !invalid, 53);
+
     if (checked)
     {
         Reset();
         VERIFY(recover() == 42, 60);
         VERIFY(attempts == 1 && releases == 1 && LiveCount() == 0 && !invalid, 61);
+        Reset();
+        VERIFY(recoverField() == 42, 62);
+        VERIFY(attempts == 1 && releases == 1 && LiveCount() == 0 && !invalid, 63);
     }
 
     Reset();
@@ -319,7 +328,7 @@ int main(int argc, char** argv)
     }
     if (result == 0)
     {
-        puts("owned-buffer-abi opaque=8 publication=checked views=scoped reuse=checked heap=tracked live=0");
+        puts("owned-buffer-abi opaque=8 publication=checked views=scoped reuse=checked field=tracked heap=tracked live=0");
     }
     return result;
 }

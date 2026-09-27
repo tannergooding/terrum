@@ -693,7 +693,10 @@ earlier headers reject those methods. Semantic v28 permits nested mutable
 field loans through fully initialized unique roots and children, with the
 same writable-path, root-reservation and recursive-cleanup invariants.
 Earlier headers reject the broadened loan contract. Partially initialized roots,
-temporaries, managed-class-field receiver paths,
+temporary and managed-class-field receivers remain unsupported. Semantic v29
+adds `OwnedInt32Buffer.Set`, `TryAppend` and `Clear` through writable owning
+fields, preserving root reservation, active-view exclusion and recursive
+release. Field `SliceMutable` acquisition,
 rebinding `this`, and general reference forms remain unsupported. Primitive
 `Buffer` views retain separate legacy access paths, and the coherent
 `out`-to-`init ref<T>` migration remains scheduled. Neither the fail-fast runtime nor bounded
