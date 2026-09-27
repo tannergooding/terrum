@@ -1,0 +1,30 @@
+// DESIGN ONLY: declaration contracts, static proofs and require-expression
+// lifting are not implemented. Header-clause syntax is illustrative.
+using Terrum;
+
+public int32 AddOne(int32 value)
+    require value >= 0;
+    require value < int32.MaxValue;
+    ensure return == value + 1;
+{
+    // Private compile-time obligations, not additional public contracts.
+    static require value < int32.MaxValue;
+    static ensure return > value;
+
+    return value + 1;
+}
+
+int32 Main()
+{
+    // Lift the API's single success-conditioned output; false fails the requirement.
+    int32 x = require int32.TryParse("20");
+
+    // Explicit failure selection applies only to false, not a thrown exception.
+    int32 y = require<FormatException> int32.TryParse("21");
+
+    // Body-local runtime checks, not published preconditions.
+    require x >= 0 && x < int32.MaxValue;
+    require AddOne(x) == y;
+
+    return y;
+}
