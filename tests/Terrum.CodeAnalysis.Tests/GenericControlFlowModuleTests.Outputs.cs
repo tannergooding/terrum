@@ -1,0 +1,84 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System;
+using System.Buffers.Binary;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Native;
+using Terrum.CodeAnalysis.Semantics;
+using Xunit;
+
+namespace Terrum.CodeAnalysis.Tests;
+
+public sealed partial class GenericControlFlowModuleTests
+{
+    private const string OutputProducer = """
+        struct Pair {
+            public int64 First;
+            public int64 Second;
+            public Pair(int64 first, int64 second) { First = first; Second = second; }
+        }
+        [NoThrow] bool TryCopy<T>(T value, bool publish, out T result) where T : [Copy] {
+            result = value;
+            return publish;
+        }
+        [NoThrow] int32 Count<T>(T value, int32 count) where T : [Copy] { return count; }
+        public int32 PowerProbe() {
+            if (TryCopy<Pair>(new Pair(1i64, 2i64), false, out var missing)) { return 1; }
+            require TryCopy<Pair>(new Pair(40i64, 2i64), true, out var result);
+            return (int32)(result.First + result.Second) + Count<Pair>(result, 0);
+        }
+        """;
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task GenericOutputSpecializationsPersistWithoutPublicWitnessesOrNewWireFormatAsync(
+        NativeRuntimePolicy policy)
+    {
+        var original = ModuleCompiler.CreateProducer(Compile(Stub, policy), ["PowerProbe"]);
+        var consumer = ModuleCompiler.CreateConsumer(Compile("""
+            struct Pair {
+                public int32 Other;
+                public Pair(int32 other) { Other = other; }
+            }
+            int32 Main() {
+                Pair unrelated = new Pair(1);
+                return PowerProbe() + unrelated.Other - 1;
+            }
+            """, policy, ModuleCompiler.CreateReference(original), library: false), original);
+        var hash = SHA256.HashData(consumer);
+        var replacement = ModuleCompiler.CreateProducer(Compile(OutputProducer, policy), ["PowerProbe"]);
+        Assert.Equal(18, BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)));
+        var reference = ModuleCompiler.CreateReference(replacement);
+        Assert.Empty(reference.Structures);
+        Assert.Equal("PowerProbe", Assert.Single(reference.Functions).Name);
+        var linked = ModuleCompiler.Link(consumer, replacement);
+        Assert.Equal(["Pair", "$producer.Pair"], linked.Structures.Select(static structure => structure.Name));
+        var helper = Assert.Single(linked.Functions,
+            static function => function.Name == "$producer.TryCopy<Pair>");
+        Assert.Equal(PrimitiveType.Bool, helper.ReturnType);
+        Assert.True(helper.Variables[2].IsOut);
+        Assert.Equal((PrimitiveType)101, helper.Variables[2].Type);
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.Equal(hash, SHA256.HashData(consumer));
+
+        var nativeOriginal = NativeModuleCompiler.CreateProducer(Compile(Stub, policy), ["PowerProbe"], "NodeB", policy);
+        var middle = NativeModuleCompiler.CreateGraphProducer(Compile(Middle, policy,
+            NativeModuleCompiler.CreateGraphReference([nativeOriginal])), ["Middle"], "NodeA", [nativeOriginal], policy);
+        var root = NativeModuleCompiler.CreateGraphConsumer(Compile(Root, policy,
+            NativeModuleCompiler.CreateGraphReference([middle]), library: false), [middle], policy);
+        var rootHash = SHA256.HashData(root);
+        var middleHash = SHA256.HashData(middle);
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(Compile(OutputProducer, policy),
+            ["PowerProbe"], "NodeB", policy);
+        Assert.Equal(44, await NativeModuleCompiler.RunGraphAsync(root, [nativeReplacement, middle],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.Equal(44, await NativeModuleCompiler.RunGraphJitAsync(root, [middle, nativeReplacement],
+            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.Equal(rootHash, SHA256.HashData(root));
+        Assert.Equal(middleHash, SHA256.HashData(middle));
+    }
+}

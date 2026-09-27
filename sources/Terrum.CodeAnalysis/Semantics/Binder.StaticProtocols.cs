@@ -18,9 +18,9 @@ internal sealed partial class Binder
 
     private sealed record StaticProtocol(string Name, TokenKind Operator, bool IsNoThrow, SyntaxNode Declaration,
         SyntaxTree Tree);
-    internal sealed record GenericParameter(string Name, PrimitiveType? ScalarType);
-    internal sealed record GenericTemplate(string Name, string TypeParameter, ImmutableArray<GenericParameter> Parameters,
-        ImmutableDictionary<TokenKind, string> Operations, SyntaxNode Body, SyntaxNode Declaration,
+    internal sealed record GenericParameter(string Name, PrimitiveType? ScalarType, bool IsOut);
+    internal sealed record GenericTemplate(string Name, string TypeParameter, PrimitiveType? ScalarReturnType,
+        ImmutableArray<GenericParameter> Parameters, ImmutableDictionary<TokenKind, string> Operations, SyntaxNode Body, SyntaxNode Declaration,
         SyntaxTree Tree, bool IsNoThrow);
     internal sealed record GenericInstantiation(GenericTemplate Template, PrimitiveType Type);
 
@@ -36,6 +36,16 @@ internal sealed partial class Binder
         }
         throw new ArgumentOutOfRangeException(nameof(kind));
     }
+
+    private static PrimitiveType? GenericScalarType(string name) => name switch {
+        "int32" => PrimitiveType.Int32,
+        "uint32" => PrimitiveType.UInt32,
+        "int64" => PrimitiveType.Int64,
+        "uint64" => PrimitiveType.UInt64,
+        "char16" => PrimitiveType.Char16,
+        "bool" => PrimitiveType.Bool,
+        _ => null,
+    };
 
     private void DeclareProtocols()
     {
@@ -196,6 +206,8 @@ internal sealed partial class Binder
             .Where(static child => child.Token.Kind == TokenKind.Identifier)
             .Select(static child => child.Token.Text).ToArray();
         var returnType = children.FirstOrDefault(static child => child.Kind == SyntaxKind.TypeName);
+        var returnName = returnType is null ? "" : NameText(returnType);
+        var scalarReturn = GenericScalarType(returnName);
         var parameters = children.FirstOrDefault(static child => child.Kind == SyntaxKind.ParameterList);
         var body = children.LastOrDefault(static child => child.Kind == SyntaxKind.Block);
         var nameToken = ((SyntaxTokenElement)declaration.Children.First(element =>
@@ -209,7 +221,7 @@ internal sealed partial class Binder
         var noThrow = declaration.Children.OfType<SyntaxNode>()
             .Any(static node => node.Kind == SyntaxKind.Attribute && NameText(node) == "[NoThrow]");
         var valid = typeNames.Length == 1 && returnType is not null && body is not null
-            && NameText(returnType) == typeNames[0]
+            && (returnName == typeNames[0] || scalarReturn is not null)
             && arguments.Length is >= 1 and <= 8
             && declaration.Children.OfType<SyntaxTokenElement>().All(static element =>
                 element.Token.Kind is not (TokenKind.PublicKeyword or TokenKind.PrivateKeyword
@@ -220,8 +232,12 @@ internal sealed partial class Binder
                 node.Kind == SyntaxKind.Attribute) <= 1;
         foreach (var argument in arguments)
         {
+            var isOut = argument.Children is [SyntaxTokenElement { Token.Kind: TokenKind.OutKeyword },
+                SyntaxNode, SyntaxTokenElement];
             if (argument.Kind != SyntaxKind.Parameter
-                || argument.Children is not [SyntaxNode argumentType, SyntaxTokenElement argumentName]
+                || (argument.Children is not [SyntaxNode, SyntaxTokenElement] && !isOut)
+                || argument.Children[^2] is not SyntaxNode argumentType
+                || argument.Children[^1] is not SyntaxTokenElement argumentName
                 || argumentType.Kind != SyntaxKind.TypeName
                 || typeNames.Length != 1
                 || !parameterNames.Add(argumentName.Token.Text))
@@ -231,21 +247,13 @@ internal sealed partial class Binder
             else
             {
                 var typeName = NameText(argumentType);
-                var scalar = typeName switch {
-                    "int32" => PrimitiveType.Int32,
-                    "uint32" => PrimitiveType.UInt32,
-                    "int64" => PrimitiveType.Int64,
-                    "uint64" => PrimitiveType.UInt64,
-                    "char16" => PrimitiveType.Char16,
-                    "bool" => PrimitiveType.Bool,
-                    _ => (PrimitiveType?)null,
-                };
+                var scalar = GenericScalarType(typeName);
                 if (typeName != typeNames[0] && scalar is null)
                 {
                     valid = false;
                 }
                 templateParameters.Add(new GenericParameter(argumentName.Token.Text, typeName == typeNames[0]
-                    ? null : scalar));
+                    ? null : scalar, isOut));
             }
         }
         foreach (var constraint in children.Where(static child => child.Kind == SyntaxKind.ConstraintClause))
@@ -281,6 +289,7 @@ internal sealed partial class Binder
             }
         }
         if (body is null || !copy
+            || (templateParameters.Any(static parameter => parameter.IsOut) && scalarReturn != PrimitiveType.Bool)
             || !templateParameters.Any(static parameter => parameter.ScalarType is null)
             || (noThrow && operations.Values.Any(protocol => !_protocols[protocol].IsNoThrow)))
         {
@@ -288,10 +297,10 @@ internal sealed partial class Binder
         }
         if (!valid || _templates.Count >= MaximumStaticSpecializations)
         {
-            Report("TRM3007", "Generic function requires one local Copy type parameter, supported by-value parameters, and explicit constraints for any operators.", declaration.Span);
+            Report("TRM3007", "Generic function requires one local Copy type parameter, supported value or bool/out parameters, and explicit constraints for any operators.", declaration.Span);
             return;
         }
-        if (!_templates.TryAdd(qualified, new GenericTemplate(qualified, typeNames[0],
+        if (!_templates.TryAdd(qualified, new GenericTemplate(qualified, typeNames[0], scalarReturn,
             templateParameters.ToImmutable(), operations.ToImmutable(), body!, declaration, _tree, noThrow)))
         {
             Report("TRM3003", $"Duplicate generic function '{qualified}'.", declaration.Span);
@@ -300,19 +309,18 @@ internal sealed partial class Binder
 
     private PrimitiveType? GenericCallType(SyntaxNode callee)
     {
+        var name = ((SyntaxTokenElement)callee.Children[0]).Token.Text;
+        if (TryFindVariable(name, out _) || FindGenericTemplate(name) is not GenericTemplate template)
+        {
+            return null;
+        }
         var arguments = ((SyntaxNode)callee.Children[1]).Children.OfType<SyntaxNode>().ToArray();
-        return arguments.Length == 1 && TryResolveGenericArgument(NameText(arguments[0]), out var type) ? type : null;
+        return arguments.Length == 1 && TryResolveGenericArgument(NameText(arguments[0]), out var type)
+            ? template.ScalarReturnType ?? type : null;
     }
 
-    private int InstantiateGeneric(SyntaxNode callee)
+    private GenericTemplate? FindGenericTemplate(string name)
     {
-        _cancellationToken.ThrowIfCancellationRequested();
-        var name = ((SyntaxTokenElement)callee.Children[0]).Token.Text;
-        if (TryFindVariable(name, out _))
-        {
-            Report("TRM3011", $"'{name}' is a variable, not a function.", callee.Span);
-            return -1;
-        }
         var names = new HashSet<string>(StringComparer.Ordinal);
         if (_templates.ContainsKey(Qualify(name)))
         {
@@ -326,7 +334,19 @@ internal sealed partial class Binder
                 _ = names.Add(qualified);
             }
         }
-        var template = names.Count == 1 ? _templates[names.Single()] : null;
+        return names.Count == 1 ? _templates[names.Single()] : null;
+    }
+
+    private int InstantiateGeneric(SyntaxNode callee)
+    {
+        _cancellationToken.ThrowIfCancellationRequested();
+        var name = ((SyntaxTokenElement)callee.Children[0]).Token.Text;
+        if (TryFindVariable(name, out _))
+        {
+            Report("TRM3011", $"'{name}' is a variable, not a function.", callee.Span);
+            return -1;
+        }
+        var template = FindGenericTemplate(name);
         var arguments = ((SyntaxNode)callee.Children[1]).Children.OfType<SyntaxNode>().ToArray();
         if (_genericContext is GenericInstantiation caller
             && (arguments.Length != 1 || NameText(arguments[0]) != caller.Template.TypeParameter
@@ -365,10 +385,10 @@ internal sealed partial class Binder
             return -1;
         }
         var parameters = template.Parameters.Select(parameter => new Parameter(parameter.Name, parameter.ScalarType ?? concrete,
-            callee.Span, false)).ToImmutableArray();
+            callee.Span, parameter.IsOut)).ToImmutableArray();
         var index = _signatures.Count;
         _functions.Add(instantiated, index);
-        _signatures.Add(new Signature(instantiated, concrete, parameters,
+        _signatures.Add(new Signature(instantiated, template.ScalarReturnType ?? concrete, parameters,
             template.Declaration.Children.OfType<SyntaxNode>().Last(static node => node.Kind == SyntaxKind.Block),
             template.Declaration, template.Tree, null, false, false, true, false, true, template.IsNoThrow, false) {
             Generic = new GenericInstantiation(template, concrete),
@@ -439,26 +459,31 @@ internal sealed partial class Binder
                 proofBinder._templates.Add(helper.Name, helper);
                 var name = helper.Name + "<" + probeName + ">";
                 var parameters = helper.Parameters.Select(parameter => new Parameter(parameter.Name,
-                    parameter.ScalarType ?? probeType, helper.Declaration.Span, false)).ToImmutableArray();
+                    parameter.ScalarType ?? probeType, helper.Declaration.Span, parameter.IsOut)).ToImmutableArray();
                 var variables = parameters.Select(parameter => new BoundVariable(parameter.Name,
-                    parameter.Type, false, parameter.Span)).ToImmutableArray();
-                var external = new BoundFunction(name, probeType, variables, parameters.Length,
+                    parameter.Type, parameter.IsOut, parameter.Span) { IsOut = parameter.IsOut }).ToImmutableArray();
+                var returnType = helper.ScalarReturnType ?? probeType;
+                var external = new BoundFunction(name, returnType, variables, parameters.Length,
                     new BoundBlock([], helper.Declaration.Span), helper.Declaration.Span) {
                     IsExternal = true,
                     IsNoThrow = helper.IsNoThrow,
                 };
                 proofBinder._functions.Add(name, proofBinder._signatures.Count);
-                proofBinder._signatures.Add(new Signature(name, probeType, parameters, null, null,
+                proofBinder._signatures.Add(new Signature(name, returnType, parameters, null, null,
                     helper.Tree, null, false, false, true, false, true, helper.IsNoThrow, false, external));
                 functions.Add(external);
             }
 
             proofBinder._scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
-            proofBinder._returnType = probeType;
+            proofBinder._returnType = template.ScalarReturnType ?? probeType;
             foreach (var parameter in template.Parameters)
             {
-                _ = proofBinder.AddVariable(parameter.Name, parameter.ScalarType ?? probeType, false,
+                var slot = proofBinder.AddVariable(parameter.Name, parameter.ScalarType ?? probeType, parameter.IsOut,
                     template.Declaration.Span);
+                if (parameter.IsOut)
+                {
+                    proofBinder._variables[slot] = proofBinder._variables[slot] with { IsOut = true };
+                }
             }
             var body = proofBinder.BindGenericBody(new GenericInstantiation(template, probeType));
             if (proofBinder._diagnostics.Count != 0)
@@ -473,7 +498,8 @@ internal sealed partial class Binder
                 return false;
             }
 
-            var function = new BoundFunction(template.Name + "<$T>", probeType, [.. proofBinder._variables],
+            var function = new BoundFunction(template.Name + "<$T>", template.ScalarReturnType ?? probeType,
+                [.. proofBinder._variables],
                 template.Parameters.Length, body, template.Declaration.Span) {
                 IsNoThrow = template.IsNoThrow,
             };

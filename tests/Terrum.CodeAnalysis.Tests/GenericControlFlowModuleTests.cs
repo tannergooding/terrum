@@ -15,7 +15,7 @@ using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
 
-public sealed class GenericControlFlowModuleTests
+public sealed partial class GenericControlFlowModuleTests
 {
     private const string Stub = "public int32 PowerProbe() { return 40; }";
     private const string Middle = "public int32 Middle() { return PowerProbe() + 1; }";

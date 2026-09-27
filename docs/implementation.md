@@ -209,8 +209,13 @@ subset is deliberately compilation-local: each interface has three type
 parameters and one `static abstract` `+` or `*` declaration; an internal Copy
 struct explicitly implements a closed homogeneous instance. Parameter/result
 types, accessibility and declared effects must match. An internal generic
-function has one `[Copy]` type parameter and returns that type. By-value
-parameters and initialized locals may mix that type with supported scalars.
+function has one `[Copy]` type parameter and returns that type or a supported
+scalar. By-value parameters and initialized locals may mix that type with
+supported scalars. Boolean-returning templates also support conditional `out`
+parameters of either kind. The ordinary publication rules apply: true requires
+all outputs initialized, false or an exception publishes none, and a caller
+cannot read an output without proving success. Output-only type parameters are
+permitted, but generic construction and a default value are not implied.
 Structured bodies use assignments, blocks, `if`, `while`, scoped `for`,
 `break`/`continue`, `require` and return; operations on the type parameter
 must come from its declared operator constraints. `[Copy]` alone suffices for
@@ -232,6 +237,9 @@ executes for two distinct wrappers. The [integer-power example](../samples/nativ
 combines scalar loop control with a constrained square helper and explicit
 caller-supplied identity. The [Copy selection candidate](../self-host/CopyAlgorithms.terrum)
 selects complete values without requiring operator conformance.
+Its `TrySelectCopy` variant publishes a selected value only for index zero or
+one. Scalar return typing and output modes remain part of each helper's declared
+signature during definition-site proof and closed specialization.
 General interface dispatch, primitive conformance, generic inference,
 concrete type arguments inside templates, member access on a
 type parameter and public

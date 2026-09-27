@@ -28,6 +28,9 @@ Helpers require only their declared constraints: the
 [Copy selection candidate](../self-host/CopyAlgorithms.terrum) needs no operator
 witness and composes over nested token/range values. Calls cannot acquire
 undeclared protocols from a concrete specialization or a callee's body.
+Scalar-returning and conditional-output helpers retain the ordinary signature
+and definite-initialization rules; invalid selections publish no value rather
+than a fabricated generic default.
 Templates and witnesses remain
 compilation-local; the [implementation limits](implementation.md) do not extend
 to these complete inventories, primitive numeric conformance, mixed-result

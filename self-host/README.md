@@ -26,7 +26,7 @@ remain hosted in C#.
 
 | Candidate | Purpose | Gates before execution |
 |---|---|---|
-| [CopyAlgorithms](CopyAlgorithms.terrum) | NoThrow selection of complete Copy values without operator witnesses | Composed AOT/JIT calls select nested tokens and ranges under both policies; no primitive conformance, borrowed views or generic runtime dispatch |
+| [CopyAlgorithms](CopyAlgorithms.terrum) | NoThrow selection and conditional output of complete Copy values without operator witnesses | Composed AOT/JIT calls select nested tokens and ranges under both policies; invalid indices publish no value; no primitive conformance, borrowed views or generic runtime dispatch |
 | [IntegerFacts](IntegerFacts.terrum) | Overflow-free signed-addition range predicate | Supported by the native profile; tested with native entry wrappers, not a full compiler bootstrap |
 | [WideIntegerFacts](WideIntegerFacts.terrum) | Checked signed addition and bounded decimal accumulation through the full unsigned 64-bit range | Executed as a separately compiled module with conditional wide outputs |
 | [WideIntegerTests](WideIntegerTests.terrum) | Signed extrema, invalid digits, decimal overflow and repeated output publication | Executed through AOT and JIT with a shared entry wrapper |
@@ -63,6 +63,11 @@ The caller can compose it through another Copy-constrained helper while retainin
 the declared NoThrow contract. Token/range fixtures verify independent nested
 copies after the original local values are replaced. The function remains a
 compilation-local template, not a separately published generic library contract.
+`TrySelectCopy<T>` accepts index zero or one and publishes the corresponding
+value through the existing conditional `bool`/`out` contract. Other indices
+return false without publishing an output; inputs are still ordinary eagerly
+evaluated values. Generic helper forwarding preserves that contract rather
+than manufacturing a default token or range.
 
 `SourceLines` reads the same immutable `Host.Source` capability as the scanner,
 without retaining a pointer, borrowing writable storage or allocating a line table.

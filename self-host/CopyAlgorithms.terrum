@@ -9,3 +9,19 @@ namespace Terrum;
 
     return second;
 }
+
+[NoThrow] bool TrySelectCopy<T>(int32 index, T first, T second, out T result) where T : [Copy]
+{
+    if (index == 0)
+    {
+        result = first;
+        return true;
+    }
+    if (index == 1)
+    {
+        result = second;
+        return true;
+    }
+
+    return false;
+}
