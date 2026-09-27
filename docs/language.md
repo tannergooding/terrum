@@ -162,6 +162,67 @@ Design-only character literals carry one scalar, target-typed to a representable
 
 Defaults are **ordinal plus invariant together**: exact Unicode scalar sequence equality and scalar ordering across encodings, matching hash, no implicit normalization/casing/linguistic comparison, and ASCII digits/signs/punctuation for numeric parsing and formatting. U+0661/U+FF11 digits and U+2212 minus do not act like ASCII tokens. Arbitrary valid Unicode remains valid text data. Termination, embedded-zero exclusion, pinning and lifetime are distinct native-string requirements. `Text` is a common payload/facade. The target sketch uses `own<val<Text>>` when it means a native owner of inline `Text` payload; construction/conversion and cleanup syntax remain unsettled, and this is not implemented.
 
+### Callable values, `params` and tuples
+
+The target callable families are `func<Args..., R>` for a lifetime-aware
+single-cast callable and `fnptr<Args..., R>` for a raw pointer to target-defined
+code; the result is last, and each concrete signature is closed at any
+supported arity. A `func` retains its checked target and capture dependencies
+without silently owning borrows or extending lifetimes. A `fnptr` retains no
+independent environment, and its code must outlive each use. Neither form
+multicasts, boxes by default, or implies an allocation. Type aliases,
+including generic aliases, preserve parameter labels, access, effects, and
+calling convention with the complete signature; nominal wrappers are a
+separate feature.
+
+Callable parameter names and tuple element labels are source-view and
+metadata/tooling information, not ABI names or nominal identity. Calls use the
+statically visible callable labels, and named arguments evaluate in source
+order before binding to parameter positions. Tuple values are inline ordered
+heterogeneous storage with a fixed closed shape, not a parameter pack or
+implicit function-argument ABI. Their copy, uniqueness, borrow, and access
+rules follow every complete element type.
+
+`fnptr` uses the Terrum callable convention by default, analogous to a C#
+managed function-pointer contract but not CLR execution. Foreign conventions
+are explicit checked type-use attributes on the callable entry, retained
+through pointer nesting, aliases, parameters, and results. For example,
+`[CallConv(NativeCallingConvention.Winapi)] fnptr<...>` and
+`NativeExport(CallingConvention = ...)` illustrate existing design vocabulary,
+but exact names/grammar and import/export ergonomics remain open. No implicit
+convention casts are allowed, and ABI choice alone makes no promise about GC,
+allocation, exception containment, or marshalling. A `func` invokes through its
+Terrum contract and may explicitly adapt a target with a different ABI. Open
+instance callables receive an explicit receiver whose access matches the
+method; bound callables retain receiver dependencies in their environment.
+The exact receiver marker syntax is open. A bound instance does not require a
+separate thin/fat type family; no full open/closed-by-thin/fat cross-product,
+fat `fnptr`, or mandatory no-capture family is part of this bounded direction.
+
+Nominal functors have checked receiver contracts: readonly `Invoke` is distinct
+from `mut Invoke`; a stateful inline functor requires a writable place or
+`write ref<T>`, and a class functor with `mut Invoke` requires a `write` handle.
+Compiler-supplied callable witnesses apply only when the complete signature,
+effects, access, lifetime, and ABI satisfy the protocol; they do not
+synthesize allocated interface adapters or authorize arbitrary structural
+conversion. Contextual lambdas preserve the expected callable or functor
+representation, and a capturing lambda is not implicitly a `fnptr`. Generic
+functors use declared symbolic constraints and specialization; ordinary
+scalar callbacks do not imply SIMD implementations or automatic vectorization.
+
+`params Collection<T>` and common `params Span<T>` forms use ordinary checked
+collection construction and element copy/move rules. Expanded values occupy
+new slots rather than aliasing caller locals; `params` adds no by-reference
+parameter mode, though explicit reference types may be elements where normal
+storage and lifetime rules permit them. Whether an existing collection binds
+as the collection argument or expands into elements remains open.
+
+These are target contracts, not claims of current compiler support. Callable
+and tuple syntax, checked witnesses, and contextual lambda lowering remain
+scheduled work; user-defined type-pack expansion, pack indexing/folds,
+polymorphic callable erasure, and implicit callback vectorization are outside
+this bounded direction.
+
 ### Construction, errors and effects
 
 Ordinary explicit constructors are baseline. Independent opt-in `Generate` operations can supply construction, equality/hash, deconstruction, formatting and combined validated withers from declared storage/mappings; no field-name magic, automatic primary-constructor capture, implicit successive setters or parameter-name-only overload distinctions. Omitted update members are `Unchanged`, not a null/default value. Affine and class withers need explicit failure, cleanup, allocation and identity behavior.
@@ -175,7 +236,7 @@ outputs are cleaned up on false or checked exceptional exit.
 
 Formatting uses one `IFormattable` → `ITextWriter` protocol with typed fragments/values, no obligatory allocating formatter per type. Target-typed interpolation and collection expressions register explicit construction shapes, not arbitrary similarly named methods. Holes evaluate once left-to-right into typed captures before segments drain; borrowed-hole expression syntax and its capture contract remain provisional. Any eventual borrowed parameter type uses canonical `ref<T>`, but that type notation does not require explicit `ref<T>` syntax at the hole/call site. Named unique transfers require `move`. Nested formatting forwards the same writer so a Point and its scalar fields can reach a custom handler without temporary strings or boxing. Refusal stops future writes but cannot undo prior output or hole evaluation; no replay, rollback or transactional stream guarantee. Owning text publishes only after full validation/freeze and cleans partial storage. Collection spreads enumerate once in order; builders own accepted elements, clean rejected consumed elements and abandon partial state exactly once. Builder arguments, handler registration and resumable async formatting are open. Synchronous formatter refusal is not a resumable continuation.
 
-Allocation, GC, rooted reads/writes, blocking, suspension, I/O, atomics, throwing/no-throw, normal/no-return, cleanup and retirement are independently expressible effect bounds, finer-grained than Core/Foundation/Application dependency layers. `void` is the single zero-data result type, with value `()`, usable as `Func<void>` and `Task<void>`; `Option<void>` still represents two states. A checked `[DoesNotReturn]` on a `void` call removes its normal continuation but retains exception/cleanup edges; `[NoThrow]` is separate. A verified implementation cannot normally return, including by completing a task that terminates *later*. There is no public `unit` or `never` primitive; the compiler may use internal bottom flow. Removing an exported no-return guarantee breaks callers that rely on it.
+Allocation, GC, rooted reads/writes, blocking, suspension, I/O, atomics, throwing/no-throw, normal/no-return, cleanup and retirement are independently expressible effect bounds, finer-grained than Core/Foundation/Application dependency layers. `void` is the single zero-data result type, with value `()`, usable as a zero-argument `func<void>` and `Task<void>`; `Option<void>` still represents two states. A checked `[DoesNotReturn]` on a `void` call removes its normal continuation but retains exception/cleanup edges; `[NoThrow]` is separate. A verified implementation cannot normally return, including by completing a task that terminates *later*. There is no public `unit` or `never` primitive; the compiler may use internal bottom flow. Removing an exported no-return guarantee breaks callers that rely on it.
 
 The current native profiles implement conservative checked `[NoThrow]` and
 `[DoesNotReturn]` bounds and their versioned declaration contracts. A separate
@@ -240,19 +301,28 @@ same lowering through a JIT worker. Independently produced semantic modules
 support checked process-start replacement; the compiled Terrum scanner can
 supply the real front end's lexical input. These are not a general LMOD
 deployment model or a compiler bootstrap. The current subset rejects target
-`mut class` declarations and writable `mut` instance-method receivers; legacy
-source classes still permit writes to declared mutable fields through bare
-class handles and do not record nominal mutability in checked type metadata.
-The class/`ManagedNode` access migration is in progress, but this remains the
-support boundary until its code and regression tests are verified. Primitive
-`Buffer` views retain separate legacy access paths and remain scheduled for
-alignment with the target `mut`/`write` contract. Existing executable class
-samples retain legacy syntax until their migration is verified. Neither the
-fail-fast runtime nor bounded checked-exceptions proof is the language's future
-general exception runtime. Bounded ownership and lexical-view checks,
-source-defined managed classes, optional edges and explicit cycle tracing are
-implemented; general ownership/lifetime analysis, public managed module
-contracts and source-compatible standard libraries remain future stages.
+`ref<T>`/`ptr<T>`/`box<T>`/`val<T>` forms, `own<T>`, general loans and
+`init ref<T>` invocation. The validated semantic-v24 class/`ManagedNode`
+access batch supports `mut class`, writable `mut` class receivers, readonly
+bare handles, and explicit `write` capability through fields, optionals,
+parameters, results and inference. Constructors initialize unpublished
+objects before publication; a writable child handle retains its capability
+through a readonly parent without deep-read propagation. Writable storage is
+invariant, output destinations require an exact qualified type, and value
+`write`-to-readonly attenuation is allowed. Semantic readers normalize private
+managed artifacts from versions 18 through 23 into qualified internal IR,
+translating legacy class/`ManagedNode` mutation authority to explicit `write`
+exactly where previously granted. Nonmanaged artifact
+versions and bytes remain unchanged. Native handle layout and the scalar-only
+public module boundary are unchanged. Primitive `Buffer` views retain separate
+legacy access paths;
+mutable struct receiver writeback and the coherent `out`-to-`init ref<T>`
+migration remain scheduled. Neither the fail-fast runtime nor bounded
+checked-exceptions proof is the language's future general exception runtime.
+Bounded ownership and lexical-view checks, source-defined managed classes,
+optional edges and explicit cycle tracing are implemented; general
+ownership/lifetime analysis, public managed module contracts and
+source-compatible standard libraries remain future stages.
 Syntax-only commands do not validate semantic obligations; native builds
 diagnose unsupported constructs rather than silently weakening them. See
 [implementation](implementation.md) and [native](native.md) for actual support,

@@ -3,6 +3,12 @@ using Terrum;
 
 namespace Terrum.Collections.Algorithms;
 
+// IMapper and IPredicate below are explicit nominal functor protocols.
+// A compiler-supplied func/fnptr witness would require the complete callable
+// signature, effects, access, lifetime and ABI to match; it would not box or
+// synthesize an allocated structural adapter. These scalar-oriented APIs do
+// not imply generic SIMD behavior for a closed callback.
+
 // Equality and key semantics are caller-selected capabilities, not inherited
 // universal object defaults. A key comparer pairs equality with its hash policy.
 public interface IEqualityComparer<T>

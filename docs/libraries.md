@@ -13,6 +13,10 @@ This is the proposed Terrum library contract, not the installed .NET library or 
 
 These are three coherent cumulative layers, **not** a feature-profile matrix for each allocator, SIMD width, encoding or collection. Namespaces describe functionality; referencing `Terrum.Collections` does not link every package or grant effects. An Application program can use Core's nonallocating kernels. Core does not promise that *all* error paths or callbacks allocate nothing; freestanding no-allocation execution additionally needs a compatible failure runtime. The initial native compiler does not yet implement these library layers. Optional hardware acceleration may use compatible software paths; a hardware-scalable register type with a target ABI is not secretly software-emulated as another type. Modules publish normalized public contracts, effects, lifetimes, generic witnesses and ABI obligations independently of linkage choice. Pinning an implementation does not expand `internal`/`private` access. Contract-bound replacement and AOT require actual metadata/binder support, not merely equal method names.
 
+The validated semantic-v24 source-class/`ManagedNode` access slice does not
+implement these general library layers: `List<T>`, `LinkedList<T>`, generic
+views/builders and the API inventories below remain design contracts.
+
 The API inventories deliberately mix signatures with selected algorithm bodies. Unspecified bodies do not imply native exports or implementations. `[Copy]`, `[Sized]`, `[ManagedStorable]`, `[SimdElement]` and `[TextCodeUnit]` denote checked capability predicates rather than arbitrary user attributes. The [Foundation ownership inventory](../library/foundation.api.terrum) distinguishes a per-allocation **storage-and-release lease** from an owned **allocator context** retained by a growing vector. `Buffer<T>.Adopt` takes an existing allocation, validating byte extent, actual element alignment and required tracing capabilities; it does not create storage from a release token. Initial `Vector<T>` accepts `[Copy]` elements: `Reserve` obtains a new lease from its retained context, copies the initialized prefix, cleans partial copies on failure and publishes replacement storage only after success. The old allocation cannot be replaced while views borrow it. Affine/borrowed element storage, initialized prefixes, allocator-provider selection, write-guard enforcement and native GC barriers still need complete contracts. Additional proposed signatures and associated-family notation require language design and validation before they can become compiler acceptance fixtures.
 
 ## Scalar mathematics, keys and conversion
@@ -62,6 +66,36 @@ Explicit `simd64/128/256/512<T>` are fixed ABI shapes where supported; `simd<T>`
 Fixed SIMD values can be `[Sized]` if layout supports their element type. The proposed initial scalable profile is SVE-like **sizeless**: locals, scoped loans and statically specialized compatible calls, but not ordinary fields, heap boxes, array/pool elements or aggregate payloads. [Arm ACLE](references.md#other-official-library-specific-prior-art) specifies related SVE vector/predicate restrictions, but does not supply Terrum's ABI or lifetime rules. Such live values cannot cross `await`, incompatible vector contexts or an ABI boundary that cannot carry them. RVV requires its own validated profile; mask representation, vector length and ABI cannot be copied blindly from SVE. Library dispatch checks CPU *and OS* support and selects concrete implementation variants before calling a scalable kernel. AOT publishes a bounded explicit variant plan rather than inventing runtime code generation. Reusable static operators/witnesses allow code sharing without erasing masks, boxing sizeless values or conflating vectors with scalar `INumber`.
 
 Tail handling is part of correctness: `First(remaining)` masks the final iteration, inactive masked **loads/stores do not access memory**, and no safe lane is poison/undefined. Stores with repeated scatter indexes preflight active bounds before writes, then define duplicate-index order (last active lane wins). Aliasing/alignment rules are checked at the public boundary. A fixed vector may use full-vector processing and a scalar tail instead; neither strategy may read beyond the provided span. Dot/sum ordering across vector widths needs an explicitly chosen reproducibility policy: per-vector lane order alone is insufficient to make a whole-input reduction bitwise stable. Strict scalar order is a defensible default; a separately named relaxed/high-throughput reduction may regroup and document architecture-dependent results.
+
+## Callable kernels and collection parameters
+
+The target `func<Args..., R>` is a lifetime-aware single-cast callable;
+`fnptr<Args..., R>` is a raw code pointer with a closed target-defined
+signature and no retained context. Named nominal functors remain ordinary
+checked protocols, as illustrated by `IMapper` and `IPredicate` in the
+[algorithm inventory](../library/algorithms.api.terrum). Compiler-supplied
+callable witnesses require the complete signature, effects, access, lifetime,
+and ABI to satisfy the protocol; they do not box, allocate a structural
+adapter, or turn a closed callback into a generic one.
+
+Generic scalar/SIMD kernels use a named generic functor with definition-site
+symbolic constraints and specialization for the registered family members.
+A scalar `func<float32, float32>` or scalar callback does not promise a vector
+implementation. A contextually generic lambda is later shorthand for the same
+checked generic-functor contract. Elementwise equivalence still needs an
+operation contract for effects, invocation counts, cross-lane behavior,
+inactive lanes, tails and floating-point order/contraction. Captured scalar
+values require an explicit supported broadcast rather than an implicit
+vector conversion. Neither a readonly functor receiver nor scalar generic
+admissibility guarantees purity or automatic vectorization.
+
+The agreed `params Collection<T>` and `params Span<T>` direction uses ordinary
+construction and per-element copy/move into new slots, not aliases to caller
+locals or a special by-reference parameter mode. Explicit reference types may
+be elements when normal storage and lifetime contracts permit them. Whether
+an existing collection binds directly or expands into elements remains a
+binding/overload rule to settle. These callable and parameter contracts are
+design targets, not executable APIs in the current native compiler.
 
 ## Views, shapes and tensor primitives
 

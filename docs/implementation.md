@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-13, native-10 through native-20, semantic v23
+## Current boundary: syntax-13, native-10 through native-20, semantic v24
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -10,22 +10,23 @@ verified structured operations. A clean syntax result is deliberately not a
 valid-program claim: `var x = 1;` parses but semantic analysis rejects its missing
 numeric context. General ownership/lifetime checking, general semantic IL/LMOD,
 general managed graphs and standard-library execution are not implemented.
-The class/`ManagedNode` readonly-versus-writable access and mutable-receiver
-migration is in progress; the existing executable behavior below remains the
-legacy contract until the implementation and regressions are verified. The
-next semantic-module capability contract is planned as version 24, not yet
-implemented or written. Buffer-view and `out`-to-`init ref<T>` migration remain
-separate scheduled work.
+The semantic-v24 source-class/`ManagedNode` readonly-versus-writable and
+mutable-class-receiver contract is validated. New managed programs use v24;
+readers normalize private managed artifacts from versions 18 through 23 into
+qualified internal IR while preserving their former authority. Nonmanaged
+programs retain their existing versions and bytes. Primitive buffer-view
+alignment, mutable struct receiver writeback and `out`-to-`init ref<T>`
+migration remain separate scheduled work.
 
 | Surface | Implemented | Not yet implemented |
 |---|---|---|
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
 | Lexing | Pinned Unicode identifiers, ASCII numbers/tags, comments, leading trivia, strings, diagnostics, EOF | Interpolation, raw/character/native literals, directives |
-| Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, bounded reference classes, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Inheritance, unique/inline classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes/generics, public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
-| Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; executable source-class and `ManagedNode` optionals; repeated `?` diagnoses | Scalar options, generic optional normalization after substitution, family defaults/conditional conformance, ownership/form qualifiers |
+| Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, bounded source classes including `mut class`, readonly default and writable `mut` class receivers, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Inheritance, unique/inline classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes/generics, public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
+| Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; source-class and `ManagedNode` optional handles with `write` capability preserved through fields, parameters, results and inference; repeated `?` diagnoses | Scalar options, generic optional normalization after substitution, family defaults/conditional conformance, general ownership/form qualifiers and general borrowed references |
 | Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, nearest-loop `break`/`continue`, return, `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, labeled transfers, general switch/patterns, general exception objects/throw, async, compound assignment |
-| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, explicit closed static-protocol calls, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations and lexical readonly/exclusive writable buffer slices | Character literals, partial owning-field moves, owning field replacement, general expression temporaries, general stored loans, evaluation outside the native profile, user-defined conversions, general overloads/generic calls, conditional expressions, constructor generic inference |
-| Managed storage | Aliasable `ManagedNode` and source-class handles, optional edges and non-null pattern snapshots, handle-free compact Copy fields in classes, descriptor-based cycle tracing, complete-publication class factories, exact frame/temporary roots and explicit nonmoving collection under both policies, including exceptional root retirement and escaping-frame unlink | Managed handles inside user structs, stored interior pointers, implicit GC, native DLL/module graph managed ABI |
+| Expressions | Names, raw literals, `()`, grouping, unary/binary operations, checked numeric casts, member/index access, calls, explicit closed static-protocol calls, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique receiver and initialized owning-field loans, qualified source-class/`ManagedNode` writes and mutable-class receivers, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations and lexical readonly/exclusive writable buffer slices | Character literals, partial owning-field moves, owning field replacement, general expression temporaries, general stored loans, evaluation outside the native profile, user-defined conversions, general overloads/generic calls, conditional expressions, constructor generic inference |
+| Managed storage | Aliasable `ManagedNode` and source-class handles, optional edges and non-null pattern snapshots, readonly bare handles and explicit `write` capability, mutable-class receiver checks, qualified field/parameter/result/inference paths, handle-free compact Copy fields in classes, descriptor-based cycle tracing, complete-publication class factories, exact frame/temporary roots and explicit nonmoving collection under both policies, including exceptional root retirement and escaping-frame unlink | Managed handles inside user structs, stored interior pointers, implicit GC, native DLL/module graph managed ABI |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
 
 Only the grammar below is supported. Unsupported constructs diagnose rather than
@@ -50,7 +51,7 @@ constraints = "where" name ":" (type | attributes) ("," (type | attributes))*
 field       = type name ("=" expression)? ";"
 constructor = containingTypeName parameters block
 parameters  = "(" (mode? type name ("," mode? type name)*)? ")"
-type        = (qualifiedName | "void") ("<" type ("," type)* ">")? "?"?
+type        = "write"? (qualifiedName | "void") ("<" type ("," type)* ">")? "?"?
 mode        = "ref" | "mut" "ref" | "out"
 local       = localInitializer ";"
 localInitializer = "mut"? ("var" | type) name "=" expression
@@ -104,15 +105,15 @@ There is no resize, general aliasable view or generic
 buffer or user-defined buffer representation. `TryAppend` is a bounded
 initialized-prefix adapter for compiler components, not an implementation of
 the proposed general `Buffer<T>`/`TryAdd` library contracts.
-The separate `ManagedNode` proof copies handles without duplicating payloads
-or a cleanup obligation. `ManagedNode.TryCreate(value, out var node)` publishes
-only on true; `node.Value`, `SetValue`, `SetNext`, `ClearNext` and
-`TryGetNext(out var next)` access a scalar and a single nullable internal
-edge. A fixed local binding can mutate through its writable handle. This is
-the current legacy intrinsic contract: a bare fixed handle can mutate the node,
-and its operations do not yet share the accepted `write` capability model. The
-`ManagedNode` portion of the readonly/writable and receiver migration is in
-progress; this description is not a claim that the target checks have landed.
+The `ManagedNode` proof copies handles without duplicating payloads or a
+cleanup obligation. `ManagedNode.TryCreate(value, out var node)` publishes only
+on true; `node.Value`, `SetValue`, `SetNext`, `ClearNext` and
+`TryGetNext(out var next)` access a scalar and a single nullable internal edge.
+Semantic version 24 applies readonly-by-default access to these intrinsics:
+reads use readonly handles, while mutation requires a writable handle and
+checked writable receiver. `write` qualification is preserved through optional
+handles, fields, parameters, results and inference. A bare fixed handle cannot
+mutate the node.
 `ManagedHeap.Collect()` walks typed active roots across generated frames,
 including staged call arguments, outputs and pending returns, then follows
 descriptor-listed managed edges and reclaims unmarked cycles. This bounded collector runs only
@@ -147,12 +148,17 @@ Neither the provisional object nor managed arguments can disappear during
 constructor collection. Copy payloads are not conservative roots.
 Classes have no inheritance, inline class representation or public managed
 module ABI; `new C(...)` is rejected rather than inventing an allocation exception.
-The current source-class subset is also legacy access behavior: bare class
-handles can write declared mutable fields, class types do not retain nominal
-mutability in checked metadata, `mut class` is rejected, and writable `mut`
-instance-method receivers are not supported. The class part of the
-readonly/writable migration is in progress; until verified, these executable
-rules must not be read as the target language contract.
+Semantic version 24 records nominal mutability and `write` access for source
+classes. A `mut class` may declare mutable fields and writable `mut` class
+receivers; bare class handles are readonly and writes through a handle require
+`write` authority in addition to mutable member declarations. A writable
+child handle stored in a field retains that capability when read through a
+readonly parent; no deep-read propagation is applied. Constructors initialize
+the unpublished receiver and publish only after complete initialization.
+Writable storage is invariant, output destinations require the exact qualified
+type, and value-level `write`-to-readonly attenuation is allowed. These rules
+also apply through nested handles subject to private/internal access and
+partial-construction checks.
 `native-20` adds `C?` and `ManagedNode?`, contextual `null`, non-null-to-optional
 lifting, `is null` and `is some value`. Successful extraction creates a non-null
 handle snapshot; clearing the original edge does not invalidate it.
@@ -179,6 +185,14 @@ export boundary and private-leaf dependency restriction remain unchanged.
 Constructor signatures with more than three inputs require version 23; older
 versions retain their original arity limit. High-arity functions retain the
 existing page-safe frame bound and exact roots for potentially managed spills.
+Semantic version 24 records managed class/`ManagedNode` access capabilities.
+New managed programs use v24; readers normalize private managed artifacts from
+versions 18 through 23 into explicitly qualified internal IR, translating
+legacy class/`ManagedNode` mutation authority into `write` exactly where each
+older contract granted it. A v18-v23 header cannot contain v24 write
+identifiers. Nonmanaged programs retain their historical versions and bytes.
+The private managed-leaf boundary and scalar-only public native ABI are
+unchanged.
 Optional-node-only modules,
 managed consumer declarations and managed imported/exported signatures still
 reject.

@@ -1,7 +1,8 @@
 # Language and library improvement review
 
-**Design review; §§1.1 and 1.2 and the collection-based `params` direction in
-§1.4 record accepted directions.** Other proposals add no syntax/API promise
+**Design review; §§1.1 and 1.2 and the bounded collection-based `params`,
+callable, tuple, alias, and functor directions in §1.4 are accepted.**
+Unresolved grammar and other proposals add no syntax/API promise
 or compiler authorization. The review draws on C#/.NET, Rust, Go, Swift, Kotlin, C++
 and Java experience without treating any one ecosystem as a template.
 [Language](language.md), [lifetimes](lifetimes.md), [type families](type-families.md),
@@ -71,13 +72,16 @@ Readonly access does not make aliased backing or its object graph immutable.
 The canonical reference representations are `ref<T>`, `ptr<T>`, `box<T>`,
 `val<T>` and `own<T>`. `init ref<T>` is an initialization loan to vacant
 storage, unreadable until full initialization/publication; it is not an
-arbitrary writable `ref<T>`. The bounded compiler still implements legacy
-`bool`/`out` publication, which must migrate coherently across declarations
-and call sites. It also rejects target `mut class` declarations and writable
-`mut` instance-method receivers, while legacy class handles can still write
-declared mutable fields; the current type metadata does not encode nominal
-mutability. These are implementation gaps, not revisions to the accepted
-model. Details and current support boundaries are in
+arbitrary writable `ref<T>`. The validated semantic-v24 batch implements this access distinction for source
+classes and `ManagedNode`: `mut class` declarations and writable `mut` class
+receivers, readonly bare handles, and explicit `write` capability are retained
+through fields, optionals, parameters, results and inference. A writable child
+handle remains writable through a readonly parent; no deep-read propagation is
+implied. `write` storage is invariant, and output destinations require the
+exact qualified type; value-level `write`-to-readonly attenuation is allowed.
+Constructors initialize unpublished objects before publication. Legacy
+`bool`/`out` conditional publication remains the executable output contract;
+it is not replaced by `init ref<T>`. Details and current support boundaries are in
 [language](language.md), [lifetimes](lifetimes.md) and
 [implementation](implementation.md).
 
@@ -244,164 +248,126 @@ case/version policy and match behavior remain proposals. Concrete types remain
 sealed by default under the canonical [language contract](language.md); that
 accepted default does not settle any of the enum evolution proposals here.
 
-### 1.4 Collection-based `params` and callable/type-pack proposals
+### 1.4 Collection-based `params`, callables, and tuples
 
 **Agreed collection-based `params` direction:** `params Collection<T>` with a
-common `Span<T>` form, using ordinary collection construction and element
-copy/move rules. The existing-collection versus expanded-element binding rule
-remains open. This mechanism is distinct from the following unapproved
-callable/tuple proposals.
+common `Span<T>` form uses ordinary checked collection construction and
+ordinary per-element copy/move rules. Expanded elements initialize new slots,
+not aliases of caller argument locals. There is no special `ref`-parameter
+mode for expanded arguments, though an explicit reference type may be an
+ordinary element value where normal storage and lifetime rules permit it.
+Access follows the accepted `mut`/`write` and qualified-`T` rules in §1.1.
+The exact overload/binding rule for an existing collection versus expanded
+elements remains open.
 
-**Unapproved bounded-subset recommendation:** keep homogeneous `params`
-separate from heterogeneous type packs. A first subset could provide
-compiler-recognized `fnptr`, single-cast `delegate`, and ordered `tuple` type
-families at arbitrary supported arities, while each concrete function
-signature and tuple has a fixed, closed shape. This avoids a maintained
-`Func` arity ladder without introducing user-defined type-pack expansion, pack
-indexing/folds, or forwarding. .NET's finite `Func`
-arities and recursive `Tuple<..., TRest>` are library conventions, not a
-language-level pack ([`Func`](https://learn.microsoft.com/en-us/dotnet/api/system.func-17),
-[`Tuple`](https://learn.microsoft.com/en-us/dotnet/api/system.tuple-8)).
-The built-in stored-callable family could instead be called `func`; its naming
-and relationship to `delegate` remain open, without requiring user-declared
-nominal delegate types.
-
-Agreed parameter-model examples:
+**Accepted bounded callable and tuple direction:** the compiler knows these
+closed type families at any supported arity; each callable signature and
+tuple instance has one fixed shape. This is not a user-defined type-pack
+facility: no pack declarations, expansion, indexing, folds, or forwarding.
+Result is last and parameter names are omitted from these type spellings:
 
 ```terrum
 void Consume<T>(params Collection<T> items);
 int32 Sum(params Span<int32> values);
+
+fnptr<int32, bool, int64> parse;  // (int32, bool) -> int64
+func<int32, int32> map;           // int32 -> int32
+tuple<int32, bool> state;         // ordered inline elements
 ```
 
-The following callable/type-family spellings are **recommendations, not
-accepted syntax**:
+`func<Args..., R>` is a lifetime-aware, single-cast callable with one target;
+it may represent a static target or retain a bound receiver/environment under
+ordinary checked capture, ownership, and lifetime rules. It does not imply
+that a borrow is owned, that a lifetime is extended, or that storage is
+allocated. Its layout is uniform for the complete type regardless of the
+specific target, but an exact fat size is not promised. `fnptr<Args..., R>` is
+a raw pointer to target-defined code, with no independently retained
+environment; the code must outlive every use. There is no multicast callable
+or custom nominal-delegate declaration in this bounded direction. Type aliases,
+including generic signature aliases, are transparent aliases, not nominal
+delegate identities; generic aliases preserve labels, access, effects, and
+calling convention with the complete signature. Simple nominal wrappers remain
+a separate feature.
 
-```terrum
-fnptr<int32, bool, int64> parse;  // (int32, bool) -> int64; result last
-func<int32, int32> map;           // int32 -> int32; one target/environment
-tuple<int32, bool> state;         // ordered, heterogeneous inline values
+Callable parameter names and tuple element labels belong to the statically
+visible source view and its metadata/tooling, not to the ABI or nominal type
+identity. Calls use labels from that static view, not target implementation
+names; renaming a public label can break source compatibility without changing
+the ABI. Named arguments evaluate in source order before binding to parameter
+positions. Tuples are inline ordered heterogeneous values with fixed,
+closed shapes, not implicit argument lists or alternate function ABIs. Their
+Copy, uniqueness, borrow, and access properties follow the complete element
+types. A tuple's labels do not make it nominal or transparent.
 
-interface IMapper<TInput, TOutput>
-{
-    TOutput Invoke(TInput value);      // readonly functor receiver
-}
+An unannotated `fnptr` uses the Terrum callable convention in this direction,
+analogous to a C# managed function-pointer contract but not CLR execution.
+Foreign conventions are explicit checked type-use attributes on the callable
+entry, not inferred from `ptr` or repaired by pointer casts. For example,
+`[CallConv(NativeCallingConvention.Winapi)] fnptr<...>` and
+`NativeExport(CallingConvention = ...)` use existing design vocabulary, but
+exact attribute names, grammar, and import/export ergonomics remain open. The
+annotation follows the callable through nested pointers, aliases, parameters,
+and results. No convention conversion is implicit. ABI choice does not itself
+promise no-GC, no-allocation, exception containment, or marshalling. The `func`
+invocation entry uses Terrum's callable contract even when its target uses a
+foreign ABI; any adapter crosses that declared boundary and preserves the
+target's effects while making capture/allocation costs explicit. Native
+`ptr + context` callbacks remain ordinary explicit aggregates with lifetime
+rules; C++ member-function pointers are not generally raw code addresses, and a
+trampoline does not hide its state or lifetime.
 
-interface IStatefulMapper<TInput, TOutput>
-{
-    mut TOutput Invoke(TInput value);  // requires writable receiver access
-}
-```
-
-Expanded elements initialize new slots; they are not aliases of the caller's
-argument locals. `params` adds no special by-reference parameter mode for
-expanded arguments. An explicit reference type may still be an ordinary
-element value where the normal storage/loan rules permit it. Access uses the
-accepted `mut`/`write` and qualified-`T` rules in §1.1, with existing
-lifetime/storage construction contracts rather than a separate parameter
-system. Whether a call supplying an existing collection binds it as the
-collection argument or expands it as elements remains a rule to specify.
-
-`fnptr` would be a noncapturing raw callable with an explicit managed or native
-ABI and effect contract as appropriate. A delegate would contain one target
-and its environment, not a multicast list; capture, ownership, lifetime,
-boxing, and allocation would be explicit rather than hidden by conversion.
-A tuple would be inline ordered heterogeneous storage, not a parameter pack;
-its Copy eligibility follows all of its elements, not the argument list that
-created it. Its structural fields do not automatically make it a nominal
-record or transparent wrapper, and function arguments are not implicitly
-lowered to a tuple or given a different ABI. Any later pack design must also
-keep bare `Task<void>` (no result) distinct from encoding-erased
-`TextSpan<void>`, and preserve a unique `Task<T>` result and its cleanup.
-Typed text projection still checks the recorded encoding and preserves
-backing/lifetime dependencies; typed `AsSpan()` drops text validity only,
-including for empty views.
-
-Also review ordinary nominal functional interfaces/functors. A source-defined
-type with a known concrete signature can explicitly implement a callable
-protocol without packs. An optional checked `[Callable]` marker could permit
-`f(x)` as notation for a checked `Invoke`, but structural SAM conversion and
-implicit boxing are not recommended. A stateful inline functor needs a
-writable place or `write ref<T>`; a class functor with `mut Invoke` needs a
-`write` handle. Do not make `mut Invoke` silently satisfy a readonly `Invoke`
-contract. Whether to provide one callable protocol or separate readonly and
-mutable protocols, and the marker/notation, remain open; add a special
-signature family only if the concrete use case requires it.
-
-**Additional unapproved callable recommendation and open contracts:** a
-lifetime-aware, single-cast `func` and a raw ABI-level `fnptr` could share
-checked signature and witness machinery without sharing representation.
-The agreed alias direction is transparent naming, not nominal delegate
-identity; simple nominal wrappers are a separate feature. Alias syntax remains
-open. A static callable view may retain named parameters for source contracts
-and metadata, but parameter names are not ABI names. C# custom delegates have
-named parameters; generic `Func` types expose library-chosen `Invoke` parameter
-names. Under the proposed model, calls use the names from the declared
-callable view, not the target implementation. Renaming a public parameter can
-break source compatibility without changing the ABI. Named arguments retain
-source-order evaluation before assignment to their parameter positions.
-
-The signature-versus-value notation remains open. One candidate is
-`fn<Args..., R>` for a closed signature, with `ptr<fn<...>>` for a raw code
-pointer and `func<fn<...>>` for a stored callable; a flatter
-`func<...>`/`fnptr<...>` family is another. Neither is selected syntax. Type-use
-attributes for calling convention fit the existing design vocabulary; for
-example, `[CallConv(NativeCallingConvention.Winapi)] fnptr<...>` is only an
-illustration. A Terrum default versus explicit foreign convention, and any
-ergonomic special-casing for `fnptr` declarations or imports/exports, remain
-open. Calling convention belongs to the callable entry contract, not to `ptr`
-by itself or an inference from pointer representation; no implicit convention
-casts are proposed. A delegate's `Invoke` entry ABI can differ from its
-underlying target ABI, so an adapter must declare the boundary and preserve
-effects while making capture, allocation, and other costs explicit.
-
-The contract must distinguish static functions, unbound instance methods, and
-bound instance calls. This illustrative matrix records candidate semantics,
-not selected syntax:
-
-| Case | Raw `fnptr` candidate | Stored `func` candidate |
+| Callable case | `fnptr` direction | `func` direction |
 |---|---|---|
-| Static | Points to a static function with ordinary arguments | Can store a static `M(T)` target |
-| Open instance | `fnptr<this T, void>` candidate passes the receiver explicitly | `func<this T, void>` candidate is invoked with the receiver explicitly |
-| Bound instance | Cannot retain a receiver; a pointer may target an adapter, but that adapter's origin is not part of the pointer contract | Can store a bound `C.M(T)` with an explicit environment/context |
+| Static | Raw pointer to a static function with ordinary arguments | Stores a static target such as `M(T)` |
+| Open instance | Candidate `fnptr<this C, T, R>` passes the receiver and remaining arguments explicitly | Candidate `func<this C, T, R>` is invoked with the receiver and remaining arguments explicitly |
+| Bound instance | No stored receiver; may point at a static adapter, whose origin is not part of the pointer contract | Stores the bound target and its receiver/environment, with dependencies retained |
 
-The `this` marker and its compatibility with ordinary `T` parameters remain
-open. It marks an open receiver role; it does not select a calling convention.
-An open receiver's access must match the method (for example, `C`/`write C`
-or `ref<S>`/`write ref<S>`). A plain `fnptr<T, void>` has an ordinary `T`
-argument, not a bound receiver. Native member-function pointers are not
-generally raw code addresses: adjustment thunks and virtual dispatch can
-participate, so no blanket reinterpretation as a code pointer is implied.
+The illustrative receiver marker `this` is a role in the checked signature,
+not permission or calling convention; its exact syntax remains open. Receiver
+access must match the method: e.g. `this C` versus `this write C`, or
+`this ref<S>` versus `this write ref<S>`. A plain
+`fnptr<T, void>` has an ordinary `T` argument and no bound state. A plain
+`func<T, void>` may store either a static `M(T)` or bound `C.M(T)`; binding
+removes the receiver from the call signature and retains its required
+dependencies. A bound callable may use a thin trampoline, so boundness does
+not mandate a separate thin/fat type cross-product. The bounded direction
+does not define the full open/closed-by-thin/fat family cross-product, a fat
+`fnptr`, or a mandatory separate no-capture family.
 
-**Generic callable and scalar/SIMD integration (proposal).** A closed
-`func<float32, float32>` does not promise vector implementations. Numeric
-kernels could instead require a generic functor whose `Invoke<T>` is checked
-against declared operation and storage capabilities, then specialized for the
-supported scalar and SIMD family members. Each raw function-pointer
-instantiation still has one closed signature and ABI.
+Compiler-supplied checked witnesses may expose a `func` or `fnptr` through a
+callable protocol only when its complete signature, effects, access, lifetime,
+and ABI satisfy that protocol; no allocated interface adapter, boxing, or
+arbitrary structural single-abstract-method conversion is implied. Ordinary
+nominal functors remain supported: a readonly `Invoke` contract is distinct
+from a `mut Invoke` contract, and `mut` cannot silently satisfy readonly.
+Stateful inline functors require a writable place or `write ref<T>`; a class
+functor with `mut Invoke` requires a `write` handle. Contextual lambdas bind a
+concrete expected `func`, `fnptr`, or functor contract while preserving its
+representation; a capturing lambda is not silently converted to raw
+`fnptr`. `[Callable]`-style marker naming and callable invocation syntax
+remain open.
 
-A later contextually generic lambda could implement that same functor
-contract. For example, `x => x * x` could be checked with symbolic `T` under a
-declared multiplication and Copy contract; it would not first become a scalar
-callback and then be reinterpreted for vector arguments. Captured scalar
-values need an explicit supported broadcast operation where appropriate.
-Generic admissibility alone does not establish elementwise equivalence:
-invocation counts, state changes, cross-lane operations, inactive lanes,
-tails, floating-point order and contraction remain part of the kernel's
-semantic contract. A readonly receiver is not a purity guarantee.
-
-The recommended staging is fixed-signature callables and contextual lambdas,
-then named generic functors with bounded scalar/SIMD contracts, then
-contextually generic lambdas as shorthand for those functors. Arbitrary pack
-manipulation, polymorphic callable erasure and automatic vectorization of an
-arbitrary scalar callback remain outside this recommendation.
+Named generic functors can express operations over scalar and registered SIMD
+family members through definition-site symbolic constraints and
+specialization. A closed scalar callable such as `func<float32, float32>` is
+not a promise of vectorization. `x => x * x` may be contextually checked for
+symbolic `T` only under the declared multiplication and Copy constraints;
+captured scalar values require an explicit supported broadcast, not an
+implicit vector conversion. Generic admissibility does not prove elementwise
+semantics: effects, call counts, cross-lane behavior, inactive lanes, tails,
+floating-point order, and contraction require a separate contract.
+Contextually generic lambdas are the later shorthand for these same generic
+functor contracts, not a new pack system.
 
 Formatting handlers remain typed writer streams with declared captures, not
-universal `ToString` or heterogeneous varargs; see §1.2. C variadics are a
-separate foreign-ABI/interop contract, not Terrum `params` or a type pack.
-Before any later pack proposal, settle collection-versus-expanded binding,
-constraints and overload ambiguity, per-element effects/ownership, tuple and
-callable representation, callable entry and target ABIs, static/unbound/bound
-instance representation, metadata/code-size costs, and managed/native ABI.
+universal `ToString` or heterogeneous varargs; see §1.2. C variadics remain a
+separate foreign-ABI/interop contract, not Terrum `params` or a callable pack.
+The remaining design choices are existing-collection binding, exact
+receiver/attribute/alias/lambda grammar, callable marker/invocation spelling,
+generic constraints and specialization policy, elementwise kernel semantics,
+and import/export ergonomics. None of these directions is compiler support;
+no general pack, polymorphic callable erasure, or automatic vectorization of
+arbitrary scalar callbacks is included.
 
 ## 2. Make representation and cost visible
 
@@ -701,15 +667,16 @@ Do not add fallible destructors or broaden recovery implicitly.
 
 ### 4.2 Prefer single-target callables; make event aggregation explicit
 
-**Open proposal.** A general function value should have an explicit signature,
-capture/lifetime contract, and single-target invocation. Repeat calls are valid
-only while captures remain valid; consuming a capture needs explicit one-shot
-semantics or reconstruction. Multicast is
-useful for events but should not be an accidental universal delegate semantic:
-define a separate event/subscription abstraction with order, exception
-aggregation, reentrancy, mutation-during-dispatch, and unsubscribe/disposal
-rules. A closure's captures must preserve ownership and borrowing rules; copying
-a function value must not silently duplicate a unique capture.
+**Accepted single-target direction with open capture refinements.** `func` and
+`fnptr` have one target and an explicit closed signature; multicast is not an
+ordinary callable behavior. `func` capture follows checked ownership and
+borrow/lifetime rules; copying a function value must not silently duplicate a
+unique capture. Repeated calls are valid only while dependencies remain valid;
+consuming a capture may require explicit one-shot semantics or reconstruction,
+which remains open. Multicast is useful for events but should not be an
+accidental universal delegate semantic: a separate event/subscription
+abstraction would need order, exception aggregation, reentrancy,
+mutation-during-dispatch, and unsubscribe/disposal rules.
 
 Go 1.22 shipped fresh loop bindings per iteration after production capture bugs;
 the version gate exposed analyzer false positives/negatives
@@ -736,7 +703,8 @@ Not syntax: cardinality, noescape, no-suspend, and `[Pure]` are distinct.
 
 .NET multicast runs in order, stops on throw, returns the last result; select
 it only for an explicit event adapter ([delegates](https://learn.microsoft.com/en-us/dotnet/csharp/programming-guide/delegates/using-delegates)).
-Until pack ABI exists, keep arity explicit and multicast out of ordinary calls.
+The bounded callable families need no pack ABI; keep each signature closed and
+multicast out of ordinary calls.
 
 ### 4.3 Never let async work disappear
 
@@ -815,7 +783,7 @@ trades generality for simplicity.
 | Layout and wrappers | Opaque by default; transparent/native layouts preserve ABI, validity, and ownership | Accepted direction / open proposal |
 | Sealed concrete types | Preserve; favor interfaces/composition and explicit extension points | Accepted direction |
 | Collection-based `params` | Ordinary collection construction and per-element copy/move; existing-collection versus expansion binding remains open | Agreed direction / binding rule open |
-| `fnptr`, delegate, tuple, and packs | Fixed closed callable/tuple families are a bounded recommendation; signature-versus-value types, ABI, and receiver representation remain open; no user-defined pack expansion | Unapproved recommendation / open |
+| `func`, `fnptr`, tuples, and packs | Bounded closed callable/tuple direction, transparent aliases, and checked callable witnesses; exact grammar, ABI annotations and generic callable contracts remain scheduled/open; no user-defined pack expansion | Accepted direction / scheduled details |
 | Tensor, multidimensional, SoA/AoS | Separate shape, strides, storage, and truthful projections | Proposal |
 | Discards | One evaluation, vacancy, and cleanup rule across contexts | Refinement |
 | Literals, consteval, operators, compound assignment | Bounded, hygienic, versioned constant evaluation distinct from runtime witnesses | Open |

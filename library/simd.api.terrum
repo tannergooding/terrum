@@ -1,6 +1,13 @@
 // DESIGN ONLY: conceptual SIMD contracts; family/witness syntax and target ABI are open.
 namespace Terrum.Numerics;
 
+// Generic kernels may use a named generic functor checked at its definition
+// site and specialized for registered SIMD family members. A closed scalar
+// func callback does not itself promise a vector implementation, and a
+// contextual generic lambda must satisfy the same operation/Copy constraints.
+// Elementwise effects, call counts, inactive lanes, tails and FP ordering are
+// separate kernel contracts; scalar arithmetic is not auto-vectorized here.
+
 // LOCAL PSEUDO-CODE: explicit family registration, not an interface or naming
 // convention. The checker validates each concrete width, element/mask pairing,
 // static member, representation and ABI. All TVector operands/results have the

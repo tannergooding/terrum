@@ -14,13 +14,15 @@ are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
-The latest semantic-module writer is version 23; semantic version 24's
-capability contract is planned, not implemented. The class/`ManagedNode`
-readonly/writable access and mutable-receiver migration is in progress, but
-does not change the stated support boundary until its implementation and
-regressions are verified. Existing `native-20` behavior below is the legacy
-executable contract, not proof that the accepted `mut`/`write` model is
-implemented.
+Semantic version 24 carries the validated class/`ManagedNode` access
+capability contract. New managed programs use v24; readers normalize private
+managed artifacts from versions 18 through 23 into qualified internal IR,
+translating prior class/`ManagedNode` mutation authority to explicit `write`
+exactly where granted. Nonmanaged artifacts retain their historical versions
+and bytes, and a legacy header cannot contain v24 write identifiers.
+The `native-18` through `native-20` labels below identify bounded runtime
+features; they do not imply that general references/views, ownership forms, or
+managed public ABI are implemented.
 
 `OwnedInt32Buffer.TryCreate` accepts capacities from zero through 1,048,576
 elements. It allocates an eight-byte count/capacity header plus fixed element
@@ -62,9 +64,10 @@ handle, not a pointer or a native owner. `ManagedNode.TryCreate(value, out
 var node)` returns false without publishing a handle when allocation fails;
 `node.Value`, `SetValue(value)`, `SetNext(other)`, `ClearNext()` and
 `TryGetNext(out var next)` access its scalar payload and one nullable internal
-edge. These intrinsic mutations currently work through a bare handle; the
-`ManagedNode` access path is part of the in-progress migration to explicit
-write capability and writable receiver checks. Copying a handle shares node
+edge. Semantic version 24 now checks these intrinsic accesses: reads use a
+readonly handle, while mutation requires explicit `write` capability and a
+writable receiver. This qualification is preserved through optional handles,
+fields, parameters, results and inference. Copying a handle shares node
 identity. `ManagedHeap.Collect()` is an
 explicit, allocation-free safe point: it traces exact initialized managed
 locals, argument and output staging, return snapshots and suspended callers,
@@ -134,15 +137,18 @@ The provisional object and constructor arguments remain rooted during
 collection; zeroed but uninitialized reference slots are collector-private,
 never readable source defaults. Checked constructor failure frees the
 unpublished allocation before propagating; fatal release failure still terminates.
-Fields are readonly after construction unless declared `mut`; a fixed handle
-binding may mutate writable fields of its referent. This is the legacy
-executable class rule: class types do not yet retain the accepted nominal
-mutability, a bare class handle can still write mutable fields, and `mut class`
-plus writable `mut` method receivers are not implemented. The class access
-migration is in progress; the target requires readonly handles by default and
-explicit `write` authority without bypassing field or nominal restrictions.
-Private/internal access and partial-construction checks also apply through
-nested handle fields.
+Fields are readonly after construction unless declared `mut`. Through semantic
+version 23, legacy class artifacts allowed bare handles to write declared
+mutable fields and did not encode class nominal mutability. Semantic version 24
+supports `mut class`, writable `mut` class receivers, readonly bare handles,
+and explicit `write` authority. Writes still require both a mutable class
+contract and an accessible mutable member. A writable child handle in a field
+retains its capability when read through a readonly parent; there is no
+deep-read propagation. Constructors initialize an unpublished receiver and
+publish only after all fields are initialized. Writable storage remains
+invariant, output storage requires the exact qualified type, and
+value-level `write`-to-readonly attenuation is permitted. Private/internal
+access and partial-construction checks still apply through nested handles.
 An assignment selects its target referent before evaluating its value and keeps
 that referent rooted across calls, collection and exceptional cleanup.
 `new C(...)`, inheritance, unique/inline classes,
@@ -168,6 +174,15 @@ Earlier semantic versions continue rejecting aggregate factory arguments.
 Version 23 admits constructor signatures with more than three inputs; earlier
 versions continue rejecting that arity. These remain private implementation
 details behind unchanged scalar exports.
+Semantic version 24 adds the managed access capability contract for new
+managed programs. Its readers normalize private managed artifacts from versions
+18 through 23 into explicitly qualified IR without adding authority, and reject
+v24 write identifiers under older headers. Nonmanaged artifacts keep their
+historical version and bytes. The native physical handle ABI, image-private
+managed state and scalar-only public exports are unchanged. Primitive
+`OwnedInt32Buffer` views keep their separate legacy access rules; mutable
+struct receiver writeback and general `ref<T>`/view/`own<T>`/`init ref<T>`
+call-site implementations remain unsupported.
 The [class sample](../samples/native/managed-classes.terrum)
 returns 42 through shared aliases and heterogeneous managed edges. The independent
 C heap probe checks multiple-edge liveness, pointer-shaped scalar nonroots,

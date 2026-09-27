@@ -39,11 +39,25 @@ The remaining lifetime constructs are rejected for execution.
 
 These relationships are not a single `scoped` bit. One result may borrow receiver bytes, propagate several backing dependencies, and require a separate owner/guard to remain undisposed. Access qualifiers, affinity, rooting and capture destinations travel with the dependencies. Keeping a pointer numerically unchanged is not proof of validity. Empty/end slices retain the same root/guard obligations as nonempty slices.
 
+The target `func<Args..., R>` family carries its target's checked ownership,
+root, borrow and access dependencies. Binding a receiver retains only the
+dependencies declared by the callable contract; it does not silently own a
+borrow, prolong a loan, or allocate storage. An open-instance callable instead
+receives the receiver as an explicit argument, with access matching the method
+(for example, `C` versus `write C`, or `ref<S>` versus `write ref<S>` for a
+mutable struct receiver). The receiver marker's spelling is open and does not
+grant access by itself. `fnptr<Args..., R>` has no independently retained
+environment; its target code must outlive use. An explicit native pointer plus
+context aggregate has the ordinary declared dependency rules rather than
+hidden closure capture semantics.
+
 | Example | Required relationship |
 |---|---|
 | `InlineArray<T, N>` element loan | Receiver's inline storage and matched read/write authority |
 | `Span<T>` slice or its explicit `IContiguousSequence<T>.AsSpan()` | Original backing, bounds, access and guard, not automatically the local span descriptor place; `mut Span<T>` only rebinds the descriptor, while `write Span<T>` lends writable slots |
 | `Span<write C>` | Readonly element slots containing independently writable class-handle capabilities; distinct from `write Span<C>` |
+| Bound `func<...>` | Target and every declared receiver/capture dependency remain valid under the callable's ownership and loan contract |
+| `fnptr<...>` | Target code and declared ABI remain valid through each invocation; the pointer retains no context |
 | Known-code-unit `TextSpan<TCodeUnit>.AsSpan()` | Same backing, immutable read permission and validity-loss only; no writable alias |
 | Typed text erasure to `TextSpan<void>` and successful typed projection | Actual encoding, validity, backing/root/lease and access retained; no receiver-storage borrow invented or cleanup obligation duplicated |
 | Managed inline array elements | Tracked interior location and containing GC root/relocation |

@@ -23,13 +23,24 @@ places/receivers, and `write` qualifies reference or view access. The target
 initialization-loan form is `init ref<T>`; current executable examples still
 use the legacy `bool`/`out` contract until compiler declarations and call sites
 are migrated together. Design sketches are not claims that these semantics or
-their syntax are implemented.
+their broader syntax and library surface are implemented; the bounded
+class/`ManagedNode` exception is described next.
 
-The compiler currently rejects target `mut class` declarations and writable
-`mut` instance-method receivers. Existing executable class, buffer-view, and
-managed-node examples retain their legacy access behavior pending coordinated
-migration; they are not evidence that the target `mut`/`write` model is
-implemented.
+The validated semantic-v24 managed-access batch supports `mut class`, writable
+`mut` class methods, readonly bare class handles and explicit `write` access for
+source classes and `ManagedNode`, including qualified fields, parameters,
+results, optionals and inferred values. Constructors initialize unpublished
+objects before publication. A writable child handle retains its capability
+through a readonly parent; this is not deep-read semantics. Semantic readers
+normalize private managed artifacts from versions 18 through 23 into
+qualified internal IR without granting more authority than the old contract.
+The native handle ABI and scalar-only public module boundary are unchanged.
+
+General reference/view/ownership forms and `init ref<T>` call-site grammar
+remain unsupported; mutable struct receiver writeback and the separate legacy
+buffer-view access path also remain scheduled. These bounded class and node
+features do not imply general ownership/lifetime analysis or standard-library
+execution.
 
 ## Build
 

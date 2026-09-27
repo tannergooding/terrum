@@ -56,6 +56,43 @@ The existing `IContiguousSequence<T>.AsSpan()` is a read projection, not a writa
 
 A target-typed single-scalar `'x'` literal has **no fallback type**. For `char8` it must be ASCII (one standalone UTF-8 code unit); for `char16` it must be a non-surrogate BMP scalar (one standalone UTF-16 code unit). `char32` and `rune` admit any Unicode scalar. Surrogates and out-of-range values never denote scalars. A text target's character fragment context is `rune`, including where the target writer uses UTF-8 or UTF-16: encoding happens at the writer boundary. `rune : IFormattable` forwards to `ITextWriter.TryWriteScalar(rune)` without constructing temporary `Text`; `SpanTextWriter<TCodeUnit>` checks space for the *entire* encoded scalar before writing. This adds one scalar primitive to the existing typed-writer path, not a matrix of character/text overloads. Literal grammar and final target-typing rules remain open.
 
+## Callable values and tuples
+
+The bounded target families are `func<Args..., R>` (a lifetime-aware,
+single-cast callable) and `fnptr<Args..., R>` (a raw target-defined code
+pointer), with result last and each concrete signature closed at any supported
+arity. A `func` retains its target and declared capture dependencies; it does
+not automatically own borrowed state or extend its lifetime. A `fnptr` carries
+no independent environment, and its code must outlive use. There is no
+multicast callable, custom nominal-delegate declaration, arbitrary type-pack
+expansion, full open/closed-by-thin/fat cross-product, fat `fnptr`, or
+mandatory no-capture family. Bound callables may use a thin trampoline, but
+their receiver dependencies remain explicit. Aliases, including generic
+signature aliases, are transparent; nominal wrappers are separate.
+
+Callable labels and tuple element labels are source-view metadata, not ABI
+names or nominal identity. A call binds names from the statically visible
+callable contract, and named arguments evaluate in source order. Tuples are
+inline ordered heterogeneous values with fixed closed shape. Their
+copy/uniqueness/borrow/access contracts follow the complete element types;
+labels do not change representation, and function arguments are not
+implicitly bundled into a tuple or assigned a tuple ABI. There is no
+user-defined pack declaration, expansion, indexing, fold, or forwarding.
+
+`fnptr` uses the Terrum calling convention by default; foreign ABI selection
+is a checked type-use attribute on its callable entry and follows nested
+pointers, aliases, parameters, and results. An illustrative
+`[CallConv(NativeCallingConvention.Winapi)] fnptr<...>` uses existing design
+vocabulary; exact attribute names/grammar and import/export ergonomics remain
+open. No implicit convention casts are allowed. A `func` invocation has the
+Terrum callable contract even when an explicit adapter targets another ABI.
+Static functions, open instance receivers, and bound instances are distinct:
+an open receiver is an explicit argument with access matching the method,
+whereas a bound receiver is retained with its lifetime dependencies. The
+spelling of a receiver marker remains open. Native callback pointer/context
+pairs can be ordinary explicit aggregates with declared lifetimes; C++
+member-function pointers are not generally raw code addresses.
+
 ## Fixed and scalable vectors
 
 Fixed-width SIMD is a family of explicitly registered *members*, not an obligation for every vector to implement a nominal `ISimdVector` interface or call through a public witness service class. A member provides a concrete width, lane type and corresponding boolean mask shape through checked membership; common static operations are declared by the family and accessed naturally as `TVector.Splat(...)`, `simd128<float32>.Load(...)` and `simd128mask<float32>.First(...)`. Generic fixed-vector algorithms quantify over **any** registered member. Addition takes two operands of the same fully qualified instantiation and produces that instantiation, while comparisons produce its matching mask, mask reductions produce `bool`, and lane reductions may produce the element type. Writable stores require a writable view (`write Span<TElement>`), not a mutable descriptor (`mut Span<TElement>`). Membership checking verifies width, element/mask granularity, operators, ABI and effects; similar names (`simd128` and `simd128mask`) are not evidence of membership. Other unrelated types continue to use granular generic-math protocols such as `IAdditionOperators<TSelf, TOther, TResult>` without becoming SIMD members.
