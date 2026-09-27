@@ -86,13 +86,20 @@ use `write` when the referent capability itself is part of the type.
 The accepted call-side readonly-borrow form is the parameter-only modifier
 `implicit ref<T>`, not `implicit T`, `in T`, or a qualifier inside `T` or
 `ref<T>`. Callers pass ordinary expressions, evaluated once: an eligible
-existing place is borrowed, otherwise a temporary is materialized and cleaned
-under ordinary lifetime/unwind rules. The introduced slot loan has the same
-semantics as an explicitly authored readonly `ref<T>`, including declared
-result and backing dependencies. `implicit` adds no special noescape or
-suspension restriction. References cannot outlive their backing; the precise
-materialized-temporary scope remains a
-[call-contract decision requiring review](language-contract-review.md#11-places-values-and-materialization).
+existing place is borrowed, otherwise a hidden local is initialized at that
+argument's original evaluation point in the current enclosing lexical scope.
+Its initialization is not hoisted to scope entry, and it is not wrapped in a
+shorter lifetime-only scope. It follows ordinary local initialization, ownership/root
+cleanup and unwind rules; if conditional or short-circuit evaluation skips the
+argument, no local is initialized and no owner is created to clean up. The
+introduced slot loan has the same semantics as an explicitly authored readonly
+`ref<T>`, including declared result and backing dependencies. A valid returned
+reference to a materialized local may be used by later statements in that same
+scope. `implicit` adds no special noescape or suspension restriction, does not
+widen an existing place's or backing value's lifetime, and grants no new
+capture, suspension or escape permission: ordinary declared dependencies still
+govern each use.
+
 Borrowing imposes no `[Copy]` requirement or ownership
 transfer just to borrow. The slot is readonly, but `T` keeps its complete
 qualification and dependencies; for example, borrowing a descriptor does not

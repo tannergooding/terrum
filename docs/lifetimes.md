@@ -69,9 +69,14 @@ remain open library design.
 reference parameter, not `implicit T` or `in T`, a qualifier inside `T` or
 `ref<T>`, a `view<T>` type, or a representation attribute. The caller passes
 an ordinary expression and it is evaluated once. If it denotes an eligible
-place, the call borrows that place's slot; otherwise the compiler materializes
-a temporary and cleans it according to ordinary lifetime and unwind rules.
-Borrowing alone requires neither `[Copy]` nor ownership transfer.
+place, the call borrows that place's slot; otherwise the compiler initializes
+a hidden local at that argument's original evaluation point in the current
+enclosing lexical scope. This is the same scope as an explicit local declared
+there, not a lifetime-only block and not a value hoisted to scope entry. A
+skipped conditional or short-circuit argument creates no initialized local or
+owner to clean up. The local follows ordinary initialization, ownership/root
+cleanup and unwind rules. Borrowing alone requires neither `[Copy]` nor
+ownership transfer.
 
 ```terrum
 void Inspect(implicit ref<LargeRecord> record);
@@ -83,10 +88,11 @@ Inspect(CreateRecord());
 The introduced loan is an ordinary readonly reference. Return, storage,
 capture and suspension obey the same declared dependencies and lifetime rules
 as explicit `ref<T>`; `implicit` does not add an unconditional noescape rule.
-A reference into a materialized temporary cannot outlive that temporary.
-The precise temporary-scope rule still
-[requires review](language-contract-review.md#11-places-values-and-materialization),
-not a new lifetime system for implicit arguments.
+A returned reference to a materialized local may be used by later statements
+in the same lexical scope when its ordinary declared dependencies permit it;
+it cannot outlive that local or extend the lifetime of an existing place or
+backing value. This is the accepted temporary-scope rule, not a new lifetime
+system for implicit arguments.
 The loan restricts access to the outer slot only. The complete qualified `T`
 retains any write authority, backing, roots, ownership and dependency contracts
 already carried by its value; a Copy descriptor copied out of the slot keeps

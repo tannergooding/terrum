@@ -11,10 +11,10 @@ accepted contract. Settled memory, access, and qualified-type/capability
 policies are intentionally absent below even where implementation remains
 scheduled.
 In particular, the accepted `[ThreadTransferable]`/`[ThreadShareable]` names,
-qualified `mut`/`write` rules, ordinary-reference semantics for
-`implicit ref<T>`, and memory ordering/publication policy are not awaiting
-approval. Their exact syntax, ABI, formalization or target support may still
-be work.
+qualified `mut`/`write` rules, ordinary-reference semantics and enclosing
+lexical-scope materialization for `implicit ref<T>`, and memory
+ordering/publication policy are not awaiting approval. Their exact syntax,
+ABI, formalization or target support may still be work.
 
 ## Open policy choices
 
@@ -35,7 +35,6 @@ need review; that document is not accepted wholesale.
 
 | Proposal | Review boundary |
 |---|---|
-| Materialized temporary scope for `implicit ref<T>` | Ordinary readonly-reference equivalence and dependencies are accepted. Decide the ordinary temporary endpoint; the full-expression rule in [§1](language-contract-review.md#1-one-call-and-reference-model) is a recommendation, not a selected implicit-only noescape rule. |
 | Conditional postconditions and owning-output state | Review the guarded-postcondition representation, initialized/null state facts, and the policy for possibly initialized owning outputs. These are proposals, not canonical rules; see [§2](language-contract-review.md#2-outcome-initialization-and-nullability-are-separate). |
 | Normal-return ownership endpoint and entry snapshots | Review owned-parameter cleanup and explicit entry-state snapshots within the accepted broad body/postcondition/epilogue order. The detailed ownership endpoint still needs approval; see [§3](language-contract-review.md#3-contracts-bracket-semantic-body-completion). |
 | Mandatory proof/evaluation profile and budget | Review whether required proofs use a mandatory versioned conservative profile and how deterministic evaluator/proof resources are accounted and bounded. Candidate ceilings are not accepted defaults; see [§4](language-contract-review.md#4-a-reproducible-proof-and-evaluation-foundation). |

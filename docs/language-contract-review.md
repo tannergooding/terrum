@@ -22,7 +22,7 @@ system for the prover.
 
 | Area | Confirmed direction | Recommendation requiring review |
 |---|---|---|
-| Calls | `implicit ref<T>` is an ordinary readonly `ref<T>`; existing places are borrowed, values are materialized first; evaluation is left-to-right within expression structure | Define place formation and temporary scope explicitly; do not introduce a special reservation/activation rule for implicit arguments |
+| Calls | `implicit ref<T>` is an ordinary readonly `ref<T>`; existing places are borrowed; value arguments initialize a hidden local at the original argument-evaluation point in the current enclosing lexical scope; evaluation is left-to-right within expression structure | Specify place formation and general reference/loan metadata; do not introduce a special reservation/activation rule or lifetime-only scope for implicit arguments |
 | Conditional outputs | APIs declare which outcomes provide initialized and/or non-null outputs | Use guarded postconditions as the semantic representation, with attributes only as equivalent sugar; publish only the states the declaration guarantees |
 | Contract timing | Prologue, preconditions, authored body including `finally`, postconditions, epilogue; exceptional departure has no normal-return postcondition | Put all observable body/ownership cleanup before postconditions, keep result storage provisional until checks pass, and restrict checks to surviving values or explicit snapshots |
 | Proofs and evaluation | Static checks are compile-time-only; implementation choices must not silently change the contract | Version a mandatory conservative proof profile and deterministic evaluator, including their resource-accounting rules |
@@ -32,9 +32,12 @@ system for the prover.
 The accepted implicit-loan rule in [language](language.md) and
 [lifetimes](lifetimes.md#parameter-only-implicit-readonly-loans) is ordinary
 readonly-reference equivalence, including declared result dependencies.
-`implicit` adds no unconditional call-scoped/noescape restriction.
-The concrete temporary-scope and proof mechanisms below remain proposals;
-this document does not authorize implementation of those unsettled details.
+Materialized arguments use an ordinary local in the current enclosing lexical
+scope, initialized at the argument's evaluation point; they add no
+lifetime-only region, unconditional call-scoped/noescape restriction, or
+permission to widen existing dependencies. General reference/loan syntax,
+metadata and implementation remain scheduled. The other proposed contract and
+proof mechanisms below remain under review.
 
 ## 1. One call and reference model
 
@@ -65,26 +68,34 @@ Inspect(existingPlace)
     -> Inspect(explicit readonly reference to existingPlace)
 
 Inspect(CreateValue())
-    -> {
-           T temporary = CreateValue();
+    -> at this argument's evaluation point in the current lexical scope:
+           initialize hidden local T temporary = CreateValue();
            Inspect(explicit readonly reference to temporary);
-       }
+    -> temporary remains an ordinary local through the enclosing scope
 ```
 
-The second expansion transfers a fresh owning result into the temporary under
-ordinary initialization rules; it does not require Copy. Merely borrowing an
-existing owner neither copies nor moves it. Ordinary call lowering can eliminate
-the temporary's physical storage only if its observable value, aliasing,
-address/lifetime obligations, roots, and cleanup remain unchanged.
+The second expansion initializes a local at the original argument-evaluation
+point. A fresh owning result follows ordinary initialization; materialization
+does not require Copy. Merely borrowing an existing owner neither copies nor
+moves it. If control flow skips evaluating the argument, no local is
+initialized and there is no owner to clean up. Evaluation is never hoisted to
+scope entry. The local remains within the already existing enclosing lexical
+scope, and block exit/unwind uses ordinary initialized/moved-state cleanup.
+For example, a reference returned from `Foo` may be used by `Baz` later in the
+same scope if its declared dependencies permit:
 
-**Recommended temporary scope:** materialization belongs to the containing
-full-expression, with cleanup after its uses complete or on defined unwinding.
-It is equivalent to an explicit local in that scope, not a local hoisted over
-later statements. A nested consumer in the same full-expression may use a
-permitted returned reference while the temporary is alive; storing that
-reference beyond the temporary's scope diagnoses. There is no hidden extension
-to an enclosing block, allocated box, or task lifetime. This scope rule needs
-approval as an ordinary temporary rule, not an `implicit` exception.
+```text
+Foo(CreateValue()).Bar();
+Baz(); // A valid returned reference may still refer to the hidden local.
+```
+
+This does not widen the lifetime of an existing borrowed place or the backing
+dependencies inside `T`; capture, suspension, storage and escape remain subject
+to the same declared contracts as explicit `ref<T>`. It adds no new implicit
+noescape rule. Lowering may eliminate physical storage only if value, alias,
+address/lifetime, rooting and cleanup behavior remains unchanged. This endpoint
+is accepted; general source syntax, loan metadata and runtime implementation
+are not thereby implemented.
 
 ### 1.2 Reference dependencies do not change
 
@@ -94,7 +105,8 @@ reference counterpart:
 - An ordinary no-retention parameter remains no-retention.
 - A declared result relationship may return a reference to an eligible caller
   place. Its lifetime is bounded by that place, not automatically by the call.
-- A reference into a materialized temporary remains bounded by the temporary.
+- A reference into a materialized local remains bounded by that local's
+  enclosing lexical scope; this does not widen its backing dependencies.
 - Capture and suspension require the same explicitly permitted dependencies as
   ordinary references; the modifier grants no capture permission.
 - Copying a Copy value out of a referenced slot preserves dependencies already
@@ -591,7 +603,7 @@ validation.
 | Decision | Status | Contract or recommended choice |
 |---|---|---|
 | Reference adaptation | Accepted baseline | Ordinary readonly-reference semantics; no implicit-only escape prohibition |
-| Materialized temporary endpoint | Needs review | End of the containing full-expression, including nested consumers; no automatic block/task lifetime extension |
+| Materialized temporary endpoint | Accepted design | Hidden local belongs to the current enclosing lexical scope and is initialized at the argument-evaluation point; no lifetime-only scope, hoisting, or widening of existing dependencies |
 | Loan timing | Accepted equivalence | Same as explicitly written reference operations; convenience syntax does not introduce a second loan model |
 | Conditional contract surface | Needs review | Guarded `ensure` plus checked initialization facts; attributes, if provided, are sugar for the same metadata |
 | Failure-output default | Review generalized contract; preserve current bounded behavior | Preserve vacancy without a declared publication guarantee; null is an explicitly initialized value |
@@ -607,8 +619,10 @@ scheduled implementation, not immediate execution of the illustrative grammar.
 The minimum conformance corpus should cover:
 
 - Explicit/implicit reference-equivalent calls; value versus reference-returning
-  properties; nested temporaries; returned dependencies; alias mutation and
-  reentrancy; source-order named arguments; failed later arguments and cleanup.
+  properties; later same-scope use of returned references; scope-exit cleanup;
+  conditional/short-circuit non-evaluation; returned dependencies; alias
+  mutation and reentrancy; source-order named arguments; failed later
+  arguments and cleanup.
 - True-null versus false-vacant; declared false-null; status/output correlations;
   non-null types rejecting null annotations; owning false outputs; malformed
   or contradictory metadata; require lifting without collapsing presence.
