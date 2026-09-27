@@ -39,6 +39,14 @@ Calls use symbolic function identities rather than binder-local indexes.
 Types use declaration names, visibility and ordered field layouts as their contract;
 public import keys include declaring-type and signature-type visibility, while
 the complete ordered layout is checked separately before execution.
+The target source-binding rule is stricter than simply storing a name: source
+compilation selects one declaration and its closed generic arguments, and
+records that binding. Linking or JIT loading validates and implements the
+selected target; it never reruns source overload resolution against a
+replacement's candidate set. Runtime virtual/interface dispatch and
+devirtualization are separate mechanisms. The current bounded module format
+does not yet provide general overload sets, generic-witness metadata or
+compatibility forwarders.
 Compatible reordered type declarations are remapped to the consumer's local
 type indexes before verification. Member contracts retain declaring type,
 receiver/static mode and constructor identity; unexported producer dependencies
@@ -55,6 +63,23 @@ Compatible replacements may also add exports not requested by the consumer.
 Nested writes persist their root slot and field-index path, not an unchecked
 byte offset or pointer. The linker remaps value identities and verifies every
 path against the selected layouts before native address calculation.
+
+General compatibility forwarding remains scheduled work. A forwarder must
+preserve the old identity and complete effects, access, lifetime and ABI
+contract while naming one exact replacement or closed specialization; fuzzy
+linker searches are not a compatibility policy. Source visibility of
+metadata-only stubs is a separate rule. First-class build-tool compatibility
+analysis is scheduled to compare declared baselines for binary breaks, source-binding risks,
+witness/default conflicts, case-set evolution, and layout/access/ownership/
+effect/lifetime changes. It can report declared contract differences, not prove
+arbitrary implementation behavior. These facilities are not implied by the
+bounded exact-contract replacement checks described above.
+Existing module tests exercise those bounded checks: consumers retain their
+recorded promises, weakened `NoThrow` contracts and changed signatures, output
+modes, layouts or access contracts are rejected, and provider catalogs reject
+missing, incompatible or multiple compatible selections. This is evidence for
+already-bound artifact compatibility only; it does not establish source
+compatibility or provide source-binding diagnostics.
 
 The binary reader rejects unknown versions, malformed/truncated records,
 trailing bytes, unknown nodes, invalid graph depth, excessive symbols, strings

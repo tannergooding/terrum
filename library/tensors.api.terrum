@@ -3,6 +3,8 @@ using Terrum;
 
 namespace Terrum.Numerics.Tensors;
 
+// Static operation constraints stay granular; tensor kernels do not require a
+// universal numeric classification or infer Copy from arithmetic witnesses.
 // Shape is immutable. Validate every length against the address/offset range,
 // then any zero dimension makes ElementCount zero without multiplying other
 // lengths or evaluating (length - 1) * stride for an empty view.

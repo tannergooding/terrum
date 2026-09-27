@@ -46,12 +46,42 @@ using a default width or an arbitrary ranking based on representable values.
 Negative integer literal construction must accommodate the signed minimum;
 it must not first overflow by constructing its positive magnitude in that type.
 
-Ordinary constructor inference uses the same evidence. In
+The accepted generic inference order is: explicit type arguments pin their
+positions; typed arguments establish generic types; expected-result context
+fills only positions still unresolved; then contextual literals and lambdas
+are checked. Context cannot retarget typed numeric operands or replace an
+established generic type. Thus `int64 x = 50000 * 50000` constructs `int64`
+operands, while `int32 a = 50000; int64 y = a * a` requires explicit conversion.
+
+For a schematic `U Convert<T, U>(T value)`, a typed argument establishes `T`;
+an expected result can establish `U`, or `Convert<_, int32>(typedValue)` can
+pin `U` while inferring `T`. A unique method signature may fill a local
+callable hole, as in `func<_, int32> f = ToInt32`. `_` is illustrative, not
+settled grammar. Every hole must resolve at the local binding; exported
+fields, aliases and parameters cannot retain unresolved holes. Holes are not
+wildcards, existential values or higher-kinded types, and inference does not
+invert non-injective `T?`, `box<T>` or associated-type projections. Ambiguity
+is diagnosed rather than resolved by a constraint choosing an arbitrary
+implementer.
+
+Ordinary constructor inference follows the same target rule. In
 `new DifferentRandom(new CounterRandom(0), 0xA5A5A5A5)`, the first argument
-establishes `TRandom = CounterRandom`; the declared `uint32` seed/mask parameters
-give the literals their context. This neither captures primary-constructor
-fields nor infers a concrete type from a constraint. Copy/move rules still apply.
-Non-injective `T?`/`box<T>` relationships cannot be inverted to guess `T`.
+establishes `TRandom = CounterRandom`; the declared `uint32` seed/mask
+parameters give the literals their context. This neither captures
+primary-constructor fields nor infers a concrete type from a constraint.
+Copy/move rules still apply.
+
+These are target binding rules, not current general compiler support. The
+current binder already uses typed operands before expected-result context and
+propagates expected `int32`, `uint32`, `int64`, or `uint64` types into untyped
+nested arithmetic, so `int64 x = 50000 * 50000` is supported. It rejects
+retargeting already-typed `int32` operands and leaves a literal without type
+context unresolved.
+Ordinary overloaded declarations are rejected with `TRM3003`; generic source
+calls require explicit type arguments. Generic signature-based result-type
+lookup is implemented, but it does not infer type arguments from arguments or
+expected results. General argument/result inference, partial holes and
+constructor inference remain unsupported.
 
 ## Conversion policies
 

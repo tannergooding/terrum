@@ -6,7 +6,7 @@ Terrum (TAIR-um), from TerraFX, is a proposed C#-shaped language for application
 
 - C#/.NET application and API ergonomics are the baseline; ownership, access, representation, lifetime, effects and placement are distinct contracts. An application can use managed cyclic graphs without propagating lifetime parameters through every edge; unique native resources and deterministic cleanup remain nonduplicable. There is no implicit copy, boxing, pinning, retain, synchronization or materialization to repair an invalid program.
 - AOT and JIT must implement the same semantics for supported features. Independently serviced modules, DLLs and plugins require published, versioned contracts and binding-time compatibility; closed-world optimization or implementation pinning is explicit. The initial backend emits Windows x64 native code; the C#/.NET compiler host does not define Terrum's type system, semantic IL or permanent ABI.
-- Concrete types are sealed by default; interface inheritance and composition replace general concrete inheritance. Public namespaces express concepts, not library tiers. Public source visibility is `public`, `internal` (module) and `private` (declaring type); there is no protected-family or friend-module access through `unsafe` or linking. Author-approved generation may act within the declaring module's implementation scope, but grants no consumer private access. A public Terrum surface is not automatically a native export.
+- Concrete types are sealed by default; `sealed` prohibits inheritance, not interface dispatch or API evolution. Types are evolvable by default: closed case sets, fixed layouts and frozen APIs are separate scoped contracts. Interface inheritance and composition replace general concrete inheritance. Public namespaces express concepts, not library tiers. Public source visibility is `public`, `internal` (module) and `private` (declaring type); there is no protected-family or friend-module access through `unsafe` or linking. Author-approved generation may act within the declaring module's implementation scope, but grants no consumer private access. A public Terrum surface is not automatically a native export.
 - Exceptions propagate exceptional failures; expected alternatives use conditional outputs or domain statuses. Recovering with `catch` requires an unsafe recovery context; cleanup and `try/finally` do not. Unsafe recovery does not prove an object's invariant has survived. Platform callbacks must contain faults or terminate rather than unwind across a foreign ABI.
 - Type, declaration, interface and metadata contracts are authoritative. A compiler may infer private implementation facts but cannot silently publish stronger or weaker promises from a replaceable body. Consumers bind against the producer's resolved contracts and rule version, not their own reinterpretation of its source defaults. [Lifetimes](lifetimes.md) specifies this distinction for borrowed results.
 
@@ -98,7 +98,15 @@ restrictions. `val<T>` has no implicit writable-default interpretation.
 
 There is no universal `default(T)`: live fields and active union payloads must be initialized. Explicitly repeated optional modifiers (`int32??`, `T??`, including intervening trivia) are syntax errors. Optional construction remains semantically idempotent: substituting `T = int32?` into `T?` yields `int32?`, not a second presence layer. `Option<T>` likewise normalizes an optional payload rather than adding a presence layer. Modifiers on distinct nested types, such as `List<int32?>?`, are valid. `is some` yields the canonical payload, and `is null` tests absence. Nominal unions preserve distinct cases such as `Missing` versus `Found(null)`; `with` updates need separate `Unchanged`/`Set(null)` states. `T?` and `box<T>` are non-injective projections, so inverse generic inference cannot guess a unique original type. Normalization precedes signature identity/overload checks, without flattening nominal wrappers. Niche encodings must be declared validity/ABI contracts (e.g. reserved `-1` for nonnegative `int32`, zero for nonzero `int32`, null for a non-null reference); invalid encodings and padding are not free option states. Imports and mutations preserve validity.
 
-Integer-backed `enum` values include unnamed underlying values; `[Flags]` explicitly defines bit-set operations. Closed nominal tagged `union` cases have active-payload validity; an explicitly overlapping native layout does **not** establish it. `[Layout(Sequential)]`, `[Layout(Union)]` and explicit offsets need separate validated calling-ABI profiles. Structural `T | U` unions, especially overlapping alternatives, are undecided.
+Integer-backed `enum` values include unnamed underlying values; `[Flags]`
+defines named bit-set operations without closing the set. Nominal unions are
+evolvable by default; an explicitly closed case-set promise makes adding a case
+a breaking change, ordinarily rejected before consumers bind to it. Union
+representations still require a valid active payload;
+an overlapping native layout does **not** establish a safe tagged union.
+`[Layout(Sequential)]`, `[Layout(Union)]` and explicit offsets need separate
+validated calling-ABI profiles. Structural `T | U` unions, especially
+overlapping alternatives, are undecided.
 
 ### Interfaces, access and generic properties
 
@@ -115,7 +123,104 @@ machine-readable formatting, and display/debug rendering distinct. Compiler
 and debugger type metadata does not require user-visible root methods, and no
 contract requires every value to become a string.
 
-Multiple behavioral interface bases retain declaring-member identity through diamonds. Conflicting requirements require disambiguation or an adapter; initial support has no stateful bases or default-method linearization. A generic `IRandom` call through `write ref<TRandom>` mutates the borrowed inline value without defensive copying or boxing; storing `TRandom` additionally requires `[Sized]`. An explicit `dyn IRandom` has its own chosen borrowing/ownership, root, lifetime and dispatch contract. Generic pointer and stored-loan arguments are intended where their actual storage, tracing and lifetime properties permit them, not prohibited categorically because the initial managed `List<T>` is narrower. Sizeless scalable vectors can satisfy behavior without satisfying `[Sized]`.
+Behavioral conformance is nominal and uses a checked witness; conditional
+member guarantees are not themselves conformance. Conflicting type/interface
+witness claims are rejected, not selected by import order. Producer-owned,
+versioned witnesses are the recommended bounded policy; external conformance
+ownership and exact grammar remain open. Applicable members outrank extensions;
+conflicting extensions may be explicitly qualified, but extension lookup never
+replaces a nominal witness. Associated types and `Self` relations are intended
+for relationships such as integer `Wider`/`Signed`/`Unsigned` types and SIMD
+element/mask types. One selected witness binds an associated result; inference
+does not run backward through non-injective projections or choose an arbitrary
+implementer from a constraint. Multiple relations require explicit
+disambiguation.
+
+Multiple behavioral interface bases retain declaring-member identity through
+diamonds; conflicting requirements need explicit disambiguation or an adapter.
+This does not introduce stateful bases or an implicit default-method
+linearization. A generic `IRandom` call through `write ref<TRandom>` mutates
+the borrowed inline value without defensive copying or boxing; storing
+`TRandom` additionally requires `[Sized]`. Generic pointer and stored-loan
+arguments remain intended where their actual storage, tracing, and lifetime
+properties permit them, not categorically prohibited by the narrower initial
+managed `List<T>`. Sizeless scalable vectors can satisfy behavior without
+satisfying `[Sized]`.
+
+There is no `dyn` keyword or implicit stored interface handle. Bare `I` names
+the behavior/abstract payload type, not a storable local or field. `T : I`
+is nominal conformance; `where T : I` as a generic constraint keeps `T`
+concrete.
+An erased receiver or stored value chooses its representation explicitly:
+`ref<I>` is a borrowed erased receiver, `write ref<I>` a mutable borrow,
+`box<I>` a managed aliasable handle, and `write box<I>` a writable receiver.
+`List<box<I>>` is a generic heterogeneous carrier. Explicitly boxing a Copy inline
+struct creates an independent payload, and transferring an eligible unique
+value is explicit; projecting an existing class object may preserve identity
+without allocation. Type notation alone neither allocates nor reinterprets a
+class-handle slot. `write ref<I>` can mutate the original implementation but
+cannot replace an unknown inline payload with an unrelated implementation.
+The slot/referent distinction remains explicit: `write ref<box<I>>` writes a
+slot of readonly handles; `ref<write box<I>>` has a readonly slot that preserves
+writable object authority. `ref<C>` borrows the class-handle slot, not
+automatically the payload. Opening one erased value does not prove another
+value has the same hidden `Self`; dynamic-callability, associated bindings,
+borrow lifetimes, dispatch and ABI remain to be specified.
+
+Source overload resolution records the selected declaration and closed generic
+arguments. A linker or JIT validates and implements that binding rather than
+rerunning source resolution; runtime virtual/interface dispatch is separate.
+Exact matches precede permitted erasure, with no invented numeric conversions.
+Constraints filter applicability but do not create overloads differing only by
+constraints or require arbitrary logical subsumption; return-only overloads
+are not introduced. Applicable members beat extensions. Thus a sole
+`Set(int32)` accepts `Set(1)`, but adding `Set(uint32)` makes the source literal
+ambiguous while an already compiled caller retains its `int32` binding.
+Removing the bound declaration remains a compatibility break.
+
+Generic inference is staged: explicit arguments pin positions, typed arguments
+establish types, expected-result context fills only unresolved positions, and
+then contextual literals/lambdas are checked. Context never retargets typed
+operands or established generic types. For example, `int64 x = 50000 * 50000`
+constructs `int64` operands, while `int32 a = 50000; int64 y = a * a` needs
+explicit conversion. Partial `_` holes are accepted direction (exact spelling
+is open): `Convert<_, int32>(typedValue)` may infer only the first argument,
+and `int32 result = Convert(typedValue)` may infer a result-only type from its
+target. `func<_, int32> f = ToInt32` can fill a hole from one unique method
+signature. All holes resolve at local binding; exported fields, aliases, and
+parameters cannot retain them. There is no wildcard/existential/higher-kinded
+meaning, and non-injective projections are not inverted. Ambiguity diagnoses.
+These are target binding rules, not a claim that the inference feature is
+implemented. The current binder propagates expected `int32`, `uint32`, `int64`,
+or `uint64` types into nested untyped arithmetic, so
+`int64 x = 50000 * 50000` is valid; it rejects retargeting typed `int32`
+operands and leaves context-free literals unresolved. Ordinary overload
+declarations are rejected with `TRM3003`; generic source calls require
+explicit type arguments. Generic signature-based result-type lookup is
+implemented, but neither arguments nor expected results infer generic type
+arguments. Overload selection and general argument/result inference, including
+partial holes, remain scheduled.
+
+Adding an interface member compatibly for existing implementations requires a
+default implementation that satisfies
+its declared contracts and a compatible witness/dispatch mechanism. Defaults
+alone do not ensure safe evolution: new required associated types, tightened
+effects/access/loan requirements and conflicting inherited defaults may
+break implementations. A closed-case exhaustive dispatch has a checked
+fail-fast path for unknown runtime cases, never an optimizer `unreachable`
+assumption. An older consumer can route a newly added case to an explicit
+fallback; recompiling against the new case diagnoses missing explicit
+coverage. The accepted fallback attribute is shown schematically as
+`[Exhaustive] _ => HandleUnknown(status)`: it accepts unknown cases but does
+not count as explicit coverage of known cases. This is not a new keyword or
+special `_` syntax. Missing known cases warn, guarded arms do not establish
+coverage merely by naming a case, and
+the initial form is a final unguarded wildcard. Missing-case warnings can be
+elevated; ordinary `_` suppresses them. For integer enums, diagnostics concern
+declared names while a fallback still accepts unnamed underlying values. Exact
+match grammar and the
+closed-case marker remain open. Unknown payloads must be safely rooted,
+forwarded and disposed or the representation is rejected.
 
 One access-qualified `Span<T>` and one qualified collection-interface family avoid
 nominal readonly/writable duplicates. `mut` on a view descriptor permits
@@ -227,7 +332,13 @@ this bounded direction.
 
 Ordinary explicit constructors are baseline. Independent opt-in `Generate` operations can supply construction, equality/hash, deconstruction, formatting and combined validated withers from declared storage/mappings; no field-name magic, automatic primary-constructor capture, implicit successive setters or parameter-name-only overload distinctions. Omitted update members are `Unchanged`, not a null/default value. Affine and class withers need explicit failure, cleanup, allocation and identity behavior.
 
-Constructor type arguments can be inferred from known argument/target types before contextual literals are constructed. `new DifferentRandom(new CounterRandom(0), 0xA5A5A5A5)` infers `TRandom` from the first argument and uses the declared `uint32` seed/mask types for its literals. It does not infer field capture, change ownership, choose types from constraints or invert optional/box normalization.
+The target inference order also applies to constructors: known argument types
+establish generic positions, expected-result context may fill unresolved ones,
+and contextual literals follow. `new DifferentRandom(new CounterRandom(0),
+0xA5A5A5A5)` illustrates first-argument inference and declared `uint32`
+literal contexts; it does not infer field capture, change ownership, choose a
+type from constraints or invert optional/box normalization. General constructor
+inference is not implemented by the current binder.
 
 The target parser contract is `IParsable<TSelf>.TryParse(TextSpan, init ref<TSelf>)`, including user types. `init ref<T>` is a vacant initialization loan: its destination cannot be read before complete initialization and publication. A boolean success contract publishes on true and leaves it vacant on false; other returns initialize it on every normal return unless an explicit condition such as `[OutputWhen]` says otherwise. Failure cleans partially initialized values, never fabricates `default(T)`; asynchronous publication occurs at operation completion. The call-site spelling is not settled. The bounded executable profile still implements `bool`/`out` conditional publication; its declarations and calls must migrate together rather than treating `init ref` as a parser alias or general writable reference. Expected invalid input normally branches on `Try...`/status. Domain outcomes may use response types; there is no mandatory language-wide `Result` or implicit catch-and-continue.
 
@@ -284,12 +395,15 @@ checked predicates, `[ViewOf]`, `[Captures]`, `[OutputWhen]`, `[Pure]`,
 trailing defaults as **illustrations**, not frozen syntax or implemented
 compiler promises. In particular, `out` remains the current bounded
 implementation spelling while a coherent migration to initialization loans is
-planned; invocation spelling for `init ref` is open. Exact generic constraint
-syntax, member-contract relationship syntax, conditional copy capabilities,
-first-class stored-loan ABI, span-anchor layout/calling convention, inline
-`val<C>`, native ownership transitions, structural unions, decimal encoding,
-text storage, wither omission/overloads, handling/registration, async
-start/cancellation, generic dispatch selectors and exception ABI remain open.
+planned; invocation spelling for `init ref` is open. Exact generic constraint,
+associated-type and extension-disambiguation syntax, inference-hole spelling,
+closed-case marker/match grammar and compatibility-forwarder attributes/source
+visibility remain open. So do conditional copy capabilities, first-class
+stored-loan ABI, erased-interface dispatch ABI, span-anchor layout/calling
+convention, inline `val<C>`, native ownership transitions, structural unions,
+decimal encoding, text storage, wither omission/overloads,
+handling/registration, async start/cancellation, generic dispatch selectors
+and exception ABI.
 The applicable accepted semantics and current implementation limits are
 distinct; syntax should follow checked contracts rather than determine them.
 

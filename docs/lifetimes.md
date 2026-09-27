@@ -39,6 +39,27 @@ The remaining lifetime constructs are rejected for execution.
 
 These relationships are not a single `scoped` bit. One result may borrow receiver bytes, propagate several backing dependencies, and require a separate owner/guard to remain undisposed. Access qualifiers, affinity, rooting and capture destinations travel with the dependencies. Keeping a pointer numerically unchanged is not proof of validity. Empty/end slices retain the same root/guard obligations as nonempty slices.
 
+## Erased interface storage is explicit
+
+An interface name `I` describes nominal behavior and an abstract payload, not
+an implicit storable handle. Use `ref<I>` for a borrowed erased receiver,
+`write ref<I>` for a writable borrow, `box<I>` for a managed aliasable
+interface handle, or `write box<I>` for a writable object receiver. A
+`List<box<I>>` stores homogeneous handle representations while allowing
+different concrete implementations. Bare `I` is not a local/field storage
+representation, and type notation alone does not allocate or project a value.
+
+`write ref<I>` grants access to mutate the original implementation but cannot
+replace an unknown inline payload with an unrelated implementation. The access
+of a handle slot is independent of its referent: `write ref<box<I>>` makes the
+slot writable but retains readonly object authority; `ref<write box<I>>` keeps
+the slot readonly while preserving writable object authority. `ref<C>` borrows
+a class-handle slot, not automatically the class payload. Explicitly boxing a Copy inline
+struct creates an independent payload; a unique value requires explicit
+transfer. Projecting an existing class object may preserve identity without
+allocation. The exact checked projection, representation, rooting and ABI
+remain implementation contracts, not consequences of the type spelling.
+
 The target `func<Args..., R>` family carries its target's checked ownership,
 root, borrow and access dependencies. Binding a receiver retains only the
 dependencies declared by the callable contract; it does not silently own a

@@ -5,6 +5,9 @@
 // Bodies retain legacy out/ref call expressions as schematic examples.
 namespace Terrum;
 
+// Integer associated relations such as Wider/Signed/Unsigned bind through a
+// selected checked witness; they are not inferred backward from a result.
+// Their exact declaration syntax and exposed API remain open.
 public interface IParsable<TSelf>
     where TSelf : IParsable<TSelf>
 {
@@ -17,8 +20,9 @@ public interface IFormattable
         where TWriter : ITextWriter;
 }
 
-// Operations compose independently of scalar classification. TOther and TResult
-// are not assumed to equal TSelf (vector/scalar, complex/real, and widening cases).
+// These granular generic-math protocols compose independently of scalar
+// classification; no universal number interface is mandatory. TOther and
+// TResult are not assumed to equal TSelf (vector/scalar, complex/real, widening).
 public interface IAdditionOperators<TSelf, TOther, TResult>
     where TSelf : IAdditionOperators<TSelf, TOther, TResult>
 {
@@ -37,8 +41,8 @@ public interface IAdditiveIdentity<TSelf, TResult>
     static abstract TResult Zero { get; }
 }
 
-// Scalar classification and IEEE behavior are opt-in, not implied by arithmetic.
-// In particular membership in a fixed-vector family does not imply IScalarNumber.
+// Optional composite conveniences; scalar classification and IEEE behavior
+// are not implied by arithmetic or fixed-vector-family membership.
 public interface IScalarNumber<TSelf>
     : IAdditionOperators<TSelf, TSelf, TSelf>,
       IMultiplyOperators<TSelf, TSelf, TSelf>,

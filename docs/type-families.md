@@ -1,6 +1,10 @@
 # Type-family design
 
-These are design contracts, not accepted syntax or implemented APIs. The spelling of family declarations, conditional members, extensions, witnesses and custom participation remains open. The local pseudo-code below labels relationships rather than specifying Terrum grammar.
+These are accepted semantic directions expressed as design contracts, not
+accepted syntax or implemented APIs. The spelling of family declarations,
+conditional members, extensions, witnesses and custom participation remains
+open. The local pseudo-code below labels relationships rather than specifying
+Terrum grammar.
 
 Family substitution preserves the complete qualification chosen by the caller.
 A concrete default-readonly type does not erase a caller-supplied `write`
@@ -13,12 +17,35 @@ projection is not automatically covariant and would need a checked
 representation/lifetime/cost proof. Generic `write T` is not a universal
 make-mutable transform; representation-aware mutation and its protocol
 constraints remain open.
+A readonly-only constraint on the complete `T` is distinct from projecting an
+unknown qualified `T` through a readonly view; projection does not rewrite the
+type argument or discard its original authority.
 
 ## Explicit families
 
 A family opts in explicitly to type-argument expansion and declares its members, including any distinguished specialization. A shared name or generic arity does not establish membership. The checker must preserve each member's representation and ABI, validity, copying and moving, partial initialization and cleanup, tracing and write barriers, access and backing dependencies, and lifetime across projections. An erased member may need a representation tag, a checked dictionary or a changed descriptor ABI; none follows automatically from substituting `void`. Generic extension lookup alone cannot establish a member's validity, representation, interface witnesses or lifetime obligations. Family operations must not turn erased or borrowed views into owning values, invent a `default(T)`, or assume that all members are interchangeable. Projection is legal only where the declared relationship and its costs and effects are checked. This is a general facility, not an automatic rule that every `Type<T>` acquires `Type<void>`; `void` is no universal top or bottom type.
 
 `Task<TResult = void>` has its own existing no-result meaning: `Task` expands to `Task<void>`. It does not thereby opt into an encoding-erasure projection or a general erasure rule. Hiding a result from `Task<T>` would require an explicit ownership, cleanup and observation contract for that result, not just a cast to `Task<void>`. Type defaults alone do not establish family relationships.
+
+## Nominal witnesses and associated relationships
+
+Behavioral conformance is nominal and requires a checked witness; conditional
+member guarantees do not themselves establish conformance. Conflicting
+type/interface witness claims are rejected rather than selected by import
+order. Producer-owned, versioned witnesses are the recommended bounded policy,
+while external conformance ownership and exact syntax remain open. Applicable
+members outrank extensions; extension qualification syntax is open, and an
+extension never substitutes for a nominal witness.
+
+Associated types and `Self` relationships are intended to express relations
+such as integer `Wider`, `Signed`, and `Unsigned` types and a SIMD member's
+element and mask types. One selected witness binds an associated result;
+inference does not run backward through a non-injective projection or choose
+an arbitrary implementer from a constraint. If one type has multiple valid
+relations, the use must disambiguate them. The relationship policy is accepted
+direction, but declaration, witness-selection, and disambiguation syntax are
+not settled. Associated bindings do not replace independent `[Copy]`,
+access, ownership, or family constraints.
 
 ## Text views
 
@@ -114,7 +141,7 @@ fixed_simd_family<TVector, TElement, TMask> {
 
 where TVector : [FixedSimdMember<float32, TMask>],
                 IAdditionOperators<TVector, TVector, TVector>
-// TMask is explanatory until the associated-mask syntax is settled.
+// The selected family witness binds TMask; the spelling is illustrative.
 ```
 
 The desired user-level constraint is “any fixed vector of `float32`”: its concrete width and matching mask remain statically known for each instantiation. Whether that is written with an associated mask, an explicit `TMask` parameter or another checked family form is open; the displayed spelling is not Terrum grammar.

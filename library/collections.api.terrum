@@ -3,6 +3,9 @@ using Terrum;
 
 namespace Terrum.Collections;
 
+// Generic collections are the primary surface. Heterogeneous storage uses an
+// explicit carrier such as List<box<I>>, not a parallel object-list hierarchy
+// or an implicit interface handle; representation and projection are checked.
 // `mut` requires writable receiver/storage places. `write` on a returned view
 // exposes existing element-slot authority; generic T retains its qualification.
 [CollectionBuilder(typeof(ListBuilder<>))]

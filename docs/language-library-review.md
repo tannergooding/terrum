@@ -1,6 +1,6 @@
 # Language and library improvement review
 
-**Design review; §§1.1 and 1.2 and the bounded collection-based `params`,
+**Design review; §§1.1–1.3 and the bounded collection-based `params`,
 callable, tuple, alias, and functor directions in §1.4 are accepted.**
 Unresolved grammar and other proposals add no syntax/API promise
 or compiler authorization. The review draws on C#/.NET, Rust, Go, Swift, Kotlin, C++
@@ -38,11 +38,13 @@ systems ABIs require explicit foreign contracts; none is copied wholesale.
 | **Open proposal** | A genuinely unsettled capability or policy; requires a decision before it can be treated as language behavior. |
 | **Implemented subset** | Verified in the bounded compiler/runtime profile described by the implementation documents. It is not a claim that the general feature is complete. |
 
-The reviewed implementation baseline is `f4b0425`, syntax-12/native-20:
-optional handles and source-defined cycles, plus private class implementations
-in v19 leaf modules. It does not establish a public managed ABI, general
-interfaces/witnesses, array/view libraries, async, proposed libraries, or
-specialization; examples and `.api.terrum` files remain design material.
+The reviewed implementation baseline is `0597c8b`, with managed
+semantic-module v24: optional managed handles, source-defined classes, and
+explicit `write` authority for managed handles and mutable class receivers.
+It includes compilation-local constrained generic specialization, but not a
+public managed ABI, general interfaces/witnesses, array/view libraries, async,
+or the proposed libraries. Examples in this review and `.api.terrum` files
+remain design material.
 
 ## 1. Make capabilities explicit and composable
 
@@ -139,114 +141,141 @@ supplies object defaults; [`IFormattable`](https://github.com/dotnet/runtime/blo
 is separate and opt-in. Terrum preserves explicit formatting protocols without
 requiring every value to become a user-visible string.
 
-### 1.3 Open proposals: generic APIs and type-system policies
+### 1.3 Accepted direction: generic APIs and type-system policies
 
-**The proposals in §1.3 are not accepted as a whole.** Access categories
-follow accepted §1.1 and the canonical [language contract](language.md).
-Complete generic qualification follows the opening substitution rule in
-[type-family design](type-families.md#type-family-design) and the
-[library contract](libraries.md); writable storage remains invariant. These
-are settled inputs, not open §1.3 policies. Exact constraint syntax and
-additions explicitly labeled as proposals remain design questions; the
-accepted baselines called out below are not reopened.
-After the access/syntax-category documentation settles, revisit this section
-for any remaining duplicated wording; this does not adopt the proposals below.
+The policies below are accepted target-language direction, not claims that
+general interfaces, overloads, inference, erasure, or evolution checks are
+implemented. Exact grammar, metadata encodings, and ABI details remain open
+where noted. The bounded implementation and scheduled work are tracked in
+[implementation](implementation.md) and the [roadmap](roadmap.md).
 
-**Accepted capability baseline.** A nominal behavioral constraint such as
-`where T : IFoo` requires a checked witness; a property constraint such as
-`where T : [Copy]` is a compiler-verified capability predicate, not an
-interface witness. These capabilities are independent: behavior, family
-membership, Copy, and storage permission are not inferred from one another or
-from operator names. See the canonical [language](language.md),
-[library](libraries.md), and [type-family](type-families.md) contracts. §1.3
-does not reopen those distinctions.
+**Generic collections and operation protocols.** Generic collections are the
+primary APIs; heterogeneous storage uses explicit carriers, unions, or
+interface representations rather than parallel generic and object-based
+collection hierarchies. `List<box<I>>` is one such homogeneous carrier whose
+elements may refer to different implementations. This does not reject generic
+math: granular static-operation protocols and useful composites such as
+`IScalarNumber<T>` coexist, with no mandatory universal number interface.
+Copy, access, ownership, and family requirements remain independent.
+An access constraint applies to the complete qualified `T`; it is distinct
+from exposing an unknown `T` through a readonly projection, which does not
+rewrite the type argument or erase its original authority.
 
-**Generic/erased API boundary (proposal).** Keep generic collections primary;
-do not duplicate their API graph in an erased hierarchy; use a narrow dynamic
-adapter only where heterogeneity needs explicit identity, ownership, lifetime,
-and dispatch cost. How APIs compose independent operation constraints without
-a universal “number” interface remains a design question.
-C# static-abstract members are useful prior art
-([C# interfaces](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/interface#static-abstract-and-virtual-members)).
+**Nominal witnesses, coherence, and associated types.** Behavioral conformance
+is nominal and requires a checked witness; conditional member guarantees do
+not by themselves establish behavioral conformance. Conflicting claims for a
+type/interface witness are rejected rather than selected by import order.
+Producer-owned, versioned witnesses are the recommended bounded policy;
+external conformance ownership and its grammar remain open. Applicable
+members outrank extensions; conflicting extensions may be explicitly
+qualified, but the qualification syntax remains open and extensions never
+replace nominal witnesses.
 
-**Nominal/conditional witnesses and coherence (proposal).** The accepted
-nominal behavioral-witness distinction above is the baseline. How conditional
-member-contract refinement and family membership are declared, versioned, and
-checked for coherence remains open; refinement alone would not establish
-behavioral conformance. Do not treat a second `ISpecialSpan` or an unsafe
-downcast as an accepted answer.
+Associated types and `Self` relationships are accepted direction, including
+integer `Wider`/`Signed`/`Unsigned` relations and SIMD element/mask relations.
+One selected witness binds each associated result. Do not infer a witness
+backwards through a non-injective projection, or let a constraint choose an
+arbitrary implementing type. Multiple valid relations require explicit
+disambiguation. Exact associated-type and constraint syntax remains open.
 
-**Associated types (proposal).** Associated results could express targeted
-relationships without general higher-kinded types. Swift `Sequence.Element`
-hides the concrete sequence; Rust associated types and stable GATs can relate
-a lending result to `next`'s borrow
-([SE-0346](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0346-light-weight-same-type-syntax.md);
-[Rust associated types](https://doc.rust-lang.org/reference/items/traits.html);
-[GAT stabilization](https://blog.rust-lang.org/2022/10/28/gats-stabilization/)).
-One candidate policy is to expose associated `E` only when one selected
-witness determines it, and keep `E` explicit when one `T` has multiple
-relations. Borrowed-result dependencies follow the canonical
-[lifetime contract](lifetimes.md); this does not decide associated-type
-syntax or witness selection.
+**Erased interface representations.** There is no `dyn` keyword and no
+implicit storable interface handle. Bare `I` names a nominal behavior/abstract
+payload type, not a local or field representation; storage chooses an explicit
+form such as `ref<I>` (borrowed erased receiver), `write ref<I>` (mutable
+borrow), `box<I>` (managed aliasable handle), or `write box<I>` (writable
+receiver). Explicit conformance is written `T : I`; a generic constraint keeps
+`T` concrete. `List<box<I>>` can hold heterogeneous implementations.
 
-**Erasure and existential opening (proposal).** Swift opens one existential's
-hidden type for an eligible generic call; two values do not prove equal hidden
-`Self`, and dependent results cannot escape their proof/backing
-([SE-0309](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0309-unlock-existential-types-for-all-protocols.md);
-[SE-0352](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0352-implicit-open-existentials.md)).
-Rust `dyn` excludes generic-method dispatch and most nonreceiver `Self` uses
-(`Self: Sized` methods may exist but are not dynamically callable)
-([dyn compatibility](https://doc.rust-lang.org/reference/items/traits.html#dyn-compatibility)).
-A proposed Terrum `dyn ISequence<E>` would need to settle root, ownership/loan,
-representation, and dispatch; opening one value cannot establish a second's
-hidden type or let dependent results escape.
+Projection to `box<I>` requires a checked representation conversion, never an
+implicit allocation or reinterpretation of a class-handle slot. Explicitly
+boxing a Copy inline struct creates an independent payload; transfer from an
+eligible unique value is explicit;
+projecting an existing class object may reuse its identity without allocation.
+`write ref<I>` can mutate the original implementation but cannot replace an
+unknown inline payload with an unrelated implementation. Slot and referent
+authority remain distinct: `write ref<box<I>>` can write a slot containing a
+readonly object handle, while `ref<write box<I>>` has a readonly slot and
+preserves writable object authority. `ref<C>` borrows a class-handle slot, not
+automatically the object payload. Opening one existential never proves that
+two hidden `Self` types match; dynamic-callability, associated bindings,
+borrow lifetime, and dispatch representation remain to define. No spelling
+here chooses an ABI or authorizes a cast.
 
-**Overload resolution and source compatibility (proposal).** Resolution is
-not coherence. Kotlin extensions use the declared receiver and lose to
-members; they add neither member nor witness
-([Kotlin extensions](https://kotlinlang.org/docs/extensions.html)). Rust
-rejects overlapping implementations. C++ constrained-overload subsumption uses
-atomic constraint origins/mappings, not arbitrary logical equivalence
-([Rust coherence](https://doc.rust-lang.org/reference/items/implementations.html#trait-implementation-coherence);
-[C++ ordering](https://eel.is/c++draft/temp.constr.order);
-[atomic constraints](https://eel.is/c++draft/temp.constr.atomic)).
-One candidate policy is producer-owned, versioned witnesses with overlap
-rejection rather than import-order resolution. A newly applicable overload
-could change source meaning without changing old declarations, so source
-compatibility and recompilation would matter alongside binary versioning.
+**Overload binding and source compatibility.** Overload resolution is a
+source-compilation decision. The selected declaration and closed generic
+arguments are recorded; linking and JIT validate and implement that binding,
+not rerun source overload resolution. Runtime virtual/interface dispatch and
+devirtualization are separate. An exact match precedes permitted erasure;
+there are no newly implied numeric conversions. Constraints filter
+applicability, but initial bounded resolution has no duplicate signatures
+that differ only by constraints or arbitrary logical subsumption. Return-only
+overloads are not introduced. Applicable members beat extensions.
 
-**Inference (proposal).** Inference is a policy, not a universal rule. C++
-relates parameter and argument types; Go solves some constraint equations and
-defaults untyped constants ([C++ deduction](https://eel.is/c++draft/temp.deduct.call);
-[Go inference](https://go.dev/ref/spec#Type_inference)). A Terrum inference
-proposal must define which relations participate and in what order. A
-constraint establishes admissibility, not necessarily `T` for `Parse<T>(text)`
-from `IParsable<T>` alone
-([C# constraints](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/keywords/where-generic-type-constraint)).
-Expected-result inference remains open. Typed arguments may establish generic
-context before a contextual literal is constructed; numeric literal fallback
-and the unconstrained `F(1)` case follow the accepted
-[language contract](language.md), not this proposal.
+For example, a sole `Set(int32)` accepts `Set(1)`. Adding `Set(uint32)` makes
+that source call ambiguous, but an already compiled caller retains its recorded
+`int32` binding. Removing a bound declaration remains a compatibility break.
+This separates source rebinding risk from binary identity and runtime dispatch.
 
-**Accepted enum baseline; public evolution remains open.** Integer-backed
-enums include unnamed underlying values; `[Flags]` explicitly defines
-bit-set operations. Closed nominal tagged unions have active-payload validity;
-overlapping native layout alone does not establish it. These accepted rules
-keep enum storage distinct from numeric semantics
-([language contract](language.md)). .NET's generic enum operations use enum
-constraints and underlying dispatch, not general numeric conformance
-([CoreLib `Enum`](https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/System/Enum.cs)).
+**Generic inference.** Inference proceeds in this order: explicit type
+arguments pin their positions; typed arguments establish generic types;
+expected-result context fills still-unresolved positions; then contextual
+literals and lambdas are checked. Context cannot retarget typed operands or
+replace established generic types. Thus `int64 x = 20 * 20` constructs
+`int64` operands, while `int32 a = 50000; int64 y = a * a` is invalid without
+explicit conversion. A schematic `U Convert<T, U>(T value)` can infer `T` from
+a typed argument and `U` from an expected result; `Convert<_, int32>(value)`
+pins only `U`. Likewise `func<_, int32> f = ToInt32` can fill one hole from a
+unique method signature. Hole spelling is illustrative; all holes must resolve
+at local binding, and exported fields, aliases, and parameters cannot retain
+unresolved holes. There is no wildcard, existential, higher-kinded, or
+non-injective inverse meaning; ambiguity is diagnosed. Current binder support
+is narrower and does not implement this general inference contract.
 
-**Public enum evolution (proposal).** For public case sets, distinguish closed
-exhaustiveness from evolvable sums with unknown-case handling. Swift
-non-exhaustive enums address library
-evolution; Kotlin sealed subclasses are package/module scoped
-([Swift SE-0192](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0192-non-exhaustive-enums.md);
-[Kotlin sealed classes](https://kotlinlang.org/docs/sealed-classes.html)).
-Neither closes integer enums or makes native layout a safe case test. Unknown-
-case/version policy and match behavior remain proposals. Concrete types remain
-sealed by default under the canonical [language contract](language.md); that
-accepted default does not settle any of the enum evolution proposals here.
+**Type and case evolution.** Evolvability is the default, independently of
+`sealed`: sealed prohibits inheritance, not interface dispatch and not future
+API evolution. A closed case-set promise, fixed layout, and frozen API are
+separate scoped contracts. Integer enums admit unnamed underlying values;
+`[Flags]` defines named bit operations but does not close the set. Nominal
+unions still require a valid active payload, and an overlapping raw layout is
+not a safe union representation.
+
+A closed case-set contract makes adding a case breaking; compatibility
+validation ordinarily rejects the replacement before execution. Exhaustive
+compiled dispatch still has a
+checked fail-fast unknown-case path, never an optimizer `unreachable` promise.
+Runtime fallback and compile-time explicit coverage are separate dimensions.
+The accepted `[Exhaustive]` fallback attribute, shown as
+`[Exhaustive] _ => HandleUnknown(status)`, handles unknown runtime cases while
+excluding itself from known-case coverage;
+missing known cases warn (and may be promoted), guarded arms do not establish
+coverage merely by naming a case, and the initial design permits only a final
+unguarded wildcard. Ordinary `_`
+suppresses missing-case warnings. Match grammar and the closed-set marker
+remain open. Enum coverage diagnostics concern
+named values; the fallback also handles unnamed underlying values. Unknown payloads
+must remain safely rooted, forwarded, and disposed, or the representation is
+rejected.
+
+Adding an interface member compatibly for existing implementations requires a
+default implementation that satisfies
+its declared contracts and a compatible witness/dispatch mechanism. A default
+body alone does not make every evolution safe: new required associated types,
+tighter effects/access/loan bounds, or conflicting inherited defaults can
+break implementers. Sealed types are not frozen APIs.
+
+**Compatibility forwarding and tooling.** A future compiler-recognized
+forwarder preserves the old identity and its full effects, access, lifetime,
+and ABI contract while naming one exact replacement or closed specialization.
+It may synthesize an adapter or old native entry point; fuzzy linker searches
+are not allowed. Source overload priority is separate, and metadata-stub
+visibility to source must be explicit. Exact attributes and version policy
+remain open. Build tooling should compare declared baselines/contracts and
+report binary breaks, source-binding risks (including overload additions and
+public parameter-label changes), witness/default conflicts, closed-case
+evolution, and layout/access/ownership/effect/lifetime requirements. It cannot
+prove arbitrary implementation behavior. The existing bounded semantic-module
+replacement checks are not this general forwarding or compatibility-analysis
+facility.
 
 ### 1.4 Collection-based `params`, callables, and tuples
 
@@ -778,10 +807,10 @@ trades generality for simplicity.
 | Mutable-array variance and root arrays | Writable storage is invariant; any readonly projection needs checked representation, access, and lifetime rules | Accepted invariant; projection/root-array policy open |
 | Universal object defaults | No universal object methods or automatic capabilities; opt-in equality/hash/format and separate diagnostic identity | Accepted direction |
 | Nominal witnesses and capability predicates | Checked `IFoo` witnesses remain distinct from `[Copy]`, storage, and family capabilities | Accepted baseline |
-| Generic/erased APIs, conditional witnesses, associated results, erasure, inference, overloads | Remaining API and type-system policy choices | Proposal / refinement |
-| Generic array/enum capabilities | Preserve accepted enum storage/unnamed-value semantics and independent capability predicates; array projection and public case evolution remain open | Accepted baseline / open proposals |
+| Generic/erased APIs, conditional witnesses, associated results, erasure, inference, overloads | Accepted policy; exact grammar, representations, dispatch and general compiler support are staged | Accepted direction / scheduled |
+| Generic array/enum capabilities | Preserve independent capability predicates, unnamed enum values, open-by-default evolution and explicit case-set/layout contracts | Accepted direction / representation details open |
 | Layout and wrappers | Opaque by default; transparent/native layouts preserve ABI, validity, and ownership | Accepted direction / open proposal |
-| Sealed concrete types | Preserve; favor interfaces/composition and explicit extension points | Accepted direction |
+| Sealed concrete types | `sealed` controls inheritance; type/API evolution and case-set/layout promises are separate | Accepted direction |
 | Collection-based `params` | Ordinary collection construction and per-element copy/move; existing-collection versus expansion binding remains open | Agreed direction / binding rule open |
 | `func`, `fnptr`, tuples, and packs | Bounded closed callable/tuple direction, transparent aliases, and checked callable witnesses; exact grammar, ABI annotations and generic callable contracts remain scheduled/open; no user-defined pack expansion | Accepted direction / scheduled details |
 | Tensor, multidimensional, SoA/AoS | Separate shape, strides, storage, and truthful projections | Proposal |
@@ -794,19 +823,19 @@ trades generality for simplicity.
 | Iteration, allocation, loop capture, callbacks | Lending/invalidation and allocator costs; capture/callback facts need contracts | Open library contracts |
 | Generic implementation strategy | AOT/JIT parity; sharing versus specialization is a backend choice | Open |
 
-Validate contracts across AOT/JIT/module replacement before syntax; consider
-bounded, versioned literals/handlers where useful. Defer packs/specialization
-until workload evidence; no roadmap expansion is implied.
+Validate accepted contracts across AOT/JIT/module replacement while scheduling
+each mechanism in the existing compiler stages; do not defer already accepted
+policies to an unspecified future. Type-pack declarations, arbitrary macro
+systems and unbounded specialization remain separate, later questions.
 
 These choices trade implicit convenience for stronger contracts. Keep the cost
 manageable with checked derivation of ordinary equality/formatting witnesses,
 contextual inference only where the language specifies an unambiguous source of
 target type, and useful library defaults -- not universal inherited behavior.
-Static witnesses favor optimization but can grow code; explicit dynamic
-adapters favor code sharing but add dispatch and storage contracts. Handler
-registration is narrower than arbitrary macros, while packs and overlapping
-specialization add inference and coherence complexity that ordinary typed
-builders do not need.
+Static witnesses favor optimization but can grow code; explicit erased
+representations add dispatch and storage contracts. Handler registration is
+narrower than arbitrary macros, while packs and overlapping specialization add
+inference and coherence complexity that ordinary typed builders do not need.
 
 The deeper priority is safe composition before a full higher-kinded type
 system, arbitrary macro facility, or general effect language. A single failing

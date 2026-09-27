@@ -10,8 +10,10 @@ namespace Terrum.Numerics;
 
 // LOCAL PSEUDO-CODE: explicit family registration, not an interface or naming
 // convention. The checker validates each concrete width, element/mask pairing,
-// static member, representation and ABI. All TVector operands/results have the
-// same instantiation; comparisons return its associated boolean-lane TMask.
+// static member, representation and ABI. The selected witness binds the
+// associated element/mask relationship; it is not inferred backward from a
+// non-injective projection or from a similar type name. All TVector
+// operands/results have the same instantiation; comparisons return its TMask.
 // fixed_simd_family<TVector, TElement, TMask>
 //     where TElement : [SimdElement], [Copy]
 //     where TVector : [Copy], IAdditionOperators<TVector, TVector, TVector>
