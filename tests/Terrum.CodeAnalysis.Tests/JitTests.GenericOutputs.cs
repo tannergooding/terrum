@@ -70,20 +70,20 @@ public sealed partial class JitTests
                 if (marker != 42) { return false; }
                 left = first;
                 right = second;
-                number = 18446744073709551615u64;
-                unit = (char16)55296;
+                number = 18446744073709551615;
+                unit = char16(55296);
                 return publish;
             }
             int32 Main() {
-                Pair first = new Pair(-9223372036854775808i64, 9223372036854775807i64);
-                Pair second = new Pair(40i64, 2i64);
+                Pair first = new Pair(-9223372036854775808, 9223372036854775807);
+                Pair second = new Pair(40, 2);
                 if (Forward<Pair>(first, second, false, out var noLeft, out var noRight,
                     out var noNumber, out var noUnit)) { return 1; }
                 require Forward<Pair>(first, second, true, out var left, out var right,
                     out var number, out var unit);
-                require left.First == -9223372036854775808i64 && left.Second == 9223372036854775807i64;
-                require number == 18446744073709551615u64 && unit == (char16)55296;
-                return (int32)(right.First + right.Second);
+                require left.First == -9223372036854775808 && left.Second == 9223372036854775807;
+                require number == 18446744073709551615 && unit == char16(55296);
+                return int32(right.First + right.Second);
             }
             """;
         if (checkedFailures)
@@ -109,12 +109,12 @@ public sealed partial class JitTests
             [NoThrow] int32 Count<T>(T value, int32 count) where T : [Copy] { return count; }
             [NoThrow] char16 Unit<T>(T value, char16 unit) where T : [Copy] { return unit; }
             int32 Main() {
-                Value value = new Value(0i64);
+                Value value = new Value(0);
                 var count = Count<Value>(value, 40) + 2;
-                var number = Number<Value>(value, 18446744073709551615u64);
-                var unit = Unit<Value>(value, (char16)55296);
+                var number = Number<Value>(value, 18446744073709551615);
+                var unit = Unit<Value>(value, char16(55296));
                 if (!Enabled<Value>(value, true) || Enabled<Value>(value, false)
-                    || number != 18446744073709551615u64 || unit != (char16)55296) { return 1; }
+                    || number != 18446744073709551615 || unit != char16(55296)) { return 1; }
                 return count;
             }
             """;
@@ -145,13 +145,13 @@ public sealed partial class JitTests
                 return true;
             }
             int32 Main() {
-                Value seed = new Value(40i64);
-                Value step = new Value(1i64);
+                Value seed = new Value(40);
+                Value step = new Value(1);
                 if (TryAccumulate<Value>(step, seed, -1, out var missing)) { return 1; }
                 require TryAccumulate<Value>(step, seed, 0, out var unchanged);
-                require unchanged.Number == 40i64;
+                require unchanged.Number == 40;
                 require TryAccumulate<Value>(step, seed, 2, out var sum);
-                return (int32)sum.Number;
+                return int32(sum.Number);
             }
             """;
         await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
@@ -173,14 +173,14 @@ public sealed partial class JitTests
                 return true;
             }
             int32 Main() {
-                mut Pair result = new Pair(1i64, 2i64);
+                mut Pair result = new Pair(1, 2);
                 unsafe {
                     try {
-                        Try<Pair>(new Pair(-9223372036854775808i64, 9223372036854775807i64), false, out result);
+                        Try<Pair>(new Pair(-9223372036854775808, 9223372036854775807), false, out result);
                         return 1;
                     } catch {
-                        require Try<Pair>(new Pair(40i64, 2i64), true, out result);
-                        return (int32)(result.First + result.Second);
+                        require Try<Pair>(new Pair(40, 2), true, out result);
+                        return int32(result.First + result.Second);
                     }
                 }
             }

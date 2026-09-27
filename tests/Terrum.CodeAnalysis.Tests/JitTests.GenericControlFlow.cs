@@ -27,13 +27,13 @@ public sealed partial class JitTests
     }
 
     [Theory]
-    [InlineData("Int32Value", "0", "0u32", "1")]
-    [InlineData("Int32Value", "0", "7u32", "0")]
-    [InlineData("Int32Value", "-2", "5u32", "-32")]
-    [InlineData("Int32Value", "2147483647", "1u32", "2147483647")]
-    [InlineData("Int64Value", "9223372036854775807i64", "1u32", "9223372036854775807i64")]
-    [InlineData("Int64Value", "3i64", "20u32", "3486784401i64")]
-    [InlineData("Int64Value", "1i64", "4294967295u32", "1i64")]
+    [InlineData("Int32Value", "0", "0", "1")]
+    [InlineData("Int32Value", "0", "7", "0")]
+    [InlineData("Int32Value", "-2", "5", "-32")]
+    [InlineData("Int32Value", "2147483647", "1", "2147483647")]
+    [InlineData("Int64Value", "9223372036854775807", "1", "9223372036854775807")]
+    [InlineData("Int64Value", "3", "20", "3486784401")]
+    [InlineData("Int64Value", "1", "4294967295", "1")]
     public async Task StructuredGenericPowerPreservesArithmeticBoundariesAsync(
         string type, string value, string exponent, string expected)
     {

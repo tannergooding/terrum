@@ -302,7 +302,12 @@ public sealed class Lexer
 
         if (!malformedExponent)
         {
-            _position += ReadNumericTag();
+            var tagLength = ReadNumericTag();
+            if (tagLength != 0)
+            {
+                Report("TRM0006", "Numeric width suffixes are not supported.", _position, tagLength);
+                _position += tagLength;
+            }
         }
 
         return TokenKind.NumericLiteral;

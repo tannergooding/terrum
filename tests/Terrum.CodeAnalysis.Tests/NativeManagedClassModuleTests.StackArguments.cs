@@ -83,11 +83,11 @@ public sealed partial class NativeManagedClassModuleTests
         var second = copyArgument ? "new Stamp(22)" : "22";
         return source.Replace("public Cycle(" + parameter + ")",
             "public Cycle(int32 prefix, bool ready, uint64 marker, " + parameter + ")", StringComparison.Ordinal)
-            .Replace("Ready = true;", "Ready = ready; require prefix == 1 && marker == 18446744073709551615u64;",
+            .Replace("Ready = true;", "Ready = ready; require prefix == 1 && marker == 18446744073709551615;",
                 StringComparison.Ordinal)
             .Replace("Cycle.TryCreate(" + first + ",",
-                "Cycle.TryCreate(1, true, 18446744073709551615u64, " + first + ",", StringComparison.Ordinal)
+                "Cycle.TryCreate(1, true, 18446744073709551615, " + first + ",", StringComparison.Ordinal)
             .Replace("Cycle.TryCreate(" + second + ",",
-                "Cycle.TryCreate(1, true, 18446744073709551615u64, " + second + ",", StringComparison.Ordinal);
+                "Cycle.TryCreate(1, true, 18446744073709551615, " + second + ",", StringComparison.Ordinal);
     }
 }

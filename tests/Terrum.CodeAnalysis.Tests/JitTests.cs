@@ -60,17 +60,17 @@ public sealed partial class JitTests
     [InlineData("void Main() { }", 0)]
     [InlineData("int32 Main() { mut int32 y = 9; bool result = true || Try(out y); return y; } bool Try(out int32 y) { return false; }", 9)]
     [InlineData("int32 Main() { require Fill(out var old); require Take(out var flag); if (flag == true) { return 0; } return 1; } bool Fill(out int32 value) { value = 2147483647; return true; } bool Take(out bool value) { value = true; return true; }", 0)]
-    [InlineData("int32 Main() { require Fill(out var old); require Take(out var unit); return (int32)unit; } bool Fill(out int32 value) { value = 2147483647; return true; } bool Take(out char16 value) { value = (char16)42; return true; }", 42)]
+    [InlineData("int32 Main() { require Fill(out var old); require Take(out var unit); return int32(unit); } bool Fill(out int32 value) { value = 2147483647; return true; } bool Take(out char16 value) { value = char16(42); return true; }", 42)]
     [InlineData("int32 Main() { return Factorial(6); } int32 Factorial(int32 n) { if (n <= 1) { return 1; } return n * Factorial(n - 1); }", 720)]
     [InlineData("int32 Main() { return Mix(1, 2, 3, 4, 5, 6); } int32 Mix(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { return a + b * 2 + c * 3 + d * 4 + e * 5 + f * 6; }", 91)]
     [InlineData("int32 Main() { return 2147483647 + 1; }", unchecked((int)0xE0540001))]
     [InlineData("int32 Main() { return 1 / 0; }", unchecked((int)0xE0540002))]
     [InlineData("int32 Main() { require false; return 1; }", unchecked((int)0xE0540003))]
-    [InlineData("int32 Main() { uint32 n = 4000000000u32; if (n > 2147483647u32 && n / 1000000000u32 == 4u32) { return (int32)(n - 3999999958u32); } return 0; }", 42)]
-    [InlineData("int32 Main() { return (int32)uint32.MaxValue; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { return (int32)(uint32.MaxValue + 1u32); }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { char16 high = (char16)55296u32; return (int32)high; }", 55296)]
-    [InlineData("int32 Main() { return (int32)(char16)65536u32; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { uint32 n = 4000000000; if (n > 2147483647 && n / 1000000000 == 4) { return int32(n - 3999999958); } return 0; }", 42)]
+    [InlineData("int32 Main() { return int32(uint32.MaxValue); }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { return int32(uint32.MaxValue + 1); }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { char16 high = char16(uint32(55296)); return int32(high); }", 55296)]
+    [InlineData("int32 Main() { return int32(char16(uint32(65536))); }", unchecked((int)0xE0540001))]
     [InlineData("""
         struct Tag {
             public char16 Unit;
@@ -80,8 +80,8 @@ public sealed partial class JitTests
                 this.Valid = valid;
             }
         }
-        Tag CreateTag() { return new Tag((char16)55296u32, true); }
-        int32 ReadTag(Tag tag) { if (tag.Valid) { return (int32)tag.Unit; } return 0; }
+        Tag CreateTag() { return new Tag(char16(uint32(55296)), true); }
+        int32 ReadTag(Tag tag) { if (tag.Valid) { return int32(tag.Unit); } return 0; }
         int32 Main() { return ReadTag(CreateTag()); }
         """, 55296)]
     [InlineData("int32 Main() { require Try(out var x) && x == 7; return x; } bool Try(out int32 x) { x = 7; return true; }", 7)]
@@ -105,7 +105,7 @@ public sealed partial class JitTests
     [InlineData("int32 Main() { mut int32 x = 42; try { try { return x; } finally { x = 1; } } finally { x = 2; } }", 42)]
     [InlineData("int32 Main() { mut int32 x = 42; try { if (x == 42) { return x; } x = 1; } finally { x = 0; } return x; }", 42)]
     [InlineData("int32 Choose(bool first) { mut int32 x = 42; try { if (first) { return x; } x = 7; return x; } finally { int32 local = 1; x = local; } } int32 Main() { return Choose(true) & 42; }", 42)]
-    [InlineData("int32 Main() { int64 result = Read(4294967338i64); if (result == 4294967338i64) { return 42; } return 0; } int64 Read(int64 x) { mut int64 local = x; try { return local; } finally { local = 0i64; Clobber(); } } [NoThrow] void Clobber() { mut int64 x = 1i64; x = 2i64; }", 42)]
+    [InlineData("int32 Main() { int64 result = Read(4294967338); if (result == 4294967338) { return 42; } return 0; } int64 Read(int64 x) { mut int64 local = x; try { return local; } finally { local = 0; Clobber(); } } [NoThrow] void Clobber() { mut int64 x = 1; x = 2; }", 42)]
     [InlineData("struct V { public int32 A; public int32 B; public int32 C; [NoThrow] public V(int32 a) { A = a; B = 2; C = 3; } } V Take(V v) { mut V local = v; try { return local; } finally { local = new V(0); } } int32 Main() { V v = Take(new V(42)); return v.A; }", 42)]
     [InlineData("struct V { public int32 A; public int32 B; public int32 C; public int32 D; [NoThrow] public V(int32 a) { A = a; B = 2; C = 3; D = 4; } } V Take(V v) { mut V local = v; try { return local; } finally { local = new V(0); } } int32 Main() { V v = Take(new V(42)); return v.A; }", 42)]
     [InlineData("struct V { public mut int32 A; public int32 B; public int32 C; public int32 D; [NoThrow] public V(int32 a) { A = a; B = 2; C = 3; D = 4; } } V Take(V v) { mut V local = v; try { return local; } finally { local.A = 0; Clobber(1, 2, 3, 4, 5, 6); } } [NoThrow] void Clobber(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { } int32 Main() { V v = Take(new V(42)); return v.A; }", 42)]
@@ -120,7 +120,7 @@ public sealed partial class JitTests
     [InlineData("[NoThrow] int32 Value() { return 42; } bool Take(out int32 result) { try { return true; } finally { result = Value(); } } int32 Main() { require Take(out var result); return result; }", 42)]
     [InlineData("int32 Main() { mut int32 value = 0; try { value = 1; } finally { try { value = 2; } finally { value = 42; } } return value; }", 42)]
     [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} [NoThrow] public int32 Read() { return Value; } } int32 Main() { Item item = new Item(42); return item.Read(); }", 42)]
-    [InlineData("unique struct Item { public int64 Value; public int32 Tag; public Item(int64 value) { Value = value; Tag = 1; } [NoThrow] [Cleanup] public void Close() {} } Item Take() { Item item = new Item(42i64); return move item; } int32 Main() { Item item = Take(); return (int32)item.Value; }", 42)]
+    [InlineData("unique struct Item { public int64 Value; public int32 Tag; public Item(int64 value) { Value = value; Tag = 1; } [NoThrow] [Cleanup] public void Close() {} } Item Take() { Item item = new Item(42); return move item; } int32 Main() { Item item = Take(); return int32(item.Value); }", 42)]
     [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} } int32 Take(int32 a, int32 b, int32 c, int32 d, int32 e, Item item) { return item.Value; } int32 Main() { Item item = new Item(42); return Take(1, 2, 3, 4, 5, move item); }", 42)]
     [InlineData("unique struct Item { public int32 Value; public Item(int32 value) { Value = value; } [NoThrow] [Cleanup] public void Close() {} } bool Fill(out Item item) { item = new Item(42); return true; } int32 Main() { require Fill(out var item); return item.Value; }", 42)]
     [InlineData("""
@@ -196,8 +196,8 @@ public sealed partial class JitTests
     [InlineData("int32 Main() { mut int32 value = 0; unsafe { try { try { require false; } catch { require false; } finally { value = 1; } } catch { return value + 41; } } return 0; }", 42)]
     [InlineData("int32 Main() { mut int32 value = 0; unsafe { try { value = 41; } catch { value = 0; } finally { value = 42; } } return value; }", 42)]
     [InlineData("int32 Main() { unsafe { try { require Fail(); } catch { return 42; } } return 0; } bool Fail() { return false; }", 42)]
-    [InlineData("int32 Main() { unsafe { try { return (int32)uint32.MaxValue; } catch { return 42; } } }", 42)]
-    [InlineData("int32 Main() { mut int64 value = 42i64; unsafe { try { return (int32)Take(value); } catch { return 0; } } } int64 Take(int64 value) { try { return value; } finally { int64 ignored = 0i64; } }", 42)]
+    [InlineData("int32 Main() { unsafe { try { return int32(uint32.MaxValue); } catch { return 42; } } }", 42)]
+    [InlineData("int32 Main() { mut int64 value = 42; unsafe { try { return int32(Take(value)); } catch { return 0; } } } int64 Take(int64 value) { try { return value; } finally { int64 ignored = 0; } }", 42)]
     [InlineData("struct V { public int32 A; public int32 B; public int32 C; [NoThrow] public V(int32 x) { A = x; B = 1; C = 2; } } V Take(V value) { mut V local = value; try { return local; } finally { local = new V(0); } } int32 Main() { V value = Take(new V(42)); return value.A; }", 42)]
     [InlineData("struct V { public int32 A; public int32 B; public int32 C; public int32 D; [NoThrow] public V(int32 x) { A = x; B = 1; C = 2; D = 3; } } V Take(V value) { mut V local = value; try { return local; } finally { local = new V(0); } } int32 Main() { V value = Take(new V(42)); return value.A; }", 42)]
     [InlineData("bool Take(bool fail, out int32 x) { unsafe { try { x = 42; require !fail; return true; } catch { return false; } } } int32 Main() { require Take(false, out var x); return x; }", 42)]
@@ -286,7 +286,7 @@ public sealed partial class JitTests
     public async Task CheckedBoundsFailureAgreesBetweenHostBufferPeAndJitWorkerAsync()
     {
         AssertWindowsX64();
-        var source = "int32 Main() { return (int32)Host.Source[42]; }";
+        var source = "int32 Main() { return int32(Host.Source[42]); }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("Source", PrimitiveType.Char16, [97], false)], BoundRuntimePolicy.CheckedExceptions);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));

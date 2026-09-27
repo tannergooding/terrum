@@ -11,7 +11,7 @@ The flow follows [Microsoft's Tutorial02](https://github.com/walbourn/directx-sd
 `RegisterClassExW` / `CreateWindowExW`, the message pump and native callback are explicit. Device/swap-chain creation, back buffer, render target, shaders, input layout, immutable vertex buffer, viewport, binding, draw and present are all in the source.
 
 - `unsafe` authorizes native pointer/ABI obligations, not unrestricted recovery. The callback catches only to terminate; exceptions never unwind into Win32. It captures no managed state. A future stateful callback needs retained roots/authority and unregister/drain-before-release.
-- `utf16z"..."` and `utf8z"..."` are working spellings for immutable static encoded literals with a trailing zero and no embedded zero. These do not choose a runtime string encoding.
+- `utf16z("...")` and `utf8z("...")` illustrate call-form targets for immutable static encoded literals with a trailing zero and no embedded zero. Their target parser, storage and pointer-lifetime checks are not implemented by the current executable profile; they do not choose a runtime string encoding.
 - `InlineArray<T, N>` is contiguous inline storage, not managed `T[]` and not a SIMD portability type. Taking addresses does not allocate or silently pin.
 - `[Layout(Sequential)] Vertex` has three binary32 fields, offsets 0/4/8, size 12 and alignment 4 in this ABI. Its input descriptor names the matching `R32G32B32_FLOAT` format. `CreateBuffer` copies all 36 input bytes before return.
 - Local pointer arrays/descriptor storage remain live for the immediate native calls. Shader blobs remain owned through shader/layout creation. D3D retains its own references to bound resources; the context guard clears them before source owners release.

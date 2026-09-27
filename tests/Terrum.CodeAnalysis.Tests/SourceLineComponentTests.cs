@@ -59,7 +59,7 @@ public sealed partial class SourceLineComponentTests
     public void MultipleSnapshotsPreserveHostGrantRestrictionsAndDiagnosticOwnership()
     {
         var entry = SyntaxTree.Parse("int32 Main() { Write(); return 0; }", "entry.terrum");
-        var write = SyntaxTree.Parse("void Write() { Host.Source[0] = (char16)66; }", "write.terrum");
+        var write = SyntaxTree.Parse("void Write() { Host.Source[0] = char16(66); }", "write.terrum");
         var compilation = Compilation.Create([entry, write],
             [new HostBuffer("Source", PrimitiveType.Char16, [65], false)]);
         Assert.True(compilation.HasErrors);

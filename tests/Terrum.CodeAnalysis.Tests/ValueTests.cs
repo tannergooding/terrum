@@ -18,11 +18,11 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class ValueTests
 {
     [Theory]
-    [InlineData("int32 Main() { return (int32)42u32; }", 42)]
-    [InlineData("int32 Main() { char16 unit = (char16)65535u32; return (int32)unit; }", 65535)]
-    [InlineData("int32 Main() { if (uint32.MaxValue > 2147483647u32) { return 1; } return 0; }", 1)]
-    [InlineData("int32 Main() { uint32 n = 4000000000u32; return (int32)(n / 1000000000u32); }", 4)]
-    [InlineData("namespace Example; int32 Main() { return (int32)Value(); } uint32 Value() { return 7u32; }", 7)]
+    [InlineData("int32 Main() { return int32(uint32(42)); }", 42)]
+    [InlineData("int32 Main() { char16 unit = char16(uint32(65535)); return int32(unit); }", 65535)]
+    [InlineData("int32 Main() { if (uint32.MaxValue > 2147483647) { return 1; } return 0; }", 1)]
+    [InlineData("int32 Main() { uint32 n = 4000000000; return int32(n / 1000000000); }", 4)]
+    [InlineData("namespace Example; int32 Main() { return int32(Value()); } uint32 Value() { return 7; }", 7)]
     [InlineData("namespace Example; public struct Value { public int32 Number; public Value(int32 number) { Number = number; } } int32 F(Example /*type*/ . Value value) { return value.Number; } int32 Main() { Example /*local*/ . Value value = new Example /*new*/ . Value(7); require int32 /*constant*/ . MaxValue > value.Number; return Example /*call*/ . F(value); }", 7)]
     public async Task ScalarValuesExecuteInNativeCodeAsync(string source, int expected)
     {
@@ -40,12 +40,12 @@ public sealed class ValueTests
     }
 
     [Theory]
-    [InlineData("int32 Main() { return (int32)uint32.MaxValue; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { return (int32)(uint32.MaxValue + 1u32); }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { return (int32)(0u32 - 1u32); }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { return (int32)(2147483648u32 * 2u32); }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { return (int32)(char16)65536u32; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { return (int32)(uint32)(-1i32); }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { return int32(uint32.MaxValue); }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { return int32(uint32.MaxValue + 1); }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { return int32(uint32(0) - 1); }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { return int32(uint32(2147483648) * 2); }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { return int32(char16(uint32(65536))); }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { return int32(uint32(int32(-1))); }", unchecked((int)0xE0540001))]
     public async Task CheckedConversionsAndUnsignedArithmeticFailFastAsync(string source, int expected)
     {
         Assert.Equal(expected, await RunNativeAsync(NativeEmitter.Emit(Compile(source), NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
@@ -197,7 +197,7 @@ public sealed class ValueTests
     }
 
     [Theory]
-    [InlineData("int32 Main() { if (Read(out var value)) { return (int32)value; } return 0; } bool Read(out char16 value) { value = (char16)65535; return true; }", 65535)]
+    [InlineData("int32 Main() { if (Read(out var value)) { return int32(value); } return 0; } bool Read(out char16 value) { value = char16(65535); return true; }", 65535)]
     [InlineData("int32 Main() { if (Read(out var value) && value) { return 1; } return 0; } bool Read(out bool value) { value = true; return true; }", 1)]
     public async Task NarrowOutValuesAreCanonicalAfterCommitAsync(string source, int expected)
     {
@@ -219,8 +219,8 @@ public sealed class ValueTests
             namespace Terrum.CodeAnalysis.Tests;
             int32 Main() {
                 if (!CheckSourceRange()) { return 1; }
-                if (!IsAsciiDigit((char16)48) || IsAsciiDigit((char16)47)) { return 2; }
-                if (GetDecimalDigit((char16)57) != 9) { return 3; }
+                if (!IsAsciiDigit(char16(48)) || IsAsciiDigit(char16(47))) { return 2; }
+                if (GetDecimalDigit(char16(57)) != 9) { return 3; }
                 return 0;
             }
             """);
@@ -276,7 +276,7 @@ public sealed class ValueTests
     {
         const string Source = """
             int32 Main() {
-                int32 first = (int32)Host.Source[1];
+                int32 first = int32(Host.Source[1]);
                 Host.Output[0] = first + Host.Source.Length;
                 return Host.Output[0];
             }
@@ -306,7 +306,7 @@ public sealed class ValueTests
             "int32 Main() { if (Try(out Host.Output[0])) { return 1; } return 0; } bool Try(out int32 value) { value = 1; return true; }"),
             [new HostBuffer("Output", PrimitiveType.Int32, [0], true)]);
         Assert.Null(outputArgument.Program);
-        var outOfRange = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Host.Source[-1i32]; }"), buffers);
+        var outOfRange = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Host.Source[-1]; }"), buffers);
         var program = Assert.IsType<BoundProgram>(outOfRange.Program);
         Assert.Equal(unchecked((int)0xE0540004),
             await RunNativeAsync(NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
@@ -526,9 +526,9 @@ public sealed class ValueTests
     }
 
     [Theory]
-    [InlineData("int32 Main() { return (int32)4294967296u32; }")]
+    [InlineData("int32 Main() { return int32(uint32(4294967296)); }")]
     [InlineData("int32 Main() { char16 c = 65536; return 0; }")]
-    [InlineData("int32 Main() { return (int32)true; }")]
+    [InlineData("int32 Main() { return int32(true); }")]
     [InlineData("int32 Main() { var n = 42; return n; }")]
     [InlineData("int32 Main() { uint32 n = -1; return 0; }")]
     [InlineData("struct S { public int32 A; public S() { A = 1; } public mut void Set() { A = 2; } } int32 Main() { S s = new S(); s.Set(); return s.A; }")]

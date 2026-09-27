@@ -42,11 +42,11 @@ public sealed class ScannerIntegerBindingTests
     [InlineData("extra")]
     public void RejectsMissingOrIncompatibleIntegerRecords(string variant)
     {
-        var lexical = Lexer.Lex(SourceText.From("int32 Main() { return 42i32 + 1; }"));
+        var lexical = Lexer.Lex(SourceText.From("int32 Main() { return 42 + 1; }"));
         var positions = lexical.Tokens.Select((token, index) => (token, index))
             .Where(static item => item.token.Kind == TokenKind.NumericLiteral)
             .Select(static item => item.index).ToArray();
-        var first = new ScannerIntegerValue(positions[0], "i32", false, 42);
+        var first = new ScannerIntegerValue(positions[0], "", false, 42);
         var second = new ScannerIntegerValue(positions[1], "", false, 1);
         ImmutableArray<ScannerIntegerValue> records = variant switch {
             "missing" => [first],
@@ -73,19 +73,19 @@ public sealed class ScannerIntegerBindingTests
     [Fact]
     public void SignedMinimumUsesDecodedMagnitudeAndOverflowKeepsRangeDiagnostic()
     {
-        var minimum = Lexer.Lex(SourceText.From("public int64 Read() { return -1i64; }"));
+        var minimum = Lexer.Lex(SourceText.From("public int64 Read() { return -1; }"));
         var index = Array.FindIndex([.. minimum.Tokens], static token => token.Kind == TokenKind.NumericLiteral);
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(minimum,
-            [new ScannerIntegerValue(index, "i64", false, 9223372036854775808UL)]));
+            [new ScannerIntegerValue(index, "", false, 9223372036854775808UL)]));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var statement = Assert.IsType<BoundReturn>(
             Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Functions[0].Body.Statements));
         Assert.Equal(long.MinValue, Assert.IsType<BoundConstant>(statement.Value).Value);
 
-        var overflow = Lexer.Lex(SourceText.From("public uint64 Read() { return 18446744073709551616u64; }"));
+        var overflow = Lexer.Lex(SourceText.From("public uint64 Read() { return 18446744073709551616; }"));
         var overflowIndex = Array.FindIndex([.. overflow.Tokens], static token => token.Kind == TokenKind.NumericLiteral);
         var invalid = Compilation.CreateLibrary(SyntaxTree.Parse(overflow,
-            [new ScannerIntegerValue(overflowIndex, "u64", true, null)]));
+            [new ScannerIntegerValue(overflowIndex, "", true, null)]));
         Assert.Contains(invalid.Diagnostics, static diagnostic => diagnostic.Code == "TRM3013");
     }
 }

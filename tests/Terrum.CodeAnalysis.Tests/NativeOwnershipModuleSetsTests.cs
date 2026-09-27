@@ -33,13 +33,13 @@ public sealed class NativeOwnershipModuleSetsTests
             [NoThrow] [Cleanup] public void Close() {}
         }
         public bool TrySecond(bool success, out SecondTicket ticket) {
-            ticket = new SecondTicket(22i64);
+            ticket = new SecondTicket(22);
             return success;
         }
-        public SecondTicket CreateSecond() { return new SecondTicket(0i64); }
+        public SecondTicket CreateSecond() { return new SecondTicket(0); }
         public int32 ConsumeSecond(SecondTicket ticket) {
             require ticket.Marker == uint64.MaxValue;
-            return (int32)ticket.Value;
+            return int32(ticket.Value);
         }
         """;
 
@@ -79,7 +79,7 @@ public sealed class NativeOwnershipModuleSetsTests
 
         var firstReplacement = Producer(First.Replace("new FirstTicket(20)", "new FirstTicket(21)", StringComparison.Ordinal),
             ["CreateFirst", "ConsumeFirst", "FirstTicket.Close"], "First", policy);
-        var secondReplacement = Producer(Second.Replace("new SecondTicket(22i64)", "new SecondTicket(23i64)", StringComparison.Ordinal),
+        var secondReplacement = Producer(Second.Replace("new SecondTicket(22)", "new SecondTicket(23)", StringComparison.Ordinal),
             secondExports, "Second", policy);
         Assert.Equal(43, await NativeModuleCompiler.RunConsumerSetAsync(consumer, [firstReplacement, second],
             TimeSpan.FromSeconds(10), policy));

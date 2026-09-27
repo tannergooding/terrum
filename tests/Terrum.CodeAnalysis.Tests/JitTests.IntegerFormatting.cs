@@ -39,7 +39,6 @@ public sealed partial class JitTests
                 .ToString(CultureInfo.InvariantCulture);
         var format = allowNegative ? "FormatInt64" : "FormatUInt64";
         var maximum = allowNegative ? "int64.MinValue" : "uint64.MaxValue";
-        var suffix = allowNegative ? "i64" : "u64";
         var checks = string.Join(Environment.NewLine, expected.Select((digit, index) =>
             FormattableString.Invariant($"if (digits.Read({index}) != {(int)digit}) {{ return 2; }}")));
         var component = await File.ReadAllTextAsync(
@@ -49,10 +48,10 @@ public sealed partial class JitTests
             int32 Main() {
                 require OwnedInt32Buffer.TryCreate(20, out var workspace);
                 OwnedInt32Buffer maximum = {{format}}({{maximum}}, move workspace);
-                OwnedInt32Buffer digits = {{format}}({{value}}{{suffix}}, move maximum);
+                OwnedInt32Buffer digits = {{format}}({{value}}, move maximum);
                 if (digits.Count != {{expected.Length}} || digits.Capacity != 20) { return 1; }
                 {{checks}}
-                OwnedInt32Buffer zero = {{format}}(0{{suffix}}, move digits);
+                OwnedInt32Buffer zero = {{format}}(0, move digits);
                 if (zero.Count != 1 || zero.Read(0) != 48 || zero.Capacity != 20) { return 3; }
                 return 42;
             }
@@ -70,7 +69,7 @@ public sealed partial class JitTests
 
             int32 Attempt() {
                 require OwnedInt32Buffer.TryCreate(19, out var workspace);
-                OwnedInt32Buffer digits = FormatUInt64(0u64, move workspace);
+                OwnedInt32Buffer digits = FormatUInt64(0, move workspace);
                 return digits.Count;
             }
             """;

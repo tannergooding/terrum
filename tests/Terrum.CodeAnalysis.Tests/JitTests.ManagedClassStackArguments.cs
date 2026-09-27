@@ -57,16 +57,16 @@ public sealed partial class JitTests
         var parameters = string.Join(", ", Enumerable.Range(1, count).Select(
             index => "Payload a" + index.ToString(CultureInfo.InvariantCulture)));
         var arguments = string.Join(", ", Enumerable.Range(1, count).Select(
-            index => "new Payload(" + index.ToString(CultureInfo.InvariantCulture) + "i64)"));
+            index => "new Payload(" + index.ToString(CultureInfo.InvariantCulture) + ")"));
         var checks = string.Join(" ", Enumerable.Range(1, count).Select(index =>
             "require a" + index.ToString(CultureInfo.InvariantCulture) + ".First == "
-                + index.ToString(CultureInfo.InvariantCulture) + "i64 && a"
-                + index.ToString(CultureInfo.InvariantCulture) + ".Second == -9223372036854775808i64;"));
+                + index.ToString(CultureInfo.InvariantCulture) + " && a"
+                + index.ToString(CultureInfo.InvariantCulture) + ".Second == -9223372036854775808;"));
         var source = $$"""
             struct Payload {
                 public int64 First;
                 public int64 Second;
-                public Payload(int64 first) { First = first; Second = -9223372036854775808i64; }
+                public Payload(int64 first) { First = first; Second = -9223372036854775808; }
             }
             class Box {
                 public Payload Value;
@@ -79,8 +79,8 @@ public sealed partial class JitTests
             int32 Main() {
                 {
                     require Box.TryCreate({{arguments}}, out var box);
-                    require box.Value.First == {{count.ToString(CultureInfo.InvariantCulture)}}i64;
-                    require box.Value.Second == -9223372036854775808i64;
+                    require box.Value.First == {{count.ToString(CultureInfo.InvariantCulture)}};
+                    require box.Value.Second == -9223372036854775808;
                 }
                 require ManagedHeap.Collect() == 1;
                 return 42;
@@ -103,7 +103,7 @@ public sealed partial class JitTests
                 + index.ToString(CultureInfo.InvariantCulture)));
         var arguments = string.Join(", ", Enumerable.Range(1, 63).Select(index =>
             IsHandle(index) ? "Create(" + index.ToString(CultureInfo.InvariantCulture) + ")"
-                : index.ToString(CultureInfo.InvariantCulture) + "i64"));
+                : index.ToString(CultureInfo.InvariantCulture)));
         var source = $$"""
             class Box {
                 public ManagedNode First;
@@ -114,7 +114,7 @@ public sealed partial class JitTests
                     First = a1;
                     Middle = a32;
                     Last = a63;
-                    require a2 == 2i64;
+                    require a2 == 2;
                 }
             }
             ManagedNode Create(int32 value) {
@@ -133,7 +133,7 @@ public sealed partial class JitTests
             """;
         await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
         await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
-        source = source.Replace("require a2 == 2i64;", "require false;", StringComparison.Ordinal);
+        source = source.Replace("require a2 == 2;", "require false;", StringComparison.Ordinal);
         var entry = source.IndexOf("int32 Main()", StringComparison.Ordinal);
         source = source[..entry] + $$"""
             int32 Main() {
@@ -172,7 +172,7 @@ public sealed partial class JitTests
             struct Payload {
                 public int64 First;
                 public int64 Second;
-                public Payload(int64 first) { First = first; Second = -9223372036854775808i64; }
+                public Payload(int64 first) { First = first; Second = -9223372036854775808; }
             }
             class Box {
                 public Payload First;
@@ -200,15 +200,15 @@ public sealed partial class JitTests
             }
             Payload Last() {
                 require ManagedHeap.Collect() == 0;
-                return new Payload(7i64);
+                return new Payload(7);
             }
             int32 Main() {
                 {
-                    require Box.TryCreate(new Payload(1i64), 18446744073709551615u64, true, (char16)55296,
+                    require Box.TryCreate(new Payload(1), 18446744073709551615, true, char16(55296),
                         Create(20), Create(22), Last(), out var box);
-                    require box.First.First == 1i64 && box.Last.First == 7i64
-                        && box.First.Second == -9223372036854775808i64 && box.Last.Second == -9223372036854775808i64;
-                    require box.Ready && box.Bits == 18446744073709551615u64 && box.Unit == (char16)55296;
+                    require box.First.First == 1 && box.Last.First == 7
+                        && box.First.Second == -9223372036854775808 && box.Last.Second == -9223372036854775808;
+                    require box.Ready && box.Bits == 18446744073709551615 && box.Unit == char16(55296);
                     require box.Left.Value + box.Right.Value == 42;
                 }
                 require ManagedHeap.Collect() == 3;

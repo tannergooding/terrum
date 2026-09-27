@@ -30,15 +30,15 @@ public sealed partial class NativeManagedClassModuleTests
             struct Payload {
                 public int64 First;
                 public int64 Second;
-                public Payload(int64 first) { First = first; Second = 2i64; }
+                public Payload(int64 first) { First = first; Second = 2; }
             }
             class Box {
                 {{field}}
                 public Box(Payload value) { {{assignment}} }
             }
             public int32 Proof() {
-                require Box.TryCreate(new Payload(42i64), out var box);
-                return (int32){{access}};
+                require Box.TryCreate(new Payload(42), out var box);
+                return int32({{access}});
             }
             """, policy);
         var producer = ModuleCompiler.CreateProducer(program, ["Proof"]);
@@ -72,9 +72,9 @@ public sealed partial class NativeManagedClassModuleTests
                 public Stamp(int32 value) { Other = value; }
             }
             int32 Main() {
-                Cell cell = new Cell(1i64);
+                Cell cell = new Cell(1);
                 Stamp stamp = new Stamp(2);
-                return Leaf() + (int32)cell.Other + stamp.Other - 3;
+                return Leaf() + int32(cell.Other) + stamp.Other - 3;
             }
             """, policy, ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);

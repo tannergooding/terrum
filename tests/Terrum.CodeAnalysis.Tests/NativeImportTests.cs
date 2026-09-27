@@ -19,11 +19,11 @@ public sealed class NativeImportTests
     private const string Provider = """
         public int32 A(int32 value) { return value + 1; }
         public int64 B(int64 n, int32 a, int32 b, int32 c, int32 d) {
-            return n + (int64)a + (int64)b + (int64)c + (int64)d;
+            return n + int64(a) + int64(b) + int64(c) + int64(d);
         }
         """;
     private const string Consumer = """
-        int32 Main() { return A(10) + (int32)B(1, 2, 3, 4, 5); }
+        int32 Main() { return A(10) + int32(B(1, 2, 3, 4, 5)); }
         """;
 
     private static BoundProgram Compile()

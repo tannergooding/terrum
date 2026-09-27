@@ -41,7 +41,7 @@ public sealed class AggregateAbiTests
         }
         int32 Mix(Twelve a, Three b, Six c, Wide d, int32 e, Twelve f) {
             if (!b.A || b.B || !b.C) { return -1; }
-            return a.A + a.B + (int32)c.C + d.Value.C + e + f.C;
+            return a.A + a.B + int32(c.C) + d.Value.C + e + f.C;
         }
         bool Try(bool success, out Wide result) {
             if (!success) { return false; }
@@ -54,11 +54,11 @@ public sealed class AggregateAbiTests
         """;
 
     [Theory]
-    [InlineData("return Mix(new Twelve(1, 2, 7), new Three(true, false, true), new Six((char16)4, (char16)5, (char16)6), Make(9), 14, new Twelve(1, 2, 7));", 42)]
+    [InlineData("return Mix(new Twelve(1, 2, 7), new Three(true, false, true), new Six(char16(4), char16(5), char16(6)), Make(9), 14, new Twelve(1, 2, 7));", 42)]
     [InlineData("Wide w = Echo(Make(1), Make(2), Make(3), Make(4), Recurse(5)); return w.Value.A + w.Value.B + w.Value.C + w.Tail;", 42)]
     [InlineData("mut Wide w = Make(1); Wide copy = w; w.Value = new Twelve(1, 2, 3); w.Tail = 40; return copy.Value.A + copy.Value.B + copy.Value.C + copy.Tail + w.Value.A + w.Value.B + w.Value.C;", 40)]
     [InlineData("require Forward(true, out var w); if (Forward(false, out var ignored)) { return -1; } return w.Value.A + w.Value.B + w.Value.C + w.Tail;", 42)]
-    [InlineData("Three t = new Three(true, false, true); Six s = new Six((char16)7, (char16)8, (char16)9); if (t.A && !t.B && t.C) { return (int32)s.A + (int32)s.B + (int32)s.C; } return -1;", 24)]
+    [InlineData("Three t = new Three(true, false, true); Six s = new Six(char16(7), char16(8), char16(9)); if (t.A && !t.B && t.C) { return int32(s.A) + int32(s.B) + int32(s.C); } return -1;", 24)]
     [InlineData("Wide w = Echo(Make(1 / 0), Make(2147483647 + 1), Make(3), Make(4), Make(5)); return w.Tail;", unchecked((int)0xE0540002))]
     public async Task IndirectAggregatesExecuteThroughAotAndCliJitAsync(string body, int expected)
     {

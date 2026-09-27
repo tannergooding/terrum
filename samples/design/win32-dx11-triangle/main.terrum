@@ -35,10 +35,10 @@ public static int32 Main(Span<TextSpan> args)
         NativeError.RequireHandle(instance, "GetModuleHandleW");
 
         mut var windowClass = WNDCLASSEXW.Zero;
-        windowClass.cbSize = (uint32)sizeof(WNDCLASSEXW);
+        windowClass.cbSize = uint32(sizeof(WNDCLASSEXW));
         windowClass.lpfnWndProc = &WindowProcedure;
         windowClass.hInstance = instance;
-        windowClass.lpszClassName = utf16z"TerrumTriangle";
+        windowClass.lpszClassName = utf16z("TerrumTriangle");
 
         var atom = Win32.RegisterClassExW(&windowClass);
         NativeError.RequireAtom(atom, "RegisterClassExW");
@@ -53,7 +53,7 @@ public static int32 Main(Span<TextSpan> args)
         NativeError.RequireTrue(Win32.AdjustWindowRect(&rectangle, style, 0), "AdjustWindowRect");
 
         var handle = Win32.CreateWindowExW(
-            0, utf16z"TerrumTriangle", utf16z"Terrum - Direct3D 11",
+            0, utf16z("TerrumTriangle"), utf16z("Terrum - Direct3D 11"),
             style, CW_USEDEFAULT, CW_USEDEFAULT,
             rectangle.right - rectangle.left, rectangle.bottom - rectangle.top,
             null, null, instance, null);
@@ -66,8 +66,8 @@ public static int32 Main(Span<TextSpan> args)
         mut var client = RECT.Zero;
         NativeError.RequireTrue(Win32.GetClientRect(window.Handle, &client), "GetClientRect");
 
-        uint32 width = (uint32)(client.right - client.left);
-        uint32 height = (uint32)(client.bottom - client.top);
+        uint32 width = uint32(client.right - client.left);
+        uint32 height = uint32(client.bottom - client.top);
 
         mut var swapDescription = DXGI_SWAP_CHAIN_DESC.Zero;
         swapDescription.BufferDesc.Width = width;
@@ -120,8 +120,8 @@ public static int32 Main(Span<TextSpan> args)
         using var target = targetOutput.Take();
 
         using var shaderPath = NativeUtf16Z.FromApplicationAsset("triangle.hlsl");
-        using var vertexCode = CompileShader(shaderPath.Pointer, utf8z"VertexMain", utf8z"vs_5_0");
-        using var pixelCode = CompileShader(shaderPath.Pointer, utf8z"PixelMain", utf8z"ps_5_0");
+        using var vertexCode = CompileShader(shaderPath.Pointer, utf8z("VertexMain"), utf8z("vs_5_0"));
+        using var pixelCode = CompileShader(shaderPath.Pointer, utf8z("PixelMain"), utf8z("ps_5_0"));
 
         using mut var vertexShaderOutput = new ComSlot<ID3D11VertexShader>();
         using mut var pixelShaderOutput = new ComSlot<ID3D11PixelShader>();
@@ -139,7 +139,7 @@ public static int32 Main(Span<TextSpan> args)
         using var pixelShader = pixelShaderOutput.Take();
 
         mut var element = D3D11_INPUT_ELEMENT_DESC.Zero;
-        element.SemanticName = utf8z"POSITION";
+        element.SemanticName = utf8z("POSITION");
         element.Format = DXGI_FORMAT.R32G32B32_FLOAT;
         element.InputSlotClass = D3D11_INPUT_CLASSIFICATION.PER_VERTEX_DATA;
 
@@ -157,7 +157,7 @@ public static int32 Main(Span<TextSpan> args)
             new Vertex(-0.6, -0.5, 0.5)
         ];
 
-        uint32 stride = (uint32)sizeof(Vertex);
+        uint32 stride = uint32(sizeof(Vertex));
         uint32 offset = 0;
 
         mut var bufferDescription = D3D11_BUFFER_DESC.Zero;

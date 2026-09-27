@@ -68,12 +68,12 @@ public sealed partial class JitTests
     {
         var source = CompositionValue + """
             T Repeat<T>(T value, uint32 count) where T : Addition<T, T, T>, [Copy] {
-                if (count == 0u32) { return value; }
-                return Repeat<T>(value + value, count - 1u32);
+                if (count == 0) { return value; }
+                return Repeat<T>(value + value, count - 1);
             }
             int32 Main() {
-                var value = Repeat<Value>(new Value(2i64, 3i64), 3u32);
-                return (int32)(value.First + value.Second) + 2;
+                var value = Repeat<Value>(new Value(2, 3), 3);
+                return int32(value.First + value.Second) + 2;
             }
             """;
         if (mutual)
@@ -94,17 +94,17 @@ public sealed partial class JitTests
     {
         var source = CompositionValue + """
             T Compose<T>(T value, T extra) where T : Addition<T, T, T>, [Copy] {
-                return Combine<T>(value, 10, extra, true, value + extra, 20i64,
-                    Combine<T>(value, 10, extra, true, value, 20i64, extra, 30u64), 30u64);
+                return Combine<T>(value, 10, extra, true, value + extra, 20,
+                    Combine<T>(value, 10, extra, true, value, 20, extra, 30), 30);
             }
             U Combine<U>(U first, int32 a, U second, bool b, U third, int64 c, U fourth, uint64 d)
                 where U : Addition<U, U, U>, [Copy] {
-                require (a == 10 && b && c == 20i64 && d == 30u64);
+                require (a == 10 && b && c == 20 && d == 30);
                 return first + second + third + fourth;
             }
             int32 Main() {
-                var result = Compose<Value>(new Value(1i64, 2i64), new Value(3i64, 4i64));
-                if (result.First != 16i64 || result.Second != 24i64) { return 1; }
+                var result = Compose<Value>(new Value(1, 2), new Value(3, 4));
+                if (result.First != 16 || result.Second != 24) { return 1; }
                 return 42;
             }
             """;
@@ -122,11 +122,11 @@ public sealed partial class JitTests
                 mut int32 cleaned = 0;
                 unsafe {
                     try {
-                        try { Power<Int32Value>(new Int32Value(2), new Int32Value(1), 32u32); }
+                        try { Power<Int32Value>(new Int32Value(2), new Int32Value(1), 32); }
                         finally { cleaned = 2; }
                     }
                     catch {
-                        return Power<Int32Value>(new Int32Value(2), new Int32Value(1), 5u32).Value
+                        return Power<Int32Value>(new Int32Value(2), new Int32Value(1), 5).Value
                             + cleaned + 8;
                     }
                 }

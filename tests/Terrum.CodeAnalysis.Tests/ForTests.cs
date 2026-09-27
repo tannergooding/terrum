@@ -44,9 +44,9 @@ public sealed class ForTests
     [InlineData("for (mut int32 i = 0; i < 1; i = i + 1) { } return i;")]
     [InlineData("for (var i = 0; false;) { } return 0;")]
     [InlineData("for (int32 i = 0; i < 1; i = i + 1) { } return 0;")]
-    [InlineData("for (; 1i32;) { } return 0;")]
+    [InlineData("for (; int32(1);) { } return 0;")]
     [InlineData("for (; false; i = 1) { mut int32 i = 0; } return 0;")]
-    [InlineData("for (; false; 1i32 + 2) { } return 0;")]
+    [InlineData("for (; false; int32(1) + 2) { } return 0;")]
     [InlineData("mut int32 i = 0; for (mut int32 i = 1; false;) { } return 0;")]
     public void ForLoopsPreserveScopeTypeAndUnsupportedControlRules(string body)
     {

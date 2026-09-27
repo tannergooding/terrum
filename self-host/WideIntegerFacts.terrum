@@ -19,7 +19,7 @@ public static bool TryAdd(int64 left, int64 right, out int64 result)
 
 public static bool TryAccumulateDecimal(uint64 value, uint32 digit, uint64 maximum, out uint64 result)
 {
-    uint64 widenedDigit = (uint64)digit;
+    uint64 widenedDigit = uint64(digit);
     if (digit > 9 || maximum < widenedDigit)
     {
         return false;

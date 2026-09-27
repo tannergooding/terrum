@@ -39,7 +39,7 @@ public bool TryInt32(out int32 value)
 
 public bool TryChar16(out char16 value)
 {
-    value = (char16)55296;
+    value = char16(55296);
     return true;
 }
 
@@ -51,7 +51,7 @@ public bool TryBool(out bool value)
 
 public int32 ReadChar16(char16 value)
 {
-    return (int32)value;
+    return int32(value);
 }
 
 public int32 ReadBool(bool value)
@@ -116,9 +116,9 @@ public struct AlignedOuter
     public char16 Suffix;
     public AlignedOuter()
     {
-        Prefix = (char16)1;
-        Value = new AlignedInner((char16)39);
-        Suffix = (char16)2;
+        Prefix = char16(1);
+        Value = new AlignedInner(char16(39));
+        Suffix = char16(2);
     }
 }
 
@@ -133,7 +133,7 @@ public int32 ReadAligned(AlignedOuter value)
     {
         return -1;
     }
-    return (int32)value.Prefix + (int32)value.Value.Unit + (int32)value.Suffix;
+    return int32(value.Prefix) + int32(value.Value.Unit) + int32(value.Suffix);
 }
 
 public struct Three
@@ -188,12 +188,12 @@ public struct Six
 
 public Six MakeSix()
 {
-    return new Six((char16)4, (char16)5, (char16)6);
+    return new Six(char16(4), char16(5), char16(6));
 }
 
 public int32 ReadSix(Six value)
 {
-    return (int32)value.First + (int32)value.Second + (int32)value.Third;
+    return int32(value.First) + int32(value.Second) + int32(value.Third);
 }
 
 public bool TrySix(bool success, out Six value)
@@ -240,7 +240,7 @@ public int32 ReadMixed(Twelve first, Three second, Pair third, Six fourth, Twelv
     {
         return -1;
     }
-    return first.First + first.Second + third.Length + (int32)fourth.Third + fifth.Third + sixth;
+    return first.First + first.Second + third.Length + int32(fourth.Third) + fifth.Third + sixth;
 }
 
 public struct Wide
@@ -329,8 +329,8 @@ public WideIntegerPair MakeWideIntegerPair(int64 signed, uint64 unsigned)
 public int32 ReadWideIntegerPair(WideIntegerPair value, int64 second, int64 third, int64 fourth, int64 fifth)
 {
     if (value.Signed == int64.MinValue && value.Unsigned == uint64.MaxValue
-        && second == -2147483649i64 && third == 2147483648i64
-        && fourth == 1i64 && fifth == 42i64)
+        && second == -2147483649 && third == 2147483648
+        && fourth == 1 && fifth == 42)
     {
         return 42;
     }
@@ -354,7 +354,7 @@ public unique struct SmallOwner
     [NoThrow] public int32 Read() { return Value; }
     public WideIntegerPair Pack(int64 a, int64 b, int64 c, uint64 d, uint64 e)
     {
-        return new WideIntegerPair((int64)Value + a + b + c, d + e);
+        return new WideIntegerPair(int64(Value) + a + b + c, d + e);
     }
 }
 

@@ -121,12 +121,12 @@ public sealed class MutableStructReceiverTests
 
     [Theory]
     [InlineData("int32", "40", "")]
-    [InlineData("int64", "40i64", "public int64 Second;")]
+    [InlineData("int64", "40", "public int64 Second;")]
     public void MutableReceiverRejectsForgedValueArgumentBeforeEmission(
         string type, string initial, string additionalField)
     {
         ArgumentNullException.ThrowIfNull(additionalField);
-        var initializeExtra = additionalField.Length == 0 ? "" : "Second = 2i64;";
+        var initializeExtra = additionalField.Length == 0 ? "" : "Second = 2;";
         var source = $$"""
             struct Counter {
                 public mut {{type}} Value;
@@ -137,7 +137,7 @@ public sealed class MutableStructReceiverTests
             int32 Main() {
                 mut Counter value = new Counter();
                 value.Increment();
-                return (int32)value.Value;
+                return int32(value.Value);
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));

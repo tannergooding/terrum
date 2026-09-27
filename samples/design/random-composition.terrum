@@ -1,6 +1,8 @@
 // DESIGN ONLY: a deterministic fixture, not a statistical RNG. `write ref<T>`
 // is the writable parameter form; call-site loan syntax retains legacy
-// spelling below and remains unresolved.
+// spelling below and remains unresolved. The hexadecimal seed below illustrates
+// target syntax; the bounded executable numeric binder currently accepts only
+// decimal integer literals.
 using Terrum;
 
 public interface IRandom

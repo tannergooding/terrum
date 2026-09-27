@@ -14,8 +14,8 @@ public int32 ConstructorFailure() {
     require Leaf.TryCreate(42, out var retained);
     unsafe {
         try {
-            if (Broken.TryCreate(42, 18446744073709551615u64, true,
-                new FactoryPayload(42i64), retained, false, out var unpublished)) {
+            if (Broken.TryCreate(42, 18446744073709551615, true,
+                new FactoryPayload(42), retained, false, out var unpublished)) {
                 return 0;
             }
             return 1;
@@ -28,8 +28,8 @@ public int32 ConstructorFailure() {
 
 public void EscapeConstructorToNative() {
     require Leaf.TryCreate(42, out var retained);
-    require Broken.TryCreate(42, 18446744073709551615u64, true,
-        new FactoryPayload(42i64), retained, false, out var unpublished);
+    require Broken.TryCreate(42, 18446744073709551615, true,
+        new FactoryPayload(42), retained, false, out var unpublished);
 }
 
 int32 ReplaceCollectAndFail(write ReplaceableEdge edge) {

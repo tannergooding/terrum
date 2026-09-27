@@ -6,10 +6,14 @@ classification, keyword and operator selection, numeric token boundaries,
 quoted strings and escapes, leading trivia and lexical diagnostics in Terrum.
 The C# host supplies buffers and pinned lexical data; it does not pretokenize
 or make source-dependent classification decisions for the component.
-The scanner-4 record contract below is the current implementation boundary,
-not the target numeric grammar: its integer side table still carries legacy
-suffix metadata. The accepted target grammar has no numeric width suffixes;
-migrating the scanner component and its adapter is scheduled compiler work.
+The scanner-4 record contract remains current. Syntax-14 rejects attached
+numeric width suffixes with `TRM0006`; valid decimal integer records are
+untagged, while recognized rejected suffixes retain their tag value in the
+existing integer-record field for diagnostic fidelity. This error metadata is
+not valid target syntax or a type selector. The five-word record shape and
+scanner-4/schema-4 identifiers remain unchanged. The executable numeric
+decoder handles decimal integers only; hexadecimal/floating/custom literal
+parsing, registered string targets and `[ConstEval]` remain unsupported.
 
 ```powershell
 dotnet artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll scan-component self-host\Scanner.terrum input.txt --runtime fail-fast --json
@@ -114,25 +118,29 @@ records, including EOF. Words beyond that count are not token records.
 numeric value, UTF-16 start, UTF-16 length, and zero-based owning token index.
 Leading trivia remains attached to EOF when there is no following token.
 `Host.Diagnostics[0]` contains
-the diagnostic count; subsequent triples are numeric code (1–5 maps to
-`TRM0001`–`TRM0005`), UTF-16 start and UTF-16 length, in reporting order.
+the diagnostic count; subsequent triples are numeric code (1–6 maps to
+`TRM0001`–`TRM0006`), UTF-16 start and UTF-16 length, in reporting order.
 `Host.IntegerValues[0]` contains a count followed by five-word records:
 zero-based numeric-token index, status (0 = decoded; 1 = exceeds `uint64`),
-unsigned magnitude low 32 bits, high 32 bits, explicit integer-width tag.
+unsigned magnitude low 32 bits, high 32 bits, and suffix-tag metadata.
 The magnitude is exactly zero on overflow, not a truncated value. Tag 0 means
-no explicit suffix; 1–5 map to `i8`, `i16`, `i32`, `i64`, `i128`, and 6–10 to
-`u8`, `u16`, `u32`, `u64`, `u128`. The low/high buffer words retain raw unsigned
-bits even when represented by negative `int32` values. Integer records are
-strictly ordered by token index; fractional, exponent, floating-suffix and
-malformed-exponent numeric tokens have no record.
+no suffix; 1–5 map to `i8`, `i16`, `i32`, `i64`, `i128`, and 6–10 to `u8`,
+`u16`, `u32`, `u64`, `u128`. Valid integer literals use tag 0. Recognized
+attached width suffixes are rejected with `TRM0006` but preserve their tag in
+this field; that legacy metadata does not make a suffixed token valid. The
+low/high buffer words retain raw unsigned bits even when represented by
+negative `int32` values. Integer records are strictly ordered by token index;
+fractional, exponent, floating-suffix and malformed-exponent numeric tokens
+have no record.
 
 `ScannerHost.ReadIntegerValues(source, tokens, bytes)` returns
 `ImmutableArray<ScannerIntegerValue>` with `int TokenIndex`, `string Tag`,
 `bool IsOverflow`, and `ulong? Magnitude`. `Tag` is the lowercase suffix or
-`""`; `Magnitude` is null when `IsOverflow` is true. It verifies capacity,
-ordering, referenced token
-kind, integer-form source spelling and suffix, defined status/tag, and the
-canonical overflow payload. This is structural validation, **not** host-side
+`""`; rejected width-suffix tokens may also carry their lowercase suffix as
+diagnostic metadata. `Magnitude` is null when `IsOverflow` is true. It verifies
+capacity, ordering, referenced token kind, integer-form source spelling and
+any retained suffix metadata, defined status/tag, and the canonical overflow
+payload. This is structural validation, **not** host-side
 magnitude decoding. The compiled Terrum scanner determines numeric form and
 performs each checked decimal accumulation. Values above `ulong.MaxValue`,
 including otherwise valid `i128`/`u128` spellings, get an overflow record
@@ -179,10 +187,11 @@ block comments are diagnosed. Strings preserve raw spans across escapes;
 unterminated strings stop before a newline, and invalid/incomplete escapes and
 malformed surrogates produce matching diagnostic codes and spans. Numeric
 fractions require a digit after `.`, exponents follow the host lexer's
-identifier-disambiguation and incomplete-exponent rules, and defined primitive
-width tags attach only at an identifier boundary. Spans retain original source
-positions. The component does not decode string values, type numeric values or
-construct host objects. Its adapter materializes those objects after execution.
+identifier-disambiguation and incomplete-exponent rules, and recognized
+numeric width suffixes attach only at an identifier boundary before producing
+`TRM0006`. Spans retain original source positions. The component does not
+decode string values, type numeric values or construct host objects. Its
+adapter materializes those objects after execution.
 It is not a complete
 self-hosted front end.
 

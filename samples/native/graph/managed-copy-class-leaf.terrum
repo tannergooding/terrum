@@ -10,7 +10,7 @@ struct Stamp {
     public Stamp(int32 amount) {
         Active = true;
         Item = new Cell(amount);
-        Code = 42i64;
+        Code = 42;
     }
 }
 
@@ -32,7 +32,7 @@ int32 MakeValue() {
     first.Next = second;
     second.Next = first;
     if (first.Next is some snapshot) {
-        require first.Ready && snapshot.Data.Active && first.Data.Code == 42i64;
+        require first.Ready && snapshot.Data.Active && first.Data.Code == 42;
         first.Next = null;
         if (ManagedHeap.Collect() != 0) { return 0; }
         first.Next = snapshot;

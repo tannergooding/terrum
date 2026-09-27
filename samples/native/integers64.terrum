@@ -37,11 +37,11 @@ int32 Main()
     {
         return 1;
     }
-    if (value.Signed != -9223372036854775808i64 || value.Unsigned != 18446744073709551615u64)
+    if (value.Signed != -9223372036854775808 || value.Unsigned != 18446744073709551615)
     {
         return 2;
     }
-    if (Sum(1i64, 2i64, 3i64, 4i64, 32i64) != 42i64)
+    if (Sum(1, 2, 3, 4, 32) != 42)
     {
         return 3;
     }

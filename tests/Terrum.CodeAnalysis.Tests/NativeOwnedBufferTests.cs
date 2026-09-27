@@ -143,8 +143,8 @@ public sealed class NativeOwnedBufferTests
                 mut OwnedInt32Buffer words = move raw;
                 for (mut int32 i = 0; i < 3; i = i + 1) {
                     char16 character = Host.Source[i];
-                    if (character < (char16)48 || character > (char16)57) { return 2; }
-                    if (!words.TryAppend((int32)character - 48)) { return 3; }
+                    if (character < char16(48) || character > char16(57)) { return 2; }
+                    if (!words.TryAppend(int32(character) - 48)) { return 3; }
                 }
                 if (words.Count != 3 || words.Capacity != 3) { return 4; }
                 return words.Read(0) * 10 + words.Read(1) + words.Read(2);

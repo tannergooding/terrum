@@ -38,9 +38,9 @@ public sealed partial class GenericControlFlowModuleTests
                 public Int64Value(int32 value) { Unrelated = value; }
             }
             int32 Main() {
-                Int32Value narrow = new Int32Value(1i64);
+                Int32Value narrow = new Int32Value(1);
                 Int64Value wide = new Int64Value(2);
-                return PowerProbe() + (int32)narrow.Unrelated + wide.Unrelated - 3;
+                return PowerProbe() + int32(narrow.Unrelated) + wide.Unrelated - 3;
             }
             """, policy, ModuleCompiler.CreateReference(stub), library: false), stub);
         var consumerHash = SHA256.HashData(consumer);

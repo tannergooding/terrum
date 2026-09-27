@@ -33,7 +33,7 @@ public sealed class NativeModuleTests
         int32 Hidden() { return 5; }
         public int32 Evaluate(Twelve value, Wide wide, int64 n, int32 d, int32 e) {
             require wide.Signed == int64.MinValue && wide.Unsigned == uint64.MaxValue;
-            return value.First + value.Second + value.Third + (int32)(n / 2147483648)
+            return value.First + value.Second + value.Third + int32(n / 2147483648)
                 + d + e + Hidden();
         }
         public bool TryWide(bool success, out Wide result) {
@@ -227,8 +227,8 @@ public sealed class NativeModuleTests
         }
         if (existing == "public int32 Evaluate(")
         {
-            incompatibleSource = incompatibleSource.Replace("return value.First + value.Second + value.Third + (int32)(n / 2147483648)",
-                "return (value.First + value.Second + value.Third + (int32)(n / 2147483648)",
+            incompatibleSource = incompatibleSource.Replace("return value.First + value.Second + value.Third + int32(n / 2147483648)",
+                "return (value.First + value.Second + value.Third + int32(n / 2147483648)",
                 StringComparison.Ordinal).Replace("+ d + e + Hidden();", "+ d + e + Hidden()) == 42;", StringComparison.Ordinal);
         }
         if (existing == "public bool TryWide(bool success, out Wide result)")

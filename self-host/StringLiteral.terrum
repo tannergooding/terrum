@@ -101,7 +101,7 @@ public struct StringLiteralCursor
 
 bool TryReadLiteralScalarAt(int32 at, int32 end, out int32 scalar, out int32 next)
 {
-    int32 first = (int32)Host.Source[at];
+    int32 first = int32(Host.Source[at]);
     if (first == 34 || IsLineBreak(Host.Source[at]))
     {
         return false;
@@ -113,7 +113,7 @@ bool TryReadLiteralScalarAt(int32 at, int32 end, out int32 scalar, out int32 nex
         {
             return false;
         }
-        int32 escape = (int32)Host.Source[at + 1];
+        int32 escape = int32(Host.Source[at + 1]);
         mut int32 value = 0;
         if (escape == 110) { value = 10; }
         else if (escape == 114) { value = 13; }
@@ -144,7 +144,7 @@ bool TryReadLiteralScalarAt(int32 at, int32 end, out int32 scalar, out int32 nex
             {
                 return false;
             }
-            scalar = (int32)decoded;
+            scalar = int32(decoded);
             next = at + 2 + digits;
             return true;
         }
@@ -163,7 +163,7 @@ bool TryReadLiteralScalarAt(int32 at, int32 end, out int32 scalar, out int32 nex
         {
             return false;
         }
-        int32 second = (int32)Host.Source[at + 1];
+        int32 second = int32(Host.Source[at + 1]);
         if (second < 56320 || second > 57343)
         {
             return false;
@@ -185,17 +185,17 @@ bool TryGetLiteralHexDigit(char16 unit, out uint32 digit)
 {
     if (IsAsciiDigit(unit))
     {
-        digit = (uint32)GetDecimalDigit(unit);
+        digit = uint32(GetDecimalDigit(unit));
         return true;
     }
     if (unit >= 65 && unit <= 70)
     {
-        digit = (uint32)((int32)unit - 55);
+        digit = uint32(int32(unit) - 55);
         return true;
     }
     if (unit >= 97 && unit <= 102)
     {
-        digit = (uint32)((int32)unit - 87);
+        digit = uint32(int32(unit) - 87);
         return true;
     }
     return false;

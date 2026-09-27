@@ -252,11 +252,11 @@ public sealed class StaticProtocolCompositionTests
     {
         var source = """
             T Compose<T>(T value) where T : Addition<T, T, T>, [Copy] {
-                return Repeat<T>(value, 3u32);
+                return Repeat<T>(value, 3);
             }
             U Repeat<U>(U value, uint32 count) where U : Addition<U, U, U>, [Copy] {
-                if (count == 0u32) { return value; }
-                return Repeat<U>(value + value, count - 1u32);
+                if (count == 0) { return value; }
+                return Repeat<U>(value + value, count - 1);
             }
             """;
         if (mutual)

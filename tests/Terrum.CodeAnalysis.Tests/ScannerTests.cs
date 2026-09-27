@@ -262,7 +262,7 @@ public sealed class ScannerTests
     [Theory]
     [InlineData(2, 1, 0, 1)]
     [InlineData(1, 0, 0, 1)]
-    [InlineData(1, 6, 0, 1)]
+    [InlineData(1, 7, 0, 1)]
     [InlineData(1, 1, -1, 1)]
     [InlineData(1, 1, 0, 0)]
     [InlineData(1, 1, 0, 2)]
@@ -343,9 +343,9 @@ public sealed class ScannerTests
     }
 
     [Theory]
-    [InlineData("2147483648u64", int.MinValue, 0, 2147483648UL)]
-    [InlineData("9223372036854775808u64", 0, int.MinValue, 9223372036854775808UL)]
-    [InlineData("18446744073709551615u64", -1, -1, ulong.MaxValue)]
+    [InlineData("2147483648", int.MinValue, 0, 2147483648UL)]
+    [InlineData("9223372036854775808", 0, int.MinValue, 9223372036854775808UL)]
+    [InlineData("18446744073709551615", -1, -1, ulong.MaxValue)]
     public void IntegerResultAdapterPreservesAll64MagnitudeBits(string text, int low, int high, ulong expected)
     {
         var source = SourceText.From(text);
@@ -358,8 +358,7 @@ public sealed class ScannerTests
         BinaryPrimitives.WriteInt32LittleEndian(bytes, 1);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(12), low);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16), high);
-        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(20), (int)ScannerIntegerTag.U64);
-        Assert.Equal(new ScannerIntegerValue(0, "u64", false, expected),
+        Assert.Equal(new ScannerIntegerValue(0, "", false, expected),
             Assert.Single(ScannerHost.ReadIntegerValues(source, tokens, bytes)));
     }
 

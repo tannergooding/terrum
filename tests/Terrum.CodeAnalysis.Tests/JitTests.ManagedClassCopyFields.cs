@@ -38,7 +38,7 @@ public sealed partial class JitTests
                     Ready = true;
                     require ManagedHeap.Collect() == 0;
                     Current = new Token(kind, new Range(start, length));
-                    Numbers = new Wide(40i64, 2i64);
+                    Numbers = new Wide(40, 2);
                     Tag = 7;
                     Edge = null;
                     require ManagedNode.TryCreate(7, out var node);
@@ -58,12 +58,12 @@ public sealed partial class JitTests
                 box.Current = new Token(7, new Range(8, 9));
                 box.Current.Span.Start = 40;
                 box.Current.Kind = 42;
-                box.Numbers = new Wide(41i64, 1i64);
+                box.Numbers = new Wide(41, 1);
                 if (before.Kind != 3 || before.Span.Start != 1 || before.Span.Length != 2
                     || output.Kind != 3 || output.Span.Length != 2
                     || box.Current.Kind != 42 || box.Current.Span.Start != 40
                     || box.Current.Span.Length != 9) { return 2; }
-                if (box.Numbers.Left + box.Numbers.Right != 42i64) { return 3; }
+                if (box.Numbers.Left + box.Numbers.Right != 42) { return 3; }
                 if (ManagedHeap.Collect() != 0) { return 4; }
                 require box.Edge is some node;
                 if (node.Value != 7) { return 5; }
@@ -83,7 +83,7 @@ public sealed partial class JitTests
             struct Data {
                 public mut int32 Kind;
                 public int64 Payload;
-                public Data(int32 kind) { Kind = kind; Payload = 1234567890123i64; }
+                public Data(int32 kind) { Kind = kind; Payload = 1234567890123; }
             }
             mut class Leaf {
                 public mut Data Value;
@@ -121,7 +121,7 @@ public sealed partial class JitTests
                     require Leaf.TryCreate(7, out var replacement);
                     require Holder.TryCreate(selected, out var holder);
                     holder.Target.Value = Replace(holder, replacement, new Data(42));
-                    if (selected.Value.Kind != 42 || selected.Value.Payload != 1234567890123i64
+                    if (selected.Value.Kind != 42 || selected.Value.Payload != 1234567890123
                         || holder.Target.Value.Kind != 7) { return 4; }
                 }
                 if (ManagedHeap.Collect() != 3) { return 5; }

@@ -1,11 +1,13 @@
 # Literal construction and numeric conversion
 
 The target language has one explicit conversion spelling: `T(expression)`.
-Numeric width suffixes and prefix casts are removed. Bare literals remain
-contextual and have no fallback type. The bounded current compiler still accepts
-legacy suffix-tag/prefix-cast grammar; migrating it to the target spelling is
-scheduled, so this implementation boundary is not a second language form.
-Numeric operators are checked by default in every build.
+Syntax-14 implements checked numeric type-call conversions for `int32`,
+`uint32`, `int64`, `uint64` and `char16`; prefix casts are no longer parsed,
+and attached width suffixes diagnose as `TRM0006`. Bare integer literals remain
+contextual and have no fallback type. The bounded executable profile currently
+constructs decimal integer literals and does not bind hexadecimal/floating
+literals, custom literal parsers or `[ConstEval]`. Numeric operators are
+checked by default in every build.
 
 Representation and access are separate from numeric conversion. The canonical
 forms are `ref<T>`, `ptr<T>`, `box<T>`, `val<T>` and `own<T>`; `init ref<T>`
@@ -35,21 +37,29 @@ to fit.
 ```terrum
 int32 count = 1234;                       // Context selects the parser.
 int32 same = int32(1234);                 // Explicit target, direct parsing.
-uint64 mask = uint64(0xFFFFFFFF);         // No intermediate signed type.
-float32 fraction = float32(0.1);          // Direct target-format rounding.
-float64 converted = float64(fraction);    // Checked conversion from typed value.
+uint32 unsignedCount = uint32(count);     // Checked typed-value conversion.
+int64 wide = int64(count);
+uint64 wideUnsigned = uint64(unsignedCount);
+char16 codeUnit = char16(count);          // Range checked; not scalar validation.
+uint64 mask = uint64(0xFFFFFFFF);         // Target example: hex literal binding is unsupported.
+float32 fraction = float32(0.1);          // Target example: floating literals are unsupported.
+float64 converted = float64(fraction);    // Target example: floating conversions are unsupported.
 var unknown = 1;                          // Error: no type context.
 ```
 
-`T(untypedLiteral)` parses the original token directly as `T`; it does not
-construct an implicit `int32`/`float64` first. `T(typedExpression)` selects a
-registered checked conversion and may fail according to that conversion's
-range/representation contract. Custom conversions require an explicitly
-declared conversion operator or witness, not arbitrary castability. The
-type/value-call name-resolution rule must distinguish `T` as a target from an
-ordinary callable value; the bounded compiler has not implemented this target
-syntax or resolution. `new T(arguments)` is distinct nominal construction;
-there is no added primitive `new int32(value)` form.
+The decimal integer and checked type-call examples above are executable; the
+hexadecimal and floating-point examples are target-only.
+
+In the target literal design, `T(untypedLiteral)` parses the original token
+directly as `T`; it does not construct an implicit `int32`/`float64` first.
+`T(typedExpression)` selects a checked conversion and may fail according to
+that conversion's range/representation contract. The bounded compiler
+implements built-in numeric type-call conversions for `int32`, `uint32`,
+`int64`, `uint64` and `char16`; custom conversions still require an explicitly
+declared conversion operator or witness, not arbitrary castability. Type-call
+binding preserves existing source-function/local shadowing and call
+precedence. `new T(arguments)` is distinct nominal construction; there is no
+added primitive `new int32(value)` form.
 
 Resolve known parameter/operand/target types before unresolved literals when
 that yields a unique answer. For `F<T>(T left, T right)`, `F(knownInt32, 1)` can
@@ -189,12 +199,12 @@ This does not make arbitrary raw `char8`/`char16` values valid scalars.
 `'+'` accepts ASCII plus only, not fullwidth plus or a longer operator string.
 Changing quotes alone is not evidence of an allocation or throughput improvement.
 
-Character literals remain design-only. The target conversion `char16(value)`
-checks the code-unit range, not Unicode scalar validity; surrogate code units
-are representable and must be validated when decoding text. The bounded
-compiler's current prefix-cast spelling is legacy pending the type-call
-migration. Narrowing and signed/unsigned range failures use the explicitly
-selected native fail-fast policy, not catchable conversion exceptions.
+Character literals remain design-only. The implemented `char16(value)`
+conversion checks the code-unit range, not Unicode scalar validity; surrogate
+code units are representable and must be validated when decoding text.
+Narrowing and signed/unsigned range failures terminate under the fail-fast
+policy or propagate under the bounded checked-exceptions policy. These
+compiler-generated failures do not imply a general exception-object ABI.
 
 String targets use registered text parsers too. Call forms such as
 `utf8z("Terrum")` and `utf16z("Terrum")` illustrate target parsing; they are not
@@ -207,7 +217,8 @@ Family declarations, generic inference, registration grammar and general
 user-defined conversion witnesses remain future binder work. Boolean `require`
 and legacy conditional bool/out publication are implemented for the bounded
 native value profile. The target `init ref<T>` initialization-loan form
-requires a coordinated declaration and call-site migration; catchable
-requirement exceptions and owning-output cleanup are not. The parser's
+requires a coordinated declaration and call-site migration. The bounded
+checked-exceptions policy already supports requirement failures and compact
+owning-output cleanup; general exception construction remains unsupported. The parser's
 rejection of repeated optional modifiers is independent of those later
 conversion protocols.

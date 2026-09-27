@@ -28,9 +28,12 @@ granted. A legacy header cannot contain v24 write identifiers.
 The `native-18` through `native-20` labels below identify bounded runtime
 features; they do not imply that general references/views, ownership forms, or
 managed public ABI are implemented.
-The bounded numeric grammar also remains at its legacy width-tag/prefix-cast
-boundary. The target suffixless literal and `T(expression)` design is
-documented separately and is not executable compiler support yet.
+The syntax-14 numeric surface uses unsuffixed contextual decimal integers and
+checked `T(expression)` conversions for `int32`, `uint32`, `int64`, `uint64`
+and `char16`. Attached width suffixes diagnose as `TRM0006`; prefix casts are
+no longer parsed. Hexadecimal/floating/custom literal parsing, digit
+separators, registered literal targets and `[ConstEval]` remain outside this
+executable profile.
 
 Terrum has no built-in marshalling. Source or generated tooling defines and
 performs conversions and wrappers for imported C APIs; the compiler/runtime
@@ -543,9 +546,9 @@ only with another fail-fast package.
 |---|---|
 | Program | File-scoped namespaces, using directives, top-level/static/instance functions; parameterless `int32 Main()` or `void Main()`; multi-source executable/library compilation |
 | Types | `int32`, `uint32`, `int64`, `uint64`, `char16`, `bool`, `void` results; compact reference-free structs |
-| Literals/constants | Contextual integers, legacy explicit `i32`/`u32`/`i64`/`u64` tags, primitive `MinValue`/`MaxValue`; booleans; unit `()` |
+| Literals/constants | Context-typed decimal integers without a fallback type; primitive `MinValue`/`MaxValue`; booleans; unit `()` |
 | Variables | Initialized typed/inferred locals; immutable bindings by default, explicit `mut` assignments; lexical scopes |
-| Expressions | Direct calls, forward calls/recursion, constructors, field reads, legacy checked numeric prefix casts; unary `+`, signed checked `-`, `~`, `!` |
+| Expressions | Direct calls, forward calls/recursion, constructors, field reads, checked numeric type-call conversions to `int32`, `uint32`, `int64`, `uint64` and `char16`; unary `+`, signed checked `-`, `~`, `!` |
 | Operators | Checked signed/unsigned `+ - * / %`, bitwise operations, signed/unsigned comparisons, same-type scalar equality, boolean operations; code-unit comparison but no `char16` arithmetic |
 | Flow | Blocks, `if`/`else`, `while`, scoped `for`, return, boolean `require`; left-to-right argument/operand evaluation and short-circuit `&&`/`||` |
 | Outputs | Bool/out true-only publication and definite assignment through branches, `!`, `&&`, `||` and `require` |
@@ -556,9 +559,10 @@ the [scanner contract](scanner.md). Adding 64-bit scalar values does not enlarge
 that storage contract: `int64`/`uint64` buffer descriptors are rejected.
 
 Literal context comes from declarations, parameters, return types or a known
-operand, not an implicit `int32` fallback. `var x = 1` is rejected; `var x = 1i32`
-and `int32 x = 1` are accepted. A signed minimum literal can be constructed
-directly, without first overflowing its positive magnitude. Locals cannot be
+operand, not an implicit numeric fallback. `var x = 1` is rejected;
+`var x = 1i32` diagnoses as `TRM0006`, while `int32 x = 1` is accepted. A
+signed minimum literal can be constructed directly, without first overflowing
+its positive magnitude. Locals cannot be
 read before declaration/initialization, immutable bindings cannot be assigned,
 conditions must be boolean and non-void functions must return on every normally
 completing path. Constant-true loops and declared nonreturning calls can remove
@@ -638,10 +642,10 @@ public declarations and supported public value layouts. Top-level `private`,
 field initializers and field-level `mut`/`static` are rejected. Field writes
 are governed by the owning value's access, not a separate field-mutability flag.
 
-The current legacy checked casts preserve a numeric value or fail for range overflow. Raw
-`char16` values include surrogate code units: a successful cast is not Unicode
-scalar validation. The profile has no implicit conversion between typed numeric
-values and no implicit text encoding.
+The implemented checked `T(expression)` conversions preserve a numeric value
+or fail for range overflow. Raw `char16` values include surrogate code units:
+a successful conversion is not Unicode scalar validation. The profile has no
+implicit conversion between typed numeric values and no implicit text encoding.
 
 The signed/unsigned 32- and 64-bit types retain their full range through calls,
 fields, conditional outputs and persisted modules. Widening a signed negative

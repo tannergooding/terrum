@@ -78,7 +78,7 @@ public sealed partial class SourceLineComponentTests
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 require SourceLineIndex.TryCreate(out var index);
-                Host.Source[0] = (char16)10;
+                Host.Source[0] = char16(10);
                 if (index.GetLineCount() != 1) { return 1; }
                 for (mut int32 position = 0; position <= 3; position = position + 1) {
                     require index.TryGetPosition(position, out var line, out var character);

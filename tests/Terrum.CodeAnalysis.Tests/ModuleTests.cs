@@ -46,9 +46,9 @@ public sealed class ModuleTests
                 public Stamp(int32 value) { Value = value; }
             }
             int32 Main() {
-                Cell first = new Cell(1i64);
+                Cell first = new Cell(1);
                 Stamp second = new Stamp(2);
-                return {{export}}() + (int32)first.Value + second.Value - 1;
+                return {{export}}() + int32(first.Value) + second.Value - 1;
             }
             """),
             ModuleCompiler.CreateReference(producer), runtimePolicy: policy);
@@ -422,10 +422,10 @@ public sealed class ModuleTests
             """;
         const string Second = """
             struct State { public char16 Value; public bool Valid;
-                public State() { this.Value = (char16)22; this.Valid = true; } }
+                public State() { this.Value = char16(22); this.Valid = true; } }
             struct Extra { public uint32 Value; public Extra() { this.Value = 0; } }
             int32 Calculate() { State state = new State(); Extra extra = new Extra();
-                require state.Valid; return (int32)state.Value + (int32)extra.Value; }
+                require state.Valid; return int32(state.Value) + int32(extra.Value); }
             public int32 API() { return Calculate(); }
             public int32 NewAPI() { return 33; }
             """;
@@ -729,7 +729,7 @@ public sealed class ModuleTests
         Assert.Equal(22, await ExecuteAsync(NativeEmitter.Emit(linked, NativeRuntimePolicy.FailFast)).ConfigureAwait(true));
 
         var changed = Compile("public struct Box { public int32 Value; "
-            + "public Box(uint32 value) { this.Value = (int32)value; } } int32 Main() { return 0; }");
+            + "public Box(uint32 value) { this.Value = int32(value); } } int32 Main() { return 0; }");
         _ = Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.Link(consumer, ModuleCompiler.CreateProducer(changed, ["Box.#ctor"])));
     }

@@ -216,7 +216,7 @@ public sealed partial class CliTests
             var originalSource = await File.ReadAllTextAsync(Path.Combine(fixture, "owned-leaf.terrum"));
             await File.WriteAllTextAsync(incompatibleSource,
                 originalSource.Replace("public int32 Value;", "public int64 Value;", StringComparison.Ordinal)
-                    .Replace("Value = value;", "Value = (int64)value;", StringComparison.Ordinal));
+                    .Replace("Value = value;", "Value = int64(value);", StringComparison.Ordinal));
             Assert.Equal(0, (await RunAsync([], "compile-native", "producer", incompatibleSource, "Leaf",
                 "--export", "Make", "--export", "Ticket.Close", "-o", incompatible,
                 "--runtime", policy)).ExitCode);

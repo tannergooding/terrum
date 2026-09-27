@@ -14,7 +14,7 @@ public int32 RecoverFormatting() {
     unsafe {
         try {
             require OwnedInt32Buffer.TryCreate(19, out var workspace);
-            OwnedInt32Buffer digits = FormatDigits(0u64, move workspace);
+            OwnedInt32Buffer digits = FormatDigits(0, move workspace);
             return digits.Count;
         }
         catch {

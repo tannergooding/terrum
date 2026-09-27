@@ -13,23 +13,23 @@ public sealed class StaticProtocolOutputTests
         struct Value {
             public int64 First;
             public int64 Second;
-            public Value(int64 first) { First = first; Second = 2i64; }
+            public Value(int64 first) { First = first; Second = 2; }
         }
         """;
 
     [Theory]
     [InlineData("int32", "-2147483648", PrimitiveType.Int32)]
-    [InlineData("uint32", "4294967295u32", PrimitiveType.UInt32)]
-    [InlineData("int64", "-9223372036854775808i64", PrimitiveType.Int64)]
-    [InlineData("uint64", "18446744073709551615u64", PrimitiveType.UInt64)]
-    [InlineData("char16", "(char16)55296", PrimitiveType.Char16)]
+    [InlineData("uint32", "4294967295", PrimitiveType.UInt32)]
+    [InlineData("int64", "-9223372036854775808", PrimitiveType.Int64)]
+    [InlineData("uint64", "18446744073709551615", PrimitiveType.UInt64)]
+    [InlineData("char16", "char16(55296)", PrimitiveType.Char16)]
     [InlineData("bool", "true", PrimitiveType.Bool)]
     public void GenericKnownResultTypeComesFromReturnSignature(string type, string literal, PrimitiveType expected)
     {
         var source = Value + $$"""
             {{type}} Echo<T>(T ignored, {{type}} value) where T : [Copy] { return value; }
             int32 Main() {
-                var actual = Echo<Value>(new Value(1i64), {{literal}});
+                var actual = Echo<Value>(new Value(1), {{literal}});
                 if (actual == {{literal}}) { return 42; }
                 return 1;
             }
@@ -49,7 +49,7 @@ public sealed class StaticProtocolOutputTests
     public void ConditionalHelpersForwardWholeCopyAndScalarOutputs(bool instantiate)
     {
         var entry = instantiate
-            ? "int32 Main() { require Pick<Value>(new Value(40i64), out var copy, out var count); return (int32)copy.First + count; }"
+            ? "int32 Main() { require Pick<Value>(new Value(40), out var copy, out var count); return int32(copy.First) + count; }"
             : "int32 Main() { return 0; }";
         var source = Value + """
             [NoThrow] bool Pick<T>(T value, out T result, out int32 count) where T : [Copy] {
@@ -107,13 +107,13 @@ public sealed class StaticProtocolOutputTests
 
     [Theory]
     [InlineData("return result.First;")]
-    [InlineData("Pick<Value>(new Value(40i64), out result); return result.First;")]
+    [InlineData("Pick<Value>(new Value(40), out result); return result.First;")]
     public void FalseOrUnprovenGenericCallsDoNotInitializeCallerOutputs(string after)
     {
         var source = Value + """
             bool Pick<T>(T value, out T result) where T : [Copy] { result = value; return false; }
             int64 MainValue() {
-                Pick<Value>(new Value(40i64), out var result);
+                Pick<Value>(new Value(40), out var result);
             """ + after + "} int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.True(compilation.HasErrors);
@@ -148,8 +148,8 @@ public sealed class StaticProtocolOutputTests
                 using Helpers;
                 using Values;
                 int32 Main() {
-                    var result = Echo<Value>(new Value(1i64), 18446744073709551615u64);
-                    if (result == 18446744073709551615u64) { return 42; }
+                    var result = Echo<Value>(new Value(1), 18446744073709551615);
+                    if (result == 18446744073709551615) { return 42; }
                     return 1;
                 }
                 """),
@@ -165,7 +165,7 @@ public sealed class StaticProtocolOutputTests
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
             int64 Read<T>(T value) where T : [Copy] { return value.First; }
-            int32 Main() { return (int32)Read<Value>(new Value(42i64)); }
+            int32 Main() { return int32(Read<Value>(new Value(42))); }
             """));
         Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
         Assert.Null(compilation.Program);

@@ -10,10 +10,10 @@ public static OwnedInt32Buffer FormatUInt64(uint64 value, OwnedInt32Buffer works
     mut uint64 remaining = value;
     while (remaining >= 10)
     {
-        require buffer.TryAppend((int32)(remaining % 10) + 48);
+        require buffer.TryAppend(int32(remaining % 10) + 48);
         remaining = remaining / 10;
     }
-    require buffer.TryAppend((int32)remaining + 48);
+    require buffer.TryAppend(int32(remaining) + 48);
 
     {
         mut MutableInt32BufferView digits = buffer.SliceMutable(0, buffer.Count);
@@ -36,11 +36,11 @@ public static OwnedInt32Buffer FormatInt64(int64 value, OwnedInt32Buffer workspa
 {
     if (value >= 0)
     {
-        return FormatUInt64((uint64)value, move workspace);
+        return FormatUInt64(uint64(value), move workspace);
     }
 
     // Avoid negating int64.MinValue in the signed domain.
-    uint64 magnitude = (uint64)(-(value + 1)) + 1;
+    uint64 magnitude = uint64(-(value + 1)) + 1;
     mut OwnedInt32Buffer buffer = FormatUInt64(magnitude, move workspace);
     require buffer.TryAppend(0);
     {

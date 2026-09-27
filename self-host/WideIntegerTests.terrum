@@ -29,13 +29,13 @@ public static bool CheckWideDecimalAccumulation()
 
     if (TryAccumulateDecimal(0, 10, uint64.MaxValue, out var notADigit)
         || TryAccumulateDecimal(0, 1, 0, out var exceedsLimit)
-        || TryAccumulateDecimal(922337203685477580, 8, (uint64)int64.MaxValue, out var signedOverflow))
+        || TryAccumulateDecimal(922337203685477580, 8, uint64(int64.MaxValue), out var signedOverflow))
     {
         return false;
     }
 
-    require TryAccumulateDecimal(922337203685477580, 7, (uint64)int64.MaxValue, out var maximumSigned);
+    require TryAccumulateDecimal(922337203685477580, 7, uint64(int64.MaxValue), out var maximumSigned);
     require TryAccumulateDecimal(0, 0, 0, out value);
 
-    return maximumSigned == (uint64)int64.MaxValue && value == 0;
+    return maximumSigned == uint64(int64.MaxValue) && value == 0;
 }

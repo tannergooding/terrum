@@ -142,7 +142,7 @@ public sealed class NativeModuleSetsTests
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateConsumerSet(boxedConsumer, [
             Producer(Value.Replace("public int32 Value;", "public uint32 Value;", StringComparison.Ordinal)
                 .Replace("Box(int32 value)", "Box(uint32 value)", StringComparison.Ordinal)
-                .Replace("new Box(20)", "new Box(20u32)", StringComparison.Ordinal),
+                .Replace("new Box(20)", "new Box(uint32(20))", StringComparison.Ordinal),
                 "Alpha", "First"), beta]));
 
         const string Output = "public bool Alpha(out int32 value) { value = 20; return true; }";
@@ -209,8 +209,8 @@ public sealed class NativeModuleSetsTests
     }
 
     [Theory]
-    [InlineData("int64", "22i64")]
-    [InlineData("uint32", "22u32")]
+    [InlineData("int64", "22")]
+    [InlineData("uint32", "22")]
     public async Task BothIndependentNestedValueTablesBindAndExecuteAsync(string secondType, string secondValue)
     {
         const string First = """
@@ -248,7 +248,7 @@ public sealed class NativeModuleSetsTests
             int32 Main() {
                 FirstOuter first = Alpha();
                 SecondOuter second = Beta();
-                return first.Child.Value + (int32)second.Child.Value;
+                return first.Child.Value + int32(second.Child.Value);
             }
             """;
         var executable = MakeConsumerSource(Source, provider, first);

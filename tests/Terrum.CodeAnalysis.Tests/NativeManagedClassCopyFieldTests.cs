@@ -21,7 +21,7 @@ public sealed class NativeManagedClassCopyFieldTests
         struct Wide {
             public int64 First;
             public int64 Second;
-            public Wide(int64 first) { First = first; Second = 2i64; }
+            public Wide(int64 first) { First = first; Second = 2; }
         }
         class Box {
             public bool Ready;
@@ -30,7 +30,7 @@ public sealed class NativeManagedClassCopyFieldTests
             public Box(int32 first) {
                 Ready = true;
                 Value = new Small(first);
-                Other = new Wide(40i64);
+                Other = new Wide(40);
             }
         }
         int32 Main() {
@@ -177,12 +177,12 @@ public sealed class NativeManagedClassCopyFieldTests
         var fields = string.Join(" ", Enumerable.Range(0, count).Select(
             static index => $"public Wide Field{index};"));
         var initializers = string.Join(" ", Enumerable.Range(0, count).Select(
-            static index => $"Field{index} = new Wide(42i64);"));
+            static index => $"Field{index} = new Wide(42);"));
         var source = $$"""
             struct Wide {
                 public int64 First;
                 public int64 Second;
-                public Wide(int64 first) { First = first; Second = 2i64; }
+                public Wide(int64 first) { First = first; Second = 2; }
             }
             class Box {
                 {{fields}}
@@ -190,7 +190,7 @@ public sealed class NativeManagedClassCopyFieldTests
             }
             int32 Main() {
                 require Box.TryCreate(out var box);
-                return (int32)box.Field0.First;
+                return int32(box.Field0.First);
             }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));

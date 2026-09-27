@@ -29,10 +29,10 @@ public sealed class StaticProtocolControlFlowTests
         mut T result = one;
         mut T factor = value;
         mut uint32 remaining = exponent;
-        while (remaining != 0u32) {
-            if ((remaining & 1u32) != 0u32) { result = result * factor; }
-            remaining = remaining / 2u32;
-            if (remaining == 0u32) { break; }
+        while (remaining != 0) {
+            if ((remaining & 1) != 0) { result = result * factor; }
+            remaining = remaining / 2;
+            if (remaining == 0) { break; }
             factor = factor * factor;
         }
         return result;
@@ -73,11 +73,11 @@ public sealed class StaticProtocolControlFlowTests
     {
         var compilation = Compile("""
             mut T result = one;
-            for (mut uint32 i = 0u32; i < exponent; i = i + 1u32) {
-                if (i == 0u32) { continue; }
+            for (mut uint32 i = 0; i < exponent; i = i + 1) {
+                if (i == 0) { continue; }
                 else { result = result * value; }
             }
-            require (exponent < 100u32);
+            require (exponent < 100);
             return result;
             """, instantiate);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -88,15 +88,15 @@ public sealed class StaticProtocolControlFlowTests
     [InlineData("return value.Value;", "TRM3007")]
     [InlineData("return new T();", "TRM3007")]
     [InlineData("mut uint32 count = exponent; count = value; return one;", "TRM3007")]
-    [InlineData("uint32 count = exponent; count = 0u32; return one;", "TRM3008")]
+    [InlineData("uint32 count = exponent; count = 0; return one;", "TRM3008")]
     [InlineData("mut T result = value; mut T result = one; return result;", "TRM3004")]
     [InlineData("if (value) { return one; } return value;", "TRM3007")]
     [InlineData("{ mut T local = value; } return local;", "TRM3006")]
     [InlineData("break; return one;", "TRM3008")]
-    [InlineData("if (exponent == 0u32) { return one; }", "TRM3012")]
+    [InlineData("if (exponent == 0) { return one; }", "TRM3012")]
     [InlineData("return Power<Meters>(value, one, exponent);", "TRM3007")]
-    [InlineData("require (exponent == 0u32); return Missing(value);", "TRM3011")]
-    [InlineData("mut T result = one; for (mut uint32 i = 0u32; i < exponent; i = i + 1u32) { if (i == 0u32) { continue; } result = result / value; } return result;", "TRM3007")]
+    [InlineData("require (exponent == 0); return Missing(value);", "TRM3011")]
+    [InlineData("mut T result = one; for (mut uint32 i = 0; i < exponent; i = i + 1) { if (i == 0) { continue; } result = result / value; } return result;", "TRM3007")]
     public void InvalidDefinitionRejectsEvenWithoutInstantiation(string body, string expected)
     {
         var compilation = Compile(body, instantiate: false);
@@ -127,8 +127,8 @@ public sealed class StaticProtocolControlFlowTests
     public void NoThrowStructuredDefinitionRejectsScalarFailuresWithoutInstantiation()
     {
         var source = NoThrowDeclarations + "[NoThrow] " + Generic("""
-            mut uint32 half = exponent / 2u32;
-            if (half == 0u32) { return one; }
+            mut uint32 half = exponent / 2;
+            if (half == 0) { return one; }
             return value * one;
             """) + "int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
@@ -140,7 +140,7 @@ public sealed class StaticProtocolControlFlowTests
     public void NoThrowStructuredDefinitionAcceptsOnlyConstrainedNoThrowCalls()
     {
         var source = NoThrowDeclarations + "[NoThrow] " + Generic("""
-            if (exponent == 0u32) { return one; }
+            if (exponent == 0) { return one; }
             return value * one;
             """) + "int32 Main() { return 0; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
@@ -150,7 +150,7 @@ public sealed class StaticProtocolControlFlowTests
     private static Compilation Compile(string body, bool instantiate)
     {
         var main = instantiate
-            ? "int32 Main() { return Power<Meters>(new Meters(2), new Meters(1), 3u32).Value + 34; }"
+            ? "int32 Main() { return Power<Meters>(new Meters(2), new Meters(1), 3).Value + 34; }"
             : "int32 Main() { return 0; }";
         return Compilation.Create(SyntaxTree.Parse(Declarations + Generic(body) + main));
     }

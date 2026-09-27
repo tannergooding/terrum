@@ -307,7 +307,7 @@ public sealed partial class CliTests
     public async Task ScannerPublishesExactIntegerMagnitudesWithoutDefaultTypesOrPrecisionLossAsync()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        const string Source = "0 9223372036854775808i64 18446744073709551615u64 18446744073709551616u128 256u8 1.0 2e3 3f64";
+        const string Source = "0 9223372036854775808 18446744073709551615 18446744073709551616 256 1.0 2e3 3.0";
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source), "scan-component",
             Path.Combine(root, "self-host", "Scanner.terrum"), "-", "--runtime", "fail-fast", "--json");
         Assert.Equal(0, exit);
@@ -317,7 +317,7 @@ public sealed partial class CliTests
         Assert.Equal("scanner-4", document.RootElement.GetProperty("component").GetString());
         var integers = document.RootElement.GetProperty("integerValues");
         Assert.Equal(5, integers.GetArrayLength());
-        string[] tags = ["", "i64", "u64", "u128", "u8"];
+        string[] tags = ["", "", "", "", ""];
         string?[] magnitudes = ["0", "9223372036854775808", "18446744073709551615", null, "256"];
         for (var index = 0; index < tags.Length; index++)
         {
@@ -434,8 +434,8 @@ public sealed partial class CliTests
     [InlineData("/* first */ int32 Main() { int32 \u03B1 = 17; return \u03B1 + 25; } // end")]
     [InlineData("int32 F(int32 value) { if (value == 0) { return 1; } return value * F(value - 1); } int32 Main() { return F(5); }")]
     [InlineData("struct S { public int32 Value; public S(int32 value) { Value = value; } } int32 Main() { S value = new S(42); return value.Value; }")]
-    [InlineData("int32 Main() { uint64 value = 18446744073709551615u64; return (int32)(value % 1000); }")]
-    [InlineData("int32 Main() { int64 minimum = -9223372036854775808; return (int32)(minimum % -1); }")]
+    [InlineData("int32 Main() { uint64 value = 18446744073709551615; return int32(value % 1000); }")]
+    [InlineData("int32 Main() { int64 minimum = -9223372036854775808; return int32(minimum % -1); }")]
     [InlineData("int32 Main() { mut int32 sum = 0; for (mut int32 i = 0; i < 10; i = i + 1) { sum = sum + i; } return sum; }")]
     public async Task NativeScannerFeedsTheOfficialCompilerWithoutChangingEmissionAsync(string source)
     {
@@ -625,7 +625,7 @@ public sealed partial class CliTests
     [Theory]
     [InlineData("check", "void Main() { return; }", 0)]
     [InlineData("tree", "void Main() { return 1 }", 1)]
-    [InlineData("tokens", " \r\n\u03B1 + 12i32 // end", 0)]
+    [InlineData("tokens", " \r\n\u03B1 + 12 // end", 0)]
     [InlineData("tokens", "1 \u0661", 1)]
     [SuppressMessage("Design", "CA1062:Validate arguments of public methods", Justification = "The xUnit data rows supply non-null source strings.")]
     public async Task EmitsStructuredResultsWithExpectedExitAsync(string command, string source, int exitCode)

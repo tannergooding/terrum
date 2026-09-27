@@ -27,7 +27,7 @@ const string Provider = """
     int32 Hidden() { return 5; }
     public int32 Evaluate(Twelve value, Wide wide, int64 n, int32 d, int32 e) {
         require wide.Signed == int64.MinValue && wide.Unsigned == uint64.MaxValue;
-        return value.First + value.Second + value.Third + (int32)(n / 2147483648)
+        return value.First + value.Second + value.Third + int32(n / 2147483648)
             + d + e + Hidden();
     }
     public bool TryWide(bool success, out Wide result) {

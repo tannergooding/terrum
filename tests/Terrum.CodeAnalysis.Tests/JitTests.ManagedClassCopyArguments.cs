@@ -12,9 +12,9 @@ public sealed partial class JitTests
 {
     [Theory]
     [InlineData("bool", "true", "false")]
-    [InlineData("char16", "(char16)55296", "(char16)0")]
+    [InlineData("char16", "char16(55296)", "char16(0)")]
     [InlineData("int32", "-2147483648", "0")]
-    [InlineData("int64", "-9223372036854775808i64", "0i64")]
+    [InlineData("int64", "-9223372036854775808", "0")]
     public async Task DirectCopyFactoryArgumentsSurviveCollectingConstructorsAsync(
         string type, string value, string replacement)
     {
@@ -41,9 +41,9 @@ public sealed partial class JitTests
             int32 Main() {
                 {
                     mut Payload payload = new Payload({{value}});
-                    require Box.TryCreate(payload, 18446744073709551615u64, CreateChild(), out var box);
+                    require Box.TryCreate(payload, 18446744073709551615, CreateChild(), out var box);
                     payload = new Payload({{replacement}});
-                    if (box.Data.Value != {{value}} || box.Stamp != 18446744073709551615u64
+                    if (box.Data.Value != {{value}} || box.Stamp != 18446744073709551615
                         || box.Child.Value != 42 || payload.Value != {{replacement}}) { return 1; }
                     require ManagedHeap.Collect() == 0;
                 }
@@ -69,9 +69,9 @@ public sealed partial class JitTests
             _ => "public int64 First; public int32 Second; public int32 Third;",
         };
         var firstType = size switch { 3 => "bool", 6 => "char16", 12 => "int32", _ => "int64" };
-        var first = size switch { 3 => "true", 6 => "(char16)65535", 12 => "-2147483648", _ => "-9223372036854775808i64" };
-        var second = size switch { 3 => "false", 6 => "(char16)55296", _ => "2147483647" };
-        var third = size switch { 3 => "true", 6 => "(char16)42", _ => "-123456789" };
+        var first = size switch { 3 => "true", 6 => "char16(65535)", 12 => "-2147483648", _ => "-9223372036854775808" };
+        var second = size switch { 3 => "false", 6 => "char16(55296)", _ => "2147483647" };
+        var third = size switch { 3 => "true", 6 => "char16(42)", _ => "-123456789" };
         var source = $$"""
             struct Payload {
                 {{declaration}}
@@ -171,19 +171,19 @@ public sealed partial class JitTests
                 public Data Value;
                 public Box(Data input) {
                     mut Data local = input;
-                    local.First = 40i64;
-                    local.Second = 2i64;
+                    local.First = 40;
+                    local.Second = 2;
                     require ManagedHeap.Collect() == 0;
                     Value = local;
                 }
             }
             int32 Main() {
-                mut Data original = new Data(-9223372036854775808i64, 9223372036854775807i64);
+                mut Data original = new Data(-9223372036854775808, 9223372036854775807);
                 require Box.TryCreate(original, out var box);
-                require original.First == -9223372036854775808i64 && original.Second == 9223372036854775807i64;
-                original.First = 7i64;
-                require box.Value.First == 40i64 && box.Value.Second == 2i64;
-                return (int32)(box.Value.First + box.Value.Second);
+                require original.First == -9223372036854775808 && original.Second == 9223372036854775807;
+                original.First = 7;
+                require box.Value.First == 40 && box.Value.Second == 2;
+                return int32(box.Value.First + box.Value.Second);
             }
             """;
         await AssertFailFastExecutionAsync(Source, 42).ConfigureAwait(true);
@@ -197,7 +197,7 @@ public sealed partial class JitTests
             struct Data {
                 public int64 First;
                 public int64 Second;
-                public Data(int64 first) { First = first; Second = 42i64; }
+                public Data(int64 first) { First = first; Second = 42; }
             }
             class Box {
                 public Data Value;
@@ -216,15 +216,15 @@ public sealed partial class JitTests
             int32 Main() {
                 unsafe {
                     try {
-                        Box.TryCreate(new Data(-9223372036854775808i64), CreateChild(), false, out var absent);
+                        Box.TryCreate(new Data(-9223372036854775808), CreateChild(), false, out var absent);
                         return 1;
                     } catch {
                         require ManagedHeap.Collect() == 1;
                     }
                 }
                 {
-                    require Box.TryCreate(new Data(40i64), CreateChild(), true, out var box);
-                    require box.Value.First == 40i64 && box.Value.Second == 42i64 && box.Child.Value == 42;
+                    require Box.TryCreate(new Data(40), CreateChild(), true, out var box);
+                    require box.Value.First == 40 && box.Value.Second == 42 && box.Child.Value == 42;
                 }
                 require ManagedHeap.Collect() == 2;
                 return 42;

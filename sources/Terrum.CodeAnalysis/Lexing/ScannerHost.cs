@@ -403,7 +403,7 @@ public static class ScannerHost
             var code = BinaryPrimitives.ReadInt32LittleEndian(record);
             var start = BinaryPrimitives.ReadInt32LittleEndian(record[4..]);
             var length = BinaryPrimitives.ReadInt32LittleEndian(record[8..]);
-            if (code is < 1 or > 5 || start < 0 || start > source.Length
+            if (code is < 1 or > 6 || start < 0 || start > source.Length
                 || length <= 0 || length > source.Length - start)
             {
                 throw new ArgumentException("Invalid scanner diagnostic record.", nameof(bytes));
@@ -459,6 +459,7 @@ public static class ScannerHost
                 "TRM0003" => "Unterminated block comment.",
                 "TRM0004" => "An exponent requires at least one decimal digit.",
                 "TRM0005" => "Invalid string escape sequence.",
+                "TRM0006" => "Numeric width suffixes are not supported.",
                 _ => throw new ArgumentException("Unknown scanner diagnostic.", nameof(diagnosticBytes)),
             };
             diagnostics.Add(new Diagnostic(diagnostic.Code, DiagnosticSeverity.Error, message, diagnostic.Span));

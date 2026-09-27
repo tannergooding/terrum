@@ -166,9 +166,9 @@ public sealed partial class NativeManagedClassModuleTests
                 public Stamp(int32 value) { Unrelated = value; }
             }
             int32 Main() {
-                Cell first = new Cell(1i64);
+                Cell first = new Cell(1);
                 Stamp second = new Stamp(2);
-                return Leaf() + (int32)first.Unrelated + second.Unrelated - 1;
+                return Leaf() + int32(first.Unrelated) + second.Unrelated - 1;
             }
             """, policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);

@@ -16,26 +16,26 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class Integer64Tests
 {
     [Theory]
-    [InlineData("return 9223372036854775807i64 == int64.MaxValue && -9223372036854775808i64 == int64.MinValue;", true)]
-    [InlineData("return 18446744073709551615u64 == uint64.MaxValue && 0u64 == uint64.MinValue;", true)]
-    [InlineData("return 9223372036854775807i64 > -1i64 && 18446744073709551615u64 > 9223372036854775807u64;", true)]
-    [InlineData("return (9223372036854775806i64 + 1i64) == int64.MaxValue;", true)]
-    [InlineData("return (uint64.MaxValue - 1u64) == 18446744073709551614u64;", true)]
-    [InlineData("return (-3000000000i64 * 3i64) / 3i64 == -3000000000i64;", true)]
-    [InlineData("return (uint64.MaxValue / 3u64) * 3u64 == uint64.MaxValue;", true)]
-    [InlineData("return -9223372036854775808i64 % -1i64 == 0i64;", true)]
-    [InlineData("return -11i64 / 3i64 == -3i64 && -11i64 % 3i64 == -2i64;", true)]
-    [InlineData("return (~0u64 ^ uint64.MaxValue) == 0u64 && (1u64 | 2u64) == 3u64;", true)]
-    [InlineData("return (int64)2147483648u32 == 2147483648i64;", true)]
-    [InlineData("return (int64)-2147483648i32 == -2147483648i64;", true)]
-    [InlineData("return (uint64)uint32.MaxValue == 4294967295u64;", true)]
-    [InlineData("return (int32)2147483647i64 == int32.MaxValue;", true)]
-    [InlineData("return (uint32)4294967295u64 == uint32.MaxValue;", true)]
-    [InlineData("return (char16)65535u64 == char16.MaxValue;", true)]
-    [InlineData("int64 value = 50000 * 50000; return value == 2500000000i64;", true)]
-    [InlineData("int64 value = (50000 + 1) * (50000 - 1); return value == 2499999999i64;", true)]
-    [InlineData("uint64 value = 65536 * 65536; return value == 4294967296u64;", true)]
-    [InlineData("int32 value = 50000; int64 product = (int64)value * (int64)value; return product == 2500000000i64;", true)]
+    [InlineData("return 9223372036854775807 == int64.MaxValue && -9223372036854775808 == int64.MinValue;", true)]
+    [InlineData("return 18446744073709551615 == uint64.MaxValue && 0 == uint64.MinValue;", true)]
+    [InlineData("return int64(9223372036854775807) > -1 && uint64(18446744073709551615) > 9223372036854775807;", true)]
+    [InlineData("return (9223372036854775806 + 1) == int64.MaxValue;", true)]
+    [InlineData("return (uint64.MaxValue - 1) == 18446744073709551614;", true)]
+    [InlineData("return (int64(-3000000000) * 3) / 3 == -3000000000;", true)]
+    [InlineData("return (uint64.MaxValue / 3) * 3 == uint64.MaxValue;", true)]
+    [InlineData("return int64(-9223372036854775808) % -1 == 0;", true)]
+    [InlineData("return int64(-11) / 3 == -3 && int64(-11) % 3 == -2;", true)]
+    [InlineData("return (~uint64(0) ^ uint64.MaxValue) == 0 && (uint64(1) | 2) == 3;", true)]
+    [InlineData("return int64(uint32(2147483648)) == 2147483648;", true)]
+    [InlineData("return int64(int32(-2147483648)) == -2147483648;", true)]
+    [InlineData("return uint64(uint32.MaxValue) == 4294967295;", true)]
+    [InlineData("return int32(int64(2147483647)) == int32.MaxValue;", true)]
+    [InlineData("return uint32(uint64(4294967295)) == uint32.MaxValue;", true)]
+    [InlineData("return char16(uint64(65535)) == char16.MaxValue;", true)]
+    [InlineData("int64 value = 50000 * 50000; return value == 2500000000;", true)]
+    [InlineData("int64 value = (50000 + 1) * (50000 - 1); return value == 2499999999;", true)]
+    [InlineData("uint64 value = 65536 * 65536; return value == 4294967296;", true)]
+    [InlineData("int32 value = 50000; int64 product = int64(value) * int64(value); return product == 2500000000;", true)]
     public async Task WideValuesAgreeAcrossAotAndCliJitAsync(string body, bool expected)
     {
         var source = "int32 Main() { if (Check()) { return 42; } return 1; } bool Check() { " + body + " }";
@@ -43,20 +43,20 @@ public sealed class Integer64Tests
     }
 
     [Theory]
-    [InlineData("int32 Main() { int64 x = int64.MaxValue + 1i64; return 0; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { uint64 x = uint64.MaxValue + 1u64; return 0; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { int64 x = int64.MinValue - 1i64; return 0; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { uint64 x = 0u64 - 1u64; return 0; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { int64 x = 3037000500i64 * 3037000500i64; return 0; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { uint64 x = uint64.MaxValue * 2u64; return 0; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { int64 x = int64.MinValue / -1i64; return 0; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { uint64 x = 1u64 / 0u64; return 0; }", unchecked((int)0xE0540002))]
+    [InlineData("int32 Main() { int64 x = int64.MaxValue + 1; return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { uint64 x = uint64.MaxValue + 1; return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { int64 x = int64.MinValue - 1; return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { uint64 x = 0 - 1; return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { int64 x = 3037000500 * 3037000500; return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { uint64 x = uint64.MaxValue * 2; return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { int64 x = int64.MinValue / -1; return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { uint64 x = 1 / 0; return 0; }", unchecked((int)0xE0540002))]
     [InlineData("int32 Main() { int64 x = -int64.MinValue; return 0; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { int32 x = (int32)2147483648i64; return 0; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { int64 x = (int64)9223372036854775808u64; return 0; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { uint64 x = (uint64)-1i64; return 0; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { uint32 x = (uint32)4294967296u64; return 0; }", unchecked((int)0xE0540001))]
-    [InlineData("int32 Main() { char16 x = (char16)65536u64; return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { int32 x = int32(int64(2147483648)); return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { int64 x = int64(uint64(9223372036854775808)); return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { uint64 x = uint64(int64(-1)); return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { uint32 x = uint32(uint64(4294967296)); return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { char16 x = char16(uint64(65536)); return 0; }", unchecked((int)0xE0540001))]
     public async Task WideFailuresUseCheckedRuntimePolicyAsync(string source, int expected)
     {
         await ExecuteBothAsync(Compile(source), expected).ConfigureAwait(true);
@@ -81,13 +81,13 @@ public sealed class Integer64Tests
                 return a + b + c + d + e + f;
             }
             int64 Recurse(int64 n) {
-                if (n == 0i64) { return 32i64; }
-                return Recurse(n - 1i64);
+                if (n == 0) { return 32; }
+                return Recurse(n - 1);
             }
             bool Try(bool success, out Pair value) {
                 if (!success) { return false; }
-                value = new Pair(1i64, uint64.MaxValue);
-                value.Signed.Value = 10i64;
+                value = new Pair(1, uint64.MaxValue);
+                value.Signed.Value = 10;
                 return true;
             }
             bool Forward(bool success, out Pair value) { return Try(success, out value); }
@@ -96,10 +96,10 @@ public sealed class Integer64Tests
                 if (Forward(false, out var ignored)) { return 1; }
                 Pair copy = value;
                 mut Pair replacement = value;
-                replacement.Signed.Value = 2i64;
-                if (copy.Signed.Value != 10i64 || replacement.Signed.Value != 2i64
+                replacement.Signed.Value = 2;
+                if (copy.Signed.Value != 10 || replacement.Signed.Value != 2
                     || value.Unsigned != uint64.MaxValue) { return 2; }
-                if (Sum(1i64, 2i64, 3i64, 4i64, 0i64, Recurse(3i64)) != 42i64) { return 3; }
+                if (Sum(1, 2, 3, 4, 0, Recurse(3)) != 42) { return 3; }
                 return 42;
             }
             """);
@@ -121,8 +121,8 @@ public sealed class Integer64Tests
                 return Try(success, out signed, out unsigned);
             }
             int32 Main() {
-                mut int64 signed = 0i64;
-                mut uint64 unsigned = 0u64;
+                mut int64 signed = 0;
+                mut uint64 unsigned = 0;
                 require Forward(true, out signed, out unsigned);
                 if (signed != int64.MinValue || unsigned != uint64.MaxValue) { return 2; }
                 if (Forward(false, out signed, out unsigned)) { return 1; }
@@ -156,8 +156,8 @@ public sealed class Integer64Tests
         var consumer = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
                 Wide value = Make();
-                if (value.Signed != -9223372036854775808i64
-                    || value.Unsigned != 18446744073709551615u64) { return 1; }
+                if (value.Signed != -9223372036854775808
+                    || value.Unsigned != 18446744073709551615) { return 1; }
                 return 42;
             }
             """), reference);
@@ -167,18 +167,18 @@ public sealed class Integer64Tests
     }
 
     [Theory]
-    [InlineData("int64 Main() { return 0i64; }")]
-    [InlineData("int32 Main() { int64 value = 1i32; return 0; }")]
-    [InlineData("int32 Main() { uint64 value = -1i64; return 0; }")]
-    [InlineData("int32 Main() { int64 value = 9223372036854775808i64; return 0; }")]
-    [InlineData("int32 Main() { uint64 value = 18446744073709551616u64; return 0; }")]
+    [InlineData("int64 Main() { return 0; }")]
+    [InlineData("int32 Main() { int64 value = int32(1); return 0; }")]
+    [InlineData("int32 Main() { uint64 value = int64(-1); return 0; }")]
+    [InlineData("int32 Main() { int64 value = 9223372036854775808; return 0; }")]
+    [InlineData("int32 Main() { uint64 value = 18446744073709551616; return 0; }")]
     [InlineData("int32 Main() { int64 value = 18446744073709551615; return 0; }")]
-    [InlineData("int32 Main() { bool value = (bool)1i64; return 0; }")]
-    [InlineData("int32 Main() { int64 value = 1f64; return 0; }")]
+    [InlineData("int32 Main() { bool value = bool(int64(1)); return 0; }")]
+    [InlineData("int32 Main() { int64 value = 1.0; return 0; }")]
     [InlineData("int32 Main() { var value = 20 * 20; return 0; }")]
     [InlineData("int32 Main() { var value = -(20 * 20); return 0; }")]
     [InlineData("int32 Main() { int32 value = 50000; int64 product = value * value; return 0; }")]
-    [InlineData("int32 Main() { int64 value = 20i32 * 20; return 0; }")]
+    [InlineData("int32 Main() { int64 value = int32(20) * 20; return 0; }")]
     public void WideInvalidSourcesAreDiagnosed(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
@@ -214,9 +214,9 @@ public sealed class Integer64Tests
     {
         var program = Compile("""
             int32 Main() {
-                uint64 large = 18446744073709551615u64;
-                int64 negative = -9223372036854775808i64;
-                uint32 previous = 4294967295u32;
+                uint64 large = 18446744073709551615;
+                int64 negative = -9223372036854775808;
+                uint32 previous = 4294967295;
                 return 0;
             }
             """);

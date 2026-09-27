@@ -122,14 +122,14 @@ public int32 AliasUpdates() {
 public int32 DuringConstruction() {
     DiscardLeaf();
     require Leaf.TryCreate(42, out var child);
-    require CollectingPair.TryCreate(42, 18446744073709551615u64,
-        new FactoryPayload(9223372036854775807i64), true, child,
-        new FactoryPayload(-9223372036854775808i64), out var pair);
+    require CollectingPair.TryCreate(42, 18446744073709551615,
+        new FactoryPayload(9223372036854775807), true, child,
+        new FactoryPayload(-9223372036854775808), out var pair);
     require ManagedHeap.Collect() == 0;
     require pair.Left.Value == pair.Right.Value;
-    require pair.Data.First == -9223372036854775808i64 && pair.Data.Second == 20 && pair.Data.Third == 22;
-    require pair.Marker == 42 && pair.Bits == 18446744073709551615u64 && pair.Ready;
-    require pair.First.First == 9223372036854775807i64 && pair.First.Second == 20 && pair.First.Third == 22;
+    require pair.Data.First == -9223372036854775808 && pair.Data.Second == 20 && pair.Data.Third == 22;
+    require pair.Marker == 42 && pair.Bits == 18446744073709551615 && pair.Ready;
+    require pair.First.First == 9223372036854775807 && pair.First.Second == 20 && pair.First.Third == 22;
     return pair.Left.Value;
 }
 
@@ -147,7 +147,7 @@ public int32 ScalarNonRoot(uint64 bits) {
 }
 
 public int32 AllocationFailure() {
-    if (CopyBox.TryCreate(42, true, 18446744073709551615u64, new FactoryPayload(42i64), out var unpublished)) {
+    if (CopyBox.TryCreate(42, true, 18446744073709551615, new FactoryPayload(42), out var unpublished)) {
         return 0;
     }
     require ManagedHeap.Collect() == 0;
@@ -156,9 +156,9 @@ public int32 AllocationFailure() {
 
 public int32 RetainAcrossAllocationFailure() {
     require Leaf.TryCreate(42, out var retained);
-    if (CollectingPair.TryCreate(42, 18446744073709551615u64,
-        new FactoryPayload(9223372036854775807i64), true, retained,
-        new FactoryPayload(42i64), out var unpublished)) {
+    if (CollectingPair.TryCreate(42, 18446744073709551615,
+        new FactoryPayload(9223372036854775807), true, retained,
+        new FactoryPayload(42), out var unpublished)) {
         return 0;
     }
     require ManagedHeap.Collect() == 0;

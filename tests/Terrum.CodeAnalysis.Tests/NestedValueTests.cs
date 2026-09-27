@@ -87,19 +87,19 @@ public sealed class NestedValueTests
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             struct Bits {
                 public mut bool First; public mut char16 Middle; public mut bool Last;
-                public Bits() { First = true; Middle = (char16)1; Last = false; }
+                public Bits() { First = true; Middle = char16(1); Last = false; }
             }
             struct Box {
                 public bool Head; public mut Bits Value; public char16 Tail;
-                public Box() { Head = true; Value = new Bits(); Tail = (char16)2; }
+                public Box() { Head = true; Value = new Bits(); Tail = char16(2); }
             }
             int32 Main() {
                 mut Box box = new Box();
-                box.Value.Middle = (char16)40;
+                box.Value.Middle = char16(40);
                 box.Value.Last = true;
                 box.Value.First = false;
                 require box.Head && !box.Value.First && box.Value.Last;
-                return (int32)box.Value.Middle + (int32)box.Tail;
+                return int32(box.Value.Middle) + int32(box.Tail);
             }
             """));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -221,20 +221,20 @@ public sealed class NestedValueTests
                 public Inner Value;
                 public char16 Suffix;
                 public Outer() {
-                    this.Prefix = (char16)1;
+                    this.Prefix = char16(1);
                     this.Value = new Inner();
-                    this.Suffix = (char16)2;
+                    this.Suffix = char16(2);
                 }
             }
             struct Inner {
                 public char16 Unit;
                 public bool Valid;
-                public Inner() { this.Unit = (char16)39; this.Valid = true; }
+                public Inner() { this.Unit = char16(39); this.Valid = true; }
             }
             int32 Main() {
                 Outer value = new Outer();
                 require value.Value.Valid;
-                return (int32)value.Prefix + (int32)value.Value.Unit + (int32)value.Suffix;
+                return int32(value.Prefix) + int32(value.Value.Unit) + int32(value.Suffix);
             }
             """));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -364,7 +364,7 @@ public sealed class NestedValueTests
         await ExecuteBothAsync(ModuleCompiler.Link(consumer, replacement), 42).ConfigureAwait(true);
         var changed = Compilation.CreateLibrary(SyntaxTree.Parse(Values.Replace("public mut int32 Value;",
             "public mut uint32 Value;", StringComparison.Ordinal).Replace("this.Value = value;",
-            "this.Value = (uint32)value;", StringComparison.Ordinal) + "public Pair Make() { return new Pair(1, 2); }"));
+            "this.Value = uint32(value);", StringComparison.Ordinal) + "public Pair Make() { return new Pair(1, 2); }"));
         Assert.False(changed.HasErrors, string.Join(Environment.NewLine, changed.Diagnostics));
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(consumer,
             ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(changed.Program), ["Make"])));

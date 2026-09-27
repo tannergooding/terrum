@@ -80,7 +80,7 @@ public sealed class NativeGraphOriginTests
         Assert.Equal(originalMiddle, middle);
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [
             Leaf(LeafSource.Replace("public int32 Value;", "public int64 Value;", StringComparison.Ordinal)
-                .Replace("Value = value;", "Value = (int64)value;", StringComparison.Ordinal), policy), middle]));
+                .Replace("Value = value;", "Value = int64(value);", StringComparison.Ordinal), policy), middle]));
     }
 
     [Theory]

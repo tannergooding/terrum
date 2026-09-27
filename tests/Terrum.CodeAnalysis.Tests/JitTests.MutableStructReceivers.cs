@@ -11,16 +11,16 @@ public sealed partial class JitTests
 {
     [Theory]
     [InlineData(1, "bool", "false", "true", "if (Value) { return 42; } return 0;", "")]
-    [InlineData(2, "char16", "(char16)0", "(char16)42", "return (int32)Value;", "")]
+    [InlineData(2, "char16", "char16(0)", "char16(42)", "return int32(Value);", "")]
     [InlineData(3, "bool", "false", "true", "if (Value) { return 42; } return 0;",
         "public bool Second; public bool Third;")]
     [InlineData(4, "int32", "0", "42", "return Value;", "")]
-    [InlineData(6, "char16", "(char16)0", "(char16)42", "return (int32)Value;",
+    [InlineData(6, "char16", "char16(0)", "char16(42)", "return int32(Value);",
         "public char16 Second; public char16 Third;")]
-    [InlineData(8, "int64", "0i64", "42i64", "return (int32)Value;", "")]
+    [InlineData(8, "int64", "0", "42", "return int32(Value);", "")]
     [InlineData(12, "int32", "0", "42", "return Value;",
         "public int32 Second; public int32 Third;")]
-    [InlineData(16, "int64", "0i64", "42i64", "return (int32)Value;", "public int64 Second;")]
+    [InlineData(16, "int64", "0", "42", "return int32(Value);", "public int64 Second;")]
     public async Task MutableReceiverPreservesEveryDirectAndIndirectCopyWidthAsync(
         int size, string type, string initial, string updated, string read, string additionalFields)
     {
@@ -89,11 +89,11 @@ public sealed partial class JitTests
                 public int64 Second;
                 public Payload(int64 first) { First = first; Second = 99; }
                 public mut void Set(int64 value) { First = value; }
-                public int32 Read() { return (int32)First; }
+                public int32 Read() { return int32(First); }
             }
             int32 Main() {
-                mut Payload value = new Payload(1i64);
-                value.Set(42i64);
+                mut Payload value = new Payload(1);
+                value.Set(42);
                 return value.Read();
             }
             """;

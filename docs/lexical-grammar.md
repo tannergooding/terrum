@@ -31,8 +31,8 @@ special discard handling. General discard, wildcard-pattern and generic-hole
 forms are unsupported. Expression statements or unused-local cleanup do not
 implement the distinct discard semantics.
 
-Target numeric literals are unsuffixed source tokens. Existing radix, exponent
-and signed-minimum behavior is preserved; a type is selected later by context
+Target numeric literals are unsuffixed source tokens. Target grammar preserves
+radix, exponent and signed-minimum behavior; a type is selected later by context
 or an explicit type-call target. Digit separators are not supported by the
 current lexer/scanner and their grammar is separate scheduled literal-frontend
 work. Width tags are not part of the target grammar, so spellings such as
@@ -57,9 +57,15 @@ never encoded in a suffix. The lexer preserves the complete raw spelling;
 target selection, constant parsing and numeric range/target-format validation
 happen later.
 
-The bounded current scanner still exposes legacy integer width-tag metadata
-for its existing P0 component. That implementation boundary is scheduled for
-migration and does not define target source syntax.
+The syntax-14 parser rejects a recognized attached width suffix with `TRM0006`.
+The unchanged scanner-4 five-word integer record uses tag 0 for valid literals;
+recognized suffix tags remain only as metadata on rejected suffix tokens. The
+executable binder currently constructs decimal integer literals with an
+expected type and has no fallback numeric type. Although the lexical target
+grammar above describes hexadecimal and exponent forms, the bounded executable
+decoder does not yet bind nondecimal or floating literals. Digit separators,
+custom literal parsers, registered string-target execution and `[ConstEval]`
+also remain unsupported.
 
 Strings are delimited by ASCII double quotes. Escapes supported are `\n`,
 `\r`, `\t`, `\\`, `\"`, `\0`, `\u` plus exactly four hexadecimal digits, and
@@ -75,10 +81,12 @@ encoding and terminator requirements without itself granting pointer lifetime.
 Single-quoted character literals in design samples are not implemented tokens.
 Their proposed scalar/target-representability contract is in
 [conversions](conversions.md#character-intent); it does not choose UTF-16 as
-runtime text's default encoding. Numeric literal construction and explicit
-`T(expression)` conversion are binder/evaluator work, distinct from the raw
-numeric token grammar above. The bounded current binder's prefix-cast spelling
-is legacy pending migration and is not the target form.
+runtime text's default encoding. The bounded parser now uses `T(expression)`
+for checked numeric conversions to `int32`, `uint32`, `int64`, `uint64` and
+`char16`; it has no numeric prefix-cast production. Source functions and local
+shadowing retain existing call precedence. Literal conversion remains distinct
+from raw tokenization, and nondecimal/floating/custom literal parsing is not
+executable support.
 
 Horizontal whitespace, line breaks, `//` comments up to but not including
 the break, and non-nesting `/* ... */` comments are leading trivia. The final
@@ -87,10 +95,10 @@ a diagnostic. Malformed surrogate units inside either comment form are
 diagnosed without changing the trivia text. Lexical diagnostic codes are
 `TRM0001` for bad characters or malformed surrogates, `TRM0002` for an
 unterminated string, `TRM0003` for an unterminated block comment, `TRM0004`
-for an incomplete exponent and `TRM0005` for an invalid escape. Every UTF-16
-unit belongs exactly once to either token text or
-its leading trivia, including invalid input. Diagnostics for malformed text
-do not replace or normalize source characters.
+for an incomplete exponent, `TRM0005` for an invalid escape, and `TRM0006`
+for an attached numeric width suffix. Every UTF-16 unit belongs exactly once
+to either token text or its leading trivia, including invalid input.
+Diagnostics for malformed text do not replace or normalize source characters.
 
 The 2021 TerraFX lexer gist by Tanner Gooding and Contributors was reviewed
 as MIT-licensed prior art for property selection and source preservation.

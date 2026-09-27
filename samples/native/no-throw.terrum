@@ -5,7 +5,7 @@ struct Scalar
     [NoThrow]
     public Scalar(uint32 value)
     {
-        Value = (int64)value;
+        Value = int64(value);
     }
 
     [NoThrow]

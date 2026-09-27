@@ -30,9 +30,9 @@ public sealed class WideCandidateTests
     }
 
     [Theory]
-    [InlineData("TryAdd(int64.MaxValue, 1, out var value); return (int32)value;")]
-    [InlineData("if (TryAdd(int64.MaxValue, 1, out var value)) { return 0; } return (int32)value;")]
-    [InlineData("uint32 value = 1; require TryAdd(value, 2, out var sum); return (int32)sum;")]
+    [InlineData("TryAdd(int64.MaxValue, 1, out var value); return int32(value);")]
+    [InlineData("if (TryAdd(int64.MaxValue, 1, out var value)) { return 0; } return int32(value);")]
+    [InlineData("uint32 value = 1; require TryAdd(value, 2, out var sum); return int32(sum);")]
     [InlineData("require TryAccumulateDecimal(18446744073709551616, 0, uint64.MaxValue, out var value); return 0;")]
     public void WideCandidateContractsRejectInvalidUse(string body)
     {
@@ -49,7 +49,7 @@ public sealed class WideCandidateTests
         var original = Compilation.CreateLibrary(SyntaxTree.Parse("public int64 Echo(int64 value) { return value; }"));
         Assert.False(original.HasErrors, string.Join(Environment.NewLine, original.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(original.Program), ["Echo"]);
-        var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return (int32)Echo(42); }"),
+        var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return int32(Echo(42)); }"),
             ModuleCompiler.CreateReference(producer));
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);

@@ -1635,34 +1635,6 @@ internal sealed partial class Binder
                 break;
             }
 
-            case SyntaxKind.CastExpression:
-            {
-                var target = ((SyntaxTokenElement)node.Children[1]).Token.Text switch {
-                    "int32" => PrimitiveType.Int32,
-                    "uint32" => PrimitiveType.UInt32,
-                    "int64" => PrimitiveType.Int64,
-                    "uint64" => PrimitiveType.UInt64,
-                    "char16" => PrimitiveType.Char16,
-                    _ => throw new InvalidOperationException(),
-                };
-                var castOperand = (SyntaxNode)node.Children[3];
-                var literal = castOperand.Kind == SyntaxKind.LiteralExpression
-                    ? ((SyntaxTokenElement)castOperand.Children[0]).Token : null;
-                var literalContext = literal is { Kind: TokenKind.NumericLiteral }
-                    && !literal.Text.EndsWith("i32", StringComparison.Ordinal)
-                    && !literal.Text.EndsWith("u32", StringComparison.Ordinal)
-                    && !literal.Text.EndsWith("i64", StringComparison.Ordinal)
-                    && !literal.Text.EndsWith("u64", StringComparison.Ordinal)
-                    ? target : (PrimitiveType?)null;
-                var operand = BindExpression(castOperand, literalContext);
-                if (operand.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16))
-                {
-                    Report("TRM3007", "A checked cast requires a numeric operand.", operand.Span);
-                }
-                expression = new BoundCast(operand, target, node.Span);
-                break;
-            }
-
             case SyntaxKind.MemberAccessExpression:
             {
                 if (((SyntaxTokenElement)node.Children[2]).Token.Text == "Length"
@@ -1763,8 +1735,7 @@ internal sealed partial class Binder
                     TryMinimumLiteral(((SyntaxTokenElement)operandNode.Children[0]).Token, operandType))
                 {
                     var literal = ((SyntaxTokenElement)operandNode.Children[0]).Token;
-                    if (!literal.Text.EndsWith(operandType == PrimitiveType.Int32 ? "i32" : "i64", StringComparison.Ordinal)
-                        && expected != operandType)
+                    if (expected != operandType)
                     {
                         Report("TRM3014", "An unsuffixed integer literal requires a signed integer context.", literal.Span);
                     }
@@ -1994,6 +1965,10 @@ internal sealed partial class Binder
             }
             else if (!TryFindFunction(name.Text, out function))
             {
+                if (TryConversionTarget(callee, out var target))
+                {
+                    return BindConversionCall(node, (SyntaxNode)node.Children[1], target);
+                }
                 Report("TRM3011", $"Unknown function '{name.Text}'.", name.Span);
             }
         }
@@ -2064,6 +2039,46 @@ internal sealed partial class Binder
             Report("TRM3011", "Only direct calls to named functions are supported.", callee.Span);
         }
         return BindArguments(node, (SyntaxNode)node.Children[1], function, receiver);
+    }
+
+    private bool TryConversionTarget(SyntaxNode callee, out PrimitiveType target)
+    {
+        target = PrimitiveType.Int32;
+        if (callee.Kind != SyntaxKind.NameExpression)
+        {
+            return false;
+        }
+        var name = ((SyntaxTokenElement)callee.Children[0]).Token.Text;
+        if (TryFindVariable(name, out _) || TryFindFunction(name, out _))
+        {
+            return false;
+        }
+        target = name switch {
+            "int32" => PrimitiveType.Int32,
+            "uint32" => PrimitiveType.UInt32,
+            "int64" => PrimitiveType.Int64,
+            "uint64" => PrimitiveType.UInt64,
+            "char16" => PrimitiveType.Char16,
+            _ => PrimitiveType.Int32,
+        };
+        return name is "int32" or "uint32" or "int64" or "uint64" or "char16";
+    }
+
+    private BoundExpression BindConversionCall(SyntaxNode node, SyntaxNode arguments, PrimitiveType target)
+    {
+        var items = arguments.Children.OfType<SyntaxNode>().ToArray();
+        if (items is not [{ Kind: SyntaxKind.Argument, Children: [SyntaxNode operandNode] }])
+        {
+            Report("TRM3011", "A checked conversion requires exactly one positional value argument.", arguments.Span);
+            return ErrorExpression(node.Span);
+        }
+        var operand = BindExpression(operandNode, KnownType(operandNode) is null ? target : null);
+        if (operand.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+            or PrimitiveType.UInt64 or PrimitiveType.Char16))
+        {
+            Report("TRM3007", "A checked conversion requires a numeric operand.", operand.Span);
+        }
+        return new BoundCast(operand, target, node.Span);
     }
 
     private BoundCall BindArguments(SyntaxNode node, SyntaxNode arguments, int function, SyntaxNode? receiver)
@@ -2280,11 +2295,7 @@ internal sealed partial class Binder
         }
 
         var text = _tree.Source.GetSubText(token.Span);
-        var suffix = text.EndsWith("i32", StringComparison.Ordinal) ? PrimitiveType.Int32
-            : text.EndsWith("u32", StringComparison.Ordinal) ? PrimitiveType.UInt32
-            : text.EndsWith("i64", StringComparison.Ordinal) ? PrimitiveType.Int64
-            : text.EndsWith("u64", StringComparison.Ordinal) ? PrimitiveType.UInt64 : (PrimitiveType?)null;
-        var digits = suffix is not null ? text.AsSpan(0, text.Length - 3) : text.AsSpan();
+        var digits = text.AsSpan();
 
         if (digits.IndexOfAny('.', 'e', 'E') >= 0 || digits.IsEmpty || !AllDigits(digits))
         {
@@ -2292,8 +2303,8 @@ internal sealed partial class Binder
             return ErrorExpression(token.Span);
         }
 
-        var type = suffix ?? expected;
-        if (suffix is null && type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16))
+        var type = expected;
+        if (type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16))
         {
             Report("TRM3014", "An unsuffixed integer literal requires a numeric context.", token.Span);
         }
@@ -2342,13 +2353,7 @@ internal sealed partial class Binder
         }
 
         var text = _tree.Source.GetSubText(token.Span);
-        var tag = type == PrimitiveType.Int32 ? "i32" : "i64";
-        if (text.EndsWith(type == PrimitiveType.Int32 ? "i64" : "i32", StringComparison.Ordinal)
-            || text.EndsWith("u32", StringComparison.Ordinal) || text.EndsWith("u64", StringComparison.Ordinal))
-        {
-            return false;
-        }
-        var digits = text.EndsWith(tag, StringComparison.Ordinal) ? text.AsSpan(0, text.Length - 3) : text.AsSpan();
+        var digits = text.AsSpan();
         if (digits.IsEmpty || !AllDigits(digits))
         {
             return false;
@@ -2403,10 +2408,6 @@ internal sealed partial class Binder
                 var token = ((SyntaxTokenElement)node.Children[0]).Token;
                 return token.Kind switch {
                     TokenKind.TrueKeyword or TokenKind.FalseKeyword => PrimitiveType.Bool,
-                    TokenKind.NumericLiteral when token.Text.EndsWith("i32", StringComparison.Ordinal) => PrimitiveType.Int32,
-                    TokenKind.NumericLiteral when token.Text.EndsWith("u32", StringComparison.Ordinal) => PrimitiveType.UInt32,
-                    TokenKind.NumericLiteral when token.Text.EndsWith("i64", StringComparison.Ordinal) => PrimitiveType.Int64,
-                    TokenKind.NumericLiteral when token.Text.EndsWith("u64", StringComparison.Ordinal) => PrimitiveType.UInt64,
                     _ => null,
                 };
             }
@@ -2422,9 +2423,13 @@ internal sealed partial class Binder
                 if (callee.Kind == SyntaxKind.NameExpression)
                 {
                     var name = ((SyntaxTokenElement)callee.Children[0]).Token.Text;
-                    if (TryFindFunction(name, out var index) && !TryFindVariable(name, out _))
+                    if (!TryFindVariable(name, out _) && TryFindFunction(name, out var index))
                     {
                         return _signatures[index].ReturnType;
+                    }
+                    if (TryConversionTarget(callee, out var target))
+                    {
+                        return target;
                     }
                 }
 
@@ -2459,14 +2464,6 @@ internal sealed partial class Binder
             case SyntaxKind.ObjectCreationExpression:
                 return TryResolveStruct(NameText((SyntaxNode)node.Children[1]), out var created)
                     ? created : null;
-            case SyntaxKind.CastExpression:
-                return ((SyntaxTokenElement)node.Children[1]).Token.Text switch {
-                    "int32" => PrimitiveType.Int32,
-                    "uint32" => PrimitiveType.UInt32,
-                    "int64" => PrimitiveType.Int64,
-                    "uint64" => PrimitiveType.UInt64,
-                    _ => PrimitiveType.Char16,
-                };
             case SyntaxKind.MemberAccessExpression:
             {
                 if (((SyntaxTokenElement)node.Children[2]).Token.Text == "Length"

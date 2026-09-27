@@ -4,12 +4,12 @@ namespace Terrum.CodeAnalysis;
 // Host buffers are bounded capabilities, not source-constructible pointers.
 int32 ReadScalar(int32 at)
 {
-    int32 first = (int32)Host.Source[at];
+    int32 first = int32(Host.Source[at]);
     if (first >= 55296 && first <= 56319)
     {
         if (at + 1 < Host.Source.Length)
         {
-            int32 second = (int32)Host.Source[at + 1];
+            int32 second = int32(Host.Source[at + 1]);
             if (second >= 56320 && second <= 57343)
             {
                 return 65536 + (first - 55296) * 1024 + second - 56320;
@@ -110,7 +110,7 @@ int32 PeekUnit(int32 at)
         return -1;
     }
 
-    return (int32)Host.Source[at];
+    return int32(Host.Source[at]);
 }
 
 bool IsDigit(int32 unit)
@@ -233,7 +233,7 @@ int32 KeywordKind(int32 start, int32 length)
         if (size == length)
         {
             mut int32 offset = 0;
-            while (offset < size && (int32)Host.Source[start + offset] == Host.Keywords[entry + 2 + offset])
+            while (offset < size && int32(Host.Source[start + offset]) == Host.Keywords[entry + 2 + offset])
             {
                 offset = offset + 1;
             }
@@ -260,7 +260,7 @@ int32 OperatorMatch(int32 start)
         if (size > width && size <= Host.Source.Length - start)
         {
             mut int32 offset = 0;
-            while (offset < size && (int32)Host.Source[start + offset] == Host.Operators[entry + 2 + offset])
+            while (offset < size && int32(Host.Source[start + offset]) == Host.Operators[entry + 2 + offset])
             {
                 offset = offset + 1;
             }
@@ -352,12 +352,12 @@ int32 IntegerTag(int32 at, int32 length)
 
 int32 EncodeWord(uint32 word)
 {
-    if (word <= (uint32)int32.MaxValue)
+    if (word <= uint32(int32.MaxValue))
     {
-        return (int32)word;
+        return int32(word);
     }
 
-    return (int32)((int64)word - 4294967296);
+    return int32(int64(word) - 4294967296);
 }
 
 void PublishInteger(int32 tokenIndex, bool overflow, uint64 magnitude, int32 tag)
@@ -378,8 +378,8 @@ void PublishInteger(int32 tokenIndex, bool overflow, uint64 magnitude, int32 tag
     {
         Host.IntegerValues[count * 5 + 2] = 1;
     }
-    Host.IntegerValues[count * 5 + 3] = EncodeWord((uint32)(payload % base));
-    Host.IntegerValues[count * 5 + 4] = EncodeWord((uint32)(payload / base));
+    Host.IntegerValues[count * 5 + 3] = EncodeWord(uint32(payload % base));
+    Host.IntegerValues[count * 5 + 4] = EncodeWord(uint32(payload / base));
     Host.IntegerValues[count * 5 + 5] = tag;
     Host.IntegerValues[0] = count + 1;
 }
@@ -394,7 +394,7 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
     {
         if (!overflow)
         {
-            uint64 digit = (uint64)(PeekUnit(at) - 48);
+            uint64 digit = uint64(PeekUnit(at) - 48);
             // Rearrange magnitude * 10 + digit <= MaxValue before multiplying.
             if (magnitude > (uint64.MaxValue - digit) / 10)
             {
@@ -469,6 +469,7 @@ int32 ScanNumber(int32 initial, int32 tokenIndex)
         int32 tagLength = ReadNumericTag(at);
         if (tagLength != 0)
         {
+            Report(6, at, tagLength);
             tag = IntegerTag(at, tagLength);
             if (tag == 0)
             {

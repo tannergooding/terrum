@@ -14,13 +14,13 @@ public sealed partial class CliTests
 {
     [Theory]
     [InlineData("int32 Main() { return 42; }")]
-    [InlineData("int32 Main() { int32 value = 2147483647i32; return value - 2147483605; }")]
-    [InlineData("int32 Main() { int64 value = -9223372036854775808i64; if (value == int64.MinValue) { return 42; } return 0; }")]
+    [InlineData("int32 Main() { int32 value = 2147483647; return value - 2147483605; }")]
+    [InlineData("int32 Main() { int64 value = int64(-9223372036854775808); if (value == int64.MinValue) { return 42; } return 0; }")]
     [InlineData("int32 Main() { int64 value = -9223372036854775808; if (value == int64.MinValue) { return 42; } return 0; }")]
     [InlineData("int32 Main() { int32 value = -2147483648; if (value == int32.MinValue) { return 42; } return 0; }")]
-    [InlineData("int32 Main() { uint64 value = 18446744073709551615u64; return (int32)(value % 1000u64); }")]
-    [InlineData("int32 Main() { char16 value = 65535; return (int32)value - 65493; }")]
-    [InlineData("int32 Main() { uint32 a = 4294967295u32; int64 b = 42i64; return (int32)((uint64)a % 1000u64) - 295 + (int32)b; }")]
+    [InlineData("int32 Main() { uint64 value = 18446744073709551615; return int32(value % 1000); }")]
+    [InlineData("int32 Main() { char16 value = 65535; return int32(value) - 65493; }")]
+    [InlineData("int32 Main() { uint32 a = 4294967295; int64 b = 42; return int32(uint64(a) % 1000) - 295 + int32(b); }")]
     public async Task CompiledIntegerValuesEmitTheSameImageAsHostBuildAsync(string source)
     {
         var scanner = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -53,9 +53,9 @@ public sealed partial class CliTests
     }
 
     [Theory]
-    [InlineData("int32 Main() { return 4294967296u32; }")]
-    [InlineData("int32 Main() { char16 value = 65536; return (int32)value; }")]
-    [InlineData("int32 Main() { uint64 value = 18446744073709551616u64; return 42; }")]
+    [InlineData("int32 Main() { return uint32(4294967296); }")]
+    [InlineData("int32 Main() { char16 value = 65536; return int32(value); }")]
+    [InlineData("int32 Main() { uint64 value = 18446744073709551616; return 42; }")]
     [InlineData("int32 Main() { int64 value = -9223372036854775809; return 42; }")]
     [InlineData("int32 Main() { return 18446744073709551616; }")]
     [InlineData("int32 Main() { return 1i128; }")]
@@ -132,7 +132,7 @@ public sealed partial class CliTests
         {
             await File.WriteAllTextAsync(scanner, source);
             await File.WriteAllBytesAsync(artifact, original);
-            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("42i32"),
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes("42"),
                 "build-component", scanner, "-", "-o", artifact, "--runtime", "fail-fast", "--json");
             Assert.Equal(1, exit);
             Assert.Empty(error);

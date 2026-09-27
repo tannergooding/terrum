@@ -19,10 +19,10 @@ public sealed class NativeTests
     [Theory]
     [InlineData("require true; return 7;", 7)]
     [InlineData("require false; return 7;", unchecked((int)0xE0540003))]
-    [InlineData("require (1i32 < 2); return 8;", 8)]
-    [InlineData("require true || (1i32 / 0 == 0); return 9;", 9)]
-    [InlineData("require false && (1i32 / 0 == 0); return 9;", unchecked((int)0xE0540003))]
-    [InlineData("require 1i32 / 0 == 0; return 9;", unchecked((int)0xE0540002))]
+    [InlineData("require (int32(1) < 2); return 8;", 8)]
+    [InlineData("require true || (int32(1) / 0 == 0); return 9;", 9)]
+    [InlineData("require false && (int32(1) / 0 == 0); return 9;", unchecked((int)0xE0540003))]
+    [InlineData("require int32(1) / 0 == 0; return 9;", unchecked((int)0xE0540002))]
     public async Task ExecutesRequirementsWithExplicitFailurePolicyAsync(string body, int expected)
     {
         Assert.Equal(expected, await ExecuteAsync(Emit("int32 Main() { " + body + " }")).ConfigureAwait(true));
@@ -45,7 +45,7 @@ public sealed class NativeTests
     [InlineData("int32 Main() { return Mix(Id(1), Id(2), Id(3), Id(4), Id(5), Mix(1,2,3,4,5,6)); } int32 Id(int32 x) { return x; } int32 Mix(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) { return a+b+c+d+e+f; }", 36)]
     [InlineData("int32 Main() { if (false && Fail()) { return 1; } if (true || Fail()) { return 8; } return 2; } bool Fail() { int32 value = 1 / 0; return value == 0; }", 8)]
     [InlineData("int32 Main() { bool a = true; bool b = false; if ((a & !b) ^ b) { return 11; } return 2; }", 11)]
-    [InlineData("int32 Main() { if (-2147483648i32 < 2147483647 && 2147483647i32 >= -2147483648) { return 9; } return 2; }", 9)]
+    [InlineData("int32 Main() { if (int32(-2147483648) < 2147483647 && int32(2147483647) >= -2147483648) { return 9; } return 2; }", 9)]
     [InlineData("int32 Main() { NoResult(); return 6; } void NoResult() { return (); }", 6)]
     [InlineData("void Main() { return Fail(); } void Fail() { int32 value = 1 / 0; }", unchecked((int)0xE0540002))]
     [InlineData("int32 Main() { mut int32 n = 0; while (n < 4) { int32 value = n * 2; n = n + 1; if (value == 6) { return value; } } return 0; }", 6)]

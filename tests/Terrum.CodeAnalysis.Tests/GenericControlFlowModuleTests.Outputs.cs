@@ -26,9 +26,9 @@ public sealed partial class GenericControlFlowModuleTests
         }
         [NoThrow] int32 Count<T>(T value, int32 count) where T : [Copy] { return count; }
         public int32 PowerProbe() {
-            if (TryCopy<Pair>(new Pair(1i64, 2i64), false, out var missing)) { return 1; }
-            require TryCopy<Pair>(new Pair(40i64, 2i64), true, out var result);
-            return (int32)(result.First + result.Second) + Count<Pair>(result, 0);
+            if (TryCopy<Pair>(new Pair(1, 2), false, out var missing)) { return 1; }
+            require TryCopy<Pair>(new Pair(40, 2), true, out var result);
+            return int32(result.First + result.Second) + Count<Pair>(result, 0);
         }
         """;
 
