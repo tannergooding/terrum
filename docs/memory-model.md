@@ -110,6 +110,14 @@ observations unless the source contract permits that observation, including
 any explicitly permitted partial completion on failure. Source sequencing is
 the contract; physical instruction order is an implementation choice within it.
 
+For example, an explicitly requested non-temporal store operation may leave
+ordering or completion obligations to its caller. Its contract must specify
+the fence or completion operation required before dependent accesses or
+publication. If the compiler instead selects non-temporal stores to implement
+an ordinary assignment or copy, those obligations remain the implementation's
+responsibility; instruction selection cannot weaken the source contract.
+See [non-temporal stores and cache management](#non-temporal-stores-and-cache-management).
+
 ### 3. Explicit sharing introduces observable access atomicity
 
 Transfer hands authority to another thread without granting simultaneous use;
