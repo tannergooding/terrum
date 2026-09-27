@@ -7,7 +7,7 @@ Terrum (TAIR-um), from TerraFX, is a proposed C#-shaped language for application
 - C#/.NET application and API ergonomics are the baseline; ownership, access, representation, lifetime, effects and placement are distinct contracts. An application can use managed cyclic graphs without propagating lifetime parameters through every edge; unique native resources and deterministic cleanup remain nonduplicable. There is no implicit copy, boxing, pinning, retain, synchronization or materialization to repair an invalid program.
 - AOT and JIT must implement the same semantics for supported features. Independently serviced modules, DLLs and plugins require published, versioned contracts and binding-time compatibility; closed-world optimization or implementation pinning is explicit. The initial backend emits Windows x64 native code; the C#/.NET compiler host does not define Terrum's type system, semantic IL or permanent ABI.
 - Concrete types are sealed by default; `sealed` prohibits inheritance, not interface dispatch or API evolution. Types are evolvable by default: closed case sets, fixed layouts and frozen APIs are separate scoped contracts. Interface inheritance and composition replace general concrete inheritance. Public namespaces express concepts, not library tiers. Public source visibility is `public`, `internal` (module) and `private` (declaring type); there is no protected-family or friend-module access through `unsafe` or linking. Author-approved generation may act within the declaring module's implementation scope, but grants no consumer private access. A public Terrum surface is not automatically a native export.
-- Exceptions propagate exceptional failures; expected alternatives use conditional outputs or domain statuses. Recovering with `catch` requires an unsafe recovery context; cleanup and `try/finally` do not. Unsafe recovery does not prove an object's invariant has survived. Platform callbacks must contain faults or terminate rather than unwind across a foreign ABI.
+- Exceptions propagate exceptional failures; expected alternatives use conditional outputs or explicit domain statuses. `require` is a safe checked failure; only catching/recovering requires unsafe authorization. Cleanup and `try/finally` do not. Unsafe recovery does not prove an object's invariant has survived. Platform callbacks must contain faults or terminate rather than unwind across a foreign ABI.
 - Type, declaration, interface and metadata contracts are authoritative. A compiler may infer private implementation facts but cannot silently publish stronger or weaker promises from a replaceable body. Consumers bind against the producer's resolved contracts and rule version, not their own reinterpretation of its source defaults. [Lifetimes](lifetimes.md) specifies this distinction for borrowed results.
 
 ### Types and operations
@@ -379,7 +379,11 @@ from `mut Invoke`; a stateful inline functor requires a writable place or
 Compiler-supplied callable witnesses apply only when the complete signature,
 effects, access, lifetime, and ABI satisfy the protocol; they do not
 synthesize allocated interface adapters or authorize arbitrary structural
-conversion. Contextual lambdas preserve the expected callable or functor
+conversion. An event/subscription abstraction, if supplied, is an explicit
+library collection/dispatch contract, not a language-level multicast event
+feature. It defines ordering, refusal, exceptions, reentrancy, subscription
+mutation/cleanup, and handling of every result rather than silently returning
+only the last. Contextual lambdas preserve the expected callable or functor
 representation, and a capturing lambda is not implicitly a `fnptr`. Generic
 functors use declared symbolic constraints and specialization; ordinary
 scalar callbacks do not imply SIMD implementations or automatic vectorization.
@@ -409,9 +413,72 @@ literal contexts; it does not infer field capture, change ownership, choose a
 type from constraints or invert optional/box normalization. General constructor
 inference is not implemented by the current binder.
 
-The target parser contract is `IParsable<TSelf>.TryParse(TextSpan, init ref<TSelf>)`, including user types. `init ref<T>` is a vacant initialization loan: its destination cannot be read before complete initialization and publication. A boolean success contract publishes on true and leaves it vacant on false; other returns initialize it on every normal return unless an explicit condition such as `[OutputWhen]` says otherwise. Failure cleans partially initialized values, never fabricates `default(T)`; asynchronous publication occurs at operation completion. The call-site spelling is not settled. The bounded executable profile still implements `bool`/`out` conditional publication; its declarations and calls must migrate together rather than treating `init ref` as a parser alias or general writable reference. Expected invalid input normally branches on `Try...`/status. Domain outcomes may use response types; there is no mandatory language-wide `Result` or implicit catch-and-continue.
+The target parser contract is `IParsable<TSelf>.TryParse(TextSpan, init ref<TSelf>)`, including user types. `init ref<T>` is a vacant initialization loan: its destination cannot be read before complete initialization and publication. A boolean success contract publishes on true and leaves it vacant on false; other returns initialize it on every normal return unless an explicit condition such as `[OutputWhen]` says otherwise. Failure cleans partially initialized values, never fabricates `default(T)`; asynchronous publication occurs at operation completion. The call-site spelling is not settled. The bounded executable profile still implements `bool`/`out` conditional publication; its declarations and calls must migrate together rather than treating `init ref` as a parser alias or general writable reference. Expected invalid input normally branches on `Try...`/status. Domain outcomes may use response types; there is no mandatory language-wide `Option`/`Result` wrapper or typed-throws failure-set machinery.
 
-`require predicate;` is a normal user-facing checked boolean requirement: evaluate the predicate once, continue on true, and throw a requirement-failure exception on false **in every build**. It accepts general predicates (`require format.IsEmpty;`) and can lift a declared conditional initialization success so the initialized value is available afterward. Status APIs require an explicit success predicate, such as `require status == CalculateStatus.Success;`, using the declaration's output relationship. It is not a debug assertion, optimizer assumption, catch or silent status conversion; exceptional/partial-output cleanup remains intact. Metadata exposes resolved success/output/effect contracts to ordinary tools and consumers. The call-site requirement itself belongs to semantic code/IR, not a body-inferred public precondition or framework-private intrinsic. Boolean requirements and conditional outputs for the bounded native value profile are implemented. Explicit fail-fast terminates on false; the separate bounded checked policy propagates and can recover only four compiler-generated failure reasons. General exception identity/ABI remains unimplemented; completed compact owning
+`require predicate;` is a safe user-facing checked boolean requirement: evaluate
+the predicate once, continue on true, and raise the selected requirement failure
+on false **in every build**. It accepts general predicates (`require
+format.IsEmpty;`); for example, `require<FormatException>
+int32.TryParse(text)` selects an exception only for a false predicate, not for
+exceptions thrown while evaluating it. A declaration may provide a
+default failure type for brevity, while an explicit call-site selection wins;
+the annotation spelling and exception-construction contract remain scheduled.
+Common null/range conditions may receive recognized diagnostics, but checks do
+not infer meaning from arbitrary method names or reevaluate arguments,
+properties or user-defined comparisons. The bounded profile currently has
+statement-form `require` with its existing `bool`/`out` output flow; the
+implicit-destination expression form below is target syntax, not current
+compiler support.
+
+The expression form can lift one declared success-conditioned output:
+`int32 value = require int32.TryParse(text);`. The operation runs once; success
+publishes the complete value, while false cleans partial initialization and
+raises rather than exposing a vacant destination or manufacturing `default(T)`.
+This is based on declaration metadata, not a `Try` naming convention. Multiple
+outputs stay explicit; status APIs use an explicit declared success predicate
+and preserve other statuses for explicit matching/diagnostics rather than
+guessing an enum-zero member. Pattern and `init ref` invocation grammar remain
+scheduled.
+
+Declaration placement determines contract visibility. A declaration
+precondition (`require`) and postcondition (`ensure`) are published promises;
+they are executable unless proven redundant, and strengthening preconditions
+or weakening postconditions breaks compatibility. Published clauses use a
+checked, side-effect-free contract language; body `require` retains general
+executable predicates and is an ordinary point check, not an inferred public
+precondition. Body-only `static
+require` proves a condition at that point and `static ensure` proves the outer
+function's postcondition on every normal return; neither is automatically
+published. Static forms are compile-time-only, side-effect-free proof checks
+in every build. False or unproven required proofs are errors, never runtime
+fallbacks or optimizer assumptions. They may use runtime values symbolically,
+unlike constant evaluation, which must produce a value. `return` in a result
+postcondition denotes the actual result contextually; it is not a new binder
+or lambda and does not reevaluate the return expression. A `void` function has
+no result-valued return. Static postconditions initially apply only to the
+outer function body. Proofs respect mutation/alias invalidation.
+
+The frontend should prove stable ordinary guards independently of optimization
+level. A proven-to-fail ordinary guard produces a warning by default,
+promotable to an error; an intentionally failing `require` remains a valid
+path when that diagnostic is not promoted. Failed required static/constant
+proofs diagnose. Removing runtime guards preserves evaluation, effects, exceptions,
+output publication and cleanup. Neither `NoThrow` nor another public promise
+is inferred from a conditional body check.
+
+`require` does not need an unsafe context. Catching/recovery does; `finally`
+for cleanup does not. Unsafe recovery does not prove an object's invariant
+survived. Fail-fast termination promises no cleanup, so durable-state
+protocols must tolerate abrupt termination/restart; `finally` and destructors
+are not crash-consistency mechanisms. On defined unwinding paths, ownership,
+conditional publication and promised `NoThrow` cleanup still apply.
+
+The bounded profile implements ordinary boolean requirements and conditional
+outputs. It does not yet implement declaration pre/postconditions, static
+proofs, typed failure selection or the `require` output-expression form.
+Explicit fail-fast terminates on false; the separate bounded checked policy
+propagates and can recover only four compiler-generated failure reasons.
+General exception construction and ABI remain unimplemented; completed compact owning
 outputs are cleaned up on false or checked exceptional exit.
 
 Formatting uses one `IFormattable` → `ITextWriter` protocol with typed fragments/values, no obligatory allocating formatter per type. Target-typed interpolation and collection expressions select registered handler types, such as `[TextBuilder(typeof(TextBuilder))]` or `[CollectionBuilder(typeof(ListBuilder<>))]`, not arbitrary similarly named methods. Holes evaluate once left-to-right into typed captures before segments drain; ownership, borrowing and refusal cleanup remain explicit. Named unique transfers require `move`. Nested formatting forwards the same writer so a Point and its scalar fields can reach a custom handler without temporary strings or boxing. Refusal stops future writes but cannot undo prior output or hole evaluation; no replay, rollback or transactional stream guarantee. Expression handlers may consume an explicitly supported typed operation graph, as in `Tensor.Apply(destination, i => x[i] * y[i] + z[i])`; this is not body-divined autovectorization of an ordinary callback. Unsupported expressions diagnose or require a separately declared fallback. Owning text publishes only after full validation/freeze and cleans partial storage. Collection spreads enumerate once in order; builders own accepted elements, clean rejected consumed elements and abandon partial state exactly once. Detailed standard-library APIs and resumable async formatting remain scheduled. Synchronous formatter refusal is not a resumable continuation.
@@ -443,9 +510,37 @@ Tracing GC handles aliased/cyclic application graphs; ownership handles determin
 
 Ordinary mutable access is local/nonconcurrent, not intrinsically bound to an OS thread. `[Send]` transfers actual authority; `[Sync]` governs sharing; neither follows from GC, `[Copy]` or readonly. A checked `ListWriteAccess` guard arbitrates *all* aliases/reentrancy before mutable span access, without silently registering failed static loans or becoming a cross-thread mutex. A managed `LinkedList<T>` retains node identity through remove/reinsert; `Clear` detaches even externally held nodes. Wrong-list/preflight failures leave the structure unchanged; enumeration fails after structural mutations, not mere payload replacement. Common collection semantics and examples are in [samples](samples.md) and [libraries](libraries.md).
 
-Tasks are scope-owned and structured; cold start is a **recommendation**, not a frozen contract. Cancellation does not establish completion of external buffer use, and suspension cannot extend invalid loans. Entry conventions are `Main` returning `void`/`int32` or `MainAsync` returning `Task`/`Task<int32>`, with no arguments or `Span<TextSpan> args` excluding the program name. Host-selected arguments/rooting last through async completion and structured cleanup; `async` describes implementation, `Async` describes API behavior, and no implicit blocking bridge is inserted. `Terminal.Write`/`WriteLine` default to standard output; `output: TerminalOutput.Error` selects stderr, with writer access for composition. Redirected streams work without an interactive terminal; terminal controls require endpoint capabilities.
+Asynchronous operations return task-like completion, including `Task<void>` for
+no result; synchronous `void` remains valid, but `async void` is not permitted.
+Every started operation retains a responsible owner: a structured
+scope that joins it, an explicit transfer to another responsible owner, or a
+supervisor with error, lifetime and shutdown policy. Returning a task alone is
+not sufficient when no caller/owner remains responsible, and discarding a task
+does not cancel work or discharge completion/error obligations. Cancellation
+is a request, not completion; it does not release borrowed backing before the
+operation actually stops and completes required cleanup. A task cannot
+legalize a loan escaping its backing's permitted lifetime. Entry conventions
+include `Main` returning `void`/`int32` or `MainAsync` returning `Task`/
+`Task<int32>`, with no arguments or `Span<TextSpan> args` excluding the program
+name. Host-selected arguments/rooting last through async completion and
+structured cleanup. `async` describes implementation, `Async` describes API
+behavior, and no implicit blocking bridge is inserted. Start policy (cold or
+hot), ownership-transfer mechanics and scheduler/affinity policy remain open;
+these contracts do not mandate actors. `Terminal.Write`/`WriteLine` default to
+standard output; `output: TerminalOutput.Error` selects stderr, with writer
+access for composition. Redirected streams work without an interactive
+terminal; terminal controls require endpoint capabilities.
 
-Recommended continuation policy: no ambient `SynchronizationContext`-style capture by default and no pervasive per-await `ConfigureAwait(false)`. Explicit execution/affinity scopes or declarations govern thread-bound/UI continuations, including cleanup and cancellation. Generic library code composes through those declared requirements without acquiring accidental UI dependencies. No capture is **not** "always switch to a thread pool": synchronous continuation is allowed, logical serialized authority need not mean one OS thread, and non-Send/affine state must never migrate unsafely. A caller's explicit UI obligation remains valid across a library call without imposing it on every internal continuation. Scheduler/awaiter syntax, propagation and boundary validation still need design; there is no implemented async runtime.
+Recommended continuation policy remains no ambient `SynchronizationContext`-style
+capture by default and explicit execution/affinity scopes for thread-bound/UI
+continuations, including cleanup and cancellation; this is not a frozen
+scheduler contract. No capture is **not** "always
+switch to a thread pool": synchronous continuation is possible, logical
+serialized authority need not mean one OS thread, and non-`Send`/affine state
+must never migrate unsafely. A caller's explicit UI obligation must remain
+valid across a library call without imposing it on every internal continuation.
+Scheduler/awaiter syntax, propagation and boundary validation still need
+design; there is no implemented async runtime.
 
 Reflection respects visibility, access, lifetime and trimming. Symbol-resolved tokens and compiler-checked `[ConstantExpected]` names (including through wrappers) support safe bounded lookup; open-ended runtime discovery or private access needs a *different* privileged unsafe API, explicit authorization and retained targets. Retention of layout, executable bodies, descriptors and debugging data is independent. Author-authorized deterministic generation can inspect its own defining module's private members but cannot grant consumers friendship or bypass normal checks. Foreign interop uses source or generated tooling for marshalling; the compiler/runtime provide checked native symbols, calling conventions, representations, ownership, callback-lifetime and exception-containment prerequisites for safe imported-C APIs, not built-in value marshalling. COM requires exact profiles, not behavioral-interface resemblance.
 

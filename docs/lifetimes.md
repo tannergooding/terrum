@@ -150,6 +150,25 @@ Public relationships come from declarations, language-versioned defaults and inh
 | Declared `Task<TResult>` | May retain borrowed inputs/receiver until completion and required cleanup, whether or not the method is `async` |
 | Implemented interface/registered builder | Inherit the source, access, output and effect contract; no implementation-by-implementation repetition |
 
+The task handle alone does not discharge responsibility for a started
+operation. Its obligation remains with a structured owner that joins it, an
+explicitly transferred responsible owner, or a supervisor with error, lifetime
+and shutdown policy. Discarding a task does not cancel it or release its
+captures. Cancellation does not shorten a borrowed input's declared lifetime:
+backing and guards remain live until the operation actually stops and performs
+required cleanup.
+
+A `require` expression may lift one declared success-conditioned destination
+without an explicit output argument at the use site. It evaluates the call once,
+publishes the fully initialized value only on the declared success, and on
+false cleans partial state before raising the selected requirement failure.
+It never reads a vacant destination or synthesizes `default(T)`. This uses the
+same output metadata as an explicit branch, not a method-name convention;
+multiple outputs and declaration-driven status/presence matching remain
+explicit. A selected exception applies to the false condition only and does
+not catch an exception raised while evaluating the call. The syntax is target
+direction, not bounded compiler support.
+
 An eligible view source can provide backing/borrowed access; outputs and independent scalars do not automatically qualify. A numeric parser's result is independent; a parser returning a view of input text retains the input dependency. A parameterless projection generally uses its receiver. An independent freshly allocated result needs its own owner/root and cost contract. More than one eligible input is not resolved by inspecting current control flow. Returning a view does **not** authorize storing it in an unrelated receiver. Constructor capture, exported callback factories and registrations need a declared destination/boundary. Local closures carry actual capture relationships; consuming a unique owner retains its ordinary transfer/cleanup rules rather than becoming an invisible borrowed capture.
 
 Working annotations `[ViewOf(From = nameof(source))]`,

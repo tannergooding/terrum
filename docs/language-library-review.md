@@ -3,8 +3,10 @@
 **Design review; §§1.1–1.3, the bounded collection-based `params`, callable,
 tuple, alias, and functor directions in §1.4, the representation and safety
 directions in §§2.1–2.4, and the compile-time/handler/specialization directions
-in §§3.1–3.3 are accepted.** The generic
-input/result/receiver representation follow-up remains open.
+in §§3.1–3.3, plus the requirement/failure and single-target callable
+directions in §§4.1–4.2 and the no-orphaned-async-work direction in §4.3 are
+accepted.** The generic input/result/receiver representation follow-up remains
+open; task start/ownership mechanics and scheduler policy remain open.
 Unresolved grammar and other proposals add no syntax/API promise
 or compiler authorization. The review draws on C#/.NET, Rust, Go, Swift, Kotlin, C++
 and Java experience without treating any one ecosystem as a template.
@@ -759,43 +761,102 @@ choices.
 
 ### 4.1 Distinguish expected outcomes from exceptional failures
 
-**Accepted direction.** Expected alternatives use conditional outputs or domain
-statuses; exceptional failures propagate; catch-based recovery is unsafe and
-does not prove invariants survived. `require` is checked in every build.
-**Refinement proposal:** distinguish diagnostics, expected results, operational
-failures, invariant defects, and host/process failures without conflating cause,
-recoverability, or cleanup. `ArgumentException` deriving from .NET
-`SystemException` illustrates why exception inheritance is not that taxonomy
+**Accepted direction.** Expected alternatives use conditional initialization
+outputs or explicitly checked domain statuses; exceptional failures propagate.
+There is no mandatory `Option`/`Result` wrapper or typed-throws failure-set
+system. Use a strong domain value or protocol object, such as an HTTP response,
+when the failure/result itself is substantive.
+Keep expected external failures, invalid user input, programmer defects, and
+environmental causes distinguishable from the separate question of whether
+recovery is safe. Expected operational failures normally use `Try`/status
+contracts; retry additionally needs idempotence, backing and cleanup rules.
+`TryParse` is a fundamental API. An assertion-style caller may deliberately
+lift its declared success output with `int32 value = require
+int32.TryParse(text);`, or select `require<FormatException>` for that false
+result. The `require` failure type applies only when its predicate returns
+false; exceptions thrown while evaluating the predicate propagate unchanged.
+Runtime declaration pre/postcondition failures use the same false-only
+selection rule; static forms diagnose and never select or throw a runtime
+exception.
+
+Failure publication comes from checked declaration metadata, not method names.
+A boolean success contract can initialize a vacant destination only on success;
+a rare enum status uses an explicit declared publication predicate, never
+zero/member-name guessing. The caller can explicitly match a status to retain
+domain detail. Initially the `require` expression lifts one declared
+success-conditioned output, invokes the operation once, publishes only on
+success and cleans partial state under the ordinary contract before raising on
+false. It never reads an uninitialized or fabricated `default(T)` value.
+Multiple conditional outputs remain explicit; declaration-driven some/none or
+status-pattern syntax and `init ref` invocation grammar remain scheduled, not
+implied by this lifting form.
+
+Requirement contracts are determined by placement. A declaration `require`
+publishes a precondition; declaration `ensure` publishes a postcondition over
+normal executable returns. These conditions are executable unless proven
+redundant. Stronger preconditions and weaker postconditions are compatibility
+breaks. Published clauses use a checked, side-effect-free contract language.
+A body `require` retains general executable predicates and is an ordinary
+point check, not an inferred public precondition. A body `static require`
+proves a condition at that point, while outer-body `static ensure` proves a
+postcondition on every normal return; these body-only guarantees are private,
+not inferred into the public declaration.
+
+Static requirements are compile-time-only in every build: the proof language
+is side-effect-free, and a false or unproven required proof is an error, never a
+runtime fallback or unchecked optimizer assumption. Runtime values may satisfy
+symbolic proofs; this is distinct from constant evaluation to a value.
+`ensure return >= 0` uses `return` as the contextual value of the actual
+function result. It does not introduce a result binder/lambda or reevaluate a
+return expression; a `void` function has no result-valued return to reference.
+The initially accepted static postcondition applies only at the outer function
+body, not at arbitrary nested block exits. Aliasing and mutation can invalidate
+facts, so proofs must respect writes and declared effects.
+
+The ordinary frontend should prove stable cases without depending on
+optimization level. A proven-to-fail ordinary runtime guard produces a warning
+by default, promotable to an error; a deliberately false `require` remains a
+valid failure path when that diagnostic is not promoted.
+Required static/constant proofs that fail or cannot be established diagnose.
+Eliminating a guard must preserve evaluation, effects, exception behavior,
+output publication and cleanup. `const` evaluation is not this proof system.
+Neither `NoThrow` nor other declaration guarantees are inferred from a
+conditional check in a body; public guarantees come from checked declarations.
+
+`require` is safe and raises its selected failure on false. Only
+catching/recovering is unsafe;
+checks, ordinary calls and cleanup-only `finally` do not require unsafe context.
+Unsafe recovery does not prove that invariants survived or roll back earlier
+effects. Built-in exceptions such as `ArgumentNullException`,
+`ArgumentOutOfRangeException` and `FormatException` are useful diagnostic
+identities, not a recoverability classification. APIs should be able to
+annotate a default requirement-failure type for brevity, with an explicit
+call-site selection taking precedence. Common null/range checks may receive
+recognized diagnostics/classification, but not through arbitrary method-name
+inference or reevaluation of arguments, properties, or user comparisons.
+Exception construction shape and the complete exception ABI remain work; do
+not assume arbitrary parameterless constructors.
+
+Fail-fast termination promises **no cleanup**, like losing power. Durable-state
+protocols must tolerate abrupt termination and restart; `finally` and
+destructors do not provide crash consistency. On defined unwinding paths,
+preserve the existing ownership, output-publication, and `NoThrow` cleanup
+contracts. Unsafe catch does not make those paths transactional.
+
+`ArgumentException` deriving from .NET `SystemException` illustrates why
+exception inheritance is not a failure/recovery taxonomy
 ([API reference](https://learn.microsoft.com/en-us/dotnet/api/system.systemexception?view=net-10.0)).
-
-No classification makes recovery safe: even environmental exceptions need
-separate unsafe authorization and proof of object integrity. A `require` failure
-may be checked/recoverable; cancellation is a control/lifetime signal, not proof
-that a foreign operation stopped using a borrow. No-throw, no-return, cleanup,
-and expected-result contracts remain independent.
-
 Propagation syntax has real demand but no consensus design. Go's 2025 review
 reported boilerplate and hundreds of proposals; `check`/`handle`, `try`, and
 `?` did not reach agreement, and syntax work paused -- not an adoption of `?`
 ([Go retrospective](https://go.dev/blog/error-syntax)).
 
-**Open typed-failure proposal:** retain domain failure types where useful, with
-erased/exceptional propagation as a boundary option. Swift 6 implemented typed
-throws for cases such as `Result`/`Task`, but full inference did not ship in
-6.0; Kotlin remains unchecked-by-default. Together they show the information
-benefit versus propagation/versioning cost, not a universal answer
-([Swift SE-0413](https://raw.githubusercontent.com/swiftlang/swift-evolution/main/proposals/0413-typed-throws.md);
-[Kotlin exceptions](https://kotlinlang.org/docs/exceptions.html)).
-Terrum must choose closed, evolvable/versioned, or erased public failure sets;
-typed propagation does not make `catch` safe. Consumers bind to
-published/versioned contracts, independent of private inference.
-
 Use one failure/cleanup vocabulary for error returns, conditional results,
 exceptions, callbacks, and builder refusal: specify initialized outputs,
-current owner, and cleanup before propagation. Safe source contracts need
-compiler evidence; foreign promises remain a separate trust boundary.
+current owner, and cleanup before propagation. Foreign promises remain a
+separate trust boundary.
 
-Illustrative cleanup expansion, not a proposed `?` operator or an accepted
+Illustrative cleanup expansion, not a proposed `?` operator or a mandatory
 `Result` API:
 
 ```text
@@ -828,18 +889,21 @@ Preserve those contracts: deterministic release stays `NoThrow`; fallible
 `Finish`/`Commit` is separate and defines primary/secondary failure reporting.
 Do not add fallible destructors or broaden recovery implicitly.
 
-### 4.2 Prefer single-target callables; make event aggregation explicit
+### 4.2 Keep callables single-target; keep event aggregation in libraries
 
-**Accepted single-target direction with open capture refinements.** `func` and
-`fnptr` have one target and an explicit closed signature; multicast is not an
-ordinary callable behavior. `func` capture follows checked ownership and
-borrow/lifetime rules; copying a function value must not silently duplicate a
-unique capture. Repeated calls are valid only while dependencies remain valid;
-consuming a capture may require explicit one-shot semantics or reconstruction,
-which remains open. Multicast is useful for events but should not be an
-accidental universal delegate semantic: a separate event/subscription
-abstraction would need order, exception aggregation, reentrancy,
-mutation-during-dispatch, and unsubscribe/disposal rules.
+**Accepted direction with open capture details.** An ordinary callable has one
+target and an explicit closed signature. Multicast is not an ordinary callable
+behavior and Terrum does not gain a language-level event feature from this
+direction. Event/subscription behavior, if provided, is an explicit collection
+or dispatch/library abstraction. Its contract must define ordering, refusal,
+exceptions, reentrancy, subscription mutation, cleanup/disposal, and handling
+of **all** results; it must not silently discard earlier results and return
+only the last as C# multicast invocation does.
+
+`func` capture follows checked ownership and borrow/lifetime rules; copying a
+function value must not silently duplicate a unique capture. Repeated calls
+are valid only while dependencies remain valid; one-shot callables remain a
+possible explicit library/representation contract with exact syntax open.
 
 Go 1.22 shipped fresh loop bindings per iteration after production capture bugs;
 the version gate exposed analyzer false positives/negatives
@@ -864,26 +928,41 @@ callback failure -> release lease, then propagate
 
 Not syntax: cardinality, noescape, no-suspend, and `[Pure]` are distinct.
 
-.NET multicast runs in order, stops on throw, returns the last result; select
-it only for an explicit event adapter ([delegates](https://learn.microsoft.com/en-us/dotnet/csharp/programming-guide/delegates/using-delegates)).
+.NET multicast runs in order, stops on throw, returns the last result; that is
+one precedent, not Terrum's implied event result policy
+([delegates](https://learn.microsoft.com/en-us/dotnet/csharp/programming-guide/delegates/using-delegates)).
 The bounded callable families need no pack ABI; keep each signature closed and
-multicast out of ordinary calls.
+aggregation explicit.
 
-### 4.3 Never let async work disappear
+### 4.3 Keep responsibility for every asynchronous operation
 
-**Accepted direction plus refinement.** Return task-like completion, including
-no-result `Task<void>`; ordinary APIs should not use `async void`. Detached work
-needs explicit supervision, error sink, cancellation/lifetime, and shutdown/
-join policy -- not an unobserved `void` task.
+**Accepted direction.** Asynchronous operations return task-like completion,
+including `Task<void>` when there is no result; synchronous `void` remains
+valid, but `async void` is not permitted. A task represents
+completion, not by itself ownership or discharge of responsibility. Every
+started operation remains owned by a structured scope that joins it, is
+explicitly transferred to another responsible owner, or is handled by an
+explicit supervisor with error, lifetime and shutdown policy. Returning a task
+alone is insufficient when no caller/owner remains responsible. Discarding a
+task does not cancel the operation, release its resources, or evade its
+completion/error obligation.
+
+Cancellation is a request, not completion. It does not end a task's borrows or
+permit releasing borrowed backing until the operation has actually stopped and
+completed required cleanup. Task transfer, capture cleanup and exception
+reporting remain explicit. Task start policy (cold or hot), scheduler and
+affinity mechanics remain open; this direction selects neither policy nor an
+actor mandate.
 
 In .NET, `async void` posts exceptions to a captured context/thread pool instead
 of faulting `Task`; use an explicit callback adapter
 ([`AsyncVoidMethodBuilder`](https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/System/Runtime/CompilerServices/AsyncVoidMethodBuilder.cs);
 [`AsyncTaskMethodBuilder`](https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/System/Runtime/CompilerServices/AsyncTaskMethodBuilder.cs)).
 
-Tasks do not extend borrows; cancellation is not proof that external work
-stopped. Specify capture cleanup and keep `Task<void>` distinct from
-`Task<T>` result erasure. Scheduler, affinity, start, cancellation remain open.
+Declared task borrows may keep backing live through actual completion and
+required cleanup; cancellation does not shorten that lifetime. Specify capture
+cleanup and keep `Task<void>` distinct from `Task<T>` result erasure. A task
+does not legalize a loan escaping its backing's permitted lifetime.
 
 Prefer **structured lifetime**, not an actor mandate. Swift structured
 concurrency and Kotlin scopes await children; cancellation is
@@ -954,8 +1033,9 @@ trades generality for simplicity.
 | Operators and compound assignment | Checked runtime operators are distinct from `[ConstEval]`; user `+=` is explicit single-place `write ref<T>` mutation, not inferred from `+` | Accepted direction / operator grammar and implementation scheduled |
 | Handlers and builders | Registered collection/text targets and parameter-directed streaming handlers; eager left-to-right typed captures, ownership cleanup and publish-on-success | Accepted direction / exact library APIs scheduled |
 | Specialization | Exact closed generic references and declared target requirements; same-contract AOT/JIT variants, explicit priority, reject tied overlap | Accepted direction / implementation scheduled |
-| Errors and propagation | Separate expected/domain results, exceptions, invariant defects, host failures, and cleanup | Accepted constraints / open refinement |
-| Callables, async, cancellation, structured concurrency | Completion, ownership, supervision, transfer, and revalidation remain explicit | Refinement / open |
+| Requirements and failures | Placement determines published pre/postconditions versus private body checks; static proofs are compile-time-only; safe `require` lifts declared conditional output; expected failures remain explicit without mandatory Result/typed-throws machinery | Accepted direction / syntax, exception construction and diagnostic mapping scheduled |
+| Single-target callables and event aggregation | Ordinary callables have one target; events are an explicit library aggregation contract defining all results and dispatch/cleanup behavior | Accepted direction / library contract details scheduled |
+| Async completion and responsibility | Every operation retains a structured owner, is explicitly transferred, or is supervised; task discard and cancellation do not discharge completion/borrow obligations | Accepted direction / start, ownership and scheduler mechanics open |
 | Loop capture and callbacks | Capture, callback and scheduling facts need contracts | Open library contracts |
 | Generic implementation strategy | AOT/JIT parity; sharing versus specialization is a backend choice | Open |
 
@@ -1049,20 +1129,13 @@ invoke the checked signature without boxing or a universal tuple layout
 On failure clean only owners still held; consume is transfer, not copy. Loans
 cannot outlive the call/suspension; effects, inference, and ABI are per-element.
 
-**Supervised start.** Establish ownership before work runs.
-
-```text
-factory = operation factory with explicit transferred/borrowed captures
-completion: Task<void> = scope.Start(factory)
-await completion
-scope exit: join any outstanding operation before releasing its captures
-```
-
-`Start` is hypothetical: scope accepts before invoking; rejection cleans
-transferred captures. Exceptional exit still joins/cleans; cancellation does
-not discharge that obligation. Detached work needs a supervisor/error sink.
-
-Spelling and start policy remain open; executable claims require
+**Responsibility sketch, not syntax or start policy.** Before an asynchronous
+operation can outlive its initiating expression, a structured owner must join
+it, responsibility must be explicitly transferred to another owner, or a
+supervisor must provide error, lifetime and shutdown policy. Owners cannot
+release captures before actual completion and required cleanup; cancellation
+does not discharge that obligation. Exact start timing, acceptance/rejection
+behavior, spelling and scheduler policy remain open; executable claims require
 producer/witness, lifetime, and AOT/JIT/module checks.
 
 ## Evidence and limits

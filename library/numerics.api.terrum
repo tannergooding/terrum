@@ -11,6 +11,8 @@ namespace Terrum;
 public interface IParsable<TSelf>
     where TSelf : IParsable<TSelf>
 {
+    // Malformed input is an expected false result; an assertion caller may
+    // lift the declared conditional output with `require`.
     static abstract bool TryParse(TextSpan text, init ref<TSelf> value);
 }
 

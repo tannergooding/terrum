@@ -80,6 +80,11 @@ witness/default conflicts, case-set evolution, and layout/access/ownership/
 effect/lifetime changes. It can report declared contract differences, not prove
 arbitrary implementation behavior. These facilities are not implied by the
 bounded exact-contract replacement checks described above.
+Published declaration preconditions and postconditions will also participate
+in module compatibility: stronger preconditions and weaker postconditions break
+callers. Body-local static proofs are not exported promises. These condition
+contracts and their metadata are not supported by the current module format;
+the existing replacement checks below remain limited to recorded contracts.
 Existing module tests exercise those bounded checks: consumers retain their
 recorded promises, weakened `NoThrow` contracts and changed signatures, output
 modes, layouts or access contracts are rejected, and provider catalogs reject

@@ -1,6 +1,8 @@
-// DESIGN ONLY: parameter declarations use target init ref<T>; body call sites
-// retain legacy out/ref expressions as schematics until invocation syntax settles.
-// Target/handler registration remains provisional; require is working syntax.
+// DESIGN ONLY: require-expression output lifting is target direction, not
+// bounded compiler syntax.
+// Other legacy out/ref expressions remain schematics until invocation syntax settles.
+// Target/handler registration remains provisional; statement-form require is
+// current bounded syntax.
 // `own<val<Text>>` shows the native inline-payload direction, not settled lifecycle syntax.
 using Terrum;
 using Terrum.Collections;
@@ -34,7 +36,7 @@ public static void Forward<TContent>(write TextWriter destination, TContent cont
 
 public static int32 Main()
 {
-    require int32.TryParse("3", out var x);
+    int32 x = require int32.TryParse("3");
 
     var point = new Point(x, 4);
     Forward(Terminal.Output, $"point = {ref point}");

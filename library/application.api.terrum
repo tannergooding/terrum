@@ -171,6 +171,7 @@ public static class Terminal
     public static void WriteLine<TContent>(TContent content, TerminalOutput output = TerminalOutput.Standard)
         where TContent : IFormattable;
 
+    // Callers retain completion responsibility or explicitly transfer/supervise it.
     [TextTarget(nameof(content))]
     public static Task WriteLineAsync<TContent>(TContent content, TerminalOutput output = TerminalOutput.Standard)
         where TContent : IFormattable;
@@ -197,6 +198,7 @@ public mut class TextWriter : ITextWriter
     public mut void WriteLine<TContent>(TContent content)
         where TContent : IFormattable;
 
+    // Discarding the returned task does not cancel the write or release its captures.
     [TextTarget(nameof(content))]
     public mut Task WriteLineAsync<TContent>(TContent content)
         where TContent : IFormattable;
