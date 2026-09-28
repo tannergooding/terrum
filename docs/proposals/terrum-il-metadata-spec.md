@@ -211,6 +211,11 @@ index size plus the final offset equals the section length. This indexes
 strings, type forms, contracts and bodies directly without scanning prior
 records; a one-row heap pays four additional bytes versus length-prefixing,
 while larger heaps pay the same four bytes per row plus one sentinel.
+This deliberately favors repeated reader lookup after validating the index:
+writers and mergers may first compute row lengths, buffer rows, or backpatch
+offsets. A reader still validates every offset and extent before use; the
+index avoids rescanning preceding rows for subsequent AOT, JIT, interpreter
+and tooling queries.
 
 A schema-typed table reference is a one-based `u32` row in the table named
 by its column, even when that column belongs to another table. Its high
