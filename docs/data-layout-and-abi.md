@@ -11,7 +11,7 @@
 
 | Status | Covered here |
 |---|---|
-| Accepted design | Primitive and eligible-wrapper access guarantees; no aggregate atomicity inferred from size; opaque layout by default; explicit Sequential, Union and Transparent contracts; separation of representation, calling convention, validity, ownership and sharing; preservation of published boundaries |
+| Accepted design | Primitive and eligible-wrapper access guarantees; no aggregate atomicity inferred from size; opaque layout by default; no foreign-interop promise inferred from an ordinary struct's current shape; explicit checked, target-profile representation/call contracts; separation of representation, calling convention, atomic-access eligibility, validity, ownership and sharing; preservation of published boundaries |
 | Implemented bounded profile | The existing Windows x64 compact-value and module ABIs. Their exact current contracts remain authoritative; they are not superseded by an unspecified future profile |
 | Needs policy or declaration review | Wrapper eligibility/declaration details, any checked overlapping-union subset, externally promised encodings not determined by a selected profile, and a future public managed boundary; see [remaining decisions](#remaining-decisions-requiring-review) |
 | Specification and implementation work | Recording chosen target rules, checking layouts and metadata, validating compatible replacement, and testing lowering against accepted guarantees; see [profile work](#profile-specification-and-implementation-work) |
@@ -21,6 +21,14 @@ selected target contract does not reopen the language policy; choosing a new
 observable representation or independently replaceable public boundary does.
 The cross-document [pending-decision index](language-library-review.md)
 tracks those review items without making the accepted core provisional.
+
+Explicit layout or carrier opt-ins constrain compatible replacement under the
+same contract: adding a field to a frozen layout or changing a promised
+carrier is breaking unless a separately versioned contract permits it. Such
+promises are target/profile-specific, not universal byte encodings. Any future
+checked source enforcement needs an explicit compatibility migration; it does
+not claim that the current compiler rejects ordinary structs or retroactively
+revoke existing source/artifact contracts.
 
 ## Contract layers
 
@@ -67,11 +75,22 @@ memory contract, including any permitted elimination or combination of accesses.
 
 ### Trivial wrappers are not arbitrary small aggregates
 
-A trivial wrapper carries one primitive value without changing its relevant
-storage and access requirements. Its nominal type and validation requirements
-remain meaningful. Exact eligibility and declaration syntax need specification;
-neither a one-field declaration nor equal size alone establishes every ABI
-equivalence.
+A type explicitly promised as a trivial wrapper carries one primitive value
+without changing the storage/access properties named by that promise. Its
+nominal type and validation requirements remain meaningful. Exact eligibility
+and declaration syntax need specification; neither a one-field declaration
+nor equal size alone establishes any unstated ABI equivalence.
+
+An ordinary declaration such as `struct CounterValue { int32 value; }` makes
+no foreign-interoperability promise merely because it currently has one field
+or happens to match a primitive's size. A wrapper must explicitly opt into a
+checked contract before external code may rely on its representation. A frozen
+or Transparent promise constrains future compatible replacement under that
+same contract; changing the field set or carrier is not silently compatible.
+Each promise is scoped to its target profile.
+For example, promising that `CounterValue` is a single `int32` carrier for one
+profile is a distinct contract from merely declaring its current field; its
+consumers rely on the promise, not an observation of today's source shape.
 
 For contrast:
 
@@ -84,11 +103,15 @@ copy may use separate field accesses; it is not promised to be an atomic
 two-byte snapshot. A backend selecting one wider instruction for a particular
 copy does not strengthen the portable contract.
 
-Atomic wrapper access and a transparent calling convention are separate
-questions. The accepted Transparent direction additionally requires carrier-
-equivalent argument/result classification, size/alignment, validity, ownership,
-cleanup and any niche representation. It does not imply an ordinary source
-conversion or permit bypassing a wrapper's invariant.
+The accepted Transparent contract deliberately combines a frozen carrier
+representation with carrier-equivalent argument/result classification for the
+selected target profile. Its checked eligibility must preserve size/alignment,
+validity, ownership, cleanup and any niche rules. This named combined promise
+does not imply that every layout opt-in has the same effect: Sequential or
+Union layout alone does not promise procedure-call equivalence. Atomic access,
+sharing, arbitrary-bit validity and ordinary source conversion remain separate
+questions; no promise permits bypassing a wrapper's invariant or establishes a
+universal cross-target encoding.
 
 ## What a target data-layout profile must record
 
@@ -185,7 +208,7 @@ No public managed-handle ABI is introduced by these contracts.
 
 | Decision | Accepted boundary that the decision must preserve |
 |---|---|
-| Exact wrapper eligibility and declarations | Define which forms may promise primitive-carrier atomicity or Transparent ABI and how each promise is exposed. These are independent contracts; equal size, a single field or nominal identity alone does not establish every equivalence |
+| Exact wrapper eligibility and declarations | Define which forms may promise primitive-carrier atomicity or Transparent ABI and how each promise is exposed. These are independent, checked contracts; equal size, a single field or nominal identity alone does not establish every equivalence. Ordinary structs receive no inferred foreign-interoperability promise |
 | Any safe overlapping-union subset | Decide whether to admit a narrowly checked subset and its active-member, initialization, aliasing and lifetime conditions. Until then, matching fields do not establish safe access |
 | Additional externally promised representations | Choose an encoding or interchange rule only where the selected target/ABI does not already determine it. Storage layout is not a default serialization format, and no general reference encoding or SIMD ABI is selected here |
 | Future public managed boundary | Choose stable versus versioned profiles/adapters together with roots, barriers, allocation/cleanup ownership, failure and lifetime contracts. Private managed implementations do not imply a public managed-handle ABI |
@@ -201,7 +224,10 @@ representation, access guarantees and procedure-call classification separately.
 Complete wrapper tables after the eligibility decision, and implement the
 corresponding layout, validity and metadata checks. Describe cross-module
 compatibility independently of private lowering, preserving existing artifact
-contracts and feature-version checks.
+contracts and feature-version checks. Introduce any future checked opt-in
+enforcement through an explicit compatibility migration; do not retroactively
+reject ordinary declarations or reinterpret retained compact-value/module
+contracts.
 
 Validate argument/result classification, padding and boundaries, non-tearing
 accesses, malformed metadata and compatible replacement across the supported

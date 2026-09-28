@@ -24,10 +24,10 @@ system for the prover.
 |---|---|---|
 | Calls | `implicit ref<T>` is an ordinary readonly `ref<T>`; existing places are borrowed; value arguments initialize a hidden local at the original argument-evaluation point in the current enclosing lexical scope; evaluation is left-to-right within expression structure | Specify place formation and general reference/loan metadata; do not introduce a special reservation/activation rule or lifetime-only scope for implicit arguments |
 | Conditional outputs | Postconditions are the normal authoring route, using ordinary pattern/expression composition without a routine output-attribute system; initialized, uninitialized and initialized-null states are distinct and correlated with the declared discriminator | Specify exact guard/pattern spelling and metadata for the accepted state relationships |
-| Contract timing | Prologue, preconditions, method body (including body-local initialization, authored execution, `finally`, local cleanup and untransferred owned-parameter cleanup), postconditions, epilogue; preconditions/postconditions are public declaration contracts outside the body; exceptional departure has no normal-return postcondition | Specify exact output/result publication and postcondition-failure cleanup mechanics, and decide whether entry snapshots are supported |
-| Proofs and evaluation | Static checks are compile-time-only; implementation choices must not silently change the contract | Version a mandatory conservative proof profile and deterministic evaluator, including their resource-accounting rules |
+| Contract timing | Prologue, preconditions, method body (including local/output initialization, authored execution, `finally`, local cleanup and untransferred owned-parameter cleanup), postconditions, epilogue; preconditions/postconditions are public declaration contracts outside the body; exceptional departure has no normal-return postcondition | Keep public facts within effective accessibility and ordinary contract-expression rules; exact output/result publication and postcondition-failure cleanup remain to specify |
+| Proofs and evaluation | Required static obligations are compile-time-only; ordinary runtime contracts and required constant evaluation remain distinct | Specify the exact mandatory proof-floor rules/complexity and minimum resources, plus separate constant-evaluator operations/accounting/limits |
 | Memory | Explicit checked opt-in for sharing, not an assumption that arbitrary aliasable objects are thread-safe | Accepted separately; see the [memory model](memory-model.md) for its specification deliverables and target-profile work |
-| Documentation comments | Added as a topic for discussion; no documentation-comment syntax is selected | Structured API documentation with symbol-checked references and generated views of declared contracts, without making prose a source of semantics |
+| Documentation comments | Source-attached friendly markup with structured XML/HTML-style tags is compiled to a separate XML documentation artifact; common symbol, parameter, and type references resolve to structured references rather than textual substitution. Normal extraction does not execute embedded code or fetch remote includes | Specify the source grammar, supported markup and HTML normalization, XML schema/member IDs, inheritance, diagnostics, and packaging; keep the documentation artifact separate from executable ABI/runtime data |
 
 The accepted implicit-loan rule in [language](language.md) and
 [lifetimes](lifetimes.md#parameter-only-implicit-readonly-loans) is ordinary
@@ -281,7 +281,7 @@ after a postcondition that callers are meant to rely on.
 | Argument staging | Evaluate once in source order; establish explicit references, staged values, and ordinary temporary lifetimes |
 | Prologue | Establish frame/root/ownership responsibility and parameter storage before executing user contracts |
 | Preconditions | Check published conditions in declaration order; body scopes have not been entered |
-| Body | Perform body-local initialization and authored execution, save a return candidate, execute relevant `finally` blocks, then complete local-scope and untransferred owned-parameter cleanup |
+| Body | Perform initialization within the body, including local/output values; execute authored code and save a return candidate; execute relevant `finally` blocks, then complete local-scope and untransferred owned-parameter cleanup |
 | Postconditions | Check normal-return guarantees over the saved candidate and surviving state, in declaration order |
 | Epilogue | Retire frame/root bookkeeping and return; the exact publication step and postcondition-failure handling remain separately unspecified |
 
@@ -296,14 +296,15 @@ is fail-fast, no cleanup is promised.
 
 Evaluate a return expression once into checked result storage. It remains
 rooted and owned while the body's `finally` and scope cleanup finish. A copied
-scalar result is a snapshot; a copied handle or returned reference still
-observes its permitted backing and aliases. A finally that changes backing can
-therefore affect a subsequent postcondition through that reference without
-reevaluating the return expression.
+scalar result retains its computed value; a copied handle or returned
+reference still observes its permitted backing and aliases. A finally that
+changes backing can therefore affect a subsequent postcondition through that
+reference without reevaluating the return expression.
 
-**Accepted ownership endpoint:** semantic body completion includes body-local
-initialization and authored execution, relevant `finally` blocks, local-scope
-cleanup, and cleanup of callee-owned parameters not transferred elsewhere.
+**Accepted ownership endpoint:** semantic body completion includes
+initialization within the method body (including local and output values),
+authored execution, relevant `finally` blocks, local-scope cleanup, and cleanup
+of callee-owned parameters not transferred elsewhere.
 These complete before postconditions. Preconditions and postconditions are
 public declaration/signature contracts outside the authored method body. On a
 successful return, no user-observable ownership cleanup is deferred to the
@@ -322,15 +323,35 @@ access. State that may already change concurrently is not a stable output
 guarantee. Check it inside the protected body, return a snapshot, or declare
 an actual retained capability; do not implicitly extend user scopes.
 
-An entry-state facility is useful but not yet accepted syntax. Recommend
-explicit, statically enumerated snapshots captured after successful
-preconditions and before the body. An `old(...)`-like operation must identify
-what is copied and retain its ordinary dependencies. It must not clone an
-arbitrary graph, move a unique value to satisfy a predicate, or turn a handle
-copy into an immutable snapshot of its referent. A count can be captured as a
-scalar; comparing a disposed owner's later property with its entry value cannot.
-Allocation, owned snapshots, and general heap-history capture are outside the
-initial proposal.
+**Accepted deferral: no entry snapshots or state-history facility in the initial
+contract model, with no promise to add one later.** Initial postconditions
+describe observable method-boundary facts: initialization, nullability, ranges,
+and relationships to unchanged value inputs. These are genuine behavioral
+guarantees callers may rely on, not merely optimizer hints. For example, the
+following expresses contract intent, not settled source syntax:
+
+```text
+ensure output is init;
+ensure output > 0;
+ensure written <= capacity; // capacity is an unchanged value input
+```
+
+Historical relations such as “the count increased by one” require state-history
+support and remain outside this initial model. Proving or folding a predicate
+may optimize enforcement only while preserving the published guarantee.
+
+Published clauses may mention only declarations visible at the method's
+effective accessibility and expressions permitted by the ordinary contract
+language. A public `Count` abstraction may be referenced if it is ordinarily
+accessible and evaluable there; a private representation invariant remains
+internal and cannot become a hidden caller precondition. This adds no getter-
+purity syntax. Caller facts come from published guarantees checked or proved
+for the callee, never from private body inference; dependent facts are
+invalidated by relevant mutation, alias effects or lifetime changes. Init
+safety is static: never read vacant storage to decide whether it is initialized.
+Reconsider a narrow explicit value capture only if concrete APIs justify its
+copy, lifetime and allocation costs. Arbitrary `old(expr)`, graph snapshots
+and historical mutable-state contracts are not part of the initial model.
 
 ### 3.3 Normal and exceptional exits
 
@@ -374,12 +395,26 @@ an async ABI, or permission for stack loans to survive suspension.
 
 | Operation | Required result | Failure behavior |
 |---|---|---|
-| Ordinary executable contract | A runtime boolean, unless safely eliminated | False takes the declared runtime failure; proven failure also receives the agreed frontend diagnostic |
-| `static require` / `static ensure` | Proof under the selected language proof profile | False or unproven is a compile error, in every build |
+| Ordinary executable contract | A runtime boolean unless sound analysis proves the check redundant | If not proved redundant, evaluate it at runtime; preserve required evaluation, effects and failures when eliminating a check |
+| `static require` / `static ensure` | A proof established by the mandatory portable floor or a sound implementation extension | Disproved or not established is a compile error, in every build; never fall back to runtime |
 | Required `const` evaluation / literal parser | A concrete target-semantic value, with successful declared publication | Invalid operation, unsupported effect, or exhausted budget is a compile error; never runtime fallback |
 
-An optional optimization is none of these. Optimizer cleverness cannot change
-whether required source is legal.
+These are separate obligations: optional proof/optimization cannot replace an
+ordinary runtime check unless it proves that check redundant while preserving
+observable behavior; a required static obligation must be established or
+compilation fails; required constant evaluation must produce the exact
+target-semantic value. Sound proof extensions may accept additional static
+programs above the guaranteed floor, but they do not change runtime semantics.
+
+Where a source context permits runtime values or checks, an author may
+explicitly choose an ordinary expression or executable `require` instead of
+requiring static proof or constant evaluation. That changes the source
+requirement; a compiler must never silently demote it. Ordinary expressions
+may still be folded as sound optimization, and an ordinary `require` remains
+runtime-enforced unless proven redundant. No such switch is available where a
+compile-time value is inherently required (for example, layout, type or
+metadata formation), or for structural lifetime and initialization safety.
+Any notation used to illustrate the choice is not selected grammar.
 
 For ordinary checked operations, the frontend should classify both a literal
 zero divisor and a local provably containing zero through the same proof
@@ -390,16 +425,22 @@ Unknown runtime input keeps its check. Implementation of this policy must
 reconcile existing diagnostics explicitly, not silently reclassify every
 current error as a warning.
 
-### 4.2 Mandatory conservative proof profile
+### 4.2 Versioned portable proof floor
 
-**Recommendation:** define a versioned portable profile, rather than accepting
-whatever the current compiler's optimizer or theorem prover can establish.
-Every conforming implementation of that profile must reach the same
-proved/disproved/unknown classification for its required checks.
+**Accepted policy:** standardize a versioned portable floor of minimum
+supported proof rules/complexity and a minimum guaranteed resource budget.
+The floor promises that conforming compilers can establish its required
+proofs independent of optimization level; it does not require identical
+acceptance beyond the floor or impose a fixed maximum proof budget. An
+implementation may soundly prove more complex obligations, use larger
+budgets, and accept additional programs. A required proof that is disproved or
+not established by that compiler's supported analysis is a compile error, not
+a runtime fallback. Diagnostics distinguish false from not established
+(including complexity or analysis-limit failure where appropriate).
 
-The first profile should deliberately be small:
+**Candidate rule areas for specification, not an adopted baseline:**
 
-| Component | Proposed baseline |
+| Component | Candidate rules to evaluate |
 |---|---|
 | Values | Target-width scalar constants, immutable value identities, booleans, optional presence, initialization/vacancy, and ownership state |
 | Numeric facts | Closed intervals; exact target operations on constants; conservative interval transfer only where defined; explicit checks retain their overflow/failure edges |
@@ -407,12 +448,13 @@ The first profile should deliberately be small:
 | Loops | Before analyzing a cyclic region, forget numeric/alias facts for values and storage that region may change; preserve unaffected facts and refine again on branch edges |
 | Calls | Use the selected declaration's checked pre/postconditions and effect footprint, not arbitrary inspection of a replaceable implementation |
 | Aliases | Invalidate facts for potentially affected places before relying on later loads; preserve captured values, not mutable-storage observations |
-| Unsupported reasoning | Produce unknown; do not assume a predicate, unroll according to optimizer heuristics, or consult a nondeterministic solver |
+| Unsupported reasoning | Report not established; do not assume a predicate or rely on an unsound/nondeterministic result |
 
-Loop handling is intentionally conservative: no implicit induction, guessed
-invariant, or machine-speed-dependent unrolling in the first profile. Richer
-loop-invariant syntax and proofs require a new specified capability. Public
-checked facts may still let a caller prove a result without seeing the loop.
+One possible initial floor is intentionally conservative: no implicit
+induction, guessed invariant, or machine-speed-dependent unrolling. Richer
+loop-invariant syntax and proofs may be sound implementation extensions or
+later floor additions. Public checked facts may still let a caller prove a
+result without seeing the loop.
 
 Comparisons must use actual language arithmetic. Rewriting an overflow-prone
 integer expression as an unbounded mathematical expression is not proof of
@@ -421,18 +463,19 @@ NaNs, signed zero, rounding, and the prohibition on implicit reassociation/FMA
 still apply. Start with exact constant floating evaluation only when its
 target evaluator is specified; otherwise classify such proof requests unknown.
 
-Before implementation, this table needs a machine-checkable transfer-rule
-catalog: canonical pre-optimization input form, comparison orientation, integer
-division/remainder/shift rules, joins, cycle detection, and deterministic
-traversal. Implementations cannot fill gaps with private acceptance rules.
-The catalog and conformance vectors are part of the profile, not a backend
-optimization pass.
+The floor still needs a machine-checkable transfer-rule catalog and
+conformance vectors, including canonical proof inputs, arithmetic boundaries,
+joins, cycle handling, and the minimum complexity/resource guarantee. The
+catalog defines the portable floor, not a ceiling on sound implementation
+analysis. Compilers may fill beyond-floor cases with additional sound rules;
+they must distinguish a disproved obligation from one not established within
+their supported analysis. Optimizers may perform stronger sound analysis when
+it preserves source semantics and required evaluation/effects.
 
-More capable tools may offer explanatory suggestions. They must not cause the
-same declared profile to accept a required proof another conforming compiler
-rejects. A future stronger profile or portable proof-certificate extension
-can add reasoning explicitly. Optimizers remain free to perform stronger
-sound analysis after source validation, without changing evaluation effects.
+Version the portable floor independently from its eventual wire encoding.
+No proof-certificate format, metadata carrier, ABI, or particular solver is
+selected here; a stronger implementation extension need not imply a new floor
+version.
 
 ### 4.3 Effects and stable observations
 
@@ -502,10 +545,16 @@ decline to optimize because the source did not require it.
 
 ### 4.5 Versioning and independent implementations
 
-Record the source language profile, proof/evaluator rule version, target value
+Identify the source language profile, versioned proof floor, target value
 semantics, published contract/effect dependencies, and required evaluation
-budget in the producer's semantic artifacts. Source acceptance must not depend
-on whether an imported body happens to be present today.
+budget when needed for reproducibility. Whether those identifiers/budgets are
+recorded in producer artifacts, and how they are encoded, is a separate
+metadata/wire decision not selected here. Caller-side required proofs use the
+callee's published contract and do not depend on an imported implementation
+body being present. Required constant evaluation that executes a declaration
+still requires its constant-evaluable body and evaluated dependencies to be
+available under that separate contract; the availability/persistence mechanism
+remains to specify.
 
 AOT, JIT, specialization, interface witnesses, and replacement validation use
 the same checked contracts. The verifier must reject forged state guarantees
@@ -513,33 +562,33 @@ or unsupported rule versions; an attribute or producer assertion is not a proof.
 Foreign declarations enter through an explicit trusted boundary with compatible
 contracts, not by silently weakening safe consumers.
 
-A new proof profile can establish more programs, but selecting it is an
-explicit language/toolchain capability change. It must not silently reinterpret
-an unchanged consumer's publication, lifetime, or arithmetic contract.
+Changing the versioned floor changes its minimum guarantee and is an explicit
+language/toolchain capability change. A sound implementation extension above
+the current floor may accept additional programs without changing the floor
+version or consumer contracts. Neither may silently reinterpret an unchanged
+consumer's publication, lifetime, or arithmetic contract.
 
 ## 5. Documentation comments
 
-**Open proposal for a subsequent review.** Documentation comments need an
-explicit language/tooling contract rather than a formatter-specific convention.
-The following questions are scheduled for discussion; they do not select syntax
-or authorize implementation.
+**Accepted two-layer direction; exact grammar and schema remain open.** Source
+declarations can carry friendly markup with structured XML/HTML-style tags, and
+the compiler emits a separate XML documentation artifact. Common references to
+symbols, parameters, and types resolve against declarations and become
+structured references in that artifact, not unvalidated textual substitutions.
+This selects neither a comment delimiter nor a markup dialect, XML schema,
+member-ID syntax, supported tag set, or packaging rule.
 
-Recommend a distinguished documentation-comment form with readable prose and
-a small structured vocabulary for API documentation. Markdown is a candidate
-for prose and examples; C#-style XML is an alternative to assess, not an
-inherited requirement. Ordinary line/block comments should remain ordinary
-trivia, and documentation must not alter program behavior.
-
-| Topic | Proposed direction / question to settle |
+| Topic | Remaining specification work |
 |---|---|
-| Delimiters and attachment | Choose `///`, a distinguished block form, or both; define attachment across attributes, blank lines, multiple declarations, and generated/partial declarations |
-| Prose and structured content | Choose Markdown versus XML, or a precisely defined combination; cover summaries, remarks, parameters, type parameters, return values, conditional outputs, examples, and links without competing representations of the same field |
-| Symbol references | Check parameter/type-parameter names and API references against actual declarations; represent overloads, qualified types, and generic members without guessing from display text |
-| Declared contracts | Generate documentation for access, ownership, lifetime, publication, effects, pre/postconditions, and selected failure behavior from checked declaration metadata; prose explains intent, costs, and usage |
-| Inheritance and forwarding | Decide explicit documentation inheritance, interface-member documentation, aliases, and compatibility forwarders; inherit from a selected declaration rather than an arbitrary name match |
-| Diagnostics | Define malformed markup, unresolved references, stale parameter names, and missing public documentation separately; choose warning/build-policy behavior without changing executable semantics |
-| Examples | Support explicitly marked compilable examples with a declared language/target context; distinguish complete programs, fragments, and design-only pseudocode; execution is opt-in, not a side effect of rendering comments |
-| Distribution and tooling | Specify stable symbol identities, source versus compiled-package documentation, visibility/trimming, and IDE/site rendering; determine whether documentation is a separate artifact rather than retained runtime data |
+| Delimiters and attachment | Choose the source delimiter(s); define attachment across attributes, blank lines, multiple declarations, and generated/partial declarations |
+| Friendly markup and normalization | Define whether/how Markdown prose is supported and its dialect; specify structured fields/shortcut spellings for summaries, remarks, parameters, type parameters, returns, conditional outputs, examples, and links; select supported XML/HTML-style tags and their normalization without freezing a broader HTML runtime |
+| XML artifact schema | Define element structure, schema versioning, member IDs, source location and overload/generic identity, and compatibility/evolution rules |
+| Structured references | Resolve parameter/type-parameter names and API references against actual declarations; encode overloads, qualified types, and generic members without guessing from display text |
+| Declared contracts | Generate access, ownership, lifetime, publication, effects, pre/postconditions, and selected failure behavior from checked declaration metadata; prose explains intent, costs, and usage |
+| Inheritance and forwarding | Define documentation inheritance for interface members, aliases, and compatibility forwarders; select a declaration explicitly rather than by arbitrary name match |
+| Diagnostics | Specify malformed markup, unresolved references, stale parameter names, and missing public documentation separately; choose warning/build-policy behavior without changing executable semantics |
+| Examples | Define how explicitly marked examples declare language/target context and distinguish complete programs, fragments, and design-only pseudocode; execution is opt-in, not a side effect of extraction or rendering |
+| Distribution and tooling | Specify stable symbol identities, source versus compiled-package documentation, visibility/trimming, and IDE/site rendering; keep the XML documentation artifact separate from executable ABI/runtime data |
 
 The key boundary is **declared semantics versus explanation**. A comment saying
 "non-null on true" must not grant initialization or nullability facts.
@@ -555,19 +604,19 @@ An implementation-specific note can explain behavior only within the checked
 contract it actually publishes. Automatically generated sections and authored
 prose need a defined presentation order and conflict policy.
 
-Documentation extraction should be deterministic and must not execute embedded
-code, fetch remote includes, or expose private declarations merely to resolve
-a link. Explicit documentation builds may enable separately configured example
-checks or dependencies. Changing prose alone should not invalidate executable
-ABI compatibility or change optimization decisions; documentation artifacts
-can have their own content identities.
+Normal documentation extraction should be deterministic and must not execute
+embedded code, fetch remote includes, or expose private declarations merely to
+resolve a link. Explicit documentation builds may enable separately configured
+example checks or dependencies. Changing prose alone should not invalidate
+executable ABI compatibility or change optimization decisions; the XML
+documentation artifact can have its own content identity.
 
-Before implementation, settle the source grammar, semantic reference format,
-attachment/inheritance rules, and package representation together. Conformance
-coverage should include exact comment preservation, declaration attachment,
-renamed parameters, overloaded/generic links, inherited documentation,
-unavailable dependencies, visibility filtering, and reproducible example
-validation.
+Before implementation, settle the source grammar, reference resolution and XML
+schema, attachment/inheritance rules, and package representation together.
+Conformance coverage should include exact comment preservation, declaration
+attachment, renamed parameters, overloaded/generic links, inherited
+documentation, unavailable dependencies, visibility filtering, deterministic
+XML output, and reproducible opt-in example validation.
 
 ## 6. Approval and conformance checklist
 
@@ -582,12 +631,12 @@ validation.
 | Language-versioned output defaults | Accepted | Boolean-success output initializes on `true` and remains uninitialized on `false`; other result types initialize on every normal return unless a declaration postcondition specifies a conditional relationship |
 | Output contract syntax and metadata | Specification work, not policy review | Formalize exact guard/pattern spelling and encode correlated initialization facts; preserve the current bounded bool/out behavior until coordinated migration |
 | Normal-return ownership endpoint | Accepted | Body includes body-local initialization/execution, `finally`, local cleanup and untransferred owned-parameter cleanup before postconditions; no successful-return ownership cleanup is deferred to the epilogue |
-| Consumed parameter observations | Accepted boundary; snapshots remain open | Moved/consumed/destroyed values are unavailable through their former source; surviving values and retained results remain available to applicable checks |
-| Entry snapshots | Needs review of snapshot facility | Decide whether any values may be captured after preconditions and before the body; no implicit graph snapshot |
+| Consumed parameter observations | Accepted boundary; snapshots deliberately deferred | Moved/consumed/destroyed values are unavailable through their former source; surviving values and retained results remain available to applicable checks |
+| Entry snapshots and state history | Accepted deferral | No snapshot/history facility in the initial contract model and no promise to add one; reconsider narrow explicit captures only if concrete APIs justify their cost |
 | Output publication and postcondition failure | Specification/review work | Exact publication point, candidate cleanup and predicate-failure behavior remain open; the cleanup endpoint does not select this machinery |
-| Proof acceptance | Needs review | Mandatory versioned conservative profile, independent of optimizer sophistication |
-| Constant-evaluation budget | Needs review of accounting contract | Semantic accounting with declared limits; candidate defaults require parser-workload validation |
-| Documentation comments | Needs review | Discuss a distinguished comment form, prose format, checked symbol links, declaration-derived contract documentation, inheritance, and packaging before selecting syntax |
+| Static-proof floor | Accepted policy; specification work remains | Versioned minimum rules/complexity and guaranteed resource floor; sound extensions may accept more, without identical acceptance or a fixed compiler maximum. Exact rule catalog, accounting units and numeric minimum remain to specify |
+| Constant-evaluation semantics and budget | Semantics accepted; specification work remains | Successful evaluation has exact target semantics and no runtime fallback. Evaluator operation set, resource accounting and limits remain separate from optional proof extensions and need specification |
+| Documentation comments | Architecture accepted; specification work remains | Source-attached friendly markup with structured XML/HTML-style tags emits a separate XML artifact; common references become checked structured references. Specify delimiters, markup dialect/tag set and normalization, schema/member IDs, inheritance, diagnostics, and packaging; normal extraction does not execute embedded code or fetch remote includes |
 
 Approval of a remaining recommendation should be followed by canonical documentation changes and
 scheduled implementation, not immediate execution of the illustrative grammar.
@@ -604,11 +653,15 @@ The minimum conformance corpus should cover:
 - Precondition failures before body entry; returns through finally; finally
   mutating returned backing; internal versus external catches; failed
   postconditions; owned parameter/result cleanup; roots through every boundary.
-- Equivalent direct/local constant facts; checked overflow, division, signed
-  zero and NaN boundaries; effect/alias invalidation; loops classified unknown;
-  exact budget-limit cases; identical fixed-target profile results across
-  compiler hosts, optimization levels, source and persisted modules, with
-  separate expected results where target widths or representations differ.
+- Equivalent direct/local proof facts; checked overflow, division, signed zero
+  and NaN boundaries; effect/alias invalidation; and loops classified as
+  not-established when required by the floor. The mandatory floor's expected
+  outcomes must hold across compiler hosts and optimization levels for source
+  and persisted modules; sound beyond-floor acceptance may vary.
+- Required constant evaluation has exact target results and deterministic
+  value/diagnostic outcomes for the same target profile and specified budget,
+  including budget-boundary cases; target-width/representation differences
+  receive their own expected results.
 
 ## References and comparison boundaries
 

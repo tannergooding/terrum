@@ -163,24 +163,35 @@ a breaking change, ordinarily rejected before consumers bind to it. Union
 representations still require a valid active payload;
 an overlapping native layout does **not** establish a safe tagged union.
 The layout forms are `[Layout(Sequential)]`, `[Layout(Union)]` and
-`[Layout(Transparent)]`, each with a checked ABI contract. Sequential field
-offsets and padding are computed from declaration order, size and alignment;
-arbitrary user-specified field offsets are not supported. Structural `T | U`
-unions, especially overlapping alternatives, are undecided.
+`[Layout(Transparent)]`, each with a checked, target-profile layout contract.
+Sequential field offsets and padding are computed from declaration order, size
+and alignment; arbitrary user-specified field offsets are not supported.
+Structural `T | U` unions, especially overlapping alternatives, are undecided.
 
-Ordinary type layout is opaque. An accepted transparent-wrapper direction
-keeps the wrapper nominal for Terrum source checking while making an eligible
-simple wrapper carrier-equivalent under a checked ABI contract. Equal size or
-field layout alone is insufficient: argument/return classification,
-size/alignment, validity, ownership, cleanup and niche representation must
-match the declared carrier rules. Transparency does not permit reinterpret
-casts or implicit source conversion. `[Layout(Transparent)]` is illustrative
-of the existing layout-attribute convention, not settled spelling or
-eligibility grammar; the current compiler has no general transparent-wrapper
-ABI feature. Struct and field attributes currently diagnose `TRM3001`; the
-existing `ValueLayout` is limited to naturally aligned 1–16-byte aggregates
-and does not implement transparent layout. The target opaque/evolvable default
-does not change the current module format's exact layout contracts.
+Ordinary type layout is opaque, and an ordinary struct's current shape or size
+does not promise foreign-interoperability. An accepted transparent-wrapper
+direction keeps the wrapper nominal for Terrum source checking while permitting
+an explicit checked target-profile contract that combines the promised carrier
+representation with carrier-equivalent argument/return classification.
+Storage layout, call classification, atomic-access eligibility, validity,
+ownership and sharing remain distinct language dimensions; Transparent is the
+accepted named combination of representation and carrier-call classification,
+not a new requirement for separate annotations. Its eligibility must preserve
+the declared representation, validity, ownership, cleanup and niche rules.
+Equal size or field layout alone is insufficient. Sequential/Union layout
+opt-ins do not themselves promise foreign calling compatibility, and no layout
+promise grants arbitrary-bit validity. Opting into a frozen layout or carrier
+constrains compatible replacement under that same contract. These promises
+are profile-specific, not universal byte encodings.
+Transparency does not permit reinterpret casts or implicit source conversion.
+`[Layout(Transparent)]` is illustrative of the existing layout-attribute
+convention, not settled spelling or eligibility grammar; the current compiler
+has no general transparent-wrapper ABI feature. Struct and field attributes
+currently diagnose `TRM3001`; the existing `ValueLayout` is limited to
+naturally aligned 1–16-byte aggregates and does not implement transparent
+layout. Introducing future checked opt-in enforcement requires an explicit
+compatibility migration; it does not retroactively reject ordinary structs or
+change the current module format's exact layout contracts.
 
 ### Interfaces, access and generic properties
 
@@ -596,20 +607,61 @@ or lambda and does not reevaluate the return expression. A `void` function has
 no result-valued return. Static postconditions initially apply only to the
 outer function body. Proofs respect mutation/alias invalidation.
 
+Required static proofs have a versioned portable floor: every conforming
+compiler must support its minimum rules/complexity and guaranteed resource
+budget independently of optimization level. A compiler may soundly establish
+more complex proofs or offer larger budgets, accepting additional programs;
+acceptance beyond the floor need not be identical. If a required proof is
+disproved or not established, compilation fails with the distinction reported
+(including a complexity/analysis-limit reason where applicable), never a
+runtime fallback. Ordinary pre/postconditions remain runtime-checked unless
+sound analysis proves a check redundant, and elimination must preserve required
+evaluation, effects and failures. Required constant evaluation is separate:
+successful results retain exact target semantics and never fall back to
+runtime; its supported operations, accounting and limits remain specification
+work.
+
+Where runtime values or checks are permitted, an author may explicitly choose
+an ordinary expression or executable `require` instead of requiring constant
+evaluation or static proof. This changes the source requirement; the compiler
+never silently demotes it. Ordinary expressions may still be folded as sound
+optimization, and an ordinary `require` remains runtime-enforced unless
+proven redundant. This choice is unavailable where a compile-time value is
+inherently required, such as layout, type or metadata formation, and does not
+weaken structural lifetime or initialization safety. Illustrative syntax does
+not select the exact spelling.
+
 The contract phase boundary is `prologue -> preconditions -> method body ->
 postconditions -> epilogue`. Preconditions and postconditions are public
 declaration/signature contracts outside the authored body. The body includes
-body-local initialization, authored execution and `finally`, local cleanup,
-and cleanup of untransferred owned parameters; all complete before
+initialization of local and output values, authored execution and `finally`,
+local cleanup, and cleanup of untransferred owned parameters; all complete before
 postconditions. On successful return, no user-observable ownership cleanup is
 deferred to the mechanical epilogue. Postconditions can inspect surviving
 values and retained results, but not moved or destroyed values through their
 former sources. Exceptional departure has no normal-return postcondition.
-Entry snapshots and exact output/result publication and postcondition-failure
-cleanup remain open.
+Entry snapshots and arbitrary state-history contracts are deliberately absent
+from the initial model, with no promise to add them later. Postconditions may
+state observable boundary facts about initialization, nullability, ranges and
+relationships to unchanged value inputs; these are behavioral guarantees, not
+merely optimizer hints. Historical relations such as a count increasing by
+one require state-history support and remain outside the initial model.
+Proving or folding predicates may optimize enforcement only while preserving
+the published guarantee. Clauses may refer only to declarations visible at the
+method's effective accessibility and expressions permitted by the ordinary
+contract language: an accessible public `Count` abstraction may be used when
+ordinary evaluation permits it, but a private representation invariant cannot
+become a hidden caller precondition. Caller facts derive from published
+guarantees checked or proved for the callee, never private-body inference, and
+are invalidated by relevant mutation, alias effects or lifetime changes. This
+adds no getter-purity syntax; proving or folding a predicate does not replace
+the public guarantee. Initialization safety is static and never checks vacant
+storage by reading it. Exact output/result publication and
+postcondition-failure cleanup remain open.
 
-The frontend should prove stable ordinary guards independently of optimization
-level. A proven-to-fail ordinary guard produces a warning by default,
+The guaranteed static-proof floor is available independently of optimization
+level; beyond-floor proof support may vary, but must remain sound. A
+proven-to-fail ordinary guard produces a warning by default,
 promotable to an error; an intentionally failing `require` remains a valid
 path when that diagnostic is not promoted. Failed required static/constant
 proofs diagnose. Removing runtime guards preserves evaluation, effects, exceptions,
