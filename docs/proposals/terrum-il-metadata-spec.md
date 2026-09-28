@@ -478,8 +478,9 @@ are allowed; declaration names, export keys and SourceFile paths are not
 empty. SourceFile requires `digestBlob=0` in `(1, 0)` because no digest
 algorithm is assigned.
 
-`Module.identity` and `ModuleRef.producerIdentity` are nonempty String
-references, not hashes or proof of authorship. Identity equality uses
+`Module.identity` and `ModuleRef.producerIdentity` are required references
+to nonempty, well-formed String text without embedded zero scalars, not
+hashes or proof of authorship. Identity equality uses
 ordinal decoded scalar text without normalization, even across different
 String row encodings; Module identities must be distinct within one artifact.
 Changing an identity selects another producer. Export keys are likewise
