@@ -398,6 +398,12 @@ not replace the explicit length or checked access.
 | `2` | UTF-16 little-endian code units, no BOM | Two zero bytes | Multiple of 2 |
 | `3` | UTF-32 little-endian code units, no BOM | Four zero bytes | Multiple of 4 |
 
+The common four-byte content-start alignment satisfies the per-encoding
+start-offset requirement; the byte-length divisibility rule separately
+ensures that the content ends on a whole code unit before its terminator.
+For example, a 4-byte-aligned UTF-16LE start with a three-byte content
+length is still invalid. Neither rule is a substitute for the other.
+
 Kinds `4..255` reject in `(1, 0)`; there is no validity or normalization
 bit. A name, path or key reference must decode to well-formed scalar text:
 UTF-8 uses shortest sequences; UTF-16 rejects unmatched surrogates; UTF-32
