@@ -110,7 +110,7 @@ Resource identity, resolution, integrity and limits remain schema decisions.
 | 6 | Format minor | `u16` | `0` in this proposal |
 | 8 | Header length | `u32` | `32` for this candidate layout |
 | 12 | Directory entry count | `u32` | Number of present sections; 22 kinds are assigned below, plus nonsemantic extension kinds |
-| 16 | Total artifact length | `u32` | Exact byte length of the supplied `TRRM` slice |
+| 16 | Total artifact length | `u32` | Exact byte length of the supplied `TRRM` slice; zero is reserved and invalid in this schema |
 | 20 | Directory offset | `u32` | `32` in this candidate |
 | 24 | Reserved | 8 bytes | All zero; readers reject nonzero bytes |
 
@@ -120,7 +120,7 @@ Each directory entry is 16 bytes:
 |---:|---|---:|---|
 | 0 | Section kind | `u16` | One of the table assignments below |
 | 2 | Flags | `u16` | One of the section policies below |
-| 4 | Record count | `u32` | Number of records encoded in the section |
+| 4 | Record count | `u32` | Number of records encoded in the section, `1..0xFFFFFF` when present |
 | 8 | Section offset | `u32` | Artifact-relative section start |
 | 12 | Section byte length | `u32` | Exact section extent |
 
@@ -149,8 +149,8 @@ Candidate framing invariants:
 - `headerLength` is 32 and `directoryOffset` is 32; the directory has exactly
   `entryCount * 16` bytes, with checked
   multiplication and checked end-offset arithmetic.
-- `totalLength` equals the supplied `TRRM` slice length and is at most
-  `0xFFFFFFFF` bytes. Header, directory, and every section lie wholly within
+- `totalLength` equals the supplied `TRRM` slice length and is in
+  `32..0xFFFFFFFF`. Header, directory, and every section lie wholly within
   `[0, totalLength)`. Add section offsets and lengths using checked arithmetic
   wide enough for their sum before checking containment. A section begins at
   or after the directory end. Embedded readers translate to container
@@ -178,11 +178,21 @@ space require a separately specified resource reference, not wider offsets
 in ordinary metadata. Individual variable-table data is limited to `u32`
 bytes by its offset index.
 
+Zero `totalLength` is left available for a future extended-framing escape,
+but has no interpretation in this schema. An extended artifact would need
+wider section offsets and lengths as well as a wider total length; sections
+larger than `u32` bytes would also need wider row-data indexes. No reader may
+infer that format merely from a zero length. Encoding the ordinary length in
+512-byte units would impose padding and lose exact byte framing without
+addressing those other widths.
+
 ## Metadata logical tables and row semantics (proposed)
 
 ### Table stream and token encoding
 
-Each present table has the directory's `recordCount` rows. **Fixed** tables
+Each present table has the directory's `recordCount` rows, at most
+`0xFFFFFF` per table. The same limit applies to any section's payload
+record count; slot counts and byte lengths are separate bounds. **Fixed** tables
 concatenate their fixed-size row payloads, without per-row lengths. **Variable**
 tables start with `u32 offsets[recordCount + 1]`, followed by their data bytes.
 Offsets are relative to the start of the data (after the index), start at zero,
@@ -194,14 +204,19 @@ strings, type forms, contracts and bodies directly without scanning prior
 records; a one-row heap pays four additional bytes versus length-prefixing,
 while larger heaps pay the same four bytes per row plus one sentinel.
 
-A same-table reference is a one-based `u32` row. `DefId` is a four-byte `u32`
-token: `(tableKind << 24) | row`, with `tableKind` the low byte of a registered
+A schema-typed table reference is a one-based `u32` row in the table named
+by its column, even when that column belongs to another table. Its high
+byte is zero and its row is in `1..0xFFFFFF`; zero is allowed only where
+the column says `?`. `DefId` is a four-byte `u32` token:
+`(tableKind << 24) | row`, with `tableKind` the low byte of a registered
 definition table (TypeDef `0x13`, FieldDef `0x14`, MethodDef `0x16`,
-GenericParam `0x19`, PropertyDef `0x1E`). Its row must be in `1..0xFFFFFF`;
-only token zero is
-null where allowed. Other table kinds in a DefId reject. A contiguous range
-is `u32 firstRow, u32 count`; its empty encoding is `(0, 0)`, otherwise
-`firstRow` is nonzero and the checked last row belongs to that table.
+GenericParam `0x19`, PropertyDef `0x1E`). Its row has the same
+`1..0xFFFFFF` limit; only the all-zero token is null where allowed.
+Other table kinds reject, including `0xFF`, which is reserved for a
+future required indirection encoding, not defined or accepted here.
+A contiguous range is `u32 firstRow, u32 count`; its empty encoding is
+`(0, 0)`, otherwise `firstRow` is nonzero, has a zero high byte, and the
+checked last row is at most `0xFFFFFF` and belongs to that table.
 Ranges for one owner must not overlap or include another owner's rows.
 There are no pointer-sized fields or implicit string terminators.
 
@@ -217,7 +232,7 @@ payload requires a reference. The generic slot layout is:
 |---:|---|---:|---|
 | 0 | Target section kind | `u16` | Assigned core table containing the target |
 | 2 | Selector | `u16` | `0` row, `1` Body instruction |
-| 4 | Target row | `u32` | One-based row in the target table |
+| 4 | Target row | `u32` | One-based row in the target table, high byte zero |
 | 8 | Block ID | `u32` | Zero for selector 0; nonzero Body block for selector 1 |
 | 12 | Instruction ordinal | `u32` | Zero for selector 0; operation ordinal or terminator ordinal for selector 1 |
 
