@@ -10,7 +10,7 @@ exact syntax and several API contracts remain open. Examples do not establish
 conformance or implementation. This is not an ABI layout specification.
 
 The [grammar proposal](terrum-grammar-spec.md) and
-[approved current semantic IL/metadata design](terrum-il-metadata-spec.md) are separate
+[approved current semantic IL/metadata design](../terrum-il-metadata-spec.md) are separate
 documents; neither adopts the signatures here. Related accepted direction is
 described in [language](../language.md), [libraries](../libraries.md),
 [lifetimes](../lifetimes.md), [type families](../type-families.md),

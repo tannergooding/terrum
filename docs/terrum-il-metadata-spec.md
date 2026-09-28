@@ -3,12 +3,12 @@
 > [!IMPORTANT]
 > Approved current design for the specified `TRRM` metadata and framing
 > contracts, not a released byte schema or a claim of compiler support.
-> See [implementation](../implementation.md) for the current executable
+> See [implementation](implementation.md) for the current executable
 > boundary. Terms such as "must" apply to the specified `(1, 0)` design;
 > explicitly open contracts require further specification before use.
 
 This document defines metadata tables and physical framing; the
-[instruction proposal](terrum-il-instruction-set.md) defines coded operations.
+[instruction proposal](proposals/terrum-il-instruction-set.md) defines coded operations.
 The artifact can be embedded in PE or ELF but does not require either
 container.
 
@@ -65,10 +65,10 @@ An environment that cannot trust an artifact's author must audit its
 semantic facts before safe execution or decline to execute it.
 
 The accepted language contracts remain authoritative for their semantics:
-[language](../language.md), [lifetimes](../lifetimes.md),
-[conversions](../conversions.md), [type families](../type-families.md),
-[data layout and ABI](../data-layout-and-abi.md), and the
-[memory model](../memory-model.md). This document defines the approved current
+[language](language.md), [lifetimes](lifetimes.md),
+[conversions](conversions.md), [type families](type-families.md),
+[data layout and ABI](data-layout-and-abi.md), and the
+[memory model](memory-model.md). This document defines the approved current
 binary design where specified; it does not redefine their rules or approve the
 separate coded-instruction proposal.
 
@@ -94,7 +94,7 @@ and target ABI/profile requirements are independent of the format pair.
 
 The following framing, table IDs and row layouts describe the approved current
 encoding. Initial opcodes and bodies are defined in the
-[instruction proposal](terrum-il-instruction-set.md).
+[instruction proposal](proposals/terrum-il-instruction-set.md).
 
 ### Header and directory
 
@@ -747,7 +747,7 @@ call classification. Equal layout is not implicit conversion.
 
 Param modes are `0x00` by-value, `0x01` `out`, `0x02` `init ref`,
 `0x03` readonly `ref`, `0x04` writable `ref`. The
-[coded-body proposal](terrum-il-instruction-set.md) has local place
+[coded-body proposal](proposals/terrum-il-instruction-set.md) has local place
 operations; publishing `out`/`init ref` across calls and loaning general
 references still require their specified call/exception/loan rules.
 Unimplemented modes cannot be silently treated as by-value. `MethodSig` records
@@ -826,7 +826,7 @@ visibility remain under review.
 
 ### Row-assignment example
 
-For the `return 42` [coded-body example](terrum-il-instruction-set.md#worked-bytes-and-illustrative-size),
+For the `return 42` [coded-body example](proposals/terrum-il-instruction-set.md#worked-bytes-and-illustrative-size),
 these are the relevant row references; row indexes are artifact-wide:
 
 | Table row | Payload values in column order |
@@ -875,7 +875,7 @@ directly to MethodDef 1 and omit the unused expected row and Import.
 
 Each Body row is the variable table's offset-indexed extent and carries
 exactly the coded bytes defined in the
-[instruction-set proposal](terrum-il-instruction-set.md#body-record-direct-block-index-and-regions).
+[instruction-set proposal](proposals/terrum-il-instruction-set.md#body-record-direct-block-index-and-regions).
 Its one-based row is referenced by the MethodDef `bodyRow` that owns it. Every Body row
 must be owned by exactly one local MethodDef, and an imported declaration has
 no body. Body-to-method identity and type references use the metadata tables
@@ -1024,19 +1024,19 @@ row 1 (`DefId=0x1600_0001`), then clause `0x0002`, flags zero, parameter
 ordinal 3 and states `(1, 0, 0)` for true,
 false, and exceptional departure. A consumer can compare this declared
 promise with a producer without reading the output to discover whether it
-was initialized. The [coded instruction proposal](terrum-il-instruction-set.md)
+was initialized. The [coded instruction proposal](proposals/terrum-il-instruction-set.md)
 does **not** yet encode the output place and publication operations, so this
 metadata row alone does not make such a body executable.
 
 ## Unspecified schema details
 
-The candidate defines relationships and validation principles, but not the
+The approved current design defines relationships and validation principles, but not the
 following byte-level contracts:
 
 | Surface | Not yet specified |
 |---|---|
 | Encoding and revisions | Future version/feature policy and reader compatibility rules. The approved current `(1, 0)` design accepts only its registered semantic forms but is not a released schema. |
 | Declarations | Resource references, generic/witness exportability, further type/field/layout flags, richer qualifier/contract clauses and their validation. Module identity and export-key equality are specified; assigning a stable key to a source declaration is a writer policy. |
-| Executable bodies | Beyond the [narrow executable subset and other assigned decode shapes](terrum-il-instruction-set.md#executable-subset-versus-assigned-decode-shapes): output places, exceptional handlers/cleanup, loans, roots, witness bindings and their precise verifier rules. |
+| Executable bodies | Beyond the [narrow executable subset and other assigned decode shapes](proposals/terrum-il-instruction-set.md#executable-subset-versus-assigned-decode-shapes): output places, exceptional handlers/cleanup, loans, roots, witness bindings and their precise verifier rules. |
 | Limits | Per-record and per-artifact sizes, nesting and work budgets, allocation limits and canonical encoding requirements. |
 | Unknown data | Kind-specific extension schemas, reserved values and feature negotiation; generic skip, remap and discard policies are assigned above. |

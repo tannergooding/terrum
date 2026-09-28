@@ -5,9 +5,9 @@ The [language](language.md) defines accepted semantic direction, while
 [implementation](implementation.md) records actual support and tool contracts.
 The [pending language and library index](language-library-review.md) tracks
 detailed specification work separately from this implementation sequence.
-The [specification index](proposals/README.md) distinguishes the approved
-current metadata design from the still-proposed grammar, coded instructions
-and core-library drafts. None is evidence of current compiler support.
+The [approved current metadata design](terrum-il-metadata-spec.md) is distinct
+from the still-proposed grammar, coded instructions and core-library drafts
+in the [proposal index](proposals/README.md). None is evidence of current compiler support.
 
 | Stage | Deliverable | Exit evidence |
 |---|---|---|
@@ -182,7 +182,7 @@ stability declaration is deferred until closer to v1.
 
 Substantial compiler, runtime, and library increments may proceed without
 waiting for final review of the grammar, coded instructions, or core-library
-companion drafts. The [approved current `TRRM` metadata design](proposals/terrum-il-metadata-spec.md)
+companion drafts. The [approved current `TRRM` metadata design](terrum-il-metadata-spec.md)
 defines specified framing and row contracts, not compiler support or a
 released byte schema. Where an increment needs still-open specifics, use
 concrete working designs provisionally and mark implementation-dependent choices in

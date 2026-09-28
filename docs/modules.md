@@ -11,7 +11,10 @@ layouts during consumer compilation. A **runtime policy** is the persisted
 versions persisted IR contracts; it is distinct from a native-profile label.
 
 The artifact contains verified, typed, source-mapped structured IR, not source
-text or a native DLL. The highest implemented semantic revision is 36, selected
+text or a native DLL. It is distinct from the approved current
+[`TRRM` metadata design](terrum-il-metadata-spec.md), whose candidate `(1, 0)`
+framing and rows are not yet the semantic-module writer's output.
+The highest implemented semantic revision is 36, selected
 by the artifact's required features; not every artifact uses revision 36.
 Revision-specific reader behavior and feature-dependent writer selection
 describe repository support, not an externally released binary compatibility

@@ -1,17 +1,14 @@
 # Terrum specification proposals
 
-The metadata design is approved as current intent; the other documents remain
-proposals, not approved specifications or claims of implementation. Approval
-does not make the metadata encoding released or freeze pre-v1 revisions. An
+The [metadata design](../terrum-il-metadata-spec.md) is approved as current intent
+and lives outside this proposal directory. The documents below remain proposals,
+not approved specifications or claims of implementation. Approval does not
+make the metadata encoding released or freeze pre-v1 revisions. An
 **accepted direction** records a settled semantic boundary without approving
 adjacent grammar, instruction, or API forms.
 
 - [Grammar proposal](terrum-grammar-spec.md) defines notation, accepted
   semantic direction, candidate productions and unresolved grammar.
-- [IL and metadata design](terrum-il-metadata-spec.md) specifies the approved
-  current framing and metadata contracts, with remaining unsupported and
-  unspecified surfaces called out explicitly. Current compiler support is
-  documented in [implementation](../implementation.md).
 - [Coded instruction proposal](terrum-il-instruction-set.md) assigns an
   initial Body encoding and operation subset alongside the metadata design;
   it does not describe the current module writer.
