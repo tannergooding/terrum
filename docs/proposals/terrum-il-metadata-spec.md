@@ -120,7 +120,7 @@ Each directory entry is 16 bytes:
 |---:|---|---:|---|
 | 0 | Section kind | `u16` | One of the table assignments below |
 | 2 | Flags | `u16` | One of the section policies below |
-| 4 | Record count | `u32` | Number of records encoded in the section, `1..0xFFFFFF` when present |
+| 4 | Record count | `u32` | Number of records encoded in the section, `1..0xFF_FFFF` when present |
 | 8 | Section offset | `u32` | Artifact-relative section start |
 | 12 | Section byte length | `u32` | Exact section extent |
 
@@ -150,7 +150,7 @@ Candidate framing invariants:
   `entryCount * 16` bytes, with checked
   multiplication and checked end-offset arithmetic.
 - `totalLength` equals the supplied `TRRM` slice length and is in
-  `32..0xFFFFFFFF`. Header, directory, and every section lie wholly within
+  `32..0xFFFF_FFFF`. Header, directory, and every section lie wholly within
   `[0, totalLength)`. Add section offsets and lengths using checked arithmetic
   wide enough for their sum before checking containment. A section begins at
   or after the directory end. Embedded readers translate to container
@@ -191,12 +191,12 @@ addressing those other widths.
 ### Table stream and token encoding
 
 Each present table has the directory's `recordCount` rows, at most
-`0xFFFFFF` per table. The same limit applies to any section's payload
+`0xFF_FFFF` per table. The same limit applies to any section's payload
 record count; slot counts and byte lengths are separate bounds. **Fixed** tables
 concatenate their fixed-size row payloads, without per-row lengths. **Variable**
 tables start with `u32 offsets[recordCount + 1]`, followed by their data bytes.
 Offsets are relative to the start of the data (after the index), start at zero,
-are nondecreasing and end at the exact data length (`<= 0xFFFFFFFF`). Row `i`
+are nondecreasing and end at the exact data length (`<= 0xFFFF_FFFF`). Row `i`
 occupies `[offsets[i-1], offsets[i])`, for one-based `i`. Empty String/Blob
 rows are permitted; semantic variable rows must be nonempty. The checked
 index size plus the final offset equals the section length. This indexes
@@ -206,17 +206,17 @@ while larger heaps pay the same four bytes per row plus one sentinel.
 
 A schema-typed table reference is a one-based `u32` row in the table named
 by its column, even when that column belongs to another table. Its high
-byte is zero and its row is in `1..0xFFFFFF`; zero is allowed only where
+byte is zero and its row is in `1..0xFF_FFFF`; zero is allowed only where
 the column says `?`. `DefId` is a four-byte `u32` token:
 `(tableKind << 24) | row`, with `tableKind` the low byte of a registered
 definition table (TypeDef `0x13`, FieldDef `0x14`, MethodDef `0x16`,
 GenericParam `0x19`, PropertyDef `0x1E`). Its row has the same
-`1..0xFFFFFF` limit; only the all-zero token is null where allowed.
+`1..0xFF_FFFF` limit; only the all-zero token is null where allowed.
 Other table kinds reject, including `0xFF`, which is reserved for a
 future required indirection encoding, not defined or accepted here.
 A contiguous range is `u32 firstRow, u32 count`; its empty encoding is
 `(0, 0)`, otherwise `firstRow` is nonzero, has a zero high byte, and the
-checked last row is at most `0xFFFFFF` and belongs to that table.
+checked last row is at most `0xFF_FFFF` and belongs to that table.
 Ranges for one owner must not overlap or include another owner's rows.
 There are no pointer-sized fields or implicit string terminators.
 
@@ -433,7 +433,7 @@ MethodDef belongs to the same declaring type, has the same result TypeSpec,
 and is bound by its PropertyDef identity, never a `get_Name` spelling.
 Exported properties and methods require public visibility. `Layout` is
 required only for a published fixed representation;
-private `Auto` has no layout row. `FieldDef.byteOffset` is `0xFFFFFFFF` when
+private `Auto` has no layout row. `FieldDef.byteOffset` is `0xFFFF_FFFF` when
 no fixed offset is published. A fixed layout validates size, alignment,
 overlap, field offsets and ABI classification against its target requirement;
 `Transparent` retains nominal identity while using its one carrier's direct
@@ -529,7 +529,7 @@ these are the relevant row references; row indexes are local to this artifact:
 | TypeSpec 1 | `form=0x01, qualifiers=0, primitiveCode=0x03` (`int32`) |
 | MethodSig 1 | `resultTypeSpec=1, receiverTypeSpec=0, paramFirst=0, paramCount=0, genericFirst=0, genericCount=0` |
 | MethodDef 1 | `ownerTypeDef=0, name=1, signature=1, flags=1` (public), `contractFirst=0, contractCount=0, bodyRow=1` |
-| Export 1 | `localDefId=0x16000001, exportKey=1` |
+| Export 1 | `localDefId=0x1600_0001, exportKey=1` |
 | Body 1 | `ownerMethod=1`, followed by the body bytes specified in the companion proposal |
 
 For example, the TypeSpec table with its single `int32` row is exactly
@@ -662,7 +662,7 @@ when the Boolean result is true, its Contract row is:
 ```
 
 The first eight bytes index one 16-byte row; the next four name MethodDef
-row 1 (`DefId=0x16000001`), then clause `0x0002`, flags zero, parameter
+row 1 (`DefId=0x1600_0001`), then clause `0x0002`, flags zero, parameter
 ordinal 3 and states `(1, 0, 0)` for true,
 false, and exceptional departure. A consumer can compare this declared
 promise with a producer without reading the output to discover whether it

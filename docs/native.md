@@ -134,7 +134,7 @@ incrementing count and returns false at full capacity without modifying the
 prefix. The handle is never a source-exposed pointer or copyable layout.
 Whole-owner move, by-value call/return and true-only output transfer the
 obligation; lexical and recursive composite cleanup release it exactly once.
-`HeapFree` failure is a fatal process invariant error (`0xE0540005`), not a
+`HeapFree` failure is a fatal process invariant error (`0xE054_0005`), not a
 recoverable checked failure or a fabricated successful release. The buffer
 operations do not store receiver loans or resize backing memory. `Set`,
 `TryAppend` and `Clear` also accept writable field paths through fully
@@ -698,12 +698,12 @@ an artifact; omission keeps its existing fail-fast profile. The reusable
 compilation API accepts the policy with single or multiple original snapshots,
 including explicit host-buffer grants. Only compiler-generated arithmetic/conversion, division-zero,
 requirement and host-buffer-bounds failures use the private noncontinuable
-Windows exception code `0xE0540092`, with three checked parameters: marker
-`0x54455252554D0001`, version 1 and reason 1 through 4. Generated filters
+Windows exception code `0xE054_0092`, with three checked parameters: marker
+`0x5445_5252_554D_0001`, version 1 and reason 1 through 4. Generated filters
 check code, flag, parameter count and every payload field. `unsafe { try {
 ... } catch { ... } }` recovers these failures without an exception object;
 `try`/`finally` needs no unsafe context. An unhandled owned failure exits the
-process with `0xE0540001` through `0xE0540004` in AOT and a bounded CLI JIT
+process with `0xE054_0001` through `0xE054_0004` in AOT and a bounded CLI JIT
 worker. Foreign faults and mismatched private records continue native search,
 not source recovery.
 
@@ -893,10 +893,10 @@ failures dispatch through unsafe catch and exceptional finally scopes.
 
 | Failure | Process exit status |
 |---|---|
-| Checked signed/unsigned arithmetic or numeric conversion overflow | `0xE0540001` |
-| Integer division or remainder by zero | `0xE0540002` |
-| A false boolean `require` predicate | `0xE0540003` |
-| Negative or out-of-range host-buffer index | `0xE0540004` |
+| Checked signed/unsigned arithmetic or numeric conversion overflow | `0xE054_0001` |
+| Integer division or remainder by zero | `0xE054_0002` |
+| A false boolean `require` predicate | `0xE054_0003` |
+| Negative or out-of-range host-buffer index | `0xE054_0004` |
 
 `require predicate;` evaluates its boolean once and continues only on true.
 This is executable semantic code, not a debug assertion, unchecked assumption
@@ -1037,7 +1037,7 @@ The bounded worker checks cleanup order and counts as
 well as returned values. This uses the verified IR's explicit native-import
 boundary, not a source-level interop extension.
 
-Images prefer base `0x140000000`, with 4 KiB section alignment and 512-byte
+Images prefer base `0x1_4000_0000`, with 4 KiB section alignment and 512-byte
 file alignment. `.text` is read/execute, `.idata` read/write and
 `.pdata`/`.xdata` read-only. Optional `.rdata` holds immutable buffers and
 `.data` holds writable buffers. NX, dynamic base and high-entropy 64-bit VA

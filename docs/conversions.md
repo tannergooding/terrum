@@ -110,7 +110,7 @@ is diagnosed rather than resolved by a constraint choosing an arbitrary
 implementer.
 
 Ordinary constructor inference follows the same target rule. In
-`new DifferentRandom(new CounterRandom(0), 0xA5A5A5A5)`, the first argument
+`new DifferentRandom(new CounterRandom(0), 0xA5A5_A5A5)`, the first argument
 establishes `TRandom = CounterRandom`; the declared `uint32` seed/mask
 parameters give the literals their context. This neither captures
 primary-constructor fields nor infers a concrete type from a constraint.

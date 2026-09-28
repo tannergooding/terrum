@@ -509,7 +509,7 @@ Width-explicit integers `int8` through `int128` and unsigned counterparts, disti
 Numeric literals have **no fallback type**: an expected type or explicit
 target must disambiguate; `var x = 1` and unconstrained `F(1)` diagnose.
 Contextual construction rounds/validates directly in the selected format, not
-through a hidden `int32`/`float64`. `int32(1234)`, `uint64(0xFFFFFFFF)` and
+through a hidden `int32`/`float64`. `int32(1234)`, `uint64(0xFFFF_FFFF)` and
 `float32(0.1)` illustrate direct target parsing. Width suffixes do not exist.
 `T(untypedLiteral)` uses the registered parser directly; `T(typedExpression)`
 is a checked explicit conversion. `new T(arguments)` remains nominal
@@ -523,7 +523,7 @@ Current executable coverage, including floating literals, is documented in
 Decimal integer literals keep numeric range semantics, including the direct
 negative signed-minimum case. Hexadecimal and binary literals instead
 construct the expected target width as a bit pattern: `int32(0x8000_0000)` is
-`int32.MinValue`, `int32(0xFFFF_FFFF)` is `-1`, and `int64(0xFFFFFFFF)` is
+`int32.MinValue`, `int32(0xFFFF_FFFF)` is `-1`, and `int64(0xFFFF_FFFF)` is
 `4294967295`. Nonzero bits above the target width are rejected; leading zeroes
 and separators do not add significant bits. Once constructed, the value is
 typed normally and subsequent conversions remain checked:
@@ -669,7 +669,7 @@ Ordinary explicit constructors are baseline. Independent opt-in `Generate` opera
 The target inference order also applies to constructors: known argument types
 establish generic positions, expected-result context may fill unresolved ones,
 and contextual literals follow. `new DifferentRandom(new CounterRandom(0),
-0xA5A5A5A5)` illustrates first-argument inference and declared `uint32`
+0xA5A5_A5A5)` illustrates first-argument inference and declared `uint32`
 literal contexts; it does not infer field capture, change ownership, choose a
 type from constraints or invert optional/box normalization. General constructor
 inference remains separate target work; current inference support is documented
