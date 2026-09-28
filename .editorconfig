@@ -52,11 +52,14 @@ file_header_template = Copyright © Tanner Gooding and Contributors. Licensed un
 #    ignore use integral or string argument for indexers
 #    ignore operator overloads have named alternates
 #    ignore do not use insecure randomness
+#    disable CA5390/CA5403 pending SDK analyzer fixes
 ###############################################################################
 [*.cs]
 dotnet_diagnostic.CA1043.severity = none
 dotnet_diagnostic.CA2225.severity = none
+dotnet_diagnostic.CA5390.severity = none
 dotnet_diagnostic.CA5394.severity = none
+dotnet_diagnostic.CA5403.severity = none
 
 ###############################################################################
 # Set dotnet naming rules to:
