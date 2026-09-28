@@ -384,8 +384,9 @@ an indexed segment table. Neither representation is required for ordinary
 strings. A packed type/length word is a possible segment descriptor, but
 the allocation of its bits, length unit and handling of surrogate pairs
 remain open. A byte-length field avoids encoding-dependent bounds; even a
-24-bit byte length admits almost 16 MiB per segment, already an outlier for
-ordinary metadata. Multi-gigabyte embedded payloads belong in separately
+24-bit byte length admits almost 16 MiB for one string, already an outlier for
+ordinary metadata. Bounding only individual segments would not bound the
+combined string. Multi-gigabyte embedded payloads belong in separately
 managed resources rather than forcing the common string representation to
 accommodate them. Per-string and total-section limits are distinct. The
 existing row offset index already supplies the byte length of an ordinary
