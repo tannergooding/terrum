@@ -12,7 +12,7 @@ versions persisted IR contracts; it is distinct from a native-profile label.
 
 The artifact contains verified, typed, source-mapped structured IR, not source
 text or a native DLL. It is distinct from the approved current
-[`TRRM` metadata design](terrum-il-metadata-spec.md), whose candidate `(1, 0)`
+[`TRRM` metadata design](il-metadata.md), whose candidate `(1, 0)`
 framing and rows are not yet the semantic-module writer's output.
 The highest implemented semantic revision is 36, selected
 by the artifact's required features; not every artifact uses revision 36.

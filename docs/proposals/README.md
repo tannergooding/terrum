@@ -1,6 +1,6 @@
 # Terrum specification proposals
 
-The [metadata design](../terrum-il-metadata-spec.md) is approved as current intent
+The [metadata design](../il-metadata.md) is approved as current intent
 and lives outside this proposal directory. The documents below remain proposals,
 not approved specifications or claims of implementation. Approval does not
 make the metadata encoding released or freeze pre-v1 revisions. An

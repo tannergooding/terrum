@@ -5,7 +5,7 @@
 > an approved execution profile. The unencoded contracts at the end are
 > stabilization blockers, not permissions to erase their semantics.
 
-The [approved current metadata design](../terrum-il-metadata-spec.md) defines the Body table,
+The [approved current metadata design](../il-metadata.md) defines the Body table,
 TypeSpec, MethodDef, contracts and artifact framing. This document specifies
 the Body payload and operation stream separately, following only the
 *organizational* distinction between ECMA-335 Partitions II and III. It does
@@ -335,7 +335,7 @@ object graph, machine register assignment, optimization tier or cache.
 ## Type and definition model for operands
 
 `t` refers to a complete row in the metadata design's
-[TypeSpec table](../terrum-il-metadata-spec.md#metadata-logical-tables-and-row-semantics),
+[TypeSpec table](../il-metadata.md#metadata-logical-tables-and-row-semantics),
 not to a byte-sized `PrimitiveType` embedded in an instruction.
 The narrow executable profile uses the metadata registry codes `0x00 void`,
 `0x01 bool`, `0x03 char16`, `0x08 int32`, `0x0D uint32`, `0x09 int64`,
@@ -691,7 +691,7 @@ does it assume that a stored place is a native stack slot.
 
 ## Worked bytes and illustrative size
 
-For [metadata example](../terrum-il-metadata-spec.md#row-assignment-example),
+For [metadata example](../il-metadata.md#row-assignment-example),
 MethodDef row 1 returns `int32` with no arguments; TypeSpec row 1 is
 `int32`. Its `return 42` body has one value, one block, zero places and
 zero explicit regions. The Body **section** for its single row is:

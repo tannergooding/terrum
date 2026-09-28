@@ -13,7 +13,7 @@ unless explicitly identified as accepted semantic direction.
 The [language](../language.md), [memory model](../memory-model.md),
 [conversions](../conversions.md), [lifetimes](../lifetimes.md), and
 [libraries](../libraries.md) documents define the related accepted semantic
-direction. The [approved current semantic IL/metadata design](../terrum-il-metadata-spec.md)
+direction. The [approved current semantic IL/metadata design](../il-metadata.md)
 and [core-library proposal](terrum-core-library-reference.md) are separate
 documents; cross-references do not adopt their candidate forms.
 

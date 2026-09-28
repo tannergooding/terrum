@@ -1030,7 +1030,7 @@ is represented honestly, not disguised as one natural loop. Cached analyses
 are optional/versioned; validating structure is not optional.
 
 TRRM identifies the evolving Terrum IL/module format, not a CLI assembly or a
-PE file. The [approved current metadata design](terrum-il-metadata-spec.md)
+PE file. The [approved current metadata design](il-metadata.md)
 specifies candidate `(1, 0)` framing and rows; it is not the implemented
 semantic-module encoding. Implemented semantic revisions are pre-1.0
 development revisions, not a stable 1.0 specification. Host-side candidate
