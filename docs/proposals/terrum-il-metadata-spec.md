@@ -377,11 +377,17 @@ literal data is permitted, and distinguish that use from identifier fields,
 which require well-formed decoded scalar text. A validity claim needs reader
 verification, not trust in a producer-supplied bit. ASCII may serve as a
 UTF-8-compatible fast path, allowing equal bytes to be shared across uses
-without silently transcoding raw literals. A counted ASCII/UTF-16LE run
-representation is another candidate for mixed text; per-run count overhead,
-decoding cost and worst-case alternating runs must be compared against plain
-encodings before assigning it a tag. This choice does not change the current
-UTF-8-only `(1, 0)` row grammar or authorize literal operands.
+without silently transcoding raw literals. An **additional** segmented
+ASCII/UTF-16LE representation may suit mostly ASCII text with occasional
+non-ASCII units: typed length segments could live inside a string row or in
+an indexed segment table. Neither representation is required for ordinary
+strings. A packed type/length word is a possible segment descriptor, but
+the allocation of its bits, length unit and handling of surrogate pairs
+remain open. Segment lengths alone cannot replace the offset index without
+losing direct row lookup; any separate index must preserve that property.
+Per-segment overhead, decoding cost and alternating-run cases need comparison
+with plain encodings before assigning a wire tag. This choice does not change
+the current UTF-8-only `(1, 0)` row grammar or authorize literal operands.
 
 | Table | Ordered row payload |
 |---|---|
