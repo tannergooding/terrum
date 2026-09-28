@@ -41,8 +41,6 @@ OwnedInt32Buffer PrefixMinus(OwnedInt32Buffer workspace)
 public static OwnedInt32Buffer FormatUInt64(uint64 value, OwnedInt32Buffer workspace)
 {
     mut OwnedInt32Buffer buffer = move workspace;
-    // uint64.MaxValue has twenty decimal digits.
-    require buffer.Capacity >= 20;
     buffer.Clear();
 
     mut uint64 remaining = value;
@@ -71,7 +69,7 @@ public static OwnedInt32Buffer FormatInt64(int64 value, OwnedInt32Buffer workspa
 public static OwnedInt32Buffer FormatUInt64Base(uint64 value, uint32 radix, OwnedInt32Buffer workspace)
 {
     require radix >= 2 && radix <= 36;
-    if (radix == 10 && workspace.Capacity >= 20)
+    if (radix == 10)
     {
         return FormatUInt64(value, move workspace);
     }

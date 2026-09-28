@@ -71,7 +71,7 @@ public sealed partial class JitTests
 
             int32 Attempt() {
                 require OwnedInt32Buffer.TryCreate(19, out var workspace);
-                OwnedInt32Buffer digits = FormatUInt64(0, move workspace);
+                OwnedInt32Buffer digits = FormatUInt64(uint64.MaxValue, move workspace);
                 return digits.Count;
             }
             """;
@@ -87,6 +87,64 @@ public sealed partial class JitTests
                     }
                 }
                 """, 42).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData("0", false, 1)]
+    [InlineData("42", false, 2)]
+    [InlineData("18446744073709551615", false, 20)]
+    [InlineData("0", true, 1)]
+    [InlineData("-1", true, 2)]
+    [InlineData("-9223372036854775808", true, 20)]
+    public async Task DecimalFormattingAcceptsExactOutputCapacityAsync(string value, bool isSigned, int capacity)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        var format = isSigned ? "FormatInt64" : "FormatUInt64";
+        var component = await File.ReadAllTextAsync(
+            Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+        var checks = string.Join(Environment.NewLine, value.Select((digit, index) =>
+            FormattableString.Invariant($"if (digits.Read({index}) != {(int)digit}) {{ return 2; }}")));
+        var source = component + $$"""
+
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate({{capacity}}, out var workspace);
+                OwnedInt32Buffer digits = {{format}}({{value}}, move workspace);
+                if (digits.Count != {{value.Length}} || digits.Capacity != {{capacity}}) { return 1; }
+                {{checks}}
+                return 42;
+            }
+            """;
+        await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
+        await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData("0", false, 0)]
+    [InlineData("-1", true, 1)]
+    [InlineData("-9223372036854775808", true, 19)]
+    public async Task DecimalFormattingRejectsUndersizedOutputAsync(string value, bool isSigned, int capacity)
+    {
+        var component = await File.ReadAllTextAsync(
+            Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+        var format = isSigned ? "FormatInt64" : "FormatUInt64";
+        var attempt = $$"""
+
+            int32 Attempt() {
+                require OwnedInt32Buffer.TryCreate({{capacity}}, out var workspace);
+                OwnedInt32Buffer digits = {{format}}({{value}}, move workspace);
+                return digits.Count;
+            }
+            """;
+        await AssertFailFastExecutionAsync(component + attempt + "int32 Main() { return Attempt(); }",
+            unchecked((int)0xE0540003)).ConfigureAwait(true);
+        await AssertCheckedExecutionAsync(component + attempt + """
+            int32 Main() {
+                unsafe {
+                    try { return Attempt(); }
+                    catch { return 42; }
+                }
+            }
+            """, 42).ConfigureAwait(true);
     }
 
     [Theory]

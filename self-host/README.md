@@ -167,7 +167,8 @@ than source length plus one. This is not a stored
 source view, managed line collection, or general allocator API.
 
 `IntegerFormatting` consumes and returns a unique `int32`-word workspace.
-The decimal entry points require at least twenty words. Each formatter clears
+The decimal entry points require capacity for the actual output (at most
+twenty words for either signed or unsigned 64-bit values). Each formatter clears
 the initialized prefix without reallocating, then uses
 exclusive lexical views to reverse digits or insert a minus sign. The signed
 minimum is handled without negating it in the signed domain. Output words hold
@@ -179,9 +180,10 @@ for negative values rather than a two's-complement rendering. Their workspace
 must hold the actual output (up to 64 unsigned or 65 signed words in base 2);
 an invalid radix or insufficient capacity raises the existing checked
 requirement failure without publishing a partial result. The decimal entry
-points retain their 20-word minimum even for short numbers, so callers can
-reuse a workspace for any decimal value. This is a bounded library operation,
-not a language format string or an operation-specific formatting witness.
+points accept exact output capacity, including a single word for zero; a
+20-word workspace can be reused for any decimal value. This is a bounded
+library operation, not a language format string or an operation-specific
+formatting witness.
 
 `ManagedTokenChain` stores at most 64 complete `Token` values in source-defined
 managed links. It compiles with `Token.terrum` and `SourceRange.terrum`; each
