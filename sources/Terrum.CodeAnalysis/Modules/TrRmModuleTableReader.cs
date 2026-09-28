@@ -18,10 +18,12 @@ public readonly ref struct TrRmModuleTableReader
     private readonly TrRmStringTableReader _strings;
     private readonly int _recordCount;
     private readonly int _moduleRefCount;
+    private readonly int _sourceFileCount;
     private readonly Dictionary<string, int> _identities;
 
     public int Count => _recordCount;
     public int ModuleRefCount => _moduleRefCount;
+    public int SourceFileCount => _sourceFileCount;
 
     public TrRmModuleTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, int moduleRefCount, int typeDefCount,
@@ -39,6 +41,7 @@ public readonly ref struct TrRmModuleTableReader
         _strings = strings;
         _recordCount = recordCount;
         _moduleRefCount = moduleRefCount;
+        _sourceFileCount = sourceFileCount;
         _identities = new Dictionary<string, int>(StringComparer.Ordinal);
 
         Span<int> cursorOffsets = [28, 32, 36, 40];
@@ -94,6 +97,23 @@ public readonly ref struct TrRmModuleTableReader
         var start = (int)Read(row - 1, 28);
         var end = row < _recordCount ? (int)Read(row, 28) : _moduleRefCount + 1;
         if (start <= 0 || end < start || end > _moduleRefCount + 1)
+        {
+            throw InvalidModule();
+        }
+
+        return (start, end);
+    }
+
+    public (int Start, int End) GetSourceFileRange(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidModule();
+        }
+
+        var start = (int)Read(row - 1, 40);
+        var end = row < _recordCount ? (int)Read(row, 40) : _sourceFileCount + 1;
+        if (start <= 0 || end < start || end > _sourceFileCount + 1)
         {
             throw InvalidModule();
         }

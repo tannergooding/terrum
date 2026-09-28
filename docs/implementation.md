@@ -1033,8 +1033,8 @@ TRRM identifies the evolving Terrum IL/module format, not a CLI assembly or a
 PE file. Implemented semantic revisions are pre-1.0 development revisions, not
 a stable 1.0 specification. Host-side candidate readers validate String
 offsets and name rows, fixed Module rows and their partition cursors,
-ModuleRef identities and co-located producer requirements, and structural
-TypeSpec forms and TypeArg ownership/ranges. A host-side
+ModuleRef identities and co-located producer requirements, optional SourceFile
+paths, and structural TypeSpec forms and TypeArg ownership/ranges. A host-side
 writer emits indexed name-only String sections; the self-host String-row
 candidate emits individual rows. These exercise approved metadata contracts in isolation,
 not complete artifact framing or the current module writer.
