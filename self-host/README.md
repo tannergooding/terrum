@@ -87,6 +87,7 @@ remain hosted in C#.
 | [IntegerFormatting](IntegerFormatting.terrum) | Invariant signed/unsigned 32- and 64-bit decimal and explicit radix-2..36 digits in reusable owned storage | AOT/JIT boundary, exact-capacity and repeated-use fixtures; native heap checks cover same-allocation transfer and failure cleanup |
 | [IntegerParsing](IntegerParsing.terrum) | Strict signed/unsigned radix-2..36 ASCII parsing of an exact UTF-16 source slice with conditional 32- and 64-bit outputs | Composed with `WideIntegerFacts` under AOT/JIT and both policies; full-range per-radix boundaries, invalid spelling/bounds and unpublished outputs |
 | [IntegerSaturation](IntegerSaturation.terrum) | Explicit 32-/64-bit integer narrowing and signedness conversions that clamp instead of throwing or wrapping | AOT/JIT range boundaries and an independent compiled-module consumer under both policies; these named functions are provisional, not general conversion syntax or witnesses |
+| [IntegerWrapping](IntegerWrapping.terrum) | Explicit signed/unsigned 32- and 64-bit conversions preserving the destination-width low bits | AOT/JIT host-oracle cases and an independent compiled-module consumer under both policies; no `unchecked` syntax or new primitive conversion policy |
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and conditional bool/out publication |
 | [SourceLines](SourceLines.terrum) | Streaming line ranges, line extents and bidirectional UTF-16 offset/line-position mapping over an immutable source grant | AOT/JIT conditional outputs under both policies; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
 | [SourceLineIndex](SourceLineIndex.terrum) | Owned line-start table, random-access line extents and bidirectional UTF-16 offset/line-position lookup | Executed as AOT/JIT under both failure policies; every offset round-trips with host line positions, with invalid outputs and owner copies rejected |
@@ -211,6 +212,13 @@ No ambient conversion policy, floating-point behavior or public generic
 conversion witness is implied by these library functions. A separate module
 consumer binds their eight published signatures and runs without incorporating
 the producer's source.
+
+`IntegerWrapping` supplies eight named conversions across signedness and
+64-to-32-bit narrowing. They retain the low bits for the destination width
+and interpret signed destinations as two's complement, including signed
+minima; each internal checked conversion occurs only after its value is in
+range. They run as an independent module without changing checked
+`T(value)` behavior or establishing `unchecked` expression syntax.
 
 `ManagedTokenChain` stores at most 64 complete `Token` values in source-defined
 managed links. It compiles with `Token.terrum` and `SourceRange.terrum`; each

@@ -829,6 +829,13 @@ including a separately compiled module consumer of the published functions.
 This does not add saturating conversion syntax, generic conversion witnesses
 or a change to checked `T(value)` conversions.
 
+The [integer-wrapping candidate](../self-host/IntegerWrapping.terrum)
+provides eight named 32-/64-bit signedness and narrowing conversions that
+retain destination-width low bits, rather than applying checked range
+semantics. AOT/JIT compare against host bit-pattern results under both
+policies, including an independent compiled-module consumer. This does not
+introduce `unchecked` source syntax or change existing type-call conversion.
+
 `SourceText` owns exact input text and a diagnostic path label. All library
 offsets, line characters and lengths are UTF-16 units, not scalar/grapheme/display
 columns; ranges are half-open. Lines and characters are zero-based. Only human

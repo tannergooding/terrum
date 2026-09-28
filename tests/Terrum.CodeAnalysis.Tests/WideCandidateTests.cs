@@ -37,10 +37,7 @@ public sealed class WideCandidateTests
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task SaturatingConversionsExecuteFromIndependentModuleAsync(NativeRuntimePolicy policy)
     {
-        var source = ReadTree(Path.Combine(RepositoryRoot(), "self-host", "IntegerSaturation.terrum"));
-        var library = Compilation.CreateLibrary(source, (BoundRuntimePolicy)policy);
-        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
-        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
+        var producer = CreateNumericsLibrary("IntegerSaturation.terrum", policy,
             "Terrum.CodeAnalysis.Numerics64.SaturateUInt32ToInt32",
             "Terrum.CodeAnalysis.Numerics64.SaturateInt32ToUInt32",
             "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToInt32",
@@ -48,8 +45,7 @@ public sealed class WideCandidateTests
             "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToInt32",
             "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToUInt32",
             "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToInt64",
-            "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToUInt64",
-        ]);
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToUInt64");
         var consumerSource = SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
@@ -70,6 +66,42 @@ public sealed class WideCandidateTests
                     || SaturateUInt64ToInt64(42) != 42) { return 5; }
                 if (SaturateInt64ToUInt64(int64.MinValue) != 0
                     || SaturateInt64ToUInt64(int64.MaxValue) != uint64(int64.MaxValue)) { return 6; }
+                return 42;
+            }
+            """);
+        var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task WrappingConversionsExecuteFromIndependentModuleAsync(NativeRuntimePolicy policy)
+    {
+        var producer = CreateNumericsLibrary("IntegerWrapping.terrum", policy,
+            "Terrum.CodeAnalysis.Numerics64.WrapInt32ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.WrapUInt32ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.WrapInt64ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.WrapInt64ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.WrapUInt64ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.WrapUInt64ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.WrapInt64ToUInt64",
+            "Terrum.CodeAnalysis.Numerics64.WrapUInt64ToInt64");
+        var consumerSource = SyntaxTree.Parse("""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                if (WrapInt32ToUInt32(-1) != uint32.MaxValue
+                    || WrapUInt32ToInt32(uint32.MaxValue) != -1) { return 1; }
+                if (WrapInt64ToUInt32(-4294967297) != uint32.MaxValue
+                    || WrapInt64ToInt32(2147483648) != int32.MinValue) { return 2; }
+                if (WrapUInt64ToUInt32(uint64.MaxValue) != uint32.MaxValue
+                    || WrapUInt64ToInt32(4294967295) != -1) { return 3; }
+                if (WrapInt64ToUInt64(-1) != uint64.MaxValue
+                    || WrapUInt64ToInt64(uint64.MaxValue) != -1) { return 4; }
                 return 42;
             }
             """);
@@ -130,6 +162,14 @@ public sealed class WideCandidateTests
             "Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal",
             "Terrum.CodeAnalysis.Numerics64.TryAccumulateBase",
         ]);
+    }
+
+    private static byte[] CreateNumericsLibrary(string name, NativeRuntimePolicy policy, params string[] exports)
+    {
+        var source = ReadTree(Path.Combine(RepositoryRoot(), "self-host", name));
+        var compilation = Compilation.CreateLibrary(source, (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        return ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), exports);
     }
 
     private static SyntaxTree ReadTree(string path) => SyntaxTree.Parse(File.ReadAllText(path), path);
