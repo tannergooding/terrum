@@ -821,6 +821,13 @@ invalid bounds and overflow leave outputs unpublished. It is not wired into
 `SyntaxTree.Parse(LexResult)` or the scanner-backed integer record: that
 record still supplies the binder's contextual literal magnitude.
 
+The separate [integer-saturation candidate](../self-host/IntegerSaturation.terrum)
+provides six explicit signed/unsigned 64-bit conversion functions with
+destination-range clamping for 32-bit results or 64-bit signedness changes.
+AOT/JIT exercise bounds and in-range values under both failure policies.
+This does not add saturating conversion syntax, generic conversion witnesses
+or a change to checked `T(value)` conversions.
+
 `SourceText` owns exact input text and a diagnostic path label. All library
 offsets, line characters and lengths are UTF-16 units, not scalar/grapheme/display
 columns; ranges are half-open. Lines and characters are zero-based. Only human

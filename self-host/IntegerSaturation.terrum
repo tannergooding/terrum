@@ -1,0 +1,63 @@
+namespace Terrum.CodeAnalysis.Numerics64;
+
+public static int32 SaturateInt64ToInt32(int64 value)
+{
+    if (value < int64(int32.MinValue))
+    {
+        return int32.MinValue;
+    }
+    if (value > int64(int32.MaxValue))
+    {
+        return int32.MaxValue;
+    }
+    return int32(value);
+}
+
+public static uint32 SaturateInt64ToUInt32(int64 value)
+{
+    if (value < 0)
+    {
+        return 0;
+    }
+    if (value > int64(uint32.MaxValue))
+    {
+        return uint32.MaxValue;
+    }
+    return uint32(value);
+}
+
+public static int32 SaturateUInt64ToInt32(uint64 value)
+{
+    if (value > uint64(int32.MaxValue))
+    {
+        return int32.MaxValue;
+    }
+    return int32(value);
+}
+
+public static uint32 SaturateUInt64ToUInt32(uint64 value)
+{
+    if (value > uint64(uint32.MaxValue))
+    {
+        return uint32.MaxValue;
+    }
+    return uint32(value);
+}
+
+public static int64 SaturateUInt64ToInt64(uint64 value)
+{
+    if (value > uint64(int64.MaxValue))
+    {
+        return int64.MaxValue;
+    }
+    return int64(value);
+}
+
+public static uint64 SaturateInt64ToUInt64(int64 value)
+{
+    if (value < 0)
+    {
+        return 0;
+    }
+    return uint64(value);
+}
