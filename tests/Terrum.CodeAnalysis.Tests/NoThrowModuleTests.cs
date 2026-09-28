@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
@@ -141,6 +142,30 @@ public sealed class NoThrowModuleTests
         var artifact = Producer("[NoThrow] public int32 Compute() { return 42; }");
         artifact[4] = 7;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(artifact));
+    }
+
+    [Fact]
+    public void PureUnfoldedCheckedArithmeticCannotForgeNoThrowInPersistedProducer()
+    {
+        var folded = CompileLibrary("[NoThrow] public int32 Compute() { return 1 + 2; }");
+        var function = Assert.Single(folded.Functions);
+        var statement = Assert.IsType<BoundReturn>(Assert.Single(function.Body.Statements));
+        var constant = Assert.IsType<BoundConstant>(statement.Value);
+        var arithmetic = new BoundBinary(TokenKind.Plus,
+            new BoundConstant(1, PrimitiveType.Int32, constant.Span),
+            new BoundConstant(2, PrimitiveType.Int32, constant.Span),
+            PrimitiveType.Int32, constant.Span);
+        var forged = folded with {
+            Functions = folded.Functions.SetItem(0, function with {
+                Body = function.Body with {
+                    Statements = function.Body.Statements.SetItem(0, statement with { Value = arithmetic }),
+                },
+            }),
+        };
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(forged));
+        _ = Assert.Throws<ArgumentException>(() => ModuleCompiler.CreateProducer(forged, ["Compute"]));
+        _ = Assert.Throws<ArgumentException>(() => NativeModuleCompiler.CreateProducer(forged,
+            ["Compute"], "Effects", NativeRuntimePolicy.FailFast));
     }
 
     private static async Task<int> ExecuteAsync(byte[] image)

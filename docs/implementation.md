@@ -584,8 +584,19 @@ an operation whose throwing effect violates that bound. The bounded proof
 accepts comparisons, bitwise operations, fields, total numeric conversions
 and calls to other declared NoThrow functions. A host-buffer access is
 NoThrow only with a statically constant index proven within that exact
-compilation grant. It conservatively rejects checked arithmetic, potentially
-failing conversions and general buffer indexes without range or invariant inference.
+compilation grant. Before verification, binding folds already-typed constant
+integer arithmetic and bitwise operations, unary plus/negation/complement,
+and supported integer/code-unit conversions when each intermediate result is
+representable. Folding preserves the expression's type and source span; an
+overflow, zero divisor or out-of-range conversion remains an operation with
+its original runtime failure behavior. Calls, variable/field reads and buffer
+contents are not evaluated or discarded. This normalization is unconditional,
+not an optional optimization or a general constant evaluator.
+The verifier still conservatively rejects remaining checked arithmetic,
+potentially failing conversions and general buffer indexes without range or
+invariant inference. Its rules and persisted formats are unchanged: folded
+source expressions use existing constant records, while externally constructed
+or persisted arithmetic must independently satisfy the existing verifier.
 The [native contract](native.md) describes
 these limits. `BoundFunction.DoesNotReturn` separately removes a call's normal
 continuation. Its implementation must have no reachable return or fallthrough

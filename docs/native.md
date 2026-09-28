@@ -466,7 +466,20 @@ and `uint32` to `int64`/`uint64`. Negation of a constant operand is accepted
 when its result is representable, including ordinary negative literals.
 Other conversions, checked arithmetic, general negation and host-buffer
 accesses without a statically constant, proven in-range index remain
-potentially throwing. The proof uses the exact immutable host-buffer grant
+potentially throwing in the verified IR.
+
+Source binding first folds already-typed constant `+`, `-`, `*`, `/`, `%`,
+`&`, `|` and `^`, supported unary plus/negation/complement, and integer/code-unit
+conversions into existing constants when every intermediate result is
+representable. Thus `[NoThrow] int32 Answer() { return (1 + 2) * 14; }`
+is accepted without extending the verifier's arithmetic proof. Overflow,
+division by zero and out-of-range casts remain runtime operations; a later
+cancellation cannot erase an earlier failure. Calls and storage reads stay
+opaque, including a call multiplied by zero. Folding does not provide missing
+literal context, change operator binding, or infer a callee's effect contract.
+It runs in every build and does not change semantic formats or native profiles.
+
+The proof uses the exact immutable host-buffer grant
 and its element type/read-write capability; it does not authorize unchecked
 pointers or treat fail-fast as NoThrow. A `require` needs a
 boolean condition whose false outcome is statically impossible. There is no

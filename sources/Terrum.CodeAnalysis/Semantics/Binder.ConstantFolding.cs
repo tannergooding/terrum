@@ -1,0 +1,122 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System.Diagnostics.CodeAnalysis;
+using System.Numerics;
+using Terrum.CodeAnalysis.Lexing;
+
+namespace Terrum.CodeAnalysis.Semantics;
+
+internal sealed partial class Binder
+{
+    [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Only the supported built-in operators can be folded.")]
+    private static BoundExpression FoldScalarConstant(BoundExpression expression)
+    {
+        BigInteger value;
+        switch (expression)
+        {
+            case BoundCast { Operand: BoundConstant operand }
+                when TryScalarValue(operand, out var input):
+                value = input;
+                break;
+
+            case BoundUnary { Operand: BoundConstant operand } unary
+                when unary.Type == operand.Type && TryScalarValue(operand, out var input):
+                switch (unary.Operator)
+                {
+                    case TokenKind.Plus:
+                        value = input;
+                        break;
+                    case TokenKind.Minus when unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64:
+                        value = -input;
+                        break;
+                    case TokenKind.Tilde when unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64:
+                        value = ~input;
+                        break;
+                    case TokenKind.Tilde when unary.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64:
+                        value = (unary.Type == PrimitiveType.UInt32 ? uint.MaxValue : (BigInteger)ulong.MaxValue) ^ input;
+                        break;
+                    default:
+                        return expression;
+                }
+                break;
+
+            case BoundBinary { Left: BoundConstant left, Right: BoundConstant right } binary
+                when left.Type == right.Type && binary.Type == left.Type
+                    && TryScalarValue(left, out var first) && TryScalarValue(right, out var second):
+                switch (binary.Operator)
+                {
+                    case TokenKind.Plus:
+                        value = first + second;
+                        break;
+                    case TokenKind.Minus:
+                        value = first - second;
+                        break;
+                    case TokenKind.Star:
+                        value = first * second;
+                        break;
+                    case TokenKind.Slash when second != 0:
+                        value = first / second;
+                        break;
+                    case TokenKind.Percent when second != 0:
+                        value = first % second;
+                        break;
+                    case TokenKind.Ampersand:
+                        value = first & second;
+                        break;
+                    case TokenKind.Pipe:
+                        value = first | second;
+                        break;
+                    case TokenKind.Caret:
+                        value = first ^ second;
+                        break;
+                    default:
+                        return expression;
+                }
+                break;
+
+            default:
+                return expression;
+        }
+
+        return TryEncodeScalar(value, expression.Type, out var bits)
+            ? new BoundConstant(bits, expression.Type, expression.Span) : expression;
+    }
+
+    [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Only integral scalar constants can be folded.")]
+    private static bool TryScalarValue(BoundConstant constant, out BigInteger value)
+    {
+        value = constant.Type switch {
+            PrimitiveType.Int32 or PrimitiveType.Int64 => constant.Value,
+            PrimitiveType.UInt32 => unchecked((uint)(int)constant.Value),
+            PrimitiveType.UInt64 => unchecked((ulong)constant.Value),
+            PrimitiveType.Char16 => constant.Value,
+            _ => default,
+        };
+        return constant.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+            or PrimitiveType.UInt64 or PrimitiveType.Char16;
+    }
+
+    [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Other types cannot be folded.")]
+    [SuppressMessage("Style", "IDE0078:Use pattern matching", Justification = "BigInteger range comparisons use its overloaded operators.")]
+    private static bool TryEncodeScalar(BigInteger value, PrimitiveType type, out long bits)
+    {
+        bits = default;
+        if (type switch {
+            PrimitiveType.Int32 => value < int.MinValue || value > int.MaxValue,
+            PrimitiveType.UInt32 => value < 0 || value > uint.MaxValue,
+            PrimitiveType.Int64 => value < long.MinValue || value > long.MaxValue,
+            PrimitiveType.UInt64 => value < 0 || value > ulong.MaxValue,
+            PrimitiveType.Char16 => value < 0 || value > ushort.MaxValue,
+            _ => true,
+        })
+        {
+            return false;
+        }
+        bits = type switch {
+            PrimitiveType.UInt32 => unchecked((int)(uint)value),
+            PrimitiveType.UInt64 => unchecked((long)(ulong)value),
+            _ => (long)value,
+        };
+        return true;
+    }
+}

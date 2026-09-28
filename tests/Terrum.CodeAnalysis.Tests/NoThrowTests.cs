@@ -75,6 +75,121 @@ public sealed class NoThrowTests
     }
 
     [Theory]
+    [InlineData("int32", "1 + 2", PrimitiveType.Int32, 3L)]
+    [InlineData("int32", "(1 + 2) * 14", PrimitiveType.Int32, 42L)]
+    [InlineData("int32", "-(-42)", PrimitiveType.Int32, 42L)]
+    [InlineData("int32", "~(1 & 2)", PrimitiveType.Int32, -1L)]
+    [InlineData("int32", "int32.MinValue % -1", PrimitiveType.Int32, 0L)]
+    [InlineData("int64", "int64.MinValue % -1", PrimitiveType.Int64, 0L)]
+    [InlineData("uint32", "uint32.MaxValue / 4294967295", PrimitiveType.UInt32, 1L)]
+    [InlineData("uint32", "uint32.MaxValue & uint32.MaxValue", PrimitiveType.UInt32, -1L)]
+    [InlineData("uint64", "uint64.MaxValue / uint64.MaxValue", PrimitiveType.UInt64, 1L)]
+    [InlineData("uint64", "uint64.MaxValue - 1", PrimitiveType.UInt64, -2L)]
+    [InlineData("uint64", "uint64(uint32.MaxValue) + 1", PrimitiveType.UInt64, 4294967296L)]
+    [InlineData("char16", "char16(int32(65535))", PrimitiveType.Char16, 65535L)]
+    [InlineData("int32", "int32(uint32(42))", PrimitiveType.Int32, 42L)]
+    [InlineData("int32", "+int32(42)", PrimitiveType.Int32, 42L)]
+    [InlineData("uint32", "+uint32.MaxValue", PrimitiveType.UInt32, -1L)]
+    [InlineData("uint64", "+uint64.MaxValue", PrimitiveType.UInt64, -1L)]
+    [InlineData("int64", "-int64(42)", PrimitiveType.Int64, -42L)]
+    [InlineData("int64", "~int64(0)", PrimitiveType.Int64, -1L)]
+    [InlineData("uint32", "~uint32(0)", PrimitiveType.UInt32, -1L)]
+    [InlineData("uint32", "~uint32.MaxValue", PrimitiveType.UInt32, 0L)]
+    [InlineData("uint64", "~uint64(0)", PrimitiveType.UInt64, -1L)]
+    [InlineData("uint64", "~uint64.MaxValue", PrimitiveType.UInt64, 0L)]
+    [InlineData("int32", "int32.MinValue - 0", PrimitiveType.Int32, int.MinValue)]
+    [InlineData("int64", "int64.MaxValue * 1", PrimitiveType.Int64, long.MaxValue)]
+    [InlineData("uint32", "uint32.MaxValue % 4294967295", PrimitiveType.UInt32, 0L)]
+    [InlineData("uint64", "uint64.MaxValue % uint64(100)", PrimitiveType.UInt64, 15L)]
+    [InlineData("int32", "1 | 2", PrimitiveType.Int32, 3L)]
+    [InlineData("int32", "1 ^ 3", PrimitiveType.Int32, 2L)]
+    [InlineData("uint32", "uint32.MaxValue ^ uint32(1)", PrimitiveType.UInt32, -2L)]
+    [InlineData("uint64", "uint64.MaxValue | uint64(0)", PrimitiveType.UInt64, -1L)]
+    [InlineData("uint64", "uint64.MaxValue ^ uint64(1)", PrimitiveType.UInt64, -2L)]
+    [InlineData("uint32", "uint32(int32.MaxValue) + 1", PrimitiveType.UInt32, int.MinValue)]
+    [InlineData("int64", "int64(uint32.MaxValue)", PrimitiveType.Int64, 4294967295L)]
+    [InlineData("uint64", "uint64(int64.MaxValue)", PrimitiveType.UInt64, long.MaxValue)]
+    [InlineData("char16", "char16(uint64(65535))", PrimitiveType.Char16, 65535L)]
+    public void SafeScalarExpressionsPersistAsTypedConstants(
+        string resultType, string expression, PrimitiveType type, long value)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            $"[NoThrow] public {resultType} Fold() {{ return {expression}; }}"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var function = Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Functions);
+        var result = Assert.IsType<BoundReturn>(Assert.Single(function.Body.Statements));
+        var constant = Assert.IsType<BoundConstant>(result.Value);
+        Assert.Equal(type, constant.Type);
+        Assert.Equal(value, constant.Value);
+        Assert.Equal(expression.Length, constant.Span.Length);
+    }
+
+    [Theory]
+    [InlineData("int32", "int32.MaxValue + 1")]
+    [InlineData("int32", "int32.MinValue - 1")]
+    [InlineData("int64", "int64.MaxValue * 2")]
+    [InlineData("uint32", "uint32.MaxValue + 1")]
+    [InlineData("uint64", "uint64.MaxValue + 1")]
+    [InlineData("int32", "1 / 0")]
+    [InlineData("int32", "int32.MinValue / -1")]
+    [InlineData("int64", "int64.MinValue / -1")]
+    [InlineData("char16", "char16(int32(-1))")]
+    [InlineData("int32", "int32(uint32.MaxValue)")]
+    [InlineData("int32", "(int32.MaxValue + 1) - 1")]
+    [InlineData("uint32", "(uint32.MaxValue + 1) - 1")]
+    [InlineData("int32", "0 * Read()")]
+    [InlineData("int32", "1 + value")]
+    [InlineData("uint32", "uint32(int32(-1))")]
+    [InlineData("int64", "int64(uint64.MaxValue)")]
+    [InlineData("char16", "char16(uint64(65536))")]
+    public void UnsafeOrUnknownScalarExpressionsKeepTheirEffects(string resultType, string expression)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        var parameter = expression.Contains("value", StringComparison.Ordinal) ? "int32 value" : "";
+        var callee = expression.Contains("Read()", StringComparison.Ordinal)
+            ? "[NoThrow] int32 Read() { return 42; }" : "";
+        var source = $"{resultType} Fold({parameter}) {{ return {expression}; }} {callee}";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("[NoThrow] " + source));
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3017");
+        Assert.Null(compilation.Program);
+        var baseline = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.False(baseline.HasErrors, string.Join(Environment.NewLine, baseline.Diagnostics));
+        var function = Assert.Single(Assert.IsType<BoundProgram>(baseline.Program).Functions,
+            static function => function.Name == "Fold");
+        var result = Assert.IsType<BoundReturn>(Assert.Single(function.Body.Statements));
+        Assert.IsNotType<BoundConstant>(result.Value);
+    }
+
+    [Theory]
+    [InlineData("int32 Main() { var value = 1 + 2; return value; }", "TRM3014")]
+    [InlineData("int32 Main() { return int32(1) + uint32(2); }", "TRM3007")]
+    [InlineData("char16 Main() { return char16(1) + char16(2); }", "TRM3007")]
+    public void FoldingDoesNotRepairInvalidOperandContexts(string source, string code)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.Null(compilation.Program);
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
+    }
+
+    [Fact]
+    public void FoldingCalleeBodyDoesNotStrengthenItsDeclaredEffect()
+    {
+        const string Callee = "int32 Callee() { return 1 + 2; }";
+        var baseline = Compilation.CreateLibrary(SyntaxTree.Parse(Callee));
+        Assert.False(baseline.HasErrors, string.Join(Environment.NewLine, baseline.Diagnostics));
+        var callee = Assert.Single(Assert.IsType<BoundProgram>(baseline.Program).Functions);
+        var statement = Assert.IsType<BoundReturn>(Assert.Single(callee.Body.Statements));
+        Assert.Equal(3L, Assert.IsType<BoundConstant>(statement.Value).Value);
+        Assert.False(callee.IsNoThrow);
+
+        var caller = Compilation.CreateLibrary(SyntaxTree.Parse(
+            Callee + " [NoThrow] int32 Caller() { return Callee(); }"));
+        Assert.Null(caller.Program);
+        Assert.Contains(caller.Diagnostics, static diagnostic => diagnostic.Code == "TRM3017");
+    }
+
+    [Theory]
     [InlineData("int32 F(int32 value) { return value + 1; }")]
     [InlineData("int32 F(int32 value) { return value - 1; }")]
     [InlineData("int64 F(int64 value) { return value * 2; }")]

@@ -1581,6 +1581,7 @@ internal sealed partial class Binder
     private BoundExpression BindExpression(SyntaxNode node, PrimitiveType? expected)
     {
         _cancellationToken.ThrowIfCancellationRequested();
+        var diagnosticCount = _diagnostics.Count;
         BoundExpression expression;
 
         switch (node.Kind)
@@ -1868,7 +1869,7 @@ internal sealed partial class Binder
             Report("TRM3007", $"Expected {TypeName(expected.Value)}, got {TypeName(expression.Type)}.", node.Span);
         }
 
-        return expression;
+        return _diagnostics.Count == diagnosticCount ? FoldScalarConstant(expression) : expression;
     }
 
     private static bool CanImplicitlyConvert(PrimitiveType source, PrimitiveType target)
