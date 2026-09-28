@@ -149,6 +149,12 @@ public readonly ref struct TrRmTypeDefTableReader
         return (int)Read(row - 1, 28);
     }
 
+    public uint GetFlags(int row)
+    {
+        CheckRow(row);
+        return Read(row - 1, 8);
+    }
+
     private string ReadNamespace(int row)
     {
         var reference = Read(row, 0);

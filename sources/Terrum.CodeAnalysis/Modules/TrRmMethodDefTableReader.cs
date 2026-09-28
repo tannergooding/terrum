@@ -13,6 +13,7 @@ public readonly ref struct TrRmMethodDefTableReader
     private const int RowSize = 28;
     private readonly ReadOnlySpan<byte> _rows;
     private readonly TrRmStringTableReader _strings;
+    private readonly TrRmModuleTableReader _modules;
     private readonly int _recordCount;
 
     public TrRmMethodDefTableReader(ReadOnlySpan<byte> section, int recordCount,
@@ -30,6 +31,7 @@ public readonly ref struct TrRmMethodDefTableReader
 
         _rows = section;
         _strings = strings;
+        _modules = modules;
         _recordCount = recordCount;
         var ownedBodies = new bool[bodyCount + 1];
         var usedGenericSignatures = new bool[signatures.Count + 1];
@@ -116,6 +118,38 @@ public readonly ref struct TrRmMethodDefTableReader
 
     public int GetSignature(int row)
         => (int)Read(GetRow(row), 8);
+
+    public uint GetFlags(int row)
+        => Read(GetRow(row), 12);
+
+    public int GetBodyRow(int row)
+        => (int)Read(GetRow(row), 24);
+
+    public int GetOwnerModule(int row)
+    {
+        _ = GetRow(row);
+        var low = 1;
+        var high = _modules.Count;
+        while (low <= high)
+        {
+            var middle = low + (high - low) / 2;
+            var (start, end) = _modules.GetMethodDefRange(middle);
+            if (row < start)
+            {
+                high = middle - 1;
+            }
+            else if (row >= end)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                return middle;
+            }
+        }
+
+        throw InvalidMethod();
+    }
 
     public int Count => _recordCount;
 

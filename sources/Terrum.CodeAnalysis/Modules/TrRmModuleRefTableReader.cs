@@ -16,10 +16,12 @@ public readonly ref struct TrRmModuleRefTableReader
     private readonly TrRmModuleTableReader _modules;
     private readonly int _recordCount;
 
+    public int Count => _recordCount;
+
     public TrRmModuleRefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmModuleTableReader modules)
     {
-        if (recordCount <= 0 || recordCount > 0xFF_FFFF
+        if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != modules.ModuleRefCount
             || (long)recordCount * RowSize != section.Length)
         {
@@ -73,12 +75,23 @@ public readonly ref struct TrRmModuleRefTableReader
             throw InvalidRef();
         }
 
-        for (var module = 1; module <= _modules.Count; module++)
+        var low = 1;
+        var high = _modules.Count;
+        while (low <= high)
         {
-            var (start, end) = _modules.GetModuleRefRange(module);
-            if (row >= start && row < end)
+            var middle = low + (high - low) / 2;
+            var (start, end) = _modules.GetModuleRefRange(middle);
+            if (row < start)
             {
-                return module;
+                high = middle - 1;
+            }
+            else if (row >= end)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                return middle;
             }
         }
 

@@ -67,6 +67,27 @@ public readonly ref struct TrRmPropertyDefTableReader
         return _strings.DecodeName((int)name);
     }
 
+    public int Count => _recordCount;
+
+    public int GetOwnerType(int row)
+        => (int)Read(GetRow(row), 0);
+
+    public uint GetFlags(int row)
+        => Read(GetRow(row), 12);
+
+    public int GetGetterMethod(int row)
+        => (int)Read(GetRow(row), 16);
+
+    private ReadOnlySpan<byte> GetRow(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidProperty();
+        }
+
+        return _rows.Slice((row - 1) * RowSize, RowSize);
+    }
+
     private static uint Read(ReadOnlySpan<byte> data, int offset)
         => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
 
