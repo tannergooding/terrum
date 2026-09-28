@@ -154,10 +154,22 @@ It is not merely serialization of a private compiler object graph or a
 verifier certificate. Its ecosystem role is comparable to CIL without adopting
 its format. Compactness does not select a compression codec or container;
 pre-v1 IL breaks remain allowed and no frozen versioning scheme is selected.
-The verifier is one consumer of metadata and may use public contracts for
-external dependencies without source recompilation or mandatory dependency-
-body inspection; this neither trusts every producer claim nor forbids
-verification of available bodies, and does not change the current verifier.
+Source compilation checks authored bodies against their contracts. The verifier
+is one consumer of metadata; ordinary binary consumers perform safe structural,
+reference, binding, compatibility and caller-use checks, then trust declared
+contracts for external dependencies without mandatory dependency-body
+re-proof. Callers still satisfy imported preconditions, access, ownership and
+effect contracts. This does not trust malformed bytes or change the current
+bounded readers/verifier. Optional deeper audit tooling is not a v1 promise;
+signing/provenance does not establish semantic correctness; no mandatory
+signature or trust store is selected.
+
+Separate minimal language conformance from the standard application-library/
+runtime surface and feature-specific dependencies. Core requirements remain
+genuinely small; richer facilities retain their checked dependencies when
+used, with no silent weakening or fallback. This does not define an exhaustive
+type/API list, named runtime profiles, universal support for every feature or
+an implemented embedded/kernel backend.
 
 Specify the source language, semantic operations and verifier, metadata/module
 interchange, and runtime/target profiles with explicit boundaries. The exact

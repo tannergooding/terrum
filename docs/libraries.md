@@ -11,7 +11,31 @@ This is the proposed Terrum library contract, not the installed .NET library or 
 | **Application** | Managed list/linked list/dictionary/set/queue, ordinary managed `Text`, tasks, streams/terminal, files/network, globalization and serialization | Foundation plus tracing and appropriate host services |
 | **Platform leaves** | COM/Windows/DirectX and other native bindings | Only layers their adapters actually use; no reverse dependency on platform APIs |
 
-These are three coherent cumulative layers, **not** a feature-profile matrix for each allocator, SIMD width, encoding or collection. Namespaces describe functionality; referencing `Terrum.Collections` does not link every package or grant effects. An Application program can use Core's nonallocating kernels. Core does not promise that *all* error paths or callbacks allocate nothing; freestanding no-allocation execution additionally needs a compatible failure runtime. The initial native compiler does not yet implement these library layers. Optional hardware acceleration may use compatible software paths; a hardware-scalable register type with a target ABI is not secretly software-emulated as another type. Modules publish normalized public contracts, effects, lifetimes, generic witnesses and ABI obligations independently of linkage choice. Pinning an implementation does not expand `internal`/`private` access. Contract-bound replacement and AOT require actual metadata/binder support, not merely equal method names.
+These are draft cumulative **library dependency layers**, not language-conformance
+or target-runtime profiles. The Core library tier is broader than the genuinely
+minimal language requirements and is not a mandatory API baseline; `ref<T>`,
+`ptr<T>` and `int32` are illustrative foundational forms, not an exhaustive
+type list. Core/Foundation/Application are existing organizational labels, not
+newly standardized profile names or a feature-profile matrix for each allocator,
+SIMD width, encoding or collection. Core does not imply that the language
+requires a heap, tracing collector, scheduler or OS services.
+
+Namespaces describe functionality; referencing `Terrum.Collections` does not
+link every package or grant effects. An Application program can use Core's
+nonallocating kernels. Core does not promise that *all* error paths or callbacks
+allocate nothing; freestanding no-allocation execution additionally needs a
+compatible failure runtime. Features that require runtime facilities retain
+their dependencies and checked contracts when used; a missing facility does
+not silently weaken semantics or substitute an implicit fallback. Not every
+environment is required to support every feature, and no embedded/kernel
+backend is implemented. The initial native compiler does not yet
+implement these library layers. Optional hardware acceleration may use
+compatible software paths; a hardware-scalable register type with a target ABI
+is not secretly software-emulated as another type. Modules publish normalized
+public contracts, effects, lifetimes, generic witnesses and ABI obligations
+independently of linkage choice. Pinning an implementation does not expand
+`internal`/`private` access. Contract-bound replacement and AOT require actual
+metadata/binder support, not merely equal method names.
 
 The validated semantic-v24 source-class/`ManagedNode` access slice and
 semantic-v25/v26 named and nested mutable non-owning struct-receiver contracts do not implement

@@ -556,11 +556,24 @@ still requires its constant-evaluable body and evaluated dependencies to be
 available under that separate contract; the availability/persistence mechanism
 remains to specify.
 
-AOT, JIT, specialization, interface witnesses, and replacement validation use
-the same checked contracts. The verifier must reject forged state guarantees
-or unsupported rule versions; an attribute or producer assertion is not a proof.
-Foreign declarations enter through an explicit trusted boundary with compatible
-contracts, not by silently weakening safe consumers.
+AOT, JIT, specialization, interface witnesses and replacement validation use
+the same published contracts. Source compilation checks authored bodies
+against their declared state and effect guarantees. Ordinary binary consumers
+safely decode and structurally validate artifacts, resolve references, check
+binding/contract compatibility and validate caller use, then rely on published
+metadata contracts for external dependencies rather than re-proving their
+implementations. A caller still proves its obligations from imported
+preconditions, access, ownership and effect contracts. Unsupported rule
+versions and malformed structures reject;
+this default does not treat malformed bytes as trusted or require dependency
+body inspection. Hand-authored IL that lies about an implementation is not
+excluded by mandatory whole-program proof. Optional deeper audit tooling may
+be considered later, with no v1 or all-behavior certification promise.
+Signing/provenance is a separate distribution concern; signer identity is not
+semantic proof. These target contracts do not change the current bounded
+reader/verifier behavior. Foreign declarations still enter through explicit
+trusted boundaries with compatible contracts, not by silently weakening safe
+consumers.
 
 Changing the versioned floor changes its minimum guarantee and is an explicit
 language/toolchain capability change. A sound implementation extension above
