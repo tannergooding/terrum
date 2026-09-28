@@ -98,4 +98,29 @@ public unique struct SourceLineIndex
         character = position - starts.Read(low);
         return true;
     }
+
+    public bool TryGetOffset(int32 line, int32 character, out int32 offset)
+    {
+        if (line < 0 || line >= _starts.Count || character < 0)
+        {
+            return false;
+        }
+
+        ReadonlyInt32BufferView starts = _starts.Slice(0, _starts.Count);
+        int32 start = starts.Read(line);
+        if (line + 1 < starts.Length)
+        {
+            if (character >= starts.Read(line + 1) - start)
+            {
+                return false;
+            }
+        }
+        else if (character > _length - start)
+        {
+            return false;
+        }
+
+        offset = start + character;
+        return true;
+    }
 }

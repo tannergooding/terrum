@@ -42,11 +42,22 @@ public sealed partial class SourceLineComponentTests
                 if (index.GetLineCount() != Host.LineCount[0]) { return 1; }
                 if (index.TryGetPosition(-1, out var beforeLine, out var beforeCharacter)) { return 2; }
                 if (index.TryGetPosition(Host.Source.Length + 1, out var afterLine, out var afterCharacter)) { return 3; }
+                if (index.TryGetOffset(-1, 0, out var beforeOffset)
+                    || index.TryGetOffset(Host.LineCount[0], 0, out var afterOffset)
+                    || index.TryGetOffset(0, -1, out var negativeCharacter)
+                    || index.TryGetOffset(0, int32.MaxValue, out var hugeCharacter)) { return 5; }
                 for (mut int32 position = 0; position <= Host.Source.Length; position = position + 1) {
                     require index.TryGetPosition(position, out var line, out var character);
                     if (line != Host.ExpectedPositions[position * 2]
                         || character != Host.ExpectedPositions[position * 2 + 1]) { return 4; }
+                    if (!index.TryGetOffset(line, character, out var offset)
+                        || offset != position) { return 6; }
+                    if (position < Host.Source.Length
+                        && Host.ExpectedPositions[(position + 1) * 2] != line
+                        && index.TryGetOffset(line, character + 1, out var nextLineStart)) { return 7; }
                 }
+                require index.TryGetPosition(Host.Source.Length, out var lastLine, out var lastCharacter);
+                if (index.TryGetOffset(lastLine, lastCharacter + 1, out var pastEnd)) { return 8; }
                 return 0;
             }
             int32 Main() {
@@ -64,7 +75,9 @@ public sealed partial class SourceLineComponentTests
                 new HostBuffer("ExpectedPositions", PrimitiveType.Int32, expected.ToImmutable(), false),
             ], (BoundRuntimePolicy)policy);
             Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-            await ExecuteAsync(Assert.IsType<BoundProgram>(compilation.Program), policy).ConfigureAwait(true);
+            var program = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.Equal(0, NativeJit.Execute(program, policy));
+            await ExecuteAsync(program, policy).ConfigureAwait(true);
         }
     }
 
@@ -90,6 +103,8 @@ public sealed partial class SourceLineComponentTests
                     || index.GetCapacityForTest() != {{expectedCount}}) { return 1; }
                 require index.TryGetPosition(Host.Source.Length, out var line, out var character);
                 if (line != {{last.Line}} || character != {{last.Character}}) { return 2; }
+                if (!index.TryGetOffset(line, character, out var offset)
+                    || offset != Host.Source.Length) { return 3; }
                 return 0;
             }
             """, "capacity-index-entry.terrum");
@@ -123,6 +138,9 @@ public sealed partial class SourceLineComponentTests
                 require index.TryGetPosition(Host.Source.Length, out var line, out var character);
                 if (line != {{(fewLines ? 1 : 0)}}
                     || character != {{(fewLines ? 1 : MaximumCapacity)}}) { return 3; }
+                if (!index.TryGetOffset(line, character, out var offset)
+                    || offset != Host.Source.Length
+                    || index.TryGetOffset(line, int32.MaxValue, out var excessive)) { return 5; }
                 return 0;
             }
             """, "sparse-index-entry.terrum");
@@ -172,6 +190,9 @@ public sealed partial class SourceLineComponentTests
                 if (index.GetCapacityForTest() != Host.Source.Length + 1) { return 4; }
                 require index.TryGetPosition(Host.Source.Length, out var line, out var character);
                 if (line != Host.Source.Length || character != 0) { return 3; }
+                if (!index.TryGetOffset(line, character, out var offset)
+                    || offset != Host.Source.Length
+                    || index.TryGetOffset(line - 1, 1, out var nextLineStart)) { return 5; }
                 return 0;
             }
             """, "dense-index-entry.terrum");
@@ -199,6 +220,8 @@ public sealed partial class SourceLineComponentTests
                 for (mut int32 position = 0; position <= 3; position = position + 1) {
                     require index.TryGetPosition(position, out var line, out var character);
                     if (line != 0 || character != position) { return 2; }
+                    if (!index.TryGetOffset(line, character, out var offset)
+                        || offset != position) { return 3; }
                 }
                 return 0;
             }
@@ -212,6 +235,8 @@ public sealed partial class SourceLineComponentTests
     [Theory]
     [InlineData("index.TryGetPosition(-1, out var line, out var character); return line;")]
     [InlineData("index.TryGetPosition(2, out var line, out var character); return character;")]
+    [InlineData("index.TryGetOffset(-1, 0, out var position); return position;")]
+    [InlineData("index.TryGetOffset(0, 2, out var position); return position;")]
     [InlineData("SourceLineIndex copy = index; return copy.GetLineCount();")]
     [InlineData("SourceLineIndex moved = move index; return index.GetLineCount();")]
     public async Task OwnedLineIndexRejectsUnpublishedOutputsAndCopiesAsync(string body)

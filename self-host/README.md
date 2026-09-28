@@ -87,7 +87,7 @@ remain hosted in C#.
 | [IntegerFormatting](IntegerFormatting.terrum) | Invariant signed/unsigned decimal digits in reusable owned storage | AOT/JIT boundary and repeated-use fixtures; native heap checks cover same-allocation transfer and failure cleanup |
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and conditional bool/out publication |
 | [SourceLines](SourceLines.terrum) | Streaming line ranges and UTF-16 line/character mapping over an immutable source grant | Executed with conditional outputs; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
-| [SourceLineIndex](SourceLineIndex.terrum) | Owned line-start table and binary-searched UTF-16 positions | Executed as AOT under both failure policies; every position matches host fixtures, with invalid outputs and owner copies rejected |
+| [SourceLineIndex](SourceLineIndex.terrum) | Owned line-start table and bidirectional UTF-16 offset/line-position lookup | Executed as AOT/JIT under both failure policies; every offset round-trips with host line positions, with invalid outputs and owner copies rejected |
 | [SourceLineTests](SourceLineTests.terrum) | Shared line-range/position fixtures, invalid offsets and repeated queries | Executed natively with host-supplied expected records; no source normalization or default output values |
 | [StringLiteral](StringLiteral.terrum) | Validated quoted spelling and scalar decoding from the immutable UTF-16 source grant | Executed with conditional creation/reads, all supported escapes and exact source boundaries; not a runtime text representation |
 | [StringLiteralTests](StringLiteralTests.terrum) | Quoted-form validation, scalar values and rejection of offsets inside escapes or surrogate pairs | Shared host-lexer/compiled fixtures under both native runtime policies; failed calls publish no output |
@@ -143,9 +143,14 @@ table of line starts, publishes the completed index through a conditional output
 and answers position queries by binary search over a scoped readonly slice of
 the initialized table. The slice borrows the owning field only for that query;
 it is not returned or stored in the index. The index retains only copied offsets
-and the source length; queries do not retain or reread the source grant. Construction
-counts lines before reserving exactly one word per line start, including the
-final empty line after a trailing break. The fill pass reuses the known first
+and the source length; queries do not retain or reread the source grant. It
+also supports the inverse line/character-to-offset lookup from the same table.
+Line positions include break units on their preceding line; a character at the
+next line's start must use the next line number, and only the final line admits
+the EOF offset. Invalid line/character pairs return false without publishing
+an offset, including values that would overflow a signed offset if added first.
+Construction counts lines before reserving exactly one word per line start,
+including the final empty line after a trailing break. The fill pass reuses the known first
 and final starts, so one- and two-line sources need no second scan. If every
 code unit ends a line, starts are filled directly from their ordinal positions.
 Other multiline sources trade a partial second scan for smaller storage; this
