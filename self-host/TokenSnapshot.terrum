@@ -1,0 +1,83 @@
+namespace Terrum.CodeAnalysis;
+
+public unique struct TokenSnapshot
+{
+    private OwnedInt32Buffer _records;
+    private int32 _count;
+
+    private TokenSnapshot(OwnedInt32Buffer records, int32 count)
+    {
+        _records = move records;
+        _count = count;
+    }
+
+    public int32 GetCount()
+    {
+        return _count;
+    }
+
+    public bool TryGet(int32 index, out Token token)
+    {
+        if (index < 0 || index >= _count)
+        {
+            return false;
+        }
+
+        int32 offset = index * 3;
+        require SourceRange.TryCreate(_records.Read(offset + 1), _records.Read(offset + 2),
+            out var range);
+        token = new Token(_records.Read(offset), range);
+        return true;
+    }
+
+    public bool TryGetInit(int32 index, init ref<Token> token)
+    {
+        if (!TryGet(index, out var found))
+        {
+            return false;
+        }
+        token = found;
+        return true;
+    }
+
+    public static bool TryBuild(int32 count, init ref<TokenSnapshot> result)
+    {
+        if (Host.Diagnostics[0] != 0 || count < 1
+            || count > int32.MaxValue / 3 || count > Host.Tokens.Length / 3)
+        {
+            return false;
+        }
+
+        if (!OwnedInt32Buffer.TryCreate(count * 3, out var created))
+        {
+            return false;
+        }
+
+        mut OwnedInt32Buffer records = move created;
+        mut int32 previousEnd = 0;
+        for (mut int32 index = 0; index < count; index = index + 1)
+        {
+            int32 offset = index * 3;
+            int32 kind = Host.Tokens[offset];
+            int32 start = Host.Tokens[offset + 1];
+            int32 length = Host.Tokens[offset + 2];
+            if (!IsValidScannerToken(index, count, previousEnd, kind, start, length))
+            {
+                return false;
+            }
+
+            require records.TryAppend(kind);
+            require records.TryAppend(start);
+            require records.TryAppend(length);
+            previousEnd = start + length;
+        }
+
+        result = new TokenSnapshot(move records, count);
+        return true;
+    }
+
+    public static bool TryScan(init ref<TokenSnapshot> result)
+    {
+        return TryBuild(Scan(), init result);
+    }
+}

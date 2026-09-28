@@ -84,6 +84,82 @@ public sealed class ManagedScannerComponentTests
             string.Join(" ", Enumerable.Repeat("a", identifiers)), fails);
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task OwnedTokenSnapshotSupportsIndexedReadsBeyondManagedChainLimitAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                if (tokens.GetCount() != 129 || tokens.TryGet(-1, out var negative)
+                    || tokens.TryGet(129, out var beyond)) { return 1; }
+                mut int32 index = 0;
+                while (index < 128) {
+                    require tokens.TryGetInit(index, init var token);
+                    if (token.Kind != 2 || token.Range.Start != index * 2
+                        || token.Range.Length != 1) { return 2; }
+                    index = index + 1;
+                }
+                require tokens.TryGet(128, out var eof);
+                if (eof.Kind != 0 || eof.Range.Start != 255
+                    || eof.Range.Length != 0) { return 3; }
+                return 42;
+            }
+            """;
+        var input = string.Join(" ", Enumerable.Repeat("a", 128));
+        var program = await CompileAsync(input, Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task TokenSnapshotOwnsValidatedRecordsAndRejectsPartialCopiesAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                int32 count = Scan();
+                if (TokenSnapshot.TryBuild(int32.MaxValue, init var oversized)) { return 4; }
+                require TokenSnapshot.TryBuild(count, init var snapshot);
+                Host.Tokens[0] = -1;
+                require snapshot.TryGet(0, out var first);
+                if (first.Kind != 2 || first.Range.Start != 0) { return 1; }
+                Host.Tokens[0] = 2;
+                Host.Tokens[3] = -1;
+                if (TokenSnapshot.TryBuild(count, init var invalid)) { return 2; }
+                if (!snapshot.TryGet(1, out var second) || second.Kind != 2
+                    || second.Range.Start != 6) { return 3; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync("alpha beta", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task LexicalFailureLeavesOwnedTokenSnapshotVacantAsync(NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                if (TokenSnapshot.TryScan(init var tokens)) { return 1; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync("\uD800", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("alpha 42 // trailing\r\n\uD801\uDC00")]
     public async Task CursorReadsPublishedTokensAndStopsAtEndAsync(string text)
@@ -326,7 +402,7 @@ public sealed class ManagedScannerComponentTests
     private static async Task<BoundProgram> CompileAsync(string text, string entry, BoundRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        string[] names = ["SourceRange", "Token", "ManagedTokenChain", "Scanner", "ManagedScanner"];
+        string[] names = ["SourceRange", "Token", "ManagedTokenChain", "Scanner", "ManagedScanner", "TokenSnapshot"];
         var trees = new List<SyntaxTree>(names.Length + 1);
         foreach (var name in names)
         {

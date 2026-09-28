@@ -106,6 +106,7 @@ remain hosted in C#.
 | [RangeTests](RangeTests.terrum) | Small success/failure and overflow boundary cases | Executed with a host-supplied entry wrapper; a Terrum test runner remains future work |
 | [TokenTests](TokenTests.terrum) | Nested value copies and reconstruction with a vacancy-only initialized replacement range | Executed through the Windows indirect aggregate ABI; token and range fields stay read-only; no retained backing views |
 | [ManagedTokenChain](ManagedTokenChain.terrum) | Bounded linked storage for complete Copy tokens and vacancy-only validated source ranges, with a sequential managed cursor, non-consuming indexed lookahead and conditional kind consumption | AOT/JIT fixtures under both policies; 64-link capacity, count/version changes, `out` and vacancy-only `init ref` cursor creation, lookahead and indexed/sequential Copy results, mismatch does not advance, mutation invalidation and collection after clear |
+| [TokenSnapshot](TokenSnapshot.terrum) | Owned, indexed copy of a completed compiled scanner stream using three words per token, without the managed chain's 64-link limit | AOT/JIT indexed-read parity beyond 64 tokens, exact EOF and checked invalid indices; buffer capacity and allocation still bound the snapshot, while full trivia, diagnostics and parser integration remain future work |
 | [Scanner](Scanner.terrum) | UTF-16 decoding, pinned Unicode identifiers, exact token kinds, lossless trivia, lexical diagnostics and bounded integer magnitudes | Executed through fixed checked host buffers; see the [precise subset](../docs/scanner.md) |
 | [ManagedScanner](ManagedScanner.terrum) | Copy a completed compiled scanner token stream into newly published managed storage or a sequential cursor | AOT/JIT parity with host token kinds/ranges under both policies; lexical failure, malformed host records and more than 64 tokens leave the output vacant; independent copies survive clear and collection |
 | [Host APIs](host.api.terrum) | Explicit source acquisition, cancellation, digest and output boundary | Interfaces, immutable publication, operation failures; host adapters |
@@ -243,11 +244,13 @@ Allocation refusal leaves the existing chain unchanged. Indexed reads return
 independent Copy tokens that remain valid after the links are collected;
 no link handle or retained source view escapes the chain.
 `TryCreateCursor` allocates a sequential reader over the existing links rather
-than rescanning from the head for each token. The reader retains its chain and
-checks the chain version before every read. An append or clear invalidates old
-readers: `TryRead` then returns false without publishing an output, while
+than rescanning from the head for each token. Non-consuming peeks support
+bounded indexed lookahead; a kind mismatch leaves the cursor in place without
+publishing a token. The reader retains its chain and checks the chain version
+before every peek or read. An append or clear invalidates old
+readers: both operations then return false without publishing an output, while
 `IsCurrent` distinguishes invalidation from ordinary end of stream. The reader
-releases its remaining link on a rejected read; it does not preserve a snapshot
+releases its remaining link on an invalidated peek or read; it does not preserve a snapshot
 across mutation or expose a link handle.
 The link factory receives a complete `Token`, preserving the already checked
 `SourceRange` instead of decomposing and reconstructing it during allocation.
@@ -263,6 +266,12 @@ Lexical errors, invalid records, capacity or allocation refusal leave the
 output vacant; a partially filled local chain is never published. The
 wrapper does not replace the scanner records, trivia, diagnostic or integer
 tables used by `build-component`, nor does it introduce a parser bootstrap.
+`TokenSnapshot.TryScan` instead copies validated kind/start/length triples
+into one owned native buffer. Indexed reads are constant-time, remain stable
+after the host scanner buffer changes and exceed the managed chain's 64-token
+limit; native buffer capacity and allocation still bound the snapshot.
+The chain and snapshot share scanner-record validation, but neither stores
+trivia, diagnostic or integer-value records or constitutes a parser.
 `TryScanManagedCursor` publishes a reader only after the complete scan and
 cursor allocation succeed; its cursor retains the underlying chain after
 the scanner wrapper returns. It is a bounded sequential consumer, not a
