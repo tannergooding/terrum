@@ -321,8 +321,9 @@ constructors initialize every field before the generated
 `C.TryCreate(arguments, out C)` factory publishes an eight-byte handle.
 Allocation failure returns false; checked constructor failure frees the
 unpublished object and propagates. Collector-private zeroed reference slots are
-not source defaults. Class payloads are bounded to 128 bytes; readonly/mutable
-field access, visibility and partial-construction checks remain mandatory.
+not source defaults. Classes have at most 16 fields and payloads are bounded
+to 128 bytes; readonly/mutable field access, visibility and
+partial-construction checks remain mandatory.
 Class fields may contain acyclic handle-free Copy structs up to 16 bytes, including
 nested compact values. Those fields are copied as complete values, not traced as
 potential pointers. Unique owners, views and managed handles inside structs are

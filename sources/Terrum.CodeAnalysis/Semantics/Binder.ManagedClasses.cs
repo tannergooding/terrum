@@ -233,6 +233,10 @@ internal sealed partial class Binder
         {
             Report("TRM3005", "A managed class requires initialized instance fields.", declaration.Span);
         }
+        if (fields.Count > 16)
+        {
+            Report("TRM3005", "A managed class supports at most 16 fields.", declaration.Span);
+        }
         _classes[index] = new BoundClass(name, fields.ToImmutable(), (offset + 7) & ~7) {
             IsInternal = !publicClass,
             IsMutable = mutableClass,
