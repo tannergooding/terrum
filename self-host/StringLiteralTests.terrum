@@ -36,6 +36,22 @@ int32 CheckStringLiterals()
             }
             encoded = literal.EncodeUtf8(move encoded);
             if (encoded.Count != byteLength || encoded.Capacity != byteLength) { return 19; }
+            require literal.TryGetUtf16Length(init var unitLength);
+            int32 expectedUnitStart = Host.ExpectedUtf16Records[fixture * 2];
+            int32 expectedUnitLength = Host.ExpectedUtf16Records[fixture * 2 + 1];
+            if (unitLength != expectedUnitLength) { return 20; }
+            require OwnedInt32Buffer.TryCreate(unitLength, out var unitWorkspace);
+            mut OwnedInt32Buffer encodedUnits = literal.EncodeUtf16(move unitWorkspace);
+            if (encodedUnits.Count != unitLength || encodedUnits.Capacity != unitLength) { return 21; }
+            for (mut int32 unitIndex = 0; unitIndex < unitLength; unitIndex = unitIndex + 1)
+            {
+                if (encodedUnits.Read(unitIndex) != Host.ExpectedUtf16Units[expectedUnitStart + unitIndex])
+                {
+                    return 22;
+                }
+            }
+            encodedUnits = literal.EncodeUtf16(move encodedUnits);
+            if (encodedUnits.Count != unitLength || encodedUnits.Capacity != unitLength) { return 23; }
             mut int32 seen = 0;
             mut int32 at = start - 1;
             while (at <= spelling.End)

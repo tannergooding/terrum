@@ -29,6 +29,8 @@ public sealed class StringLiteralComponentTests
         var scalars = ImmutableArray.CreateBuilder<int>();
         var utf8Records = ImmutableArray.CreateBuilder<int>();
         var utf8Bytes = ImmutableArray.CreateBuilder<int>();
+        var utf16Records = ImmutableArray.CreateBuilder<int>();
+        var utf16Units = ImmutableArray.CreateBuilder<int>();
         foreach (var fixture in Fixtures())
         {
             var lexed = Lexer.Lex(SourceText.From(fixture.Text));
@@ -42,6 +44,8 @@ public sealed class StringLiteralComponentTests
             literals.Add(scalars.Count / 3);
             utf8Records.Add(utf8Bytes.Count);
             utf8Records.Add(fixture.Scalars is null ? -1 : 0);
+            utf16Records.Add(utf16Units.Count);
+            utf16Records.Add(fixture.Scalars is null ? -1 : 0);
             if (fixture.Scalars is ScalarFixture[] values)
             {
                 foreach (var value in values)
@@ -54,6 +58,8 @@ public sealed class StringLiteralComponentTests
                 var encoded = Encoding.UTF8.GetBytes(decoded);
                 utf8Records[^1] = encoded.Length;
                 utf8Bytes.AddRange(encoded.Select(static value => (int)value));
+                utf16Records[^1] = decoded.Length;
+                utf16Units.AddRange(decoded.Select(static unit => (int)unit));
             }
             _ = source.Append(fixture.Text).Append('\n');
         }
@@ -74,6 +80,8 @@ public sealed class StringLiteralComponentTests
             new HostBuffer("ExpectedScalars", PrimitiveType.Int32, scalars.ToImmutable(), false),
             new HostBuffer("ExpectedUtf8Records", PrimitiveType.Int32, utf8Records.ToImmutable(), false),
             new HostBuffer("ExpectedUtf8Bytes", PrimitiveType.Int32, utf8Bytes.ToImmutable(), false),
+            new HostBuffer("ExpectedUtf16Records", PrimitiveType.Int32, utf16Records.ToImmutable(), false),
+            new HostBuffer("ExpectedUtf16Units", PrimitiveType.Int32, utf16Units.ToImmutable(), false),
         ], policy == NativeRuntimePolicy.FailFast ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
@@ -81,34 +89,37 @@ public sealed class StringLiteralComponentTests
         Assert.Equal(0, NativeJit.Execute(program, policy));
     }
 
-    [Fact]
-    public async Task Utf8EncodingRejectsUndersizedStorageAndReleasesItOnCheckedFailureAsync()
+    [Theory]
+    [InlineData("Utf8", "\"\u00E9\"", 195, 169)]
+    [InlineData("Utf16", "\"\uD83D\uDE00\"", 0xD83D, 0xDE00)]
+    public async Task LiteralEncodingRejectsUndersizedStorageAndReleasesItOnCheckedFailureAsync(
+        string encoding, string spelling, int first, int second)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
-        var entry = SyntaxTree.Parse("""
+        var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
-                require SourceRange.TryCreate(0, 3, out var spelling);
+                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
                 require StringLiteral.TryCreate(spelling, out var literal);
-                require literal.TryGetUtf8Length(init var byteLength);
-                if (byteLength != 2) { return 1; }
+                require literal.TryGet{{encoding}}Length(init var unitLength);
+                if (unitLength != 2) { return 1; }
                 require OwnedInt32Buffer.TryCreate(1, out var small);
                 unsafe {
                     try {
-                        OwnedInt32Buffer partial = literal.EncodeUtf8(move small);
+                        OwnedInt32Buffer partial = literal.Encode{{encoding}}(move small);
                         return 2;
                     } catch {
-                        require OwnedInt32Buffer.TryCreate(byteLength, out var exact);
-                        OwnedInt32Buffer encoded = literal.EncodeUtf8(move exact);
+                        require OwnedInt32Buffer.TryCreate(unitLength, out var exact);
+                        OwnedInt32Buffer encoded = literal.Encode{{encoding}}(move exact);
                         if (encoded.Count != 2 || encoded.Capacity != 2
-                            || encoded.Read(0) != 195 || encoded.Read(1) != 169) { return 3; }
+                            || encoded.Read(0) != {{first}} || encoded.Read(1) != {{second}}) { return 3; }
                         return 0;
                     }
                 }
             }
-            """, "utf8-undersized-entry.terrum");
+            """, "literal-undersized-entry.terrum");
         var compilation = Compilation.Create(trees.Add(entry),
-            [new HostBuffer("Source", PrimitiveType.Char16, [34, 233, 34], false)],
+            [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
             BoundRuntimePolicy.CheckedExceptions);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
@@ -181,6 +192,8 @@ public sealed class StringLiteralComponentTests
         yield return Valid(("e", 101), ("\u0301", 769), ("\u00E9", 233));
         yield return Valid(("\uD7FF", 0xD7FF), ("\uE000", 0xE000), ("\uFFFF", 0xFFFF));
         yield return Valid(("\uD800\uDC00", 0x10000), ("\uDBFF\uDFFF", 0x10FFFF));
+        yield return Valid(("\u007F", 0x7F), ("\u0080", 0x80), ("\u07FF", 0x7FF),
+            ("\u0800", 0x800), ("\uFFFF", 0xFFFF));
         yield return Valid(("\\u0000", 0), ("\\u000A", 10), ("\\u0085", 133), ("\\u2028", 8232));
         yield return Valid(("\\uD7FF", 0xD7FF), ("\\ue000", 0xE000), ("\\uffFf", 0xFFFF));
         yield return Valid(("\\U00000041", 65), ("\\U00010000", 0x10000), ("\\U0010FFFF", 0x10FFFF));

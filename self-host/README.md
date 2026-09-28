@@ -97,7 +97,7 @@ remain hosted in C#.
 | [SourceLines](SourceLines.terrum) | Streaming line ranges, line extents and bidirectional UTF-16 offset/line-position mapping over an immutable source grant | AOT/JIT `out` and vacancy-only `init ref` outputs under both policies; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
 | [SourceLineIndex](SourceLineIndex.terrum) | Owned line-start table, random-access line extents and bidirectional UTF-16 offset/line-position lookup | Executed as AOT/JIT under both failure policies; existing `out` APIs and vacancy-only `init ref` construction/lookups, exact offset round-trips, invalid output and owner-copy rejection |
 | [SourceLineTests](SourceLineTests.terrum) | Shared line-range/position fixtures, invalid offsets and repeated queries | Executed natively with host-supplied expected records; no source normalization or default output values |
-| [StringLiteral](StringLiteral.terrum) | Validated quoted spelling and scalar decoding from the immutable UTF-16 source grant, with explicit UTF-8 byte-length measurement and encoding into owned storage | Executed with conditional `out` and vacancy-only `init ref` creation/reads, all supported escapes and exact source boundaries; UTF-8 bytes are checked against the host encoder, not a runtime text representation or a selected TRRM row grammar |
+| [StringLiteral](StringLiteral.terrum) | Validated quoted spelling and scalar decoding from the immutable UTF-16 source grant, with explicit UTF-8 and UTF-16 length measurement and encoding into owned storage | Executed with conditional `out` and vacancy-only `init ref` creation/reads, all supported escapes and exact source boundaries; decoded bytes/units agree with host encoders, not a default runtime representation or selected TRRM row grammar |
 | [StringLiteralTests](StringLiteralTests.terrum) | Quoted-form validation, scalar values and rejection of offsets inside escapes or surrogate pairs | Shared host-lexer/compiled fixtures under both native runtime policies; failed calls publish no output |
 | [CharacterFacts](CharacterFacts.terrum) | Shared ASCII numeric and newline decisions | Executed with `char16` comparisons, checked numeric type-call conversions and verified NoThrow classification contracts |
 | [Token](Token.terrum) | Token category and nested source range | Executed as a 12-byte aggregate with independent producer/consumer artifacts |
@@ -272,13 +272,15 @@ an escape or surrogate pair. Arbitrary-position reads rescan the prefix.
 total time, publishing the scalar and next immutable cursor together.
 Neither form allocates an index or decoded buffer. The private construction invariant
 depends on the fixed immutable `Host.Source` grant, not on a retained pointer
-or a general text-view lifetime contract. `TryGetUtf8Length` measures decoded
-scalars in bytes without allocating; `EncodeUtf8` consumes a caller-provided
-`OwnedInt32Buffer` and writes those bytes as integer words. Exact capacity
-works for empty and nonempty literals; insufficient capacity fails through
-the existing checked requirement and cleans the consumed owner. This explicit
-conversion does not allocate decoded text, normalize it, select a default
-runtime or metadata encoding, or add native string expressions.
+or a general text-view lifetime contract. Explicit UTF-8 and UTF-16 length
+queries measure decoded scalars without allocating; their encoders consume
+caller-provided `OwnedInt32Buffer` storage and write bytes or code units as
+integer words. UTF-16 supplementary scalars become surrogate pairs; escaped
+surrogates remain invalid. Exact capacity works for empty and nonempty
+literals; insufficient capacity fails through the existing checked requirement
+and cleans the consumed owner. These conversions do not allocate decoded
+text, normalize it, select a default runtime or metadata encoding, or add
+native string expressions.
 
 The candidates reuse `Span<Token>`/`TextSpan` rather than imitating C# strings,
 `IEnumerator`, `ImmutableArray`, reflection, GC handles or compiler-generated

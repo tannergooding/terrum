@@ -143,6 +143,47 @@ public struct StringLiteral
         }
         return move bytes;
     }
+
+    public bool TryGetUtf16Length(init ref<int32> unitLength)
+    {
+        mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
+        mut int32 count = 0;
+        while (cursor.TryRead(out var scalar, out var next))
+        {
+            mut int32 width = 1;
+            if (scalar >= 65536) { width = 2; }
+            if (count > int32.MaxValue - width)
+            {
+                return false;
+            }
+            count = count + width;
+            cursor = next;
+        }
+        unitLength = count;
+        return true;
+    }
+
+    public OwnedInt32Buffer EncodeUtf16(OwnedInt32Buffer workspace)
+    {
+        mut OwnedInt32Buffer units = move workspace;
+        units.Clear();
+        mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
+        while (cursor.TryRead(out var scalar, out var next))
+        {
+            if (scalar >= 65536)
+            {
+                int32 supplementary = scalar - 65536;
+                require units.TryAppend(55296 + supplementary / 1024);
+                require units.TryAppend(56320 + supplementary % 1024);
+            }
+            else
+            {
+                require units.TryAppend(scalar);
+            }
+            cursor = next;
+        }
+        return move units;
+    }
 }
 
 public struct StringLiteralCursor
