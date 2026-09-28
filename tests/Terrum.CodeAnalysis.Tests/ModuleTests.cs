@@ -159,6 +159,7 @@ public sealed class ModuleTests
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
             "Terrum.CodeAnalysis.SourceRange.TryCreate",
+            "Terrum.CodeAnalysis.SourceRange.TryCreateInit",
             "Terrum.CodeAnalysis.SourceRange.GetEnd",
             "Terrum.CodeAnalysis.SourceRange.#get:End",
             "Terrum.CodeAnalysis.IsAsciiDigit",
@@ -194,6 +195,27 @@ public sealed class ModuleTests
     }
 
     [Theory]
+    [InlineData("range.Start")]
+    [InlineData("range.End")]
+    public async Task FailedRangeInitCannotPublishFieldsAsync(string read)
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        var source = Path.Combine(root, "self-host", "SourceRange.terrum");
+        var range = SyntaxTree.Parse(await File.ReadAllTextAsync(source).ConfigureAwait(true), source);
+        var entry = SyntaxTree.Parse($$"""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                bool created = SourceRange.TryCreateInit(-1, 0, init var range);
+                return {{read}};
+            }
+            """);
+        var compilation = Compilation.Create([range, entry]);
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task CliBuildsMultiSourceSelfHostLibraryAndConsumerAsync(bool tokens)
@@ -207,6 +229,7 @@ public sealed class ModuleTests
         {
             var arguments = new List<string> { "compile-module", "producer",
                 Path.Combine(root, "self-host", "SourceRange.terrum"), "Terrum.CodeAnalysis.SourceRange.TryCreate",
+                "--export", "Terrum.CodeAnalysis.SourceRange.TryCreateInit",
                 "--source", Path.Combine(root, "self-host", tokens ? "Token.terrum" : "CharacterFacts.terrum"),
                 "--export", "Terrum.CodeAnalysis.SourceRange.GetEnd",
                 "--export", "Terrum.CodeAnalysis.SourceRange.#get:End",

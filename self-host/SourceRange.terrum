@@ -24,6 +24,16 @@ public struct SourceRange
         return true;
     }
 
+    public static bool TryCreateInit(int32 start, int32 length, init ref<SourceRange> range)
+    {
+        if (!TryCreate(start, length, out var created))
+        {
+            return false;
+        }
+        range = created;
+        return true;
+    }
+
     public int32 GetEnd()
     {
         return Start + Length;
