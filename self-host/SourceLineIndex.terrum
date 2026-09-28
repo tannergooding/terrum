@@ -186,4 +186,37 @@ public unique struct SourceLineIndex
         includingBreak = resolved;
         return true;
     }
+
+    public bool TryGetLineContentExtent(int32 line, out SourceRange content)
+    {
+        if (!TryGetLineExtent(line, out var includingBreak))
+        {
+            return false;
+        }
+
+        int32 start = includingBreak.Start;
+        mut int32 end = includingBreak.End;
+        if (end > start && IsLineBreak(Host.Source[end - 1]))
+        {
+            end = end - 1;
+            if (end > start && Host.Source[end - 1] == 13 && Host.Source[end] == 10)
+            {
+                end = end - 1;
+            }
+        }
+
+        require SourceRange.TryCreate(start, end - start, out content);
+        return true;
+    }
+
+    public bool TryGetLineContentExtentInit(int32 line, init ref<SourceRange> content)
+    {
+        if (!TryGetLineContentExtent(line, out var resolved))
+        {
+            return false;
+        }
+
+        content = resolved;
+        return true;
+    }
 }
