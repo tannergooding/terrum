@@ -1041,7 +1041,8 @@ MethodDef module, signature and body ownership. A host-side
 writer emits indexed String sections with required names or optional empty
 namespace text; the self-host String-row
 candidate emits individual rows. These exercise approved metadata contracts in isolation,
-not complete artifact framing or the current module writer.
+including a framed callable-table fixture, but do not parse executable Body
+instructions or replace the current module writer.
 Historical-revision readers and feature-dependent writer
 selection are temporary implementation support to remove before v1. That
 cleanup must update writers and fixtures together and reject unsupported

@@ -44,6 +44,19 @@ public sealed class TrRmArtifactIndexTests
         Assert.Equal(1, sources.GetOwnerModule(1));
     }
 
+    [Fact]
+    public void ComposesFramedStringTypeSpecSignatureAndCallableMetadata()
+    {
+        var artifact = ArtifactWithCallableMetadata();
+        Assert.Equal("Run", ReadCallableName(artifact));
+
+        var namesLength = TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]).Length;
+        var methodOffset = 32 + 5 * 16 + 44 + namesLength + 11;
+        artifact[methodOffset + 12] = 3;
+        _ = new TrRmArtifactIndex(artifact);
+        Assert.Throws<InvalidDataException>(() => ReadCallableName(artifact));
+    }
+
     [Theory]
     [InlineData(0, 0)]
     [InlineData(4, 2)]
@@ -236,6 +249,71 @@ public sealed class TrRmArtifactIndexTests
         Write(artifact, refOffset, 2);
         Write(artifact, refOffset + 4, 1);
         Write(artifact, sourceOffset, 3);
+        return artifact;
+    }
+
+    private static string ReadCallableName(byte[] artifact)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(0x0002, out var stringRows, out var stringCount));
+        var strings = new TrRmStringTableReader(stringRows, stringCount);
+        Assert.True(index.TryGetSection(0x0001, out var moduleRows, out var moduleCount));
+        var modules = new TrRmModuleTableReader(moduleRows, moduleCount, strings, 0, 0, 1, 0);
+        var types = new TrRmTypeDefTableReader([], 0, strings, modules, 0, 0, 0, 0);
+        Assert.True(index.TryGetSection(0x0011, out var typeRows, out var typeCount));
+        var typeSpecs = new TrRmTypeSpecTableReader(typeRows, typeCount, 0, 0, 0, 0);
+        Assert.True(index.TryGetSection(0x0017, out var signatureRows, out var signatureCount));
+        var signatures = new TrRmMethodSigTableReader(signatureRows, signatureCount, typeSpecs, 0, 0);
+        Assert.True(index.TryGetSection(0x0016, out var methodRows, out var methodCount));
+        var methods = new TrRmMethodDefTableReader(methodRows, methodCount, strings,
+            modules, types, signatures, 0, 0);
+        return methods.GetName(1);
+    }
+
+    private static byte[] ArtifactWithCallableMetadata()
+    {
+        var strings = TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]);
+        var module = new byte[44];
+        Write(module, 0, 1);
+        Write(module, 4, 1);
+        Write(module, 28, 1);
+        Write(module, 32, 1);
+        Write(module, 36, 1);
+        Write(module, 40, 1);
+        byte[] typeSpec = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
+        var method = new byte[28];
+        Write(method, 4, 2);
+        Write(method, 8, 1);
+        Write(method, 12, 2);
+        var signature = new byte[24];
+        Write(signature, 0, 1);
+        byte[][] sections = [module, strings, typeSpec, method, signature];
+        ushort[] kinds = [0x0001, 0x0002, 0x0011, 0x0016, 0x0017];
+        var length = 32 + sections.Length * 16;
+        foreach (var section in sections)
+        {
+            length += section.Length;
+        }
+
+        var artifact = new byte[length];
+        "TRRM"u8.CopyTo(artifact);
+        WriteU16(artifact, 4, 1);
+        Write(artifact, 8, 32);
+        Write(artifact, 12, (uint)sections.Length);
+        Write(artifact, 16, (uint)length);
+        Write(artifact, 20, 32);
+        var offset = 32 + sections.Length * 16;
+        for (var entry = 0; entry < sections.Length; entry++)
+        {
+            var directory = 32 + entry * 16;
+            WriteU16(artifact, directory, kinds[entry]);
+            Write(artifact, directory + 4, entry == 1 ? 2u : 1u);
+            Write(artifact, directory + 8, (uint)offset);
+            Write(artifact, directory + 12, (uint)sections[entry].Length);
+            sections[entry].CopyTo(artifact.AsSpan(offset));
+            offset += sections[entry].Length;
+        }
+
         return artifact;
     }
 
