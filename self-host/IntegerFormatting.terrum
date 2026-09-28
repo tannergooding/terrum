@@ -46,8 +46,9 @@ public static OwnedInt32Buffer FormatUInt64(uint64 value, OwnedInt32Buffer works
     mut uint64 remaining = value;
     while (remaining >= 10)
     {
-        require buffer.TryAppend(int32(remaining % 10) + 48);
-        remaining = remaining / 10;
+        uint64 quotient = remaining / 10;
+        require buffer.TryAppend(int32(remaining - quotient * 10) + 48);
+        remaining = quotient;
     }
     require buffer.TryAppend(int32(remaining) + 48);
     return ReverseDigits(move buffer);
@@ -90,7 +91,8 @@ public static OwnedInt32Buffer FormatUInt64Base(uint64 value, uint32 radix, Owne
     mut uint64 remaining = value;
     while (remaining >= divisor)
     {
-        int32 digit = int32(remaining % divisor);
+        uint64 quotient = remaining / divisor;
+        int32 digit = int32(remaining - quotient * divisor);
         if (digit < 10)
         {
             require buffer.TryAppend(digit + 48);
@@ -99,7 +101,7 @@ public static OwnedInt32Buffer FormatUInt64Base(uint64 value, uint32 radix, Owne
         {
             require buffer.TryAppend(digit + 87);
         }
-        remaining = remaining / divisor;
+        remaining = quotient;
     }
     int32 lastDigit = int32(remaining);
     if (lastDigit < 10)
