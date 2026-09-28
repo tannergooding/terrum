@@ -16,13 +16,13 @@ container.
 | Term | Meaning in this document |
 |---|---|
 | `TRRM` artifact | One complete, bounded byte slice carrying semantic IL and metadata. It may be a standalone file or embedded in another container. Its extent excludes the enclosing PE/ELF file and separately referenced resource payloads. |
-| Module | A project's semantic unit with its own identity. Ordinary compilation produces one `TRRM` artifact containing one module. A merged artifact could share physical sections among multiple logical modules; this candidate encoding still has one Module row and does not yet represent that case. No distinct assembly layer is defined. |
+| Module | A project's semantic unit with its own identity. Ordinary compilation produces one `TRRM` artifact with one Module row. A trimmed or merged artifact can contain several independently identified modules sharing physical sections, without a separate assembly identity or container. |
 | Artifact-relative offset | A zero-based byte position from the first byte of the `TRRM` signature. An extent `[offset, offset + length)` is end-exclusive and must be contained in the supplied artifact slice before an embedded reader adds any container base. |
 | Section directory (`directory`) | The fixed-width index following the header, containing one entry per present section kind, not the sections' bytes. Each entry records its kind, flags, record count, artifact-relative offset and byte length; the entry is not part of the section it indexes. |
 | Section | One contiguous artifact-relative byte extent identified by a directory entry and containing a metadata table or body stream. An absent table has no directory entry or section. |
 | Row | A fixed-stride payload in a fixed table, or an extent in a variable table's offset-indexed data. Rows have one-based indexes; absent table means zero rows. |
 | Local definition ID (`DefId`) | A `u32` token: high byte is a registered definition-table kind, low 24 bits are its one-based row. Zero is the only null token. Its value is not a stable cross-artifact identity. |
-| Producer identity and export key | The selected dependency and published declaration identity used together to resolve an external reference. Bytes and ordinal keys are specified below; source-side key assignment and authentication are separate. |
+| Producer identity and export key | The selected dependency and published declaration identity used together to resolve an import, whether its producer is packed here or in another artifact. Bytes and ordinal keys are specified below; source-side key assignment and authentication are separate. |
 | Declared contract | Published type, callable, ownership/lifetime, access, effect and requirement facts against which consumers bind and check use. A contract is not inferred from a dependency body or source spelling. |
 | Body | Typed semantic operations and control flow for an executable declaration, distinct from declaration metadata. |
 | Source revision, artifact revision, native profile | Independent axes for source syntax/semantics, `TRRM` encoding and requirements, and target/runtime ABI assumptions. The enclosing container format is separate. One revision number does not imply another. |
@@ -95,8 +95,10 @@ Candidate byte order is little-endian. The header is fixed at 32 bytes in this
 layout; the directory follows the header, and present sections follow the
 directory in ascending artifact-relative offset order. There is one entry
 per **present** table kind. An absent known table is empty; Module cannot be
-absent. No compression or whole-section transform is used, so a consumer can
-bound and index rows without inflating the complete artifact.
+absent. Multiple modules share these artifact-wide sections and row indexes;
+there is no directory per module. No compression or whole-section transform
+is used, so a consumer can bound and index rows without inflating the complete
+artifact.
 
 The artifact is the supplied `TRRM` byte slice, whether stored alone or
 embedded in a PE/ELF container. Its total length and offsets describe that
@@ -263,11 +265,11 @@ bytes remain valid after semantic changes.
 
 | Kind (`u16`) | Table | Row payload and role |
 |---:|---|---|
-| `0x0001` | Module | Singleton identity, runtime requirement and entry point |
+| `0x0001` | Module | One row per logical module: identity, runtime requirement and entry point |
 | `0x0002` | String | Variable UTF-8 bytes for names and keys |
 | `0x0003` | Blob | Variable opaque bytes, interpreted only by their referring field |
 | `0x0004` | Feature | Required semantic feature identifiers |
-| `0x0010` | ModuleRef | Selected external producer identity |
+| `0x0010` | ModuleRef | A consumer module's selected producer identity, in this artifact or external |
 | `0x0011` | TypeSpec (variable) | Complete type reference or constructed type |
 | `0x0012` | TypeArg | Ordered arguments for one constructed TypeSpec |
 | `0x0013` | TypeDef | Nominal type declaration |
@@ -286,10 +288,13 @@ bytes remain valid after semantic changes.
 | `0x0020` | Body (variable) | One offset-indexed coded body for a MethodDef |
 | `0x7F00` | SourceMap | Optional nonsemantic body-to-source mapping |
 
-`Module` is always present with exactly one row. Other known tables are absent
-when empty, not encoded as empty directory entries. In format `(1, 0)`, the
-Feature table is absent, and Module's feature range is `(0, 0)`. A new
-semantic feature requires an explicit schema update, not merely a feature
+`Module` is always present with at least one row; ordinary one-project output
+has one row. A merger may retain several module rows and deduplicate shared
+physical data without conflating their nominal identities or export keys.
+Other known tables are absent when empty, not encoded as empty directory
+entries. In format `(1, 0)`, the Feature table is absent, and every Module
+row's feature range is `(0, 0)`. A new semantic feature requires an explicit
+schema update, not merely a feature
 number in an otherwise unsupported artifact. Kinds `0x8000..0xFFFF` are
 reserved for **nonsemantic optional extensions**. A reader can skip an
 unrecognized kind in this range only with flags `0x0000`, `0x0002` or `0x0004`,
@@ -348,7 +353,7 @@ contents. Duplicate strings or blobs are not a second declaration identity.
 
 | Table | Ordered row payload |
 |---|---|
-| Module | `u32 identityBlob, u32 targetRequirement, u32 runtimePolicy, u32 entryMethod?, u32 moduleFlags, u32 featureFirst, u32 featureCount` |
+| Module | `u32 identityBlob, u32 targetRequirement, u32 runtimePolicy, u32 entryMethod?, u32 moduleFlags, u32 featureFirst, u32 featureCount, u32 moduleRefStart, u32 typeDefStart, u32 methodDefStart, u32 sourceFileStart` |
 | Feature | `u32 featureId, u32 minimumRuleRevision` |
 | ModuleRef | `u32 producerIdentityBlob, u32 targetRequirement, u32 runtimePolicy` |
 | TypeSpec (variable) | `u8 form, u8 qualifiers`, followed by only the operands specified for that form below |
@@ -367,7 +372,7 @@ contents. Duplicate strings or blobs are not a second declaration identity.
 | SourceFile | `str path, u32 digestBlob?` |
 
 The fixed row strides in bytes, in registry order excluding variable tables,
-are: Module 28, Feature 8, ModuleRef 12, TypeArg 12, TypeDef 40,
+are: Module 44, Feature 8, ModuleRef 12, TypeArg 12, TypeDef 40,
 FieldDef 20, Layout 24, MethodDef 28, MethodSig 24, Param 16,
 GenericParam 20, Constraint 16, Import 12, Export 8, PropertyDef 20,
 and SourceFile 8. String, Blob, TypeSpec, Contract and Body
@@ -380,25 +385,75 @@ algorithm is assigned.
 
 `Module.identityBlob` and `ModuleRef.producerIdentityBlob` are opaque nonempty
 byte identities, not hashes or proof of authorship. Identity equality is exact
-byte equality; replacing the identity describes another producer. Export keys
+byte equality; Module identities must be distinct within one artifact.
+Replacing an identity describes another producer. Export keys
 are nonempty decoded strings, compared ordinally without normalization.
-A future merged `TRRM` could retain multiple module identities while sharing
-physical tables, but the singleton Module row in this encoding cannot express
-that case. Such a schema must identify each declaration's owning module and
-scope imports, exports, entry points and remapped references before it can
-claim independently addressable modules. No assembly identity or manifest
-is defined here.
+Metadata table indexes and `DefId` rows are artifact-wide. Rows in ModuleRef,
+TypeDef, MethodDef and SourceFile are grouped by owning Module row. For
+each such table, the first Module row's `*Start` is `1`; starts are
+nondecreasing, and Module row `i` owns rows in
+`[start[i], start[i+1])`, with the last end equal to the table's
+`recordCount + 1`. This is a one-based cursor range, not a table
+reference: an empty range is permitted, all starts are `1` when the
+table is absent, and the last end may be `0x100_0000` when the table
+has `0xFF_FFFF` rows. Every present row belongs to exactly one
+module without storing an owner word on each declaration. A merger
+reorders rows by module and remaps references when packing them.
+The four start cursors cost 16 bytes per module instead of four owner
+bytes per row in these four tables; that size trade breaks even at four
+scoped rows per module. A reader can index the module ranges once for
+row-owner checks. It does not make every reference cheaper: shared
+TypeSpec rows still use artifact-wide indexes.
+
+A MethodDef with `ownerTypeDef` must have the same owner as that TypeDef.
+FieldDef, Layout and PropertyDef inherit ownership from their ownerTypeDef;
+GenericParam, Constraint, Contract and Body inherit it through their owning
+declaration. TypeSpec, TypeArg, MethodSig and Param are structural rows
+without a module owner; their references must be valid in every declaration's
+module context that uses them. An Import belongs to its expected local
+definition's module; its ModuleRef must belong to that same module. An
+Export belongs to its local definition's module. Module entry methods must
+be owned by their Module row. A SourceMap row must associate a Body
+instruction with a SourceFile owned by that same module.
+
+Strings and blobs can be shared by equal bytes when the referring fields
+give them the same interpretation. Structural TypeSpec/TypeArg and
+MethodSig/Param rows may be shared only when their resolved nominal, formal
+and imported references and passing modes remain identical in every using
+module. Distinct module identities, nominal TypeDefs, expected imported
+definitions, contracts and bodies are not coalesced merely because names,
+shapes or code bytes match. References to
+a definition owned by another module must use that consumer's Import and
+expected local definition, even when the producer resides in the same
+artifact; a direct local TypeSpec or call cannot bypass that boundary.
+An imported expected definition is owned by its consumer, not an alias
+of the producer's authored row. Packing cannot rewrite it into a direct
+producer reference without changing the binding contract.
+
+A ModuleRef selects the matching Module identity within this artifact when
+present, otherwise an external producer; its requirement and policy must
+match the selected module. Internal and external imports use the same
+export key and complete expected-contract compatibility checks.
+Each module's runtime policy and target requirement are checked for its
+selected dependency closure; packing modules does not waive a mismatch.
+Export keys are unique per Module identity, not across the whole artifact.
+An entry point is selected by Module identity; several modules may each
+declare one, but no loader guesses from their row order. A merger must
+remap all row references and reconcile imports, exports and optional
+reference-slotted sections; trimming cannot silently discard a published
+contract while claiming full compatibility under the same identity.
+The artifact still has one physical directory and no assembly manifest.
 Producers may assign keys as they choose, but must preserve a published key
 to offer a compatible replacement; an implementation name is not a binding
 algorithm. `runtimePolicy` candidate values
 are `0` fail-fast and `1` checked exceptions; `targetRequirement` values are
 `0` portable semantic (no native assumption) and `1` Windows x64 native.
 Other targets and nonzero module flags still need assignments and reject
-in `(1, 0)`. The entry method, if present, is a local
-MethodDef row. Imports identify **one** selected module and key; their expected
+in `(1, 0)`. The entry method, if present, is a MethodDef row owned by
+that module. Imports identify **one** selected module and key; their expected
 local TypeDef, MethodDef or PropertyDef (including its referenced signature,
-layout and contracts) is the complete consumer-side contract. The expected definition has
-no body. Export keys are unique within a producer; imports are unique by
+layout and contracts) is the complete consumer-side contract. The expected
+definition has no body. Imports are unique by
 `(moduleRef, exportKey, expectedLocalDefinition)`, and duplicate conflicting
 bindings reject. MethodDef `bodyRow` is nonzero only for locally authored
 implementations. A public exported declaration may have a body containing
@@ -410,16 +465,21 @@ TypeSpec form assignments and **entire** payload following `form, qualifiers`:
 | Form | Remaining bytes | Meaning |
 |---:|---|---|
 | `0x01` primitive | `u8 primitiveCode` | Built-in type; TypeSpec row is 3 bytes |
-| `0x02` local | `u32 typeDefRow` | Nominal type in this artifact |
-| `0x03` imported | `u32 importRow` | Import whose expected definition is TypeDef |
-| `0x04` formal | `u32 genericParamRow` | Declared type parameter |
+| `0x02` local | `u32 typeDefRow` | Nominal type owned by the using declaration's module |
+| `0x03` imported | `u32 importRow` | Import owned by the using declaration's module whose expected definition is TypeDef |
+| `0x04` formal | `u32 genericParamRow` | Declared type parameter owned by the using declaration's module |
 | `0x05` constructed | `u32 genericTypeSpec, u32 typeArgFirst, u32 typeArgCount` | Ordered substitution |
 | `0x06` optional | `u32 innerTypeSpec` | Presence on complete qualified type |
 | `0x07` ref / `0x08` ptr / `0x09` box / `0x0A` val / `0x0B` own | `u32 innerTypeSpec` | Distinct representation families |
 
 Nesting references in TypeSpec must point to an
 earlier TypeSpec row; nominal declarations may refer to each other through
-their TypeSpec rows, subject to storage-cycle validation. TypeArg rows for
+their TypeSpec rows, subject to storage-cycle validation. A TypeSpec reached
+from several modules must pass these ownership checks in every context;
+identical spelling alone cannot make a module-local or imported type shared.
+Body calls similarly select MethodDefs owned by the body module, using that
+module's expected imported MethodDef for calls across module boundaries.
+TypeArg rows for
 one constructed form are contiguous with ordinals `0..count-1`; arity,
 qualification and constraints are checked against the selected nominal
 declaration. Qualifier bit `0x01` denotes `write` where that type form permits
@@ -494,7 +554,7 @@ binding rather than rerunning overload resolution.
 ### Identity and contract invariants
 
 Local indexes are compact references within one artifact, not stable identities
-across rebuilds. External references resolve through a selected producer
+across rebuilds. Internal and external imports resolve through a selected producer
 identity and exported declaration key with the equality rules above. A
 digest is not automatically a nominal identity. Stable-key assignment,
 authentication and compatibility across published contract changes remain
@@ -526,13 +586,13 @@ visibility remain under review.
 ### Row-assignment example
 
 For the `return 42` [coded-body example](terrum-il-instruction-set.md#worked-bytes-and-illustrative-size),
-these are the relevant row references; row indexes are local to this artifact:
+these are the relevant row references; row indexes are artifact-wide:
 
 | Table row | Payload values in column order |
 |---|---|
 | Blob 1 | UTF-8 bytes `Example` (opaque module identity) |
 | String 1 | UTF-8 bytes `Answer` (method name and export key) |
-| Module 1 | `identityBlob=1, targetRequirement=1, runtimePolicy=0, entryMethod=1, moduleFlags=0, featureFirst=0, featureCount=0` |
+| Module 1 | `identityBlob=1, targetRequirement=1, runtimePolicy=0, entryMethod=1, moduleFlags=0, featureFirst=0, featureCount=0, moduleRefStart=1, typeDefStart=1, methodDefStart=1, sourceFileStart=1` |
 | TypeSpec 1 | `form=0x01, qualifiers=0, primitiveCode=0x03` (`int32`) |
 | MethodSig 1 | `resultTypeSpec=1, receiverTypeSpec=0, paramFirst=0, paramCount=0, genericFirst=0, genericCount=0` |
 | MethodDef 1 | `ownerTypeDef=0, name=1, signature=1, flags=1` (public), `contractFirst=0, contractCount=0, bodyRow=1` |
@@ -545,6 +605,23 @@ three-byte row. Neither the Module row nor an export authorizes a caller to
 skip bounds and contract compatibility checks; semantic body auditing is
 governed by the consumer's trust policy.
 
+A merger could add Blob 2 (`Consumer`), Module 2
+(`identityBlob=2, targetRequirement=1, runtimePolicy=0, entryMethod=0,
+moduleFlags=0, featureFirst=0, featureCount=0, moduleRefStart=1,
+typeDefStart=1, methodDefStart=2, sourceFileStart=1`), ModuleRef 1
+(`producerIdentityBlob=1, targetRequirement=1, runtimePolicy=0`), and
+MethodDef 2 (`ownerTypeDef=0, name=1, signature=1, flags=1,
+contractFirst=0, contractCount=0, bodyRow=0`).
+Import 1 binds ModuleRef 1, String 1 as export key, and expected local
+`DefId=0x1600_0002`; Export 1 still identifies MethodDef 1 of Module 1.
+String 1, TypeSpec 1 and MethodSig 1 are shared, but the two MethodDefs
+retain different owners and the consumer's expected contract is not
+silently replaced by the producer's body. This adds rows to the same
+artifact-wide sections, not a second directory or nested artifact. A
+call in Module 2 uses body operand `m=1` to select its own MethodDef 2
+(`DefId=0x1600_0002`), then Import 1 to resolve Module 1's exported
+MethodDef 1. It cannot encode a direct call to Module 1's MethodDef 1.
+
 ## Body table and coded-instruction boundary
 
 Each Body row is the variable table's offset-indexed extent and carries
@@ -554,6 +631,17 @@ Its one-based row is referenced by the MethodDef `bodyRow` that owns it. Every B
 must be owned by exactly one local MethodDef, and an imported declaration has
 no body. Body-to-method identity and type references use the metadata tables
 above; block/value/region IDs are **body-local**, not metadata `DefId`s.
+The coded-body `m` operand is the exception to artifact-wide metadata row
+numbering: it is a one-based index within the owning module's MethodDef
+range. Its physical row is `methodDefStart + m - 1` after checked range
+arithmetic. The importing module's expected MethodDef is in that same
+range, even if its producer is packed alongside it. In an ordinary
+single-module artifact, the local and physical row numbers coincide;
+after merging, call operands need not widen just because earlier modules
+added rows. TypeSpec operands remain artifact-wide and may widen after
+deduplication; a separate body-local dictionary would have its own
+prelude and lookup cost and is not specified without representative
+size and decode measurements.
 Bodies cannot redefine a published signature, effect or result contract.
 
 The instruction proposal assigns a narrow scalar executable subset with exact
@@ -593,9 +681,9 @@ otherwise. Candidate structural invariants are:
 - Every variable row and list is consumed wholly within its indexed extent or
   parent row; the parser consumes exactly its declared length and count.
 - Each local index is in range for the specific table and refers to the
-  expected record kind. Each external reference resolves to one declared
-  dependency/key pair. Duplicate identities and duplicate singleton records
-  reject.
+  expected record kind. Each imported reference resolves to one declared
+  dependency/key pair, including when the producer is packed in this artifact.
+  Duplicate Module identities and owner/key export pairs reject.
 - Every offset/length pair uses checked `offset + length`; every range uses
   checked `start + length`. Negative signed offsets, lengths or counts,
   wraparound, and extents beyond the containing artifact/section reject.
@@ -617,8 +705,9 @@ audit:
    canonical encodings where required, and resource limits.
 2. Validate record shapes, reserved values, counts, local indexes, and
    referenced contract shapes needed for safe decoding/binding.
-3. Resolve external declarations and verify the imported contract against the
-   selected producer before lowering or execution.
+3. Select the requested Module identity and resolve its dependency closure,
+   including producers co-located in this artifact; verify each imported
+   contract against the selected producer before lowering or execution.
 4. Optionally audit authored bodies' use of imported contracts, CFG,
    liveness, place state, effects and ownership. Source compilers must check
    the bodies they produce; trusted binary consumers need not repeat this

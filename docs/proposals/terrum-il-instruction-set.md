@@ -109,9 +109,9 @@ means the selected reference width, `count` the selected count width,
 | `r?` | `ref` | Value ID or zero only when the declared result is void |
 | `rNew?` | `ref` | New value ID, or zero iff the selected callable returns void; zero defines nothing |
 | `p` | `ref` | Body-local place descriptor ID `1..placeCount` |
-| `t` | `ref` | Local TypeSpec row ID, never a primitive code in place of a row ID |
-| `m` | `ref` | Local MethodDef row ID; imported methods use their bound local expected MethodDef |
-| `fieldDefRow` | `ref` | Local FieldDef row ID |
+| `t` | `ref` | Artifact-wide TypeSpec row ID interpreted in the body module's context, never a primitive code in place of a row ID |
+| `m` | `ref` | One-based MethodDef row within the body module's MethodDef range; resolve by checked `methodDefStart + m - 1`. Imported methods, including packed producers, use the consumer module's bound expected MethodDef |
+| `fieldDefRow` | `ref` | Artifact-wide FieldDef row ID owned by the body module |
 | `targetBlock`, `regionId` | `ref` | Body-local block or region ID; only explicitly specified region roots permit zero |
 | `args` | `count`, then `ref[count]` | Ordered value IDs; zero is not an argument |
 | `edge` | `ref targetBlock`, then `args` | Target's typed parameter list consumes the arguments, subject to implicit checked results |
@@ -704,8 +704,8 @@ terminator offset `12`, and a 14-byte
 block (region 0, zero parameters, empty live-in/out and place lists,
 one `ConstBits` operation, one `Return` terminator). The Body section
 occupies 45 bytes including its row offsets. With the eight populated
-metadata sections in this example, the artifact occupies **333 bytes**
-before alignment: 32-byte header + 8 * 16-byte directory + 173 bytes of
+metadata sections in this example, the artifact occupies **349 bytes**
+before alignment: 32-byte header + 8 * 16-byte directory + 189 bytes of
 metadata/Body sections. This is an encoded-size calculation, **not** a
 throughput measurement; wider IDs, prefixes, block counts, decode work,
 branch count, debug information and alignment still matter.
