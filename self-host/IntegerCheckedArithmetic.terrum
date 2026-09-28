@@ -35,3 +35,38 @@ public static bool TryMultiplyInt32(int32 left, int32 right, init ref<int32> res
     result = int32(value);
     return true;
 }
+
+public static bool TryAddUInt32(uint32 left, uint32 right, init ref<uint32> result)
+{
+    uint64 value = uint64(left) + uint64(right);
+    if (value > uint64(uint32.MaxValue))
+    {
+        return false;
+    }
+
+    result = uint32(value);
+    return true;
+}
+
+public static bool TrySubtractUInt32(uint32 left, uint32 right, init ref<uint32> result)
+{
+    if (left < right)
+    {
+        return false;
+    }
+
+    result = left - right;
+    return true;
+}
+
+public static bool TryMultiplyUInt32(uint32 left, uint32 right, init ref<uint32> result)
+{
+    uint64 value = uint64(left) * uint64(right);
+    if (value > uint64(uint32.MaxValue))
+    {
+        return false;
+    }
+
+    result = uint32(value);
+    return true;
+}

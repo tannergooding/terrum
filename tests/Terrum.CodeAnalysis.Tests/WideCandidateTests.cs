@@ -75,6 +75,41 @@ public sealed class WideCandidateTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task CheckedUInt32ArithmeticPublishesOnlyInRangeAcrossModulesAsync(NativeRuntimePolicy policy)
+    {
+        var producer = CreateNumericsLibrary("IntegerCheckedArithmetic.terrum", policy,
+            "Terrum.CodeAnalysis.Numerics64.TryAddUInt32",
+            "Terrum.CodeAnalysis.Numerics64.TrySubtractUInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryMultiplyUInt32");
+        var consumerSource = SyntaxTree.Parse("""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                if (TryAddUInt32(uint32.MaxValue, 1, init var addOverflow)
+                    || TrySubtractUInt32(0, 1, init var subUnderflow)
+                    || TryMultiplyUInt32(uint32.MaxValue, 2, init var mulOverflow)) { return 1; }
+                require TryAddUInt32(uint32.MaxValue - 1, 1, init var maximum);
+                require TryAddUInt32(0, 0, init var zero);
+                require TrySubtractUInt32(uint32.MaxValue, uint32.MaxValue, init var difference);
+                require TrySubtractUInt32(uint32.MaxValue, 1, init var almostMaximum);
+                require TryMultiplyUInt32(65535, 65537, init var product);
+                require TryMultiplyUInt32(uint32.MaxValue, 0, init var zeroProduct);
+                if (maximum != uint32.MaxValue || zero != 0 || difference != 0
+                    || almostMaximum != uint32.MaxValue - 1 || product != uint32.MaxValue
+                    || zeroProduct != 0) { return 2; }
+                return 42;
+            }
+            """);
+        var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task SaturatingConversionsExecuteFromIndependentModuleAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerSaturation.terrum", policy,
