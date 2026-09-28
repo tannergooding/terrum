@@ -376,33 +376,37 @@ blobs are not a second declaration identity.
 
 The String section begins at a 4-byte-aligned artifact offset. Each indexed
 row starts at a 4-byte-aligned offset relative to its data region and contains
-`u8 encodingKind, u24 byteLength` (the length stored in three little-endian
-bytes), followed immediately by `byteLength` content bytes, an all-zero
+`u8 encodingKind, u24 unitCount` (the count stored in three little-endian
+bytes), followed immediately by `unitCount` code units, an all-zero
 terminator of the encoding's code-unit width, and the minimum zero padding
-needed to align the next row to four bytes. The length excludes the header,
-terminator and padding; it is in `0..0xFF_FFFF`. The offset index addresses
-whole rows, not content bytes; its difference includes the header, terminator
-and padding. The reader validates that the computed row extent exactly equals
-the indexed extent and that the padding and terminator are zero. For ASCII and
-UTF-16LE, padding can otherwise make the content byte count ambiguous from
-adjacent offsets alone. Content
+needed to align the next row to four bytes. The count excludes the header,
+terminator and padding; it is in `0..0xFF_FFFF`. ASCII and UTF-8 units are
+one byte, UTF-16LE units two and UTF-32LE units four. A reader checks the
+product `unitCount * unitWidth`, adds the header and terminator, then checks
+the aligned row extent against the adjacent offsets before accessing content.
+The offset index addresses whole rows, not content bytes; its difference
+includes the header, terminator and padding. The reader also validates that
+the padding and terminator are zero. Content
 begins four bytes after the row start and is therefore 4-byte aligned in the
 artifact for every encoding. The terminator makes eligible NUL-free content
 convenient for interop and bounds accidental scans at the row end, but does
-not replace the explicit length or checked access.
+not replace the explicit count or checked access.
 
-| `encodingKind` | Content | Terminator | Content-length rule |
+| `encodingKind` | Content | Unit width | Terminator |
 |---:|---|---:|---|
-| `0` | ASCII code units (`0..0x7F`) | One zero byte | Any byte count |
-| `1` | UTF-8 bytes, no BOM | One zero byte | Any byte count |
-| `2` | UTF-16 little-endian code units, no BOM | Two zero bytes | Multiple of 2 |
-| `3` | UTF-32 little-endian code units, no BOM | Four zero bytes | Multiple of 4 |
+| `0` | ASCII code units (`0..0x7F`) | 1 byte | One zero byte |
+| `1` | UTF-8 code units, no BOM | 1 byte | One zero byte |
+| `2` | UTF-16 little-endian code units, no BOM | 2 bytes | Two zero bytes |
+| `3` | UTF-32 little-endian code units, no BOM | 4 bytes | Four zero bytes |
 
+`unitCount` counts encoded units, not Unicode scalar values: one scalar can
+occupy several UTF-8 bytes or a UTF-16 surrogate pair. The terminator is
+one additional code unit and is not included in `unitCount`.
 The common four-byte content-start alignment satisfies the per-encoding
-start-offset requirement; the byte-length divisibility rule separately
-ensures that the content ends on a whole code unit before its terminator.
-For example, a 4-byte-aligned UTF-16LE start with a three-byte content
-length is still invalid. Neither rule is a substitute for the other.
+start-offset requirement. A whole number of code units follows from
+`unitCount * unitWidth`; no separate content-length divisibility check is
+needed. The counted extent must still end before the required terminator
+and agree exactly with the next indexed row offset after padding.
 
 Kinds `4..255` reject in `(1, 0)`; there is no validity or normalization
 bit. A name, path or key reference must decode to well-formed scalar text:
@@ -413,10 +417,12 @@ remains authoritative: raw literal data could contain zero code units, so
 the trailing terminator alone never makes arbitrary content safe for a
 NUL-terminated interop call. Identifier ASCII and UTF-8 rows with equal
 ASCII content compare equally; raw bytes/code units are not silently
-transcoded. The per-row 24-bit bound applies to the complete unsegmented
-content, not each piece of a larger composite; the total section and artifact
-retain their separate `u32` byte bounds. Multi-gigabyte payloads belong in
-separately managed resources, not mainstream String rows.
+transcoded. The 24-bit bound is on the complete unsegmented *unit count*, not
+each piece of a larger composite: at its maximum it permits almost 16 MiB of
+ASCII/UTF-8, 32 MiB of UTF-16LE or 64 MiB of UTF-32LE content. The total
+section and artifact retain their separate `u32` byte bounds and checked
+extent arithmetic. Multi-gigabyte payloads belong in separately managed
+resources, not mainstream String rows.
 
 These physical rows can carry names and keys now. Literal references,
 ill-formed literal payload permissions and their use-site validation remain
@@ -430,9 +436,9 @@ The four initial kinds above do not allocate a segmented wire kind.
 The mapped content can back a validated, immutable typed `TextSpan` only
 while its artifact backing remains live. A String row is not directly a
 `Text` object with `nint _length` followed by inline data: its header has
-a kind and a 24-bit **byte** count, not a target-width native length or
-necessarily a code-unit count, and the row is owned by the artifact rather
-than by a runtime text object. A runtime may copy/transcode into owned `Text`
+a kind and a 24-bit code-unit count, not a target-width native length, and
+the row belongs to the artifact rather than a runtime text object. A runtime
+may copy/transcode into owned `Text`
 or explicitly retain the artifact lease in a compatible text representation;
 zero-copy ownership, GC rooting and direct aliasing are not implied.
 
@@ -688,7 +694,7 @@ these are the relevant row references; row indexes are artifact-wide:
 | Table row | Payload values in column order |
 |---|---|
 | Blob 1 | UTF-8 bytes `Example` (opaque module identity) |
-| String 1 | `kind=0, byteLength=6, ASCII content=Answer, terminator=00, padding=00` (method name and export key) |
+| String 1 | `kind=0, unitCount=6, ASCII content=Answer, terminator=00, padding=00` (method name and export key) |
 | Module 1 | `identityBlob=1, targetRequirement=1, runtimePolicy=0, entryMethod=1, moduleFlags=0, featureFirst=0, featureCount=0, moduleRefStart=1, typeDefStart=1, methodDefStart=1, sourceFileStart=1` |
 | TypeSpec 1 | `form=0x01, qualifiers=0, primitiveCode=0x03` (`int32`) |
 | MethodSig 1 | `resultTypeSpec=1, receiverTypeSpec=0, paramFirst=0, paramCount=0, genericFirst=0, genericCount=0` |
@@ -704,7 +710,7 @@ governed by the consumer's trust policy.
 
 String 1 has offsets `00 00 00 00 0C 00 00 00` followed by its
 12-byte row `00 06 00 00 41 6E 73 77 65 72 00 00`. The first `00`
-is the ASCII kind, `06 00 00` is the three-byte content length, and the
+is the ASCII kind, `06 00 00` is the three-byte code-unit count, and the
 last `00` is alignment padding after the one-byte terminator.
 
 A merger could add Blob 2 (`Consumer`), Module 2

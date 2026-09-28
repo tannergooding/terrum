@@ -186,11 +186,11 @@ Conditional family/extension syntax above is pseudocode pending grammar/custom-f
 
 `SpanTextWriter` holds an exclusive loan to caller-provided storage; `Written` is accepted code-unit count. A refused fragment does not modify storage for that fragment, but prior fragments remain. `Text.Create` validates/freezes text and may transfer eligible exclusive backing; final representation and builder contract remain open.
 
-The proposed TRRM String row has a 4-byte encoding-kind/byte-length header,
+The proposed TRRM String row has a 4-byte encoding-kind/unit-count header,
 explicit code-unit terminator and padded, 4-byte-aligned data. It is not a
-`Text` object laid out as `nint _length` followed by inline data: its length
-is a 24-bit byte count, while a native `Text` length may count code units or
-scalars and have target-dependent width. A validated typed `TextSpan` could
+`Text` object laid out as `nint _length` followed by inline data: its unit
+count is 24-bit, while a native `Text` length may have target-dependent width
+and a different unit or scalar interpretation. A validated typed `TextSpan` could
 borrow mapped row content without transcoding only while the backing artifact
 remains live; an owned `Text` needs a copy/transfer or an explicitly retained
 artifact lease and compatible representation. The native `Text` object layout,
