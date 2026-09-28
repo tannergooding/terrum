@@ -9,13 +9,18 @@ int32 CheckSourceLines()
     {
         require TryReadSourceLine(start, out var content, out var includingBreak);
         require TryGetSourceLineExtent(index, out var extent);
+        require TryReadSourceLineInit(start, init var initContent, init var initBreak);
+        require TryGetSourceLineExtentInit(index, init var initExtent);
         require index < Host.ExpectedLines.Length / 3;
         if (content.Start != Host.ExpectedLines[index * 3]
             || content.Length != Host.ExpectedLines[index * 3 + 1]
             || includingBreak.Start != content.Start
             || includingBreak.Length != Host.ExpectedLines[index * 3 + 2]
             || extent.Start != includingBreak.Start
-            || extent.Length != includingBreak.Length)
+            || extent.Length != includingBreak.Length
+            || initContent.Start != content.Start || initContent.Length != content.Length
+            || initBreak.Start != includingBreak.Start || initBreak.Length != includingBreak.Length
+            || initExtent.Start != extent.Start || initExtent.Length != extent.Length)
         {
             return 1;
         }
@@ -32,7 +37,9 @@ int32 CheckSourceLines()
 
     if (TryGetSourceLineExtent(-1, out var beforeExtent)
         || TryGetSourceLineExtent(index, out var afterExtent)
-        || TryGetSourceLineExtent(int32.MaxValue, out var maximumExtent))
+        || TryGetSourceLineExtent(int32.MaxValue, out var maximumExtent)
+        || TryGetSourceLineExtentInit(-1, init var beforeExtentInit)
+        || TryGetSourceLineExtentInit(index, init var afterExtentInit))
     {
         return 9;
     }
@@ -41,13 +48,16 @@ int32 CheckSourceLines()
     while (at <= Host.Source.Length)
     {
         require TryGetSourcePosition(at, out var line, out var character);
+        require TryGetSourcePositionInit(at, init var initLine, init var initCharacter);
         if (line != Host.ExpectedPositions[at * 2]
-            || character != Host.ExpectedPositions[at * 2 + 1])
+            || character != Host.ExpectedPositions[at * 2 + 1]
+            || initLine != line || initCharacter != character)
         {
             return 3;
         }
         require TryGetSourceOffset(line, character, out var offset);
-        if (offset != at)
+        require TryGetSourceOffsetInit(line, character, init var initOffset);
+        if (offset != at || initOffset != offset)
         {
             return 6;
         }
@@ -65,7 +75,9 @@ int32 CheckSourceLines()
         || TryGetSourceOffset(-1, 0, out var beforeOffset)
         || TryGetSourceOffset(Host.ExpectedLines.Length / 3, 0, out var afterOffset)
         || TryGetSourceOffset(0, -1, out var negativeCharacter)
-        || TryGetSourceOffset(0, int32.MaxValue, out var hugeCharacter))
+        || TryGetSourceOffset(0, int32.MaxValue, out var hugeCharacter)
+        || TryGetSourceOffsetInit(lastLine, lastCharacter + 1, init var pastEndInit)
+        || TryGetSourceOffsetInit(-1, 0, init var beforeOffsetInit))
     {
         return 8;
     }
@@ -75,7 +87,11 @@ int32 CheckSourceLines()
         || TryReadSourceLine(int32.MaxValue, out var maximum, out var maximumBreak)
         || TryGetSourcePosition(-1, out var beforeLine, out var beforeCharacter)
         || TryGetSourcePosition(Host.Source.Length + 1, out var afterLine, out var afterCharacter)
-        || TryGetSourcePosition(int32.MaxValue, out var maximumLine, out var maximumCharacter))
+        || TryGetSourcePosition(int32.MaxValue, out var maximumLine, out var maximumCharacter)
+        || TryReadSourceLineInit(-1, init var beforeInit, init var beforeBreakInit)
+        || TryReadSourceLineInit(Host.Source.Length + 1, init var afterInit, init var afterBreakInit)
+        || TryGetSourcePositionInit(-1, init var beforeLineInit, init var beforeCharacterInit)
+        || TryGetSourcePositionInit(Host.Source.Length + 1, init var afterLineInit, init var afterCharacterInit))
     {
         return 4;
     }

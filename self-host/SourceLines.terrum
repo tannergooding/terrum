@@ -122,3 +122,46 @@ public bool TryGetSourceLineExtent(int32 line, out SourceRange includingBreak)
         index = index + 1;
     }
 }
+
+public bool TryReadSourceLineInit(int32 start, init ref<SourceRange> content,
+    init ref<SourceRange> includingBreak)
+{
+    if (!TryReadSourceLine(start, out var resolvedContent, out var resolvedBreak))
+    {
+        return false;
+    }
+    content = resolvedContent;
+    includingBreak = resolvedBreak;
+    return true;
+}
+
+public bool TryGetSourcePositionInit(int32 position, init ref<int32> line, init ref<int32> character)
+{
+    if (!TryGetSourcePosition(position, out var resolvedLine, out var resolvedCharacter))
+    {
+        return false;
+    }
+    line = resolvedLine;
+    character = resolvedCharacter;
+    return true;
+}
+
+public bool TryGetSourceOffsetInit(int32 line, int32 character, init ref<int32> offset)
+{
+    if (!TryGetSourceOffset(line, character, out var resolved))
+    {
+        return false;
+    }
+    offset = resolved;
+    return true;
+}
+
+public bool TryGetSourceLineExtentInit(int32 line, init ref<SourceRange> includingBreak)
+{
+    if (!TryGetSourceLineExtent(line, out var resolved))
+    {
+        return false;
+    }
+    includingBreak = resolved;
+    return true;
+}

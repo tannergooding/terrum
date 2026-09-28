@@ -46,6 +46,12 @@ public sealed partial class SourceLineComponentTests
     [InlineData("bool ok = TryGetSourceOffset(0, 2, out var offset); return offset;")]
     [InlineData("bool ok = TryGetSourceLineExtent(-1, out var extent); return extent.Start;")]
     [InlineData("bool ok = TryGetSourceLineExtent(1, out var extent); return extent.Length;")]
+    [InlineData("bool ok = TryReadSourceLineInit(-1, init var content, init var including); return content.Start;")]
+    [InlineData("bool ok = TryReadSourceLineInit(-1, init var content, init var including); return including.Length;")]
+    [InlineData("bool ok = TryGetSourcePositionInit(-1, init var line, init var character); return line;")]
+    [InlineData("bool ok = TryGetSourcePositionInit(-1, init var line, init var character); return character;")]
+    [InlineData("bool ok = TryGetSourceOffsetInit(-1, 0, init var offset); return offset;")]
+    [InlineData("bool ok = TryGetSourceLineExtentInit(-1, init var extent); return extent.Start;")]
     public async Task FailedQueriesCannotPublishReadableOutputsAsync(string body)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
