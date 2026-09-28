@@ -49,7 +49,7 @@ detailed proposal wholesale.
 
 | Proposal | Review boundary |
 |---|---|
-| General semantic IL and metadata format | Review the specification structure, normative IL/verifier contract, metadata schema, wire encoding and evolution policy. Current semantic modules remain supported compatibility contracts, not an automatic selection of the final general format; see the [specification roadmap](roadmap.md#language-semantic-il-and-metadata-specification). |
+| General semantic IL and metadata format | Review the `TRRM` specification structure, normative IL/verifier contract, metadata schema, byte encoding and evolution policy. The current semantic-module revisions and historical-reader tests are repository implementation facts scheduled for consolidation before v1, not a promise of external production compatibility or the final byte layout; see the [specification roadmap](roadmap.md#language-semantic-il-and-metadata-specification). |
 
 ## Specification and implementation work
 

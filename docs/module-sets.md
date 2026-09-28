@@ -36,8 +36,9 @@ declaration for type or cleanup contracts does not itself create an IAT entry.
 
 The set is intentionally leaf-only: it does not model transitive graphs,
 cycles, arbitrary version roll-forward, hot servicing, resilient layouts,
-or full LMOD. Semantic v32 permits a native-set consumer to retain private
-managed state, but image boundaries remain limited to scalar and
+or the future general `TRRM` semantic-IL format. Semantic v32 permits a
+native-set consumer to retain private managed state, but image boundaries
+remain limited to scalar and
 public handle-free `Copy` value contracts, including existing conditional
 `bool`/`out` results. Handles, unique values, views, reference modes and
 mutating-receiver ABI do not cross the boundary; each persisted image has its

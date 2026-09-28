@@ -8,8 +8,9 @@ immutable and usable independently. The separate [native profiles](native.md)
 binds a bounded scalar/compact-value language and emits Windows x64 executables through
 verified structured operations. A clean syntax result is deliberately not a
 valid-program claim: `var x = 1;` parses but semantic analysis rejects its missing
-numeric context. General ownership/lifetime checking, general semantic IL/LMOD,
-general managed graphs and standard-library execution are not implemented.
+numeric context. General ownership/lifetime checking, general semantic IL and
+richer TRRM metadata, general managed graphs and standard-library execution
+are not implemented.
 The current parser rejects attached numeric width suffixes with `TRM0006` and
 has no prefix-cast production. It supports context-typed decimal, hexadecimal
 and binary integer literals without a fallback type, numeric digit separators,
@@ -812,9 +813,16 @@ dominance, joins, region entry, cleanup and lifetime contracts. Irreducible flow
 is represented honestly, not disguised as one natural loop. Cached analyses
 are optional/versioned; validating structure is not optional.
 
-LMOD is the future independently versioned Terrum module/contract artifact, not
-a renamed CLI assembly or a PE file. The current backend emits Windows x64
-machine instructions and PE32+ images directly, with no CIL/LLVM translation
+TRRM identifies the evolving Terrum IL/module format, not a CLI assembly or a
+PE file. Semantic revision 32 is a pre-1.0 development revision, not a stable
+1.0 specification. Historical-revision readers and feature-dependent writer
+selection are temporary implementation support to remove before v1. That
+cleanup must update writers and fixtures together and reject unsupported
+revisions rather than reinterpret their bytes. Structural decoding, binding
+and declared-contract checks remain required for supported revisions.
+
+The current backend emits Windows x64 machine instructions and PE32+ images
+directly, with no CIL/LLVM translation
 or linker dependency. Source functions use a saved RBP frame base for
 locals and spills, separate from the RSP-relative outgoing call area. Shared
 PE/JIT unwind metadata describes both the saved register and allocation.
@@ -837,7 +845,7 @@ without producer source; private implementation layouts and helpers can evolve
 without changing the persisted consumer. Native `.trmn` packages additionally
 persist the EXE and DLL images, validate their contracts before launch, and
 support compatible single-provider replacement without regenerating consumer
-machine code. This is process-start servicing, not the general LMOD design or
+machine code. This is process-start servicing, not the general TRRM IL design or
 hot replacement. Unsupported runtime/ABI capabilities diagnose rather than
 inherit accidental CLR behavior.
 Multi-source compilations are available through the API and repeatable

@@ -989,7 +989,7 @@ bindings, not provider contract compatibility. A bounded execution test loads
 an EXE through a dependent DLL into a leaf DLL using these raw APIs. Static AOT
 linking from these artifacts is separate from replacement of an unchanged PE.
 There is no optimizer, debug-symbol format, general source interop, managed
-root map, production runtime or hot replacement. The broader LMOD design
+root map, production runtime or hot replacement. The broader TRRM IL design
 remains separate from both PE and any optional CIL representation.
 
 Authoritative ABI references:

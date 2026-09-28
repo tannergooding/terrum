@@ -180,8 +180,9 @@ type/API list, named runtime profiles, universal support for every feature or
 an implemented embedded/kernel backend.
 
 Specify the source language, semantic operations and verifier, metadata/module
-interchange, and runtime/target profiles with explicit boundaries. The exact
-normative IL and wire encoding remain design work, not a selected new format.
+interchange, and runtime/target profiles with explicit boundaries. `TRRM` is
+the selected format identifier; its normative records and byte encoding remain
+design work.
 Cover declaration identities and references, types, generic
 constraints/witnesses, access/ownership/lifetime and output contracts, effects,
 capabilities, layouts and runtime dependencies. Accepted documentation
@@ -195,20 +196,26 @@ emits a separate XML artifact and does not define executable contracts.
 Exact tokenization/escaping, complex reference grammar, schema/member IDs,
 and packaging remain specification work.
 
-Format work must define version and feature negotiation, unknown-data handling,
-compatibility, deterministic/canonical encoding where promised, malformed-input
-rejection, validation limits and producer/consumer trust responsibilities.
-Keep source-language versions, semantic artifact formats and physical native
-profiles distinct. No header field or version value alone determines the
-evolution policy, compatibility rules or feature-negotiation strategy.
+The `TRRM` working specification must define byte framing and header,
+metadata-record relationships and identity, body/instruction/region structure,
+limits and accounting, validation, reference resolution, and unknown/reserved
+data behavior. It must distinguish source-language versions, semantic
+artifact-format revisions and physical native profiles. No wire revision
+encoding, feature-negotiation policy, unknown-record strategy or numerical
+format limit is selected by the current implementation facts.
 Establish conformance with independently exercised readers,
 writers and verifier cases rather than relying only on same-version round trips.
 
-The existing versioned semantic modules are implemented compatibility contracts
-and evidence for this work, not automatically the final general IL standard.
-Preserve supported historical artifacts and feature-dependent version selection;
-do not replace or freeze the current format merely to make the specification
-look complete. This work does not require a new backend or public managed ABI.
+`TRRM` is the selected identifier for the evolving Terrum semantic-IL/module
+format; no separate `LMOD` family is planned. The repository's current
+semantic-module bytes (highest implemented revision 32) are evidence for the
+working specification, not an adopted final layout. Reader support for
+historical revisions 10–32 and feature-dependent writer selection are temporary
+repository implementation facts, scheduled for consolidation before v1; they
+do not create an external production compatibility obligation. The 0.32 label
+is descriptive of the current repository state only, not an on-wire
+major/minor scheme or a 1.0 release decision. This work does not require a new
+backend or public managed ABI.
 Terrum makes no published frozen managed-machine ABI promise. Dynamically
 composed precompiled code must be validated against dependency/compiler/runtime
 assumptions before execution; implementation may adapt, recompile from an

@@ -94,8 +94,9 @@ never executes generated code. It is process-start code generation, not
 in-process replacement of live code or a native-code sandbox.
 
 This graph is acyclic and explicitly bounded. It does not claim transitive
-version roll-forward, hot servicing, resilient layouts, full LMOD or
-replacement of already-emitted machine code by the semantic JIT. Existing
+version roll-forward, hot servicing, resilient layouts, the future general
+`TRRM` semantic-IL format, or replacement of already-emitted machine code by
+the semantic JIT. Existing
 single-provider and independent leaf-set APIs still accept their v1 packages;
 new consumer packages use v2 metadata to record emitted imports separately
 from retained declarations. Existing leaf producer packages remain v1.

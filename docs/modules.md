@@ -1,8 +1,15 @@
 # Bounded semantic and native modules
 
-The version 18 `.trm` format records the selected native runtime policy and
-persists verified, typed, source-mapped structured IR,
-not source text or a native DLL. `CreateProducer` stores selected function bodies
+The current `.trm` repository artifact uses the `TRRM` identifier and records
+the selected native runtime policy with verified, typed, source-mapped
+structured IR, not source text or a native DLL. The highest implemented
+semantic revision is 32; this document's revision-by-revision account records
+repository behavior, not an externally released binary compatibility matrix.
+The reader's historical revisions and the writer's feature-dependent revision
+selection are temporary pre-v1 implementation support scheduled for
+consolidation before v1. They do not create a production compatibility burden.
+
+`CreateProducer` stores selected function bodies
 and exported contracts. `CreateConsumer` stores its own function bodies and the
 reference producer's declaration contracts, **not** producer bodies.
 `CreateReference` validates a producer artifact and exposes exported signatures
@@ -88,17 +95,20 @@ the existing replacement checks below remain limited to recorded contracts.
 Existing module tests exercise those bounded checks: consumers retain their
 recorded promises, weakened `NoThrow` contracts and changed signatures, output
 modes, layouts or access contracts are rejected, and provider catalogs reject
-missing, incompatible or multiple compatible selections. This is evidence for
-already-bound artifact compatibility only; it does not establish source
-compatibility or provide source-binding diagnostics.
+missing, incompatible or multiple compatible selections. This is evidence for already-bound repository artifacts only; it does not
+establish source compatibility or provide source-binding diagnostics.
 
-The binary reader rejects unknown versions, malformed/truncated records,
+The current binary reader rejects unknown versions, malformed/truncated records,
 trailing bytes, unknown nodes, invalid graph depth, excessive symbols, strings
 or input length. The artifact limit is 4 MiB, graph limit 100,000 nodes,
 nesting limit 128, and function limit 1,024. No reflection-based serialization
 or saved-source rebind occurs. Import contracts are declaration-derived, not
-implementation hashes. This format is not authenticated: untrusted artifact
-bytes are checked for safety and compatibility, not provenance.
+implementation hashes. These are current repository reader/verifier limits,
+not selected limits for the pre-v1 `TRRM` specification. This format is not
+authenticated: artifact
+bytes are checked for structural safety and declared-contract compatibility,
+not provenance. The historical-reader tests exercise repository fixtures and
+do not promise support for artifacts distributed in production.
 Linked programs additionally pass the semantic verifier's 100,000-visit work
 budget, including conditional-flow analysis.
 Host-provided buffer capabilities are outside this module format and are
