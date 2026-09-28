@@ -24,9 +24,10 @@ public readonly ref struct TrRmMethodDefTableReader
         TrRmTypeDefTableReader types, TrRmMethodSigTableReader signatures,
         int contractCount, int bodyCount)
     {
-        if (recordCount <= 0 || recordCount > 0xFF_FFFF
+        if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != modules.MethodDefCount
             || contractCount is < 0 or > 0xFF_FFFF || bodyCount is < 0 or > 0xFF_FFFF
+            || (recordCount == 0 && bodyCount != 0)
             || (long)recordCount * RowSize != section.Length)
         {
             throw InvalidMethod();

@@ -57,6 +57,38 @@ public sealed class TrRmArtifactIndexTests
         Assert.Throws<InvalidDataException>(() => ReadCallableName(artifact));
     }
 
+    [Fact]
+    public void StructuralValidatorComposesAllPresentKnownMetadataTables()
+    {
+        TrRmStructuralMetadataValidator.Validate(MinimalArtifact());
+        TrRmStructuralMetadataValidator.Validate(ArtifactWithMetadataTables());
+        TrRmStructuralMetadataValidator.Validate(ArtifactWithCallableMetadata());
+        var withBlob = ArtifactWithCallableMetadata(includeEmptyBlob: true);
+        TrRmStructuralMetadataValidator.Validate(withBlob);
+        TrRmStructuralMetadataValidator.Validate(ArtifactWithCallableMetadata(includeBody: true));
+        TrRmStructuralMetadataValidator.Validate(WithReferenceSlottedExtension());
+
+        var invalidBlob = ArtifactWithCallableMetadata(includeEmptyBlob: true);
+        var blobOffset = 32 + 6 * 16 + 44
+            + TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]).Length;
+        invalidBlob[blobOffset + 4] = 1;
+        _ = new TrRmArtifactIndex(invalidBlob);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(invalidBlob));
+
+        var invalidBody = ArtifactWithCallableMetadata(includeBody: true);
+        invalidBody[^5] = 0;
+        _ = new TrRmArtifactIndex(invalidBody);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(invalidBody));
+
+        var invalid = ArtifactWithCallableMetadata();
+        var stringsLength = TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]).Length;
+        invalid[32 + 5 * 16 + 44 + stringsLength + 11 + 12] = 3;
+        _ = new TrRmArtifactIndex(invalid);
+        Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(invalid));
+    }
+
     [Theory]
     [InlineData(0, 0)]
     [InlineData(4, 2)]
@@ -270,7 +302,8 @@ public sealed class TrRmArtifactIndexTests
         return methods.GetName(1);
     }
 
-    private static byte[] ArtifactWithCallableMetadata()
+    private static byte[] ArtifactWithCallableMetadata(bool includeEmptyBlob = false,
+        bool includeBody = false)
     {
         var strings = TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]);
         var module = new byte[44];
@@ -285,10 +318,24 @@ public sealed class TrRmArtifactIndexTests
         Write(method, 4, 2);
         Write(method, 8, 1);
         Write(method, 12, 2);
+        if (includeBody)
+        {
+            Write(method, 24, 1);
+        }
+
         var signature = new byte[24];
         Write(signature, 0, 1);
-        byte[][] sections = [module, strings, typeSpec, method, signature];
-        ushort[] kinds = [0x0001, 0x0002, 0x0011, 0x0016, 0x0017];
+        byte[][] sections = includeEmptyBlob
+            ? [module, strings, new byte[8], typeSpec, method, signature]
+            : [module, strings, typeSpec, method, signature];
+        ushort[] kinds = includeEmptyBlob
+            ? [0x0001, 0x0002, 0x0003, 0x0011, 0x0016, 0x0017]
+            : [0x0001, 0x0002, 0x0011, 0x0016, 0x0017];
+        if (includeBody)
+        {
+            sections = [.. sections, new byte[] { 0, 0, 0, 0, 1, 0, 0, 0, 0 }];
+            kinds = [.. kinds, 0x0020];
+        }
         var length = 32 + sections.Length * 16;
         foreach (var section in sections)
         {

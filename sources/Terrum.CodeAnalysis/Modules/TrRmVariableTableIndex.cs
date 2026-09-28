@@ -21,7 +21,7 @@ public readonly ref struct TrRmVariableTableIndex
     {
         var indexBytes = ((long)recordCount + 1) * sizeof(uint);
         if (recordCount <= 0 || recordCount > 0xFF_FFFF
-            || minimumRowBytes <= 0 || rowAlignment is not (1 or 4)
+            || minimumRowBytes < 0 || rowAlignment is not (1 or 4)
             || indexBytes > section.Length)
         {
             throw InvalidIndex();
