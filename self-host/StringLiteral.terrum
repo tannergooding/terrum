@@ -88,6 +88,61 @@ public struct StringLiteral
         next = following;
         return true;
     }
+
+    public bool TryGetUtf8Length(init ref<int32> byteLength)
+    {
+        mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
+        mut int32 count = 0;
+        while (cursor.TryRead(out var scalar, out var next))
+        {
+            mut int32 width = 1;
+            if (scalar >= 65536) { width = 4; }
+            else if (scalar >= 2048) { width = 3; }
+            else if (scalar >= 128) { width = 2; }
+            if (count > int32.MaxValue - width)
+            {
+                return false;
+            }
+            count = count + width;
+            cursor = next;
+        }
+        byteLength = count;
+        return true;
+    }
+
+    public OwnedInt32Buffer EncodeUtf8(OwnedInt32Buffer workspace)
+    {
+        mut OwnedInt32Buffer bytes = move workspace;
+        bytes.Clear();
+        mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
+        while (cursor.TryRead(out var scalar, out var next))
+        {
+            if (scalar < 128)
+            {
+                require bytes.TryAppend(scalar);
+            }
+            else if (scalar < 2048)
+            {
+                require bytes.TryAppend(192 + scalar / 64);
+                require bytes.TryAppend(128 + scalar % 64);
+            }
+            else if (scalar < 65536)
+            {
+                require bytes.TryAppend(224 + scalar / 4096);
+                require bytes.TryAppend(128 + (scalar / 64) % 64);
+                require bytes.TryAppend(128 + scalar % 64);
+            }
+            else
+            {
+                require bytes.TryAppend(240 + scalar / 262144);
+                require bytes.TryAppend(128 + (scalar / 4096) % 64);
+                require bytes.TryAppend(128 + (scalar / 64) % 64);
+                require bytes.TryAppend(128 + scalar % 64);
+            }
+            cursor = next;
+        }
+        return move bytes;
+    }
 }
 
 public struct StringLiteralCursor
