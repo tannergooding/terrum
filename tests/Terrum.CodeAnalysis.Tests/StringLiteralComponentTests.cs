@@ -195,6 +195,132 @@ public sealed class StringLiteralComponentTests
         Assert.Equal(0, await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, 0, "\"A\"", new[] { 0, 1, 0, 0, 65, 0, 0, 0 })]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 0, "\"A\"", new[] { 0, 1, 0, 0, 65, 0, 0, 0 })]
+    [InlineData(NativeRuntimePolicy.FailFast, 1, "\"\u00E9\"", new[] { 1, 2, 0, 0, 195, 169, 0, 0 })]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 1, "\"\u00E9\"", new[] { 1, 2, 0, 0, 195, 169, 0, 0 })]
+    [InlineData(NativeRuntimePolicy.FailFast, 2, "\"\uD83D\uDE00\"", new[] { 2, 2, 0, 0, 61, 216, 0, 222, 0, 0, 0, 0 })]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 2, "\"\uD83D\uDE00\"", new[] { 2, 2, 0, 0, 61, 216, 0, 222, 0, 0, 0, 0 })]
+    [InlineData(NativeRuntimePolicy.FailFast, 3, "\"\uD83D\uDE00\"", new[] { 3, 1, 0, 0, 0, 246, 1, 0, 0, 0, 0, 0 })]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 3, "\"\uD83D\uDE00\"", new[] { 3, 1, 0, 0, 0, 246, 1, 0, 0, 0, 0, 0 })]
+    [InlineData(NativeRuntimePolicy.FailFast, 0, "\"\"", new[] { 0, 0, 0, 0, 0, 0, 0, 0 })]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 2, "\"\\0\"", new[] { 2, 1, 0, 0, 0, 0, 0, 0 })]
+    public async Task EncodedStringRowsHaveExactCountTerminationAndPaddingAsync(
+        NativeRuntimePolicy policy, int flags, string spelling, int[] expected)
+    {
+        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var checks = string.Join(Environment.NewLine, expected.Select((value, index) =>
+            FormattableString.Invariant($"if (row.Read({index}) != {value}) {{ return 3; }}")));
+        var entry = SyntaxTree.Parse($$"""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require StringLiteral.TryCreate(spelling, out var literal);
+                require TryGetStringRowByteLength(literal, {{flags}}, init var byteLength);
+                if (byteLength != {{expected.Length}}) { return 1; }
+                require OwnedInt32Buffer.TryCreate(byteLength, out var workspace);
+                mut OwnedInt32Buffer row = EncodeStringRow(literal, {{flags}}, move workspace);
+                if (row.Count != byteLength || row.Capacity != byteLength) { return 2; }
+                {{checks}}
+                row = EncodeStringRow(literal, {{flags}}, move row);
+                if (row.Count != byteLength || row.Capacity != byteLength) { return 4; }
+                return 0;
+            }
+            """, "string-row-entry.terrum");
+        var compilation = Compilation.Create(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(0, NativeJit.Execute(program, policy));
+        Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, 257, 1, 1, 0)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 65536, 0, 0, 1)]
+    public async Task StringRowUnitCountUsesThreeLittleEndianBytesAsync(
+        NativeRuntimePolicy policy, int unitCount, int low, int middle, int high)
+    {
+        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var contentEnd = unitCount + 4;
+        var extent = contentEnd + 1;
+        var rowLength = extent + (4 - extent % 4) % 4;
+        var entry = SyntaxTree.Parse($$"""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require StringLiteral.TryCreate(spelling, out var literal);
+                require TryGetStringRowByteLength(literal, 0, init var length);
+                if (length != {{rowLength}}) { return 1; }
+                require OwnedInt32Buffer.TryCreate(length, out var workspace);
+                OwnedInt32Buffer row = EncodeStringRow(literal, 0, move workspace);
+                if (row.Count != length || row.Read(0) != 0
+                    || row.Read(1) != {{low}} || row.Read(2) != {{middle}}
+                    || row.Read(3) != {{high}}) { return 2; }
+                mut int32 index = 4;
+                while (index < {{contentEnd}}) {
+                    if (row.Read(index) != 65) { return 3; }
+                    index = index + 1;
+                }
+                while (index < row.Count) {
+                    if (row.Read(index) != 0) { return 4; }
+                    index = index + 1;
+                }
+                return 0;
+            }
+            """, "string-row-count-entry.terrum");
+        var source = ImmutableArray.CreateBuilder<int>(unitCount + 2);
+        source.Add(34);
+        source.AddRange(Enumerable.Repeat(65, unitCount));
+        source.Add(34);
+        var compilation = Compilation.Create(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, source.ToImmutable(), false)],
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(0, NativeJit.Execute(program, policy));
+        Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public async Task StringRowsRejectReservedFlagsAndUndersizedWorkspaceAsync()
+    {
+        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var entry = SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require StringLiteral.TryCreate(spelling, out var literal);
+                if (TryGetStringRowByteLength(literal, -1, init var negative)
+                    || TryGetStringRowByteLength(literal, 4, init var reserved)
+                    || TryGetStringRowByteLength(literal, 255, init var extended)
+                    || TryGetStringRowByteLength(literal, 0, init var nonAscii)) { return 1; }
+                require TryGetStringRowByteLength(literal, 1, init var exactLength);
+                require OwnedInt32Buffer.TryCreate(exactLength - 1, out var small);
+                unsafe {
+                    try {
+                        OwnedInt32Buffer partial = EncodeStringRow(literal, 1, move small);
+                        return 2;
+                    } catch {
+                        require OwnedInt32Buffer.TryCreate(exactLength, out var exact);
+                        OwnedInt32Buffer row = EncodeStringRow(literal, 1, move exact);
+                        if (row.Count != exactLength || row.Read(0) != 1) { return 3; }
+                        return 0;
+                    }
+                }
+            }
+            """, "string-row-failure-entry.terrum");
+        var compilation = Compilation.Create(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, [34, 233, 34], false)],
+            BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(0, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
+        Assert.Equal(0, await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+    }
+
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {
         var path = Path.Combine(RepositoryRoot(), "artifacts", $"string-literals-{Guid.NewGuid():N}.exe");
@@ -301,7 +427,9 @@ public sealed class StringLiteralComponentTests
     private static async Task<ImmutableArray<SyntaxTree>> ReadComponentsAsync(bool includeTests)
     {
         var trees = ImmutableArray.CreateBuilder<SyntaxTree>();
-        var names = new[] { "SourceRange.terrum", "CharacterFacts.terrum", "StringLiteral.terrum" };
+        var names = new[] {
+            "SourceRange.terrum", "CharacterFacts.terrum", "StringLiteral.terrum", "StringRow.terrum",
+        };
         foreach (var name in includeTests ? [.. names, "StringLiteralTests.terrum"] : names)
         {
             var path = Path.Combine(RepositoryRoot(), "self-host", name);

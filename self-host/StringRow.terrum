@@ -1,0 +1,89 @@
+namespace Terrum.CodeAnalysis;
+
+bool TryMeasureStringRow(StringLiteral literal, int32 flags,
+    init ref<int32> contentBytes, init ref<int32> unitWidth, init ref<int32> rowBytes)
+{
+    mut int32 bytes = 0;
+    mut int32 width = 1;
+    if (flags == 0)
+    {
+        if (!literal.TryGetAsciiLength(init var length)) { return false; }
+        bytes = length;
+    }
+    else if (flags == 1)
+    {
+        if (!literal.TryGetUtf8Length(init var length)) { return false; }
+        bytes = length;
+    }
+    else if (flags == 2)
+    {
+        if (!literal.TryGetUtf16ByteLength(init var length)) { return false; }
+        bytes = length;
+        width = 2;
+    }
+    else if (flags == 3)
+    {
+        if (!literal.TryGetUtf32ByteLength(init var length)) { return false; }
+        bytes = length;
+        width = 4;
+    }
+    else
+    {
+        return false;
+    }
+
+    if (bytes / width > 16777215)
+    {
+        return false;
+    }
+    int32 extent = 4 + bytes + width;
+    contentBytes = bytes;
+    unitWidth = width;
+    rowBytes = extent + (4 - extent % 4) % 4;
+    return true;
+}
+
+public static bool TryGetStringRowByteLength(StringLiteral literal, int32 flags,
+    init ref<int32> byteLength)
+{
+    if (!TryMeasureStringRow(literal, flags, init var contentBytes, init var unitWidth,
+        init var rowBytes))
+    {
+        return false;
+    }
+    byteLength = rowBytes;
+    return true;
+}
+
+public static OwnedInt32Buffer EncodeStringRow(StringLiteral literal, int32 flags,
+    OwnedInt32Buffer workspace)
+{
+    require TryMeasureStringRow(literal, flags, init var contentBytes, init var unitWidth,
+        init var rowBytes);
+    mut OwnedInt32Buffer bytes = move workspace;
+    if (flags == 0) { bytes = literal.EncodeAscii(move bytes); }
+    else if (flags == 1) { bytes = literal.EncodeUtf8(move bytes); }
+    else if (flags == 2) { bytes = literal.EncodeUtf16LeBytes(move bytes); }
+    else { bytes = literal.EncodeUtf32LeBytes(move bytes); }
+
+    while (bytes.Count < rowBytes)
+    {
+        require bytes.TryAppend(0);
+    }
+    {
+        mut MutableInt32BufferView row = bytes.SliceMutable(0, rowBytes);
+        // Move backward so the header can reuse the original content buffer.
+        mut int32 index = contentBytes;
+        while (index > 0)
+        {
+            index = index - 1;
+            row.Set(index + 4, row.Read(index));
+        }
+        int32 units = contentBytes / unitWidth;
+        row.Set(0, flags);
+        row.Set(1, units % 256);
+        row.Set(2, (units / 256) % 256);
+        row.Set(3, units / 65536);
+    }
+    return move bytes;
+}
