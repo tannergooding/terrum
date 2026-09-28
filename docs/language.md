@@ -216,7 +216,14 @@ in the [layout contract](data-layout-and-abi.md#fixed-directly-interoperable-rep
 These are target design contracts, not blanket compiler support claims.
 Syntax-24 supports `[Layout(Transparent)]` only for a one-field compact Copy
 struct with a scalar `bool`, `char16`, `int32`, `uint32`, `int64` or `uint64`
-carrier; other struct/field layout attributes still diagnose `TRM3001`.
+carrier.
+The provisional `[Layout(Sequential)]` spelling admits nonpublic compact
+Copy structs with private fields and eligible nested Copy fields, using the
+existing natural declaration-order layout (1–16 bytes). It does not publish
+fields, freeze representation, or permit independently replaceable layout
+boundaries; no semantic wire field or ABI migration is implied.
+Packing, aggregate-alignment overrides, public fields and `Blittable` remain
+unsupported; other struct/field layout attributes diagnose `TRM3001`.
 `ValueLayout` remains limited to naturally aligned 1–16-byte aggregates.
 Existing non-transparent compact-value and module ABI contracts remain
 authoritative. Broader enforcement requires an explicit compatibility

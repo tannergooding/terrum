@@ -3,6 +3,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -65,6 +66,17 @@ typedef IntCarrier (*EchoIntCarrier)(IntCarrier);
 typedef UIntCarrier (*EchoUIntCarrier)(UIntCarrier);
 typedef LongCarrier (*EchoLongCarrier)(LongCarrier);
 typedef ULongCarrier (*EchoULongCarrier)(ULongCarrier);
+typedef struct SequentialInner { uint16_t Unit; uint8_t Valid; } SequentialInner;
+typedef struct SequentialOuter
+{
+    uint8_t Present;
+    int32_t Number;
+    SequentialInner Inner;
+    uint16_t Suffix;
+} SequentialOuter;
+typedef SequentialOuter (*MakeSequential)(int32_t);
+typedef int32_t (*ReadSequential)(SequentialOuter);
+typedef uint8_t (*TrySequential)(uint8_t, SequentialOuter*);
 typedef struct SmallOwner { int32_t Value; } SmallOwner;
 typedef struct WordOwner { uint64_t Value; } WordOwner;
 typedef struct LargeOwner { int64_t Signed; uint64_t Unsigned; } LargeOwner;
@@ -119,7 +131,7 @@ static int CheckWideIntegerReturn(const void* function)
 // table. Loading an EXE as a library does not execute its process entrypoint.
 int main(int argc, char** argv)
 {
-    if (argc != 46)
+    if (argc != 49)
     {
         return 90;
     }
@@ -362,6 +374,32 @@ int main(int argc, char** argv)
         || echoULongCarrier(unsignedLongCarrier).Value != UINT64_MAX)
     {
         result = 112;
+    }
+
+    MakeSequential makeSequential = (MakeSequential)((uint8_t*)image + strtoul(argv[46], NULL, 10));
+    ReadSequential readSequential = (ReadSequential)((uint8_t*)image + strtoul(argv[47], NULL, 10));
+    TrySequential trySequential = (TrySequential)((uint8_t*)image + strtoul(argv[48], NULL, 10));
+    if (sizeof(SequentialInner) != 4 || __alignof(SequentialInner) != 2
+        || offsetof(SequentialInner, Unit) != 0 || offsetof(SequentialInner, Valid) != 2
+        || sizeof(SequentialOuter) != 16 || __alignof(SequentialOuter) != 4
+        || offsetof(SequentialOuter, Present) != 0 || offsetof(SequentialOuter, Number) != 4
+        || offsetof(SequentialOuter, Inner) != 8 || offsetof(SequentialOuter, Suffix) != 12)
+    {
+        result = 113;
+    }
+    SequentialOuter sequential = makeSequential(37);
+    SequentialOuter guardedSequential[3] = {
+        {1, -1, {2, 1}, 3}, {0, -2, {4, 0}, 5}, {1, -3, {6, 1}, 7}
+    };
+    if (sequential.Present != 1 || sequential.Number != 37 || sequential.Inner.Unit != 2
+        || sequential.Inner.Valid != 1 || sequential.Suffix != 3
+        || readSequential(sequential) != 42
+        || !trySequential(1, &guardedSequential[1])
+        || guardedSequential[1].Number != 37 || guardedSequential[0].Number != -1
+        || guardedSequential[2].Number != -3 || trySequential(0, &guardedSequential[1])
+        || guardedSequential[1].Number != 37)
+    {
+        result = 114;
     }
 
     if (!FreeLibrary(image))

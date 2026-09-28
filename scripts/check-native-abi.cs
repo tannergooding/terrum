@@ -43,6 +43,7 @@ foreach (var name in new[] {
     "SmallOwner.Read", "WordOwner.Read", "LargeOwner.Read", "SmallOwner.Pack",
     "EchoBoolCarrier", "EchoCharCarrier", "EchoIntCarrier", "EchoUIntCarrier",
     "EchoLongCarrier", "EchoULongCarrier",
+    "MakeSequential", "ReadSequential", "TrySequential",
 })
 {
     var index = -1;

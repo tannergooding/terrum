@@ -681,11 +681,20 @@ older non-transparent structures keep their layout and selected version.
 This subset does not admit nested, owning or managed carriers, packing or
 alignment overrides, or a general `Blittable`/public-field policy migration.
 The scanner record and native profile/package format are unchanged.
+Private compact Copy structs can provisionally select `[Layout(Sequential)]`.
+Binding and semantic verification check private fields, nonpublic visibility,
+natural declaration-order offsets and the existing 16-byte limit, including
+eligible nested Copy values. The selection is recorded in source IR but not
+serialized into public/module layout metadata: private module bodies retain
+the same offsets and existing wire versions as Auto. It does not enable public
+fields, frozen `Blittable` layout, packing, raw padding access or a separately
+replaceable native aggregate ABI.
 `[NoThrow]` on functions/constructors, `[DoesNotReturn]` on void functions and
 `[Cleanup]` on eligible unique instance methods are currently bound;
 unknown, duplicate and misplaced attributes diagnose rather
 than becoming unchecked metadata. Parameterless attribute nodes retain their
-brackets and name as three children; `Layout(Transparent)` has a parenthesized
+brackets and name as three children; `Layout(Transparent)` and
+`Layout(Sequential)` have a parenthesized
 identifier argument. The `native-10` (fail-fast), `native-11`
 (checked-exceptions) and `native-12` (compact unique owner) profiles support checked
 signed/unsigned 32- and 64-bit integers, raw code units, conditional outputs,

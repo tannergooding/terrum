@@ -561,6 +561,7 @@ internal sealed partial class Binder
         var isPublic = false;
         var isUnique = false;
         var isTransparent = false;
+        var isSequential = false;
         var visibilityCount = 0;
         foreach (var element in declaration.Children)
         {
@@ -570,15 +571,18 @@ internal sealed partial class Binder
                     SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
                     SyntaxTokenElement { Token.Kind: TokenKind.Identifier, Token.Text: "Layout" },
                     SyntaxTokenElement { Token.Kind: TokenKind.OpenParen },
-                    SyntaxTokenElement { Token.Kind: TokenKind.Identifier, Token.Text: "Transparent" },
+                    SyntaxTokenElement { Token.Kind: TokenKind.Identifier } layout,
                     SyntaxTokenElement { Token.Kind: TokenKind.CloseParen },
-                    SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket }] && !isTransparent)
+                    SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket }]
+                    && !isTransparent && !isSequential
+                    && (layout.Token.Text is "Transparent" or "Sequential"))
                 {
-                    isTransparent = true;
+                    isTransparent = layout.Token.Text == "Transparent";
+                    isSequential = layout.Token.Text == "Sequential";
                 }
                 else
                 {
-                    Report("TRM3001", "Only one [Layout(Transparent)] attribute is supported on a struct.", attribute.Span);
+                    Report("TRM3001", "Only one [Layout(Transparent)] or [Layout(Sequential)] attribute is supported on a struct.", attribute.Span);
                 }
             }
             if (element is SyntaxTokenElement modifier)
@@ -688,6 +692,10 @@ internal sealed partial class Binder
         {
             Report("TRM3005", "Transparent Copy structs require exactly one scalar value field.", declaration.Span);
         }
+        if (isSequential && (isPublic || isUnique || fields.Any(static field => !field.IsPrivate)))
+        {
+            Report("TRM3005", "Sequential layout supports only nonpublic Copy structs with private fields.", declaration.Span);
+        }
         size = (size + alignment - 1) & -alignment;
         if (size is < 1 or > ValueLayout.MaximumSize)
         {
@@ -697,6 +705,7 @@ internal sealed partial class Binder
             IsInternal = !isPublic,
             IsUnique = isUnique,
             IsTransparent = isTransparent,
+            IsSequential = isSequential,
         };
         _ = _layingOut.Remove(index);
         _ = _laidOut.Add(index);

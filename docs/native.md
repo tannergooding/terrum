@@ -973,7 +973,12 @@ It checks flat and nested direct and indirect aggregates passed/returned by valu
 including one-field transparent scalar wrappers independently called from C,
 hidden results and register/stack arguments, true/false output publication, guard storage
 around scalar and aggregate output destinations, and narrow
-arguments with deliberately unspecified upper register bits. The script
+arguments with deliberately unspecified upper register bits. The provisional
+private `[Layout(Sequential)]` fixture also checks independent C `sizeof`,
+`__alignof` and `offsetof` for nested fields with interior and tail padding,
+followed by by-value and output calls. This is physical classification
+evidence for the existing Windows x64 profile, not an exported native layout
+commitment. The script
 also checks readonly unique receivers of 4, 8 and 16 bytes, preserved caller
 storage, and a borrowed receiver combined with an indirect result and five
 explicit arguments. These C fixtures provide initialized primitive payloads

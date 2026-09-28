@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Text;
@@ -482,5 +483,7 @@ internal sealed partial class Binder
         }
     }
 
+    [SuppressMessage("Design", "CA1032:Implement standard exception constructors", Justification = "Private evaluator failure signal, caught when reporting a required constant or proof.")]
+    [SuppressMessage("Design", "CA1064:Exceptions should be public", Justification = "Private evaluator failure signal, never part of the public API.")]
     private sealed class ConstEvalFailure(string message) : Exception(message);
 }

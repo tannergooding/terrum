@@ -82,7 +82,6 @@ public sealed class TransparentLayoutTests
     [InlineData("[Layout(Transparent)] struct Inner { int32 Value; } [Layout(Transparent)] struct Outer { Inner Value; }")]
     [InlineData("[Layout(Transparent)] struct Unsupported { OwnedInt32Buffer Value; }")]
     [InlineData("[Layout(Transparent)] [Layout(Transparent)] struct Repeat { int32 Value; }")]
-    [InlineData("[Layout(Sequential)] struct Other { int32 Value; }")]
     public void UnsupportedTransparentDeclarationsDiagnose(string declaration)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(declaration + "int32 Main() { return 0; }"));

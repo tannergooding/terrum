@@ -136,6 +136,59 @@ public int32 ReadAligned(AlignedOuter value)
     return int32(value.Prefix) + int32(value.Value.Unit) + int32(value.Suffix);
 }
 
+[Layout(Sequential)] struct SequentialInner
+{
+    char16 Unit;
+    bool Valid;
+    public SequentialInner(char16 unit)
+    {
+        Unit = unit;
+        Valid = true;
+    }
+    public int32 Read()
+    {
+        if (!Valid) { return -1; }
+        return int32(Unit);
+    }
+}
+
+[Layout(Sequential)] struct SequentialOuter
+{
+    bool Present;
+    int32 Number;
+    SequentialInner Inner;
+    char16 Suffix;
+    public SequentialOuter(int32 number)
+    {
+        Present = true;
+        Number = number;
+        Inner = new SequentialInner(char16(2));
+        Suffix = char16(3);
+    }
+    public int32 Read()
+    {
+        if (!Present) { return -1; }
+        return Number + Inner.Read() + int32(Suffix);
+    }
+}
+
+SequentialOuter MakeSequential(int32 number)
+{
+    return new SequentialOuter(number);
+}
+
+int32 ReadSequential(SequentialOuter value)
+{
+    return value.Read();
+}
+
+bool TrySequential(bool success, out SequentialOuter value)
+{
+    if (!success) { return false; }
+    value = MakeSequential(37);
+    return true;
+}
+
 public struct Three
 {
     public bool First;

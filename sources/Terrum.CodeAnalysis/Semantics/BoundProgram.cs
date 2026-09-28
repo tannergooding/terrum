@@ -237,6 +237,9 @@ public sealed record BoundClass(string Name, ImmutableArray<BoundStructField> Fi
 /// <summary>A compact value type of at most sixteen bytes, with no references or aliases.</summary>
 public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> Fields, int Size)
 {
+    /// <summary>Whether source requested private declaration-order natural layout.</summary>
+    public bool IsSequential { get; init; }
+
     /// <summary>Whether this Copy value has the storage and call ABI of its sole scalar field.</summary>
     public bool IsTransparent { get; init; }
 

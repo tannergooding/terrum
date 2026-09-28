@@ -12,7 +12,7 @@
 | Status | Covered here |
 |---|---|
 | Accepted design | Primitive and eligible-wrapper access guarantees; no aggregate atomicity inferred from size; opaque `Auto` layout with private fields by default; declaration-order `Sequential`, offset-zero `Union` requiring `Blittable`, and one-field carrier `Transparent`; fixed target-specific interop under an explicit `Blittable` commitment, not layout kind alone; separation of layout, call classification, atomicity, validity, ownership and sharing; preservation of published boundaries |
-| Implemented bounded profile | The existing Windows x64 compact-value and module ABIs, including syntax-24 one-field Copy `Transparent` wrappers over the six supported scalar carriers with semantic v35 intent. Their exact current contracts remain authoritative; they are not superseded by an unspecified future profile |
+| Implemented bounded profile | The existing Windows x64 compact-value and module ABIs, including syntax-24 one-field Copy `Transparent` wrappers over the six supported scalar carriers with semantic v35 intent. Provisional `[Layout(Sequential)]` checks private Copy declarations against the existing natural 1–16-byte layout; it does not freeze an independently replaceable representation or add a wire field. Their exact current contracts remain authoritative; they are not superseded by an unspecified future profile |
 | Specification and implementation work | Recording chosen target rules, checking layouts and metadata, validating compatible replacement, and testing lowering against accepted guarantees; see [profile work](#profile-specification-and-implementation-work) |
 
 Unimplemented does not mean unapproved. Completing a table from an already
@@ -138,6 +138,16 @@ cannot cross an independently replaceable dynamic boundary; they may be used
 where producer and consumer remain layout-coupled through compilation,
 rebuild, or invalidation. JIT versus AOT labels alone do not determine that
 coupling.
+
+The provisional compiler spelling `[Layout(Sequential)]` admits nonpublic
+compact Copy structs with private fields, including nested eligible Copy
+values. It checks the existing declaration-order natural alignment and
+16-byte size limit; the in-memory semantic IR records the selection, but
+private module serialization retains the existing physical fields and wire
+version, not the annotation. Its current physical agreement with an
+independent Windows x64 C fixture is not a `Blittable` or stable public ABI
+promise. Public structs/fields, unique owners, packing and aggregate-alignment
+controls remain unsupported for this annotation.
 
 ### Packing and aggregate alignment
 

@@ -256,6 +256,11 @@ public static class SemanticVerifier
             {
                 throw Invalid();
             }
+            if (structure.IsSequential && (!structure.IsInternal || structure.IsUnique
+                || structure.IsTransparent || structure.Fields.Any(static field => !field.IsPrivate)))
+            {
+                throw Invalid();
+            }
             alignments[index] = alignment;
             layoutHeights[index] = height;
             layoutStates[index] = 2;
