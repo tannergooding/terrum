@@ -1053,7 +1053,9 @@ contracts. A host-side
 writer emits indexed String sections with required names or optional empty
 namespace text; a fixed Module-row writer checks identities, partition
 cursors, requirements and entry ownership against the supplied String table
-and table counts. The self-host String-row
+and table counts; a ModuleRef-row writer checks producer names and matching
+requirements for co-located modules, while retaining external references for
+later binding. The self-host String-row
 candidate emits individual rows. These exercise approved metadata contracts in isolation,
 including a framed callable-table fixture, but do not parse executable Body
 instructions or replace the current module writer. A provisional structural
