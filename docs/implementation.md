@@ -325,6 +325,8 @@ not source defaults. Classes have at most 32 fields and payloads are bounded
 to 128 bytes; semantic revision 36 retains more than 16 fields, including
 alongside transparent layouts. Readonly/mutable field access, visibility and
 partial-construction checks remain mandatory.
+Thirty-two four-byte fields fill the 128-byte payload exactly; a smaller
+field count does not bypass the independent payload limit.
 At the 4,096-object heap limit, a live 32-field class retains its final-field
 managed edge while collection reclaims unreachable wide classes and their edges.
 Checked constructor failure also frees its provisional wide object before

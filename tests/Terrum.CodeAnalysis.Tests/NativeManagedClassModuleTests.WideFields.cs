@@ -137,6 +137,26 @@ public sealed partial class NativeManagedClassModuleTests
             NativeRuntimePolicy.CheckedExceptions)).ConfigureAwait(true));
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task ThirtyTwoFieldsFillMaximumClassPayloadAsync(NativeRuntimePolicy policy)
+    {
+        var fields = string.Join(" ", Enumerable.Range(0, 32).Select(index => $"public int32 F{index};"));
+        var assignments = string.Join(" ", Enumerable.Range(0, 32).Select(index => $"F{index} = {index};"));
+        var source = $"class Dense {{ {fields} public Dense() {{ {assignments} }} }}"
+            + " public int32 Read() { require Dense.TryCreate(out var value);"
+            + " return value.F31 + value.F11; }";
+        var producer = ModuleCompiler.CreateProducer(Compile(source, policy), ["Read"]);
+        Assert.Equal(36, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
+            policy, ModuleCompiler.CreateReference(producer), library: false), producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.Equal(128, Assert.Single(linked.Classes).Size);
+        Assert.Equal(42, NativeJit.Execute(linked, policy));
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+    }
+
     private static string WideSource(int fieldCount, string resultSuffix = "")
     {
         var fields = string.Join(" ", Enumerable.Range(0, fieldCount - 1).Select(index => $"public bool F{index};"));

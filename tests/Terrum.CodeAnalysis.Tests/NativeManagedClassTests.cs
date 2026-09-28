@@ -52,6 +52,21 @@ public sealed class NativeManagedClassTests
         Assert.Null(compilation.Program);
     }
 
+    [Fact]
+    public void ManagedClassPayloadLimitAppliesBelowFieldLimit()
+    {
+        var fields = string.Join(" ", Enumerable.Range(0, 17)
+            .Select(index => $"public int64 F{index};"));
+        var assignments = string.Join(" ", Enumerable.Range(0, 17)
+            .Select(index => $"F{index} = 0;"));
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            $"class TooLarge {{ {fields} public TooLarge() {{ {assignments} }} }}"
+            + " int32 Main() { return 42; }"));
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3005"
+            && diagnostic.Message.Contains("bounded payload", StringComparison.Ordinal));
+        Assert.Null(compilation.Program);
+    }
+
     [Theory]
     [InlineData("write int32 value = 42;")]
     [InlineData("write Leaf value = leaf;")]
