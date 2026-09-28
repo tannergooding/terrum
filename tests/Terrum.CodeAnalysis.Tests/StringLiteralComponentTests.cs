@@ -304,6 +304,72 @@ public sealed class StringLiteralComponentTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, 0)]
+    [InlineData(NativeRuntimePolicy.FailFast, 1)]
+    [InlineData(NativeRuntimePolicy.FailFast, 2)]
+    [InlineData(NativeRuntimePolicy.FailFast, 3)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 0)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 1)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 2)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 3)]
+    public async Task EmptyNamespaceRowRetainsEncodingAndZeroUnitsAsync(
+        NativeRuntimePolicy policy, int flags)
+    {
+        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var entry = SyntaxTree.Parse($$"""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require StringLiteral.TryCreate(spelling, out var literal);
+                if (TryGetStringNameRowByteLength(literal, {{flags}}, init var nameLength)) { return 1; }
+                require TryGetStringNamespaceRowByteLength(literal, {{flags}}, init var length);
+                if (length != 8) { return 2; }
+                require OwnedInt32Buffer.TryCreate(length, out var workspace);
+                OwnedInt32Buffer row = EncodeStringNamespaceRow(literal, {{flags}}, move workspace);
+                if (row.Count != 8 || row.Read(0) != {{flags}}) { return 3; }
+                mut int32 index = 1;
+                while (index < 8) {
+                    if (row.Read(index) != 0) { return 4; }
+                    index = index + 1;
+                }
+                return 0;
+            }
+            """, "empty-namespace-row-entry.terrum");
+        var compilation = Compilation.Create(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, [.. "\"\"".Select(unit => (int)unit)], false)],
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(0, NativeJit.Execute(program, policy));
+        Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public async Task NamespaceRowRejectsEmbeddedZeroScalarAsync()
+    {
+        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var entry = SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require StringLiteral.TryCreate(spelling, out var literal);
+                if (TryGetStringNamespaceRowByteLength(literal, 0, init var ascii)
+                    || TryGetStringNamespaceRowByteLength(literal, 1, init var utf8)
+                    || TryGetStringNamespaceRowByteLength(literal, 2, init var utf16)
+                    || TryGetStringNamespaceRowByteLength(literal, 3, init var utf32)) { return 1; }
+                return 0;
+            }
+            """, "invalid-namespace-row-entry.terrum");
+        var compilation = Compilation.Create(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, [.. "\"A\\0B\"".Select(unit => (int)unit)], false)],
+            BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(0, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
+        Assert.Equal(0, await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+    }
+
+    [Theory]
     [InlineData("\"A\"", "\"\\u0041\"", true)]
     [InlineData("\"\u00E9\"", "\"\\u00E9\"", true)]
     [InlineData("\"\uD83D\uDE00\"", "\"\\U0001F600\"", true)]

@@ -55,9 +55,9 @@ public static bool TryGetStringRowByteLength(StringLiteral literal, int32 flags,
     return true;
 }
 
-bool IsValidStringName(StringLiteral literal)
+bool IsValidStringText(StringLiteral literal, bool allowEmpty)
 {
-    if (literal.ScalarCount == 0)
+    if (literal.ScalarCount == 0 && !allowEmpty)
     {
         return false;
     }
@@ -74,11 +74,28 @@ bool IsValidStringName(StringLiteral literal)
     return true;
 }
 
+bool IsValidStringName(StringLiteral literal)
+{
+    return IsValidStringText(literal, false);
+}
+
 public static bool TryGetStringNameRowByteLength(StringLiteral literal, int32 flags,
     init ref<int32> byteLength)
 {
     if (!TryMeasureStringRow(literal, flags, init var contentBytes, init var unitWidth,
             init var rowBytes) || !IsValidStringName(literal))
+    {
+        return false;
+    }
+    byteLength = rowBytes;
+    return true;
+}
+
+public static bool TryGetStringNamespaceRowByteLength(StringLiteral literal, int32 flags,
+    init ref<int32> byteLength)
+{
+    if (!TryMeasureStringRow(literal, flags, init var contentBytes, init var unitWidth,
+            init var rowBytes) || !IsValidStringText(literal, true))
     {
         return false;
     }
@@ -149,5 +166,12 @@ public static OwnedInt32Buffer EncodeStringNameRow(StringLiteral literal, int32 
     OwnedInt32Buffer workspace)
 {
     require TryGetStringNameRowByteLength(literal, flags, init var byteLength);
+    return EncodeStringRow(literal, flags, move workspace);
+}
+
+public static OwnedInt32Buffer EncodeStringNamespaceRow(StringLiteral literal, int32 flags,
+    OwnedInt32Buffer workspace)
+{
+    require TryGetStringNamespaceRowByteLength(literal, flags, init var byteLength);
     return EncodeStringRow(literal, flags, move workspace);
 }
