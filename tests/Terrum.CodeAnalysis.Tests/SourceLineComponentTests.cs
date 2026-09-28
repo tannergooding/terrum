@@ -44,6 +44,8 @@ public sealed partial class SourceLineComponentTests
     [InlineData("bool ok = TryGetSourcePosition(-1, out var line, out var character); return character;")]
     [InlineData("bool ok = TryGetSourceOffset(-1, 0, out var offset); return offset;")]
     [InlineData("bool ok = TryGetSourceOffset(0, 2, out var offset); return offset;")]
+    [InlineData("bool ok = TryGetSourceLineExtent(-1, out var extent); return extent.Start;")]
+    [InlineData("bool ok = TryGetSourceLineExtent(1, out var extent); return extent.Length;")]
     public async Task FailedQueriesCannotPublishReadableOutputsAsync(string body)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);

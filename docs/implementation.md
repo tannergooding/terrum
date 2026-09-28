@@ -407,6 +407,10 @@ per actual line start rather than per source code unit, preserving maximum-sized
 sparse inputs within the existing buffer capacity. Construction counts first
 and fills unknown starts in a second scan; already known endpoints and fully
 dense single-unit breaks need no second source scan.
+It also returns a line's full UTF-16 extent (including its break) by ordinal
+from adjacent starts without rereading source; the streaming candidate walks
+line ranges to provide the same extent without owning a table. Invalid
+ordinals leave the conditional output vacant.
 General borrowed references and stored loans remain unsupported. The accepted
 `ref<T>`/`ptr<T>`/`box<T>`/`val<T>` forms, general `write` views, `own<T>` and
 general `init ref<T>` invocation still requires its representation,

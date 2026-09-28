@@ -96,3 +96,29 @@ public bool TryGetSourceOffset(int32 line, int32 character, out int32 offset)
         index = index + 1;
     }
 }
+
+public bool TryGetSourceLineExtent(int32 line, out SourceRange includingBreak)
+{
+    if (line < 0)
+    {
+        return false;
+    }
+
+    mut int32 start = 0;
+    mut int32 index = 0;
+    while (true)
+    {
+        require TryReadSourceLine(start, out var content, out var range);
+        if (index == line)
+        {
+            includingBreak = range;
+            return true;
+        }
+        if (content.Length == range.Length)
+        {
+            return false;
+        }
+        start = range.End;
+        index = index + 1;
+    }
+}

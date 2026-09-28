@@ -123,4 +123,22 @@ public unique struct SourceLineIndex
         offset = start + character;
         return true;
     }
+
+    public bool TryGetLineExtent(int32 line, out SourceRange includingBreak)
+    {
+        if (line < 0 || line >= _starts.Count)
+        {
+            return false;
+        }
+
+        ReadonlyInt32BufferView starts = _starts.Slice(0, _starts.Count);
+        int32 start = starts.Read(line);
+        mut int32 end = _length;
+        if (line + 1 < starts.Length)
+        {
+            end = starts.Read(line + 1);
+        }
+        require SourceRange.TryCreate(start, end - start, out includingBreak);
+        return true;
+    }
 }

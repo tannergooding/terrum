@@ -28,6 +28,12 @@ public sealed partial class SourceLineComponentTests
     {
         var source = SourceText.From(text);
         var expected = ImmutableArray.CreateBuilder<int>();
+        var extents = ImmutableArray.CreateBuilder<int>();
+        foreach (var sourceLine in source.Lines)
+        {
+            extents.Add(sourceLine.SpanIncludingLineBreak.Start);
+            extents.Add(sourceLine.SpanIncludingLineBreak.Length);
+        }
         for (var position = 0; position <= source.Length; position++)
         {
             var location = source.GetLinePosition(position);
@@ -46,6 +52,14 @@ public sealed partial class SourceLineComponentTests
                     || index.TryGetOffset(Host.LineCount[0], 0, out var afterOffset)
                     || index.TryGetOffset(0, -1, out var negativeCharacter)
                     || index.TryGetOffset(0, int32.MaxValue, out var hugeCharacter)) { return 5; }
+                if (index.TryGetLineExtent(-1, out var beforeExtent)
+                    || index.TryGetLineExtent(Host.LineCount[0], out var afterExtent)
+                    || index.TryGetLineExtent(int32.MaxValue, out var hugeExtent)) { return 9; }
+                for (mut int32 current = 0; current < Host.LineCount[0]; current = current + 1) {
+                    require index.TryGetLineExtent(current, out var extent);
+                    if (extent.Start != Host.ExpectedExtents[current * 2]
+                        || extent.Length != Host.ExpectedExtents[current * 2 + 1]) { return 10; }
+                }
                 for (mut int32 position = 0; position <= Host.Source.Length; position = position + 1) {
                     require index.TryGetPosition(position, out var line, out var character);
                     if (line != Host.ExpectedPositions[position * 2]
@@ -73,6 +87,7 @@ public sealed partial class SourceLineComponentTests
                 new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false),
                 new HostBuffer("LineCount", PrimitiveType.Int32, [source.Lines.Length], false),
                 new HostBuffer("ExpectedPositions", PrimitiveType.Int32, expected.ToImmutable(), false),
+                new HostBuffer("ExpectedExtents", PrimitiveType.Int32, extents.ToImmutable(), false),
             ], (BoundRuntimePolicy)policy);
             Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
             var program = Assert.IsType<BoundProgram>(compilation.Program);
@@ -222,6 +237,8 @@ public sealed partial class SourceLineComponentTests
                     if (line != 0 || character != position) { return 2; }
                     if (!index.TryGetOffset(line, character, out var offset)
                         || offset != position) { return 3; }
+                    require index.TryGetLineExtent(0, out var extent);
+                    if (extent.Start != 0 || extent.Length != 3) { return 4; }
                 }
                 return 0;
             }
@@ -237,6 +254,8 @@ public sealed partial class SourceLineComponentTests
     [InlineData("index.TryGetPosition(2, out var line, out var character); return character;")]
     [InlineData("index.TryGetOffset(-1, 0, out var position); return position;")]
     [InlineData("index.TryGetOffset(0, 2, out var position); return position;")]
+    [InlineData("index.TryGetLineExtent(-1, out var extent); return extent.Start;")]
+    [InlineData("index.TryGetLineExtent(1, out var extent); return extent.Length;")]
     [InlineData("SourceLineIndex copy = index; return copy.GetLineCount();")]
     [InlineData("SourceLineIndex moved = move index; return index.GetLineCount();")]
     public async Task OwnedLineIndexRejectsUnpublishedOutputsAndCopiesAsync(string body)

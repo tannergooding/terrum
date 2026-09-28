@@ -86,8 +86,8 @@ remain hosted in C#.
 | [WideIntegerTests](WideIntegerTests.terrum) | Signed extrema, invalid digits, decimal overflow and repeated output publication | Executed through AOT and JIT with a shared entry wrapper |
 | [IntegerFormatting](IntegerFormatting.terrum) | Invariant signed/unsigned decimal digits in reusable owned storage | AOT/JIT boundary and repeated-use fixtures; native heap checks cover same-allocation transfer and failure cleanup |
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and conditional bool/out publication |
-| [SourceLines](SourceLines.terrum) | Streaming line ranges and bidirectional UTF-16 offset/line-position mapping over an immutable source grant | AOT/JIT conditional outputs under both policies; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
-| [SourceLineIndex](SourceLineIndex.terrum) | Owned line-start table and bidirectional UTF-16 offset/line-position lookup | Executed as AOT/JIT under both failure policies; every offset round-trips with host line positions, with invalid outputs and owner copies rejected |
+| [SourceLines](SourceLines.terrum) | Streaming line ranges, line extents and bidirectional UTF-16 offset/line-position mapping over an immutable source grant | AOT/JIT conditional outputs under both policies; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
+| [SourceLineIndex](SourceLineIndex.terrum) | Owned line-start table, random-access line extents and bidirectional UTF-16 offset/line-position lookup | Executed as AOT/JIT under both failure policies; every offset round-trips with host line positions, with invalid outputs and owner copies rejected |
 | [SourceLineTests](SourceLineTests.terrum) | Shared line-range/position fixtures, invalid offsets and repeated queries | Executed natively with host-supplied expected records; no source normalization or default output values |
 | [StringLiteral](StringLiteral.terrum) | Validated quoted spelling and scalar decoding from the immutable UTF-16 source grant | Executed with conditional creation/reads, all supported escapes and exact source boundaries; not a runtime text representation |
 | [StringLiteralTests](StringLiteralTests.terrum) | Quoted-form validation, scalar values and rejection of offsets inside escapes or surrogate pairs | Shared host-lexer/compiled fixtures under both native runtime policies; failed calls publish no output |
@@ -137,8 +137,10 @@ break. EOF is a valid empty range. Position lookup scans those lines rather than
 using the host's allocated binary-search index. Break units belong to the preceding
 line, and a trailing break creates a final empty line. Inverse position lookup
 also scans without allocation; only the final line admits an EOF character,
-and coordinates at a subsequent line's start must use that line number. This
-is an executed bounded component, not an implemented `SourceText` collection
+and coordinates at a subsequent line's start must use that line number. The
+component also locates a line's full extent, including its break, by ordinal
+without retaining a table. An invalid ordinal publishes no extent. This is
+an executed bounded component, not an implemented `SourceText` collection
 or an efficient indexed replacement.
 
 `SourceLineIndex` builds on that streaming reader. It owns a fixed-capacity native
@@ -148,6 +150,8 @@ the initialized table. The slice borrows the owning field only for that query;
 it is not returned or stored in the index. The index retains only copied offsets
 and the source length; queries do not retain or reread the source grant. It
 also supports the inverse line/character-to-offset lookup from the same table.
+It returns a line's full extent, including its break, using adjacent starts
+without rereading the source; the final line ends at the stored source length.
 Line positions include break units on their preceding line; a character at the
 next line's start must use the next line number, and only the final line admits
 the EOF offset. Invalid line/character pairs return false without publishing

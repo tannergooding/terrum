@@ -8,11 +8,14 @@ int32 CheckSourceLines()
     while (more)
     {
         require TryReadSourceLine(start, out var content, out var includingBreak);
+        require TryGetSourceLineExtent(index, out var extent);
         require index < Host.ExpectedLines.Length / 3;
         if (content.Start != Host.ExpectedLines[index * 3]
             || content.Length != Host.ExpectedLines[index * 3 + 1]
             || includingBreak.Start != content.Start
-            || includingBreak.Length != Host.ExpectedLines[index * 3 + 2])
+            || includingBreak.Length != Host.ExpectedLines[index * 3 + 2]
+            || extent.Start != includingBreak.Start
+            || extent.Length != includingBreak.Length)
         {
             return 1;
         }
@@ -25,6 +28,13 @@ int32 CheckSourceLines()
     if (index != Host.ExpectedLines.Length / 3)
     {
         return 2;
+    }
+
+    if (TryGetSourceLineExtent(-1, out var beforeExtent)
+        || TryGetSourceLineExtent(index, out var afterExtent)
+        || TryGetSourceLineExtent(int32.MaxValue, out var maximumExtent))
+    {
+        return 9;
     }
 
     mut int32 at = 0;
