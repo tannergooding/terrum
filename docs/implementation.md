@@ -322,7 +322,8 @@ constructors initialize every field before the generated
 Allocation failure returns false; checked constructor failure frees the
 unpublished object and propagates. Collector-private zeroed reference slots are
 not source defaults. Classes have at most 32 fields and payloads are bounded
-to 128 bytes; readonly/mutable field access, visibility and
+to 128 bytes; semantic revision 36 retains more than 16 fields, including
+alongside transparent layouts. Readonly/mutable field access, visibility and
 partial-construction checks remain mandatory.
 Class fields may contain acyclic handle-free Copy structs up to 16 bytes, including
 nested compact values. Those fields are copied as complete values, not traced as
@@ -365,8 +366,9 @@ Version 19 extends that private-leaf contract to source classes and their
 optional handles, serializing checked layouts, construction and root metadata.
 Class-free modules retain the version 18 format. Classes with inline Copy fields
 use version 20, retaining their private nested layouts and remapping type IDs
-during semantic linking. Version 19 still rejects those fields and remains the
-writer format for scalar/reference-only classes.
+during semantic linking. Version 19 still rejects those fields and remains the writer format for
+scalar/reference-only classes with at most 16 fields when no later feature
+requires a higher revision.
 Classes whose constructors accept Copy structs require version 22, including
 constructors that retain only scalar portions of those arguments. Older
 versions reject aggregate constructor parameters. The native profile, scalar

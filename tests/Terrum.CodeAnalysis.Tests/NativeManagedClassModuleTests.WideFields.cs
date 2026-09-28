@@ -58,6 +58,29 @@ public sealed partial class NativeManagedClassModuleTests
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task WideClassRevisionRetainsTransparentStructuresAsync(NativeRuntimePolicy policy)
+    {
+        var source = """
+            [Layout(Transparent)] public struct Number {
+                public int32 Value;
+                public Number(int32 value) { Value = value; }
+            }
+            """ + WideSource(32).Replace("return wide.Edge.Value;",
+                "Number number = new Number(wide.Edge.Value); return number.Value;", StringComparison.Ordinal);
+        var program = Compile(source, policy);
+        Assert.True(Assert.Single(program.Structures).IsTransparent);
+        var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
+        Assert.Equal(36, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
+            policy, ModuleCompiler.CreateReference(producer), library: false), producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.True(Assert.Single(linked.Structures).IsTransparent);
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+    }
+
     private static string WideSource(int fieldCount, string resultSuffix = "")
     {
         var fields = string.Join(" ", Enumerable.Range(0, fieldCount - 1).Select(index => $"public bool F{index};"));
