@@ -127,10 +127,22 @@ admissibility guarantees purity or automatic vectorization.
 The agreed `params Collection<T>` and `params Span<T>` direction uses ordinary
 construction and per-element copy/move into new slots, not aliases to caller
 locals or a special by-reference parameter mode. Explicit reference types may
-be elements when normal storage and lifetime contracts permit them. Whether
-an existing collection binds directly or expands into elements remains a
-binding/overload rule to settle. These callable and parameter contracts are
-design targets, not executable APIs in the current native compiler.
+be elements when normal storage and lifetime contracts permit them. `params`
+modifies the collection parameter's call form, not its type. A matching
+collection argument binds directly in normal form; expanded form gathers
+individual arguments into a new collection.
+Resolve overloads by ordinary match quality and specificity first; a
+fixed-arity, non-expanded candidate wins over an otherwise equally good
+expanded `params` candidate, but not against a better conversion. Diagnose
+remaining ambiguity rather than choosing arbitrarily. Full overload ranking,
+diagnostic severity and generic collection-expression inference remain
+specification work. Binding is fixed at source compilation, not selected by a
+backend. For `Log<T>(T item)` versus `Log<T>(params List<T> items)`, a
+`List<int32>` argument selects `List<T>`: both infer one `T` and match by
+identity after inference, but `List<T>` is more specific than bare `T`. This
+does not depend on the `params` modifier or on the number/cost of inferred
+parameters. These callable and parameter contracts are design targets, not
+executable APIs in the current native compiler.
 
 ## Views, shapes and tensor primitives
 

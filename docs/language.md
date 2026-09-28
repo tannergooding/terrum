@@ -565,8 +565,21 @@ scalar callbacks do not imply SIMD implementations or automatic vectorization.
 collection construction and element copy/move rules. Expanded values occupy
 new slots rather than aliasing caller locals; `params` adds no by-reference
 parameter mode, though explicit reference types may be elements where normal
-storage and lifetime rules permit them. Whether an existing collection binds
-as the collection argument or expands into elements remains open.
+storage and lifetime rules permit them. `params` modifies the collection
+parameter's call form; it is not a different element or parameter type. An
+argument matching the declared collection binds directly in normal form;
+expanded form gathers individual arguments into a new collection. Resolve
+overloads by ordinary match quality and specificity first; a fixed-arity,
+non-expanded candidate wins an otherwise equal match over expanded `params`,
+not regardless of conversion quality. Diagnose unresolved ambiguity rather
+than selecting arbitrarily. Exact overload ranking, diagnostic severity and
+generic collection-expression inference remain specification work. Binding is
+fixed at source compilation; a backend does not choose among overloads. For
+example, given `Log<T>(T item)` and `Log<T>(params List<T> items)`, a
+`List<int32>` argument selects the `List<T>` overload: both infer one `T` and
+have identity matches after inference, but the declared `List<T>` parameter
+shape is more specific than bare `T`. This same specificity applies without
+the `params` modifier; it is not a count of inferred parameters or solver work.
 
 These are target contracts, not claims of current compiler support. Callable
 and tuple syntax, checked witnesses, and contextual lambda lowering remain
