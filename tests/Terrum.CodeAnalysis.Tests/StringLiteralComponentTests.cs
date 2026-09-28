@@ -87,6 +87,7 @@ public sealed class StringLiteralComponentTests
                 throw;
             }
             Assert.Equal(0, process.ExitCode);
+            Assert.Equal(0, NativeJit.Execute(program, policy));
         }
         finally
         {
@@ -99,6 +100,10 @@ public sealed class StringLiteralComponentTests
     [InlineData("require StringLiteral.TryCreate(range, out var literal); bool success = literal.TryReadScalar(0, out var scalar, out var next); return scalar;")]
     [InlineData("require StringLiteral.TryCreate(range, out var literal); bool success = literal.TryReadScalar(0, out var scalar, out var next); return next;")]
     [InlineData("require StringLiteral.TryCreate(range, out var literal); StringLiteralCursor cursor = StringLiteralCursor.Create(literal); bool success = cursor.TryRead(out var scalar, out var next); return next.Position;")]
+    [InlineData("bool success = StringLiteral.TryCreateInit(range, init var literal); return literal.ScalarCount;")]
+    [InlineData("require StringLiteral.TryCreate(range, out var literal); bool success = literal.TryReadScalarInit(0, init var scalar, init var next); return scalar;")]
+    [InlineData("require StringLiteral.TryCreate(range, out var literal); bool success = literal.TryReadScalarInit(0, init var scalar, init var next); return next;")]
+    [InlineData("require StringLiteral.TryCreate(range, out var literal); StringLiteralCursor cursor = StringLiteralCursor.Create(literal); bool success = cursor.TryReadInit(init var scalar, init var next); return next.Position;")]
     public async Task FailedValidationAndReadsDoNotPublishOutputsAsync(string body)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
