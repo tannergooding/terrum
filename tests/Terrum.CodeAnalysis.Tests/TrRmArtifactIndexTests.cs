@@ -25,6 +25,25 @@ public sealed class TrRmArtifactIndexTests
         Assert.Equal(0, absentCount);
     }
 
+    [Fact]
+    public void IndexesModuleReferencesAndSourceFilesThroughOneArtifact()
+    {
+        var artifact = ArtifactWithMetadataTables();
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(0x0002, out var nameBytes, out var nameCount));
+        var names = new TrRmStringTableReader(nameBytes, nameCount);
+        Assert.True(index.TryGetSection(0x0001, out var moduleBytes, out var moduleCount));
+        var modules = new TrRmModuleTableReader(moduleBytes, moduleCount, names, 1, 0, 0, 1);
+        Assert.True(index.TryGetSection(0x0010, out var refBytes, out var refCount));
+        var refs = new TrRmModuleRefTableReader(refBytes, refCount, names, modules);
+        Assert.Equal("B", refs.GetProducerIdentity(1));
+        Assert.Equal(1, refs.GetOwnerModule(1));
+        Assert.True(index.TryGetSection(0x001F, out var sourceBytes, out var sourceCount));
+        var sources = new TrRmSourceFileTableReader(sourceBytes, sourceCount, names, modules);
+        Assert.Equal("src/A.terrum", sources.GetPath(1));
+        Assert.Equal(1, sources.GetOwnerModule(1));
+    }
+
     [Theory]
     [InlineData(0, 0)]
     [InlineData(4, 2)]
@@ -173,6 +192,50 @@ public sealed class TrRmArtifactIndexTests
         Write(artifact, 140, 1);
         WriteU16(artifact, 144, 0x0002);
         Write(artifact, 148, 1);
+        return artifact;
+    }
+
+    private static byte[] ArtifactWithMetadataTables()
+    {
+        var names = TrRmStringTableWriter.EncodeNames(
+            [("A", 0), ("B", 1), ("src/A.terrum", 0)]);
+        var artifact = new byte[32 + 4 * 16 + 44 + names.Length + 12 + 8];
+        "TRRM"u8.CopyTo(artifact);
+        WriteU16(artifact, 4, 1);
+        Write(artifact, 8, 32);
+        Write(artifact, 12, 4);
+        Write(artifact, 16, (uint)artifact.Length);
+        Write(artifact, 20, 32);
+        var moduleOffset = 96;
+        var stringOffset = moduleOffset + 44;
+        var refOffset = stringOffset + names.Length;
+        var sourceOffset = refOffset + 12;
+        WriteU16(artifact, 32, 0x0001);
+        Write(artifact, 32 + 4, 1);
+        Write(artifact, 32 + 8, (uint)moduleOffset);
+        Write(artifact, 32 + 12, 44);
+        WriteU16(artifact, 48, 0x0002);
+        Write(artifact, 48 + 4, 3);
+        Write(artifact, 48 + 8, (uint)stringOffset);
+        Write(artifact, 48 + 12, (uint)names.Length);
+        WriteU16(artifact, 64, 0x0010);
+        Write(artifact, 64 + 4, 1);
+        Write(artifact, 64 + 8, (uint)refOffset);
+        Write(artifact, 64 + 12, 12);
+        WriteU16(artifact, 80, 0x001F);
+        Write(artifact, 80 + 4, 1);
+        Write(artifact, 80 + 8, (uint)sourceOffset);
+        Write(artifact, 80 + 12, 8);
+        Write(artifact, moduleOffset, 1);
+        Write(artifact, moduleOffset + 4, 1);
+        Write(artifact, moduleOffset + 28, 1);
+        Write(artifact, moduleOffset + 32, 1);
+        Write(artifact, moduleOffset + 36, 1);
+        Write(artifact, moduleOffset + 40, 1);
+        names.CopyTo(artifact.AsSpan(stringOffset));
+        Write(artifact, refOffset, 2);
+        Write(artifact, refOffset + 4, 1);
+        Write(artifact, sourceOffset, 3);
         return artifact;
     }
 
