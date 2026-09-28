@@ -304,6 +304,44 @@ public sealed class StringLiteralComponentTests
     }
 
     [Theory]
+    [InlineData("\"A\"", "\"\\u0041\"", true)]
+    [InlineData("\"\u00E9\"", "\"\\u00E9\"", true)]
+    [InlineData("\"\uD83D\uDE00\"", "\"\\U0001F600\"", true)]
+    [InlineData("\"A\"", "\"a\"", false)]
+    [InlineData("\"A\"", "\"AB\"", false)]
+    [InlineData("\"AB\"", "\"A\"", false)]
+    [InlineData("\"A\u0301\"", "\"\u00C1\"", false)]
+    [InlineData("\"\"", "\"A\"", null)]
+    [InlineData("\"A\"", "\"\\0\"", null)]
+    [InlineData("\"A\\u0000\"", "\"A\\u0000\"", null)]
+    public async Task MetadataNameEqualityComparesDecodedScalarsWithoutNormalizationAsync(
+        string left, string right, bool? expected)
+    {
+        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var assertion = expected is bool equal
+            ? $"require TryCompareStringNames(first, second, init var same); if (same != {equal.ToString().ToLowerInvariant()}) {{ return 1; }}"
+            : "if (TryCompareStringNames(first, second, init var same)) { return 1; }";
+        var entry = SyntaxTree.Parse($$"""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                require SourceRange.TryCreate(0, {{left.Length}}, out var firstSpelling);
+                require SourceRange.TryCreate({{left.Length}}, {{right.Length}}, out var secondSpelling);
+                require StringLiteral.TryCreate(firstSpelling, out var first);
+                require StringLiteral.TryCreate(secondSpelling, out var second);
+                {{assertion}}
+                return 0;
+            }
+            """, "string-name-equality-entry.terrum");
+        var compilation = Compilation.Create(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, [.. (left + right).Select(unit => (int)unit)], false)],
+            BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(0, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
+        Assert.Equal(0, await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+    }
+
+    [Theory]
     [InlineData("\"\"")]
     [InlineData("\"\\0\"")]
     [InlineData("\"A\\0B\"")]

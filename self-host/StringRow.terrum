@@ -78,6 +78,32 @@ public static bool TryGetStringNameRowByteLength(StringLiteral literal, int32 fl
     return true;
 }
 
+public static bool TryCompareStringNames(StringLiteral left, StringLiteral right,
+    init ref<bool> equal)
+{
+    if (!TryGetStringNameRowByteLength(left, 1, init var leftBytes)
+        || !TryGetStringNameRowByteLength(right, 1, init var rightBytes))
+    {
+        return false;
+    }
+
+    mut StringLiteralCursor leftCursor = StringLiteralCursor.Create(left);
+    mut StringLiteralCursor rightCursor = StringLiteralCursor.Create(right);
+    while (leftCursor.TryRead(out var leftScalar, out var leftNext))
+    {
+        if (!rightCursor.TryRead(out var rightScalar, out var rightNext)
+            || leftScalar != rightScalar)
+        {
+            equal = false;
+            return true;
+        }
+        leftCursor = leftNext;
+        rightCursor = rightNext;
+    }
+    equal = !rightCursor.TryRead(out var remaining, out var following);
+    return true;
+}
+
 public static OwnedInt32Buffer EncodeStringRow(StringLiteral literal, int32 flags,
     OwnedInt32Buffer workspace)
 {
