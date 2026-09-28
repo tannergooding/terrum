@@ -830,7 +830,7 @@ This does not add saturating conversion syntax, generic conversion witnesses
 or a change to checked `T(value)` conversions.
 
 The [integer-wrapping candidate](../self-host/IntegerWrapping.terrum)
-provides eight named 32-/64-bit signedness and narrowing conversions that
+provides all twelve cross-type 32-/64-bit signedness and width conversions that
 retain destination-width low bits, rather than applying checked range
 semantics. AOT/JIT compare against host bit-pattern results under both
 policies, including an independent compiled-module consumer. This does not

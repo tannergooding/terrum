@@ -83,6 +83,10 @@ public sealed class WideCandidateTests
     public async Task WrappingConversionsExecuteFromIndependentModuleAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerWrapping.terrum", policy,
+            "Terrum.CodeAnalysis.Numerics64.WrapInt32ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.WrapInt32ToUInt64",
+            "Terrum.CodeAnalysis.Numerics64.WrapUInt32ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.WrapUInt32ToUInt64",
             "Terrum.CodeAnalysis.Numerics64.WrapInt32ToUInt32",
             "Terrum.CodeAnalysis.Numerics64.WrapUInt32ToInt32",
             "Terrum.CodeAnalysis.Numerics64.WrapInt64ToUInt32",
@@ -94,6 +98,10 @@ public sealed class WideCandidateTests
         var consumerSource = SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
+                if (WrapInt32ToInt64(int32.MinValue) != int64(int32.MinValue)
+                    || WrapInt32ToUInt64(-1) != uint64.MaxValue
+                    || WrapUInt32ToInt64(uint32.MaxValue) != int64(uint32.MaxValue)
+                    || WrapUInt32ToUInt64(uint32.MaxValue) != uint64(uint32.MaxValue)) { return 5; }
                 if (WrapInt32ToUInt32(-1) != uint32.MaxValue
                     || WrapUInt32ToInt32(uint32.MaxValue) != -1) { return 1; }
                 if (WrapInt64ToUInt32(-4294967297) != uint32.MaxValue

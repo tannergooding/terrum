@@ -1,5 +1,25 @@
 namespace Terrum.CodeAnalysis.Numerics64;
 
+public static int64 WrapInt32ToInt64(int32 value)
+{
+    return int64(value);
+}
+
+public static uint64 WrapInt32ToUInt64(int32 value)
+{
+    return WrapInt64ToUInt64(int64(value));
+}
+
+public static int64 WrapUInt32ToInt64(uint32 value)
+{
+    return int64(value);
+}
+
+public static uint64 WrapUInt32ToUInt64(uint32 value)
+{
+    return uint64(value);
+}
+
 public static uint32 WrapInt32ToUInt32(int32 value)
 {
     if (value >= 0)

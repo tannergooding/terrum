@@ -43,12 +43,17 @@ public sealed partial class JitTests
         int[] signed32 = [int.MinValue, -1, 0, 1, int.MaxValue];
         foreach (var value in signed32)
         {
-            checks.Add($"WrapInt32ToUInt32({Int32Literal(value)}) != {unchecked((uint)value)}");
+            var literal = Int32Literal(value);
+            checks.Add($"WrapInt32ToUInt32({literal}) != {unchecked((uint)value)}");
+            checks.Add($"WrapInt32ToInt64({literal}) != {value}");
+            checks.Add($"WrapInt32ToUInt64({literal}) != {UInt64Literal(unchecked((ulong)value))}");
         }
         uint[] unsigned32 = [0, 1, int.MaxValue, (uint)int.MaxValue + 1, uint.MaxValue];
         foreach (var value in unsigned32)
         {
             checks.Add($"WrapUInt32ToInt32({value}) != {Int32Literal(unchecked((int)value))}");
+            checks.Add($"WrapUInt32ToInt64({value}) != {value}");
+            checks.Add($"WrapUInt32ToUInt64({value}) != {value}");
         }
 
         var component = await File.ReadAllTextAsync(
