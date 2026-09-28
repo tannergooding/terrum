@@ -1,35 +1,34 @@
 # Lifetime and access contracts
 
-This document specifies the accepted direction for checked loans, views and published member contracts, with **provisional notation** where the grammar is unresolved. It refines [language](language.md); [libraries](libraries.md) illustrates the span/text/collection protocols. Declaration places default to fixed/readonly: `mut` grants place rebinding or a writable receiver, while `write` grants capability through a reference/view. A writable referent is not created by changing the local descriptor, and neither qualifier overrides immutable fields or nominal access. The canonical representation forms are `ref<T>`, `ptr<T>`, `box<T>`, `val<T>`, and `own<T>`; `mut` is not a generic type-argument qualifier. Compact unique locals, explicit named moves, synchronous readonly receiver loans,
-the exclusive, call-bounded receiver loan of `OwnedInt32Buffer.Set` and
-`TryAppend`, and nonescaping lexical `ReadonlyInt32BufferView` locals obtained
-through `OwnedInt32Buffer.Slice`, and exclusive lexical
-`mut MutableInt32BufferView` locals obtained through `SliceMutable` (legacy
-implementation spelling, not the target `write` qualifier), have
-executable ownership checks today
-([implementation](implementation.md)); a slice cannot be copied, passed,
-stored or returned, and is not the proposed generic `Span<T>`.
-The separate bounded `ManagedNode` proof allows copied aliasable handles,
-records exact active roots for locals, call/output/return temporaries and
-suspended frames, and traces its single managed edge at explicit collection
-points. Managed `for` header locals and conditional outputs remain rooted
-through the loop and retire when its header scope ends. Checked unwind retires
-departed lexical and staged roots after user cleanup and unlinks escaping
-frames; local catches preserve surviving roots and returns stay rooted through
-cleanup. It neither gives a managed root authority over an `OwnedInt32Buffer`
-nor implements stored-view, exception-object or module root contracts.
-Source-defined classes extend these roots to immutable descriptors listing
-multiple managed fields. A generated `TryCreate` roots provisional construction,
-publishes only a fully initialized handle, and releases the unpublished object
-on checked constructor failure. Private zeroed tracing slots do not expose
-source null/default values. Inline structs still cannot contain managed handles.
-Optional managed fields instead admit explicitly initialized `null`. Presence
-patterns copy a present handle into a separately rooted, conditionally initialized
-payload variable; they do not permanently narrow a mutable aliased field.
-Clearing the field cannot revoke that snapshot, while leaving its scope or
-unwinding retires its root normally. An unsuccessful output is still uninitialized,
-not an implicitly published null.
-The remaining lifetime constructs are rejected for execution.
+This document specifies accepted contracts for loans, views and published
+members, using provisional notation where grammar remains open. It refines
+[language](language.md); [libraries](libraries.md) illustrates span, text and
+collection protocols.
+
+## Definitions and notation
+
+A **place** is addressable storage; a reference to a place is distinct from a
+copy of the value stored there. A **loan** grants bounded access to a place or
+backing storage without transferring its ownership. **Backing** is the storage
+whose lifetime and validity support a view's elements. An **owner** retains
+the responsibility to release a resource; a **lease** can keep backing valid
+or prevent its reclamation/replacement for a bounded interval. These
+relationships are independent: a rooted object does not by itself preserve a
+native resource's cleanup scope or grant write authority.
+
+Declaration places default to fixed/readonly. `mut` grants place rebinding or
+a writable receiver; `write` grants capability through a reference or view.
+Changing a local descriptor does not create writable referent access, and
+neither qualifier overrides immutable fields or nominal access. The canonical
+representation forms are `ref<T>`, `ptr<T>`, `box<T>`, `val<T>` and `own<T>`.
+`mut` qualifies a place or receiver, not a generic type argument. Every
+reference or view contract applies to the complete qualified form, including
+access, backing, roots, ownership and region dependencies.
+
+Current executable ownership, view and managed-root boundaries are documented
+in [implementation](implementation.md) and [native](native.md); staged work
+is tracked in [roadmap](roadmap.md). A slice does not thereby become the
+proposed generic `Span<T>`.
 
 Transfer/share proofs cover the complete qualified form, including backing
 storage, retained roots and region dependencies. A readonly loan is not by
@@ -114,7 +113,8 @@ form only while preserving the declared snapshot/loan, aliasing, ownership and
 lifetime semantics; there is no universal size threshold or adaptive type
 attribute. Results remain `T` or an explicit `ref<T>` with declared lifetime
 metadata; no adaptive generic value-or-loan result family is selected. This
-contract is accepted direction, not implemented compiler support.
+contract is accepted direction; current compiler support is documented in
+[implementation](implementation.md).
 
 ## Erased interface storage is explicit
 
@@ -222,9 +222,10 @@ establishes initialization. Callers may retain a checked relation between
 output state and its discriminator before testing it, but must not access or
 clean up a vacant arm or receive an undiscriminated maybe-live owner. Exact
 clause placement/grammar and metadata remain to be specified. The
-boolean-success and other-result defaults above are
-language-versioned, not inferred from method names. The current bounded
-`bool`/`out` behavior is unchanged.
+boolean-success and other-result defaults above are language-versioned, not
+inferred from method names. Legacy `bool`/`out` conditional publication is
+distinct from `init ref<T>`; current support for each is documented in
+[implementation](implementation.md).
 
 The task handle alone does not discharge responsibility for a started
 operation. Its obligation remains with a structured owner that joins it, an
@@ -243,7 +244,8 @@ same output metadata as an explicit branch, not a method-name convention;
 multiple outputs and declaration-driven status/presence matching remain
 explicit. A selected exception applies to the false condition only and does
 not catch an exception raised while evaluating the call. The syntax is target
-direction, not bounded compiler support.
+direction; current compiler support is documented in
+[implementation](implementation.md).
 
 An eligible view source can provide backing/borrowed access; outputs and independent scalars do not automatically qualify. A numeric parser's result is independent; a parser returning a view of input text retains the input dependency. A parameterless projection generally uses its receiver. An independent freshly allocated result needs its own owner/root and cost contract. More than one eligible input is not resolved by inspecting current control flow. Returning a view does **not** authorize storing it in an unrelated receiver. Constructor capture, exported callback factories and registrations need a declared destination/boundary. Local closures carry actual capture relationships; consuming a unique owner retains its ordinary transfer/cleanup rules rather than becoming an invisible borrowed capture.
 
@@ -259,10 +261,9 @@ failure/exception cleanup leaves an initialization destination vacant; no
 a later branch. Async initialization targets operation-owned or valid rooted
 caller storage through completion, never a borrowed startup stack address
 smuggled into a suspended task. Fault capture requires trusted containment.
-The bounded executable profile still implements the legacy `bool`/`out`
-conditional-publication contract. The target notation is `init ref<T>`; migrate
-declaration and call sites coherently rather than treating `init ref` as a
-spelling alias for arbitrary writable `ref<T>`.
+Legacy `bool`/`out` conditional publication is distinct from the `init ref<T>`
+target notation; declaration and call sites must migrate coherently rather than treating
+`init ref` as a spelling alias for arbitrary writable `ref<T>`.
 
 Matched access follows the relevant source through wrappers, interface dispatch,
 generic calls, reflection and generated adapters. A structural readonly list may
@@ -278,61 +279,54 @@ An interface witness must satisfy the interface's published requirements.
 
 Store both the **broad interface contract** and the **resolved published implementation/member refinement**, including conditional relationships, source selectors, capture destinations, root/disposal requirements, rule versions and ABI layouts. Source compilation checks a member's claimed refinement against its authored body. An independently compiled generic caller sees the broad interface contract; only an explicit checked conditional contract can expose a type/witness refinement when its condition is proven. Ordinary binary consumers rely on published dependency metadata rather than re-proving dependency bodies, while still checking references, contract compatibility and caller use. Devirtualization, specialization and implementation pinning cannot change source validity or substitute body inference for a published relationship. Tightening an interface from permission to borrow receiver storage to a no-borrow requirement rejects existing implementations that published that permission, even if today's bodies do not use it. Broadening a published scoped implementation to permit receiver-storage borrowing invalidates existing callers that relied on its no-borrow guarantee; it requires a breaking revision or explicit checked adapter. Dynamic binding and AOT/JIT replacement checks must reject added capture, weakened access, changed view source, new cleanup obligation or invalid refinement, not merely compare CLR-signature shapes. Compatible changes may be replaced contract-bound; stronger implementation-only facts are not implicitly upgraded in consumer metadata. ABI layout and roll-forward need explicit version-aware validation.
 
-## Implementation and unsettled points
+## Ownership transfer and cleanup
 
-The compact native profile tracks a unique named owner's vacancy across
-branches, loops, returns and exceptional edges. By-value parameters transfer
-from an explicit named move or fresh result and are dropped by the callee on
-normal or checked exceptional exit unless moved again. Arguments are staged
-in evaluation order: an earlier completed owner is dropped if a later
-argument fails before invocation. A `bool`/`out` owner is published only on
-true; on false or exceptional exit its completed private output is dropped
-without manufacturing a readable caller value. Existing owners passed as
-output destinations are dropped only when the call begins, not when earlier
-arguments are still being evaluated. In the bounded executable profile, a
-successful `out var` gains its own lexical cleanup scope; the target
-`init ref<T>` migration must preserve this publication and cleanup behavior.
-User-defined unique receiver loans remain synchronous and cannot be stored,
+A unique named owner has one live-or-vacant state along every control-flow
+path. By-value parameters transfer from an explicit named move or fresh
+result and are dropped by the callee on normal or checked exceptional exit
+unless moved again. Arguments are staged in evaluation order: an earlier
+completed owner is dropped if a later argument fails before invocation. A
+`bool`/`out` owner is published only on true; on false or exceptional exit its
+completed private output is dropped without manufacturing a readable caller
+value. Existing owners passed as output destinations are dropped only when
+the call begins, not while earlier arguments are being evaluated. A successful
+`out var` has a lexical cleanup scope. Initialization-loan output preserves
+these publication and cleanup rules without becoming a general writable
+reference.
+User-defined unique receiver loans are synchronous and cannot be stored,
 consumed or passed as values. Ordinary methods default to readonly loans.
 A `mut` method requires a fully initialized named mutable owner, a writable
 field path from it, or forwarding through its existing writable `this`;
-it may update mutable scalar and Copy
-fields, not replace owning fields. Its root is reserved before argument
+it may update mutable scalar and Copy fields, not replace owning fields. Its
+root is reserved before argument
 evaluation, so argument calls cannot move, replace or otherwise invalidate
 that owner. Mutation does not transfer ownership or change cleanup
 responsibility; updates before a checked failure remain visible.
 Unique child structs may be borrowed through writable paths only after the
 whole root is initialized; the borrowed child is neither moved nor separately
 destroyed, and eventual recursive cleanup sees its updated state. Partial
-construction still permits only the existing readonly initialized-child loans,
-not these mutable loans. `OwnedInt32Buffer.Set`, `TryAppend` and `Clear`
-can borrow writable buffer fields through fully initialized unique roots.
-Those calls reserve the containing root before argument evaluation and
-preserve its ownership and recursive release obligation; active slices
-block mutation through any path from that root. A lexical `SliceMutable`
-from a writable buffer field reserves the same fully initialized root:
-range expressions run before activation and cannot invalidate it; while
-active, the view excludes all other root access, including sibling fields.
-Normal scope exit and checked unwind end only the loan, leaving prior writes
-intact and recursive release to the owner. Such views cannot escape or be
-copied, passed, stored, or returned.
+construction permits only readonly loans of initialized children. A writable
+slice from a buffer field reserves its fully initialized root: range
+expressions run before activation and cannot invalidate it; while active, the
+view excludes other root access, including sibling fields. Normal scope exit
+and checked unwind end only the loan, leaving prior writes intact and
+recursive release to the owner. Such views cannot escape or be copied, passed,
+stored or returned.
 Cleanup is an explicit
 `[NoThrow] [Cleanup] public void Close()`-shaped contract on a unique
 instance method; the name itself has no special meaning. Compact owners can
 contain primitive, nested Copy and owning fields; partial construction cleans
-acquired fields in reverse acquisition order, and complete-value cleanup recurses
-through owning fields. Cleanup cannot invoke a potentially throwing
-operation. A statically constant index proven within an immutable host
-buffer grant may be used in NoThrow cleanup; general indexing cannot.
-`OwnedInt32Buffer` adds checked native allocation and lexical readonly/exclusive
-writable slices. Active slices block conflicting operations on their original
-owner, but cannot be passed, returned or stored. Managed classes separately use
-exact lexical/temporary roots and explicit descriptor-based tracing, not unique
-cleanup or a general stored-view representation.
-This is not a general owning-expression/field analysis, OS-resource
-adapter, stored interior, generic witness, return-anchor ABI or runtime
-guard implementation. Later stages must extend place disjointness and
-last-use analysis, partial owning-field moves, temporaries and result escapes,
-interface variance/refinement and dynamic dependency binding before
-executing examples that depend on them. Unsupported escapes must
-diagnose, never silently box, clone, register, retain or copy.
+acquired fields in reverse acquisition order, and complete-value cleanup
+recurses through owning fields. Cleanup cannot invoke a potentially throwing
+operation. A statically constant
+index proven within an immutable host-buffer grant may be used in NoThrow
+cleanup; general indexing cannot. Managed roots preserve exact live values
+through lexical and temporary scopes but do not implement unique cleanup or
+general stored-view representation.
+
+Exact rules for partial owning-field moves, expression temporaries, result
+escapes, place disjointness, return anchors, interface refinement and dynamic
+dependency binding remain open. Current executable boundaries are documented
+in [implementation](implementation.md) and staged in [roadmap](roadmap.md).
+An escape without a declared and checked contract diagnoses; it must not
+silently box, clone, register, retain or copy.

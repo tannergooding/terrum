@@ -1,15 +1,35 @@
 # Terrum language design
 
-Terrum (TAIR-um), from TerraFX, is a proposed C#-shaped language for applications through systems code. Proposed tools are `terrum` and `terrumc`. This document describes the intended language, **not a claim of complete implementation**: the compiler supports lossless syntax and a bounded [native value profile](native.md). The status of examples is documented in [samples](samples.md); implementation staging is in [implementation](implementation.md), and the proposed API inventory is in [libraries](libraries.md). Source spellings throughout the design samples are provisional.
+Terrum (TAIR-um), from TerraFX, is a proposed C#-shaped language for applications through systems code. This document specifies accepted semantic direction; source spellings in design samples remain provisional. Actual compiler and runtime support is documented in [implementation](implementation.md), its staging in [roadmap](roadmap.md), runnable examples in [samples](samples.md), and the proposed API inventory in [libraries](libraries.md).
+
+## Definitions and notation
+
+**Contract** means a published type, declaration, interface, ownership, access,
+lifetime, effect or representation guarantee that source implementations and
+callers must satisfy. **Accepted direction** identifies selected language
+semantics; it does not imply that the compiler or runtime implements them.
+**Complete qualified form** includes a type's access and ownership qualifiers,
+not only its nominal name. Thus `write C` and `C` are distinct forms, and
+`mut` qualifies a place or receiver rather than a type argument. `F<T>` denotes
+a type constructor applied to `T`; `T?` denotes an optional form where the
+surrounding contract permits it.
+
+`Copy` is a checked property of a complete type that permits copying without
+duplicating a unique obligation; it does not imply bitwise copying or low cost.
+`unique` prohibits implicit duplication and uses explicit ownership transfer,
+but does not imply a unique reachable object graph or prohibit managed
+storage. The canonical representation forms are `ref<T>` (borrowed reference),
+`ptr<T>` (pointer), `box<T>` (managed aliasable indirection), `val<T>` (inline
+value) and `own<T>` (native owning indirection).
 
 ## Accepted direction
 
 - C#/.NET application and API ergonomics are the baseline; ownership, access, representation, lifetime, effects and placement are distinct contracts. An application can use managed cyclic graphs without propagating lifetime parameters through every edge; unique native resources and deterministic cleanup remain nonduplicable. There is no implicit copy, boxing, pinning, retain, synchronization or materialization to repair an invalid program.
-- AOT and JIT must implement the same semantics for supported features. Independently serviced modules, DLLs and plugins require published, versioned contracts and binding-time compatibility; closed-world optimization or implementation pinning is explicit. The initial backend emits Windows x64 native code; the C#/.NET compiler host does not define Terrum's type system, semantic IL or permanent ABI.
+- AOT and JIT must implement the same semantics for supported features. Independently serviced modules, DLLs and plugins require published, versioned contracts and binding-time compatibility; closed-world optimization or implementation pinning is explicit. Neither a compiler host nor a particular backend defines Terrum's type system, semantic IL or permanent ABI; current target support is documented in [implementation](implementation.md).
 - Concrete types are sealed by default; `sealed` prohibits inheritance, not interface dispatch or API evolution. Types are evolvable by default: closed case sets, fixed layouts and frozen APIs are separate scoped contracts. Interface inheritance and composition replace general concrete inheritance. Public namespaces express concepts, not library tiers. Public source visibility is `public`, `internal` (module) and `private` (declaring type); there is no protected-family or friend-module access through `unsafe` or linking. Author-approved generation may act within the declaring module's implementation scope, but grants no consumer private access. A public Terrum surface is not automatically a native export.
 - Exceptions propagate exceptional failures; expected alternatives use conditional outputs or explicit domain statuses. `require` is a safe checked failure; catching/recovering requires unsafe recovery authorization, while unsafe operations and caller-unsafe invocations require explicit `unsafe { ... }` blocks. Cleanup and `try/finally` do not require unsafe authorization. Unsafe recovery does not prove an object's invariant has survived. Platform callbacks must contain faults or terminate rather than unwind across a foreign ABI.
 - Type, declaration, interface and metadata contracts are authoritative. A compiler may infer private implementation facts but cannot silently publish stronger or weaker promises from a replaceable body. Consumers bind against the producer's resolved contracts and rule version, not their own reinterpretation of its source defaults. [Lifetimes](lifetimes.md) specifies this distinction for borrowed results.
-- Source compilation checks authored bodies against declared contracts. Ordinary binary consumers safely decode and structurally validate artifacts, resolve references, check binding/contract compatibility and validate caller use, then trust declared metadata contracts for external dependencies instead of re-proving dependency implementations. Callers still satisfy imported preconditions, access, ownership and effects. This is not permission to trust malformed bytes; optional deeper audit tooling is not a v1 promise. Signing/provenance is separate from semantic correctness; no mandatory signature or trust store is selected, and signer identity does not prove a contract true. This target direction does not change current reader/verifier behavior.
+- Source compilation checks authored bodies against declared contracts. Ordinary binary consumers safely decode and structurally validate artifacts, resolve references, check binding/contract compatibility and validate caller use, then trust declared metadata contracts for external dependencies instead of re-proving dependency implementations. Callers still satisfy imported preconditions, access, ownership and effects. This is not permission to trust malformed bytes; optional deeper audit tooling is not a v1 promise. Signing/provenance is separate from semantic correctness; no mandatory signature or trust store is selected, and signer identity does not prove a contract true. Current reader and verifier support is documented in [implementation](implementation.md).
 - Keep minimum language requirements separate from the standard application-library/runtime surface and feature-specific dependencies. Foundational types such as `ref<T>`, `ptr<T>` and `int32` are illustrative, not a complete mandatory API list. Language conformance alone does not require heap/GC, a scheduler or OS services; richer features retain their dependencies and checked contracts when used, with no silent semantic weakening or fallback. This can enable embedded/kernel environments in principle, but does not promise a backend there or universal support for every feature.
 
 ### Safe and unsafe boundaries
@@ -31,8 +51,8 @@ section to explain caller responsibilities; prose is informative, not a
 compiler proof or a substitute for checked contract metadata. Safe declarations
 may contain internally scoped unsafe work without an extra
 trusted-implementation marker.
-These are target directions, not current support; existing `unsafe` recovery
-remains a bounded subset.
+These are target directions. Current support for `unsafe` recovery is
+documented in [implementation](implementation.md).
 
 ### Types and operations
 
@@ -82,19 +102,15 @@ through a reference only within the payload's declared mutable-member
 contract. `write val<T>` is not a default permission; inline fields need
 writable containing storage or a writable loan/view. `own<val<C>>` is an
 explicit native owner of an inline payload, not the unqualified/legacy `own C`
-spelling. `init ref<T>` is an initialization
-loan to vacant storage: it cannot be read before complete initialization and
-publication. Syntax-22 implements bounded `bool`/`init ref<T>`
-conditional publication alongside legacy `bool`/`out`: the caller passes
-`init name` for vacant storage or declares a vacant local with `init var name`.
-Compilation-private managed-handle output loans now use the same checked
-publication and rooting path, including nullable and `write` qualifications;
-public managed-handle outputs remain unsupported. Bounded public scalar,
-handle-free Copy and eligible unique outputs have distinct `init:` contracts;
-the rest of the migration remains scheduled. Parameter-only `ref T`, `T*`
-and `T&` are not alternate
+spelling. `init ref<T>` is an initialization loan to vacant storage: it cannot
+be read before complete initialization and publication. The accepted call-side
+form passes `init name` for vacant storage or declares a vacant local with
+`init var name`. Conditional publication is distinct from ordinary writable
+references and preserves the destination's complete type and cleanup
+contract. Parameter-only `ref T`, `T*` and `T&` are not alternate
 representations. `mut` is not valid as a generic type-argument qualifier;
-use `write` when the referent capability itself is part of the type.
+use `write` when the referent capability itself is part of the type. See
+[implementation](implementation.md) for the supported output modes.
 
 The accepted call-side readonly-borrow form is the parameter-only modifier
 `implicit ref<T>`, not `implicit T`, `in T`, or a qualifier inside `T` or
@@ -130,7 +146,7 @@ select a reference overload; explicit and implicit readonly `ref<T>` alone
 cannot distinguish overloads. Physical ABI lowering preserves the declared
 value/loan semantics; no size threshold or adaptive type attribute is implied.
 No adaptive result family or change to default receiver semantics is selected.
-This accepted direction is not yet compiler support.
+Current support for this contract is documented in [implementation](implementation.md).
 
 Constructor initialization does not imply later mutation permission. Loans are
 place- and flow-sensitive, ending after last use; overlapping read loans are
@@ -218,16 +234,13 @@ emitted byte, but may use verified or explicitly trusted raw copy. Details are
 in the [layout contract](data-layout-and-abi.md#fixed-directly-interoperable-representations).
 
 These are target design contracts, not blanket compiler support claims.
-Syntax-24 supports `[Layout(Transparent)]` only for a one-field compact Copy
-struct with a scalar `bool`, `char16`, `int32`, `uint32`, `int64` or `uint64`
-carrier.
+Transparent and sequential layout support boundaries are documented in
+[implementation](implementation.md).
 The provisional `[Layout(Sequential)]` spelling admits nonpublic compact
 Copy structs with private fields and eligible nested Copy fields, using the
 existing natural declaration-order layout (1–16 bytes). It does not publish
 fields, freeze representation, or permit independently replaceable layout
 boundaries; no semantic wire field or ABI migration is implied.
-Packing, aggregate-alignment overrides, public fields and `Blittable` remain
-unsupported; other struct/field layout attributes diagnose `TRM3001`.
 `ValueLayout` remains limited to naturally aligned 1–16-byte aggregates.
 Existing non-transparent compact-value and module ABI contracts remain
 authoritative. Broader enforcement requires an explicit compatibility
@@ -260,12 +273,10 @@ public int32 Count
 
 The getter is a named, source-bound callable member with a readonly receiver
 and by-value result; property/accessor identity and effects are checked
-metadata, not an inferred `get_Name` convention. Syntax-23 implements this
-getter-only subset, including accessor-local `[NoThrow]`, on source compact
-`Copy` structs and classes. A public Copy-struct getter may cross a module
-boundary when its containing struct already has an exportable public layout;
-managed class state remains image-private. Setters, auto-properties, ref
-returns, expression bodies and general property semantics remain unsupported.
+metadata, not an inferred `get_Name` convention. Module visibility follows
+the containing type's published representation and state contract. Setter,
+auto-property and ref-return semantics are separate. The current supported
+property subset is documented in [implementation](implementation.md).
 
 `where T : IFoo` requires a checked behavioral witness; `where T : [Sized]`, `[Copy]`, `[ManagedStorable]`, `[ThreadTransferable]`, `[ThreadShareable]`, `[TextCodeUnit]` or `[NativeComInterface]` asks for a compiler-verified property of the complete qualified form, **not** implementation of an `I...` interface or the mere presence of an attribute. Thread capabilities describe which checked transfer or concurrent-use contracts a complete form can satisfy; they do not imply that a value is currently shared, authorize mutation, or perform synchronization. Thread confinement is the default but does not bind a value to one OS thread or executor. `[Sized]` does not promise a size constant in shared generic code. `[TextCodeUnit]` admits `char8`, `char16`, `char32`, not arbitrary valid encoded text. Native COM additionally requires checked IID, inherited slots, signatures, layout and lifetime. User shape generation can provide witnesses or adapters only after checking costs, ownership and ABI.
 
@@ -397,77 +408,34 @@ signature. All holes resolve at local binding; exported fields, aliases, and
 parameters cannot retain them. There is no wildcard/existential/higher-kinded
 meaning, and non-injective projections are not inverted. Ambiguity diagnoses.
 The broad inference order above is target direction, not a claim that general
-inference is implemented. The bounded compiler now infers multiple
-independently constrained type parameters for eligible top-level generic
-function templates over `Copy` structs or the existing scalar value types
-(`bool`, `char16`, `int32`, `uint32`, `int64`, `uint64`), and existing
-source-class/`ManagedNode` handles in their supported readonly/write and
-optional forms. A complete explicit
-type-argument list pins every position; typed arguments and typed existing
-`out` destinations establish their corresponding parameters independently.
-Expected-result context can fill an unresolved parameter represented in the
-return type before contextual argument binding. Contextual literals bind only
-after the parameter type is known. Explicit type arguments continue to work.
-Specialization keys are ordered tuples, so reversed helper forwarding keeps
-its argument positions distinct. Each parameter retains its own `Copy` and
-operator constraints; the function's declared effects are checked against the
-operations those constraints permit. Two parameters do not become
-interchangeable at definition time merely because a selected specialization
-uses the same concrete type for both.
-For a Copy-only identity function, `int64 result = Identity(42)` supplies
-the missing `T` through result context, while `var result = Identity(42)`
-rejects without type evidence. `Identity(int32(42))` fixes `T` to `int32`;
-an outer result context cannot retarget that typed argument.
-An explicitly typed construction such as
-`new Value(42)` does provide its struct type; inferring a generic constructor's
-own type arguments remains unsupported. Inference does not implicitly
-construct a struct from a literal. A complete type-argument list is required
-when explicit arguments are used; partial holes are unsupported. Scalar
-specialization does not grant
-primitive operator witnesses: arithmetic on `T` still needs an explicitly
-supported nominal conformance. Definition-site `Copy`,
-operator and `[NoThrow]` requirements remain authoritative for every inferred
-specialization, and a caller's stronger constraints are not borrowed to
-justify a weaker template. A `write C` argument fixes `T` as `write C` before
-result-context fallback; an ordinary permitted weakening to `C` or supported
-optional widening may accept the result without retargeting `T`. Conditional
-outputs retain existing exact type and qualification rules. A `Copy`
-constraint on a handle does not grant field, null-test or operator operations.
-Managed-handle specializations remain compilation-local and use existing
-access/rooting behavior; this adds no public generic or managed-handle ABI.
-Generic classes/structs, managed fields inside user structs, unique/owning
-arguments and views remain unsupported. See the
-[bounded generic contract](implementation.md#bounded-generic-functions) for
-the precise implementation boundary.
+inference is implemented. Typed arguments and explicit type arguments establish
+their positions before result context fills unresolved positions; contextual
+literals are checked only after their target type is known. An outer result
+context cannot retarget a typed argument, and a literal does not implicitly
+construct a struct or supply a default type. Definition-site constraints and
+effects remain authoritative for each independently inferred parameter; a
+caller cannot lend stronger constraints to a template. A `write C` argument
+fixes its parameter as `write C` before result-context fallback, and any
+permitted result weakening does not retarget that parameter. Generic
+signature lookup is distinct from type-argument inference. Constructor
+inference, partial holes, general overload inference and public generic ABI
+remain separate design work. The bounded inference profile and its exact
+limits are documented in [implementation](implementation.md#bounded-generic-functions).
 
-The bounded executable operator-protocol subset supports homogeneous binary
-`+`, `-`, `*`, `/`, `%`, `&`, `|` and `^` on explicitly conforming Copy
-structs. Syntax-19 implements distinct `==`,
-`!=`, `<`, `<=`, `>` and `>=` nominal protocols over homogeneous Copy operands
-with `bool` results. Generic use requires each operation's conformance and
-definition-site constraint; concrete operands may invoke their declared
-operator directly. Operator spelling does not imply `[NoThrow]` or
-derive complements or ordering laws. This does not establish universal equality,
-hashing, or managed identity policy, nor primitive/heterogeneous witnesses or
-a public generic ABI. See the detailed [bounded generic contract](implementation.md#bounded-generic-functions).
-Syntax-21 implements a provisional compilation-local unary contract for
-`+`, `-`, `!` and `~` with one `Copy`-struct operand and an independent
-`Copy` result type. `!` is not inherently bool-result, and result type
-alone does not distinguish overloads. Nullable operands remain a target
-direction, not part of this bounded profile.
+Operator protocols are explicitly declared and constrained; homogeneous
+operands require the applicable conformance. Operator spelling does not imply
+`[NoThrow]`, derive complements or ordering laws, or establish universal
+equality, hashing or managed identity policy. Unary result types are declared,
+not inferred from operator spelling; `!` is not inherently bool-result, and
+result type alone does not distinguish overloads. Primitive and heterogeneous
+witnesses, nullable operands and public generic ABI are separate contracts.
+See [implementation](implementation.md) for the bounded operator subset.
 Static `++`/`--` have operand-shaped results rather than an arbitrary result
 type; this does not import C# inheritance. `true` and
 `false` are the explicit exception: both return `bool` and are declared
 together. C# 14's instance-mutating `++`/`--` and `void` compound-assignment
 operators are not adopted here. `++`/`--`, `true`/`false` and shift
 protocols remain unsupported.
-
-The implementation does not infer unique/owning `T`, constructor or
-method type arguments, ordinary overloads, or partial `_` holes. It does not
-add a struct-literal parser or public generic ABI. Contextual expected types
-still flow into untyped arithmetic (for example, `int64 x = 50000 * 50000`),
-but do not retarget typed numeric operands. General overload selection and
-argument/result inference remain scheduled.
 
 `_` is reserved and never names an identifier. `_ = expression;` is the
 accepted standalone discard statement: evaluate the expression once, preserve
@@ -477,10 +445,8 @@ and omitted lambda parameter names are separate nonbinding contexts; they do
 not drop the matched/argument value or alter parameter mode. Separately
 proposed type holes are not identifiers and are not covered by this discard
 rule. Exact grammar contexts beyond the accepted discard direction remain to
-specify; the historical syntax-19 baseline bound `_` as an identifier. The
-standalone discard statement is implemented in syntax-20/scanner-5/schema-5.
-Wildcard patterns, lambda placeholders and generic type holes remain
-unsupported; see the [implementation boundary](implementation.md).
+specify. Wildcard patterns, lambda placeholders and generic type holes are
+separate features; see the [implementation boundary](implementation.md).
 
 Adding an interface member compatibly for existing implementations requires a
 default implementation that satisfies
@@ -547,12 +513,12 @@ through a hidden `int32`/`float64`. `int32(1234)`, `uint64(0xFFFFFFFF)` and
 `float32(0.1)` illustrate direct target parsing. Width suffixes do not exist.
 `T(untypedLiteral)` uses the registered parser directly; `T(typedExpression)`
 is a checked explicit conversion. `new T(arguments)` remains nominal
-construction. Already-typed numbers never implicitly widen or narrow. The
-syntax-16 compiler executes contextual decimal, hexadecimal and binary integer
-literals without a fallback, digit separators, and checked numeric type-call
-conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`; floating
-literals above remain target-only. Type/value-call binding preserves existing
-source-function and local shadowing/call precedence.
+construction. Already-typed numbers never implicitly widen or narrow.
+Contextual decimal, hexadecimal and binary integer literals have no fallback
+type, and numeric type-call conversions are checked. Type/value-call binding
+preserves existing source-function and local shadowing/call precedence.
+Current executable coverage, including floating literals, is documented in
+[implementation](implementation.md).
 
 Decimal integer literals keep numeric range semantics, including the direct
 negative signed-minimum case. Hexadecimal and binary literals instead
@@ -572,11 +538,11 @@ attach to a decimal point, exponent marker or sign.
 `[ConstEval]` marks declarations eligible for bounded deterministic
 compile-time execution; `const T a = F()`
 requires a constant declaration value, while `T b = const F()` requires only
-the expression. The current syntax-26 implementation supports both forms
-for internal scalar functions and scalar results; `const F() + x` requires
+the expression. `const F() + x` requires
 only `F()`, while `const (F() + x)` requires the whole expression. Literal
 parsing always uses the registered compile-time parser, even in ordinary local
-initialization; there is no runtime fallback.
+initialization; there is no runtime fallback. Current evaluator support is
+documented in [implementation](implementation.md).
 The evaluator has no ambient I/O, preserves target semantics and recorded
 producer/rule/value-ABI dependencies, and permits only checked bounded
 evaluation. It does not change type checking, overload binding or optimizer
@@ -611,7 +577,7 @@ Source text is UTF-8; runtime text has **no default encoding**. The single `Text
 
 Design-only character literals carry one scalar, target-typed to a representable code-unit/scalar type without a numeric or UTF-16 fallback. Registered text targets provide `rune` context and forward scalar fragments directly through the writer protocol. A raw `char8` is not automatically a valid standalone UTF-8 scalar. Precise representability rules and the current unsupported-syntax boundary are in [conversions](conversions.md#character-intent).
 
-Defaults are **ordinal plus invariant together**: exact Unicode scalar sequence equality and scalar ordering across encodings, matching hash, no implicit normalization/casing/linguistic comparison, and ASCII digits/signs/punctuation for numeric parsing and formatting. U+0661/U+FF11 digits and U+2212 minus do not act like ASCII tokens. Arbitrary valid Unicode remains valid text data. Termination, embedded-zero exclusion, pinning and lifetime are distinct native-string requirements. `Text` is a common payload/facade. The target sketch uses `own<val<Text>>` when it means a native owner of inline `Text` payload; construction/conversion and cleanup syntax remain unsettled, and this is not implemented.
+Defaults are **ordinal plus invariant together**: exact Unicode scalar sequence equality and scalar ordering across encodings, matching hash, no implicit normalization/casing/linguistic comparison, and ASCII digits/signs/punctuation for numeric parsing and formatting. U+0661/U+FF11 digits and U+2212 minus do not act like ASCII tokens. Arbitrary valid Unicode remains valid text data. Termination, embedded-zero exclusion, pinning and lifetime are distinct native-string requirements. `Text` is a common payload/facade. The target sketch uses `own<val<Text>>` when it means a native owner of inline `Text` payload; construction, conversion and cleanup syntax remain open. Text implementation support is documented in [implementation](implementation.md).
 
 ### Callable values, `params` and tuples
 
@@ -690,11 +656,11 @@ have identity matches after inference, but the declared `List<T>` parameter
 shape is more specific than bare `T`. This same specificity applies without
 the `params` modifier; it is not a count of inferred parameters or solver work.
 
-These are target contracts, not claims of current compiler support. Callable
-and tuple syntax, checked witnesses, and contextual lambda lowering remain
-scheduled work; user-defined type-pack expansion, pack indexing/folds,
-polymorphic callable erasure, and implicit callback vectorization are outside
-this bounded direction.
+These are target contracts. Callable and tuple syntax, checked witnesses and
+contextual lambda lowering remain open; user-defined type-pack expansion,
+pack indexing/folds, polymorphic callable erasure and implicit callback
+vectorization are outside this direction. Current compiler support is
+documented in [implementation](implementation.md).
 
 ### Construction, errors and effects
 
@@ -706,9 +672,10 @@ and contextual literals follow. `new DifferentRandom(new CounterRandom(0),
 0xA5A5A5A5)` illustrates first-argument inference and declared `uint32`
 literal contexts; it does not infer field capture, change ownership, choose a
 type from constraints or invert optional/box normalization. General constructor
-inference is not implemented by the current binder.
+inference remains separate target work; current inference support is documented
+in [implementation](implementation.md).
 
-The target parser contract is `IParsable<TSelf>.TryParse(TextSpan, init ref<TSelf>)`, including user types. `init ref<T>` is a vacant initialization loan: its destination cannot be read before complete initialization and publication. The accepted call-site form is `TryParse(text, init result)`; syntax-22 implements this mode for compilation-private boolean-success helpers, not general parser interfaces or public contracts. Conditional initialization facts are normally authored as declaration postconditions using `ensure <expr>`, an ordinary Boolean expression that may compose patterns and short-circuit predicates. A legal value predicate such as `result > 0` implies initialization; source-body/path checking must prove reads are legal and may not inspect vacant storage to decide a predicate's result. A successful value predicate establishes initialization. These clauses correlate the output's live/uninitialized state with the declared status/result; they are not a separate conditional-assertion block language. An initialized nullable value (including null) is a live `T` value; an uninitialized outcome has no `T` lifetime, access or cleanup, even if physical storage remains. Callers cannot receive an undiscriminated maybe-live owner or access/clean up a vacant arm. Exact clause placement, grammar and metadata remain to be specified; equivalent routine output attributes are not a parallel authoring mechanism. Failure cleans partial initialization according to the declared contract and never fabricates `default(T)`; asynchronous publication occurs at operation completion. The bounded executable profile retains `bool`/`out` while adding a distinct private `bool`/`init ref<T>` contract; neither is an alias for general writable references. Expected invalid input normally branches on `Try...`/status. Domain outcomes may use response types; there is no mandatory language-wide `Option`/`Result` wrapper or typed-throws failure-set machinery.
+The target parser contract is `IParsable<TSelf>.TryParse(TextSpan, init ref<TSelf>)`, including user types. `init ref<T>` is a vacant initialization loan: its destination cannot be read before complete initialization and publication. The accepted call-site form is `TryParse(text, init result)`. Conditional initialization facts are normally authored as declaration postconditions using `ensure <expr>`, an ordinary Boolean expression that may compose patterns and short-circuit predicates. A legal value predicate such as `result > 0` implies initialization; source-body/path checking must prove reads are legal and may not inspect vacant storage to decide a predicate's result. A successful value predicate establishes initialization. These clauses correlate the output's live/uninitialized state with the declared status/result; they are not a separate conditional-assertion block language. An initialized nullable value (including null) is a live `T` value; an uninitialized outcome has no `T` lifetime, access or cleanup, even if physical storage remains. Callers cannot receive an undiscriminated maybe-live owner or access/clean up a vacant arm. Exact clause placement, grammar and metadata remain to be specified; equivalent routine output attributes are not a parallel authoring mechanism. Failure cleans partial initialization according to the declared contract and never fabricates `default(T)`; asynchronous publication occurs at operation completion. This contract is distinct from a general writable reference. Expected invalid input normally branches on `Try...`/status. Domain outcomes may use response types; there is no mandatory language-wide `Option`/`Result` wrapper or typed-throws failure-set machinery. Current output-mode support is documented in [implementation](implementation.md).
 
 The language-versioned boolean-success default initializes the output on
 `true` and leaves it uninitialized on `false`. For other result types, an
@@ -723,13 +690,12 @@ format.IsEmpty;`); for example, `require<FormatException>
 int32.TryParse(text)` selects an exception only for a false predicate, not for
 exceptions thrown while evaluating it. A declaration may provide a
 default failure type for brevity, while an explicit call-site selection wins;
-the annotation spelling and exception-construction contract remain scheduled.
+the annotation spelling and exception-construction contract remain open.
 Common null/range conditions may receive recognized diagnostics, but checks do
 not infer meaning from arbitrary method names or reevaluate arguments,
-properties or user-defined comparisons. The bounded profile currently has
-statement-form `require` with its existing `bool`/`out` output flow; the
-implicit-destination expression form below is target syntax, not current
-compiler support.
+properties or user-defined comparisons. The implicit-destination expression
+form below follows the same declared output contract; current support for
+statement and expression forms is documented in [implementation](implementation.md).
 
 The expression form can lift one declared success-conditioned output:
 `int32 value = require int32.TryParse(text);`. The operation runs once; success
@@ -758,13 +724,10 @@ postcondition denotes the actual result contextually; it is not a new binder
 or lambda and does not reevaluate the return expression. A `void` function has
 no result-valued return. Static postconditions initially apply only to the
 outer function body. Proofs respect mutation/alias invalidation.
-The syntax-27 implementation admits a constant-only floor: a body-local
-`static require` may use earlier immutable `const` locals, while an
-outer-body `static ensure` must be closed and independent of local or
-parameter state so it holds on every normal return. False conditions,
-unestablished values and unsupported effects diagnose distinctly; neither
-form executes or publishes a contract. Symbolic runtime-dependent proofs,
-declaration clauses and result references remain scheduled.
+The exact supported proof forms and resource limits are documented in
+[implementation](implementation.md). Static proofs do not execute or publish
+a contract; symbolic runtime-dependent proofs, declaration clauses and result
+references remain separate design work.
 
 Required static proofs have a versioned portable floor: every conforming
 compiler must support its minimum rules/complexity and guaranteed resource
@@ -838,40 +801,23 @@ protocols must tolerate abrupt termination/restart; `finally` and destructors
 are not crash-consistency mechanisms. On defined unwinding paths, ownership,
 conditional publication and promised `NoThrow` cleanup still apply.
 
-The bounded profile implements ordinary boolean requirements and conditional
-outputs. It does not yet implement declaration pre/postconditions, static
-proofs, typed failure selection or the `require` output-expression form.
-Explicit fail-fast terminates on false; the separate bounded checked policy
-propagates and can recover only four compiler-generated failure reasons.
-General exception construction and ABI remain unimplemented; completed compact owning
-outputs are cleaned up on false or checked exceptional exit.
+Ordinary boolean requirements and conditional outputs preserve their declared
+cleanup behavior. Fail-fast and checked-exception policies govern how a failure
+propagates; neither permits reading or publishing an uninitialized output.
+Current support for declaration clauses, static proofs, typed failure
+selection, exception construction and output forms is documented in
+[implementation](implementation.md).
 
-Formatting uses one `IFormattable` → `ITextWriter` protocol with typed fragments/values, no obligatory allocating formatter per type. Target-typed interpolation and collection expressions select registered handler types, such as `[TextBuilder(typeof(TextBuilder))]` or `[CollectionBuilder(typeof(ListBuilder<>))]`, not arbitrary similarly named methods. Holes evaluate once left-to-right into typed captures before segments drain; ownership, borrowing and refusal cleanup remain explicit. Named unique transfers require `move`. Nested formatting forwards the same writer so a Point and its scalar fields can reach a custom handler without temporary strings or boxing. Refusal stops future writes but cannot undo prior output or hole evaluation; no replay, rollback or transactional stream guarantee. Expression handlers may consume an explicitly supported typed operation graph, as in `Tensor.Apply(destination, i => x[i] * y[i] + z[i])`; this is not body-divined autovectorization of an ordinary callback. Unsupported expressions diagnose or require a separately declared fallback. Owning text publishes only after full validation/freeze and cleans partial storage. Collection spreads enumerate once in order; builders own accepted elements, clean rejected consumed elements and abandon partial state exactly once. Detailed standard-library APIs and resumable async formatting remain scheduled. Synchronous formatter refusal is not a resumable continuation.
+Formatting uses one `IFormattable` → `ITextWriter` protocol with typed fragments/values, no obligatory allocating formatter per type. Target-typed interpolation and collection expressions select registered handler types, such as `[TextBuilder(typeof(TextBuilder))]` or `[CollectionBuilder(typeof(ListBuilder<>))]`, not arbitrary similarly named methods. Holes evaluate once left-to-right into typed captures before segments drain; ownership, borrowing and refusal cleanup remain explicit. Named unique transfers require `move`. Nested formatting forwards the same writer so a Point and its scalar fields can reach a custom handler without temporary strings or boxing. Refusal stops future writes but cannot undo prior output or hole evaluation; no replay, rollback or transactional stream guarantee. Expression handlers may consume an explicitly supported typed operation graph, as in `Tensor.Apply(destination, i => x[i] * y[i] + z[i])`; this is not body-divined autovectorization of an ordinary callback. Unsupported expressions diagnose or require a separately declared fallback. Owning text publishes only after full validation/freeze and cleans partial storage. Collection spreads enumerate once in order; builders own accepted elements, clean rejected consumed elements and abandon partial state exactly once. Detailed standard-library APIs and resumable async formatting are specified separately. Synchronous formatter refusal is not a resumable continuation.
 
 Allocation, GC, rooted reads/writes, blocking, suspension, I/O, atomics, throwing/no-throw, normal/no-return, cleanup and retirement are independently expressible effect bounds, finer-grained than Core/Foundation/Application dependency layers. `void` is the single zero-data result type, with value `()`, usable as a zero-argument `func<void>` and `Task<void>`; `Option<void>` still represents two states. A checked `[DoesNotReturn]` on a `void` call removes its normal continuation but retains exception/cleanup edges; `[NoThrow]` is separate. A verified implementation cannot normally return, including by completing a task that terminates *later*. There is no public `unit` or `never` primitive; the compiler may use internal bottom flow. Removing an exported no-return guarantee breaks callers that rely on it.
 
-The current native profiles implement conservative checked `[NoThrow]` and
-`[DoesNotReturn]` bounds and their versioned declaration contracts. A separate
-explicit checked-exceptions proof policy uses private Windows SEH records for
-four compiler-generated failures and permits recovery only in `unsafe`
-`try`/`catch` scopes. Structured `try`/`finally` handles normal and checked
-exceptional exits in that policy; explicit fail-fast termination still skips
-pending cleanup. General exception identity, low-memory semantics and
-other effect bounds remain later implementation work. A compact
-`unique struct` proof checks named moves, by-value parameter transfer, and
-conditional owning `bool`/`out` publication with lexical NoThrow cleanup.
-Fresh constructor/factory results can transfer directly; a moved owner is
-vacant. Receiver loans remain synchronous and default to readonly. Ordinary
-`mut` methods can update mutable scalar/Copy fields through a named mutable
-owner, its writable field paths, or forwarded writable `this`, without transferring ownership or
-replacing owning fields. Root reservation prevents invalidating argument
-evaluation, and cleanup responsibility is unchanged. Compact owning fields
-have partial-construction cleanup in reverse actual acquisition order and
-complete-value recursive cleanup. The compiler-owned `OwnedInt32Buffer` adds
-checked native allocation, initialized-prefix operations and lexical readonly or
-exclusive writable slices; partial moves, general stored loans and broader
-resource adapters are not implemented.
-See the [native proof limits](native.md).
+Ownership transfer and cleanup are explicit: a moved owner becomes vacant,
+fresh results may transfer directly, and partial construction cleans acquired
+fields in reverse acquisition order. Receiver loans do not transfer ownership;
+mutation preserves the owner's cleanup obligation. Actual native-profile
+coverage and failure policies are documented in [implementation](implementation.md)
+and [native](native.md).
 
 ### Storage, concurrency, entry and boundaries
 
@@ -958,10 +904,16 @@ and implemented.
 
 Reflection respects visibility, access, lifetime and trimming. Symbol-resolved tokens and compiler-checked `[ConstantExpected]` names (including through wrappers) support safe bounded lookup; open-ended runtime discovery or private access needs a *different* privileged unsafe API, explicit authorization and retained targets. Retention of layout, executable bodies, descriptors and debugging data is independent. Author-authorized deterministic generation can inspect its own defining module's private members but cannot grant consumers friendship or bypass normal checks. Foreign interop uses source or generated tooling for marshalling; the compiler/runtime provide checked native symbols, calling conventions, representations, ownership, callback-lifetime and exception-containment prerequisites for safe imported-C APIs, not built-in value marshalling. COM requires exact profiles, not behavioral-interface resemblance.
 
-The proposed portable structured semantic IL carries typed blocks/arguments/edges, values and memory places, loop/exception/cleanup regions, roots, checked operations, construction and suspension. Source compilers check authored bodies against their contracts; ordinary binary consumers perform safe structural/reference/binding and caller-use checks, then trust declared dependency contracts rather than re-proving dependency bodies. Dominance, ownership and region verification apply when a body is checked; optional deeper audits are not a v1 promise. The target model is **not** CLI IL. The initial backend lowers a smaller verified structured representation directly to Windows x64 machine code, without CIL or LLVM. `TRRM` is the selected identifier for the evolving Terrum semantic-IL/module format. Its pre-v1 byte layout and revision encoding remain under specification; the existing semantic revision 32 is implementation history, not a proposed header schema. The 0.32 label may describe that repository state, but does not prescribe on-wire major/minor fields or assign a 1.0 release. Repository-only readers for historical revisions and feature-dependent writer selection are temporary and are scheduled for consolidation before v1; they are not an external production compatibility promise. Contract-bound vs implementation-pinned replacement is independent of static vs dynamic linkage. Unchanged JIT/AOT consumers must reject incompatible capture, output, access, layout and effect changes; AOT-only deployment cannot secretly require a JIT. The bounded module implementation checks declaration-derived signatures,
-compact layouts, ownership/output modes and the supported effect promises before
-loading unchanged native consumers. General capture/root contracts and resilient
-layouts are not yet implemented. Generic specialization, sharing and explicit scenarios need enforceable ABI/dictionary/rooting rules; unsupported strict codegen policies must fail instead of silently boxing or duplicating code.
+The target portable semantic representation carries typed control flow, values
+and memory places, cleanup regions, roots, checked operations, construction and
+suspension. It is not CLI IL. Source compilers check authored bodies against
+contracts; binary consumers validate structure, references, binding and caller
+use, then rely on published dependency contracts rather than re-proving bodies.
+Contract-bound and implementation-pinned replacement are distinct from static
+and dynamic linkage; replacement must preserve capture, output, access, layout
+and effect guarantees. The `TRRM` identifier names the evolving semantic-IL and
+module format; its wire schema and revision encoding remain open. Actual module
+and backend support is documented in [implementation](implementation.md).
 
 ## Provisional source notation and open decisions
 
@@ -972,13 +924,11 @@ checked predicates, `[ViewOf]`, `[Captures]`, `[Pure]`,
 `[TextBuilder(typeof(...))]`, `[CollectionBuilder(typeof(...))]`,
 `[Literal(...)]`, `[ConstEval]`, `[Specialize(...)]`, `[NativeExport]`,
 `utf8z("...")`/`utf16z("...")` calls and generic trailing defaults as
-**illustrations**, not implemented compiler promises, except for the supported
-numeric `T(expression)` conversion subset. Attached width suffixes diagnose
+**illustrations**, not implementation promises. Attached width suffixes diagnose
 as `TRM0006`; prefix casts are not parsed. In particular, legacy `out` remains
 supported while a coherent general migration to initialization loans is
-planned. The accepted `init ref` call-site form is `Create(init value)`;
-syntax-22 implements that call mode for bounded boolean-success helpers,
-including eligible public contracts.
+planned. Current support for numeric conversions and initialization loans is
+documented in [implementation](implementation.md).
 Exact generic constraint,
 associated-type and extension-disambiguation syntax, inference-hole spelling,
 closed-case marker/match grammar and compatibility-forwarder attributes/source
@@ -991,103 +941,16 @@ handling/registration, task lifecycle/cancellation APIs, generic dispatch
 selectors and exception ABI. Eager async invocation and ordinary-await
 continuation semantics are accepted; the exact awaiter, executor and affinity
 syntax remain open.
-The applicable accepted semantics and current implementation limits are
-distinct; syntax should follow checked contracts rather than determine them.
+Syntax follows checked contracts; actual implementation boundaries are listed
+in [implementation](implementation.md) and staged in [roadmap](roadmap.md).
 
-## Current implementation limit
+## Implementation status
 
-The current compiler binds and verifies a bounded integer/boolean/code-unit and
-compact-value profile, emits native Windows x64 executables, and executes the
-same lowering through a JIT worker. Independently produced repository semantic
-modules support checked process-start replacement; the compiled Terrum scanner
-can supply the real front end's lexical input. These bounded capabilities are
-not the general `TRRM` format or a compiler bootstrap. The current subset rejects target
-`ref<T>`/`ptr<T>`/`box<T>`/`val<T>` forms, `own<T>`, general loans including
-parameter-only `implicit ref<T>`, and general/public `init ref<T>` invocation
-outside the private boolean-success subset. The validated
-semantic-v24 class/`ManagedNode` access batch supports `mut class`, writable
-`mut` class receivers, readonly
-bare handles, and explicit `write` capability through fields, optionals,
-parameters, results and inference. Constructors initialize unpublished
-objects before publication; a writable child handle retains its capability
-through a readonly parent without deep-read propagation. Writable storage is
-invariant, output destinations require an exact qualified type, and value
-`write`-to-readonly attenuation is allowed. Semantic readers normalize private
-managed artifacts from versions 18 through 23 into qualified internal IR,
-translating legacy class/`ManagedNode` mutation authority to explicit `write`
-exactly where previously granted. Programs not requiring the semantic-v25
-`MutReceiver` contract or v26 nested mutable-field loans retain their prior versions and bytes regardless of
-managedness. Native handle layout and the absence of a public managed-handle
-ABI are unchanged. Semantic v32 supports private managed consumers through
-existing single-provider semantic and native module entry points when
-boundaries carry the established scalar or handle-free public `Copy` value
-contracts. Persisted acyclic native graphs additionally permit managed
-intermediate and root producers under those same boundary contracts.
-Semantic modules statically link into one image, remap private class
-identities, and use one heap/root domain; persisted native images retain
-separate heaps and roots. This adds no public managed-handle ABI, semantic
-`LinkSet`, native-set JIT API, or cross-image shared collector.
-
-The semantic-v25 `MutReceiver` contract supports `mut` methods on non-owning
-compact structs as non-exported persisted calls. Source visibility may be
-public or private, but does not expose a public mutating-receiver ABI. A method
-invoked on a named mutable local or its writable nested struct fields, or
-forwarded through an existing writable `this` and its writable fields,
-borrows and writes the original place, including writes before a checked exception;
-default-readonly methods and by-value arguments preserve copy behavior, and
-the ordinary readonly/by-value receiver ABI is unchanged. The verifier rejects
-mutable receiver loans forged from immutable places, while
-nested field writes through a valid receiver are allowed. These methods remain
-non-exported: public scalar entry wrappers may call them; source-level
-`public` visibility does not provide a public mutating-receiver ABI. Older
-module headers reject the v25 contract. Nested-field loan expressions require
-semantic v26; whole-local non-owning loans still use v25, and programs needing neither
-keep their prior semantic versions and bytes. Nested calls such as
-`outer.Inner.Mutate()` require writable containing storage and fields along
-the complete path; root reservation prevents invalidation during argument
-evaluation. Semantic v27 additionally permits ordinary mutating methods on
-initialized named mutable unique owners or forwarded writable `this`;
-earlier headers reject those methods. Semantic v28 permits nested mutable
-field loans through fully initialized unique roots and children, with the
-same writable-path, root-reservation and recursive-cleanup invariants.
-Earlier headers reject the broadened loan contract. Partially initialized roots,
-temporary and managed-class-field receivers remain unsupported. Semantic v29
-adds `OwnedInt32Buffer.Set`, `TryAppend` and `Clear` through writable owning
-fields, preserving root reservation, active-view exclusion and recursive
-release. Semantic v30 permits lexical `SliceMutable` views through those
-fields, with whole-root exclusion until normal scope exit or checked unwind.
-The view cannot escape; ending its loan does not free the owner's buffer.
-Partial-constructor mutation,
-rebinding `this`, and general reference forms remain unsupported. Primitive
-`Buffer` views retain separate legacy access paths, and the coherent
-public/general `out`-to-`init ref<T>` migration remains scheduled; the private
-boolean-success subset is available in syntax-22/semantic v33. Neither the fail-fast runtime nor bounded
-checked-exceptions proof is the language's future general exception runtime.
-Semantic v31 also permits managed-backed leaf modules to export public,
-handle-free compact `Copy` values up to 16 bytes through by-value parameters
-and results and existing conditional `bool`/`out` outputs. This does not expose
-managed handles or private heap storage, add reference modes, or change the
-native physical ABI.
-The syntax-16 numeric compiler rejects attached width suffixes with `TRM0006`,
-diagnoses missing hexadecimal and binary digits as `TRM0007` and `TRM0008`,
-and malformed separators as `TRM0009`; prefix casts are no longer parsed. It
-supports contextual decimal, hexadecimal and binary integer literals without
-a fallback type, numeric digit separators and checked numeric type-call
-conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`.
-Floating/custom literal parsing and registered string targets remain
-unsupported. Syntax-26 supports internal scalar `[ConstEval]` functions,
-required `const T name = expression;` locals and scalar `const expression`
-subexpressions; it neither exports an evaluation promise nor registers
-literal parsers.
-Bounded ownership and lexical-view checks, source-defined managed classes,
-optional edges and explicit cycle tracing are implemented; general
-ownership/lifetime analysis, public managed module contracts and
-source-compatible standard libraries remain future stages.
-Syntax-only commands do not validate semantic obligations; native builds
-diagnose unsupported constructs rather than silently weakening them. See
-[implementation](implementation.md) and [native](native.md) for actual support,
-[roadmap](roadmap.md) for staging and [samples](samples.md) for runnable
-examples versus broader design sketches.
+Syntax-only acceptance does not establish semantic validity. Native builds
+must diagnose unsupported constructs rather than silently weaken their
+contracts. See [implementation](implementation.md) and [native](native.md) for
+actual support, [roadmap](roadmap.md) for staging, and [samples](samples.md)
+for runnable examples versus broader design sketches.
 
 ## Sources and prior art
 
