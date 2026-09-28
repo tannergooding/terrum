@@ -92,7 +92,13 @@ public sealed class TrRmArtifactIndexTests
         TrRmStructuralMetadataValidator.Validate(withBlob);
         TrRmStructuralMetadataValidator.Validate(ArtifactWithCallableMetadata(includeBody: true));
         TrRmStructuralMetadataValidator.Validate(ArtifactWithCallableMetadata(includeSourceMap: true));
+        TrRmStructuralMetadataValidator.Validate(ArtifactWithCallableMetadata(includeOutputState: true));
         TrRmStructuralMetadataValidator.Validate(WithReferenceSlottedExtension());
+
+        var invalidOutput = ArtifactWithCallableMetadata(includeOutputState: true);
+        invalidOutput[^8] = 1;
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(invalidOutput));
 
         var invalidBlob = ArtifactWithCallableMetadata(includeEmptyBlob: true);
         var blobOffset = 32 + 6 * 16 + 44
@@ -335,7 +341,7 @@ public sealed class TrRmArtifactIndexTests
     }
 
     private static byte[] ArtifactWithCallableMetadata(bool includeEmptyBlob = false,
-        bool includeBody = false, bool includeSourceMap = false)
+        bool includeBody = false, bool includeSourceMap = false, bool includeOutputState = false)
     {
         var strings = includeSourceMap
             ? TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0), ("src/file", 0)])
@@ -348,10 +354,20 @@ public sealed class TrRmArtifactIndexTests
         Write(module, 36, 1);
         Write(module, 40, 1);
         byte[] typeSpec = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
+        if (includeOutputState)
+        {
+            typeSpec[^1] = 1;
+        }
+
         var method = new byte[28];
         Write(method, 4, 2);
         Write(method, 8, 1);
         Write(method, 12, 2);
+        if (includeOutputState)
+        {
+            Write(method, 16, 1);
+            Write(method, 20, 1);
+        }
         if (includeBody || includeSourceMap)
         {
             Write(method, 24, 1);
@@ -359,6 +375,12 @@ public sealed class TrRmArtifactIndexTests
 
         var signature = new byte[24];
         Write(signature, 0, 1);
+        if (includeOutputState)
+        {
+            Write(signature, 8, 1);
+            Write(signature, 12, 1);
+        }
+
         byte[][] sections = includeEmptyBlob
             ? [module, strings, TrRmVariableTableWriter.EncodeBlobs([ReadOnlyMemory<byte>.Empty]),
                 typeSpec, method, signature]
@@ -366,6 +388,21 @@ public sealed class TrRmArtifactIndexTests
         ushort[] kinds = includeEmptyBlob
             ? [0x0001, 0x0002, 0x0003, 0x0011, 0x0016, 0x0017]
             : [0x0001, 0x0002, 0x0011, 0x0016, 0x0017];
+        if (includeOutputState)
+        {
+            var param = new byte[16];
+            Write(param, 0, 1);
+            Write(param, 8, 1);
+            param[12] = 2;
+            var contract = new byte[24];
+            Write(contract, 4, 16);
+            Write(contract, 8, 0x1600_0001);
+            WriteU16(contract, 12, 2);
+            contract[20] = 1;
+            sections = [.. sections, param, contract];
+            kinds = [.. kinds, 0x0018, 0x001B];
+        }
+
         if (includeSourceMap)
         {
             var source = new byte[8];
