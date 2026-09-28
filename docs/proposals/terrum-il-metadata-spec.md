@@ -453,7 +453,7 @@ zero-copy ownership, GC rooting and direct aliasing are not implied.
 | ModuleRef | `str producerIdentity, u32 targetRequirement, u32 runtimePolicy` |
 | TypeSpec (variable) | `u8 form, u8 qualifiers`, followed by only the operands specified for that form below |
 | TypeArg | `u32 ownerTypeSpec, u32 ordinal, u32 argumentTypeSpec` |
-| TypeDef | `str namespace, str name, u8 kind, u8 visibility, u8 layoutKind, u8 flags, u32 fieldFirst, u32 fieldCount, u32 genericFirst, u32 genericCount, u32 layoutRow?, u32 contractFirst, u32 contractCount` |
+| TypeDef | `str namespace, str name, u32 flags, u32 fieldFirst, u32 fieldCount, u32 genericFirst, u32 genericCount, u32 layoutRow?, u32 contractFirst, u32 contractCount` |
 | FieldDef | `u32 ownerTypeDef, str name, u32 typeSpec, u32 flags, u32 byteOffset` |
 | Layout | `u32 ownerTypeDef, u32 targetRequirement, u32 size, u32 alignment, u32 pack, u32 flags` |
 | MethodDef | `u32 ownerTypeDef?, str name, u32 signature, u32 flags, u32 contractFirst, u32 contractCount, u32 bodyRow?` |
@@ -597,19 +597,30 @@ it; other bits reject. Candidate primitive codes: `0x00 void`, `0x01 bool`,
 Other primitives require explicit assignments and feature support, not a
 reader's private enum ordinals.
 
-TypeDef kinds are `0x01` struct, `0x02` class, `0x03` interface; layout kinds
-are `0x00` Auto, `0x01` Sequential, `0x02` Union and `0x03` Transparent.
-Visibility is `0x00` private, `0x01` internal, `0x02` public. For the initial
-profile, `MethodDef.flags` uses bit `0x01` for public and `0x02` for internal
-(neither means private; both together reject). FieldDef flags use the same
-visibility bits plus `0x04` for mutable. All other definition flags and
-call-classification masks need assignments before use; unknown bits reject.
-PropertyDef visibility uses the same public/internal bits; its getter
-MethodDef belongs to the same declaring type, has the same result TypeSpec,
-and is bound by its PropertyDef identity, never a `get_Name` spelling.
-Exported properties and methods require public visibility. `Layout` is
-required only for a published fixed representation;
-private `Auto` has no layout row. `FieldDef.byteOffset` is `0xFFFF_FFFF` when
+The low two bits (`flags & 0x03`) of every definition's `u32 flags` encode
+visibility: `0x00` private, `0x01` internal, `0x02` public; `0x03`
+rejects. This applies identically to TypeDef, FieldDef, MethodDef and
+PropertyDef. Their remaining bits have row-specific assignments:
+
+| Row | Assigned bits beyond visibility | Reserved bits in `(1, 0)` |
+|---|---|---|
+| TypeDef | Bits 2–3 (`(flags >> 2) & 0x03`): kind `1` struct, `2` class, `3` interface; zero rejects. Bits 4–5 (`(flags >> 4) & 0x03`): layout `0` Auto, `1` Sequential, `2` Union, `3` Transparent. | Bits 6–31 |
+| FieldDef | Bit 2 (`0x04`): mutable field. | Bits 3–31 |
+| MethodDef, PropertyDef | None. | Bits 2–31 |
+
+Reserved bits reject rather than silently changing a declaration's meaning.
+Packing TypeDef kind, layout and visibility into one `u32` retains its
+40-byte row stride. Other flag fields do not encode declaration visibility:
+`Module.moduleFlags`, `Layout.flags`, `Param.flags` and `Constraint.flags`
+must be zero in `(1, 0)` until their own meanings are assigned. Directory
+section-policy flags, String encoding flags and Body place flags have
+separate, explicitly defined domains. The PropertyDef getter MethodDef
+belongs to the same declaring type, has the same result TypeSpec, and is
+bound by its PropertyDef identity, never a `get_Name` spelling. Exported
+TypeDefs, MethodDefs and PropertyDefs require public visibility; an exported
+member also requires a public owner TypeDef. `Layout` is required only for a
+published fixed representation; private `Auto` has no layout row.
+`FieldDef.byteOffset` is `0xFFFF_FFFF` when
 no fixed offset is published. A fixed layout validates size, alignment,
 overlap, field offsets and ABI classification against its target requirement;
 `Transparent` retains nominal identity while using its one carrier's direct
@@ -704,7 +715,7 @@ these are the relevant row references; row indexes are artifact-wide:
 | Module 1 | `identity=2, targetRequirement=1, runtimePolicy=0, entryMethod=1, moduleFlags=0, featureFirst=0, featureCount=0, moduleRefStart=1, typeDefStart=1, methodDefStart=1, sourceFileStart=1` |
 | TypeSpec 1 | `form=0x01, qualifiers=0, primitiveCode=0x03` (`int32`) |
 | MethodSig 1 | `resultTypeSpec=1, receiverTypeSpec=0, paramFirst=0, paramCount=0, genericFirst=0, genericCount=0` |
-| MethodDef 1 | `ownerTypeDef=0, name=1, signature=1, flags=1` (public), `contractFirst=0, contractCount=0, bodyRow=1` |
+| MethodDef 1 | `ownerTypeDef=0, name=1, signature=1, flags=2` (public), `contractFirst=0, contractCount=0, bodyRow=1` |
 | Export 1 | `localDefId=0x1600_0001, exportKey=1` |
 | Body 1 | `ownerMethod=1`, followed by the body bytes specified in the companion proposal |
 
@@ -726,7 +737,7 @@ A merger could add String 3 (`Consumer`), Module 2
 moduleFlags=0, featureFirst=0, featureCount=0, moduleRefStart=1,
 typeDefStart=1, methodDefStart=2, sourceFileStart=1`), ModuleRef 1
 (`producerIdentity=2, targetRequirement=1, runtimePolicy=0`), and
-MethodDef 2 (`ownerTypeDef=0, name=1, signature=1, flags=1,
+MethodDef 2 (`ownerTypeDef=0, name=1, signature=1, flags=2,
 contractFirst=0, contractCount=0, bodyRow=0`).
 Import 1 binds ModuleRef 1, String 1 as export key, and expected local
 `DefId=0x1600_0002`; Export 1 still identifies MethodDef 1 of Module 1.
@@ -904,7 +915,7 @@ following byte-level contracts:
 | Surface | Not yet specified |
 |---|---|
 | Encoding and revisions | Adoption of candidate widths, future version/feature policy and reader compatibility rules. The proposed `(1, 0)` schema accepts only its registered semantic forms. |
-| Declarations | Resource references, generic/witness exportability, type/field/layout flags, richer qualifier/contract clauses and their validation. Module identity and export-key equality are specified; assigning a stable key to a source declaration is a writer policy. |
+| Declarations | Resource references, generic/witness exportability, further type/field/layout flags, richer qualifier/contract clauses and their validation. Module identity and export-key equality are specified; assigning a stable key to a source declaration is a writer policy. |
 | Executable bodies | Beyond the [narrow executable subset and other assigned decode shapes](terrum-il-instruction-set.md#executable-subset-versus-assigned-decode-shapes): output places, exceptional handlers/cleanup, loans, roots, witness bindings and their precise verifier rules. |
 | Limits | Per-record and per-artifact sizes, nesting and work budgets, allocation limits and canonical encoding requirements. |
 | Unknown data | Kind-specific extension schemas, reserved values and feature negotiation; generic skip, remap and discard policies are assigned above. |
