@@ -59,10 +59,9 @@ bool TryScanManaged(init ref<write ManagedTokenChain> result)
 
 bool TryScanManagedCursor(init ref<write ManagedTokenCursor> result)
 {
-    if (!TryScanManaged(init var chain) || !chain.TryCreateCursor(out var cursor))
+    if (!TryScanManaged(init var chain))
     {
         return false;
     }
-    result = cursor;
-    return true;
+    return chain.TryCreateCursorInit(init result);
 }

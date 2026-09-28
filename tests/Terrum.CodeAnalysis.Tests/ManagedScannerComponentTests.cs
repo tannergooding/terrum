@@ -156,11 +156,11 @@ public sealed class ManagedScannerComponentTests
                 require chain.TryAppend(1, 0, 1);
                 require chain.TryCreateCursor(out var cursor);
                 require cursor.TryRead(out var first) && first.Kind == 1;
-                require chain.TryCreateCursor(out var stale);
+                require chain.TryCreateCursorInit(init var stale);
                 require {{mutation}};
                 if (cursor.IsCurrent || stale.IsCurrent
                     || cursor.TryReadInit(init var absent) || stale.TryRead(out var missed)) { return 1; }
-                require chain.TryCreateCursor(out var fresh);
+                require chain.TryCreateCursorInit(init var fresh);
                 if (!fresh.IsCurrent) { return 2; }
                 if ({{(clear ? "fresh.TryRead(out var cleared)" : "!fresh.TryRead(out var appended) || appended.Kind != 1")}}) { return 3; }
                 return 42;
@@ -184,9 +184,7 @@ public sealed class ManagedScannerComponentTests
             bool MakeCursor(init ref<write ManagedTokenCursor> result) {
                 require ManagedTokenChain.TryCreate(out var chain);
                 require chain.TryAppend(7, 0, 1);
-                require chain.TryCreateCursor(out var cursor);
-                result = cursor;
-                return true;
+                return chain.TryCreateCursorInit(init result);
             }
             int32 Main() {
                 require MakeCursor(init var cursor);
