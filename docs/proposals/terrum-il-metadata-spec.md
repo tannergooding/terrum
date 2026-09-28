@@ -44,15 +44,20 @@ generation without requiring source recompilation. It is not merely a
 serialization of a compiler's private object graph or a verifier certificate.
 
 Source compilation checks authored bodies against their declared contracts.
-A binary consumer checks safe decoding, structure, references, binding,
-contract compatibility, and caller use, then
-trusts declared contracts for external dependencies rather than requiring
-dependency-body re-proof. Callers remain responsible for imported preconditions,
-access, ownership, effects, and other declared obligations. Deliberately
-dishonest dependency metadata is not ruled out by mandatory whole-program
-proof; malformed bytes, unresolved references, incompatible contracts, and
-unsupported semantic forms are not trusted. Optional deeper body audit is not
-a required dependency-consumption step.
+A binary consumer checks safe decoding, structure, supported semantics,
+references, binding and contract compatibility. It may trust a compiler's
+body-level facts and promises for artifacts admitted by its trust policy,
+without re-proving dominance, liveness, effect/ownership flow, or every
+call site. This is an explicit unsafe-like trust boundary, not a property
+conferred by a byte flag in the artifact. An optional semantic audit checks
+those facts for untrusted input or diagnostics; otherwise the producer is
+responsible for their truth. Callers remain responsible for imported
+preconditions, access, ownership and effects when they are compiled.
+Malformed framing, unresolved references, incompatible contracts and
+unknown required semantic forms still reject; trusting a producer does
+not justify reading outside its byte extents or calling with a mismatched ABI.
+An environment that cannot trust an artifact's author must audit its
+semantic facts before safe execution or decline to execute it.
 
 The accepted language contracts remain authoritative for their semantics:
 [language](../language.md), [lifetimes](../lifetimes.md),
@@ -64,8 +69,8 @@ binary representation and validation; it does not redefine their rules.
 | Role | Required checks |
 |---|---|
 | Source compiler and writer | Check authored bodies against declared language contracts; encode complete, well-formed declarations and supported bodies. |
-| Binary reader | Bound and decode the supplied artifact; validate its structure, required features, references and declared contracts before accepting it. |
-| Linker or executable consumer | Resolve selected dependencies, check compatibility and caller use, and reject unsupported semantics before lowering or execution. It need not re-prove dependency bodies. |
+| Binary reader | Bound and decode the supplied artifact; validate framing, required features and referenced contract shapes before accepting it. |
+| Linker or executable consumer | Resolve selected dependencies, check compatibility and reject unsupported semantics before lowering or execution. Trusted bodies need no repeated semantic/caller-use proof; an opt-in audit can check them. |
 
 ## Format identity and revision scope
 
@@ -415,7 +420,7 @@ visibility remain under review.
 
 ### Row-assignment example
 
-For the `return 42` [coded-body example](terrum-il-instruction-set.md#worked-byte-example-and-measured-format-costs),
+For the `return 42` [coded-body example](terrum-il-instruction-set.md#worked-bytes-and-illustrative-size),
 these are the relevant **candidate** row references, not current repository
 bytes or stable identifiers:
 
@@ -433,7 +438,8 @@ bytes or stable identifiers:
 For example, the TypeSpec table with its single `int32` row is exactly
 `00 00 00 00 03 00 00 00 01 00 03`: two four-byte offsets followed by the
 three-byte row. Neither the Module row nor an export authorizes a caller to
-skip bounds, contract or body validation.
+skip bounds and contract compatibility checks; semantic body auditing is
+governed by the consumer's trust policy.
 
 ## Body table and coded-instruction boundary
 
@@ -452,9 +458,10 @@ are structurally inspectable but not executable. Exception regions, general
 loans, owner cleanup, rooted managed values, witness calls and correlated
 outputs must receive additional feature-gated encodings before they can be
 emitted as executable bodies.
-They are not silently modeled as ordinary branch instructions. An ordinary
-binary consumer need not re-prove dependency bodies, but it must reject
-malformed or unsupported coded bodies it accepts for execution.
+They are not silently modeled as ordinary branch instructions. An ordinary binary consumer need not re-prove dependency bodies, but it
+must reject out-of-bounds framing and unsupported coded forms it accepts
+for execution. Trusting producer-supplied body facts is distinct from
+silently interpreting an unknown instruction as a supported one.
 
 ## Limits, counts, ranges, and accounting
 
@@ -498,18 +505,20 @@ open.
 
 ## Validation, unknown data, and references
 
-Readers validate in stages before lowering or executing an artifact:
+Readers perform required loading checks before lowering or executing an
+artifact; a trust policy chooses whether to perform the optional semantic
+audit:
 
 1. Check signature, revision/requirements identity, framing, lengths, ranges,
    canonical encodings where required, and resource limits.
-2. Validate record shapes, uniqueness rules, reserved values, counts, local
-   indexes, and all references.
+2. Validate record shapes, reserved values, counts, local indexes, and
+   referenced contract shapes needed for safe decoding/binding.
 3. Resolve external declarations and verify the imported contract against the
    selected producer before lowering or execution.
-4. Validate caller use against the imported contract. Check authored bodies
-   during source compilation; check dependency bodies only when source
-   compilation or an explicitly selected audit has access and authority to do
-   so.
+4. Optionally audit authored bodies' use of imported contracts, CFG,
+   liveness, place state, effects and ownership. Source compilers must check
+   the bodies they produce; trusted binary consumers need not repeat this
+   work or audit dependency bodies.
 5. Reject unsupported required semantics before native code generation.
 
 Candidate unknown-data rules are:
@@ -529,8 +538,10 @@ Candidate unknown-data rules are:
 The exact registry, reserved values, feature declaration, and policy for
 preserving optional sections when rewriting remain open.
 
-Structural, reference, contract, and caller-use validation are required
-independently of any separately defined integrity check.
+Framing, reference resolution and contract compatibility are required
+independently of any separately defined integrity check. Semantic caller-use
+and flow audits are optional for trusted binaries, not silently replaced by
+integrity checks.
 
 ## Example: conditional output contract (beyond the initial coded profile)
 
