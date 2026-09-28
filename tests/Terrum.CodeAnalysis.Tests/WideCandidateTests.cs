@@ -33,6 +33,49 @@ public sealed class WideCandidateTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task SaturatingConversionsExecuteFromIndependentModuleAsync(NativeRuntimePolicy policy)
+    {
+        var source = ReadTree(Path.Combine(RepositoryRoot(), "self-host", "IntegerSaturation.terrum"));
+        var library = Compilation.CreateLibrary(source, (BoundRuntimePolicy)policy);
+        Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToUInt64",
+        ]);
+        var consumerSource = SyntaxTree.Parse("""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                if (SaturateInt64ToInt32(int64.MinValue) != int32.MinValue
+                    || SaturateInt64ToInt32(int64.MaxValue) != int32.MaxValue
+                    || SaturateInt64ToInt32(42) != 42) { return 1; }
+                if (SaturateInt64ToUInt32(-1) != 0
+                    || SaturateInt64ToUInt32(int64.MaxValue) != uint32.MaxValue) { return 2; }
+                if (SaturateUInt64ToInt32(uint64.MaxValue) != int32.MaxValue
+                    || SaturateUInt64ToInt32(42) != 42) { return 3; }
+                if (SaturateUInt64ToUInt32(uint64.MaxValue) != uint32.MaxValue
+                    || SaturateUInt64ToUInt32(42) != 42) { return 4; }
+                if (SaturateUInt64ToInt64(uint64.MaxValue) != int64.MaxValue
+                    || SaturateUInt64ToInt64(42) != 42) { return 5; }
+                if (SaturateInt64ToUInt64(int64.MinValue) != 0
+                    || SaturateInt64ToUInt64(int64.MaxValue) != uint64(int64.MaxValue)) { return 6; }
+                return 42;
+            }
+            """);
+        var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData("TryAdd(int64.MaxValue, 1, out var value); return int32(value);")]
     [InlineData("if (TryAdd(int64.MaxValue, 1, out var value)) { return 0; } return int32(value);")]
     [InlineData("uint32 value = 1; require TryAdd(value, 2, out var sum); return int32(sum);")]

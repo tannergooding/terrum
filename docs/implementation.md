@@ -824,7 +824,8 @@ record still supplies the binder's contextual literal magnitude.
 The separate [integer-saturation candidate](../self-host/IntegerSaturation.terrum)
 provides six explicit signed/unsigned 64-bit conversion functions with
 destination-range clamping for 32-bit results or 64-bit signedness changes.
-AOT/JIT exercise bounds and in-range values under both failure policies.
+AOT/JIT exercise bounds and in-range values under both failure policies,
+including a separately compiled module consumer of the published functions.
 This does not add saturating conversion syntax, generic conversion witnesses
 or a change to checked `T(value)` conversions.
 
