@@ -17,6 +17,51 @@ public static bool TryAdd(int64 left, int64 right, out int64 result)
     return true;
 }
 
+public static bool TrySubtract(int64 left, int64 right, out int64 result)
+{
+    if (right < 0 && left > int64.MaxValue + right)
+    {
+        return false;
+    }
+
+    if (right > 0 && left < int64.MinValue + right)
+    {
+        return false;
+    }
+
+    result = left - right;
+    return true;
+}
+
+public static bool TryMultiply(int64 left, int64 right, out int64 result)
+{
+    if (left > 0)
+    {
+        if (right > 0 && left > int64.MaxValue / right)
+        {
+            return false;
+        }
+        if (right < 0 && right < int64.MinValue / left)
+        {
+            return false;
+        }
+    }
+    else if (left < 0)
+    {
+        if (right > 0 && left < int64.MinValue / right)
+        {
+            return false;
+        }
+        if (right < 0 && left < int64.MaxValue / right)
+        {
+            return false;
+        }
+    }
+
+    result = left * right;
+    return true;
+}
+
 public static bool TryAccumulateDecimal(uint64 value, uint32 digit, uint64 maximum, out uint64 result)
 {
     uint64 widenedDigit = uint64(digit);

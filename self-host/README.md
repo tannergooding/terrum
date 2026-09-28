@@ -82,10 +82,10 @@ remain hosted in C#.
 |---|---|---|
 | [CopyAlgorithms](CopyAlgorithms.terrum) | NoThrow selection and conditional output of complete Copy values without operator witnesses | Composed AOT/JIT calls select scalars, nested tokens and ranges under both policies; invalid indices publish no value; no primitive operator conformance, borrowed views or generic runtime dispatch |
 | [IntegerFacts](IntegerFacts.terrum) | Overflow-free signed-addition range predicate | Its internal `[ConstEval]` helper is required for a scalar local and remains callable at runtime; tested with native entry wrappers, not a full compiler bootstrap |
-| [WideIntegerFacts](WideIntegerFacts.terrum) | Checked signed addition and bounded decimal/radix-2..36 accumulation through the full unsigned 64-bit range | Executed as a separately compiled module with conditional wide outputs |
-| [WideIntegerTests](WideIntegerTests.terrum) | Signed extrema, invalid digits/radices, per-radix unsigned/signed limits and conditional output publication | Executed through AOT and JIT with a shared entry wrapper under both failure policies |
+| [WideIntegerFacts](WideIntegerFacts.terrum) | Checked signed addition, subtraction and multiplication, plus bounded decimal/radix-2..36 accumulation through the full unsigned 64-bit range | Executed as a separately compiled module with conditional wide outputs |
+| [WideIntegerTests](WideIntegerTests.terrum) | Signed arithmetic extrema, invalid digits/radices, per-radix unsigned/signed limits and conditional output publication | Executed through AOT and JIT with a shared entry wrapper under both failure policies |
 | [IntegerFormatting](IntegerFormatting.terrum) | Invariant signed/unsigned 32- and 64-bit decimal and explicit radix-2..36 digits in reusable owned storage | AOT/JIT boundary, exact-capacity and repeated-use fixtures; native heap checks cover same-allocation transfer and failure cleanup |
-| [IntegerParsing](IntegerParsing.terrum) | Strict signed/unsigned radix-2..36 ASCII parsing of an exact UTF-16 source slice with conditional 32- and 64-bit outputs | Composed with `WideIntegerFacts` under AOT/JIT and both policies; full-range per-radix boundaries, invalid spelling/bounds and unpublished outputs |
+| [IntegerParsing](IntegerParsing.terrum) | Strict signed/unsigned radix-2..36 ASCII parsing of an exact UTF-16 source slice with conditional 32- and 64-bit outputs | AOT/JIT under both policies; full-range per-radix boundaries, invalid spelling/bounds and unpublished outputs |
 | [IntegerSaturation](IntegerSaturation.terrum) | All twelve cross-type 32-/64-bit integer conversions preserving or clamping to the destination range | AOT/JIT range boundaries and an independent compiled-module consumer under both policies; these named functions are provisional, not general conversion syntax or witnesses |
 | [IntegerWrapping](IntegerWrapping.terrum) | All twelve cross-type signed/unsigned 32- and 64-bit conversions preserving destination-width low bits | AOT/JIT host-oracle cases and an independent compiled-module consumer under both policies; no `unchecked` syntax or new primitive conversion policy |
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and conditional bool/out publication |
@@ -192,7 +192,8 @@ library operation, not a language format string or an operation-specific
 formatting witness.
 
 `IntegerParsing` reads a bounded slice of the immutable `Host.Source`
-capability and uses `WideIntegerFacts.TryAccumulateBase` for each digit.
+capability and precomputes its destination-specific quotient and final-digit
+limits once per call before checked digit accumulation.
 It accepts ASCII `0`-`9`, `A`-`Z` and `a`-`z` only where the digit is in
 radix 2..36; signed parsing optionally accepts a leading `-`. It consumes
 the **entire** nonempty slice, with no prefix, separator, whitespace or

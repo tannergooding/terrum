@@ -16,6 +16,44 @@ public static bool CheckWideAddition()
     return negative == -1 && maximum == int64.MaxValue && minimum == int64.MinValue;
 }
 
+public static bool CheckWideSubtraction()
+{
+    if (TrySubtract(int64.MaxValue, -1, out var tooLarge)
+        || TrySubtract(int64.MinValue, 1, out var tooSmall))
+    {
+        return false;
+    }
+
+    require TrySubtract(int64.MinValue, int64.MinValue, out var zero);
+    require TrySubtract(-1, int64.MinValue, out var maximum);
+    require TrySubtract(0, int64.MaxValue, out var negative);
+    require TrySubtract(int64.MaxValue, 0, out var unchanged);
+    return zero == 0 && maximum == int64.MaxValue
+        && negative == -int64.MaxValue && unchanged == int64.MaxValue;
+}
+
+public static bool CheckWideMultiplication()
+{
+    if (TryMultiply(int64.MaxValue, 2, out var positiveOverflow)
+        || TryMultiply(int64.MinValue, -1, out var negativeTimesNegativeOverflow)
+        || TryMultiply(int64.MinValue, 2, out var negativeOverflow)
+        || TryMultiply(-2, int64.MinValue, out var negativeTimesNegativeOverflow2)
+        || TryMultiply(2, int64.MaxValue, out var reversedPositiveOverflow))
+    {
+        return false;
+    }
+
+    require TryMultiply(int64.MinValue, 1, out var minimum);
+    require TryMultiply(int64.MinValue, 0, out var zero);
+    require TryMultiply(-1, int64.MaxValue, out var negative);
+    require TryMultiply(-1, -int64.MaxValue, out var positive);
+    require TryMultiply(int64.MinValue / 2, 2, out var boundary);
+    require TryMultiply(3037000499, 3037000499, out var square);
+    return minimum == int64.MinValue && zero == 0
+        && negative == -int64.MaxValue && positive == int64.MaxValue
+        && boundary == int64.MinValue && square == 9223372030926249001;
+}
+
 public static bool CheckWideDecimalAccumulation()
 {
     mut uint64 value = 1844674407370955161;

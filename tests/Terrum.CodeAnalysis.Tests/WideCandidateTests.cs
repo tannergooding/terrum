@@ -175,6 +175,8 @@ public sealed class WideCandidateTests
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         return ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), [
             "Terrum.CodeAnalysis.Numerics64.TryAdd",
+            "Terrum.CodeAnalysis.Numerics64.TrySubtract",
+            "Terrum.CodeAnalysis.Numerics64.TryMultiply",
             "Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal",
             "Terrum.CodeAnalysis.Numerics64.TryAccumulateBase",
         ]);

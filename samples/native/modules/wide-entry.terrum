@@ -5,6 +5,8 @@ int32 Main()
     for (mut int32 iteration = 0; iteration < 3; iteration = iteration + 1)
     {
         require CheckWideAddition();
+        require CheckWideSubtraction();
+        require CheckWideMultiplication();
         require CheckWideDecimalAccumulation();
         require CheckWideBaseAccumulation();
     }
