@@ -600,6 +600,11 @@ potentially failing conversions and general buffer indexes without range or
 invariant inference. Its rules and persisted formats are unchanged: folded
 source expressions use existing constant records, while externally constructed
 or persisted arithmetic must independently satisfy the existing verifier.
+After verification, native instruction selection replaces unsigned 32- and
+64-bit division/remainder by a nonzero constant power of two with shifts/masks,
+preserving numerator evaluation and failures. Unlike binding normalization,
+this shared AOT/JIT optimization does not establish additional source facts or
+change `NoThrow` acceptance.
 The [native contract](native.md) describes
 these limits. `BoundFunction.DoesNotReturn` separately removes a call's normal
 continuation. Its implementation must have no reachable return or fallthrough

@@ -106,6 +106,149 @@ public sealed class Integer64Tests
         await ExecuteBothAsync(Compile(source), expected).ConfigureAwait(true);
     }
 
+    [Theory]
+    [InlineData("uint32", "0", "1")]
+    [InlineData("uint32", "4294967295", "1")]
+    [InlineData("uint32", "4294967295", "2")]
+    [InlineData("uint32", "2147483648", "2147483648")]
+    [InlineData("uint32", "4294967295", "2147483648")]
+    [InlineData("uint64", "0", "1")]
+    [InlineData("uint64", "18446744073709551615", "1")]
+    [InlineData("uint64", "18446744073709551615", "2")]
+    [InlineData("uint64", "18446744073709551615", "4294967296")]
+    [InlineData("uint64", "9223372036854775808", "9223372036854775808")]
+    [InlineData("uint64", "18446744073709551615", "9223372036854775808")]
+    public async Task UnsignedPowerOfTwoDivisionsPreserveExactBitsAsync(string type, string numerator, string divisor)
+    {
+        var value = ulong.Parse(numerator, System.Globalization.CultureInfo.InvariantCulture);
+        var power = ulong.Parse(divisor, System.Globalization.CultureInfo.InvariantCulture);
+        var program = Compile($$"""
+            {{type}} Quot({{type}} n) { return n / {{type}}({{divisor}}); }
+            {{type}} Rem({{type}} n) { return n % {{type}}({{divisor}}); }
+            int32 Main() {
+                {{type}} n = {{type}}({{numerator}});
+                if (Quot(n) != {{type}}({{value / power}})
+                    || Rem(n) != {{type}}({{value % power}})) { return 1; }
+                return 42;
+            }
+            """);
+        var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
+        for (var index = 0; index < 2; index++)
+        {
+            var start = code.SourceFunctionOffsets[index];
+            var length = code.SourceFunctionOffsets[index + 1] - start;
+            var bytes = code.Code.AsSpan(start, length);
+            ReadOnlySpan<byte> division = type == "uint32" ? [0xF7, 0xF1] : [0x48, 0xF7, 0xF1];
+            Assert.True(bytes.IndexOf(division) < 0);
+        }
+        await ExecuteBothAsync(program, 42).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData("uint32", "4294967295", "3")]
+    [InlineData("uint64", "18446744073709551615", "3")]
+    public async Task OtherUnsignedDivisorsRetainGeneralDivisionAsync(string type, string numerator, string divisor)
+    {
+        var value = ulong.Parse(numerator, System.Globalization.CultureInfo.InvariantCulture);
+        var other = ulong.Parse(divisor, System.Globalization.CultureInfo.InvariantCulture);
+        var program = Compile($$"""
+            {{type}} Quot({{type}} n) { return n / {{type}}({{divisor}}); }
+            {{type}} Rem({{type}} n) { return n % {{type}}({{divisor}}); }
+            int32 Main() {
+                {{type}} n = {{type}}({{numerator}});
+                if (Quot(n) != {{type}}({{value / other}})
+                    || Rem(n) != {{type}}({{value % other}})) { return 1; }
+                return 42;
+            }
+            """);
+        var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
+        for (var index = 0; index < 2; index++)
+        {
+            var start = code.SourceFunctionOffsets[index];
+            var length = code.SourceFunctionOffsets[index + 1] - start;
+            var bytes = code.Code.AsSpan(start, length);
+            ReadOnlySpan<byte> division = type == "uint32" ? [0xF7, 0xF1] : [0x48, 0xF7, 0xF1];
+            Assert.True(bytes.IndexOf(division) >= 0);
+        }
+        await ExecuteBothAsync(program, 42).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData("uint32", "/", "1")]
+    [InlineData("uint32", "%", "2147483648")]
+    [InlineData("uint64", "/", "9223372036854775808")]
+    [InlineData("uint64", "%", "1")]
+    public async Task UnsignedPowerOfTwoDivisionsEvaluateNumeratorOnceAsync(string type, string operation, string divisor)
+    {
+        await ExecuteBothAsync(Compile($$"""
+            struct Counter {
+                public mut int32 Calls;
+                public Counter() { Calls = 0; }
+                public mut {{type}} Read() { Calls = Calls + 1; return {{type}}.MaxValue; }
+            }
+            int32 Main() {
+                mut Counter counter = new Counter();
+                {{type}} result = counter.Read() {{operation}} {{type}}({{divisor}});
+                if (counter.Calls != 1) { return 1; }
+                return 42;
+            }
+            """), 42).ConfigureAwait(true);
+        await ExecuteBothAsync(Compile($$"""
+            {{type}} Fail() { require false; return {{type}}(1); }
+            int32 Main() {
+                {{type}} result = Fail() {{operation}} {{type}}({{divisor}});
+                return 1;
+            }
+            """), unchecked((int)0xE0540003)).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData("uint32", "/", "0")]
+    [InlineData("uint64", "%", "0")]
+    [InlineData("int32", "/", "-1")]
+    [InlineData("int64", "%", "-1")]
+    public async Task UnspecializedDivisionsRetainFailureAndSignedSemanticsAsync(string type, string operation, string divisor)
+    {
+        var source = $$"""
+            int32 Main() {
+                {{type}} n = {{type}}.MinValue;
+                {{type}} result = n {{operation}} {{type}}({{divisor}});
+                return 42;
+            }
+            """;
+        var expected = divisor == "0" ? unchecked((int)0xE0540002)
+            : operation == "/" ? unchecked((int)0xE0540001) : 42;
+        await ExecuteBothAsync(Compile(source), expected).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData("int32", "/")]
+    [InlineData("int32", "%")]
+    [InlineData("int64", "/")]
+    [InlineData("int64", "%")]
+    public Task SignedPowerOfTwoDivisorsPreserveNegativeResultsAsync(string type, string operation) =>
+        ExecuteBothAsync(Compile($$"""
+            {{type}} Calculate({{type}} n) { return n {{operation}} {{type}}(2); }
+            int32 Main() {
+                if (Calculate({{type}}(-3)) != {{type}}(-1)) { return 1; }
+                return 42;
+            }
+            """), 42);
+
+    [Theory]
+    [InlineData("uint32", "/", "2")]
+    [InlineData("uint32", "%", "2147483648")]
+    [InlineData("uint64", "/", "9223372036854775808")]
+    [InlineData("uint64", "%", "1")]
+    public void NativeUnsignedStrengthReductionDoesNotRelaxNoThrowProof(string type, string operation, string divisor)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            [NoThrow] {{type}} Calculate({{type}} n) { return n {{operation}} {{type}}({{divisor}}); }
+            int32 Main() { return 42; }
+            """));
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3017");
+    }
+
     [Fact]
     public async Task WideArgumentsNestedFieldsOutputsAndRecursionPreserveBitsAsync()
     {

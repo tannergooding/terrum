@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Numerics;
 using System.Threading;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
@@ -2171,6 +2172,10 @@ internal sealed partial class PeCompiler
                     return;
                 }
                 Expression(binary.Left, spill);
+                if (TryEmitUnsignedPowerOfTwoBinary(binary))
+                {
+                    break;
+                }
                 StoreValue(Spill(spill), binary.Left.Type);
                 Expression(binary.Right, spill + 1);
                 if (IsWide(binary.Left.Type))
@@ -2455,6 +2460,57 @@ internal sealed partial class PeCompiler
             _code.Bytes(0x48, 0x39, 0xC8); // cmp rax,rcx
             RuntimeBranch(0x85, 0);
         }
+    }
+
+    private bool TryEmitUnsignedPowerOfTwoBinary(BoundBinary binary)
+    {
+        if (binary.Operator is not (TokenKind.Slash or TokenKind.Percent)
+            || binary.Left.Type is not (PrimitiveType.UInt32 or PrimitiveType.UInt64)
+            || binary.Right is not BoundConstant constant)
+        {
+            return false;
+        }
+
+        var divisor = binary.Left.Type == PrimitiveType.UInt32
+            ? unchecked((uint)constant.Value)
+            : unchecked((ulong)constant.Value);
+        if (divisor == 0 || (divisor & (divisor - 1)) != 0)
+        {
+            return false;
+        }
+
+        if (binary.Operator == TokenKind.Slash)
+        {
+            if (divisor != 1)
+            {
+                if (binary.Left.Type == PrimitiveType.UInt64)
+                {
+                    _code.Byte(0x48);
+                }
+                _code.Bytes(0xC1, 0xE8, (byte)BitOperations.TrailingZeroCount(divisor));
+            }
+        }
+        else if (divisor == 1)
+        {
+            _code.Bytes(0x31, 0xC0);
+        }
+        else
+        {
+            var mask = divisor - 1;
+            if (binary.Left.Type == PrimitiveType.UInt32 || mask <= uint.MaxValue)
+            {
+                _code.Byte(0x25); // and eax,imm32; zero-extends for uint64
+                _code.Int32(unchecked((int)mask));
+            }
+            else
+            {
+                _code.Bytes(0x48, 0xB9);
+                _code.Int64(unchecked((long)mask));
+                _code.Bytes(0x48, 0x21, 0xC8);
+            }
+        }
+
+        return true;
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The verifier restricts binary operators to the supported native profile.")]

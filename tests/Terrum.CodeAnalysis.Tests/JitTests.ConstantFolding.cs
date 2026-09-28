@@ -82,4 +82,41 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
+
+    [Theory]
+    [InlineData(false, "uint32", "/", "2147483648", "1")]
+    [InlineData(true, "uint32", "%", "2147483648", "2147483647")]
+    [InlineData(false, "uint64", "%", "9223372036854775808", "9223372036854775807")]
+    [InlineData(true, "uint64", "/", "9223372036854775808", "1")]
+    public Task UnsignedPowerOfTwoOperationsAgreeAcrossAotAndJitAsync(
+        bool checkedFailures, string type, string operation, string divisor, string expected)
+    {
+        var source = $$"""
+            {{type}} Calculate({{type}} n) { return n {{operation}} {{type}}({{divisor}}); }
+            int32 Main() {
+                if (Calculate({{type}}.MaxValue) != {{type}}({{expected}})) { return 1; }
+                return 42;
+            }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(source, 42)
+            : AssertFailFastExecutionAsync(source, 42);
+    }
+
+    [Theory]
+    [InlineData("uint32", "/")]
+    [InlineData("uint64", "%")]
+    public Task UnsignedPowerOfTwoNumeratorFailuresRemainCatchableAcrossAotAndJitAsync(string type, string operation)
+    {
+        var source = $$"""
+            {{type}} Fail() { require false; return {{type}}(1); }
+            int32 Main() {
+                unsafe {
+                    try { {{type}} result = Fail() {{operation}} {{type}}(2); }
+                    catch { return 42; }
+                }
+                return 1;
+            }
+            """;
+        return AssertCheckedExecutionAsync(source, 42);
+    }
 }
