@@ -28,6 +28,16 @@ public sealed class TrRmModuleTableReaderTests
         Assert.Throws<InvalidDataException>(() => GetIdentity(TwoModules(), 3));
     }
 
+    [Fact]
+    public void SelectsModulesByDecodedIdentityAcrossStringEncodings()
+    {
+        var section = TrRmStringTableWriter.EncodeNames([("A", 0), ("B", 2)]);
+        var strings = new TrRmStringTableReader(section, 2);
+        var modules = new TrRmModuleTableReader(TwoModules(), 2, strings, 0, 0, 2, 0);
+        Assert.True(modules.TryFindModule("B", out var row));
+        Assert.Equal(2, row);
+    }
+
     [Theory]
     [InlineData(0, 0)]
     [InlineData(4, 2)]
