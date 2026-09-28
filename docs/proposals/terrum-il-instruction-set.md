@@ -455,6 +455,31 @@ a Copy field value from an aggregate; neither is a silent register/address
 mode of `Binary`. Folding a literal into a future add-immediate opcode
 would have to preserve the same overflow and evaluation semantics.
 
+The **decode-only** Body section for that local case, with `t1=int32`,
+is 92 bytes. Its `05` place flags mean mutable and initially vacant;
+the block offsets are `[0,33,52]`, and terminator offsets `[27,17]`:
+
+```text
+00 00 00 00  54 00 00 00
+01 00 00 00  00  02 05 01 00  01 00 05
+00 00 00 00  21 00 00 00  34 00 00 00
+1B 00 00 00  11 00 00 00
+00 00 00 01 01 00 01 01 00 05
+0B 01 01  02 02 01 0A  0E 01 02  0D 03 01  02 04 01 05
+84 01 03 04 02 00
+00 01 05 01 01 01 00 01 01 01 00 01 01 01
+0F 01 05  83 05
+```
+
+B1's header has no incoming values or places, one outgoing live value
+`r1`, one starting place `p1`, and five operations. B2's header has
+the implicit result parameter `(r5,t1)`, incoming live value `r1`,
+inherited initialized place `(p1,1)`, ending place `p1`, and one
+operation. A tool can read those facts before decoding either operation
+stream; the terminator index locates the checked add and return directly.
+The bytes establish a decode shape, **not** authority to execute the
+unsupported place operations.
+
 | Source operand shape | Proposed state transition before checked add |
 |---|---|
 | By-value parameter or computed temporary | Already has a typed immutable `r`; use it directly. |
