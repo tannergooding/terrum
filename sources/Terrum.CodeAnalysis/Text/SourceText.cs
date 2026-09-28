@@ -107,6 +107,30 @@ public sealed class SourceText
         return new LinePosition(high, position - Lines[high].Span.Start);
     }
 
+    /// <summary>Maps a zero-based line and UTF-16 character position to a source offset.</summary>
+    /// <param name="line">The zero-based line number.</param>
+    /// <param name="character">The UTF-16 offset from the line start, including code units in its line break.</param>
+    /// <param name="offset">The source offset when the position is valid.</param>
+    /// <returns>Whether the position belongs to the line; the end of source belongs only to the final line.</returns>
+    public bool TryGetOffset(int line, int character, out int offset)
+    {
+        offset = 0;
+        if (line < 0 || line >= Lines.Length || character < 0)
+        {
+            return false;
+        }
+
+        var sourceLine = Lines[line];
+        if (character > sourceLine.SpanIncludingLineBreak.Length
+            || (line + 1 < Lines.Length && character == sourceLine.SpanIncludingLineBreak.Length))
+        {
+            return false;
+        }
+
+        offset = sourceLine.Span.Start + character;
+        return true;
+    }
+
     /// <summary>Returns the original source content.</summary>
     /// <returns>The unmodified source string.</returns>
     public override string ToString() => Text;

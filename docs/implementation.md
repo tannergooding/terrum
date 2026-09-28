@@ -819,6 +819,11 @@ columns; ranges are half-open. Lines and characters are zero-based. Only human
 CLI diagnostics convert to one-based positions. Invalid UTF-16 is retained and
 diagnosed by the library; file/stdin decoding is strict UTF-8 and rejects invalid
 bytes before parsing. A UTF-8 BOM is transport metadata, not a source character.
+`SourceText.TryGetOffset` reverses `GetLinePosition` for every valid offset,
+including line-break code units; the start of the next line belongs only to
+that next line, and end-of-source belongs only to the final line. Its behavior
+matches the bounded self-hosted `SourceLineIndex` without changing scanner
+records or source storage.
 
 `SyntaxTree` owns source, lexical tokens, root and diagnostics. Nodes/tokens are
 immutable; trees hold no mutable global tables, symbol state or parent pointers.

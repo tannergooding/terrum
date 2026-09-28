@@ -37,6 +37,8 @@ public sealed partial class SourceLineComponentTests
         for (var position = 0; position <= source.Length; position++)
         {
             var location = source.GetLinePosition(position);
+            Assert.True(source.TryGetOffset(location.Line, location.Character, out var offset));
+            Assert.Equal(position, offset);
             expected.Add(location.Line);
             expected.Add(location.Character);
         }

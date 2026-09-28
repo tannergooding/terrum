@@ -32,6 +32,37 @@ public sealed class SourceTextTests
         Assert.Equal(new LinePosition(1, 0), source.GetLinePosition(2));
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("a\r\nb\rc\nd\u0085e\u2028f\u2029")]
+    [InlineData("\r\r\n\n\r")]
+    [InlineData("\uD800\r\n\uDC00\0\uD800\uDC00")]
+    public void LineOffsetsRoundTripThroughBreaksAndUtf16Units(string text)
+    {
+        var source = SourceText.From(text);
+        for (var position = 0; position <= source.Length; position++)
+        {
+            var location = source.GetLinePosition(position);
+            Assert.True(source.TryGetOffset(location.Line, location.Character, out var offset));
+            Assert.Equal(position, offset);
+        }
+
+        Assert.False(source.TryGetOffset(-1, 0, out _));
+        Assert.False(source.TryGetOffset(source.Lines.Length, 0, out _));
+        Assert.False(source.TryGetOffset(0, -1, out _));
+        Assert.False(source.TryGetOffset(0, int.MaxValue, out _));
+        for (var line = 0; line < source.Lines.Length; line++)
+        {
+            var end = source.Lines[line].SpanIncludingLineBreak.Length;
+            Assert.Equal(line == source.Lines.Length - 1,
+                         source.TryGetOffset(line, end, out var offset));
+            if (line == source.Lines.Length - 1)
+            {
+                Assert.Equal(source.Length, offset);
+            }
+        }
+    }
+
     [Fact]
     public void RetainsUnpairedSurrogates()
     {
