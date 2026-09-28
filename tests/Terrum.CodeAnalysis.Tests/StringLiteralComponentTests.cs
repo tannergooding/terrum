@@ -31,6 +31,8 @@ public sealed class StringLiteralComponentTests
         var utf8Bytes = ImmutableArray.CreateBuilder<int>();
         var utf16Records = ImmutableArray.CreateBuilder<int>();
         var utf16Units = ImmutableArray.CreateBuilder<int>();
+        var asciiRecords = ImmutableArray.CreateBuilder<int>();
+        var asciiBytes = ImmutableArray.CreateBuilder<int>();
         foreach (var fixture in Fixtures())
         {
             var lexed = Lexer.Lex(SourceText.From(fixture.Text));
@@ -46,6 +48,8 @@ public sealed class StringLiteralComponentTests
             utf8Records.Add(fixture.Scalars is null ? -1 : 0);
             utf16Records.Add(utf16Units.Count);
             utf16Records.Add(fixture.Scalars is null ? -1 : 0);
+            asciiRecords.Add(asciiBytes.Count);
+            asciiRecords.Add(-1);
             if (fixture.Scalars is ScalarFixture[] values)
             {
                 foreach (var value in values)
@@ -60,6 +64,11 @@ public sealed class StringLiteralComponentTests
                 utf8Bytes.AddRange(encoded.Select(static value => (int)value));
                 utf16Records[^1] = decoded.Length;
                 utf16Units.AddRange(decoded.Select(static unit => (int)unit));
+                if (values.All(static value => value.Value < 128))
+                {
+                    asciiRecords[^1] = values.Length;
+                    asciiBytes.AddRange(values.Select(static value => value.Value));
+                }
             }
             _ = source.Append(fixture.Text).Append('\n');
         }
@@ -82,6 +91,8 @@ public sealed class StringLiteralComponentTests
             new HostBuffer("ExpectedUtf8Bytes", PrimitiveType.Int32, utf8Bytes.ToImmutable(), false),
             new HostBuffer("ExpectedUtf16Records", PrimitiveType.Int32, utf16Records.ToImmutable(), false),
             new HostBuffer("ExpectedUtf16Units", PrimitiveType.Int32, utf16Units.ToImmutable(), false),
+            new HostBuffer("ExpectedAsciiRecords", PrimitiveType.Int32, asciiRecords.ToImmutable(), false),
+            new HostBuffer("ExpectedAsciiBytes", PrimitiveType.Int32, asciiBytes.ToImmutable(), false),
         ], policy == NativeRuntimePolicy.FailFast ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
@@ -127,6 +138,39 @@ public sealed class StringLiteralComponentTests
         Assert.Equal(0, await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
     }
 
+    [Fact]
+    public async Task AsciiEncodingRejectsNonAsciiWithoutPublishingPartialOutputAsync()
+    {
+        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var entry = SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require StringLiteral.TryCreate(spelling, out var literal);
+                if (literal.TryGetAsciiLength(init var length)) { return 1; }
+                require OwnedInt32Buffer.TryCreate(2, out var workspace);
+                unsafe {
+                    try {
+                        OwnedInt32Buffer invalid = literal.EncodeAscii(move workspace);
+                        return 2;
+                    } catch {
+                        require OwnedInt32Buffer.TryCreate(1, out var created);
+                        mut OwnedInt32Buffer recovered = move created;
+                        if (!recovered.TryAppend(42) || recovered.Read(0) != 42) { return 3; }
+                        return 0;
+                    }
+                }
+            }
+            """, "ascii-nonascii-entry.terrum");
+        var compilation = Compilation.Create(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, [34, 65, 233, 34], false)],
+            BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(0, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
+        Assert.Equal(0, await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+    }
+
     private static async Task<int> ExecuteAotAsync(BoundProgram program, NativeRuntimePolicy policy)
     {
         var path = Path.Combine(RepositoryRoot(), "artifacts", $"string-literals-{Guid.NewGuid():N}.exe");
@@ -165,6 +209,7 @@ public sealed class StringLiteralComponentTests
     [InlineData("require StringLiteral.TryCreate(range, out var literal); bool success = literal.TryReadScalarInit(0, init var scalar, init var next); return scalar;")]
     [InlineData("require StringLiteral.TryCreate(range, out var literal); bool success = literal.TryReadScalarInit(0, init var scalar, init var next); return next;")]
     [InlineData("require StringLiteral.TryCreate(range, out var literal); StringLiteralCursor cursor = StringLiteralCursor.Create(literal); bool success = cursor.TryReadInit(init var scalar, init var next); return next.Position;")]
+    [InlineData("require StringLiteral.TryCreate(range, out var literal); bool success = literal.TryGetAsciiLength(init var length); return length;")]
     public async Task FailedValidationAndReadsDoNotPublishOutputsAsync(string body)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
