@@ -31,6 +31,16 @@ public sealed class TrRmStringRowReaderTests
         Assert.Equal(ascii, utf32);
     }
 
+    [Fact]
+    public void EmptyNamespaceRemainsDistinctFromARequiredName()
+    {
+        byte[] empty = [0, 0, 0, 0, 0, 0, 0, 0];
+        Assert.Equal("", TrRmStringRowReader.DecodeNamespace(empty));
+        Assert.Throws<InvalidDataException>(() => TrRmStringRowReader.DecodeName(empty));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStringRowReader.DecodeNamespace([0, 1, 0, 0, 0, 0, 0, 0]));
+    }
+
     [Theory]
     [InlineData(new byte[] { 0, 1, 0, 0, 65, 0, 0 })]
     [InlineData(new byte[] { 0, 0, 0, 0, 0, 0, 0, 0 })]

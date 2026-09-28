@@ -13,6 +13,12 @@ public static class TrRmStringRowReader
     private static readonly UTF32Encoding s_utf32 = new(false, false, true);
 
     public static string DecodeName(ReadOnlySpan<byte> row)
+        => DecodeText(row, allowEmpty: false);
+
+    public static string DecodeNamespace(ReadOnlySpan<byte> row)
+        => DecodeText(row, allowEmpty: true);
+
+    private static string DecodeText(ReadOnlySpan<byte> row, bool allowEmpty)
     {
         if (row.Length < 8 || (row[0] & 0xFC) != 0)
         {
@@ -26,7 +32,7 @@ public static class TrRmStringRowReader
             _ => 4,
         };
         var units = row[1] | (row[2] << 8) | (row[3] << 16);
-        if (units == 0)
+        if (units == 0 && !allowEmpty)
         {
             throw InvalidRow();
         }

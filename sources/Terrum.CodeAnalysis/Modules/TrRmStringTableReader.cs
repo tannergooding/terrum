@@ -17,4 +17,7 @@ public readonly ref struct TrRmStringTableReader
 
     public string DecodeName(int row)
         => TrRmStringRowReader.DecodeName(_rows.GetRow(row));
+
+    public string DecodeNamespace(int row)
+        => TrRmStringRowReader.DecodeNamespace(_rows.GetRow(row));
 }
