@@ -25,7 +25,7 @@ container.
 | Declared contract | Published type, callable, ownership/lifetime, access, effect and requirement facts against which consumers bind and check use. A contract is not inferred from a dependency body or source spelling. |
 | Body | Typed semantic operations and control flow for an executable declaration, distinct from declaration metadata. |
 | Source revision, artifact revision, native profile | Independent axes for source syntax/semantics, `TRRM` encoding and requirements, and target/runtime ABI assumptions. The enclosing container format is separate. One revision number does not imply another. |
-| Required feature and optional data | A required semantic feature must be understood before binding or execution. An optional section can be skipped only if its registered kind is nonsemantic and explicitly safe to ignore. |
+| Required feature and optional data | A required semantic feature must be understood before binding or execution. An optional section can be skipped only if its registered kind or designated extension namespace is nonsemantic and safe to ignore. Its directory policy separately governs rewrites. |
 
 Field tables use `u8`, `u16`, `u32` and `u64` for fixed-width unsigned
 little-endian integers. Byte offsets are artifact-relative; lengths are byte
@@ -109,7 +109,7 @@ Resource identity, resolution, integrity and limits remain schema decisions.
 | 4 | Format major | `u16` | `1` in this proposal |
 | 6 | Format minor | `u16` | `0` in this proposal |
 | 8 | Header length | `u32` | `32` for this candidate layout |
-| 12 | Directory entry count | `u32` | Number of present sections, at most 22 for the assigned registry |
+| 12 | Directory entry count | `u32` | Number of present sections; 22 kinds are assigned below, plus nonsemantic extension kinds |
 | 16 | Total artifact length | `u32` | Exact byte length of the supplied `TRRM` slice |
 | 20 | Directory offset | `u32` | `32` in this candidate |
 | 24 | Reserved | 8 bytes | All zero; readers reject nonzero bytes |
@@ -119,18 +119,30 @@ Each directory entry is 16 bytes:
 | Entry offset | Field | Width | Candidate meaning |
 |---:|---|---:|---|
 | 0 | Section kind | `u16` | One of the table assignments below |
-| 2 | Flags | `u16` | `0x0001` required or `0x0000` optional; all other bits reject |
+| 2 | Flags | `u16` | One of the section policies below |
 | 4 | Record count | `u32` | Number of records encoded in the section |
 | 8 | Section offset | `u32` | Artifact-relative section start |
 | 12 | Section byte length | `u32` | Exact section extent |
 
-Every present semantic table uses the required flag; SourceMap alone uses the
-optional flag. Empty tables are omitted rather than encoded as empty entries.
-An unknown section's optional bit is not permission to ignore it without a
-nonsemantic registry entry. The entry does not add a minimum-reader-version
-field, and a matching major version does not imply acceptance of a different
-minor version. A separate minimum-reader field remains an alternative for
-future revision policy.
+Directory flags are a policy selector, not producer authority to declare a
+section safe to skip:
+
+| Flags | Reader and rewriter policy |
+|---:|---|
+| `0x0001` | Required semantics: a consumer must understand this section before binding or execution. A rewriter must understand and update it or reject the rewrite. |
+| `0x0000` | Optional, self-contained: a consumer may ignore it; a rewriter may preserve its bytes if its registered contract guarantees that changes elsewhere cannot invalidate them. |
+| `0x0002` | Optional, reference-slotted: a consumer may ignore its payload. A rewriter may preserve the unchanged payload if it remaps every declared reference slot and proves each target still has the same meaning; otherwise it drops the section. |
+| `0x0004` | Optional, discard-on-rewrite: a consumer may ignore it, but a rewriter that does not understand and regenerate it drops it whenever the artifact changes. |
+
+Other values reject; these policies are mutually exclusive. The section-kind
+registry must authorize the exact policy for assigned kinds. Unassigned
+kinds are skippable only in the reserved nonsemantic extension namespace
+defined below; their flags cannot override that namespace policy.
+Every present semantic table uses `0x0001`; SourceMap uses `0x0002`.
+Empty tables are omitted rather than encoded as empty entries. The entry does
+not add a minimum-reader-version field, and a matching major version does
+not imply acceptance of a different minor version. A separate minimum-reader
+field remains an alternative for future revision policy.
 
 Candidate framing invariants:
 
@@ -155,7 +167,8 @@ Candidate framing invariants:
   conversions use checked arithmetic before slicing, allocation, or iteration.
 - A present section has a positive record count. An absent registered table
   has zero rows. Fixed sections have exactly `recordCount * rowStride` bytes;
-  variable sections validate their index and data extents as specified below.
+  variable and reference-slotted sections validate their index or prelude
+  and data extents as specified below.
 
 The directory remains fixed-width for direct section lookup. An artifact
 has 32 bytes of header plus 16 bytes **per present table** before section
@@ -192,6 +205,46 @@ is `u32 firstRow, u32 count`; its empty encoding is `(0, 0)`, otherwise
 Ranges for one owner must not overlap or include another owner's rows.
 There are no pointer-sized fields or implicit string terminators.
 
+### Optional section reference slots
+
+A `0x0002` section begins with `u32 slotCount`, followed by `slotCount`
+16-byte slots. The remaining bytes are its kind-specific payload. The
+directory's `recordCount` counts payload records, not slots. Slot numbers
+are one-based `u32` values local to this section; zero is invalid where a
+payload requires a reference. The generic slot layout is:
+
+| Slot offset | Field | Width | Meaning |
+|---:|---|---:|---|
+| 0 | Target section kind | `u16` | Assigned core table containing the target |
+| 2 | Selector | `u16` | `0` row, `1` Body instruction |
+| 4 | Target row | `u32` | One-based row in the target table |
+| 8 | Block ID | `u32` | Zero for selector 0; nonzero Body block for selector 1 |
+| 12 | Instruction ordinal | `u32` | Zero for selector 0; operation ordinal or terminator ordinal for selector 1 |
+
+The prelude must fit entirely within its section: validate
+`4 + slotCount * 16` with checked arithmetic before reading or allocating.
+Each slot has a supported selector and a present target row of the specified
+core kind; selector 1 requires Body. A section's registry or extension
+namespace contract specifies which selectors it permits and requires
+**all cross-section references in its payload** to use slots, not raw row
+indexes. Core metadata and executable bodies retain direct indexes without
+this extra lookup. Only sections selecting this policy pay the four-byte
+count and 16 bytes per slot.
+
+A generic rewriter keeps the opaque payload and its slot numbers unchanged.
+It may rewrite a slot's target coordinates only when its own transformation
+provides an unambiguous old-to-new mapping **and** preserves the referent's
+meaning. Reordering rows can be remapped; deleting a target, changing a
+referenced Body instruction, or renumbering blocks/ordinals without a
+meaning-preserving mapping cannot be repaired by indirection alone. The
+rewriter drops the optional section rather than emitting dangling or stale
+slots. A section-aware tool may instead regenerate its payload and prelude.
+Dropping a section also removes its directory entry and does not leave
+unclaimed bytes. The prelude is not a promise that arbitrary opaque payload
+bytes remain valid after semantic changes.
+
+### Section kinds and row layouts
+
 | Kind (`u16`) | Table | Row payload and role |
 |---:|---|---|
 | `0x0001` | Module | Singleton identity, runtime requirement and entry point |
@@ -221,23 +274,53 @@ There are no pointer-sized fields or implicit string terminators.
 when empty, not encoded as empty directory entries. In format `(1, 0)`, the
 Feature table is absent, and Module's feature range is `(0, 0)`. A new
 semantic feature requires an explicit schema update, not merely a feature
-number in an otherwise unsupported artifact. Unknown section kinds are not
-self-declared safe to skip. The numeric gaps are
-reserved, not available for vendor-specific execution semantics. A required
-feature is identified by `u32` in `Feature`; its registry, minimum revision
-rule and negotiation policy still require a decision. Until then, a producer
-cannot emit an unrecognized semantic form by merely writing a feature number.
+number in an otherwise unsupported artifact. Kinds `0x8000..0xFFFF` are
+reserved for **nonsemantic optional extensions**. A reader can skip an
+unrecognized kind in this range only with flags `0x0000`, `0x0002` or `0x0004`,
+after checking its directory framing and any `0x0002` prelude. `0x0002`
+extensions use only selector 0 to refer to assigned core tables or selector
+1 to refer to Body instructions; their payload uses slots for all such
+references. They cannot define executable behavior, contract obligations,
+or new interpretations of core rows, and core sections cannot refer to them.
+Required flags or unknown kinds outside this range reject. Numeric gaps
+below this range are reserved, not available for execution semantics. A
+required feature is identified by `u32` in `Feature`; its registry, minimum
+revision rule and negotiation policy still require a decision. Until then,
+a producer cannot emit an unrecognized semantic form by merely writing a
+feature number.
 `SourceMap` is skippable for execution, not uninterpretable for tools. Its
-fixed 24-byte rows are `u32 bodyRow, u32 blockId, u32 instructionOrdinal,
-u32 sourceFileRow, u32 startUtf16, u32 lengthUtf16`.
-Rows sort by body, block and ordinal and do not duplicate a location.
-Ordinal zero means the first operation, `operationCount` means its terminator.
+reference-slot prelude uses selector 1 for Body instruction locations and
+selector 0 for SourceFile rows. After the prelude, its fixed 16-byte rows
+are `u32 instructionSlot, u32 sourceFileSlot, u32 startUtf16,
+u32 lengthUtf16`. Each slot must have the stated selector and target kind;
+the section length is exactly `4 + slotCount * 16 + recordCount * 16`.
+Rows sort by `instructionSlot` and do not duplicate an instruction slot.
+Ordinal zero means the first operation, `operationCount` means its
+terminator. SourceMap-aware tools validate that each block and ordinal exists;
+opaque-preserving rewriters must discard the section when they cannot
+establish that changed Body locations retain the same meaning. A remapping
+must not merge two referenced instruction locations into one.
 SourceFile paths are identifiers, not permissions to read a local file;
 `digestBlob` is an optional exact-content digest whose algorithm requires
 an assigned feature before nonzero use. Spans validate checked end arithmetic
-and need not imply that source bytes are embedded. Rewriting may omit
-SourceMap without changing execution or contracts; tools preserving debug
-data must retain its referenced SourceFile rows.
+and need not imply that source bytes are embedded. Dropping SourceMap does not
+change execution or contracts; tools preserving debug data must also retain
+or remap its referenced SourceFile rows.
+
+For one mapping from Body row 1, block 1, operation 0 to SourceFile row 1,
+UTF-16 span `[0, 2)`, the SourceMap section has two slots and one row
+(`recordCount=1`), for 52 bytes:
+
+```text
+02 00 00 00
+20 00 01 00 01 00 00 00 01 00 00 00 00 00 00 00
+1F 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00
+01 00 00 00 02 00 00 00 00 00 00 00 02 00 00 00
+```
+
+Moving Body row 1 to row 3 changes only slot 1's `targetRow`; the row's
+`instructionSlot=1` and the rest of the payload remain unchanged, provided
+the referenced instruction still has the same meaning.
 
 The next tables show **row payloads**, excluding the variable section's offset
 index. `str` and `blob` mean one-based rows in their respective tables;
@@ -271,8 +354,9 @@ The fixed row strides in bytes, in registry order excluding variable tables,
 are: Module 28, Feature 8, ModuleRef 12, TypeArg 12, TypeDef 40,
 FieldDef 20, Layout 24, MethodDef 28, MethodSig 24, Param 16,
 GenericParam 20, Constraint 16, Import 12, Export 8, PropertyDef 20,
-SourceFile 8, and SourceMap 24. String, Blob, TypeSpec, Contract and Body
-use offset indexes. A consumer rejects an incorrect stride or an unconsumed
+and SourceFile 8. String, Blob, TypeSpec, Contract and Body
+use offset indexes; SourceMap has the reference-slot prelude and 16-byte
+rows defined above. A consumer rejects an incorrect stride or an unconsumed
 field, rather than guessing a trailing extension. Empty namespace strings
 are allowed; declaration names, export keys and SourceFile paths are not
 empty. SourceFile requires `digestBlob=0` in `(1, 0)` because no digest
@@ -522,19 +606,29 @@ audit:
 Candidate unknown-data rules are:
 
 - Reject an unsupported format revision before interpreting sections.
-- Reject a section whose kind is unknown and whose required flag is set.
-- Reject unknown flag bits, nonzero reserved fields, duplicate section kinds,
-  and malformed directory ordering.
-- Skip an unknown optional section only if the section registry explicitly
-  classifies it as nonsemantic and safe to ignore; otherwise reject it. A
-  producer cannot make a safety-relevant section ignorable by setting a flag.
+- Reject unknown required kinds and unknown kinds outside the nonsemantic
+  extension range; an unknown optional extension cannot affect binding or
+  execution, and no core record may reference it.
+- Reject undefined or registry-incompatible section policies, nonzero reserved
+  fields, duplicate section kinds, and malformed directory ordering.
+- Skip an unknown optional section only when its kind lies in the
+  nonsemantic extension range, its flags select a permitted policy and its
+  generic framing is valid. A producer cannot make a safety-relevant section
+  ignorable by setting a flag.
+- Before preserving a reference-slotted section, validate the prelude and
+  mapped targets. Preserve its opaque payload only when every slot can be
+  updated without changing target meaning; otherwise drop it. Optional
+  discard-on-rewrite sections are regenerated by an aware tool or dropped.
 - Reject unknown required features and all unknown instructions, types,
   constraints, qualifiers, or callable-contract forms before binding/lowering.
   A feature declaration cannot authorize behavior the reader does not
   implement.
 
-The exact registry, reserved values, feature declaration, and policy for
-preserving optional sections when rewriting remain open.
+Kind-specific schemas for future optional extensions, reserved values, and
+feature declaration remain open. Optional extensions are limited to their
+namespace's generic rewrite policy and, if reference-slotted, the permitted
+target selectors above; a consumer that interprets an extension must also
+validate its kind-specific payload.
 
 Framing, reference resolution and contract compatibility are required
 independently of any separately defined integrity check. Semantic caller-use
@@ -572,4 +666,4 @@ following byte-level contracts:
 | Declarations | Resource references, generic/witness exportability, type/field/layout flags, richer qualifier/contract clauses and their validation. Module identity and export-key equality are specified; assigning a stable key to a source declaration is a writer policy. |
 | Executable bodies | Beyond the [narrow executable subset and other assigned decode shapes](terrum-il-instruction-set.md#executable-subset-versus-assigned-decode-shapes): output places, exceptional handlers/cleanup, loans, roots, witness bindings and their precise verifier rules. |
 | Limits | Per-record and per-artifact sizes, nesting and work budgets, allocation limits and canonical encoding requirements. |
-| Unknown data | Registry, reserved values, feature negotiation and safe handling or preservation of optional nonsemantic sections. |
+| Unknown data | Kind-specific extension schemas, reserved values and feature negotiation; generic skip, remap and discard policies are assigned above. |
