@@ -120,8 +120,8 @@ public sealed class TrRmImportExportTableReaderTests
         Write(propertyRows, 0, 1);
         Write(propertyRows, 4, 7);
         Write(propertyRows, 8, 1);
-        Write(propertyRows, 12, propertyFlags);
-        Write(propertyRows, 16, 1);
+        Write(propertyRows, 12, 1);
+        Write(propertyRows, 16, propertyFlags);
         var properties = propertyFlags == 0
             ? default
             : new TrRmPropertyDefTableReader(propertyRows, 1,

@@ -24,10 +24,10 @@ public sealed class TrRmPropertyDefTableReaderTests
     [InlineData(4, 0)]
     [InlineData(8, 0)]
     [InlineData(8, 2)]
-    [InlineData(12, 3)]
-    [InlineData(12, 4)]
-    [InlineData(16, 0)]
-    [InlineData(16, 2)]
+    [InlineData(12, 0)]
+    [InlineData(12, 2)]
+    [InlineData(16, 3)]
+    [InlineData(16, 4)]
     public void RejectsBadPropertyReferencesAndFlags(int offset, byte replacement)
     {
         var bytes = Property();
@@ -116,7 +116,7 @@ public sealed class TrRmPropertyDefTableReaderTests
         Write(row, 0, 1);
         Write(row, 4, 5);
         Write(row, 8, 1);
-        Write(row, 16, 1);
+        Write(row, 12, 1);
         return row;
     }
 

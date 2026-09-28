@@ -35,8 +35,8 @@ public readonly ref struct TrRmPropertyDefTableReader
             var owner = Read(data, 0);
             var name = Read(data, 4);
             var type = Read(data, 8);
-            var flags = Read(data, 12);
-            var getter = Read(data, 16);
+            var getter = Read(data, 12);
+            var flags = Read(data, 16);
             if (owner == 0 || owner > types.Count
                 || name is 0 or > 0xFF_FFFF
                 || type == 0 || type > typeSpecs.Count || flags > 2
@@ -73,10 +73,10 @@ public readonly ref struct TrRmPropertyDefTableReader
         => (int)Read(GetRow(row), 0);
 
     public uint GetFlags(int row)
-        => Read(GetRow(row), 12);
+        => Read(GetRow(row), 16);
 
     public int GetGetterMethod(int row)
-        => (int)Read(GetRow(row), 16);
+        => (int)Read(GetRow(row), 12);
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
