@@ -31,10 +31,13 @@ public sealed class StringLiteralComponentTests
         var utf8Bytes = ImmutableArray.CreateBuilder<int>();
         var utf16Records = ImmutableArray.CreateBuilder<int>();
         var utf16Units = ImmutableArray.CreateBuilder<int>();
+        var utf16ByteRecords = ImmutableArray.CreateBuilder<int>();
+        var utf16Bytes = ImmutableArray.CreateBuilder<int>();
         var asciiRecords = ImmutableArray.CreateBuilder<int>();
         var asciiBytes = ImmutableArray.CreateBuilder<int>();
         var utf32Records = ImmutableArray.CreateBuilder<int>();
         var utf32Bytes = ImmutableArray.CreateBuilder<int>();
+        var utf16Encoder = new UnicodeEncoding(false, false, true);
         var utf32Encoder = new UTF32Encoding(false, false, true);
         foreach (var fixture in Fixtures())
         {
@@ -51,6 +54,8 @@ public sealed class StringLiteralComponentTests
             utf8Records.Add(fixture.Scalars is null ? -1 : 0);
             utf16Records.Add(utf16Units.Count);
             utf16Records.Add(fixture.Scalars is null ? -1 : 0);
+            utf16ByteRecords.Add(utf16Bytes.Count);
+            utf16ByteRecords.Add(fixture.Scalars is null ? -1 : 0);
             asciiRecords.Add(asciiBytes.Count);
             asciiRecords.Add(-1);
             utf32Records.Add(utf32Bytes.Count);
@@ -69,6 +74,9 @@ public sealed class StringLiteralComponentTests
                 utf8Bytes.AddRange(encoded.Select(static value => (int)value));
                 utf16Records[^1] = decoded.Length;
                 utf16Units.AddRange(decoded.Select(static unit => (int)unit));
+                var encoded16 = utf16Encoder.GetBytes(decoded);
+                utf16ByteRecords[^1] = encoded16.Length;
+                utf16Bytes.AddRange(encoded16.Select(static value => (int)value));
                 if (values.All(static value => value.Value < 128))
                 {
                     asciiRecords[^1] = values.Length;
@@ -99,6 +107,8 @@ public sealed class StringLiteralComponentTests
             new HostBuffer("ExpectedUtf8Bytes", PrimitiveType.Int32, utf8Bytes.ToImmutable(), false),
             new HostBuffer("ExpectedUtf16Records", PrimitiveType.Int32, utf16Records.ToImmutable(), false),
             new HostBuffer("ExpectedUtf16Units", PrimitiveType.Int32, utf16Units.ToImmutable(), false),
+            new HostBuffer("ExpectedUtf16ByteRecords", PrimitiveType.Int32, utf16ByteRecords.ToImmutable(), false),
+            new HostBuffer("ExpectedUtf16Bytes", PrimitiveType.Int32, utf16Bytes.ToImmutable(), false),
             new HostBuffer("ExpectedAsciiRecords", PrimitiveType.Int32, asciiRecords.ToImmutable(), false),
             new HostBuffer("ExpectedAsciiBytes", PrimitiveType.Int32, asciiBytes.ToImmutable(), false),
             new HostBuffer("ExpectedUtf32Records", PrimitiveType.Int32, utf32Records.ToImmutable(), false),
@@ -113,6 +123,7 @@ public sealed class StringLiteralComponentTests
     [Theory]
     [InlineData("TryGetUtf8Length", "EncodeUtf8", "\"\u00E9\"", new[] { 195, 169 })]
     [InlineData("TryGetUtf16Length", "EncodeUtf16", "\"\uD83D\uDE00\"", new[] { 0xD83D, 0xDE00 })]
+    [InlineData("TryGetUtf16ByteLength", "EncodeUtf16LeBytes", "\"\uD83D\uDE00\"", new[] { 0x3D, 0xD8, 0, 0xDE })]
     [InlineData("TryGetUtf32ByteLength", "EncodeUtf32LeBytes", "\"\u00E9\"", new[] { 233, 0, 0, 0 })]
     public async Task LiteralEncodingRejectsUndersizedStorageAndReleasesItOnCheckedFailureAsync(
         string measure, string encode, string spelling, int[] expected)

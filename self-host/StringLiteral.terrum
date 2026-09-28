@@ -185,6 +185,44 @@ public struct StringLiteral
         return move units;
     }
 
+    public bool TryGetUtf16ByteLength(init ref<int32> byteLength)
+    {
+        if (!TryGetUtf16Length(init var unitLength) || unitLength > int32.MaxValue / 2)
+        {
+            return false;
+        }
+        byteLength = unitLength * 2;
+        return true;
+    }
+
+    public OwnedInt32Buffer EncodeUtf16LeBytes(OwnedInt32Buffer workspace)
+    {
+        mut OwnedInt32Buffer bytes = move workspace;
+        bytes.Clear();
+        mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
+        while (cursor.TryRead(out var scalar, out var next))
+        {
+            mut int32 first = scalar;
+            if (scalar >= 65536)
+            {
+                int32 supplementary = scalar - 65536;
+                first = 55296 + supplementary / 1024;
+                int32 second = 56320 + supplementary % 1024;
+                require bytes.TryAppend(first % 256);
+                require bytes.TryAppend(first / 256);
+                require bytes.TryAppend(second % 256);
+                require bytes.TryAppend(second / 256);
+            }
+            else
+            {
+                require bytes.TryAppend(first % 256);
+                require bytes.TryAppend(first / 256);
+            }
+            cursor = next;
+        }
+        return move bytes;
+    }
+
     public bool TryGetAsciiLength(init ref<int32> byteLength)
     {
         mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);

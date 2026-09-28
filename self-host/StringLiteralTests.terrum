@@ -52,6 +52,24 @@ int32 CheckStringLiterals()
             }
             encodedUnits = literal.EncodeUtf16(move encodedUnits);
             if (encodedUnits.Count != unitLength || encodedUnits.Capacity != unitLength) { return 23; }
+            require literal.TryGetUtf16ByteLength(init var utf16ByteLength);
+            int32 expectedUtf16ByteStart = Host.ExpectedUtf16ByteRecords[fixture * 2];
+            int32 expectedUtf16ByteLength = Host.ExpectedUtf16ByteRecords[fixture * 2 + 1];
+            if (utf16ByteLength != expectedUtf16ByteLength) { return 33; }
+            require OwnedInt32Buffer.TryCreate(utf16ByteLength, out var utf16ByteWorkspace);
+            mut OwnedInt32Buffer encodedUtf16Bytes = literal.EncodeUtf16LeBytes(move utf16ByteWorkspace);
+            if (encodedUtf16Bytes.Count != utf16ByteLength
+                || encodedUtf16Bytes.Capacity != utf16ByteLength) { return 34; }
+            for (mut int32 index = 0; index < utf16ByteLength; index = index + 1)
+            {
+                if (encodedUtf16Bytes.Read(index) != Host.ExpectedUtf16Bytes[expectedUtf16ByteStart + index])
+                {
+                    return 35;
+                }
+            }
+            encodedUtf16Bytes = literal.EncodeUtf16LeBytes(move encodedUtf16Bytes);
+            if (encodedUtf16Bytes.Count != utf16ByteLength
+                || encodedUtf16Bytes.Capacity != utf16ByteLength) { return 36; }
             int32 expectedAsciiStart = Host.ExpectedAsciiRecords[fixture * 2];
             int32 expectedAsciiLength = Host.ExpectedAsciiRecords[fixture * 2 + 1];
             if (literal.TryGetAsciiLength(init var asciiLength))
