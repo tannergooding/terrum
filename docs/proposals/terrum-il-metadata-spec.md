@@ -1,10 +1,11 @@
 # Terrum semantic IL and metadata
 
 > [!IMPORTANT]
-> Working proposal, not an accepted byte schema or a claim of compiler support.
+> Approved current design for the specified `TRRM` metadata and framing
+> contracts, not a released byte schema or a claim of compiler support.
 > See [implementation](../implementation.md) for the current executable
-> boundary. Terms such as "must" below describe the proposed contract where
-> its representation has been specified; open choices are identified explicitly.
+> boundary. Terms such as "must" apply to the specified `(1, 0)` design;
+> explicitly open contracts require further specification before use.
 
 This document defines metadata tables and physical framing; the
 [instruction proposal](terrum-il-instruction-set.md) defines coded operations.
@@ -22,7 +23,7 @@ container.
 | Section | One contiguous artifact-relative byte extent identified by a directory entry and containing a metadata table or body stream. An absent table has no directory entry or section. |
 | Row | A fixed-stride payload in a fixed table, or an extent in a variable table's offset-indexed data. Rows have one-based indexes; absent table means zero rows. |
 | Local definition ID (`DefId`) | A `u32` token: high byte is a registered definition-table kind, low 24 bits are its one-based row. Zero is the only null token. Its value is not a stable cross-artifact identity. |
-| Producer identity and export key | The selected dependency and published declaration identity used together to resolve an import, whether its producer is packed here or in another artifact. Bytes and ordinal keys are specified below; source-side key assignment and authentication are separate. |
+| Producer identity and export key | The selected dependency and published declaration identity used together to resolve an import, whether its producer is packed here or in another artifact. Equality of decoded text is specified below; source-side key assignment and authentication are separate. |
 | Declared contract | Published type, callable, ownership/lifetime, access, effect and requirement facts against which consumers bind and check use. A contract is not inferred from a dependency body or source spelling. |
 | Body | Typed semantic operations and control flow for an executable declaration, distinct from declaration metadata. |
 | Source revision, artifact revision, native profile | Independent axes for source syntax/semantics, `TRRM` encoding and requirements, and target/runtime ABI assumptions. The enclosing container format is separate. One revision number does not imply another. |
@@ -31,7 +32,7 @@ container.
 Field tables use `u8`, `u16`, `u32` and `u64` for fixed-width unsigned
 little-endian integers. Byte offsets are artifact-relative; lengths are byte
 counts unless stated otherwise. Numeric assignments below describe this
-proposed format. Numerical resource ceilings and future format-revision
+approved current design. Numerical resource ceilings and future format-revision
 policy remain unspecified.
 
 ## Scope and conformance boundary
@@ -67,8 +68,9 @@ The accepted language contracts remain authoritative for their semantics:
 [language](../language.md), [lifetimes](../lifetimes.md),
 [conversions](../conversions.md), [type families](../type-families.md),
 [data layout and ABI](../data-layout-and-abi.md), and the
-[memory model](../memory-model.md). This document describes their proposed
-binary representation and validation; it does not redefine their rules.
+[memory model](../memory-model.md). This document defines the approved current
+binary design where specified; it does not redefine their rules or approve the
+separate coded-instruction proposal.
 
 | Role | Required checks |
 |---|---|
@@ -79,24 +81,24 @@ binary representation and validation; it does not redefine their rules.
 ## Format identity and revision scope
 
 `TRRM` is the format identifier, with ASCII signature bytes `54 52 52 4D`.
-This proposal targets format 1.0, encoded as major/minor `(1, 0)`; it is not
+This design targets format 1.0, encoded as major/minor `(1, 0)`; it is not
 a declaration of general availability or a compatibility promise for draft
 artifacts. Before release, the schema can change without incrementing this
 pair. Pre-release tools may exchange artifacts only when they share the exact
 schema; matching version bytes alone do not establish that. A reader of the
-proposed schema accepts exactly `(1, 0)` and rejects other pairs. Post-release
+specified schema accepts exactly `(1, 0)` and rejects other pairs. Post-release
 revision and feature-negotiation rules remain unspecified. Source revisions
 and target ABI/profile requirements are independent of the format pair.
 
-## Physical framing and embedding (proposed)
+## Physical framing and embedding
 
-The following framing, table IDs and row layouts describe the proposed
+The following framing, table IDs and row layouts describe the approved current
 encoding. Initial opcodes and bodies are defined in the
 [instruction proposal](terrum-il-instruction-set.md).
 
 ### Header and directory
 
-Candidate byte order is little-endian. The header is fixed at 32 bytes in this
+Byte order is little-endian. The header is fixed at 32 bytes in this
 layout; the directory follows the header, and present sections follow the
 directory in ascending artifact-relative offset order. There is one entry
 per **present** table kind. An absent known table is empty; Module cannot be
@@ -111,20 +113,20 @@ slice, not the containing file. Large resources may be held separately and
 referenced by metadata; their payload bytes are not part of `totalLength`.
 Resource identity, resolution, integrity and limits remain schema decisions.
 
-| Offset | Field | Width | Candidate meaning |
+| Offset | Field | Width | Meaning |
 |---:|---|---:|---|
 | 0 | Magic | 4 bytes | ASCII `TRRM` |
-| 4 | Format major | `u16` | `1` in this proposal |
-| 6 | Format minor | `u16` | `0` in this proposal |
-| 8 | Header length | `u32` | `32` for this candidate layout |
+| 4 | Format major | `u16` | `1` in this design |
+| 6 | Format minor | `u16` | `0` in this design |
+| 8 | Header length | `u32` | `32` for this layout |
 | 12 | Directory entry count | `u32` | Number of present sections; 22 kinds are assigned below, plus nonsemantic extension kinds |
 | 16 | Total artifact length | `u32` | Exact byte length of the supplied `TRRM` slice; zero is reserved and invalid in this schema |
-| 20 | Directory offset | `u32` | `32` in this candidate |
+| 20 | Directory offset | `u32` | `32` in this design |
 | 24 | Reserved | 8 bytes | All zero; readers reject nonzero bytes |
 
 Each directory entry is 16 bytes:
 
-| Entry offset | Field | Width | Candidate meaning |
+| Entry offset | Field | Width | Meaning |
 |---:|---|---:|---|
 | 0 | Section kind | `u16` | One of the table assignments below |
 | 2 | Flags | `u16` | Two-bit section-policy selector; upper 14 bits reserved and zero |
@@ -152,7 +154,7 @@ not add a minimum-reader-version field, and a matching major version does
 not imply acceptance of a different minor version. A separate minimum-reader
 field remains an alternative for future revision policy.
 
-Candidate framing invariants:
+Framing invariants:
 
 - `headerLength` is 32 and `directoryOffset` is 32; the directory has exactly
   `entryCount * 16` bytes, with checked
@@ -194,7 +196,7 @@ infer that format merely from a zero length. Encoding the ordinary length in
 512-byte units would impose padding and lose exact byte framing without
 addressing those other widths.
 
-## Metadata logical tables and row semantics (proposed)
+## Metadata logical tables and row semantics
 
 ### Table stream and token encoding
 
@@ -478,6 +480,55 @@ are allowed; declaration names, export keys and SourceFile paths are not
 empty. SourceFile requires `digestBlob=0` in `(1, 0)` because no digest
 algorithm is assigned.
 
+The following ownership and range rules apply in addition to the module
+partition below. A TypeDef's `fieldFirst/fieldCount` names exactly its
+contiguous FieldDef rows; each row's `ownerTypeDef` names that TypeDef.
+Its `genericFirst/genericCount` similarly names its GenericParam rows.
+A MethodSig's `paramFirst/paramCount` names exactly its Param rows, whose
+`ownerMethodSig` names that MethodSig and whose zero-based `ordinal` equals
+its position in the range. Its `genericFirst/genericCount` names the
+MethodDef's formals, not formals owned by the structural MethodSig: each
+GenericParam's `ownerDefId` names the using MethodDef. Consequently a
+MethodSig with a nonempty generic range cannot be shared by distinct
+MethodDefs. Each formal's `constraintFirst/constraintCount` names exactly
+its Constraint rows, whose `ownerGenericParam` names that formal. Nonempty
+ranges must satisfy the common checked range rules; empty ranges are
+`(0, 0)`. Field and formal rows cannot belong to two owners.
+
+`MethodDef.signature` and `PropertyDef.typeSpec` are required references.
+A nonzero `MethodSig.receiverTypeSpec` requires a MethodDef with a nonzero
+`ownerTypeDef`; a module-level MethodDef has no receiver. A method owned by
+a type can have no receiver (a type-scoped static method). The getter named
+by a PropertyDef must have the same owner TypeDef and a MethodSig with the
+same result TypeSpec; its parameter and receiver contracts remain those of
+that method, not inferred from the property name. A MethodDef's nonzero
+`bodyRow` is unique to that MethodDef, and every Body row is referenced
+exactly once. A TypeDef's nonzero `layoutRow` names a Layout row whose
+`ownerTypeDef` names it; no Layout row may be orphaned or shared between
+different TypeDefs. TypeSpec form `0x05` ranges similarly contain only
+TypeArg rows whose `ownerTypeSpec` names that constructed TypeSpec and whose
+zero-based `ordinal` equals its position in the range. Their
+`argumentTypeSpec` rows must precede the constructed TypeSpec, so structural
+TypeSpec references remain acyclic.
+
+The remaining fixed-row columns have these `(1, 0)` validation rules:
+
+| Row | References, values and ownership |
+|---|---|
+| Module | `identity` is required; `entryMethod?` is a MethodDef in this module. `featureFirst/featureCount` is `(0, 0)` because Feature is absent. `moduleFlags=0`; `targetRequirement` and `runtimePolicy` use the assigned values below. The four `*Start` fields are cursors into their respective module-partitioned tables, not nullable row references. |
+| ModuleRef | `producerIdentity` is required, and requirement/policy must match the selected producer; ownership follows `Module.moduleRefStart`. An in-artifact identity selects exactly one Module. |
+| TypeDef | `namespace` may name an empty String row; `name` must be nonempty. `flags` contains the specified visibility, kind and layout. `layoutRow?` names this type's Layout when present; field, generic and contract ranges have exactly the owners described here. |
+| FieldDef | `ownerTypeDef`, `name` and `typeSpec` are required. `byteOffset=0xFFFF_FFFF` when no fixed offset is published; otherwise it is an offset within the owning published Layout. Its flags permit visibility and the mutable bit only. |
+| Layout | `ownerTypeDef` is required, `flags=0`; `targetRequirement` uses the assigned target registry. `size`, `alignment` and `pack` are checked against the target's layout rules; a row with unsupported layout rules cannot publish a valid fixed representation merely by supplying numbers. |
+| MethodDef | `name` and `signature` are required; `ownerTypeDef?` is zero for a module-level callable. Contract rows have this MethodDef as owner. `bodyRow?` names its unique Body; retained imported expectations have no Body. Only visibility bits are assigned. |
+| MethodSig | `resultTypeSpec` is required (the built-in `void` TypeSpec denotes no result); `receiverTypeSpec?` is zero when absent. Param and generic ranges follow the ownership rules above. |
+| Param | `ownerMethodSig` and `typeSpec` are required. `mode` uses the assigned registry below, `flags=0`, and `reserved=0`; ordinal is zero-based within the owning range. |
+| GenericParam, Constraint | `ownerDefId` names a TypeDef or MethodDef and `ownerGenericParam` names a formal, respectively. Names are nonempty, ordinals are zero-based within the owning range, and constraints belong to their formal. `Constraint.flags=0`; unassigned kinds and witnesses cannot be bound as executable generic contracts. |
+| Import | `moduleRef` names a ModuleRef owned by the expected definition's module; `exportKey` is nonempty and `expectedLocalDefId` names that module's TypeDef, MethodDef or PropertyDef with no locally authored implementation. Resolve that selected producer/key against the complete expected contract before execution. |
+| Export | `localDefId` names this module's public TypeDef, MethodDef or PropertyDef, not an imported expectation; `exportKey` is nonempty and unique within this module's producer identity. An exported member's owner TypeDef is public. |
+| PropertyDef | `ownerTypeDef`, `name`, `typeSpec` and `getterMethodDef` are required; only visibility bits are assigned. The getter and result must match as specified above. |
+| SourceFile | `path` is required nonempty decoded text; `digestBlob?=0` until a digest algorithm is assigned. The Module partition owns the row; paths convey no filesystem authority. |
+
 `Module.identity` and `ModuleRef.producerIdentity` are required references
 to nonempty, well-formed String text without embedded zero scalars, not
 hashes or proof of authorship. Identity equality uses
@@ -611,13 +662,14 @@ with its high bit clear names one assigned atomic type and consumes no
 argument byte. A high-bit code in `0x80..0xFE` names a one-argument
 built-in family and **must** consume the following byte as the atomic
 type code for `T`. The common built-in instance therefore needs no
-TypeSpec operand lookup. Assigned family codes are:
+additional TypeSpec lookup for its argument; an instruction's `t` operand
+still names the containing TypeSpec row. Assigned family codes are:
 
 | Codes | Built-in family in increasing code order |
 |---|---|
 | `0x80..0x84` | `simd64<T>`, `simd128<T>`, `simd256<T>`, `simd512<T>`, scalable `simd<T>` |
 | `0x85..0x88` | `simd64mask<T>`, `simd128mask<T>`, `simd256mask<T>`, `simd512mask<T>` |
-| `0x89` | Reserved for a scalable mask form; no source name or representation assigned |
+| `0x89` | Provisional scalable `simdmask<T>`; name, representation and membership remain open |
 | `0x8A` | `Span<T>` |
 | `0x8B..0x8F` | `ref<T>`, `ptr<T>`, `box<T>`, `val<T>`, `own<T>` |
 
@@ -643,6 +695,20 @@ reading; it does not make unsupported widths, floating/decimal
 operations, SIMD, spans or general references executable in the narrow
 `(1, 0)` body profile. Reserved codes reject rather than becoming private
 reader-enum ordinals.
+
+These codes are semantic type identities, not C ABI aliases or promises of
+one machine-register representation. C `long`, `wchar_t` and `long double`
+depend on the target ABI; an x87 extended `float80` or built-in complex
+number would require separately specified value, storage, target-support
+and call-classification rules before receiving a code. `Task<T>` is a
+declared completion family with ownership and async contracts, not a scalar
+or a fixed task-object layout implied by an inline type code. `mut` belongs
+to a place or receiver, `write` is a type qualifier, and `out`/`init ref`
+are passing modes. Multi-argument callable signatures such as `func` and
+`fnptr`, tuples, nominal types and arbitrary type arguments require their
+own structural TypeSpec/contract references; a one-byte `T` cannot stand
+in for them. SIMD mask codes above reserve candidate identities only:
+mask naming, layout and lane correspondence remain under review.
 
 The low two bits (`flags & 0x03`) of every definition's `u32 flags` encode
 visibility: `0x00` private, `0x01` internal, `0x02` public; `0x03`
@@ -694,7 +760,9 @@ The offset index gives its exact extent; each clause defines the length of
 `data`. Unknown clauses reject semantic consumption, even if the row is
 well framed; no producer can reclassify one as debug data.
 Contracts for a TypeDef or MethodDef occupy its contiguous `contractFirst/count`
-range; duplicates of a singleton clause reject. The initial candidate clause
+range. Each Contract's `ownerDefId` must name that owner; no Contract row is
+orphaned or shared between owners. Duplicates of a singleton clause reject.
+The initial clause
 assignments are:
 
 | Clause | `data` payload | Meaning |
@@ -961,7 +1029,7 @@ following byte-level contracts:
 
 | Surface | Not yet specified |
 |---|---|
-| Encoding and revisions | Adoption of candidate widths, future version/feature policy and reader compatibility rules. The proposed `(1, 0)` schema accepts only its registered semantic forms. |
+| Encoding and revisions | Future version/feature policy and reader compatibility rules. The approved current `(1, 0)` design accepts only its registered semantic forms but is not a released schema. |
 | Declarations | Resource references, generic/witness exportability, further type/field/layout flags, richer qualifier/contract clauses and their validation. Module identity and export-key equality are specified; assigning a stable key to a source declaration is a writer policy. |
 | Executable bodies | Beyond the [narrow executable subset and other assigned decode shapes](terrum-il-instruction-set.md#executable-subset-versus-assigned-decode-shapes): output places, exceptional handlers/cleanup, loans, roots, witness bindings and their precise verifier rules. |
 | Limits | Per-record and per-artifact sizes, nesting and work budgets, allocation limits and canonical encoding requirements. |

@@ -1,11 +1,11 @@
 # Terrum coded instruction proposal
 
 > [!IMPORTANT]
-> Candidate `TRRM` interchange design, not the current revision-35 writer or
+> Candidate coded-instruction design, not the current semantic-module writer or
 > an approved execution profile. The unencoded contracts at the end are
 > stabilization blockers, not permissions to erase their semantics.
 
-The [metadata proposal](terrum-il-metadata-spec.md) defines the Body table,
+The [approved current metadata design](terrum-il-metadata-spec.md) defines the Body table,
 TypeSpec, MethodDef, contracts and artifact framing. This document specifies
 the Body payload and operation stream separately, following only the
 *organizational* distinction between ECMA-335 Partitions II and III. It does
@@ -334,8 +334,8 @@ object graph, machine register assignment, optimization tier or cache.
 
 ## Type and definition model for operands
 
-`t` refers to a complete row in the metadata proposal's
-[TypeSpec table](terrum-il-metadata-spec.md#metadata-logical-tables-and-row-semantics-proposed),
+`t` refers to a complete row in the metadata design's
+[TypeSpec table](terrum-il-metadata-spec.md#metadata-logical-tables-and-row-semantics),
 not to a byte-sized `PrimitiveType` embedded in an instruction.
 The narrow executable profile uses the metadata registry codes `0x00 void`,
 `0x01 bool`, `0x03 char16`, `0x08 int32`, `0x0D uint32`, `0x09 int64`,

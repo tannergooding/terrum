@@ -49,12 +49,13 @@ detailed proposal wholesale.
 
 | Proposal | Review boundary |
 |---|---|
-| General semantic IL and metadata format | Review the `TRRM` specification structure, normative IL/verifier contract, metadata schema, byte encoding and evolution policy. The current semantic-module revisions and historical-reader tests are repository implementation facts scheduled for consolidation before v1, not a promise of external production compatibility or the final byte layout; see the [specification roadmap](roadmap.md#language-semantic-il-and-metadata-specification). |
+| Coded instructions and remaining `TRRM` contracts | The [metadata design](proposals/terrum-il-metadata-spec.md) is approved as current intent, not implemented or released. Review the separate [coded-instruction proposal](proposals/terrum-il-instruction-set.md), generic/witness and callable contracts, numerical budgets, feature negotiation and evolution rules before claiming complete interchange support. The current semantic-module revisions and historical-reader tests are implementation facts scheduled for consolidation before v1, not external production compatibility; see the [specification roadmap](roadmap.md#language-semantic-il-and-metadata-specification). |
 
 ## Specification and implementation work
 
 These items are not requests to reconsider accepted policy. Exact source
-grammar, metadata, target profiles and library APIs remain to specify; runtime
+grammar, remaining metadata contracts, target profiles and library APIs remain
+to specify; runtime
 support and conformance evidence follow the [roadmap](roadmap.md).
 
 | Area | Work still required | Canonical detail |

@@ -160,9 +160,11 @@ requirements remain unchanged. No pre-v1 stability level is promised; any
 stability declaration is deferred until closer to v1.
 
 Substantial compiler, runtime, and library increments may proceed without
-waiting for final review of the grammar, `TRRM` metadata, or core-library
-companion drafts. Where an increment needs specifics, use their concrete
-working designs provisionally and mark implementation-dependent choices in
+waiting for final review of the grammar, coded instructions, or core-library
+companion drafts. The [approved current `TRRM` metadata design](proposals/terrum-il-metadata-spec.md)
+defines specified framing and row contracts, not compiler support or a
+released byte schema. Where an increment needs still-open specifics, use
+concrete working designs provisionally and mark implementation-dependent choices in
 the relevant design and implementation-status documentation; retrospective
 correction remains possible before v1. This is not blanket adoption of every
 proposal, an implementation-support claim, or a stability promise. Keep work
@@ -200,8 +202,8 @@ an implemented embedded/kernel backend.
 
 Specify the source language, semantic operations and verifier, metadata/module
 interchange, and runtime/target profiles with explicit boundaries. `TRRM` is
-the selected format identifier; its normative records and byte encoding remain
-design work.
+the selected format identifier; approved metadata records and framing do not
+yet specify the complete executable body, verifier and feature contracts.
 Cover declaration identities and references, types, generic
 constraints/witnesses, access/ownership/lifetime and output contracts, effects,
 capabilities, layouts and runtime dependencies. Accepted documentation
@@ -215,13 +217,15 @@ emits a separate XML artifact and does not define executable contracts.
 Exact tokenization/escaping, complex reference grammar, schema/member IDs,
 and packaging remain specification work.
 
-The `TRRM` working specification must define byte framing and header,
+The `TRRM` specification must define byte framing and header,
 metadata-record relationships and identity, body/instruction/region structure,
 limits and accounting, validation, reference resolution, and unknown/reserved
 data behavior. It must distinguish source-language versions, semantic
-artifact-format revisions and physical native profiles. No wire revision
-encoding, feature-negotiation policy, unknown-record strategy or numerical
-format limit is selected by the current implementation facts.
+artifact-format revisions and physical native profiles. The approved current
+metadata design assigns a proposed `(1, 0)` wire revision and generic
+unknown-section policies, but feature negotiation, executable contracts and
+numerical resource budgets remain open; current implementation facts do not
+select or implement this schema.
 Establish conformance with independently exercised readers,
 writers and verifier cases rather than relying only on same-version round trips.
 
