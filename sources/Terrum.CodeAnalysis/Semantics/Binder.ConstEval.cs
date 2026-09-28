@@ -13,6 +13,10 @@ internal sealed partial class Binder
 {
     private const int ConstEvalDepthLimit = 64;
     private const int ConstEvalWorkLimit = 4096;
+    private bool _hasRequiredExpression;
+
+    private sealed record BoundRequiredConstant(BoundExpression Operand, TextSpan Span)
+        : BoundExpression(Operand.Type, Span);
 
     private static bool ConstEvalScalar(PrimitiveType type) =>
         type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
@@ -36,7 +40,7 @@ internal sealed partial class Binder
         {
             return false;
         }
-        if (_constRequired.Count == 0)
+        if (_constRequired.Count == 0 && !_hasRequiredExpression)
         {
             return true;
         }
@@ -95,6 +99,8 @@ internal sealed partial class Binder
         unsupported = expression.Span;
         switch (expression)
         {
+            case BoundRequiredConstant required:
+                return CheckConstExpression(required.Operand, out unsupported);
             case BoundConstant or BoundRead:
                 return true;
             case BoundUnary unary:
@@ -133,17 +139,18 @@ internal sealed partial class Binder
                 }
                 return block with { Statements = statements.MoveToImmutable() };
             }
-            case BoundLocal local when _constRequired.Contains(local):
+            case BoundLocal local:
             {
+                var initializer = ResolveConstExpression(local.Initializer, locals, functions, variableCount);
+                if (!_constRequired.Contains(local))
+                {
+                    return local with { Initializer = initializer };
+                }
                 try
                 {
                     var state = new ConstEvalState(_cancellationToken);
-                    var slots = new BoundConstant?[variableCount];
-                    foreach (var (variable, value) in locals)
-                    {
-                        slots[variable] = value;
-                    }
-                    var constant = EvaluateConstExpression(local.Initializer, slots, functions, 0, state);
+                    var constant = EvaluateConstExpression(initializer, ConstSlots(locals, variableCount),
+                        functions, 0, state);
                     locals.Add(local.Variable, constant);
                     return local with { Initializer = constant with { Span = local.Initializer.Span } };
                 }
@@ -155,12 +162,14 @@ internal sealed partial class Binder
             }
             case BoundIf conditional:
                 return conditional with {
+                    Condition = ResolveConstExpression(conditional.Condition, locals, functions, variableCount),
                     Then = ResolveConstStatement(conditional.Then, locals, functions, variableCount),
                     Else = conditional.Else is null ? null
                         : ResolveConstStatement(conditional.Else, locals, functions, variableCount),
                 };
             case BoundWhile loop:
                 return loop with {
+                    Condition = ResolveConstExpression(loop.Condition, locals, functions, variableCount),
                     Body = ResolveConstStatement(loop.Body, locals, functions, variableCount),
                     Iterator = loop.Iterator is null ? null
                         : ResolveConstStatement(loop.Iterator, locals, functions, variableCount),
@@ -180,10 +189,117 @@ internal sealed partial class Binder
             case BoundUnsafe region:
                 return region with { Body = (BoundBlock)ResolveConstStatement(region.Body, locals, functions, variableCount) };
             case BoundViewScope view:
-                return view with { Body = (BoundBlock)ResolveConstStatement(view.Body, locals, functions, variableCount) };
+                return view with {
+                    Owner = ResolveConstExpression(view.Owner, locals, functions, variableCount),
+                    Start = ResolveConstExpression(view.Start, locals, functions, variableCount),
+                    Length = ResolveConstExpression(view.Length, locals, functions, variableCount),
+                    Body = (BoundBlock)ResolveConstStatement(view.Body, locals, functions, variableCount),
+                };
+            case BoundAssignment assignment:
+                return assignment with { Value = ResolveConstExpression(assignment.Value, locals, functions, variableCount) };
+            case BoundFieldAssignment assignment:
+                return assignment with { Value = ResolveConstExpression(assignment.Value, locals, functions, variableCount) };
+            case BoundBufferAssignment assignment:
+                return assignment with {
+                    Index = ResolveConstExpression(assignment.Index, locals, functions, variableCount),
+                    Value = ResolveConstExpression(assignment.Value, locals, functions, variableCount),
+                };
+            case BoundViewSet set:
+                return set with {
+                    Index = ResolveConstExpression(set.Index, locals, functions, variableCount),
+                    Value = ResolveConstExpression(set.Value, locals, functions, variableCount),
+                };
+            case BoundExpressionStatement action:
+                return action with {
+                    Expression = ResolveConstExpression(action.Expression, locals, functions, variableCount),
+                };
+            case BoundRequire requirement:
+                return requirement with {
+                    Condition = ResolveConstExpression(requirement.Condition, locals, functions, variableCount),
+                };
+            case BoundReturn { Value: BoundExpression value } result:
+                return result with { Value = ResolveConstExpression(value, locals, functions, variableCount) };
             default:
                 return statement;
         }
+    }
+
+    private BoundExpression ResolveConstExpression(BoundExpression expression, Dictionary<int, BoundConstant> locals,
+        IReadOnlyList<BoundFunction> functions, int variableCount)
+    {
+        switch (expression)
+        {
+            case BoundRequiredConstant required:
+            {
+                var operand = ResolveConstExpression(required.Operand, locals, functions, variableCount);
+                if (!CheckConstExpression(operand, out _))
+                {
+                    Report("TRM3024", "A required constant expression cannot contain unsupported effects or calls.",
+                        required.Span);
+                    return expression;
+                }
+                try
+                {
+                    var state = new ConstEvalState(_cancellationToken);
+                    var constant = EvaluateConstExpression(operand, ConstSlots(locals, variableCount),
+                        functions, 0, state);
+                    return constant with { Span = required.Span };
+                }
+                catch (ConstEvalFailure failure)
+                {
+                    Report("TRM3024", failure.Message, required.Span);
+                    return expression;
+                }
+            }
+            case BoundUnary unary:
+                return unary with { Operand = ResolveConstExpression(unary.Operand, locals, functions, variableCount) };
+            case BoundBinary binary:
+                return binary with {
+                    Left = ResolveConstExpression(binary.Left, locals, functions, variableCount),
+                    Right = ResolveConstExpression(binary.Right, locals, functions, variableCount),
+                };
+            case BoundCast cast:
+                return cast with { Operand = ResolveConstExpression(cast.Operand, locals, functions, variableCount) };
+            case BoundCall call:
+            {
+                var arguments = ImmutableArray.CreateBuilder<BoundExpression>(call.Arguments.Length);
+                foreach (var argument in call.Arguments)
+                {
+                    arguments.Add(ResolveConstExpression(argument, locals, functions, variableCount));
+                }
+                return call with { Arguments = arguments.MoveToImmutable() };
+            }
+            case BoundFieldRead field:
+                return field with { Receiver = ResolveConstExpression(field.Receiver, locals, functions, variableCount) };
+            case BoundBufferRead buffer:
+                return buffer with { Index = ResolveConstExpression(buffer.Index, locals, functions, variableCount) };
+            case BoundViewRead view:
+                return view with { Index = ResolveConstExpression(view.Index, locals, functions, variableCount) };
+            case BoundOptionalLift lift:
+                return lift with { Value = ResolveConstExpression(lift.Value, locals, functions, variableCount) };
+            case BoundReadonlyProjection projection:
+                return projection with { Value = ResolveConstExpression(projection.Value, locals, functions, variableCount) };
+            case BoundIsNull test:
+                return test with { Value = ResolveConstExpression(test.Value, locals, functions, variableCount) };
+            case BoundIsSome test:
+                return test with { Value = ResolveConstExpression(test.Value, locals, functions, variableCount) };
+            case BoundFieldLoan loan:
+                return loan with { Place = (BoundFieldRead)ResolveConstExpression(loan.Place, locals, functions, variableCount) };
+            case BoundMutableFieldLoan loan:
+                return loan with { Place = (BoundFieldRead)ResolveConstExpression(loan.Place, locals, functions, variableCount) };
+            default:
+                return expression;
+        }
+    }
+
+    private static BoundConstant?[] ConstSlots(Dictionary<int, BoundConstant> locals, int variableCount)
+    {
+        var slots = new BoundConstant?[variableCount];
+        foreach (var (variable, value) in locals)
+        {
+            slots[variable] = value;
+        }
+        return slots;
     }
 
     private BoundConstant EvaluateConstExpression(BoundExpression expression, BoundConstant?[] slots,
@@ -192,6 +308,8 @@ internal sealed partial class Binder
         state.Step();
         switch (expression)
         {
+            case BoundRequiredConstant required:
+                return EvaluateConstExpression(required.Operand, slots, functions, depth, state);
             case BoundConstant constant:
                 return constant;
             case BoundRead read when slots[read.Variable] is BoundConstant value:

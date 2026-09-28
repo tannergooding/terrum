@@ -62,6 +62,50 @@ public sealed class ConstEvalModuleTests
         Assert.Equal(nativeSnapshot, SHA256.HashData(nativeConsumer));
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task ExpressionRequirementServicesUnchangedConsumersAsync(NativeRuntimePolicy policy)
+    {
+        const string Source = """
+            [ConstEval] int32 Offset(int32 input) { return input + 1; }
+            public int32 Compute(int32 input) {
+                return Offset(input) + const Offset(40);
+            }
+            """;
+        const string Consumer = "int32 Main() { return Compute(0); }";
+        var original = CompileLibrary(Source, policy);
+        var producer = ModuleCompiler.CreateProducer(original, ["Compute"]);
+        var consumer = ModuleCompiler.CreateConsumer(CompileConsumer(Consumer,
+            ModuleCompiler.CreateReference(producer), policy), producer);
+        var snapshot = SHA256.HashData(consumer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+
+        var revised = CompileLibrary(Source.Replace("input + 1", "input + 2", StringComparison.Ordinal), policy);
+        var replacement = ModuleCompiler.CreateProducer(revised, ["Compute"]);
+        Assert.Equal(44, NativeJit.Execute(ModuleCompiler.Link(consumer, replacement), policy));
+        Assert.Equal(snapshot, SHA256.HashData(consumer));
+
+        var nativeProducer = NativeModuleCompiler.CreateProducer(original, ["Compute"], "NodeB", policy);
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(CompileConsumer(Consumer,
+            NativeModuleCompiler.CreateGraphReference([nativeProducer]), policy), [nativeProducer], policy);
+        var nativeSnapshot = SHA256.HashData(nativeConsumer);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(revised, ["Compute"], "NodeB", policy);
+        NativeModuleCompiler.ValidateGraph(nativeConsumer, [nativeReplacement]);
+        Assert.Equal(44, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeReplacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        var framework = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = framework.Parent?.Name
+            ?? throw new InvalidOperationException("Missing test configuration directory.");
+        var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
+            configuration, framework.Name, "terrumc.exe");
+        Assert.Equal(44, await NativeModuleCompiler.RunGraphJitAsync(nativeConsumer, [nativeReplacement],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.Equal(nativeSnapshot, SHA256.HashData(nativeConsumer));
+    }
+
     private static BoundProgram CompileLibrary(string source, NativeRuntimePolicy policy)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);

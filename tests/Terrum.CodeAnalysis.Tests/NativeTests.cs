@@ -98,7 +98,8 @@ public sealed class NativeTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var source = new StringBuilder(await File.ReadAllTextAsync(Path.Combine(root, "self-host", "IntegerFacts.terrum")).ConfigureAwait(true));
-        _ = source.Append("int32 Main() {");
+        _ = source.Append("int32 Main() { const bool staticOverflow = !CanAddInt32(2147483647, 1); "
+            + "if (!staticOverflow || CanAddInt32(2147483647, 1)) { return 2; }");
         int[] values = [int.MinValue, int.MinValue + 1, -65536, -1, 0, 1, 65536, int.MaxValue - 1, int.MaxValue];
 
         foreach (var left in values)

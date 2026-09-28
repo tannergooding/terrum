@@ -4,7 +4,7 @@ These files are parallel design candidates, not a bootstrapped compiler.
 They are not linked into the C# implementation. The native profile executes
 the range, character, integer and nested token components and a bounded token scanner.
 The host test runner remains C#, even when it compiles and executes a candidate.
-The host parser's current language version is syntax-25. Syntax-18's qualified
+The host parser's current language version is syntax-26. Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle
 specializations described below. These reuse existing, feature-selected
 semantic contracts without changing the scanner record/schema, native profile
@@ -26,6 +26,11 @@ Syntax-24 supports one-field transparent scalar wrappers with semantic v35
 layout identity. Syntax-25 supports bounded internal scalar `[ConstEval]`
 functions and required `const T name = expression;` locals without adding
 public constant-evaluation metadata or a native ABI.
+Syntax-26 adds scalar `const expression` requirements in locals, return values,
+call arguments and conditions using the same bounded evaluator. The compiler
+replaces each requirement at its original expression position; runtime calls
+outside the required expression remain executable. No public module contract
+or native ABI changes.
 
 Host fixtures retain syntax round trips and add native execution of
 `SourceRange`, `CharacterFacts`, `RangeTests`, `Token` and `TokenTests` with entry wrappers.
@@ -72,7 +77,7 @@ remain hosted in C#.
 | Candidate | Purpose | Gates before execution |
 |---|---|---|
 | [CopyAlgorithms](CopyAlgorithms.terrum) | NoThrow selection and conditional output of complete Copy values without operator witnesses | Composed AOT/JIT calls select scalars, nested tokens and ranges under both policies; invalid indices publish no value; no primitive operator conformance, borrowed views or generic runtime dispatch |
-| [IntegerFacts](IntegerFacts.terrum) | Overflow-free signed-addition range predicate | Supported by the native profile; tested with native entry wrappers, not a full compiler bootstrap |
+| [IntegerFacts](IntegerFacts.terrum) | Overflow-free signed-addition range predicate | Its internal `[ConstEval]` helper is required for a scalar local and remains callable at runtime; tested with native entry wrappers, not a full compiler bootstrap |
 | [WideIntegerFacts](WideIntegerFacts.terrum) | Checked signed addition and bounded decimal accumulation through the full unsigned 64-bit range | Executed as a separately compiled module with conditional wide outputs |
 | [WideIntegerTests](WideIntegerTests.terrum) | Signed extrema, invalid digits, decimal overflow and repeated output publication | Executed through AOT and JIT with a shared entry wrapper |
 | [IntegerFormatting](IntegerFormatting.terrum) | Invariant signed/unsigned decimal digits in reusable owned storage | AOT/JIT boundary and repeated-use fixtures; native heap checks cover same-allocation transfer and failure cleanup |

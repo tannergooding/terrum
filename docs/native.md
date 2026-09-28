@@ -52,7 +52,10 @@ arithmetic, short-circuiting and branch/loop behavior match the target; failures
 and the 64-call/4,096-step limits diagnose at compile time rather than falling
 back to native execution. No public contract, semantic wire field or native
 ABI changes; imported functions cannot satisfy required constant calls.
-The current parser version is syntax-25. Syntax-18 qualified generic-call type
+Syntax-26 adds scalar `const expression` requirements in nested executable
+expressions, with the same limits and deferred constant substitution; no new
+native or semantic wire representation is emitted. The current parser version
+is syntax-26. Syntax-18 qualified generic-call type
 arguments such as `write C` and `write C?` enable bounded managed-handle
 substitutions in compilation-local `Copy` templates. Syntax-19 adds the
 bounded nominal comparison protocols; neither changes the native profile,

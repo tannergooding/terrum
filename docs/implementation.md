@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-25, semantic v35 transparent wrappers, native-10 through native-20
+## Current boundary: syntax-26, semantic v35 transparent wrappers, native-10 through native-20
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -59,9 +59,24 @@ function bodies are bound, so forward calls work. The marker is not exported
 or persisted as a promise in imported signatures; private functions and
 their folded local values use existing semantic/native module representations
 without a wire-version change. Required expressions cannot call imported
-functions. Expression-level `const F()`, public/generic `[ConstEval]`,
-non-scalar values, registered literal parsers and ambient I/O remain
-unsupported.
+functions. Public/generic `[ConstEval]`, non-scalar values, registered
+literal parsers and ambient I/O remain unsupported.
+
+Syntax-26 also supports `const expression` as a scalar subexpression
+requirement in locals, returns, call arguments and conditions. It uses the
+same evaluator, limits and failure diagnostics as required declarations,
+but does not make the enclosing local or expression constant. `const F() + x`
+requires only `F()`; `const (F() + x)` requires the entire parenthesized
+expression. The value replaces the requirement at its original expression
+position after all bodies are bound; surrounding runtime calls and
+short-circuit behavior remain unchanged. The contextual `const(...)` spelling
+without intervening trivia remains an ordinary named call, while
+`const (expression)` is the parenthesized requirement. When `const` names
+a local, `const + 1` and `const - 1` remain ordinary binary operations;
+parenthesize required unary signs as `const (+1)` or `const (-1)`.
+A required expression cannot read runtime locals, use non-scalar results,
+or invoke ordinary functions, even in a short-circuited branch. No
+semantic/native version or public contract changes.
 
 Semantic v24 validates source-class/`ManagedNode` readonly-versus-writable
 access and mutable-class receivers. Semantic v25 adds a distinct persisted,

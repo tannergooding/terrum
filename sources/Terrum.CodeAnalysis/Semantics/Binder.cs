@@ -1766,6 +1766,18 @@ internal sealed partial class Binder
                 expression = BindExpression((SyntaxNode)node.Children[1], expected);
                 break;
 
+            case SyntaxKind.ConstExpression:
+            {
+                var operand = BindExpression((SyntaxNode)node.Children[1], expected);
+                if (!ConstEvalScalar(operand.Type))
+                {
+                    Report("TRM3024", "A required constant expression must have a scalar type.", node.Span);
+                }
+                _hasRequiredExpression = true;
+                expression = new BoundRequiredConstant(operand, node.Span);
+                break;
+            }
+
             case SyntaxKind.VoidExpression:
                 expression = new BoundConstant(0, PrimitiveType.Void, node.Span);
                 break;
@@ -2653,6 +2665,8 @@ internal sealed partial class Binder
         switch (node.Kind)
         {
             case SyntaxKind.ParenthesizedExpression:
+                return KnownType((SyntaxNode)node.Children[1]);
+            case SyntaxKind.ConstExpression:
                 return KnownType((SyntaxNode)node.Children[1]);
             case SyntaxKind.VoidExpression:
                 return PrimitiveType.Void;

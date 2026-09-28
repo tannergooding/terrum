@@ -693,7 +693,7 @@ internal sealed class Parser
             default:
             {
                 if (Current.Kind == TokenKind.Identifier && Current.Text == "const"
-                    && Peek(1).Kind is not TokenKind.OpenParen)
+                    && LooksLikeLocal(1))
                 {
                     var keyword = Take();
                     node = Node(SyntaxKind.ConstDeclaration, [keyword, ParseLocal()]);
@@ -757,9 +757,9 @@ internal sealed class Parser
         return Node(SyntaxKind.VariableDeclaration, children);
     }
 
-    private bool LooksLikeLocal()
+    private bool LooksLikeLocal(int initialOffset = 0)
     {
-        var offset = Current.Kind == TokenKind.WriteKeyword ? 1 : 0;
+        var offset = initialOffset + (Peek(initialOffset).Kind == TokenKind.WriteKeyword ? 1 : 0);
         if (Peek(offset).Kind != TokenKind.Identifier)
         {
             return false;
@@ -810,7 +810,16 @@ internal sealed class Parser
         SyntaxNode left;
         var unaryPrecedence = UnaryPrecedence(Current.Kind);
 
-        if (unaryPrecedence != 0 && unaryPrecedence >= parentPrecedence)
+        if (Current.Kind == TokenKind.Identifier && Current.Text == "const"
+            && 11 >= parentPrecedence && (Peek(1).Kind is TokenKind.Identifier
+                or TokenKind.NumericLiteral or TokenKind.StringLiteral
+                or TokenKind.TrueKeyword or TokenKind.FalseKeyword or TokenKind.NullKeyword
+                or TokenKind.NewKeyword or TokenKind.MoveKeyword or TokenKind.Bang or TokenKind.Tilde
+                || (Peek(1).Kind == TokenKind.OpenParen && Peek(1).Span.Start > Current.Span.End)))
+        {
+            left = Node(SyntaxKind.ConstExpression, [Take(), ParseExpression(11)]);
+        }
+        else if (unaryPrecedence != 0 && unaryPrecedence >= parentPrecedence)
         {
             left = Node(SyntaxKind.UnaryExpression, [Take(), ParseExpression(unaryPrecedence)]);
         }
