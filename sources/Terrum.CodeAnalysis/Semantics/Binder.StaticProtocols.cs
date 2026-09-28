@@ -515,7 +515,7 @@ internal sealed partial class Binder
                 {
                     var resultName = NameText(parts[^1]);
                     var resultIndex = Array.IndexOf(typeNames, resultName);
-                    var fixedResult = resultIndex >= 0 ? (PrimitiveType?)null : GenericScalarType(resultName);
+                    var fixedResult = resultIndex >= 0 ? null : GenericScalarType(resultName);
                     if (resultIndex < 0 && fixedResult is null)
                     {
                         fixedResult = BindType(parts[^1], allowVoid: false);

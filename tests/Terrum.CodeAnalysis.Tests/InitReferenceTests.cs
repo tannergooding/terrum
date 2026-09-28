@@ -110,6 +110,7 @@ public sealed class InitReferenceTests
     [InlineData("bool Fill(out int32 value) { value = 42; return true; } int32 Main() { require Fill(init var item); return item; }", "TRM3011")]
     public void InitModeRequiresBooleanCompletionAndMatchingCall(string source, string code)
     {
+        ArgumentNullException.ThrowIfNull(source);
         var compilation = Compilation.Create(SyntaxTree.Parse(source.Contains("int32 Main()", StringComparison.Ordinal)
             ? source : source + "int32 Main() { return 42; }"));
         Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
