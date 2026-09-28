@@ -71,6 +71,61 @@ public sealed class TrRmSourceMapTableReaderTests
             Create(section, recordCount: 2, twoMethods: true));
     }
 
+    [Fact]
+    public void WriterMatchesWorkedBytesAndSharesSourceFileSlots()
+    {
+        var first = new TrRmSourceMapEntry(1, 1, 0, 1, 0, 2);
+        Assert.Equal(Map(), Encode([first]));
+        var second = first with { Ordinal = 1, StartUtf16 = 2, LengthUtf16 = 3 };
+        var section = Encode([first, second]);
+        Assert.Equal(84, section.Length);
+        Assert.Equal((uint)3, BinaryPrimitives.ReadUInt32LittleEndian(section));
+        Assert.Equal((uint)3, BinaryPrimitives.ReadUInt32LittleEndian(section.AsSpan(56)));
+        Assert.Equal((uint)3, BinaryPrimitives.ReadUInt32LittleEndian(section.AsSpan(72)));
+        Create(section, recordCount: 2);
+    }
+
+    [Fact]
+    public void WriterRejectsUnboundDuplicateAndOverflowedMappings()
+    {
+        var entry = new TrRmSourceMapEntry(1, 1, 0, 1, 0, 2);
+        Assert.Throws<ArgumentOutOfRangeException>(() => Encode([]));
+        Assert.Throws<InvalidDataException>(() => Encode([entry, entry]));
+        Assert.Throws<InvalidDataException>(() => Encode([entry with { BodyRow = 0 }]));
+        Assert.Throws<InvalidDataException>(() => Encode([entry with { BodyRow = 2 }]));
+        Assert.Throws<InvalidDataException>(() => Encode([entry with { Block = 0 }]));
+        Assert.Throws<InvalidDataException>(() => Encode([entry with { Ordinal = -1 }]));
+        Assert.Throws<InvalidDataException>(() => Encode([entry with { SourceFileRow = 0 }]));
+        Assert.Throws<InvalidDataException>(() => Encode([entry with { SourceFileRow = 2 }]));
+        Assert.Throws<InvalidDataException>(() =>
+            Encode([entry with { StartUtf16 = uint.MaxValue }]));
+        Assert.Throws<InvalidDataException>(() => Encode([entry], crossModule: true));
+    }
+
+    private static byte[] Encode(TrRmSourceMapEntry[] entries, bool crossModule = false)
+    {
+        var names = new TrRmStringTableReader(TrRmStringTableWriter.EncodeNames(
+            [("Module", 0), ("Run", 0), ("src/file", 0), ("Other", 0)]), 4);
+        var modules = new TrRmModuleTableReader(Modules(crossModule),
+            crossModule ? 2 : 1, names, 0, 0, 1, 1);
+        var types = new TrRmTypeDefTableReader([], 0, names, modules, 0, 0, 0, 0);
+        byte[] specRow = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
+        var typeSpecs = new TrRmTypeSpecTableReader(specRow, 1, 0, 0, 0, 0);
+        var signature = new byte[24];
+        Write(signature, 0, 1);
+        var signatures = new TrRmMethodSigTableReader(signature, 1, typeSpecs, 0, 0);
+        var method = new byte[28];
+        Write(method, 4, 2);
+        Write(method, 8, 1);
+        Write(method, 24, 1);
+        var methods = new TrRmMethodDefTableReader(method, 1,
+            names, modules, types, signatures, 0, 1);
+        var source = new byte[8];
+        Write(source, 0, 3);
+        var files = new TrRmSourceFileTableReader(source, 1, names, modules);
+        return TrRmSourceMapTableWriter.Encode(entries, methods, files);
+    }
+
     private static void Create(byte[] section, int recordCount = 1,
         bool crossModule = false, bool twoMethods = false)
     {
