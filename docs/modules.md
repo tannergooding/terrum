@@ -1,13 +1,24 @@
 # Bounded semantic and native modules
 
-The current `.trm` repository artifact uses the `TRRM` identifier and records
-the selected native runtime policy with verified, typed, source-mapped
-structured IR, not source text or a native DLL. The highest implemented
-semantic revision is 32; this document's revision-by-revision account records
-repository behavior, not an externally released binary compatibility matrix.
-The reader's historical revisions and the writer's feature-dependent revision
-selection are temporary pre-v1 implementation support scheduled for
-consolidation before v1. They do not create a production compatibility burden.
+## Definitions and scope
+
+A **module artifact** is a `.trm` file with the `TRRM` identifier. A **producer**
+stores selected function bodies and exported contracts; a **consumer** stores
+its own bodies and the imported declarations it was compiled against. A
+**reference** validates a producer and exposes its exported signatures and
+layouts during consumer compilation. A **runtime policy** is the persisted
+`fail-fast` or `checked-exceptions` choice. A **semantic artifact revision**
+versions persisted IR contracts; it is distinct from a native-profile label.
+
+The artifact contains verified, typed, source-mapped structured IR, not source
+text or a native DLL. The highest implemented semantic revision is 35, selected
+by the artifact's required features; not every artifact uses revision 35.
+Revision-specific reader behavior and feature-dependent writer selection
+describe repository support, not an externally released binary compatibility
+matrix. See [implementation](implementation.md) for the compiler support
+boundary and [roadmap](roadmap.md) for scheduled format work.
+
+## Current artifact and loading rules
 
 `CreateProducer` stores selected function bodies
 and exported contracts. `CreateConsumer` stores its own function bodies and the
@@ -45,16 +56,18 @@ path does not yet bind precompiled native imports.
 Calls use symbolic function identities rather than binder-local indexes.
 Types use declaration names, visibility and ordered field layouts as their contract;
 public import keys include declaring-type and signature-type visibility, while
-the complete ordered layout is checked separately before execution.
-The target transparent-wrapper contract is nominal in Terrum but carrier-
-equivalent in ABI only after argument/return classification and validity,
-ownership, cleanup and layout requirements are checked; equal size/layout is
-not enough. The current module format has no such wrapper metadata and does not
-relax its exact layout checks.
-The target source-binding rule is stricter than simply storing a name: source
-compilation selects one declaration and its closed generic arguments, and
-records that binding. Linking or JIT loading validates and implements the
-selected target; it never reruns source overload resolution against a
+the complete ordered layout is checked separately before execution. The
+current module format does not relax its exact layout checks. The bounded
+syntax-24 transparent `Copy` wrapper is a specific v35 contract: one-field
+wrappers over `bool`, `char16`, `int32`, `uint32`, `int64`, or `uint64` retain
+nominal identity and field visibility/mutation rules, while storage and direct
+argument/result classification match the carrier. Semantic artifact v35
+persists the transparent-layout intent for private and exported structures,
+and compatible replacements must preserve that intent. This does not add
+implicit conversions or relax exact checks for other module layouts.
+Current source binding records the selected declaration and its closed generic
+arguments, not just a name. Linking or JIT loading validates and implements
+that selected target; it never reruns source overload resolution against a
 replacement's candidate set. Runtime virtual/interface dispatch and
 devirtualization are separate mechanisms. The current bounded module format
 does not yet provide general overload sets, generic-witness metadata or
@@ -68,14 +81,18 @@ declaring type name.
 Only layouts referenced by retained consumer definitions and imported
 declarations are stored in the consumer. Imported layouts remain exact,
 including private fields of a public static member's owner; this is not resilient
-public layout evolution. The target opaque/evolvable-by-default direction does
-not retroactively make these current module contracts resilient. Producer-only layouts and helpers have module-local
+public layout evolution. Producer-only layouts and helpers have module-local
 identities at linking and may change independently. Private names can coincide
 with consumer-local names without binding to the wrong implementation.
 Compatible replacements may also add exports not requested by the consumer.
 Nested writes persist their root slot and field-index path, not an unchecked
 byte offset or pointer. The linker remaps value identities and verifies every
 path against the selected layouts before native address calculation.
+
+## Proposed compatibility contracts
+
+The proposed opaque/evolvable-by-default direction does not retroactively make
+current module layouts resilient.
 
 General compatibility forwarding remains scheduled work. A forwarder must
 preserve the old identity and complete effects, access, lifetime and ABI
@@ -92,6 +109,9 @@ in module compatibility: stronger preconditions and weaker postconditions break
 callers. Body-local static proofs are not exported promises. These condition
 contracts and their metadata are not supported by the current module format;
 the existing replacement checks below remain limited to recorded contracts.
+
+## Current compatibility checks
+
 Existing module tests exercise those bounded checks: consumers retain their
 recorded promises, weakened `NoThrow` contracts and changed signatures, output
 modes, layouts or access contracts are rejected, and provider catalogs reject

@@ -1,5 +1,29 @@
 # Windows x64 native profile
 
+## Definitions and scope
+
+Here, a **native profile** is a bounded set of source, verification, ABI, and
+runtime capabilities accepted for native PE32+ emission. A **semantic
+revision** identifies persisted typed-IR contracts; it is distinct from a
+native-profile label. A **runtime policy** selects the failure and recovery
+behavior emitted for a program (`fail-fast` or `checked-exceptions`). A
+**native image** is the emitted Windows x64 executable or DLL, not the
+compiler's managed host process.
+
+This document specifies implemented native-profile behavior and its current
+boundaries. The broader executable implementation status is in
+[implementation](implementation.md); scheduled work is in [roadmap](roadmap.md).
+The profile is deliberately narrower than the syntax grammar and proposed
+libraries. It does not imply general ownership/lifetime checking, general
+semantic IL, general managed graphs, or standard-library execution.
+
+## Implemented profiles and versioned contracts
+
+The version identifiers below state current support and persisted compatibility
+requirements, not a release chronology or external compatibility promise.
+Compiler evolution is summarized in [implementation](implementation.md);
+scheduled changes are in [roadmap](roadmap.md).
+
 `native-10` (explicit fail-fast), `native-11` (explicit checked exceptions),
 `native-12` (compact unique locals/returns), `native-13` (owned
 by-value arguments and conditional outputs), `native-14` (composite unique

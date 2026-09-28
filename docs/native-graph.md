@@ -1,5 +1,20 @@
 # Bounded native dependency graphs
 
+## Definitions and scope
+
+A **root** is the persisted consumer EXE and its direct imports. An
+**intermediate** is a `.trng` DLL package that both provides exports and may
+import other providers; a **leaf** is a `.trmn` producer package with no
+provider dependency. A **selected closure** is the complete set of packages
+needed to satisfy the root's transitive imports. A **candidate catalog** is an
+explicit local list from which the resolver must select one unique compatible
+closure.
+
+This document specifies implemented bounded, acyclic native graphs and their
+CLI behavior. It does not define a general package manager or native-code
+sandbox. See [implementation](implementation.md) for the broader compiler
+support boundary and [roadmap](roadmap.md) for future format work.
+
 A `.trng` library package stores one verified DLL, its symbolic semantic
 library, public exports and exact direct DLL-import ownership. A `.trng` root
 stores one already emitted consumer EXE and its direct imports. Leaf `.trmn`
@@ -11,17 +26,19 @@ policies, malformed images and import maps before the root process starts.
 Implementation hashes are not pinned: a compatible leaf implementation can
 replace an independently compiled package without changing the intermediate
 DLL or root EXE.
-Semantic v32 permits managed roots and intermediate producers in persisted
-acyclic native DLL graphs. Participants communicate only through the
-established scalar and handle-free public `Copy` value contracts. Each
-persisted image has its own heap and root chain; an imported call preserves
-the caller's roots, and `ManagedHeap.Collect()` remains local to the image
-where it runs. Semantic v32 also supports private managed consumers through
-ordinary single-provider semantic linking and native single-provider or
-module-set entry points. Semantic linking places producer and consumer code in
-one image/heap domain and remaps private class identities; the persisted native
-graph continues to keep each image's heap separate. Managed handles never
-cross image boundaries, and graph cycles remain unsupported.
+For managed roots and intermediate producers in persisted acyclic native DLL
+graphs, semantic v32 is the minimum participant revision. This is a feature
+requirement, not the highest implemented semantic revision. Participants
+communicate only through the established scalar and handle-free public `Copy`
+value contracts. Each persisted image has its own heap and root chain; an
+imported call preserves the caller's roots, and `ManagedHeap.Collect()` remains
+local to the image where it runs. Semantic v32 also supports private managed
+consumers through ordinary single-provider semantic linking and native
+single-provider or module-set entry points. Semantic linking places producer
+and consumer code in one image/heap domain and remaps private class identities;
+the persisted native graph continues to keep each image's heap separate.
+Managed handles never cross image boundaries, and graph cycles remain
+unsupported.
 
 `resolve-native-graph` accepts an explicitly listed local candidate catalog
 rather than an already selected closure. It validates every package, ignores

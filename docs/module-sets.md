@@ -1,5 +1,18 @@
 # Native module sets
 
+## Definitions and scope
+
+A **module set** is one persisted consumer EXE plus two to sixteen selected
+provider DLL packages. A **provider** supplies public exports; the consumer
+imports only the selected exports. A **retained declaration** preserves a
+contract needed for validation or type/cleanup checking, while an **actual
+machine import** is an emitted call represented in the PE import table.
+Declaration retention does not by itself create a machine import.
+
+A module set is a flat, leaf-only native deployment contract. The broader
+compiler support boundary is in [implementation](implementation.md); future
+formats and servicing work are tracked in [roadmap](roadmap.md).
+
 A native module set persists **one** Windows x64 consumer EXE and its checked
 semantic contract. Two to sixteen independently compiled leaf DLL packages
 provide distinct, unambiguous public exports. Identity selects the DLL, not

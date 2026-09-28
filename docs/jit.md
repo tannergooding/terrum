@@ -1,5 +1,17 @@
 # Windows x64 JIT proof
 
+## Definitions and scope
+
+Here, **JIT** means process-start lowering of a verified bound program to
+native code in memory. **AOT** means emission of a persisted PE image. A **JIT
+worker** is the supervised CLI process that performs source or persisted-module
+JIT execution; it is not an in-process code-servicing API.
+
+This document states the implemented Windows x64 JIT execution, memory, unwind,
+and runtime-policy contract. It is not a general-purpose runtime or sandbox.
+See [implementation](implementation.md) for the broader compiler support
+boundary and [roadmap](roadmap.md) for future runtime work.
+
 The JIT consumes the same verified bound program and `NativeEmitter.EmitCode`
 result as the PE writer. It is a second artifact consumer, not a second
 instruction encoder, source interpreter or CIL/LLVM backend.
