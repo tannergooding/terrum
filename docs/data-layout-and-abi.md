@@ -11,9 +11,9 @@
 
 | Status | Covered here |
 |---|---|
-| Accepted design | Primitive and eligible-wrapper access guarantees; no aggregate atomicity inferred from size; opaque layout by default; no foreign-interop promise inferred from an ordinary struct's current shape; explicit checked, target-profile representation/call contracts; separation of representation, calling convention, atomic-access eligibility, validity, ownership and sharing; preservation of published boundaries |
+| Accepted design | Primitive and eligible-wrapper access guarantees; no aggregate atomicity inferred from size; opaque `Auto` layout with private fields by default; declaration-order `Sequential`, offset-zero `Union`, and one-field carrier `Transparent`; fixed target-specific interop under an explicit `Blittable` commitment, not layout kind alone; separation of layout, call classification, atomicity, validity, ownership and sharing; preservation of published boundaries |
 | Implemented bounded profile | The existing Windows x64 compact-value and module ABIs. Their exact current contracts remain authoritative; they are not superseded by an unspecified future profile |
-| Needs policy or declaration review | Wrapper eligibility/declaration details, any checked overlapping-union subset, externally promised encodings not determined by a selected profile, and a future public managed boundary; see [remaining decisions](#remaining-decisions-requiring-review) |
+| Needs policy or declaration review | Whether raw `Union` layout additionally requires the fixed `Blittable` commitment; see [remaining decisions](#remaining-decisions-requiring-review) |
 | Specification and implementation work | Recording chosen target rules, checking layouts and metadata, validating compatible replacement, and testing lowering against accepted guarantees; see [profile work](#profile-specification-and-implementation-work) |
 
 Unimplemented does not mean unapproved. Completing a table from an already
@@ -22,13 +22,14 @@ observable representation or independently replaceable public boundary does.
 The cross-document [pending-decision index](language-library-review.md)
 tracks those review items without making the accepted core provisional.
 
-Explicit layout or carrier opt-ins constrain compatible replacement under the
-same contract: adding a field to a frozen layout or changing a promised
-carrier is breaking unless a separately versioned contract permits it. Such
-promises are target/profile-specific, not universal byte encodings. Any future
-checked source enforcement needs an explicit compatibility migration; it does
-not claim that the current compiler rejects ordinary structs or retroactively
-revoke existing source/artifact contracts.
+An explicit `Blittable` commitment freezes its per-profile size, alignment and
+field offsets. `Transparent` instead promises exactly one field with the
+carrier representation and carrier-equivalent argument/result classification;
+changes that violate this contract are breaking, but it does not freeze
+arbitrary layout. These promises are not universal byte encodings. Any future checked source
+enforcement needs an explicit compatibility migration; it does not claim that
+the current compiler rejects ordinary structs or retroactively revoke existing
+source/artifact contracts.
 
 ## Contract layers
 
@@ -77,17 +78,15 @@ memory contract, including any permitted elimination or combination of accesses.
 
 A type explicitly promised as a trivial wrapper carries one primitive value
 without changing the storage/access properties named by that promise. Its
-nominal type and validation requirements remain meaningful. Exact eligibility
-and declaration syntax need specification; neither a one-field declaration
-nor equal size alone establishes any unstated ABI equivalence.
+nominal type and validation requirements remain meaningful. The accepted
+eligibility policies below do not settle exact source spelling, target-profile
+checks or metadata. Neither a one-field declaration nor equal size alone
+establishes any unstated ABI equivalence.
 
 An ordinary declaration such as `struct CounterValue { int32 value; }` makes
 no foreign-interoperability promise merely because it currently has one field
 or happens to match a primitive's size. A wrapper must explicitly opt into a
-checked contract before external code may rely on its representation. A frozen
-or Transparent promise constrains future compatible replacement under that
-same contract; changing the field set or carrier is not silently compatible.
-Each promise is scoped to its target profile.
+checked contract before external code may rely on its representation.
 For example, promising that `CounterValue` is a single `int32` carrier for one
 profile is a distinct contract from merely declaring its current field; its
 consumers rely on the promise, not an observation of today's source shape.
@@ -98,20 +97,68 @@ For contrast:
 struct S { int8 x; int8 y; }
 ```
 
-This can occupy two bytes while exposing two separate fields. A whole-value
+This can occupy two bytes while containing two separate fields. A whole-value
 copy may use separate field accesses; it is not promised to be an atomic
 two-byte snapshot. A backend selecting one wider instruction for a particular
 copy does not strengthen the portable contract.
 
-The accepted Transparent contract deliberately combines a frozen carrier
-representation with carrier-equivalent argument/result classification for the
-selected target profile. Its checked eligibility must preserve size/alignment,
-validity, ownership, cleanup and any niche rules. This named combined promise
-does not imply that every layout opt-in has the same effect: Sequential or
-Union layout alone does not promise procedure-call equivalence. Atomic access,
-sharing, arbitrary-bit validity and ordinary source conversion remain separate
-questions; no promise permits bypassing a wrapper's invariant or establishes a
-universal cross-target encoding.
+The accepted Transparent contract is exactly one field with the carrier's
+representation and carrier-equivalent argument/result classification under the
+selected target profile. It inherits the carrier ABI and does not accept custom
+packing or aggregate alignment. A layout kind alone does not freeze the type.
+Atomic access, `Copy`, sharing, arbitrary bit-pattern validity and ordinary
+source conversion remain separate; this contract does not establish a
+universal cross-target encoding or bypass a wrapper invariant.
+
+### Fixed directly interoperable representations
+
+**Blittable** denotes one bundled, fixed,
+directly-interoperable representation promise per target profile. A conceptual
+`Blittable: true` commitment fixes size, alignment and field offsets and
+requires transitively compatible fields; it is not selected compiler syntax
+or a universal byte encoding. An ordinary struct does not acquire this promise
+from its current shape. Ordinary `ref<T>` is excluded; `ptr<T>` may be
+eligible when its target representation is covered and its ordinary pointer
+validity, lifetime and access-safety rules are met.
+
+Blittability/frozen representation does not initialize padding bytes, validate
+arbitrary bit patterns, imply `Copy` or sharing, grant atomic access, or
+authorize every raw operation.
+`Auto` is the default: fields are private, external access goes through
+properties or methods, and the declaration has no `Blittable`, packing or
+aggregate-alignment commitment. Unfrozen fields remain private; a frozen
+representation may expose fields without changing ordinary readonly or `mut`
+access rules. Public field access requires the fixed `Blittable` commitment,
+regardless of layout kind; neither `Sequential` nor `Transparent` alone makes
+an exposed field a `Blittable` field. `Sequential` lays fields out in
+declaration order; `Union` places every field at offset zero. Neither permits
+arbitrary user-selected field offsets. Those kinds do not themselves freeze
+the layout or carrier across versions. Layout-dependent values without a fixed commitment
+cannot cross an independently replaceable dynamic boundary; they may be used
+where producer and consumer remain layout-coupled through compilation,
+rebuild, or invalidation. JIT versus AOT labels alone do not determine that
+coupling.
+
+### Packing and aggregate alignment
+
+Both a power-of-two member-packing limit and a separate power-of-two
+aggregate-alignment control are accepted; they may be combined, though most
+declarations need only one. Packing caps member alignment and the derived
+natural aggregate alignment; aggregate alignment may over-align the result,
+with tail padding preserving aggregate alignment and array stride. Exact source
+argument spelling and target limits remain specification work. For a struct
+with `int8` followed by `int32`, assuming the profile naturally aligns `int32`
+to four bytes:
+
+| Controls | Field offsets (`int8`, `int32`) | Size / array stride | Aggregate alignment |
+|---|---|---|---|
+| Packing limit 1 | `0, 1` | `5` | `1` |
+| Aggregate alignment 32 only | `0, 4` | `32` | `32` |
+| Packing limit 1 plus aggregate alignment 32 | `0, 1` | `32` | `32` |
+
+Transparent inherits its carrier ABI and does not permit custom packing or
+aggregate-alignment overrides. Safe access lowering for packed, under-aligned
+members remains to specify.
 
 ## What a target data-layout profile must record
 
@@ -130,13 +177,9 @@ universal cross-target encoding.
 The size/alignment/representation table is still to be completed; this document
 does not choose a default serialization format, boolean encoding, reference
 encoding, or SIMD ABI. Register classification is not inferred from storage
-size alone.
-
-Ordinary layout remains opaque in the accepted language direction. Explicit
-Sequential, Union and Transparent contracts constrain what may change.
-Sequential layout computes offsets and padding from declared order and
-alignment; it is not arbitrary user-selected offsets. Union support does not
-automatically make inactive-member access safe. See the
+size alone. Explicit raw `Union` layout permits overlapping storage, not safe
+typed access to inactive alternatives. Whether that layout must also carry the
+fixed `Blittable` commitment remains open. See the
 [accepted layout direction](language.md#types-and-operations).
 The currently implemented compact value/module layouts remain exact contracts,
 not an already implemented resilient-layout mechanism.
@@ -149,13 +192,26 @@ bit preservation, including signed zero and NaN encodings, rather than
 performing a floating-to-integer numeric conversion. Such helpers must not
 become unrestricted construction of references or invalid nominal values.
 
+Initializing every field does not initialize the aggregate's padding bytes.
+Raw object-representation blits and direct raw foreign transfer are unsafe
+operations; an explicit Blittable contract supplies a fixed target-profile
+representation, not blanket permission for unsafe access. A safe binary
+serializer must account for padding initialization and representation validity
+under its wire format rather than assume that every byte of a live value is
+initialized or has a portable representation. Field-wise encoding is one
+approach, not a requirement to exclude a correctly validated raw-copy implementation.
+
 Explicit unaligned operations are distinct from reinterpretation and from
 atomicity. `MemoryPrimitives.UnalignedRead`/`UnalignedWrite` may assemble or
 store an unaligned value through smaller accesses
-without promising an atomic snapshot. Overlapping typed views require unsafe
-code or a checked abstraction that accounts for aliasing, initialization,
-lifetime, validity and concurrency. Any safe subset of overlapping union
-access remains to be defined; matching fields are not sufficient by themselves.
+without promising an atomic snapshot. Reinterpreting overlapping storage through
+incompatible typed views requires unsafe code. A raw `Union` layout is the only
+accepted way to request overlapping field storage, and it does not provide
+active-member tracking or a safe subset of typed reinterpretation. A future
+tagged/sum type is a separate feature whose case and tag checks must preserve
+ordinary validity, ownership, roots and cleanup. Whether raw `Union` also
+requires `Blittable` remains a narrow policy choice; matching fields are not
+sufficient by themselves.
 
 The backend may implement a valid source operation with register bit moves or
 overlapping machine accesses when all observable source guarantees survive.
@@ -188,6 +244,17 @@ declaration contracts, not inspection of the current private representation.
 An opaque layout may evolve while preserving a promised capability; a frozen
 layout alone does not prove sharing safety.
 
+Published language-level signatures and their layout, access, ownership and
+effect contracts are compatibility commitments for independently replaceable
+consumers, whether or not they promise foreign interoperability. A public
+field exposes its representation and therefore requires `Blittable`; a public
+method does not need a foreign-layout annotation merely because it is public.
+Changing a published guarantee incompatibly breaks replacement, while
+contract-preserving implementation changes and compatible extensions or
+stronger guarantees are not automatically breaking. This language/module
+binary contract is distinct from both a foreign procedure-call ABI and a
+serialization or wire format.
+
 The current module paths illustrate the distinction:
 
 - A persisted semantic consumer selects a compatible producer and both are
@@ -198,36 +265,54 @@ The current module paths illustrate the distinction:
   replacement must preserve the physical crossing contract without rebuilding
   the consumer image.
 
-A future managed boundary also needs explicit root/barrier conventions,
-allocation and cleanup ownership, failure/unwind behavior and lifetime rules.
-A matching register convention alone is insufficient. Whether the boundary
-uses one stable managed ABI, versioned profiles or adapters remains open.
-No public managed-handle ABI is introduced by these contracts.
+Terrum does not promise a published, frozen managed-machine ABI. Managed
+precompiled code is version-sensitive implementation material, not a durable
+foreign interface. Before dynamically combining it with dependencies, the
+runtime must have enough metadata about dependency, compiler and runtime
+assumptions to validate that code or adapt, recompile, discard, or reject it
+before execution. The mechanism is engineering work: adapters, recompilation
+from an available form, and load/compile failure are possibilities, not
+selected requirements. There is no mandatory JIT fallback or requirement to
+retain IR; strict AOT may require rebuilding or fail. This strategy cannot
+weaken published language contracts or required static and safety guarantees.
+
+Foreign exports are distinct: an explicitly declared FFI boundary is fixed by
+its target profile, and implementation changes behind it must preserve the
+caller's contract rather than reinterpret it. The current implementation does
+not support public managed-handle exports; no new export surface or stable
+managed ABI is implied here.
 
 ## Remaining decisions requiring review
 
 | Decision | Accepted boundary that the decision must preserve |
 |---|---|
-| Exact wrapper eligibility and declarations | Define which forms may promise primitive-carrier atomicity or Transparent ABI and how each promise is exposed. These are independent, checked contracts; equal size, a single field or nominal identity alone does not establish every equivalence. Ordinary structs receive no inferred foreign-interoperability promise |
-| Any safe overlapping-union subset | Decide whether to admit a narrowly checked subset and its active-member, initialization, aliasing and lifetime conditions. Until then, matching fields do not establish safe access |
-| Additional externally promised representations | Choose an encoding or interchange rule only where the selected target/ABI does not already determine it. Storage layout is not a default serialization format, and no general reference encoding or SIMD ABI is selected here |
-| Future public managed boundary | Choose stable versus versioned profiles/adapters together with roots, barriers, allocation/cleanup ownership, failure and lifetime contracts. Private managed implementations do not imply a public managed-handle ABI |
+| `Blittable` requirement for raw `Union` | Raw overlapping storage is unsafe and has no active-member-tracked safe subset. Decide whether requesting `Union` layout also requires the fixed, directly interoperable `Blittable` commitment; this does not change the unsafe status of overlapping access |
 
 These decisions need not block unrelated compiler work. Keep unsupported forms
 unsupported until their contracts are selected; do not infer approval from a
-current backend representation.
+current backend representation. Define serialization, callback and other
+external protocol encodings for concrete boundaries as needed, reusing the
+selected profile where it determines representation; no global boolean,
+reference or SIMD wire format is selected.
 
 ## Profile specification and implementation work
 
 For an already selected target contract, record primitive size, alignment,
 representation, access guarantees and procedure-call classification separately.
-Complete wrapper tables after the eligibility decision, and implement the
-corresponding layout, validity and metadata checks. Describe cross-module
-compatibility independently of private lowering, preserving existing artifact
-contracts and feature-version checks. Introduce any future checked opt-in
-enforcement through an explicit compatibility migration; do not retroactively
-reject ordinary declarations or reinterpret retained compact-value/module
-contracts.
+Specify both packing and aggregate-alignment controls, their profile limits and
+the safe-access rules for any under-aligned members. Specify source spellings,
+target limits, metadata, transitive `Blittable` field eligibility, and boundary
+coupling/invalidation rules; then implement the corresponding layout, validity
+and metadata checks and conformance cases. Describe cross-module compatibility
+independently of private lowering, preserving existing artifact contracts and
+feature-version checks. Introduce any future checked opt-in enforcement through
+an explicit compatibility migration; do not retroactively reject ordinary
+declarations or reinterpret retained compact-value/module contracts. Specify
+external protocol encodings only for concrete boundaries that need them; do
+not turn language-level binary compatibility into a universal wire format.
+For managed precompiled-code composition, specify dependency/runtime metadata
+validation and before-execution handling; preserve the accepted boundary
+without mandating JIT/IR retention, an adapter, or fallback.
 
 Validate argument/result classification, padding and boundaries, non-tearing
 accesses, malformed metadata and compatible replacement across the supported

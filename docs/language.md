@@ -162,36 +162,66 @@ evolvable by default; an explicitly closed case-set promise makes adding a case
 a breaking change, ordinarily rejected before consumers bind to it. Union
 representations still require a valid active payload;
 an overlapping native layout does **not** establish a safe tagged union.
-The layout forms are `[Layout(Sequential)]`, `[Layout(Union)]` and
-`[Layout(Transparent)]`, each with a checked, target-profile layout contract.
-Sequential field offsets and padding are computed from declaration order, size
-and alignment; arbitrary user-specified field offsets are not supported.
-Structural `T | U` unions, especially overlapping alternatives, are undecided.
+The layout-kind spellings below are illustrative, not compiler syntax. `Auto`
+is the default: fields are private and external access uses properties or
+methods; it grants no `Blittable`, packing or aggregate-alignment commitment.
+`Sequential` places fields in declaration order; `Union` places every field at
+offset zero. Neither kind permits arbitrary user-selected field offsets or
+freezes its representation across versions.
+`Transparent` is exactly one field and explicitly bundles the carrier
+representation with carrier-equivalent argument/result classification for the
+target profile. It inherits the carrier ABI and rejects custom packing and
+aggregate alignment; this is an explicit contract, not layout-kind
+auto-freezing.
 
-Ordinary type layout is opaque, and an ordinary struct's current shape or size
-does not promise foreign-interoperability. An accepted transparent-wrapper
-direction keeps the wrapper nominal for Terrum source checking while permitting
-an explicit checked target-profile contract that combines the promised carrier
-representation with carrier-equivalent argument/return classification.
-Storage layout, call classification, atomic-access eligibility, validity,
-ownership and sharing remain distinct language dimensions; Transparent is the
-accepted named combination of representation and carrier-call classification,
-not a new requirement for separate annotations. Its eligibility must preserve
-the declared representation, validity, ownership, cleanup and niche rules.
-Equal size or field layout alone is insufficient. Sequential/Union layout
-opt-ins do not themselves promise foreign calling compatibility, and no layout
-promise grants arbitrary-bit validity. Opting into a frozen layout or carrier
-constrains compatible replacement under that same contract. These promises
-are profile-specific, not universal byte encodings.
-Transparency does not permit reinterpret casts or implicit source conversion.
-`[Layout(Transparent)]` is illustrative of the existing layout-attribute
-convention, not settled spelling or eligibility grammar; the current compiler
-has no general transparent-wrapper ABI feature. Struct and field attributes
-currently diagnose `TRM3001`; the existing `ValueLayout` is limited to
-naturally aligned 1–16-byte aggregates and does not implement transparent
-layout. Introducing future checked opt-in enforcement requires an explicit
-compatibility migration; it does not retroactively reject ordinary structs or
-change the current module format's exact layout contracts.
+`Blittable` is the accepted fixed, directly-interoperable representation
+contract per target profile, covering size, alignment, offsets and transitively
+compatible fields. `Blittable: true` is conceptual notation; exact attribute
+and schema spelling remain specification work.
+Ordinary `ref<T>` is excluded; `ptr<T>` may qualify subject to ordinary pointer
+safety. The exact source spelling, target limits and metadata remain
+specification work. Unfrozen fields remain private; a frozen representation
+may expose fields without changing ordinary readonly or `mut` access rules.
+`Blittable` does not imply `Copy`, atomicity, sharing, arbitrary-bit validity,
+or a universal cross-platform wire format. Public field access requires the
+fixed `Blittable` commitment, regardless of layout kind. Published
+language-level signatures and their layout, access, ownership and effect
+contracts are binary compatibility commitments even without foreign
+interoperability; a public method does not need a foreign-layout annotation
+merely because it is public. Layout-dependent values without a fixed
+commitment cannot cross an independently replaceable dynamic boundary; they
+can be used in layout-coupled compile/rebuild/invalidation scopes. JIT/AOT
+labels alone do not decide whether such a boundary is coupled.
+
+Both a power-of-two member-packing limit and a separate power-of-two
+aggregate-alignment control are accepted and may be combined. Packing caps
+member and derived aggregate alignment; the other control over-aligns the
+aggregate, with tail padding preserving array stride. Exact argument spelling
+and target limits remain to specify. Transparent inherits its carrier and
+rejects either control. Initializing fields does not initialize padding; raw
+object-byte blits and unmediated raw foreign transfer are unsafe. A safe
+serializer must account for the initialization and representation of every
+emitted byte, but may use verified or explicitly trusted raw copy. Details are
+in the [layout contract](data-layout-and-abi.md#fixed-directly-interoperable-representations).
+
+These are target design contracts, not current compiler support claims.
+Struct/field attributes currently diagnose `TRM3001`; the existing `ValueLayout`
+is limited to naturally aligned 1–16-byte aggregates and does not implement
+Transparent. Existing compact-value and module ABI contracts remain
+authoritative. Future enforcement requires an explicit compatibility
+migration, not retroactive rejection or reinterpretation of existing artifacts.
+Language/module compatibility is distinct from foreign ABI and serialization:
+external wire or callback encodings are specified for concrete protocols, not
+as one global boolean, reference or SIMD format.
+Declared overlapping field storage is available only through an explicit
+`[Layout(Union)]` declaration; it is unsafe to access overlapping alternatives,
+with no active-member tracking or special safe subset. This does not prohibit
+unsafe pointer-based aliasing/reinterpretation or compiler-private overlapping
+representations. Whether raw `Union` also
+requires `Blittable: true` remains open. A future checked tagged/sum type is a
+separate feature: case/tag checks must preserve ordinary validity, ownership,
+roots and cleanup, and do not grant raw reinterpretation. Its grammar and
+representation remain open.
 
 ### Interfaces, access and generic properties
 

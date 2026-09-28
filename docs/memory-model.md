@@ -559,6 +559,16 @@ The hazards include incompatible aliasing and mutation authority,
 initialization, lifetime, representation validity, and concurrent accesses of
 different widths. Atomicity of one access does not validate the others.
 
+Initializing every field does not initialize padding bytes, so a live complete
+value does not make every byte of its object representation readable. Raw
+object-byte blits and unmediated raw foreign transfers are unsafe operations.
+A `Blittable` target-profile promise fixes a representation but does not make
+padding initialized or grant arbitrary raw access. Safe binary serializers
+must account for the initialization and representation of every emitted byte
+under their wire format; they may use a verified or explicitly trusted raw copy
+when its contract covers those bytes, and need not encode field by field. These
+representation rules are independent of access atomicity and memory ordering.
+
 Prefer explicit value-level helpers for supported representation operations:
 for example, obtaining the backing `int32` bits of a `float32`, or constructing
 the corresponding floating value from valid bits. Such a helper transfers a
