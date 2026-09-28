@@ -1,0 +1,83 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System;
+using System.Buffers.Binary;
+using System.Linq;
+using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Native;
+using Xunit;
+
+namespace Terrum.CodeAnalysis.Tests;
+
+public sealed partial class NativeManagedClassModuleTests
+{
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, 16, 24)]
+    [InlineData(NativeRuntimePolicy.FailFast, 17, 36)]
+    [InlineData(NativeRuntimePolicy.FailFast, 32, 36)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 16, 24)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 17, 36)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 32, 36)]
+    public async Task WideClassTracksFinalFieldAndManagedEdgeAcrossModulesAsync(
+        NativeRuntimePolicy policy, int fieldCount, int version)
+    {
+        var producer = ModuleCompiler.CreateProducer(Compile(WideSource(fieldCount), policy), ["Read"]);
+        Assert.Equal(version, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)));
+        if (fieldCount > 16)
+        {
+            var oldRevision = producer.ToArray();
+            BinaryPrimitives.WriteInt32LittleEndian(oldRevision.AsSpan(4, 4), 35);
+            _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(oldRevision));
+        }
+
+        var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
+            policy, ModuleCompiler.CreateReference(producer), library: false), producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.Equal(fieldCount, Assert.Single(linked.Classes).Fields.Length);
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.Equal(42, await RunSemanticModuleJitAsync(consumer, producer, policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task WideClassGraphLibraryRetainsPrivateLayoutAsync(NativeRuntimePolicy policy)
+    {
+        var leaf = NativeModuleCompiler.CreateProducer(Compile(
+            "public int32 Leaf() { return 0; }", policy), ["Leaf"], "Leaf", policy);
+        var middle = NativeModuleCompiler.CreateGraphProducer(Compile(
+            WideSource(32, " + Leaf()"), policy, NativeModuleCompiler.CreateGraphReference([leaf])),
+            ["Read"], "Wide", [leaf], policy);
+        var consumer = NativeModuleCompiler.CreateGraphConsumer(Compile(
+            "int32 Main() { return Read(); }", policy,
+            NativeModuleCompiler.CreateGraphReference([middle]), library: false),
+            [middle], policy);
+        NativeModuleCompiler.ValidateGraph(consumer, [leaf, middle]);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(consumer, [middle, leaf],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+    }
+
+    private static string WideSource(int fieldCount, string resultSuffix = "")
+    {
+        var fields = string.Join(" ", Enumerable.Range(0, fieldCount - 1).Select(index => $"public bool F{index};"));
+        var assignments = string.Join(" ", Enumerable.Range(0, fieldCount - 1).Select(index => $"F{index} = true;"));
+        return $$"""
+            class Wide {
+                {{fields}}
+                public ManagedNode Edge;
+                public Wide(ManagedNode edge) { {{assignments}} Edge = edge; }
+            }
+            bool Make(out Wide wide) {
+                require ManagedNode.TryCreate(42, out var edge);
+                return Wide.TryCreate(edge, out wide);
+            }
+            public int32 Read() {
+                require Make(out var wide);
+                require ManagedHeap.Collect() == 0;
+                require wide.F{{fieldCount - 2}};
+                return wide.Edge.Value{{resultSuffix}};
+            }
+            """;
+    }
+}

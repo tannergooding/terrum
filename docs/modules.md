@@ -11,8 +11,8 @@ layouts during consumer compilation. A **runtime policy** is the persisted
 versions persisted IR contracts; it is distinct from a native-profile label.
 
 The artifact contains verified, typed, source-mapped structured IR, not source
-text or a native DLL. The highest implemented semantic revision is 35, selected
-by the artifact's required features; not every artifact uses revision 35.
+text or a native DLL. The highest implemented semantic revision is 36, selected
+by the artifact's required features; not every artifact uses revision 36.
 Revision-specific reader behavior and feature-dependent writer selection
 describe repository support, not an externally released binary compatibility
 matrix. See [implementation](implementation.md) for the compiler support
@@ -65,6 +65,9 @@ argument/result classification match the carrier. Semantic artifact v35
 persists the transparent-layout intent for private and exported structures,
 and compatible replacements must preserve that intent. This does not add
 implicit conversions or relax exact checks for other module layouts.
+Revision 36 admits up to 32 managed-class fields (previous revisions retain
+the 16-field reader limit); construction tracks the final field in a 32-bit
+initialization mask. The collector descriptor remains an offset list.
 Current source binding records the selected declaration and its closed generic
 arguments, not just a name. Linking or JIT loading validates and implements
 that selected target; it never reruns source overload resolution against a

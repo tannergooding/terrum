@@ -14,7 +14,9 @@ public sealed class NativeManagedClassTests
 {
     [Theory]
     [InlineData(16, true)]
-    [InlineData(17, false)]
+    [InlineData(17, true)]
+    [InlineData(32, true)]
+    [InlineData(33, false)]
     public void ManagedClassFieldLimitDiagnosesAtDeclaration(int fieldCount, bool supported)
     {
         var fields = string.Join(" ", Enumerable.Range(0, fieldCount)
@@ -31,9 +33,23 @@ public sealed class NativeManagedClassTests
         else
         {
             Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3005"
-                && diagnostic.Message.Contains("at most 16 fields", StringComparison.Ordinal));
+                && diagnostic.Message.Contains("at most 32 fields", StringComparison.Ordinal));
             Assert.Null(compilation.Program);
         }
+    }
+
+    [Fact]
+    public void ThirtySecondFieldMustBeInitializedBeforePublication()
+    {
+        var fields = string.Join(" ", Enumerable.Range(0, 32)
+            .Select(index => $"public bool F{index};"));
+        var assignments = string.Join(" ", Enumerable.Range(0, 31)
+            .Select(index => $"F{index} = true;"));
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            $"class Wide {{ {fields} public Wide() {{ {assignments} }} }}"
+            + " int32 Main() { return 42; }"));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
     }
 
     [Theory]

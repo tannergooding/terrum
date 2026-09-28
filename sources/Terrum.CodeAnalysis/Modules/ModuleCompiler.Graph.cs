@@ -321,7 +321,7 @@ public static partial class ModuleCompiler
             var (structures, names) = ReadStructures(reader, version);
             if (version is >= ManagedClassVersion and not
                 (LoopTransferVersion or ManagedGraphParticipantVersion or PrivateInitReferenceVersion
-                    or ExplicitGetterVersion or TransparentLayoutVersion))
+                    or ExplicitGetterVersion or TransparentLayoutVersion or WideClassFieldsVersion))
             {
                 throw new ModuleFormatException("Graph libraries cannot use the private class module version.");
             }
@@ -348,6 +348,7 @@ public static partial class ModuleCompiler
                 || (version == PrivateInitReferenceVersion && !HasInitReference(module))
                 || (version == ExplicitGetterVersion && !HasExplicitGetter(module))
                 || (version == TransparentLayoutVersion && !HasTransparentLayout(module))
+                || (version == WideClassFieldsVersion && !HasWideClassFields(module))
                 || (profile == "native-20" && classes.IsEmpty)
                 || stream.Position != stream.Length || profile != RetainedNativeProfile(module))
             {

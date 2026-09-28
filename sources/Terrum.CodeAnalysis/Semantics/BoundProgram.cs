@@ -48,6 +48,8 @@ public enum PrimitiveType
 /// <summary>Disjoint source-class type identifiers start above the complete inline-struct range.</summary>
 public static class ManagedClassTypes
 {
+    /// <summary>The number of fields tracked by the construction verifier's 32-bit mask.</summary>
+    public const int MaximumFields = 32;
     /// <summary>The first source-defined managed class type identifier.</summary>
     public const int First = 1024;
     /// <summary>The first nullable class handle; class identifiers remain disjoint.</summary>

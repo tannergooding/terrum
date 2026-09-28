@@ -41,6 +41,7 @@ public static partial class ModuleCompiler
     private const int PrivateInitReferenceVersion = 33;
     private const int ExplicitGetterVersion = 34;
     private const int TransparentLayoutVersion = 35;
+    private const int WideClassFieldsVersion = 36;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -58,6 +59,9 @@ public static partial class ModuleCompiler
 
     private static bool HasTransparentLayout(Module module) =>
         module.Structures.Any(static structure => structure.IsTransparent);
+
+    private static bool HasWideClassFields(Module module) =>
+        module.Classes.Any(static @class => @class.Fields.Length > 16);
 
     /// <summary>Reads and verifies a producer artifact, exposing only exported declarations and their value layouts to source binding.</summary>
     public static CompilationReference CreateReference(byte[] producerBytes)
@@ -1380,7 +1384,9 @@ public static partial class ModuleCompiler
         }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-        var version = HasTransparentLayout(module)
+        var version = HasWideClassFields(module)
+            ? WideClassFieldsVersion
+            : HasTransparentLayout(module)
             ? TransparentLayoutVersion
             : HasExplicitGetter(module)
             ? ExplicitGetterVersion
@@ -1591,9 +1597,10 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Explicit getter version requires a property.");
             }
-            if (version == TransparentLayoutVersion && !HasTransparentLayout(module))
+            if ((version == TransparentLayoutVersion && !HasTransparentLayout(module))
+                || (version == WideClassFieldsVersion && !HasWideClassFields(module)))
             {
-                throw new ModuleFormatException("Transparent layout version requires a transparent structure.");
+                throw new ModuleFormatException("Module version requires its declared layout feature.");
             }
             if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
                 || !items.Any(static item => item.Import && item.Function is BoundFunction function
@@ -1647,7 +1654,7 @@ public static partial class ModuleCompiler
             or MutableFieldReceiverVersion or UniqueMutableReceiverVersion or UniqueMutableFieldReceiverVersion
             or MutableBufferFieldReceiverVersion or MutableBufferFieldViewVersion or ManagedValueExportVersion
             or ManagedGraphParticipantVersion or PrivateInitReferenceVersion or ExplicitGetterVersion
-            or TransparentLayoutVersion))
+            or TransparentLayoutVersion or WideClassFieldsVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -1753,7 +1760,7 @@ public static partial class ModuleCompiler
             var size = reader.ReadInt32();
             var isInternal = GetBool(reader);
             var isMutable = version < ManagedAccessVersion || GetBool(reader);
-            var fieldCount = Count(reader, 16);
+            var fieldCount = Count(reader, version >= WideClassFieldsVersion ? ManagedClassTypes.MaximumFields : 16);
             var fields = ImmutableArray.CreateBuilder<BoundStructField>(fieldCount);
             for (var field = 0; field < fieldCount; field++)
             {

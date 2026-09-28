@@ -141,7 +141,7 @@ public static class SemanticVerifier
             if (@class is null || string.IsNullOrWhiteSpace(@class.Name)
                 || @class.Name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName
                 || !classNames.Add(@class.Name) || structNames.Contains(@class.Name)
-                || @class.Fields.IsDefaultOrEmpty || @class.Fields.Length > 16
+                || @class.Fields.IsDefaultOrEmpty || @class.Fields.Length > ManagedClassTypes.MaximumFields
                 || @class.Size is < 8 or > ManagedClassTypes.MaximumPayload || (@class.Size & 7) != 0)
             {
                 throw Invalid();
@@ -2880,8 +2880,11 @@ public static class SemanticVerifier
             || (source == PrimitiveType.Int32 && destination == PrimitiveType.Int64)
             || (source == PrimitiveType.UInt32 && destination is PrimitiveType.Int64 or PrimitiveType.UInt64);
 
-    private static uint FullMask(BoundProgram program, PrimitiveType type) =>
-        (1u << Fields(program, type).Length) - 1;
+    private static uint FullMask(BoundProgram program, PrimitiveType type)
+    {
+        var count = Fields(program, type).Length;
+        return count == 32 ? uint.MaxValue : (1u << count) - 1;
+    }
 
     private static bool HasFields(BoundProgram program, PrimitiveType type) =>
         ManagedClassTypes.IsClass(type)
