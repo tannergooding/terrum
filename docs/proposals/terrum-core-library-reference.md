@@ -186,7 +186,7 @@ Conditional family/extension syntax above is pseudocode pending grammar/custom-f
 
 `SpanTextWriter` holds an exclusive loan to caller-provided storage; `Written` is accepted code-unit count. A refused fragment does not modify storage for that fragment, but prior fragments remain. `Text.Create` validates/freezes text and may transfer eligible exclusive backing; final representation and builder contract remain open.
 
-The proposed TRRM String row has a 4-byte encoding-kind/unit-count header,
+The proposed TRRM String row has a 4-byte encoding-flags/unit-count header,
 explicit code-unit terminator and padded, 4-byte-aligned data. It is not a
 `Text` object laid out as `nint _length` followed by inline data: its unit
 count is 24-bit, while a native `Text` length may have target-dependent width

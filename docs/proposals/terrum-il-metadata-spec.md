@@ -376,7 +376,7 @@ blobs are not a second declaration identity.
 
 The String section begins at a 4-byte-aligned artifact offset. Each indexed
 row starts at a 4-byte-aligned offset relative to its data region and contains
-`u8 encodingKind, u24 unitCount` (the count stored in three little-endian
+`u8 flags, u24 unitCount` (the count stored in three little-endian
 bytes), followed immediately by `unitCount` code units, an all-zero
 terminator of the encoding's code-unit width, and the minimum zero padding
 needed to align the next row to four bytes. The count excludes the header,
@@ -392,7 +392,7 @@ artifact for every encoding. The terminator makes eligible NUL-free content
 convenient for interop and bounds accidental scans at the row end, but does
 not replace the explicit count or checked access.
 
-| `encodingKind` | Content | Unit width | Terminator |
+| `flags & 0x03` | Content | Unit width | Terminator |
 |---:|---|---:|---|
 | `0` | ASCII code units (`0..0x7F`) | 1 byte | One zero byte |
 | `1` | UTF-8 code units, no BOM | 1 byte | One zero byte |
@@ -408,8 +408,12 @@ start-offset requirement. A whole number of code units follows from
 needed. The counted extent must still end before the required terminator
 and agree exactly with the next indexed row offset after padding.
 
-Kinds `4..255` reject in `(1, 0)`; there is no validity or normalization
-bit. A name, path or key reference must decode to well-formed scalar text:
+Bits 0–1 of `flags` select the encoding. Bits 2–7 are reserved and must
+be zero in `(1, 0)`; readers reject any row with these bits set. All four
+encoding values are assigned, so a further encoding needs an explicitly
+defined future extension rather than interpreting reserved bits as more
+encoding-kind bits. There is no validity or normalization bit. A name,
+path or key reference must decode to well-formed scalar text:
 UTF-8 uses shortest sequences; UTF-16 rejects unmatched surrogates; UTF-32
 rejects surrogates and values above `0x10FFFF`. ASCII rejects high-bit bytes.
 Name/path/key uses also reject embedded zero scalars. The explicit length
