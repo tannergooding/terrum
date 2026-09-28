@@ -1,20 +1,8 @@
 namespace Terrum.CodeAnalysis.Numerics64;
 
-public static OwnedInt32Buffer FormatUInt64(uint64 value, OwnedInt32Buffer workspace)
+OwnedInt32Buffer ReverseDigits(OwnedInt32Buffer workspace)
 {
     mut OwnedInt32Buffer buffer = move workspace;
-    // uint64.MaxValue has twenty decimal digits.
-    require buffer.Capacity >= 20;
-    buffer.Clear();
-
-    mut uint64 remaining = value;
-    while (remaining >= 10)
-    {
-        require buffer.TryAppend(int32(remaining % 10) + 48);
-        remaining = remaining / 10;
-    }
-    require buffer.TryAppend(int32(remaining) + 48);
-
     {
         mut MutableInt32BufferView digits = buffer.SliceMutable(0, buffer.Count);
         mut int32 first = 0;
@@ -32,16 +20,9 @@ public static OwnedInt32Buffer FormatUInt64(uint64 value, OwnedInt32Buffer works
     return move buffer;
 }
 
-public static OwnedInt32Buffer FormatInt64(int64 value, OwnedInt32Buffer workspace)
+OwnedInt32Buffer PrefixMinus(OwnedInt32Buffer workspace)
 {
-    if (value >= 0)
-    {
-        return FormatUInt64(uint64(value), move workspace);
-    }
-
-    // Avoid negating int64.MinValue in the signed domain.
-    uint64 magnitude = uint64(-(value + 1)) + 1;
-    mut OwnedInt32Buffer buffer = FormatUInt64(magnitude, move workspace);
+    mut OwnedInt32Buffer buffer = move workspace;
     require buffer.TryAppend(0);
     {
         mut MutableInt32BufferView digits = buffer.SliceMutable(0, buffer.Count);
@@ -55,4 +36,85 @@ public static OwnedInt32Buffer FormatInt64(int64 value, OwnedInt32Buffer workspa
     }
 
     return move buffer;
+}
+
+public static OwnedInt32Buffer FormatUInt64(uint64 value, OwnedInt32Buffer workspace)
+{
+    mut OwnedInt32Buffer buffer = move workspace;
+    // uint64.MaxValue has twenty decimal digits.
+    require buffer.Capacity >= 20;
+    buffer.Clear();
+
+    mut uint64 remaining = value;
+    while (remaining >= 10)
+    {
+        require buffer.TryAppend(int32(remaining % 10) + 48);
+        remaining = remaining / 10;
+    }
+    require buffer.TryAppend(int32(remaining) + 48);
+    return ReverseDigits(move buffer);
+}
+
+public static OwnedInt32Buffer FormatInt64(int64 value, OwnedInt32Buffer workspace)
+{
+    if (value >= 0)
+    {
+        return FormatUInt64(uint64(value), move workspace);
+    }
+
+    // Avoid negating int64.MinValue in the signed domain.
+    uint64 magnitude = uint64(-(value + 1)) + 1;
+    OwnedInt32Buffer buffer = FormatUInt64(magnitude, move workspace);
+    return PrefixMinus(move buffer);
+}
+
+public static OwnedInt32Buffer FormatUInt64Base(uint64 value, uint32 radix, OwnedInt32Buffer workspace)
+{
+    require radix >= 2 && radix <= 36;
+    if (radix == 10 && workspace.Capacity >= 20)
+    {
+        return FormatUInt64(value, move workspace);
+    }
+    mut OwnedInt32Buffer buffer = move workspace;
+    buffer.Clear();
+
+    uint64 divisor = uint64(radix);
+    mut uint64 remaining = value;
+    while (remaining >= divisor)
+    {
+        int32 digit = int32(remaining % divisor);
+        if (digit < 10)
+        {
+            require buffer.TryAppend(digit + 48);
+        }
+        else
+        {
+            require buffer.TryAppend(digit + 87);
+        }
+        remaining = remaining / divisor;
+    }
+    int32 lastDigit = int32(remaining);
+    if (lastDigit < 10)
+    {
+        require buffer.TryAppend(lastDigit + 48);
+    }
+    else
+    {
+        require buffer.TryAppend(lastDigit + 87);
+    }
+
+    return ReverseDigits(move buffer);
+}
+
+public static OwnedInt32Buffer FormatInt64Base(int64 value, uint32 radix, OwnedInt32Buffer workspace)
+{
+    if (value >= 0)
+    {
+        return FormatUInt64Base(uint64(value), radix, move workspace);
+    }
+
+    // Avoid negating int64.MinValue in the signed domain.
+    uint64 magnitude = uint64(-(value + 1)) + 1;
+    OwnedInt32Buffer buffer = FormatUInt64Base(magnitude, radix, move workspace);
+    return PrefixMinus(move buffer);
 }

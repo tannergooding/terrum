@@ -4,6 +4,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Numerics;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -85,5 +86,91 @@ public sealed partial class JitTests
                     }
                 }
                 """, 42).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData("0", 2, false)]
+    [InlineData("18446744073709551615", 2, false)]
+    [InlineData("18446744073709551615", 8, false)]
+    [InlineData("0", 10, false)]
+    [InlineData("18446744073709551615", 10, false)]
+    [InlineData("18446744073709551615", 16, false)]
+    [InlineData("18446744073709551615", 36, false)]
+    [InlineData("12345678901234567890", 3, false)]
+    [InlineData("12345678901234567890", 17, false)]
+    [InlineData("0", 36, true)]
+    [InlineData("9223372036854775807", 16, true)]
+    [InlineData("-9223372036854775808", 2, true)]
+    [InlineData("-9223372036854775808", 10, true)]
+    [InlineData("-9223372036854775808", 16, true)]
+    [InlineData("-1234567890123456789", 35, true)]
+    public async Task IntegerBaseFormattingUsesExactWorkspaceAcrossAotAndJitAsync(
+        string value, int radix, bool signed)
+    {
+        var number = signed ? new BigInteger(long.Parse(value, CultureInfo.InvariantCulture))
+            : new BigInteger(ulong.Parse(value, CultureInfo.InvariantCulture));
+        var magnitude = BigInteger.Abs(number);
+        var expectedDigits = new char[65];
+        var start = expectedDigits.Length;
+        do
+        {
+            magnitude = BigInteger.DivRem(magnitude, radix, out var remainder);
+            expectedDigits[--start] = "0123456789abcdefghijklmnopqrstuvwxyz"[(int)remainder];
+        }
+        while (magnitude > 0);
+        if (number.Sign < 0)
+        {
+            expectedDigits[--start] = '-';
+        }
+        var expected = new string(expectedDigits, start, expectedDigits.Length - start);
+        var checks = string.Join(Environment.NewLine, expected.Select((digit, index) =>
+            FormattableString.Invariant($"if (digits.Read({index}) != {(int)digit}) {{ return 2; }}")));
+        var format = signed ? "FormatInt64Base" : "FormatUInt64Base";
+        var component = await File.ReadAllTextAsync(
+            Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+        var source = component + $$"""
+
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate({{expected.Length}}, out var workspace);
+                OwnedInt32Buffer digits = {{format}}({{value}}, {{radix}}, move workspace);
+                if (digits.Count != {{expected.Length}} || digits.Capacity != {{expected.Length}}) { return 1; }
+                {{checks}}
+                OwnedInt32Buffer zero = {{format}}(0, {{radix}}, move digits);
+                if (zero.Count != 1 || zero.Read(0) != 48 || zero.Capacity != {{expected.Length}}) { return 3; }
+                return 42;
+            }
+            """;
+        await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
+        await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(1, 16)]
+    [InlineData(37, 16)]
+    [InlineData(16, 15)]
+    [InlineData(2, 63)]
+    public async Task IntegerBaseFormattingRejectsInvalidRadixAndInsufficientStorageAsync(
+        int radix, int capacity)
+    {
+        var component = await File.ReadAllTextAsync(
+            Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+        var attempt = $$"""
+
+            int32 Attempt() {
+                require OwnedInt32Buffer.TryCreate({{capacity}}, out var workspace);
+                OwnedInt32Buffer digits = FormatUInt64Base(uint64.MaxValue, {{radix}}, move workspace);
+                return digits.Count;
+            }
+            """;
+        await AssertFailFastExecutionAsync(component + attempt + "int32 Main() { return Attempt(); }",
+            unchecked((int)0xE0540003)).ConfigureAwait(true);
+        await AssertCheckedExecutionAsync(component + attempt + """
+            int32 Main() {
+                unsafe {
+                    try { return Attempt(); }
+                    catch { return 42; }
+                }
+            }
+            """, 42).ConfigureAwait(true);
     }
 }
