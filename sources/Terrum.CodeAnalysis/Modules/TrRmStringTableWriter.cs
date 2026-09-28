@@ -15,11 +15,21 @@ public static class TrRmStringTableWriter
     private static readonly UTF32Encoding s_utf32 = new(false, false, true);
 
     public static byte[] EncodeNames(IReadOnlyList<(string Text, int Encoding)> names)
+        => EncodeRows(names, allowEmpty: false, argumentName: nameof(names));
+
+    public static byte[] EncodeTextRows(IReadOnlyList<(string Text, int Encoding)> rows)
+        => EncodeRows(rows, allowEmpty: true, argumentName: nameof(rows));
+
+    private static byte[] EncodeRows(IReadOnlyList<(string Text, int Encoding)> names,
+        bool allowEmpty, string argumentName)
     {
-        ArgumentNullException.ThrowIfNull(names);
+        if (names is null)
+        {
+            throw new ArgumentNullException(argumentName);
+        }
         if (names.Count is <= 0 or > 0xFF_FFFF)
         {
-            throw new ArgumentOutOfRangeException(nameof(names));
+            throw new ArgumentOutOfRangeException(argumentName);
         }
 
         var indexBytes = ((long)names.Count + 1) * sizeof(uint);
@@ -29,9 +39,9 @@ public static class TrRmStringTableWriter
         {
             var (text, encoding) = names[index];
             ArgumentNullException.ThrowIfNull(text);
-            if (text.Length == 0 || text.Contains('\0'))
+            if ((!allowEmpty && text.Length == 0) || text.Contains('\0'))
             {
-                throw new ArgumentException("A TRRM name must be nonempty and NUL-free.", nameof(names));
+                throw new ArgumentException("A TRRM text row must be NUL-free and required names nonempty.", argumentName);
             }
 
             byte[] content;
@@ -44,17 +54,17 @@ public static class TrRmStringTableWriter
                     1 => (s_utf8.GetBytes(text), 1),
                     2 => (s_utf16.GetBytes(text), 2),
                     3 => (s_utf32.GetBytes(text), 4),
-                    _ => throw new ArgumentOutOfRangeException(nameof(names), "Unassigned TRRM String encoding."),
+                    _ => throw new ArgumentOutOfRangeException(argumentName, "Unassigned TRRM String encoding."),
                 };
             }
             catch (EncoderFallbackException exception)
             {
-                throw new ArgumentException("A TRRM name must contain well-formed scalar text.", nameof(names), exception);
+                throw new ArgumentException("A TRRM name must contain well-formed scalar text.", argumentName, exception);
             }
 
             if (content.Length / width > 0xFF_FFFF)
             {
-                throw new ArgumentOutOfRangeException(nameof(names), "TRRM String unit count exceeds u24.");
+                throw new ArgumentOutOfRangeException(argumentName, "TRRM String unit count exceeds u24.");
             }
 
             var unpaddedLength = (long)4 + content.Length + width;
@@ -62,7 +72,7 @@ public static class TrRmStringTableWriter
             dataBytes += rowLength;
             if (indexBytes + dataBytes > int.MaxValue)
             {
-                throw new ArgumentOutOfRangeException(nameof(names), "TRRM String section exceeds host byte-array limits.");
+                throw new ArgumentOutOfRangeException(argumentName, "TRRM String section exceeds host byte-array limits.");
             }
 
             rows[index] = (content, encoding, width, (int)rowLength);

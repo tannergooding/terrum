@@ -1038,7 +1038,8 @@ ModuleRef identities and co-located producer requirements, optional SourceFile
 paths, nominal TypeDef ranges and FieldDef ownership, and structural TypeSpec
 forms and TypeArg ownership/ranges, plus structural MethodSig and Param
 ownership/ordinals. A host-side
-writer emits indexed name-only String sections; the self-host String-row
+writer emits indexed String sections with required names or optional empty
+namespace text; the self-host String-row
 candidate emits individual rows. These exercise approved metadata contracts in isolation,
 not complete artifact framing or the current module writer.
 Historical-revision readers and feature-dependent writer

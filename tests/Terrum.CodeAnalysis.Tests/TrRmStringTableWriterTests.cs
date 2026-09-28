@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.IO;
 using Terrum.CodeAnalysis.Modules;
 using Xunit;
 
@@ -31,6 +32,26 @@ public sealed class TrRmStringTableWriterTests
         Assert.Equal(Name, reader.DecodeName(3));
         Assert.Equal("A", reader.DecodeName(4));
     }
+
+    [Fact]
+    public void EmptyNamespaceRoundTripsInAllEncodingsWithoutBecomingAValidName()
+    {
+        var section = TrRmStringTableWriter.EncodeTextRows(
+            [("", 0), ("", 1), ("", 2), ("", 3), ("Widget", 0)]);
+        var reader = new TrRmStringTableReader(section, 5);
+        for (var row = 1; row <= 4; row++)
+        {
+            Assert.Equal("", reader.DecodeNamespace(row));
+            Assert.Throws<InvalidDataException>(() => DecodeName(section, row));
+        }
+
+        Assert.Equal("Widget", reader.DecodeName(5));
+        Assert.Throws<ArgumentException>(() =>
+            TrRmStringTableWriter.EncodeTextRows([("X\0Y", 1)]));
+    }
+
+    private static string DecodeName(byte[] section, int row)
+        => new TrRmStringTableReader(section, 5).DecodeName(row);
 
     [Theory]
     [InlineData("", 0)]

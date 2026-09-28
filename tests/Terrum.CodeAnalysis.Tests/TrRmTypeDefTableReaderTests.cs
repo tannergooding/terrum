@@ -138,14 +138,7 @@ public sealed class TrRmTypeDefTableReaderTests
     }
 
     private static byte[] Names()
-    {
-        var result = new byte[32];
-        Write(result, 4, 8);
-        Write(result, 8, 20);
-        byte[] widget = [0, 6, 0, 0, 87, 105, 100, 103, 101, 116, 0, 0];
-        widget.CopyTo(result.AsSpan(20));
-        return result;
-    }
+        => TrRmStringTableWriter.EncodeTextRows([("", 0), ("Widget", 0)]);
 
     private static byte[] Module()
     {
