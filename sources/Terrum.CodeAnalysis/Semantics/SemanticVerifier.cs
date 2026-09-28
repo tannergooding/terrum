@@ -301,7 +301,10 @@ public static class SemanticVerifier
                         || (variable.Type is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
                             or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
                             or PrimitiveType.OwnedInt32Buffer)
-                            && ((int)variable.Type < 100 || (int)variable.Type >= ManagedClassTypes.First))))
+                            && !ManagedClassTypes.IsManaged(variable.Type)
+                            && ((int)variable.Type < 100 || (int)variable.Type >= ManagedClassTypes.First))
+                        || (ManagedClassTypes.IsManaged(variable.Type)
+                            && !function.IsPrivate && !function.IsInternal)))
                         || (variable.IsOut && (variableIndex >= function.ParameterCount + (function.IsConstructor ? 1 : 0)
                             || function.ReturnType != PrimitiveType.Bool)))
                     {

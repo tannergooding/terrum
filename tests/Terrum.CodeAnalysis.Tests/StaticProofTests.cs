@@ -89,6 +89,7 @@ public sealed class StaticProofTests
     [InlineData("static ensure true;", "TRM3026")]
     public void NestedEnsureAndConstructorEnsureAreNotPointChecks(string statement, string code)
     {
+        ArgumentNullException.ThrowIfNull(statement);
         var source = statement.StartsWith("if", StringComparison.Ordinal)
             ? "int32 Main() { " + statement + " return 42; }"
             : "struct Box { public int32 Value; public Box(int32 value) { "

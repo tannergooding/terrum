@@ -84,11 +84,15 @@ writable containing storage or a writable loan/view. `own<val<C>>` is an
 explicit native owner of an inline payload, not the unqualified/legacy `own C`
 spelling. `init ref<T>` is an initialization
 loan to vacant storage: it cannot be read before complete initialization and
-publication. Syntax-22 implements compilation-private `bool`/`init ref<T>`
+publication. Syntax-22 implements bounded `bool`/`init ref<T>`
 conditional publication alongside legacy `bool`/`out`: the caller passes
 `init name` for vacant storage or declares a vacant local with `init var name`.
-Public initialization-loan contracts and the rest of the migration remain
-scheduled. Parameter-only `ref T`, `T*` and `T&` are not alternate
+Compilation-private managed-handle output loans now use the same checked
+publication and rooting path, including nullable and `write` qualifications;
+public managed-handle outputs remain unsupported. Bounded public scalar,
+handle-free Copy and eligible unique outputs have distinct `init:` contracts;
+the rest of the migration remains scheduled. Parameter-only `ref T`, `T*`
+and `T&` are not alternate
 representations. `mut` is not valid as a generic type-argument qualifier;
 use `write` when the referent capability itself is part of the type.
 

@@ -180,8 +180,9 @@ This exercises compact inline Copy fields alongside optional managed edges, not 
 generic collection, persistent iterator or complete token stream.
 `ManagedScanner.TryScanManaged` first fills the unchanged fixed host scanner
 records, then validates and copies up to 64 tokens (including EOF) into a new
-chain. Lexical errors, invalid records, capacity or allocation refusal leave
-the output vacant; a partially filled local chain is never published. The
+chain through a compilation-private `init ref<write ManagedTokenChain>` loan.
+Lexical errors, invalid records, capacity or allocation refusal leave the
+output vacant; a partially filled local chain is never published. The
 wrapper does not replace the scanner records, trivia, diagnostic or integer
 tables used by `build-component`, nor does it introduce a parser bootstrap.
 

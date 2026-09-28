@@ -916,10 +916,14 @@ internal sealed partial class Binder
             }
             if (isInit && type is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
                 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
-                && !IsStruct(type) && !IsUnique(type))
+                && !IsStruct(type) && !IsUnique(type) && !ManagedClassTypes.IsManaged(type))
             {
-                Report("TRM3011", "Init ref parameters require supported scalar, Copy-struct, or unique outputs.",
+                Report("TRM3011", "Init ref parameters require supported scalar, Copy-struct, unique, or managed-handle outputs.",
                     parameter.Span);
+            }
+            if (isInit && ManagedClassTypes.IsManaged(type) && !isPrivate && !isInternal)
+            {
+                Report("TRM3011", "Managed-handle init ref parameters are compilation-private.", parameter.Span);
             }
             if (isConstEval && (isOut || isInit || !ConstEvalScalar(type)))
             {

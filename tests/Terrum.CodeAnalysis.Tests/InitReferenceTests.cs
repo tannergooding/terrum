@@ -26,6 +26,49 @@ public sealed class InitReferenceTests
         }
         """;
 
+    internal const string ManagedSource = """
+        bool Fill(bool publish, init ref<write ManagedNode> value) {
+            if (!publish) { return false; }
+            require ManagedNode.TryCreate(42, out var created);
+            value = created;
+            return true;
+        }
+        int32 Main() {
+            if (Fill(false, init var node)) { return 1; }
+            if (ManagedHeap.Collect() != 0) { return 2; }
+            require Fill(true, init node);
+            if (ManagedHeap.Collect() != 0) { return 3; }
+            return node.Value;
+        }
+        """;
+
+    [Fact]
+    public void ManagedInitReferenceRetainsWritableHandleAndVacantPassingMode()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(ManagedSource));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var fill = Assert.Single(program.Functions, function => function.Name == "Fill");
+        Assert.True(fill.Variables[1].IsOut);
+        Assert.True(fill.Variables[1].IsInit);
+        Assert.True(ManagedClassTypes.IsManaged(fill.Variables[1].Type));
+        var forged = fill with { IsInternal = false, IsPrivate = false };
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program with {
+            Functions = program.Functions.SetItem(0, forged),
+        }));
+    }
+
+    [Theory]
+    [InlineData("return node.Value;", "TRM3016")]
+    [InlineData("require Fill(true, out node); return 42;", "TRM3011")]
+    [InlineData("require Fill(true, init node); require Fill(true, init node); return 42;", "TRM3016")]
+    public void ManagedInitCannotReadVacancyOrReusePublishedStorage(string replacement, string diagnostic)
+    {
+        var source = ManagedSource.Replace("require Fill(true, init node);", replacement, StringComparison.Ordinal);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.Contains(compilation.Diagnostics, item => item.Code == diagnostic);
+    }
+
     [Fact]
     public void InitReferenceHasDistinctBoundParameterAndArgumentModes()
     {
@@ -106,7 +149,6 @@ public sealed class InitReferenceTests
     [Theory]
     [InlineData("void Fill(init ref<int32> value) { value = 42; }", "TRM3011")]
     [InlineData("bool Fill(init ref<int32> value) { return true; }", "TRM3016")]
-    [InlineData("bool Fill(init ref<ManagedNode> value) { return false; }", "TRM3011")]
     [InlineData("bool Fill(out int32 value) { value = 42; return true; } int32 Main() { require Fill(init var item); return item; }", "TRM3011")]
     public void InitModeRequiresBooleanCompletionAndMatchingCall(string source, string code)
     {
@@ -158,6 +200,59 @@ public sealed class InitReferenceTests
         var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
             Assert.IsType<BoundProgram>(nativeCompilation.Program), [nativeProducer], policy);
         Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeProducer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task ManagedInitStaysPrivateBehindAnUnchangedScalarConsumerAsync(NativeRuntimePolicy policy)
+    {
+        const string Library = """
+            bool Fill(init ref<write ManagedNode> result) {
+                require ManagedNode.TryCreate(41, out var created);
+                result = created;
+                return true;
+            }
+            public int32 Read() {
+                require Fill(init var node);
+                return node.Value + 1;
+            }
+            """;
+        var sourcePolicy = (BoundRuntimePolicy)policy;
+        static BoundProgram Compile(string source, BoundRuntimePolicy runtime)
+        {
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), runtimePolicy: runtime);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            return Assert.IsType<BoundProgram>(compilation.Program);
+        }
+        var producerProgram = Compile(Library, sourcePolicy);
+        var updatedProgram = Compile(Library.Replace("TryCreate(41", "TryCreate(42", StringComparison.Ordinal),
+            sourcePolicy);
+        var producer = ModuleCompiler.CreateProducer(producerProgram, ["Read"]);
+        var updated = ModuleCompiler.CreateProducer(updatedProgram, ["Read"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        Assert.DoesNotContain(reference.Functions, function => function.Name == "Fill");
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
+            reference, runtimePolicy: sourcePolicy);
+        Assert.False(consumerCompilation.HasErrors, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program),
+            producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        Assert.Equal(43, NativeJit.Execute(ModuleCompiler.Link(consumer, updated), policy));
+
+        var nativeProducer = NativeModuleCompiler.CreateProducer(producerProgram, ["Read"], "NodeB", policy);
+        var nativeUpdated = NativeModuleCompiler.CreateProducer(updatedProgram, ["Read"], "NodeB", policy);
+        var graphReference = NativeModuleCompiler.CreateGraphReference([nativeProducer]);
+        var graphCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
+            graphReference, runtimePolicy: sourcePolicy);
+        Assert.False(graphCompilation.HasErrors, string.Join(Environment.NewLine, graphCompilation.Diagnostics));
+        var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
+            Assert.IsType<BoundProgram>(graphCompilation.Program), [nativeProducer], policy);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(graphConsumer, [nativeProducer],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        NativeModuleCompiler.ValidateGraph(graphConsumer, [nativeUpdated]);
+        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(graphConsumer, [nativeUpdated],
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
     }
 

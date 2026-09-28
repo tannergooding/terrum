@@ -48,7 +48,7 @@ public sealed class ConstExpressionTests
             """;
         var tree = SyntaxTree.Parse(NamedCall);
         Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Empty(tree.Root.DescendantNodes().Where(node => node.Kind == SyntaxKind.ConstExpression));
+        Assert.DoesNotContain(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.ConstExpression);
         var compilation = Compilation.Create(tree);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var main = Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Functions,
@@ -58,7 +58,7 @@ public sealed class ConstExpressionTests
         const string LocalName = "int32 Main() { int32 const = 40; return const + 2; }";
         tree = SyntaxTree.Parse(LocalName);
         Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Empty(tree.Root.DescendantNodes().Where(node => node.Kind == SyntaxKind.ConstExpression));
+        Assert.DoesNotContain(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.ConstExpression);
         compilation = Compilation.Create(tree);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         main = Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Functions);

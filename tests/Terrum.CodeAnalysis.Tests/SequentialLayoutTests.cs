@@ -2,7 +2,6 @@
 
 using System;
 using System.Buffers.Binary;
-using System.Linq;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
@@ -50,9 +49,15 @@ public sealed class SequentialLayoutTests
         Assert.All(inner.Fields, field => Assert.True(field.IsPrivate));
         Assert.All(outer.Fields, field => Assert.True(field.IsPrivate));
         Assert.Equal(4, inner.Size);
-        Assert.Equal(new[] { 0, 2 }, inner.Fields.Select(field => field.Offset));
+        Assert.Collection(inner.Fields,
+            field => Assert.Equal(0, field.Offset),
+            field => Assert.Equal(2, field.Offset));
         Assert.Equal(16, outer.Size);
-        Assert.Equal(new[] { 0, 4, 8, 12 }, outer.Fields.Select(field => field.Offset));
+        Assert.Collection(outer.Fields,
+            field => Assert.Equal(0, field.Offset),
+            field => Assert.Equal(4, field.Offset),
+            field => Assert.Equal(8, field.Offset),
+            field => Assert.Equal(12, field.Offset));
     }
 
     [Theory]

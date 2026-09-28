@@ -107,4 +107,55 @@ public sealed partial class JitTests
         return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
             : AssertFailFastExecutionAsync(Source, 42);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task ManagedInitReferenceRootsOnlyPublishedHandlesAsync(bool checkedFailures) =>
+        checkedFailures ? AssertCheckedExecutionAsync(InitReferenceTests.ManagedSource, 42)
+            : AssertFailFastExecutionAsync(InitReferenceTests.ManagedSource, 42);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task ManagedInitPublishesAnInitializedNullDistinctFromVacancyAsync(bool checkedFailures)
+    {
+        const string Source = """
+            bool Fill(bool publish, init ref<ManagedNode?> value) {
+                if (!publish) { return false; }
+                value = null;
+                return true;
+            }
+            int32 Main() {
+                if (Fill(false, init var node)) { return 1; }
+                require Fill(true, init node);
+                if (node is some present) { return present.Value; }
+                return 42;
+            }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
+    }
+
+    [Fact]
+    public Task CheckedManagedInitFailureDoesNotPublishOrRetainTheScratchHandleAsync() =>
+        AssertCheckedExecutionAsync("""
+            bool Fail(init ref<write ManagedNode> value) {
+                require ManagedNode.TryCreate(42, out var created);
+                value = created;
+                require false;
+                return true;
+            }
+            int32 Main() {
+                unsafe {
+                    try {
+                        if (Fail(init var missing)) { return 1; }
+                        return 2;
+                    } catch {
+                        if (ManagedHeap.Collect() != 1) { return 3; }
+                        return 42;
+                    }
+                }
+            }
+            """, 42);
 }

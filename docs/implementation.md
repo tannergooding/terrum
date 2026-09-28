@@ -417,6 +417,12 @@ call mode for supported output values, with `init var name` introducing a
 vacant destination in the call. A named destination must still be vacant;
 an initialized value cannot be overwritten by `init`. A true result requires
 complete initialization; false and exceptional paths do not publish.
+Compilation-private `init ref<T>` also supports qualified managed handles.
+The call's checked scratch and exact temporary roots retain the handle until
+successful publication; false and exceptional completion retire the scratch
+without granting a readable output. Source binding and IR verification reject
+public managed-handle init declarations, including forged public visibility.
+The self-host managed scanner uses this mode to publish a complete chain.
 Generic init parameters, general references and declaration postconditions
 remain unsupported. Public init contracts support eligible scalar, Copy-struct
 and unique outputs; managed graph boundaries admit only public handle-free

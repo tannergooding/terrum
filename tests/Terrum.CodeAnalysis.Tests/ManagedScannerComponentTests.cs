@@ -32,7 +32,7 @@ public sealed class ManagedScannerComponentTests
         var source = new StringBuilder("""
             using Terrum.CodeAnalysis;
             int32 Main() {
-                if (!TryScanManaged(out var chain)) {
+                if (!TryScanManaged(init var chain)) {
                     return EXPECTED_FAILURE;
                 }
             """.Replace("EXPECTED_FAILURE", fails ? "42" : "1", StringComparison.Ordinal));
@@ -56,7 +56,7 @@ public sealed class ManagedScannerComponentTests
                     $"if (token{index}.Kind != {(int)expected[index].Kind} || token{index}.Range.Start != {expected[index].Span.Start}) {{ return 6; }}");
             }
             _ = source.Append(CultureInfo.InvariantCulture,
-                $"if (!TryScanManaged(out var again) || again.Count != {expected.Length}) {{ return 7; }}");
+                $"if (!TryScanManaged(init var again) || again.Count != {expected.Length}) {{ return 7; }}");
             _ = source.Append(CultureInfo.InvariantCulture,
                 $"if (!again.TryClear() || ManagedHeap.Collect() != {expected.Length}) {{ return 8; }}");
             _ = source.Append("return 42; }");
@@ -88,7 +88,7 @@ public sealed class ManagedScannerComponentTests
             int32 Main() {
                 int32 count = Scan();
                 Host.Tokens[{{word}}] = {{value}};
-                if (TryBuildManagedTokenChain(count, out var chain)) { return 1; }
+                if (TryBuildManagedTokenChain(count, init var chain)) { return 1; }
                 if (ManagedHeap.Collect() != {{collected}}) { return 2; }
                 return 42;
             }

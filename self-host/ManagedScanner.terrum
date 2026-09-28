@@ -1,7 +1,7 @@
 namespace Terrum.CodeAnalysis;
 
 // Only a complete, validated snapshot of the fixed host records escapes.
-bool TryBuildManagedTokenChain(int32 count, out write ManagedTokenChain result)
+bool TryBuildManagedTokenChain(int32 count, init ref<write ManagedTokenChain> result)
 {
     if (Host.Diagnostics[0] != 0 || count < 1 || count > 64
         || count * 3 > Host.Tokens.Length)
@@ -46,10 +46,10 @@ bool TryBuildManagedTokenChain(int32 count, out write ManagedTokenChain result)
     return true;
 }
 
-bool TryScanManaged(out write ManagedTokenChain result)
+bool TryScanManaged(init ref<write ManagedTokenChain> result)
 {
     int32 count = Scan();
-    if (!TryBuildManagedTokenChain(count, out var chain))
+    if (!TryBuildManagedTokenChain(count, init var chain))
     {
         return false;
     }
