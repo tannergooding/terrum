@@ -249,6 +249,13 @@ public static class SemanticVerifier
             {
                 throw Invalid();
             }
+            if (structure.IsTransparent && (structure.IsUnique || structure.Fields.Length != 1
+                || structure.Fields[0].Type is not (PrimitiveType.Bool or PrimitiveType.Char16
+                    or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                || structure.Fields[0].Offset != 0 || structure.Fields[0].Size != structure.Size))
+            {
+                throw Invalid();
+            }
             alignments[index] = alignment;
             layoutHeights[index] = height;
             layoutStates[index] = 2;

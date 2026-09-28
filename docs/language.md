@@ -213,11 +213,13 @@ serializer must account for the initialization and representation of every
 emitted byte, but may use verified or explicitly trusted raw copy. Details are
 in the [layout contract](data-layout-and-abi.md#fixed-directly-interoperable-representations).
 
-These are target design contracts, not current compiler support claims.
-Struct/field attributes currently diagnose `TRM3001`; the existing `ValueLayout`
-is limited to naturally aligned 1–16-byte aggregates and does not implement
-Transparent. Existing compact-value and module ABI contracts remain
-authoritative. Future enforcement requires an explicit compatibility
+These are target design contracts, not blanket compiler support claims.
+Syntax-24 supports `[Layout(Transparent)]` only for a one-field compact Copy
+struct with a scalar `bool`, `char16`, `int32`, `uint32`, `int64` or `uint64`
+carrier; other struct/field layout attributes still diagnose `TRM3001`.
+`ValueLayout` remains limited to naturally aligned 1–16-byte aggregates.
+Existing non-transparent compact-value and module ABI contracts remain
+authoritative. Broader enforcement requires an explicit compatibility
 migration, not retroactive rejection or reinterpretation of existing artifacts.
 Language/module compatibility is distinct from foreign ABI and serialization:
 external wire or callback encodings are specified for concrete protocols, not
@@ -951,11 +953,11 @@ checked predicates, `[ViewOf]`, `[Captures]`, `[Pure]`,
 `utf8z("...")`/`utf16z("...")` calls and generic trailing defaults as
 **illustrations**, not implemented compiler promises, except for the supported
 numeric `T(expression)` conversion subset. Attached width suffixes diagnose
-as `TRM0006`; prefix casts are not parsed. In particular, `out` remains the
-current bounded implementation spelling while a coherent migration to
-initialization loans is planned; the accepted `init ref` call-site form is
-`Create(init value)`. Syntax-22 implements that call mode for private
-boolean-success helpers; public/general migration remains scheduled.
+as `TRM0006`; prefix casts are not parsed. In particular, legacy `out` remains
+supported while a coherent general migration to initialization loans is
+planned. The accepted `init ref` call-site form is `Create(init value)`;
+syntax-22 implements that call mode for bounded boolean-success helpers,
+including eligible public contracts.
 Exact generic constraint,
 associated-type and extension-disambiguation syntax, inference-hole spelling,
 closed-case marker/match grammar and compatibility-forwarder attributes/source

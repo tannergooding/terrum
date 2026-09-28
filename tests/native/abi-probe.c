@@ -53,6 +53,18 @@ typedef struct WideIntegerPair { int64_t Signed; uint64_t Unsigned; } WideIntege
 typedef WideIntegerPair (*MakeWideIntegerPair)(int64_t, uint64_t);
 typedef int32_t (*ReadWideIntegerPair)(WideIntegerPair, int64_t, int64_t, int64_t, int64_t);
 typedef uint8_t (*TryWideIntegerPair)(uint8_t, WideIntegerPair*);
+typedef struct BoolCarrier { uint8_t Value; } BoolCarrier;
+typedef struct CharCarrier { uint16_t Value; } CharCarrier;
+typedef struct IntCarrier { int32_t Value; } IntCarrier;
+typedef struct UIntCarrier { uint32_t Value; } UIntCarrier;
+typedef struct LongCarrier { int64_t Value; } LongCarrier;
+typedef struct ULongCarrier { uint64_t Value; } ULongCarrier;
+typedef BoolCarrier (*EchoBoolCarrier)(BoolCarrier);
+typedef CharCarrier (*EchoCharCarrier)(CharCarrier);
+typedef IntCarrier (*EchoIntCarrier)(IntCarrier);
+typedef UIntCarrier (*EchoUIntCarrier)(UIntCarrier);
+typedef LongCarrier (*EchoLongCarrier)(LongCarrier);
+typedef ULongCarrier (*EchoULongCarrier)(ULongCarrier);
 typedef struct SmallOwner { int32_t Value; } SmallOwner;
 typedef struct WordOwner { uint64_t Value; } WordOwner;
 typedef struct LargeOwner { int64_t Signed; uint64_t Unsigned; } LargeOwner;
@@ -107,7 +119,7 @@ static int CheckWideIntegerReturn(const void* function)
 // table. Loading an EXE as a library does not execute its process entrypoint.
 int main(int argc, char** argv)
 {
-    if (argc != 40)
+    if (argc != 46)
     {
         return 90;
     }
@@ -325,6 +337,31 @@ int main(int argc, char** argv)
         || wordOwner.Value != UINT64_MAX || largeOwner.Signed != INT64_MIN || largeOwner.Unsigned != UINT64_MAX)
     {
         result = 111;
+    }
+
+    EchoBoolCarrier echoBoolCarrier = (EchoBoolCarrier)((uint8_t*)image + strtoul(argv[40], NULL, 10));
+    EchoCharCarrier echoCharCarrier = (EchoCharCarrier)((uint8_t*)image + strtoul(argv[41], NULL, 10));
+    EchoIntCarrier echoIntCarrier = (EchoIntCarrier)((uint8_t*)image + strtoul(argv[42], NULL, 10));
+    EchoUIntCarrier echoUIntCarrier = (EchoUIntCarrier)((uint8_t*)image + strtoul(argv[43], NULL, 10));
+    EchoLongCarrier echoLongCarrier = (EchoLongCarrier)((uint8_t*)image + strtoul(argv[44], NULL, 10));
+    EchoULongCarrier echoULongCarrier = (EchoULongCarrier)((uint8_t*)image + strtoul(argv[45], NULL, 10));
+    BoolCarrier booleanCarrier = {1};
+    CharCarrier characterCarrier = {55296};
+    IntCarrier integerCarrier = {INT32_MIN};
+    UIntCarrier unsignedCarrier = {UINT32_MAX};
+    LongCarrier signedLongCarrier = {INT64_MIN};
+    ULongCarrier unsignedLongCarrier = {UINT64_MAX};
+    if (sizeof(BoolCarrier) != sizeof(uint8_t) || sizeof(CharCarrier) != sizeof(uint16_t)
+        || sizeof(IntCarrier) != sizeof(int32_t) || sizeof(UIntCarrier) != sizeof(uint32_t)
+        || sizeof(LongCarrier) != sizeof(int64_t) || sizeof(ULongCarrier) != sizeof(uint64_t)
+        || echoBoolCarrier(booleanCarrier).Value != 1
+        || echoCharCarrier(characterCarrier).Value != 55296
+        || echoIntCarrier(integerCarrier).Value != INT32_MIN
+        || echoUIntCarrier(unsignedCarrier).Value != UINT32_MAX
+        || echoLongCarrier(signedLongCarrier).Value != INT64_MIN
+        || echoULongCarrier(unsignedLongCarrier).Value != UINT64_MAX)
+    {
+        result = 112;
     }
 
     if (!FreeLibrary(image))

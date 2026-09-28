@@ -41,6 +41,8 @@ foreach (var name in new[] {
     "TryThree", "TrySix", "TryTwelve", "MakeShiftedWide",
     "SumInt64", "EchoUInt64", "MakeWideIntegerPair", "ReadWideIntegerPair", "TryWideIntegerPair",
     "SmallOwner.Read", "WordOwner.Read", "LargeOwner.Read", "SmallOwner.Pack",
+    "EchoBoolCarrier", "EchoCharCarrier", "EchoIntCarrier", "EchoUIntCarrier",
+    "EchoLongCarrier", "EchoULongCarrier",
 })
 {
     var index = -1;

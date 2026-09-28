@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-23, semantic v34 explicit getters, native-10 through native-20
+## Current boundary: syntax-24, semantic v35 transparent wrappers, native-10 through native-20
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -616,11 +616,23 @@ are unchanged. Exported structs still require their existing public field
 layout, and managed class handles remain private to their image. Setter,
 auto-property, ref-return and expression-bodied forms are unsupported. No
 scanner or native ABI/profile version changes.
+`syntax-24` permits `[Layout(Transparent)]` on a compact Copy struct with
+exactly one `bool`, `char16`, `int32`, `uint32`, `int64`, or `uint64` field.
+The field retains its visibility and mutation rules; the nominal wrapper
+does not implicitly convert to or from its carrier. Native Windows x64
+storage and direct argument/result classification match that scalar carrier.
+Semantic v35 persists the layout intent for both private and exported
+structures; a replacement that changes the intent is incompatible, while
+older non-transparent structures keep their layout and selected version.
+This subset does not admit nested, owning or managed carriers, packing or
+alignment overrides, or a general `Blittable`/public-field policy migration.
+The scanner record and native profile/package format are unchanged.
 `[NoThrow]` on functions/constructors, `[DoesNotReturn]` on void functions and
 `[Cleanup]` on eligible unique instance methods are currently bound;
 unknown, duplicate and misplaced attributes diagnose rather
-than becoming unchecked metadata. Attribute nodes retain their brackets and
-name as three children. The `native-10` (fail-fast), `native-11`
+than becoming unchecked metadata. Parameterless attribute nodes retain their
+brackets and name as three children; `Layout(Transparent)` has a parenthesized
+identifier argument. The `native-10` (fail-fast), `native-11`
 (checked-exceptions) and `native-12` (compact unique owner) profiles support checked
 signed/unsigned 32- and 64-bit integers, raw code units, conditional outputs,
 fixed host-buffer capabilities and acyclic value layouts up to 16 bytes.

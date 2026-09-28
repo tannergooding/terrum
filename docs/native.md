@@ -45,7 +45,7 @@ longer parsed. Based literals construct target-width bit patterns, while
 decimal literals retain numeric range semantics. Floating/custom literal
 parsing, registered literal targets and `[ConstEval]` remain outside this
 executable profile.
-The current parser version is syntax-23. Syntax-18 qualified generic-call type
+The current parser version is syntax-24. Syntax-18 qualified generic-call type
 arguments such as `write C` and `write C?` enable bounded managed-handle
 substitutions in compilation-local `Copy` templates. Syntax-19 adds the
 bounded nominal comparison protocols; neither changes the native profile,
@@ -73,6 +73,13 @@ Copy-struct getters can be exported only where the existing public value
 layout permits it; private class getters remain within image-local managed
 state. Older field and method contracts retain their selected semantic
 versions, and the native profile/package format is unchanged.
+Syntax-24 supports one-field transparent Copy wrappers over `bool`, `char16`,
+`int32`, `uint32`, `int64` and `uint64`. Semantic v35 records the distinct
+layout intent, and replacement checks require it to match. Their natural
+storage size/alignment and direct Windows x64 argument/result classification
+match the scalar field; identity, field authority and effects stay nominal.
+Nested and owning carriers, custom packing/alignment and broader field-policy
+changes are not implemented.
 
 Terrum has no built-in marshalling. Source or generated tooling defines and
 performs conversions and wrappers for imported C APIs; the compiler/runtime
@@ -924,8 +931,9 @@ backend storage, not language pointers, escaping borrows or shared mutable
 references. This direct/indirect choice preserves the complete `T`'s source
 semantics; it does not itself introduce a loan of the original value's storage.
 A source-level borrowed result needs its own declared lifetime, access
-and alias contract. The current profiles have no general transparent-wrapper
-ABI contract. Outputs use separate exact-size publication into the caller's
+and alias contract. The bounded syntax-24 one-field scalar transparent wrapper
+inherits its carrier's direct ABI; no other transparent-wrapper ABI is
+implemented. Outputs use separate exact-size publication into the caller's
 storage only on a true return.
 
 Unique instance receiver loans are an exception to by-value aggregate passing:
@@ -948,6 +956,7 @@ dotnet run --file scripts\check-native-abi.cs
 ```
 
 It checks flat and nested direct and indirect aggregates passed/returned by value,
+including one-field transparent scalar wrappers independently called from C,
 hidden results and register/stack arguments, true/false output publication, guard storage
 around scalar and aggregate output destinations, and narrow
 arguments with deliberately unspecified upper register bits. The script

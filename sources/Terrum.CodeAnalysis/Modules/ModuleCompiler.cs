@@ -40,6 +40,7 @@ public static partial class ModuleCompiler
     private const int ManagedGraphParticipantVersion = 32;
     private const int PrivateInitReferenceVersion = 33;
     private const int ExplicitGetterVersion = 34;
+    private const int TransparentLayoutVersion = 35;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -54,6 +55,9 @@ public static partial class ModuleCompiler
 
     private static bool HasExplicitGetter(Module module) =>
         module.Functions.Any(static item => item.Function is BoundFunction { PropertyName: not null });
+
+    private static bool HasTransparentLayout(Module module) =>
+        module.Structures.Any(static structure => structure.IsTransparent);
 
     /// <summary>Reads and verifies a producer artifact, exposing only exported declarations and their value layouts to source binding.</summary>
     public static CompilationReference CreateReference(byte[] producerBytes)
@@ -1151,7 +1155,8 @@ public static partial class ModuleCompiler
     {
         if (a.Name != b.Name || a.Size != b.Size || a.Fields.Length != b.Fields.Length
             || a.IsPrivate != b.IsPrivate || a.IsInternal != b.IsInternal
-            || a.IsUnique != b.IsUnique || a.CleanupMethod != b.CleanupMethod)
+            || a.IsUnique != b.IsUnique || a.CleanupMethod != b.CleanupMethod
+            || a.IsTransparent != b.IsTransparent)
         {
             return false;
         }
@@ -1375,7 +1380,9 @@ public static partial class ModuleCompiler
         }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-        var version = HasExplicitGetter(module)
+        var version = HasTransparentLayout(module)
+            ? TransparentLayoutVersion
+            : HasExplicitGetter(module)
             ? ExplicitGetterVersion
             : HasInitReference(module)
             ? PrivateInitReferenceVersion
@@ -1420,6 +1427,10 @@ public static partial class ModuleCompiler
             writer.Write(structure.IsPrivate);
             writer.Write(structure.IsInternal);
             writer.Write(structure.IsUnique);
+            if (version >= TransparentLayoutVersion)
+            {
+                writer.Write(structure.IsTransparent);
+            }
             writer.Write(structure.CleanupMethod is not null);
             if (structure.CleanupMethod is string cleanup)
             {
@@ -1580,6 +1591,10 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Explicit getter version requires a property.");
             }
+            if (version == TransparentLayoutVersion && !HasTransparentLayout(module))
+            {
+                throw new ModuleFormatException("Transparent layout version requires a transparent structure.");
+            }
             if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
                 || !items.Any(static item => item.Import && item.Function is BoundFunction function
                     && !ManagedExportShape.ScalarOnly(function))))
@@ -1631,7 +1646,8 @@ public static partial class ModuleCompiler
             or StackClassFactoryVersion or ManagedAccessVersion or MutableStructReceiverVersion
             or MutableFieldReceiverVersion or UniqueMutableReceiverVersion or UniqueMutableFieldReceiverVersion
             or MutableBufferFieldReceiverVersion or MutableBufferFieldViewVersion or ManagedValueExportVersion
-            or ManagedGraphParticipantVersion or PrivateInitReferenceVersion or ExplicitGetterVersion))
+            or ManagedGraphParticipantVersion or PrivateInitReferenceVersion or ExplicitGetterVersion
+            or TransparentLayoutVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -1673,6 +1689,7 @@ public static partial class ModuleCompiler
             var isPrivate = GetBool(reader);
             var isInternal = GetBool(reader);
             var isUnique = version >= OwnershipVersion && GetBool(reader);
+            var isTransparent = version >= TransparentLayoutVersion && GetBool(reader);
             var cleanup = version >= OwnershipVersion && GetBool(reader) ? GetString(reader) : null;
             var fieldCount = Count(reader, MaximumSlots);
             var fields = ImmutableArray.CreateBuilder<BoundStructField>(fieldCount);
@@ -1695,6 +1712,7 @@ public static partial class ModuleCompiler
                 IsPrivate = isPrivate,
                 IsInternal = isInternal,
                 IsUnique = isUnique,
+                IsTransparent = isTransparent,
                 CleanupMethod = cleanup,
             });
         }

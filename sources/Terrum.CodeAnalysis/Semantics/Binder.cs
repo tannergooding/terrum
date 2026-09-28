@@ -555,12 +555,26 @@ internal sealed partial class Binder
         var qualified = string.IsNullOrEmpty(_namespace) ? name.Text : _namespace + "." + name.Text;
         var isPublic = false;
         var isUnique = false;
+        var isTransparent = false;
         var visibilityCount = 0;
         foreach (var element in declaration.Children)
         {
             if (element is SyntaxNode { Kind: SyntaxKind.Attribute } attribute)
             {
-                Report("TRM3001", "Attributes on structs are not supported.", attribute.Span);
+                if (attribute.Children is [
+                    SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
+                    SyntaxTokenElement { Token.Kind: TokenKind.Identifier, Token.Text: "Layout" },
+                    SyntaxTokenElement { Token.Kind: TokenKind.OpenParen },
+                    SyntaxTokenElement { Token.Kind: TokenKind.Identifier, Token.Text: "Transparent" },
+                    SyntaxTokenElement { Token.Kind: TokenKind.CloseParen },
+                    SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket }] && !isTransparent)
+                {
+                    isTransparent = true;
+                }
+                else
+                {
+                    Report("TRM3001", "Only one [Layout(Transparent)] attribute is supported on a struct.", attribute.Span);
+                }
             }
             if (element is SyntaxTokenElement modifier)
             {
@@ -663,6 +677,12 @@ internal sealed partial class Binder
         {
             Report("TRM3005", "A struct requires at least one field.", declaration.Span);
         }
+        if (isTransparent && (isUnique || fields.Count != 1
+            || fields[0].Type is not (PrimitiveType.Bool or PrimitiveType.Char16
+                or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)))
+        {
+            Report("TRM3005", "Transparent Copy structs require exactly one scalar value field.", declaration.Span);
+        }
         size = (size + alignment - 1) & -alignment;
         if (size is < 1 or > ValueLayout.MaximumSize)
         {
@@ -671,6 +691,7 @@ internal sealed partial class Binder
         _structs[index] = new BoundStruct(qualified, fields.ToImmutable(), size) {
             IsInternal = !isPublic,
             IsUnique = isUnique,
+            IsTransparent = isTransparent,
         };
         _ = _layingOut.Remove(index);
         _ = _laidOut.Add(index);

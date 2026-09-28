@@ -376,3 +376,45 @@ public unique struct LargeOwner
     }
     [NoThrow] public uint64 Read() { return Unsigned; }
 }
+// Transparent wrappers retain the carrier's direct argument and result ABI.
+[Layout(Transparent)] public struct BoolCarrier
+{
+    public bool Value;
+    public BoolCarrier(bool value) { Value = value; }
+}
+public BoolCarrier EchoBoolCarrier(BoolCarrier value) { return value; }
+
+[Layout(Transparent)] public struct CharCarrier
+{
+    public char16 Value;
+    public CharCarrier(char16 value) { Value = value; }
+}
+public CharCarrier EchoCharCarrier(CharCarrier value) { return value; }
+
+[Layout(Transparent)] public struct IntCarrier
+{
+    public int32 Value;
+    public IntCarrier(int32 value) { Value = value; }
+}
+public IntCarrier EchoIntCarrier(IntCarrier value) { return value; }
+
+[Layout(Transparent)] public struct UIntCarrier
+{
+    public uint32 Value;
+    public UIntCarrier(uint32 value) { Value = value; }
+}
+public UIntCarrier EchoUIntCarrier(UIntCarrier value) { return value; }
+
+[Layout(Transparent)] public struct LongCarrier
+{
+    public int64 Value;
+    public LongCarrier(int64 value) { Value = value; }
+}
+public LongCarrier EchoLongCarrier(LongCarrier value) { return value; }
+
+[Layout(Transparent)] public struct ULongCarrier
+{
+    public uint64 Value;
+    public ULongCarrier(uint64 value) { Value = value; }
+}
+public ULongCarrier EchoULongCarrier(ULongCarrier value) { return value; }

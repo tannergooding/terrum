@@ -254,7 +254,15 @@ internal sealed class Parser
 
         while (Current.Kind == TokenKind.OpenBracket)
         {
-            children.Add(Node(SyntaxKind.Attribute, [Take(), Expect(TokenKind.Identifier), Expect(TokenKind.CloseBracket)]));
+            var attribute = new List<SyntaxElement> { Take(), Expect(TokenKind.Identifier) };
+            if (Current.Kind == TokenKind.OpenParen)
+            {
+                attribute.Add(Take());
+                attribute.Add(Expect(TokenKind.Identifier));
+                attribute.Add(Expect(TokenKind.CloseParen));
+            }
+            attribute.Add(Expect(TokenKind.CloseBracket));
+            children.Add(Node(SyntaxKind.Attribute, attribute));
         }
 
         while (IsModifier(Current.Kind) || Current.Kind == TokenKind.AbstractKeyword)
