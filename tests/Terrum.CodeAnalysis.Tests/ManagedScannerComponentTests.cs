@@ -160,6 +160,53 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("int32 Answer() { return 42; }", true)]
+    [InlineData("int32 Answer() { return -42; }", true)]
+    [InlineData("int32 Answer() { return (42); }", false)]
+    [InlineData("int32 Answer() { return true; }", false)]
+    [InlineData("int32 Answer() { return 42 }", false)]
+    public async Task BoundedScalarParserAgreesWithHostedSyntaxForItsAcceptedShapeAsync(
+        string text, bool accepted)
+    {
+        Assert.Equal(0, (int)TokenKind.EndOfFile);
+        Assert.Equal(2, (int)TokenKind.Identifier);
+        Assert.Equal(3, (int)TokenKind.NumericLiteral);
+        Assert.Equal(19, (int)TokenKind.ReturnKeyword);
+        Assert.Equal(46, (int)TokenKind.OpenParen);
+        Assert.Equal(47, (int)TokenKind.CloseParen);
+        Assert.Equal(48, (int)TokenKind.OpenBrace);
+        Assert.Equal(49, (int)TokenKind.CloseBrace);
+        Assert.Equal(52, (int)TokenKind.Semicolon);
+        Assert.Equal(58, (int)TokenKind.Minus);
+
+        var hosted = SyntaxTree.Parse(text);
+        var name = hosted.Tokens[1].Span;
+        var result = hosted.Root.DescendantNodes().Single(node => node.Kind == SyntaxKind.ReturnStatement);
+        var expression = ((SyntaxNode)result.Children[1]).Span;
+        var assertion = accepted
+            ? FormattableString.Invariant($$"""
+                require TryParseScalarReturnFunction(move tokens, out var name, out var value);
+                if (name.Start != {{name.Start}} || name.Length != {{name.Length}}
+                    || value.Start != {{expression.Start}} || value.Length != {{expression.Length}}) { return 1; }
+                """)
+            : "if (TryParseScalarReturnFunction(move tokens, out var name, out var value)) { return 1; }";
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                {{assertion}}
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("alpha 42 // trailing\r\n\uD801\uDC00")]
     public async Task CursorReadsPublishedTokensAndStopsAtEndAsync(string text)
@@ -402,7 +449,8 @@ public sealed class ManagedScannerComponentTests
     private static async Task<BoundProgram> CompileAsync(string text, string entry, BoundRuntimePolicy policy)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
-        string[] names = ["SourceRange", "Token", "ManagedTokenChain", "Scanner", "ManagedScanner", "TokenSnapshot"];
+        string[] names = ["SourceRange", "Token", "ManagedTokenChain", "Scanner", "ManagedScanner",
+            "TokenSnapshot", "ScalarFunctionParser"];
         var trees = new List<SyntaxTree>(names.Length + 1);
         foreach (var name in names)
         {
