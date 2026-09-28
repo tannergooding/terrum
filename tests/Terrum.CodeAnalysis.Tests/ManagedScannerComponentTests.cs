@@ -163,6 +163,37 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task CursorKindMatchConsumesOnlyTheSelectedTokenAsync(NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require ManagedTokenChain.TryCreate(out var chain);
+                require chain.TryAppend(7, 0, 1);
+                require chain.TryAppend(8, 1, 1);
+                require chain.TryCreateCursor(out var cursor);
+                if (cursor.TryReadKind(8, out var wrong)
+                    || cursor.TryReadKindInit(-1, init var invalid)) { return 1; }
+                require cursor.TryReadKindInit(7, init var first);
+                if (first.Kind != 7 || first.Range.Start != 0) { return 2; }
+                if (cursor.TryReadKind(7, out var repeated)) { return 3; }
+                require cursor.TryReadKind(8, out var second);
+                if (second.Kind != 8 || second.Range.Start != 1
+                    || cursor.TryReadKind(8, out var afterEnd)) { return 4; }
+                require chain.TryCreateCursor(out var stale);
+                require chain.TryClear();
+                if (stale.TryReadKindInit(7, init var afterMutation) || stale.IsCurrent) { return 5; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync("ab", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData("\uD800")]
     [InlineData("a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a")]
     public async Task FailedCursorScanDoesNotPublishAsync(string text)
