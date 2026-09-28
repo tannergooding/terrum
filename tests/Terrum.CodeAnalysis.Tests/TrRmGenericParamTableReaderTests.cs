@@ -73,6 +73,53 @@ public sealed class TrRmGenericParamTableReaderTests
         Assert.Throws<InvalidDataException>(() => GetConstraintOwner(Formals()[..^1], 1));
     }
 
+    [Fact]
+    public void ConstraintRowChecksOwnershipWithoutAssigningKindsOrWitnesses()
+    {
+        var row = Constraint();
+        Write(row, 12, 0x1600_0001);
+        row[4] = 0xFF;
+        row[5] = 0xFF;
+        CreateConstraint(row);
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(0, 2)]
+    [InlineData(6, 1)]
+    [InlineData(7, 1)]
+    [InlineData(8, 0)]
+    [InlineData(8, 2)]
+    public void RejectsInvalidConstraintOwnerFlagsAndTarget(int offset, byte replacement)
+    {
+        var row = Constraint();
+        row[offset] = replacement;
+        Assert.Throws<InvalidDataException>(() => CreateConstraint(row));
+    }
+
+    [Fact]
+    public void ConstraintSectionMustMatchFormalOwnedRowCount()
+    {
+        Assert.Throws<InvalidDataException>(() => CreateConstraint(Constraint()[..^1]));
+        Assert.Throws<InvalidDataException>(() => CreateConstraint([], recordCount: 0));
+    }
+
+    private static void CreateConstraint(byte[] bytes, int recordCount = 1)
+    {
+        var names = new TrRmStringTableReader(TrRmStringTableWriter.EncodeTextRows(
+            [("", 0), ("Module", 0), ("Widget", 0), ("Build", 0), ("T", 0), ("U", 0)]), 6);
+        var modules = new TrRmModuleTableReader(Module(), 1, names, 0, 1, 1, 0);
+        var types = new TrRmTypeDefTableReader(Type(), 1, names, modules, 0, 2, 0, 0);
+        byte[] specRow = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
+        var typeSpecs = new TrRmTypeSpecTableReader(specRow, 1, 1, 0, 2, 0);
+        var signatures = new TrRmMethodSigTableReader(Signature(), 1, typeSpecs, 0, 2);
+        var methods = new TrRmMethodDefTableReader(Method(), 1,
+            names, modules, types, signatures, 0, 0);
+        var formals = new TrRmGenericParamTableReader(Formals(), 2,
+            names, types, methods, signatures, 1);
+        _ = new TrRmConstraintTableReader(bytes, recordCount, formals, typeSpecs);
+    }
+
     private static int GetConstraintOwner(byte[] formalRows, int row,
         byte[]? signature = null, byte[]? type = null)
     {
@@ -141,6 +188,14 @@ public sealed class TrRmGenericParamTableReaderTests
         Write(rows, 20, 0x1600_0001);
         Write(rows, 28, 6);
         return rows;
+    }
+
+    private static byte[] Constraint()
+    {
+        var row = new byte[16];
+        Write(row, 0, 1);
+        Write(row, 8, 1);
+        return row;
     }
 
     private static void Write(byte[] bytes, int offset, uint value)
