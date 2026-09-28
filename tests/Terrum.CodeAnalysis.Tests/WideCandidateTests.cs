@@ -376,6 +376,8 @@ public sealed class WideCandidateTests
     [InlineData("uint32 value = 1; require TryAdd(value, 2, out var sum); return int32(sum);")]
     [InlineData("require TryAccumulateDecimal(18446744073709551616, 0, uint64.MaxValue, out var value); return 0;")]
     [InlineData("TryAccumulateBase(1, 1, 2, uint64.MaxValue, out var value); return int32(value);")]
+    [InlineData("TryAccumulateDecimalInit(1, 10, uint64.MaxValue, init var value); return int32(value);")]
+    [InlineData("TryAccumulateBaseInit(1, 2, 2, uint64.MaxValue, init var value); return int32(value);")]
     public void WideCandidateContractsRejectInvalidUse(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
@@ -420,6 +422,8 @@ public sealed class WideCandidateTests
             "Terrum.CodeAnalysis.Numerics64.TryMultiply",
             "Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal",
             "Terrum.CodeAnalysis.Numerics64.TryAccumulateBase",
+            "Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimalInit",
+            "Terrum.CodeAnalysis.Numerics64.TryAccumulateBaseInit",
         ]);
     }
 

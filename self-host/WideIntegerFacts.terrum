@@ -223,3 +223,24 @@ public static bool TryAccumulateBase(uint64 value, uint32 digit, uint32 radix, u
     result = value * uint64(radix) + widenedDigit;
     return true;
 }
+
+public static bool TryAccumulateDecimalInit(uint64 value, uint32 digit, uint64 maximum, init ref<uint64> result)
+{
+    if (!TryAccumulateDecimal(value, digit, maximum, out var accumulated))
+    {
+        return false;
+    }
+    result = accumulated;
+    return true;
+}
+
+public static bool TryAccumulateBaseInit(uint64 value, uint32 digit, uint32 radix, uint64 maximum,
+    init ref<uint64> result)
+{
+    if (!TryAccumulateBase(value, digit, radix, maximum, out var accumulated))
+    {
+        return false;
+    }
+    result = accumulated;
+    return true;
+}
