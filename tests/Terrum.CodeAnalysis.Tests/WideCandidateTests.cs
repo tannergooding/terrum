@@ -15,18 +15,21 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class WideCandidateTests
 {
-    [Fact]
-    public async Task WideCompilerCandidatesExecuteFromIndependentModulesAsync()
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task WideCompilerCandidatesExecuteFromIndependentModulesAsync(NativeRuntimePolicy policy)
     {
-        var producer = CreateCandidateLibrary();
+        var producer = CreateCandidateLibrary((BoundRuntimePolicy)policy);
         var reference = ModuleCompiler.CreateReference(producer);
         var root = RepositoryRoot();
         var tests = ReadTree(Path.Combine(root, "self-host", "WideIntegerTests.terrum"));
         var entry = ReadTree(Path.Combine(root, "samples", "native", "modules", "wide-entry.terrum"));
-        var compilation = Compilation.Create([tests, entry], reference);
+        var compilation = Compilation.Create([tests, entry], reference, (BoundRuntimePolicy)policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
-        await ExecuteBothAsync(consumer, producer, 0).ConfigureAwait(true);
+        Assert.Equal(0, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 0, policy).ConfigureAwait(true);
     }
 
     [Theory]
@@ -34,6 +37,7 @@ public sealed class WideCandidateTests
     [InlineData("if (TryAdd(int64.MaxValue, 1, out var value)) { return 0; } return int32(value);")]
     [InlineData("uint32 value = 1; require TryAdd(value, 2, out var sum); return int32(sum);")]
     [InlineData("require TryAccumulateDecimal(18446744073709551616, 0, uint64.MaxValue, out var value); return 0;")]
+    [InlineData("TryAccumulateBase(1, 1, 2, uint64.MaxValue, out var value); return int32(value);")]
     public void WideCandidateContractsRejectInvalidUse(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(
@@ -67,14 +71,15 @@ public sealed class WideCandidateTests
             ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(incompatible.Program), ["Echo"])));
     }
 
-    private static byte[] CreateCandidateLibrary()
+    private static byte[] CreateCandidateLibrary(BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
     {
         var path = Path.Combine(RepositoryRoot(), "self-host", "WideIntegerFacts.terrum");
-        var compilation = Compilation.CreateLibrary(ReadTree(path));
+        var compilation = Compilation.CreateLibrary(ReadTree(path), policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         return ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), [
             "Terrum.CodeAnalysis.Numerics64.TryAdd",
             "Terrum.CodeAnalysis.Numerics64.TryAccumulateDecimal",
+            "Terrum.CodeAnalysis.Numerics64.TryAccumulateBase",
         ]);
     }
 
@@ -83,7 +88,8 @@ public sealed class WideCandidateTests
     private static string RepositoryRoot() =>
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
 
-    private static async Task ExecuteBothAsync(byte[] consumer, byte[] producer, int expected)
+    private static async Task ExecuteBothAsync(byte[] consumer, byte[] producer, int expected,
+        NativeRuntimePolicy policy = NativeRuntimePolicy.FailFast)
     {
         var prefix = Path.Combine(AppContext.BaseDirectory, $"wide-candidate-{Guid.NewGuid():N}");
         var image = prefix + ".exe";
@@ -92,14 +98,15 @@ public sealed class WideCandidateTests
         try
         {
             var program = ModuleCompiler.Link(consumer, producer);
-            await File.WriteAllBytesAsync(image, NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast)).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(image, NativeEmitter.Emit(program, policy)).ConfigureAwait(true);
             await RunAsync(image, [], expected).ConfigureAwait(true);
             await File.WriteAllBytesAsync(consumerPath, consumer).ConfigureAwait(true);
             await File.WriteAllBytesAsync(producerPath, producer).ConfigureAwait(true);
             var framework = new DirectoryInfo(AppContext.BaseDirectory);
             var configuration = framework.Parent?.Name ?? throw new InvalidOperationException("Missing configuration.");
             var cli = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc", configuration, framework.Name, "terrumc.dll");
-            await RunAsync("dotnet", [cli, "run-module", consumerPath, producerPath, "--runtime", "fail-fast"], expected).ConfigureAwait(true);
+            await RunAsync("dotnet", [cli, "run-module", consumerPath, producerPath, "--runtime",
+                policy == NativeRuntimePolicy.FailFast ? "fail-fast" : "checked-exceptions"], expected).ConfigureAwait(true);
             Assert.Equal(consumer, await File.ReadAllBytesAsync(consumerPath).ConfigureAwait(true));
         }
         finally

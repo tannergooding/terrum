@@ -39,3 +39,56 @@ public static bool CheckWideDecimalAccumulation()
 
     return maximumSigned == uint64(int64.MaxValue) && value == 0;
 }
+
+public static bool CheckWideBaseAccumulation()
+{
+    mut uint64 binary = 0;
+    for (mut int32 bit = 0; bit < 64; bit = bit + 1)
+    {
+        require TryAccumulateBase(binary, 1, 2, uint64.MaxValue, out binary);
+    }
+    if (binary != uint64.MaxValue
+        || TryAccumulateBase(binary, 0, 2, uint64.MaxValue, out var overflow)
+        || TryAccumulateBase(0, 36, 36, uint64.MaxValue, out var invalidDigit)
+        || TryAccumulateBase(0, 1, 1, uint64.MaxValue, out var lowBase)
+        || TryAccumulateBase(0, 1, 37, uint64.MaxValue, out var highBase)
+        || TryAccumulateBase(0, 1, 16, 0, out var overLimit))
+    {
+        return false;
+    }
+
+    require TryAccumulateBase(0, 35, 36, 35, out var lastDigit);
+    require TryAccumulateBase(0, 15, 16, 15, out var hexDigit);
+    require TryAccumulateBase(1844674407370955161, 5, 10, uint64.MaxValue, out var decimalValue);
+    require TryAccumulateBase(0, 0, 2, 0, out var zero);
+    if (lastDigit != 35 || hexDigit != 15
+        || decimalValue != uint64.MaxValue || zero != 0)
+    {
+        return false;
+    }
+
+    for (mut uint32 radix = 2; radix <= 36; radix = radix + 1)
+    {
+        uint64 divisor = uint64(radix);
+        uint64 prefix = uint64.MaxValue / divisor;
+        uint32 finalDigit = uint32(uint64.MaxValue % divisor);
+        require TryAccumulateBase(prefix, finalDigit, radix, uint64.MaxValue, out var maximum);
+        if (maximum != uint64.MaxValue
+            || TryAccumulateBase(prefix + 1, finalDigit, radix, uint64.MaxValue, out var tooLarge)
+            || TryAccumulateBase(0, radix, radix, uint64.MaxValue, out var tooWide))
+        {
+            return false;
+        }
+
+        uint64 signedPrefix = uint64(int64.MaxValue) / divisor;
+        uint32 signedDigit = uint32(uint64(int64.MaxValue) % divisor);
+        require TryAccumulateBase(signedPrefix, signedDigit, radix, uint64(int64.MaxValue), out var signedMaximum);
+        if (signedMaximum != uint64(int64.MaxValue)
+            || TryAccumulateBase(signedPrefix + 1, signedDigit, radix,
+                uint64(int64.MaxValue), out var signedOverflow))
+        {
+            return false;
+        }
+    }
+    return true;
+}

@@ -6,6 +6,7 @@ int32 Main()
     {
         require CheckWideAddition();
         require CheckWideDecimalAccumulation();
+        require CheckWideBaseAccumulation();
     }
 
     return 0;

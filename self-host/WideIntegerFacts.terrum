@@ -35,3 +35,30 @@ public static bool TryAccumulateDecimal(uint64 value, uint32 digit, uint64 maxim
 
     return true;
 }
+
+public static bool TryAccumulateBase(uint64 value, uint32 digit, uint32 radix, uint64 maximum, out uint64 result)
+{
+    if (radix < 2 || radix > 36 || digit >= radix)
+    {
+        return false;
+    }
+
+    if (radix == 10)
+    {
+        if (!TryAccumulateDecimal(value, digit, maximum, out var decimalResult))
+        {
+            return false;
+        }
+        result = decimalResult;
+        return true;
+    }
+
+    uint64 widenedDigit = uint64(digit);
+    if (maximum < widenedDigit || value > (maximum - widenedDigit) / uint64(radix))
+    {
+        return false;
+    }
+
+    result = value * uint64(radix) + widenedDigit;
+    return true;
+}
