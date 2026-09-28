@@ -62,7 +62,8 @@ public static bool TryParseUInt32Base(int32 start, int32 length, uint32 radix, o
     return true;
 }
 
-public static bool TryParseInt64Base(int32 start, int32 length, uint32 radix, out int64 result)
+bool TryParseSignedBase(int32 start, int32 length, uint32 radix,
+    int64 minimum, int64 maximum, out int64 result)
 {
     if (start < 0 || length <= 0 || start > Host.Source.Length
         || length > Host.Source.Length - start)
@@ -79,20 +80,21 @@ public static bool TryParseInt64Base(int32 start, int32 length, uint32 radix, ou
         digitLength = digitLength - 1;
     }
 
-    mut uint64 maximum = uint64(int64.MaxValue);
+    mut uint64 magnitudeLimit = uint64(maximum);
     if (negative)
     {
-        maximum = maximum + 1;
+        // Compute the negative limit without negating int64.MinValue.
+        magnitudeLimit = uint64(-(minimum + 1)) + 1;
     }
 
-    if (!TryParseMagnitude(digitStart, digitLength, radix, maximum, out var magnitude))
+    if (!TryParseMagnitude(digitStart, digitLength, radix, magnitudeLimit, out var magnitude))
     {
         return false;
     }
 
-    if (negative && magnitude == maximum)
+    if (negative && magnitude == magnitudeLimit)
     {
-        result = int64.MinValue;
+        result = minimum;
     }
     else if (negative)
     {
@@ -105,10 +107,21 @@ public static bool TryParseInt64Base(int32 start, int32 length, uint32 radix, ou
     return true;
 }
 
+public static bool TryParseInt64Base(int32 start, int32 length, uint32 radix, out int64 result)
+{
+    if (!TryParseSignedBase(start, length, radix,
+        int64.MinValue, int64.MaxValue, out var parsed))
+    {
+        return false;
+    }
+    result = parsed;
+    return true;
+}
+
 public static bool TryParseInt32Base(int32 start, int32 length, uint32 radix, out int32 result)
 {
-    if (!TryParseInt64Base(start, length, radix, out var parsed)
-        || parsed < int64(int32.MinValue) || parsed > int64(int32.MaxValue))
+    if (!TryParseSignedBase(start, length, radix,
+        int64(int32.MinValue), int64(int32.MaxValue), out var parsed))
     {
         return false;
     }

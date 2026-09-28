@@ -200,7 +200,8 @@ implicit plus sign, and returns false without publishing an output on
 malformed input, invalid bounds/radix or overflow. Negative zero is zero;
 `int64.MinValue` is handled by accumulating its unsigned magnitude.
 `TryParseUInt32Base` and `TryParseInt32Base` reuse the validated parsing
-and enforce their narrower ranges before publishing a result.
+and enforce their narrower ranges during digit accumulation; signed
+32-bit parsing does not first accumulate against the 64-bit range.
 These compiled library functions do not replace the scanner's contextual
 integer binding or create a runtime text representation.
 
