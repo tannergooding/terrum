@@ -238,6 +238,72 @@ public sealed class StringLiteralComponentTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, 0, "\"Name\"", new[] { 0, 4, 0, 0, 78, 97, 109, 101, 0, 0, 0, 0 })]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 0, "\"Name\"", new[] { 0, 4, 0, 0, 78, 97, 109, 101, 0, 0, 0, 0 })]
+    [InlineData(NativeRuntimePolicy.FailFast, 1, "\"\u00E9\"", new[] { 1, 2, 0, 0, 195, 169, 0, 0 })]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 1, "\"\u00E9\"", new[] { 1, 2, 0, 0, 195, 169, 0, 0 })]
+    [InlineData(NativeRuntimePolicy.FailFast, 2, "\"\uD83D\uDE00\"", new[] { 2, 2, 0, 0, 0x3D, 0xD8, 0, 0xDE, 0, 0, 0, 0 })]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 2, "\"\uD83D\uDE00\"", new[] { 2, 2, 0, 0, 0x3D, 0xD8, 0, 0xDE, 0, 0, 0, 0 })]
+    [InlineData(NativeRuntimePolicy.FailFast, 3, "\"\u00E9\"", new[] { 3, 1, 0, 0, 233, 0, 0, 0, 0, 0, 0, 0 })]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 3, "\"\u00E9\"", new[] { 3, 1, 0, 0, 233, 0, 0, 0, 0, 0, 0, 0 })]
+    public async Task MetadataNameRowsRequireNonemptyScalarTextAndPreserveEncodingAsync(
+        NativeRuntimePolicy policy, int flags, string spelling, int[] expected)
+    {
+        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var checks = string.Join(Environment.NewLine, expected.Select((value, index) =>
+            FormattableString.Invariant($"if (row.Read({index}) != {value}) {{ return 3; }}")));
+        var entry = SyntaxTree.Parse($$"""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require StringLiteral.TryCreate(spelling, out var literal);
+                require TryGetStringNameRowByteLength(literal, {{flags}}, init var byteLength);
+                if (byteLength != {{expected.Length}}) { return 1; }
+                require OwnedInt32Buffer.TryCreate(byteLength, out var workspace);
+                OwnedInt32Buffer row = EncodeStringNameRow(literal, {{flags}}, move workspace);
+                if (row.Count != byteLength) { return 2; }
+                {{checks}}
+                return 0;
+            }
+            """, "string-name-row-entry.terrum");
+        var compilation = Compilation.Create(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(0, NativeJit.Execute(program, policy));
+        Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData("\"\"")]
+    [InlineData("\"\\0\"")]
+    [InlineData("\"A\\0B\"")]
+    public async Task MetadataNameRowsRejectEmptyAndEmbeddedZeroScalarsAsync(string spelling)
+    {
+        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var entry = SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require StringLiteral.TryCreate(spelling, out var literal);
+                if (TryGetStringNameRowByteLength(literal, 0, init var ascii)
+                    || TryGetStringNameRowByteLength(literal, 1, init var utf8)
+                    || TryGetStringNameRowByteLength(literal, 2, init var utf16)
+                    || TryGetStringNameRowByteLength(literal, 3, init var utf32)) { return 1; }
+                return 0;
+            }
+            """, "invalid-name-row-entry.terrum");
+        var compilation = Compilation.Create(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
+            BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(0, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
+        Assert.Equal(0, await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+    }
+
+    [Theory]
     [InlineData(NativeRuntimePolicy.FailFast, 257, 1, 1, 0)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, 65536, 0, 0, 1)]
     public async Task StringRowUnitCountUsesThreeLittleEndianBytesAsync(

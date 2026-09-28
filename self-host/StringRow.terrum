@@ -55,6 +55,29 @@ public static bool TryGetStringRowByteLength(StringLiteral literal, int32 flags,
     return true;
 }
 
+public static bool TryGetStringNameRowByteLength(StringLiteral literal, int32 flags,
+    init ref<int32> byteLength)
+{
+    if (literal.ScalarCount == 0
+        || !TryMeasureStringRow(literal, flags, init var contentBytes, init var unitWidth,
+            init var rowBytes))
+    {
+        return false;
+    }
+
+    mut StringLiteralCursor cursor = StringLiteralCursor.Create(literal);
+    while (cursor.TryRead(out var scalar, out var next))
+    {
+        if (scalar == 0)
+        {
+            return false;
+        }
+        cursor = next;
+    }
+    byteLength = rowBytes;
+    return true;
+}
+
 public static OwnedInt32Buffer EncodeStringRow(StringLiteral literal, int32 flags,
     OwnedInt32Buffer workspace)
 {
@@ -86,4 +109,11 @@ public static OwnedInt32Buffer EncodeStringRow(StringLiteral literal, int32 flag
         row.Set(3, units / 65536);
     }
     return move bytes;
+}
+
+public static OwnedInt32Buffer EncodeStringNameRow(StringLiteral literal, int32 flags,
+    OwnedInt32Buffer workspace)
+{
+    require TryGetStringNameRowByteLength(literal, flags, init var byteLength);
+    return EncodeStringRow(literal, flags, move workspace);
 }
