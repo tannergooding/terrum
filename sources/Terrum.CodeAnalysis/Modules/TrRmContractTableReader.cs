@@ -40,6 +40,8 @@ public readonly ref struct TrRmContractTableReader
         }
 
         var singletons = new HashSet<(uint Owner, ushort Kind)>();
+        var noThrowMethods = new HashSet<uint>();
+        var cleanupMethods = new List<uint>();
         for (var row = 1; row <= recordCount; row++)
         {
             var data = _rows.GetRow(row);
@@ -58,6 +60,11 @@ public readonly ref struct TrRmContractTableReader
                     if (data.Length != 12 || (Read(data, 8) & ~7u) != 0)
                     {
                         throw InvalidContract();
+                    }
+
+                    if (owner >> 24 == 0x16 && (Read(data, 8) & 1) != 0)
+                    {
+                        noThrowMethods.Add(owner & 0xFF_FFFF);
                     }
                     break;
                 case 2:
@@ -98,9 +105,19 @@ public readonly ref struct TrRmContractTableReader
                     {
                         throw InvalidContract();
                     }
+
+                    cleanupMethods.Add(Read(data, 8));
                     break;
                 default:
                     throw InvalidContract();
+            }
+        }
+
+        foreach (var method in cleanupMethods)
+        {
+            if (!noThrowMethods.Contains(method))
+            {
+                throw InvalidContract();
             }
         }
     }

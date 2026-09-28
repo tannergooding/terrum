@@ -45,6 +45,19 @@ public sealed class TrRmContractTableReaderTests
     }
 
     [Fact]
+    public void CleanupRequiresDeclaredNoThrowEffectOnItsTargetMethod()
+    {
+        var withoutNoThrow = Effects();
+        withoutNoThrow[8] = 2;
+        Assert.Throws<InvalidDataException>(() =>
+            Create(Section(Cleanup(), withoutNoThrow)));
+        Assert.Throws<InvalidDataException>(() =>
+            Create(Section(Cleanup()), recordCount: 1, declaredCount: 1,
+                methodFirst: 0, methodCount: 0));
+        Create(Section(Effects(), Cleanup()), typeFirst: 2, methodFirst: 1);
+    }
+
+    [Fact]
     public void RejectsOverlapsOrphansAndMismatchedDeclaredCounts()
     {
         var rows = Section(Cleanup(), Effects());

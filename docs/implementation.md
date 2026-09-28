@@ -1045,7 +1045,8 @@ flags and required types are checked structurally; unassigned kinds and
 witnesses are not executable generic contracts. Contract row ownership,
 singleton clauses and assigned payload shapes are also checked without proving
 effects or making reserved clause modes executable. OutputState additionally
-checks its Boolean return and `out`/`init ref` parameter ordinal. These do not bind imported
+checks its Boolean return and `out`/`init ref` parameter ordinal, and Cleanup
+requires a declared `NoThrow` effect on the same-type target method. These do not bind imported
 contracts. A host-side
 writer emits indexed String sections with required names or optional empty
 namespace text; the self-host String-row
