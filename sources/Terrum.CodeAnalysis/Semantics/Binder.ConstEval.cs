@@ -14,9 +14,13 @@ internal sealed partial class Binder
     private const int ConstEvalDepthLimit = 64;
     private const int ConstEvalWorkLimit = 4096;
     private bool _hasRequiredExpression;
+    private bool _hasStaticProof;
 
     private sealed record BoundRequiredConstant(BoundExpression Operand, TextSpan Span)
         : BoundExpression(Operand.Type, Span);
+
+    private sealed record BoundStaticProof(BoundExpression Condition, bool IsEnsure, TextSpan Span)
+        : BoundStatement(Span);
 
     private static bool ConstEvalScalar(PrimitiveType type) =>
         type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
@@ -40,7 +44,7 @@ internal sealed partial class Binder
         {
             return false;
         }
-        if (_constRequired.Count == 0 && !_hasRequiredExpression)
+        if (_constRequired.Count == 0 && !_hasRequiredExpression && !_hasStaticProof)
         {
             return true;
         }
@@ -77,6 +81,8 @@ internal sealed partial class Binder
                 return CheckConstExpression(assignment.Value, out unsupported);
             case BoundExpressionStatement expression:
                 return CheckConstExpression(expression.Expression, out unsupported);
+            case BoundStaticProof proof:
+                return CheckConstExpression(proof.Condition, out unsupported);
             case BoundIf conditional:
                 return CheckConstExpression(conditional.Condition, out unsupported)
                     && CheckConstStatement(conditional.Then, out unsupported)
@@ -135,9 +141,39 @@ internal sealed partial class Binder
                 var statements = ImmutableArray.CreateBuilder<BoundStatement>(block.Statements.Length);
                 foreach (var child in block.Statements)
                 {
-                    statements.Add(ResolveConstStatement(child, locals, functions, variableCount));
+                    var resolved = ResolveConstStatement(child, locals, functions, variableCount);
+                    if (child is not BoundStaticProof)
+                    {
+                        statements.Add(resolved);
+                    }
                 }
-                return block with { Statements = statements.MoveToImmutable() };
+                return block with { Statements = statements.ToImmutable() };
+            }
+            case BoundStaticProof proof:
+            {
+                var proofLocals = proof.IsEnsure ? new Dictionary<int, BoundConstant>() : locals;
+                var condition = ResolveConstExpression(proof.Condition, proofLocals, functions, variableCount);
+                var kind = proof.IsEnsure ? "Static ensure" : "Static require";
+                if (!CheckConstExpression(condition, out _))
+                {
+                    Report("TRM3027", $"{kind} cannot use unsupported effects or calls.", proof.Span);
+                    return new BoundBlock([], proof.Span);
+                }
+                try
+                {
+                    var state = new ConstEvalState(_cancellationToken);
+                    var result = EvaluateConstExpression(condition, ConstSlots(proofLocals, variableCount),
+                        functions, 0, state);
+                    if (result.Value == 0)
+                    {
+                        Report("TRM3025", $"{kind} evaluates to false.", proof.Span);
+                    }
+                }
+                catch (ConstEvalFailure failure)
+                {
+                    Report("TRM3026", $"{kind} is not established: {failure.Message}", proof.Span);
+                }
+                return new BoundBlock([], proof.Span);
             }
             case BoundLocal local:
             {

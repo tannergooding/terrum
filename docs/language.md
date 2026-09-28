@@ -747,6 +747,13 @@ postcondition denotes the actual result contextually; it is not a new binder
 or lambda and does not reevaluate the return expression. A `void` function has
 no result-valued return. Static postconditions initially apply only to the
 outer function body. Proofs respect mutation/alias invalidation.
+The syntax-27 implementation admits a constant-only floor: a body-local
+`static require` may use earlier immutable `const` locals, while an
+outer-body `static ensure` must be closed and independent of local or
+parameter state so it holds on every normal return. False conditions,
+unestablished values and unsupported effects diagnose distinctly; neither
+form executes or publishes a contract. Symbolic runtime-dependent proofs,
+declaration clauses and result references remain scheduled.
 
 Required static proofs have a versioned portable floor: every conforming
 compiler must support its minimum rules/complexity and guaranteed resource

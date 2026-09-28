@@ -1457,6 +1457,21 @@ internal sealed partial class Binder
             case SyntaxKind.RequireStatement:
                 return new BoundRequire(BindExpression((SyntaxNode)node.Children[1], PrimitiveType.Bool), node.Span);
 
+            case SyntaxKind.StaticRequireStatement:
+            case SyntaxKind.StaticEnsureStatement:
+            {
+                var isEnsure = node.Kind == SyntaxKind.StaticEnsureStatement;
+                if (_genericContext is not null || (isEnsure && (_scopes.Count != 2 || _constructor)))
+                {
+                    Report("TRM3026", isEnsure
+                        ? "Static ensure is supported only in the outer body of a nongeneric function."
+                        : "Static require is not supported in a generic function template.", node.Span);
+                }
+                _hasStaticProof = true;
+                return new BoundStaticProof(BindExpression((SyntaxNode)node.Children[2], PrimitiveType.Bool),
+                    isEnsure, node.Span);
+            }
+
             case SyntaxKind.ReturnStatement:
             {
                 if (_constructor)

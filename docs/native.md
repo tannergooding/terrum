@@ -55,7 +55,11 @@ ABI changes; imported functions cannot satisfy required constant calls.
 Syntax-26 adds scalar `const expression` requirements in nested executable
 expressions, with the same limits and deferred constant substitution; no new
 native or semantic wire representation is emitted. The current parser version
-is syntax-26. Syntax-18 qualified generic-call type
+is syntax-27. Syntax-27 adds compile-time-only body `static require`
+and outer-body `static ensure` for closed scalar proofs. Successful proofs
+leave no native operation or semantic wire record; known false, unsupported
+and unevaluated proofs diagnose before emission. Existing executable
+`require` remains unchanged. Syntax-18 qualified generic-call type
 arguments such as `write C` and `write C?` enable bounded managed-handle
 substitutions in compilation-local `Copy` templates. Syntax-19 adds the
 bounded nominal comparison protocols; neither changes the native profile,

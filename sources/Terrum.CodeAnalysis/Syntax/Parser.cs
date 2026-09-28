@@ -563,7 +563,9 @@ internal sealed class Parser
 
         while (Current.Kind is not (TokenKind.CloseBrace or TokenKind.EndOfFile))
         {
-            if (Current.Kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword or TokenKind.PrivateKeyword or TokenKind.StaticKeyword or TokenKind.StructKeyword or TokenKind.UniqueKeyword)
+            if (Current.Kind is TokenKind.PublicKeyword or TokenKind.InternalKeyword
+                or TokenKind.PrivateKeyword or TokenKind.StructKeyword or TokenKind.UniqueKeyword
+                || (Current.Kind == TokenKind.StaticKeyword && !IsStaticProofStart()))
             {
                 break;
             }
@@ -614,6 +616,24 @@ internal sealed class Parser
             case TokenKind.RequireKeyword:
             {
                 node = Node(SyntaxKind.RequireStatement, [Take(), ParseExpression(), Expect(TokenKind.Semicolon)]);
+                break;
+            }
+            case TokenKind.StaticKeyword:
+            {
+                var proof = IsStaticProofStart();
+                var modifier = Take();
+                if (proof)
+                {
+                    var isEnsure = Current.Kind == TokenKind.Identifier;
+                    node = Node(isEnsure ? SyntaxKind.StaticEnsureStatement : SyntaxKind.StaticRequireStatement,
+                        [modifier, Take(), ParseExpression(), Expect(TokenKind.Semicolon)]);
+                }
+                else
+                {
+                    Report("TRM1001", "Expected 'require' or 'ensure' after 'static' in a body.",
+                        Current.Span);
+                    node = Node(SyntaxKind.SkippedSyntax, [modifier]);
+                }
                 break;
             }
             case TokenKind.TryKeyword:
@@ -1031,6 +1051,10 @@ internal sealed class Parser
     }
 
     private SyntaxToken Peek(int offset) => _tokens[Math.Min(_position + offset, _tokens.Length - 1)];
+
+    private bool IsStaticProofStart() => Current.Kind == TokenKind.StaticKeyword
+        && (Peek(1).Kind == TokenKind.RequireKeyword
+            || (Peek(1).Kind == TokenKind.Identifier && Peek(1).Text == "ensure"));
 
     private SyntaxNode Node(SyntaxKind kind, List<SyntaxElement> children) => new(kind, [.. children], Current.Span.Start);
 

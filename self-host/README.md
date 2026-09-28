@@ -4,7 +4,7 @@ These files are parallel design candidates, not a bootstrapped compiler.
 They are not linked into the C# implementation. The native profile executes
 the range, character, integer and nested token components and a bounded token scanner.
 The host test runner remains C#, even when it compiles and executes a candidate.
-The host parser's current language version is syntax-26. Syntax-18's qualified
+The host parser's current language version is syntax-27. Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle
 specializations described below. These reuse existing, feature-selected
 semantic contracts without changing the scanner record/schema, native profile
@@ -31,6 +31,10 @@ call arguments and conditions using the same bounded evaluator. The compiler
 replaces each requirement at its original expression position; runtime calls
 outside the required expression remain executable. No public module contract
 or native ABI changes.
+Syntax-27 accepts bounded constant-only body `static require` and
+outer-body `static ensure` obligations; proven conditions disappear before
+native emission and do not publish module contracts. Symbolic proofs over
+runtime values remain scheduled.
 
 Host fixtures retain syntax round trips and add native execution of
 `SourceRange`, `CharacterFacts`, `RangeTests`, `Token` and `TokenTests` with entry wrappers.
