@@ -277,7 +277,7 @@ bytes remain valid after semantic changes.
 |---:|---|---|
 | `0x0001` | Module | One row per logical module: identity, runtime requirement and entry point |
 | `0x0002` | String | Variable UTF-8 bytes for names and keys |
-| `0x0003` | Blob | Variable opaque bytes, interpreted only by their referring field |
+| `0x0003` | Blob | Variable opaque non-reference bytes, interpreted only by their referring field |
 | `0x0004` | Feature | Required semantic feature identifiers |
 | `0x0010` | ModuleRef | A consumer module's selected producer identity, in this artifact or external |
 | `0x0011` | TypeSpec (variable) | Complete type reference or constructed type |
@@ -359,7 +359,14 @@ zero is allowed only where a column says `?`. String rows contain their exact
 UTF-8 bytes (no BOM, NUL terminator or normalization); readers reject invalid
 UTF-8 and compare names/keys by decoded ordinal scalar sequence. Blob rows
 are bytes only: each use must name its interpretation and validate its
-contents. Duplicate strings or blobs are not a second declaration identity.
+contents. A Blob payload must not encode a semantically meaningful table
+index, `DefId`, token, Body instruction location or other reference that
+trimming, rewriting or merging would need to remap. Such references belong
+in typed table fields or, for eligible optional sections, validated reference
+slots; a Blob is not a hidden fixup list. Coincidental byte patterns have no
+reference meaning. A merger may preserve or deduplicate Blob bytes but never
+silently treat their contents as relocatable references. Duplicate strings or
+blobs are not a second declaration identity.
 
 | Table | Ordered row payload |
 |---|---|
