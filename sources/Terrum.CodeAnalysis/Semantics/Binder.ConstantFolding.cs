@@ -14,6 +14,48 @@ internal sealed partial class Binder
         BigInteger value;
         switch (expression)
         {
+            case BoundBinary { Left: BoundConstant boolLeft, Right: BoundConstant boolRight, Type: PrimitiveType.Bool } comparison:
+                if (boolLeft.Type != boolRight.Type)
+                {
+                    return expression;
+                }
+                BigInteger firstValue;
+                BigInteger secondValue;
+                if (boolLeft.Type == PrimitiveType.Bool)
+                {
+                    firstValue = boolLeft.Value;
+                    secondValue = boolRight.Value;
+                }
+                else if (!TryScalarValue(boolLeft, out firstValue) || !TryScalarValue(boolRight, out secondValue))
+                {
+                    return expression;
+                }
+                bool result;
+                switch (comparison.Operator)
+                {
+                    case TokenKind.EqualsEquals:
+                        result = firstValue == secondValue;
+                        break;
+                    case TokenKind.BangEquals:
+                        result = firstValue != secondValue;
+                        break;
+                    case TokenKind.Less when boolLeft.Type != PrimitiveType.Bool:
+                        result = firstValue < secondValue;
+                        break;
+                    case TokenKind.LessEquals when boolLeft.Type != PrimitiveType.Bool:
+                        result = firstValue <= secondValue;
+                        break;
+                    case TokenKind.Greater when boolLeft.Type != PrimitiveType.Bool:
+                        result = firstValue > secondValue;
+                        break;
+                    case TokenKind.GreaterEquals when boolLeft.Type != PrimitiveType.Bool:
+                        result = firstValue >= secondValue;
+                        break;
+                    default:
+                        return expression;
+                }
+                return new BoundConstant(result ? 1 : 0, PrimitiveType.Bool, expression.Span);
+
             case BoundCast { Operand: BoundConstant operand }
                 when TryScalarValue(operand, out var input):
                 value = input;

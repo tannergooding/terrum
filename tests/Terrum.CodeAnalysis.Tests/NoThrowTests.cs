@@ -189,6 +189,132 @@ public sealed class NoThrowTests
         Assert.Contains(caller.Diagnostics, static diagnostic => diagnostic.Code == "TRM3017");
     }
 
+    [Fact]
+    public void ConstantTrueComparisonSatisfiesNoThrowRequire()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "[NoThrow] void Check() { require int32(1) == int32(1); }"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        SemanticVerifier.VerifyLibrary(Assert.IsType<BoundProgram>(compilation.Program));
+    }
+
+    [Theory]
+    [InlineData("int32.MinValue == int32.MinValue", true)]
+    [InlineData("int32.MinValue != int32.MinValue", false)]
+    [InlineData("int32.MinValue < int32.MaxValue", true)]
+    [InlineData("int32.MaxValue < int32.MinValue", false)]
+    [InlineData("int32.MinValue <= int32.MinValue", true)]
+    [InlineData("int32.MaxValue <= int32.MinValue", false)]
+    [InlineData("int32.MaxValue > int32.MinValue", true)]
+    [InlineData("int32.MinValue > int32.MaxValue", false)]
+    [InlineData("int32.MaxValue >= int32.MaxValue", true)]
+    [InlineData("int32.MinValue >= int32.MaxValue", false)]
+    [InlineData("int64.MinValue < int64.MaxValue", true)]
+    [InlineData("int64.MinValue >= int64.MaxValue", false)]
+    [InlineData("uint32.MaxValue > uint32(0)", true)]
+    [InlineData("uint32(0) > uint32.MaxValue", false)]
+    [InlineData("uint32.MaxValue <= uint32.MaxValue", true)]
+    [InlineData("uint32.MaxValue < uint32(0)", false)]
+    [InlineData("uint64.MaxValue > uint64(int64.MaxValue)", true)]
+    [InlineData("uint64.MaxValue < uint64(int64.MaxValue)", false)]
+    [InlineData("uint64.MaxValue != uint64(0)", true)]
+    [InlineData("uint64.MaxValue == uint64(0)", false)]
+    [InlineData("char16(65535) >= char16(65535)", true)]
+    [InlineData("char16(0) > char16(65535)", false)]
+    [InlineData("char16(1) != char16(0)", true)]
+    [InlineData("char16(1) == char16(0)", false)]
+    [InlineData("true == true", true)]
+    [InlineData("true != true", false)]
+    [InlineData("true != false", true)]
+    [InlineData("false == true", false)]
+    [InlineData("(1 + 2) == int32(3)", true)]
+    public void MatchingScalarConstantComparisonsBecomeBooleanConstants(string expression, bool expected)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            $"[NoThrow] bool Compare() {{ return {expression}; }}"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var function = Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Functions);
+        var returned = Assert.IsType<BoundReturn>(Assert.Single(function.Body.Statements));
+        var constant = Assert.IsType<BoundConstant>(returned.Value);
+        Assert.Equal(PrimitiveType.Bool, constant.Type);
+        Assert.Equal(expected ? 1L : 0L, constant.Value);
+        Assert.Equal(expression.Length, constant.Span.Length);
+    }
+
+    [Theory]
+    [InlineData("int32(1) == int32(1)", true)]
+    [InlineData("uint64.MaxValue >= uint64(0)", true)]
+    [InlineData("char16(1) < char16(0)", false)]
+    [InlineData("true != true", false)]
+    public void NoThrowRequireKeepsBooleanLiteralFailurePolicy(string comparison, bool expected)
+    {
+        ArgumentNullException.ThrowIfNull(comparison);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            $"[NoThrow] void Check() {{ require {comparison}; }}"));
+        Assert.Equal(!expected, compilation.HasErrors);
+        if (expected)
+        {
+            var function = Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Functions);
+            var requirement = Assert.IsType<BoundRequire>(function.Body.Statements[0]);
+            Assert.Equal(1L, Assert.IsType<BoundConstant>(requirement.Condition).Value);
+        }
+        else
+        {
+            Assert.Null(compilation.Program);
+            Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3017");
+        }
+    }
+
+    [Theory]
+    [InlineData("bool Compare(int32 value) { return value == 42; }")]
+    [InlineData("[NoThrow] bool Compare() { return Read() == 42; } [NoThrow] int32 Read() { return 42; }")]
+    [InlineData("bool Compare() { return int32.MaxValue + 1 == int32(0); }")]
+    public void UnknownOrFailingComparisonsRetainExecutableOperands(string source)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        var function = Assert.Single(program.Functions, static function => function.Name == "Compare");
+        var returned = Assert.IsType<BoundReturn>(Assert.Single(function.Body.Statements));
+        var comparison = Assert.IsType<BoundBinary>(returned.Value);
+        Assert.IsNotType<BoundConstant>(comparison.Left);
+    }
+
+    [Theory]
+    [InlineData("bool Compare() { return int32(1) == uint32(1); }", "TRM3007")]
+    [InlineData("bool Compare() { return char16(1) < int32(2); }", "TRM3007")]
+    [InlineData("bool Compare() { return true < false; }", "TRM3007")]
+    [InlineData("bool Compare() { var value = 1 == 2; return value; }", "TRM3007")]
+    public void FoldingDoesNotRepairInvalidComparisons(string source, string code)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.Null(compilation.Program);
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
+    }
+
+    [Theory]
+    [InlineData("[NoThrow] int32 Check() { if (int32(1) == int32(1)) { return 42; } return 1 / 0; }", "TRM3017")]
+    [InlineData("int32 Check() { if (int32(1) != int32(1)) { return Missing(); } return 42; }", "TRM3011")]
+    public void UnreachableComparisonBranchesRetainNormalChecks(string source, string code)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.Null(compilation.Program);
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
+    }
+
+    [Theory]
+    [InlineData("false")]
+    [InlineData("int32(1) != int32(1)")]
+    public void FoldedFalseConditionDoesNotInitializeUnreachedOutputs(string condition)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            $"bool Try(out int32 value) {{ return false; }} "
+            + $"int32 Main() {{ if ({condition} && Try(out var output)) {{ }} return output; }}"));
+        Assert.Null(compilation.Program);
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
+    }
+
     [Theory]
     [InlineData("int32 F(int32 value) { return value + 1; }")]
     [InlineData("int32 F(int32 value) { return value - 1; }")]

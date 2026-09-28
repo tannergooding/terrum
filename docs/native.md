@@ -479,6 +479,13 @@ opaque, including a call multiplied by zero. Folding does not provide missing
 literal context, change operator binding, or infer a callee's effect contract.
 It runs in every build and does not change semantic formats or native profiles.
 
+Matching constant integer/code-unit comparisons and boolean equality also
+fold into boolean constants. For example, `[NoThrow] void Check() {
+require int32(1) == int32(1); }` satisfies the existing requirement proof.
+False comparisons retain requirement failure, and unknown or failing operands
+remain executable. Folding does not remove the ordinary conservative checks
+on unreachable source or authorize access to uninitialized outputs.
+
 The proof uses the exact immutable host-buffer grant
 and its element type/read-write capability; it does not authorize unchecked
 pointers or treat fail-fast as NoThrow. A `require` needs a

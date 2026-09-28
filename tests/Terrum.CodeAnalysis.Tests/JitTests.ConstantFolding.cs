@@ -27,10 +27,31 @@ public sealed partial class JitTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task FoldedConstantComparisonsAgreeAcrossAotAndJitAsync(bool checkedFailures)
+    {
+        const string Source = """
+            [NoThrow] int32 Check() {
+                require uint64.MaxValue > uint64(int64.MaxValue);
+                require char16(65535) >= char16(65535);
+                if (uint32.MaxValue < uint32(0)) { return 0; }
+                return 42;
+            }
+            int32 Main() { return Check(); }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
+    }
+
+    [Theory]
     [InlineData("int32 Main() { return (int32.MaxValue + 1) - 1; }", unchecked((int)0xE0540001))]
     [InlineData("int32 Main() { return (42 / 0) * 0; }", unchecked((int)0xE0540002))]
     [InlineData("int32 Main() { return int32(uint32.MaxValue); }", unchecked((int)0xE0540001))]
     [InlineData("int32 Main() { return 0 * Fail(); } int32 Fail() { require false; return 42; }", unchecked((int)0xE0540003))]
+    [InlineData("int32 Main() { require uint64.MaxValue < uint64(0); return 0; }", unchecked((int)0xE0540003))]
+    [InlineData("int32 Main() { require int32.MaxValue + 1 == int32(0); return 0; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { require Fail() == int32(0); return 0; } int32 Fail() { require false; return 0; }", unchecked((int)0xE0540003))]
     public Task UnsafeScalarExpressionsStillFailInOrderAcrossAotAndJitAsync(string source, int failure) =>
         AssertFailFastExecutionAsync(source, failure);
 
@@ -39,6 +60,9 @@ public sealed partial class JitTests
     [InlineData("int32 Main() { unsafe { try { return (42 / 0) * 0; } catch { return 42; } } }")]
     [InlineData("int32 Main() { unsafe { try { return int32(uint32.MaxValue); } catch { return 42; } } }")]
     [InlineData("int32 Main() { unsafe { try { return 0 * Fail(); } catch { return 42; } } } int32 Fail() { require false; return 0; }")]
+    [InlineData("int32 Main() { unsafe { try { require uint64.MaxValue < uint64(0); } catch { return 42; } } return 0; }")]
+    [InlineData("int32 Main() { unsafe { try { require int32.MaxValue + 1 == int32(0); } catch { return 42; } } return 0; }")]
+    [InlineData("int32 Main() { unsafe { try { require Fail() == int32(0); } catch { return 42; } } return 0; } int32 Fail() { require false; return 0; }")]
     public Task UnsafeScalarExpressionsStayCatchableAcrossAotAndJitAsync(string source) =>
         AssertCheckedExecutionAsync(source, 42);
 }

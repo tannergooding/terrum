@@ -20,8 +20,12 @@ public sealed partial class GenericControlFlowModuleTests
     {
         const string Original = "public int32 Read() { return 40; }";
         const string Replacement = """
-            [NoThrow] int32 Secret() { return int32(uint32(6 * 7)); }
-            public int32 Read() { return Secret(); }
+            [NoThrow] bool Condition() { return uint64.MaxValue > uint64(int64.MaxValue); }
+            [NoThrow] int32 Secret() {
+                require uint64.MaxValue > uint64(int64.MaxValue);
+                return int32(uint32(6 * 7));
+            }
+            public int32 Read() { if (Condition()) { return Secret(); } return 0; }
             """;
         const string Consumer = "int32 Main() { return Read(); }";
         var originalProgram = Compile(Original, policy);
@@ -38,8 +42,13 @@ public sealed partial class GenericControlFlowModuleTests
             ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var linked = ModuleCompiler.Link(consumer, replacement);
+        var condition = Assert.Single(linked.Functions, function => function.Name == "$producer.Condition");
+        var conditionResult = Assert.IsType<BoundReturn>(Assert.Single(condition.Body.Statements));
+        Assert.Equal(1L, Assert.IsType<BoundConstant>(conditionResult.Value).Value);
         var secret = Assert.Single(linked.Functions, function => function.Name == "$producer.Secret");
-        var result = Assert.IsType<BoundReturn>(Assert.Single(secret.Body.Statements));
+        var requirement = Assert.IsType<BoundRequire>(secret.Body.Statements[0]);
+        Assert.Equal(1L, Assert.IsType<BoundConstant>(requirement.Condition).Value);
+        var result = Assert.IsType<BoundReturn>(secret.Body.Statements[1]);
         Assert.Equal(42L, Assert.IsType<BoundConstant>(result.Value).Value);
         Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
         Assert.Equal(42, NativeJit.Execute(linked, policy));
