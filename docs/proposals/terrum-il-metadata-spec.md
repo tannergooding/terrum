@@ -71,9 +71,11 @@ binary representation and validation; it does not redefine their rules.
 
 `TRRM` is the format identifier; there is no separate `LMOD` family. Its four
 ASCII signature bytes are `54 52 52 4D`. The wire fields for encoding revision
-are assigned **provisionally** below as format `(0, 2)` for this compact
+are assigned **provisionally** below as format `(0, 3)` for this compact
 candidate only. This is not semantic artifact revision 1, language version
-0.2, or a release label. Its initial reader accepts that exact pair; future
+0.3, or a release label. The earlier `(0, 2)` working draft used LEB128
+body operands; it is incompatible and not a supported prior wire format.
+A reader of this candidate accepts the `(0, 3)` pair only; future
 revision and feature-negotiation policy remain open. Target ABI/profile
 requirements remain separate from source and artifact revisions. Pre-v1
 format changes may be incompatible; this proposal does not promise a
@@ -105,7 +107,7 @@ Resource identity, resolution, integrity and limits remain schema decisions.
 |---:|---|---:|---|
 | 0 | Magic | 4 bytes | ASCII `TRRM` |
 | 4 | Format major | `u16` | `0` in this candidate |
-| 6 | Format minor | `u16` | `2` in this candidate |
+| 6 | Format minor | `u16` | `3` in this candidate |
 | 8 | Header length | `u32` | `32` for this candidate layout |
 | 12 | Directory entry count | `u32` | Number of present sections, at most 22 for the assigned registry |
 | 16 | Total artifact length | `u64` | Exact byte length of the supplied `TRRM` slice |
@@ -126,7 +128,7 @@ optional flag. Empty tables are omitted rather than encoded as empty entries.
 An unknown section's optional bit is
 not permission to ignore it without a nonsemantic registry entry. The entry
 does not add a minimum-reader-version field. This candidate rejects any
-header format pair other than `(0, 2)`; a different reader compatibility
+header format pair other than `(0, 3)`; a different reader compatibility
 policy requires a format revision, not a silent interpretation of minor
 versions. A separate minimum-reader field remains an alternative for review.
 
@@ -213,7 +215,7 @@ There are no pointer-sized fields or implicit string terminators.
 | `0x7F00` | SourceMap | Optional nonsemantic body-to-source mapping |
 
 `Module` is always present with exactly one row. Other known tables are absent
-when empty, not encoded as empty directory entries. In format `(0, 2)`, the
+when empty, not encoded as empty directory entries. In format `(0, 3)`, the
 Feature table is absent, and Module's feature range is `(0, 0)`; later
 features require a new explicitly understood format. Unknown
 section kinds are not self-declared safe to skip. The numeric gaps are
@@ -269,7 +271,7 @@ SourceFile 8, and SourceMap 24. String, Blob, TypeSpec, Contract and Body
 use offset indexes. A consumer rejects an incorrect stride or an unconsumed
 field, rather than guessing a trailing extension. Empty namespace strings
 are allowed; declaration names, export keys and SourceFile paths are not
-empty. SourceFile requires `digestBlob=0` in `(0, 2)` because no digest
+empty. SourceFile requires `digestBlob=0` in `(0, 3)` because no digest
 algorithm is assigned.
 
 `Module.identityBlob` and `ModuleRef.producerIdentityBlob` are opaque nonempty
@@ -282,7 +284,7 @@ algorithm. `runtimePolicy` candidate values
 are `0` fail-fast and `1` checked exceptions; `targetRequirement` values are
 `0` portable semantic (no native assumption) and `1` Windows x64 native.
 Other targets and nonzero module flags still need assignments and reject
-in `(0, 2)`. The entry method, if present, is a local
+in `(0, 3)`. The entry method, if present, is a local
 MethodDef row. Imports identify **one** selected module and key; their expected
 local TypeDef, MethodDef or PropertyDef (including its referenced signature,
 layout and contracts) is the complete consumer-side contract. The expected definition has
@@ -557,7 +559,7 @@ following byte-level contracts:
 
 | Surface | Not yet specified |
 |---|---|
-| Encoding and revisions | Adoption of candidate widths, future version/feature policy and reader compatibility rules. `(0, 2)` currently accepts only its registered semantic forms. |
+| Encoding and revisions | Adoption of candidate widths, future version/feature policy and reader compatibility rules. `(0, 3)` currently accepts only its registered semantic forms. |
 | Declarations | Resource references, generic/witness exportability, type/field/layout flags, richer qualifier/contract clauses and their validation. Module identity and export-key equality are specified; assigning a stable key to a source declaration is a writer policy. |
 | Executable bodies | Beyond the [narrow executable subset and other assigned decode shapes](terrum-il-instruction-set.md#executable-subset-versus-assigned-decode-shapes): output places, exceptional handlers/cleanup, loans, roots, witness bindings and their precise verifier rules. |
 | Limits | Per-record and per-artifact sizes, nesting and work budgets, allocation limits and canonical encoding requirements. |
