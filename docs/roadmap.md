@@ -150,6 +150,16 @@ Existing implemented compatibility behavior and explicit migration
 requirements remain unchanged. No pre-v1 stability level is promised; any
 stability declaration is deferred until closer to v1.
 
+Substantial compiler, runtime, and library increments may proceed without
+waiting for final review of the grammar, `TRRM` metadata, or core-library
+companion drafts. Where an increment needs specifics, use their concrete
+working designs provisionally and mark implementation-dependent choices in
+the relevant design and implementation-status documentation; retrospective
+correction remains possible before v1. This is not blanket adoption of every
+proposal, an implementation-support claim, or a stability promise. Keep work
+within the four current roadmap areas, use coherent validated increments and
+local commits, and leave Later capabilities excluded.
+
 The intended IL is a compact binary representation of the language and
 ecosystem, carrying type information, metadata/contracts and operations. It is
 usable as compilation input for metadata binding, reflection and tooling, and
