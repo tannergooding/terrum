@@ -106,7 +106,19 @@ public static bool TryGetStringNamespaceRowByteLength(StringLiteral literal, int
 public static bool TryCompareStringNames(StringLiteral left, StringLiteral right,
     init ref<bool> equal)
 {
-    if (!IsValidStringName(left) || !IsValidStringName(right))
+    return TryCompareStringText(left, right, false, init equal);
+}
+
+public static bool TryCompareStringNamespaces(StringLiteral left, StringLiteral right,
+    init ref<bool> equal)
+{
+    return TryCompareStringText(left, right, true, init equal);
+}
+
+bool TryCompareStringText(StringLiteral left, StringLiteral right, bool allowEmpty,
+    init ref<bool> equal)
+{
+    if (!IsValidStringText(left, allowEmpty) || !IsValidStringText(right, allowEmpty))
     {
         return false;
     }
