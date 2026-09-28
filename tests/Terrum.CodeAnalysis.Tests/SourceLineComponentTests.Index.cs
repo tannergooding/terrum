@@ -47,7 +47,18 @@ public sealed partial class SourceLineComponentTests
             namespace Terrum.CodeAnalysis;
             int32 CheckIndex() {
                 require SourceLineIndex.TryCreate(out var index);
+                require SourceLineIndex.TryCreateInit(init var initialized);
                 if (index.GetLineCount() != Host.LineCount[0]) { return 1; }
+                if (initialized.GetLineCount() != index.GetLineCount()) { return 11; }
+                if (initialized.TryGetPositionInit(-1, init var initLine, init var initCharacter)
+                    || initialized.TryGetOffsetInit(-1, 0, init var initOffset)
+                    || initialized.TryGetLineExtentInit(-1, init var initExtent)) { return 12; }
+                require initialized.TryGetPositionInit(Host.Source.Length, init initLine, init initCharacter);
+                require initialized.TryGetOffsetInit(initLine, initCharacter, init initOffset);
+                require initialized.TryGetLineExtentInit(initLine, init initExtent);
+                if (initOffset != Host.Source.Length || initLine != Host.LineCount[0] - 1
+                    || initExtent.Start != Host.ExpectedExtents[initLine * 2]
+                    || initExtent.Length != Host.ExpectedExtents[initLine * 2 + 1]) { return 13; }
                 if (index.TryGetPosition(-1, out var beforeLine, out var beforeCharacter)) { return 2; }
                 if (index.TryGetPosition(Host.Source.Length + 1, out var afterLine, out var afterCharacter)) { return 3; }
                 if (index.TryGetOffset(-1, 0, out var beforeOffset)

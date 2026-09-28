@@ -411,7 +411,10 @@ dense single-unit breaks need no second source scan.
 It also returns a line's full UTF-16 extent (including its break) by ordinal
 from adjacent starts without rereading source; the streaming candidate walks
 line ranges to provide the same extent without owning a table. Invalid
-ordinals leave the conditional output vacant.
+ordinals leave the conditional output vacant. Vacancy-only `init ref`
+construction and position, offset and extent lookups reuse the original
+`out` paths without changing their contracts. Invalid requests publish no
+value, while a later valid request may fill the same vacant destination.
 General borrowed references and stored loans remain unsupported. The accepted
 `ref<T>`/`ptr<T>`/`box<T>`/`val<T>` forms, general `write` views, `own<T>` and
 general `init ref<T>` invocation still requires its representation,
