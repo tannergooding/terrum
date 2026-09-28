@@ -227,13 +227,13 @@ writers and verifier cases rather than relying only on same-version round trips.
 
 `TRRM` is the selected identifier for the evolving Terrum semantic-IL/module
 format; no separate `LMOD` family is planned. The repository's current
-semantic-module bytes (highest implemented revision 32) are evidence for the
+semantic-module bytes (highest implemented revision 35) are evidence for the
 working specification, not an adopted final layout. Reader support for
-historical revisions 10–32 and feature-dependent writer selection are temporary
+historical revisions 10–35 and feature-dependent writer selection are temporary
 repository implementation facts, scheduled for consolidation before v1; they
-do not create an external production compatibility obligation. The 0.32 label
-is descriptive of the current repository state only, not an on-wire
-major/minor scheme or a 1.0 release decision. This work does not require a new
+do not create an external production compatibility obligation. The selected
+revision is a semantic artifact requirement, not an on-wire major/minor scheme
+or a 1.0 release decision. This work does not require a new
 backend or public managed ABI.
 Terrum makes no published frozen managed-machine ABI promise. Dynamically
 composed precompiled code must be validated against dependency/compiler/runtime

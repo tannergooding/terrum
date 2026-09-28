@@ -10,6 +10,9 @@ illustrative and may change before v1.
 - [IL and metadata proposal](terrum-il-metadata-spec.md) explores a proposed
   representation and metadata contract; implementation history and support
   are documented in [implementation](../implementation.md).
+- [Coded instruction proposal](terrum-il-instruction-set.md) assigns an
+  initial Body encoding and operation subset within that proposed format;
+  it does not describe the current module writer.
 - [Core-library proposal](terrum-core-library-reference.md) records candidate
   declarations, dependency layers and unresolved API contracts.
 
