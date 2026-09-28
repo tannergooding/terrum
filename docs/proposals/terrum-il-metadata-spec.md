@@ -22,7 +22,7 @@ container.
 | Section directory (`directory`) | The fixed-width index following the header, containing one entry per present section kind, not the sections' bytes. Each entry records its kind, flags, record count, artifact-relative offset and byte length; the entry is not part of the section it indexes. |
 | Section | One contiguous artifact-relative byte extent identified by a directory entry and containing a metadata table or body stream. An absent table has no directory entry or section. |
 | Row | A fixed-stride payload in a fixed table, or an extent in a variable table's offset-indexed data. Rows have one-based indexes; absent table means zero rows. |
-| Local definition ID (`DefId`) | A `u32` token: high byte is a registered definition-table kind, low 24 bits are its one-based row. Zero is the only null token. Its value is not a stable cross-artifact identity. |
+| Local definition ID (`DefId`) | A `u32` reference word: high byte is a registered definition-table kind, low 24 bits are its one-based row. A kind byte of zero selects the table fixed by a typed field's schema; polymorphic definition fields require an explicit registered kind. Zero is the only null word. Its value is not a stable cross-artifact identity. |
 | Producer identity and export key | The selected dependency and published declaration identity used together to resolve an import, whether its producer is packed here or in another artifact. Equality of decoded text is specified below; source-side key assignment and authentication are separate. |
 | Declared contract | Published type, callable, ownership/lifetime, access, effect and requirement facts against which consumers bind and check use. A contract is not inferred from a dependency body or source spelling. |
 | Body | Typed semantic operations and control flow for an executable declaration, distinct from declaration metadata. |
@@ -223,16 +223,22 @@ offsets. A reader still validates every offset and extent before use; the
 index avoids rescanning preceding rows for subsequent AOT, JIT, interpreter
 and tooling queries.
 
-A schema-typed table reference is a one-based `u32` row in the table named
-by its column, even when that column belongs to another table. Its high
-byte is zero and its row is in `1..0xFF_FFFF`; zero is allowed only where
-the column says `?`. `DefId` is a four-byte `u32` token:
-`(tableKind << 24) | row`, with `tableKind` the low byte of a registered
-definition table (TypeDef `0x13`, FieldDef `0x14`, MethodDef `0x16`,
-GenericParam `0x19`, PropertyDef `0x1E`). Its row has the same
-`1..0xFF_FFFF` limit; only the all-zero token is null where allowed.
-Other table kinds reject, including `0xFF`, which is reserved for a
-future required indirection encoding, not defined or accepted here.
+A table reference or `DefId` uses the same four-byte `u32` word:
+`(tableKind << 24) | row`, with row in `1..0xFF_FFFF`. In a schema-typed
+column such as `MethodDef.signature`, `tableKind=0` means the table named
+by that column (MethodSig here); it does **not** mean the containing
+table. This also applies to references across tables, such as
+`MethodDef.bodyRow`. A polymorphic `DefId` field such as
+`Export.localDefId` instead requires the explicit low byte of its target
+definition-table kind: TypeDef `0x13`, FieldDef `0x14`, MethodDef `0x16`,
+GenericParam `0x19` or PropertyDef `0x1E`, further restricted by the
+field's permitted target kinds. Thus typed MethodDef row 1 is
+`0x0000_0001`, whereas explicit MethodDef row 1 is `0x1600_0001`;
+neither loses a row bit. Nonzero explicit kinds in typed columns and
+kind zero in polymorphic columns reject. Only the all-zero word is null,
+and only in columns marked `?`. Other kinds reject, including `0xFF`,
+which is reserved for a future required indirection encoding, not
+defined or accepted here.
 A contiguous range is `u32 firstRow, u32 count`; its empty encoding is
 `(0, 0)`, otherwise `firstRow` is nonzero, has a zero high byte, and the
 checked last row is at most `0xFF_FFFF` and belongs to that table.
