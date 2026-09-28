@@ -7,13 +7,25 @@
 > [implementation](implementation.md) and the [native profile](native.md);
 > concurrency semantics are defined by the [memory model](memory-model.md).
 
-## Status and review boundary
+## Definitions
 
-| Status | Covered here |
+| Term | Meaning |
 |---|---|
-| Accepted design | Primitive and eligible-wrapper access guarantees; no aggregate atomicity inferred from size; opaque `Auto` layout with private fields by default; declaration-order `Sequential`, offset-zero `Union` requiring `Blittable`, and one-field carrier `Transparent`; fixed target-specific interop under an explicit `Blittable` commitment, not layout kind alone; separation of layout, call classification, atomicity, validity, ownership and sharing; preservation of published boundaries |
-| Implemented bounded profile | The existing Windows x64 compact-value and module ABIs, including syntax-24 one-field Copy `Transparent` wrappers over the six supported scalar carriers with semantic v35 intent. Provisional `[Layout(Sequential)]` checks private Copy declarations against the existing natural 1–16-byte layout; it does not freeze an independently replaceable representation or add a wire field. Their exact current contracts remain authoritative; they are not superseded by an unspecified future profile |
-| Specification and implementation work | Recording chosen target rules, checking layouts and metadata, validating compatible replacement, and testing lowering against accepted guarantees; see [profile work](#profile-specification-and-implementation-work) |
+| `Blittable` | A per-target-profile commitment that fixes a type's size, alignment and field offsets, and requires every field to be transitively `Blittable`. It is a fixed, directly-interoperable representation promise, not selected compiler syntax or a universal byte encoding. |
+| `Transparent` | A layout commitment that a type has exactly one field, with that field's representation and carrier-equivalent argument/result classification. It inherits the carrier ABI and does not accept custom packing or aggregate alignment. |
+| `Auto` | The default layout: fields are private, external access goes through properties or methods, and the declaration carries no `Blittable`, packing or aggregate-alignment commitment. |
+| `Sequential` | A layout that places fields at offsets following declaration order, subject to the target's natural alignment, packing and aggregate-alignment rules. |
+| `Union` | A layout that places every field at offset zero, requiring the `Blittable` commitment. It permits overlapping storage; it does not by itself provide safe typed access to inactive alternatives. |
+| Independently replaceable boundary | A crossing point between separately compiled or separately versioned artifacts, where the physical contract must be explicit and versioned rather than an internal implementation detail. |
+| Private implementation detail | A representation or calling-convention choice visible only where the compiler controls, and can regenerate, both sides of a crossing. |
+
+## Scope
+
+Per-target size/alignment/representation tables, procedure-call
+classification and compiler conformance are [open questions](#open-questions);
+current compiler support for any part of this contract is tracked in
+[implementation](implementation.md) and the [native profile](native.md), not
+restated here.
 
 Unimplemented does not mean unapproved. Completing a table from an already
 selected target contract does not reopen the language policy; choosing a new
@@ -21,13 +33,11 @@ observable representation or independently replaceable public boundary does.
 The cross-document [pending-decision index](language-library-review.md)
 tracks those review items without making the accepted core provisional.
 
-An explicit `Blittable` commitment freezes its per-profile size, alignment and
-field offsets. `Transparent` instead promises exactly one field with the
-carrier representation and carrier-equivalent argument/result classification;
-changes that violate this contract are breaking, but it does not freeze
-arbitrary layout. These promises are not universal byte encodings. Any future checked source
-enforcement needs an explicit compatibility migration; it does not claim that
-the current compiler rejects ordinary structs or retroactively revoke existing
+A `Blittable` or `Transparent` commitment is a compatibility promise: changes
+that violate it are breaking, but neither promise a universal byte encoding
+or freeze layout kinds that were not committed. Any future checked source
+enforcement of these commitments needs an explicit compatibility migration;
+it does not retroactively reject ordinary declarations or revoke existing
 source/artifact contracts.
 
 ## Contract layers
@@ -139,15 +149,11 @@ where producer and consumer remain layout-coupled through compilation,
 rebuild, or invalidation. JIT versus AOT labels alone do not determine that
 coupling.
 
-The provisional compiler spelling `[Layout(Sequential)]` admits nonpublic
-compact Copy structs with private fields, including nested eligible Copy
-values. It checks the existing declaration-order natural alignment and
-16-byte size limit; the in-memory semantic IR records the selection, but
-private module serialization retains the existing physical fields and wire
-version, not the annotation. Its current physical agreement with an
-independent Windows x64 C fixture is not a `Blittable` or stable public ABI
-promise. Public structs/fields, unique owners, packing and aggregate-alignment
-controls remain unsupported for this annotation.
+A `Sequential` annotation on a nonpublic compact struct is a checked subset of
+this contract, not a `Blittable` or stable public ABI promise: it does not by
+itself cover public fields, unique owners, or packing/aggregate-alignment
+controls. Current compiler support for this annotation is tracked in
+[implementation](implementation.md).
 
 ### Packing and aggregate alignment
 
@@ -293,7 +299,7 @@ caller's contract rather than reinterpret it. The current implementation does
 not support public managed-handle exports; no new export surface or stable
 managed ABI is implied here.
 
-## Remaining decisions requiring review
+## Open questions
 
 No unresolved policy choice remains in the accepted layout model. Keep
 unsupported forms unsupported until their specifications and implementations

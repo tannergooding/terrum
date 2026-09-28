@@ -1050,7 +1050,7 @@ contracts when introduced; notification alone neither stores nor publishes data.
 The policy choices above are accepted. The work below makes them precise and
 implements them; it is not a list of open policy alternatives.
 This acceptance does not settle the separate
-[layout/ABI review items](data-layout-and-abi.md#remaining-decisions-requiring-review)
+[layout/ABI open questions](data-layout-and-abi.md#open-questions)
 or [call-contract recommendations](language-contract-review.md#6-approval-and-conformance-checklist).
 
 | Area | Remaining work |

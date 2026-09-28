@@ -5,7 +5,22 @@ accepted syntax or implemented APIs. The spelling of family declarations,
 conditional members, extensions and witnesses remains open; participation
 itself requires an explicit family opt-in with declared projections and
 constraints. The local pseudo-code below labels relationships rather than
-specifying Terrum grammar.
+specifying Terrum grammar. Current compiler support for any part of this
+document is tracked in [implementation](implementation.md), not restated here.
+
+## Definitions
+
+| Term | Meaning |
+|---|---|
+| Family | A declared, explicitly opted-in set of related types (its members), together with members' common operations and any distinguished specialization. A shared name or generic arity does not by itself establish membership. |
+| Member | One of the concrete types that belongs to a family, checked against the family's declared representation, validity, copying/moving, initialization/cleanup, tracing/write-barrier, access/backing-dependency and lifetime obligations. |
+| Nominal witness | A type's explicit, checked declaration that it implements a behavioral contract (an interface). Conformance is never inferred from matching members, matching representation, or extension-member lookup alone. |
+| Associated type / relation | A named type member of an interface witness (for example `IInteger<TSelf>.Wider`), bound to a concrete type by the implementing witness and resolved through that witness, not inferred backward from a result. |
+| Projection | A checked, explicitly declared conversion between related types (for example an erased family member to/from a typed member, or an original type to an adapter) that preserves validity, representation, access, ownership and lifetime. Equal representation bits do not by themselves establish a projection. |
+| Erasure | A specific, declared projection that discards static type information (for example a typed `TextSpan<char8>` to `TextSpan<void>`) while forwarding the member's backing, access and lifetime dependencies unchanged. |
+| Adapter | An explicitly declared type that carries another type's representation and implements additional behavioral contracts without changing the original type's own witness set. |
+
+## Generic qualification and substitution
 
 Family substitution preserves the complete qualification chosen by the caller.
 A concrete default-readonly type does not erase a caller-supplied `write`
@@ -178,3 +193,20 @@ where TVector : [FixedSimdMember<float32, TMask>],
 The desired user-level constraint is “any fixed vector of `float32`”: its concrete width and matching mask remain statically known for each instantiation. Whether that is written with an associated mask, an explicit `TMask` parameter or another checked family form is open; the displayed spelling is not Terrum grammar.
 
 `simd<T>` remains a separate genuinely hardware-scalable, initially sizeless type with target-specific vector length, mask and ABI. It is not an alias for a convenient fixed width or an automatic member of the fixed-vector family. Scalable-value storage, suspension and calling restrictions must be validated for each target.
+
+## Open questions
+
+The rules above are accepted; the following remain unresolved design work,
+not settled contracts:
+
+- Exact declaration syntax and metadata for family opt-in, conditional
+  members, extensions, associated-type binding and adapter/projection
+  declarations.
+- Representation-aware mutation and its protocol constraints for generic
+  `write T`.
+- Final literal grammar and target-typing rules for character fragments.
+- Exact spelling of a bound-receiver marker, and of foreign-calling-convention
+  attribute names/grammar.
+- Family/associated-member grammar for fixed-vector registration, including
+  whether an "any fixed vector of `float32`" constraint is expressed with an
+  associated mask, an explicit mask type parameter, or another checked form.

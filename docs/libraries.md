@@ -1,6 +1,25 @@
 # Standard-library design
 
-This is the proposed Terrum library contract, not the installed .NET library or an implemented Terrum runtime. The `.api.terrum` inventories in [`library`](../library) and the [numerics/tensors example](../samples/design/numerics-and-tensors.terrum) are **DESIGN ONLY**. The current native integer/bool profile does not bind these library declarations or execute these examples ([implementation staging](implementation.md)). [Language](language.md) defines the broader value/effect rules; [lifetimes](lifetimes.md) defines the access and dependency model. In signatures, `mut` grants place rebinding or a writable receiver, while `write` grants reference/view access; the two are not interchangeable. Generic parameters preserve their full caller qualification, and mutable storage is invariant.
+This is the proposed Terrum library contract, not the installed .NET library or an implemented Terrum runtime. The `.api.terrum` inventories in [`library`](../library) and the [numerics/tensors example](../samples/design/numerics-and-tensors.terrum) are **DESIGN ONLY**. Current compiler support for any part of this contract is tracked in [implementation](implementation.md), not restated here. [Language](language.md) defines the broader value/effect rules; [lifetimes](lifetimes.md) defines the access and dependency model. In signatures, `mut` grants place rebinding or a writable receiver, while `write` grants reference/view access; the two are not interchangeable. Generic parameters preserve their full caller qualification, and mutable storage is invariant.
+
+## Definitions
+
+| Term | Meaning |
+|---|---|
+| Dependency layer (Core/Foundation/Application/Platform leaves) | A cumulative package-boundary grouping, described in [dependency layers](#dependency-layers-and-package-boundaries): each layer may depend only on the layers listed before it and its declared substrate. |
+| Storage-and-release lease | A per-allocation handle that grants access to allocated storage and the obligation to release it; distinct from an owned allocator context. |
+| Allocator context | A retained handle to an allocator, used to obtain leases; owned by a container such as a growing vector, not per-allocation. |
+| Family, member, witness | Defined in [type families](type-families.md); a family is a declared set of related types (members), and conformance to a behavioral contract is established by an explicit witness. |
+| `func` / `fnptr` | `func<Args..., R>` is a lifetime-aware, single-cast callable retaining its capture dependencies; `fnptr<Args..., R>` is a raw target-defined code pointer with no retained environment. |
+
+## Scope
+
+This document is accepted library design direction, not an implemented
+library or a claim about which signatures currently compile. Where a passage
+references a specific sample or self-hosted source file, that file
+illustrates the accepted contract; it is not evidence of general compiler
+support. Current compiler and runtime support is tracked in
+[implementation](implementation.md).
 
 ## Dependency layers and package boundaries
 
@@ -37,10 +56,10 @@ independently of linkage choice. Pinning an implementation does not expand
 `internal`/`private` access. Contract-bound replacement and AOT require actual
 metadata/binder support, not merely equal method names.
 
-The validated semantic-v24 source-class/`ManagedNode` access slice and
-semantic-v25/v26 named and nested mutable non-owning struct-receiver contracts do not implement
-these general library layers: `List<T>`, `LinkedList<T>`, generic views/builders
-and the API inventories below remain design contracts.
+These general library layers — `List<T>`, `LinkedList<T>`, generic
+views/builders and the API inventories below — remain design contracts.
+Current compiler support for any subset of them is tracked in
+[implementation](implementation.md).
 
 The API inventories deliberately mix signatures with selected algorithm bodies. Unspecified bodies do not imply native exports or implementations. `[Copy]`, `[Sized]`, `[ManagedStorable]`, `[SimdElement]` and `[TextCodeUnit]` denote checked capability predicates rather than arbitrary user attributes. The [Foundation ownership inventory](../library/foundation.api.terrum) distinguishes a per-allocation **storage-and-release lease** from an owned **allocator context** retained by a growing vector. `Buffer<T>.Adopt` takes an existing allocation, validating byte extent, actual element alignment and required tracing capabilities; it does not create storage from a release token. Initial `Vector<T>` accepts `[Copy]` elements: `Reserve` obtains a new lease from its retained context, copies the initialized prefix, cleans partial copies on failure and publishes replacement storage only after success. The old allocation cannot be replaced while views borrow it. Affine/borrowed element storage, initialized prefixes, allocator-provider selection, write-guard enforcement and native GC barriers still need complete contracts. Additional proposed signatures and associated-family notation require language design and validation before they can become compiler acceptance fixtures.
 
@@ -68,29 +87,31 @@ user equality witness. Unaligned value access does not promise an atomic snapsho
 
 ## Scalar mathematics, keys and conversion
 
-The executable [static-protocol sample](../samples/native/static-protocol-quadratic.terrum)
-now exercises a bounded part of this direction: source-defined addition and
-multiplication protocols, explicit nominal Copy conformance and one constrained
-algorithm specialized for two wrappers. The [integer-power sample](../samples/native/static-protocol-power.terrum)
-extends this to initialized generic locals, scalar loop control and a constrained
-square helper, with an explicit identity argument rather than implicit
-construction of a generic literal or default value.
-The [binary-protocol sample](../samples/native/static-protocol-binary.terrum)
-adds homogeneous subtraction, division, remainder and bitwise `&`, `|`, `^`
-witnesses. Its arithmetic and bit-selection helpers are separately constrained;
-the interfaces are source declarations, not an implicitly supplied numeric
-hierarchy. Comparisons, shifts, unary and heterogeneous operators remain outside
-this executable protocol subset.
-Helpers require only their declared constraints: the
-[Copy selection candidate](../self-host/CopyAlgorithms.terrum) needs no operator
-witness and composes over nested token/range values. Calls cannot acquire
-undeclared protocols from a concrete specialization or a callee's body.
-Scalar-returning and conditional-output helpers retain the ordinary signature
-and definite-initialization rules; invalid selections publish no value rather
-than a fabricated generic default.
-Templates and witnesses remain
-compilation-local; the [implementation limits](implementation.md) do not extend
-to these complete inventories, primitive numeric conformance, mixed-result
+Arithmetic and bit-selection witnesses are ordinary source-declared
+interfaces, not an implicitly supplied numeric hierarchy: a type conforms
+only by an explicit, checked witness declaration, and a generic algorithm may
+require only the operators its declared constraints name (for example,
+addition and multiplication, or separately, subtraction, division, remainder
+and bitwise `&`/`|`/`^`). Comparisons, shifts, unary and heterogeneous
+operators are likewise separate, independently declared constraints under
+this principle; declaring one never implies another. This is a design
+principle, not a claim that every one of these operator families is
+implemented: current compiler support for comparison and unary witnesses is
+bounded, while shift, heterogeneous-binary, increment/decrement and
+`true`/`false` protocols remain unimplemented — see
+[implementation](implementation.md#bounded-generic-functions) for the exact
+current boundary. A helper needing no operator witness may compose over
+nested values without one. Calls cannot acquire an undeclared protocol from a
+concrete specialization or from a callee's body. Scalar-returning and
+conditional-output helpers retain the ordinary signature and
+definite-initialization rules; an invalid selection publishes no value rather
+than a fabricated generic default. The current implementation deliberately
+keeps generic templates and their witness resolution compilation-local; that
+is a bounded-implementation characteristic tracked in
+[implementation](implementation.md#bounded-generic-functions), not a
+permanent library requirement, and does not foreclose a future public generic
+contract. Current compiler and sample coverage does not extend to the
+complete inventories below, primitive numeric conformance, mixed-result
 operators, families or generic collection algorithms.
 
 The granular `IAdditionOperators<TSelf, TOther, TResult>` and `IMultiplyOperators<...>` protocols in [numerics](../library/numerics.api.terrum) express an operand and a *possibly different* result. `IAdditiveIdentity<TSelf, TResult>` supplies an operation's zero. `IScalarNumber<TSelf>` composes selected closed scalar operations; IEEE classification/functions live on `IScalarIeee754<TSelf>`. A declared fixed-vector family checks its common operations and associated element/mask relationships; it can supply the same granular operator witnesses without requiring users to name an `ISimdVector` interface merely to abstract over widths. Granular interfaces remain useful across unrelated vector, complex and matrix types. A SIMD vector does **not** become a scalar number by providing `+` and `*`. The inventory is representative, not an implemented numeric surface.
@@ -219,14 +240,11 @@ Core `TensorPrimitives` operate over borrowed spans and caller destinations, not
 
 ## Collections, algorithms and application services
 
-The executed [managed token-chain candidate](../self-host/ManagedTokenChain.terrum)
-is a bounded consumer of source-defined classes and optional edges: it stores
-complete 12-byte Copy tokens with validated source ranges, preflights append
-mutations, tracks count/version and leaves collection explicit. It exposes no
-node handles or borrowed source storage. Copied results survive collection of
-the original links. This is not the generic `List<T>`/`LinkedList<T>` API below
-and does not implement their guards, builders, iterator invalidation or public
-module contracts.
+A self-hosted managed-node collection candidate exercises a bounded consumer
+of source-defined classes and optional edges as a design check; see
+[implementation](implementation.md) for its current scope. It is not the
+generic `List<T>`/`LinkedList<T>` API below and does not implement their
+guards, builders, iterator invalidation or public module contracts.
 
 Generic collections are the primary collection APIs, not one half of parallel
 generic and object-based hierarchies. Heterogeneous values use explicit
