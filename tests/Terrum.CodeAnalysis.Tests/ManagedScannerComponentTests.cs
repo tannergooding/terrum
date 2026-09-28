@@ -217,7 +217,7 @@ public sealed class ManagedScannerComponentTests
                 if (!cursor.TryRead(out var token) || token.Kind != 7) { return 2; }
                 require chain.TryCreateCursor(out var stale);
                 require chain.TryClear();
-                if (stale.TryRead(out var absent) || stale.IsCurrent) { return 3; }
+                if (stale.TryReadInit(init var absent) || stale.IsCurrent) { return 3; }
                 if (ManagedHeap.Collect() != 1) { return 4; }
                 if (cursor.TryRead(out var afterClear) || cursor.IsCurrent) { return 5; }
                 return 42;
