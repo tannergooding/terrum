@@ -1058,7 +1058,9 @@ a two-module Import/Export fixture, but does not interpret Blob contents or
 Body instructions. SourceMap rows check slots, spans and Body/SourceFile module
 association. A bounded SourceMap writer emits those slots, reuses SourceFile slots
 and rejects duplicate instruction locations; block/ordinal existence still
-requires instruction-aware verification.
+requires instruction-aware verification. A separate provisional artifact writer
+frames caller-supplied sections under the `(1, 0)` directory and checks that
+framing without changing the current semantic-module writer.
 Historical-revision readers and feature-dependent writer
 selection are temporary implementation support to remove before v1. That
 cleanup must update writers and fixtures together and reject unsupported
