@@ -572,7 +572,7 @@ TypeSpec form assignments and **entire** payload following `form, qualifiers`:
 
 | Form | Remaining bytes | Meaning |
 |---:|---|---|
-| `0x01` primitive | `u8 primitiveCode` | Built-in type; TypeSpec row is 3 bytes |
+| `0x01` primitive | `u8 primitiveCode` | Assigned atomic built-in type; TypeSpec row is 3 bytes in `(1, 0)` |
 | `0x02` in-artifact | `u32 typeDefRow` | Nominal TypeDef in this artifact, including a direct resolved definition from another packed module |
 | `0x03` imported | `u32 importRow` | Import owned by the using declaration's module whose expected definition is TypeDef |
 | `0x04` formal | `u32 genericParamRow` | Declared type parameter owned by the using declaration's module |
@@ -592,10 +592,35 @@ TypeArg rows for
 one constructed form are contiguous with ordinals `0..count-1`; arity,
 qualification and constraints are checked against the selected nominal
 declaration. Qualifier bit `0x01` denotes `write` where that type form permits
-it; other bits reject. Candidate primitive codes: `0x00 void`, `0x01 bool`,
-`0x02 char16`, `0x03 int32`, `0x04 uint32`, `0x05 int64`, `0x06 uint64`.
-Other primitives require explicit assignments and feature support, not a
-reader's private enum ordinals.
+it; other bits reject. The proposed atomic built-in code registry is:
+
+| Codes | Atomic types in increasing code order |
+|---|---|
+| `0x00` | `void` |
+| `0x01` | `bool` |
+| `0x02..0x05` | `char8`, `char16`, `char32`, `rune` |
+| `0x06..0x0A` | `int8`, `int16`, `int32`, `int64`, `int128` |
+| `0x0B..0x0F` | `uint8`, `uint16`, `uint32`, `uint64`, `uint128` |
+| `0x10..0x11` | `nint`, `nuint` |
+| `0x12..0x16` | `float16`, `bfloat16`, `float32`, `float64`, `float128` |
+| `0x17..0x19` | `decimal32`, `decimal64`, `decimal128` |
+
+Codes `0x1A..0x7F` are reserved for further atomic types; `0x80..0xFE`
+are reserved for built-in type-family constructors, not complete types
+without operands. `0xFF` is reserved as a possible extended-code escape,
+not a type or a currently decodable prefix. Reserved codes reject in
+`(1, 0)`; a future constructor assignment needs its operand/arity,
+qualification, representation and validation rules, not just a code.
+Fixed and scalable SIMD families and `Span<T>` may use that constructor
+range once their complete TypeSpec forms are defined. `ref<T>`, `ptr<T>`,
+`box<T>`, `val<T>` and `own<T>` already have distinct TypeSpec forms;
+`out` and `init ref` are Param passing modes, not primitive types.
+Do not encode these twice as constructor codes without a specified
+canonical representation. Assigning an atomic code identifies a type for
+structural reading; it does not make unsupported widths, floating/decimal
+operations or generic families executable in the narrow `(1, 0)` body
+profile. Neither the reserved ranges nor this proposal's pre-release
+assignments authorize private reader-enum ordinals.
 
 The low two bits (`flags & 0x03`) of every definition's `u32 flags` encode
 visibility: `0x00` private, `0x01` internal, `0x02` public; `0x03`
@@ -713,14 +738,14 @@ these are the relevant row references; row indexes are artifact-wide:
 | String 1 | `flags=0, unitCount=6, ASCII content=Answer, terminator=00, padding=00` (method name and export key) |
 | String 2 | `flags=0, unitCount=7, ASCII content=Example, terminator=00` (module identity) |
 | Module 1 | `identity=2, targetRequirement=1, runtimePolicy=0, entryMethod=1, moduleFlags=0, featureFirst=0, featureCount=0, moduleRefStart=1, typeDefStart=1, methodDefStart=1, sourceFileStart=1` |
-| TypeSpec 1 | `form=0x01, qualifiers=0, primitiveCode=0x03` (`int32`) |
+| TypeSpec 1 | `form=0x01, qualifiers=0, primitiveCode=0x08` (`int32`) |
 | MethodSig 1 | `resultTypeSpec=1, receiverTypeSpec=0, paramFirst=0, paramCount=0, genericFirst=0, genericCount=0` |
 | MethodDef 1 | `ownerTypeDef=0, name=1, signature=1, flags=2` (public), `contractFirst=0, contractCount=0, bodyRow=1` |
 | Export 1 | `localDefId=0x1600_0001, exportKey=1` |
 | Body 1 | `ownerMethod=1`, followed by the body bytes specified in the companion proposal |
 
 For example, the TypeSpec table with its single `int32` row is exactly
-`00 00 00 00 03 00 00 00 01 00 03`: two four-byte offsets followed by the
+`00 00 00 00 03 00 00 00 01 00 08`: two four-byte offsets followed by the
 three-byte row. Neither the Module row nor an export authorizes a caller to
 skip bounds and contract compatibility checks; semantic body auditing is
 governed by the consumer's trust policy.

@@ -337,11 +337,12 @@ object graph, machine register assignment, optimization tier or cache.
 `t` refers to a complete row in the metadata proposal's
 [TypeSpec table](terrum-il-metadata-spec.md#metadata-logical-tables-and-row-semantics-proposed),
 not to a byte-sized `PrimitiveType` embedded in an instruction.
-TypeSpec form `0x01` has one primitive code: `0x00 void`, `0x01 bool`,
-`0x02 char16`, `0x03 int32`, `0x04 uint32`, `0x05 int64`,
-`0x06 uint64`. Their logical bit widths are respectively none, 1, 16,
-32, 32, 64 and 64; `bool` has only values 0 and 1. `void` cannot
-define an `r` or be a block parameter. The four integer codes alone
+The narrow executable profile uses the metadata registry codes `0x00 void`,
+`0x01 bool`, `0x03 char16`, `0x08 int32`, `0x0D uint32`, `0x09 int64`,
+`0x0E uint64`. Their logical bit widths are respectively none, 1, 16,
+32, 32, 64 and 64; `bool` has only values 0 and 1. Other assigned atomic
+types can be decoded as metadata but are not executable in this profile.
+`void` cannot define an `r` or be a block parameter. The four integer codes alone
 participate in integer arithmetic; `char16` is not implicitly an integer.
 
 | TypeSpec form | Body-facing interpretation |
