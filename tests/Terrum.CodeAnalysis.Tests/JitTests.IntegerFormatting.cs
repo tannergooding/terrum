@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -89,13 +90,9 @@ public sealed partial class JitTests
     }
 
     [Theory]
+    [MemberData(nameof(EveryRadix))]
     [InlineData("0", 2, false)]
-    [InlineData("18446744073709551615", 2, false)]
-    [InlineData("18446744073709551615", 8, false)]
     [InlineData("0", 10, false)]
-    [InlineData("18446744073709551615", 10, false)]
-    [InlineData("18446744073709551615", 16, false)]
-    [InlineData("18446744073709551615", 36, false)]
     [InlineData("12345678901234567890", 3, false)]
     [InlineData("12345678901234567890", 17, false)]
     [InlineData("0", 36, true)]
@@ -103,6 +100,7 @@ public sealed partial class JitTests
     [InlineData("-9223372036854775808", 2, true)]
     [InlineData("-9223372036854775808", 10, true)]
     [InlineData("-9223372036854775808", 16, true)]
+    [InlineData("-1", 36, true)]
     [InlineData("-1234567890123456789", 35, true)]
     public async Task IntegerBaseFormattingUsesExactWorkspaceAcrossAotAndJitAsync(
         string value, int radix, bool signed)
@@ -144,21 +142,32 @@ public sealed partial class JitTests
         await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
     }
 
+    public static IEnumerable<object[]> EveryRadix()
+    {
+        for (var radix = 2; radix <= 36; radix++)
+        {
+            yield return [ulong.MaxValue.ToString(CultureInfo.InvariantCulture), radix, false];
+        }
+    }
+
     [Theory]
-    [InlineData(1, 16)]
-    [InlineData(37, 16)]
-    [InlineData(16, 15)]
-    [InlineData(2, 63)]
+    [InlineData(1, 16, false)]
+    [InlineData(37, 16, false)]
+    [InlineData(16, 15, false)]
+    [InlineData(2, 63, false)]
+    [InlineData(2, 64, true)]
     public async Task IntegerBaseFormattingRejectsInvalidRadixAndInsufficientStorageAsync(
-        int radix, int capacity)
+        int radix, int capacity, bool signed)
     {
         var component = await File.ReadAllTextAsync(
             Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+        var format = signed ? "FormatInt64Base" : "FormatUInt64Base";
+        var value = signed ? "int64.MinValue" : "uint64.MaxValue";
         var attempt = $$"""
 
             int32 Attempt() {
                 require OwnedInt32Buffer.TryCreate({{capacity}}, out var workspace);
-                OwnedInt32Buffer digits = FormatUInt64Base(uint64.MaxValue, {{radix}}, move workspace);
+                OwnedInt32Buffer digits = {{format}}({{value}}, {{radix}}, move workspace);
                 return digits.Count;
             }
             """;
