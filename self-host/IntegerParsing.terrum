@@ -67,6 +67,16 @@ public static bool TryParseUInt32Base(int32 start, int32 length, uint32 radix, o
     return true;
 }
 
+public static bool TryParseChar16Base(int32 start, int32 length, uint32 radix, out char16 result)
+{
+    if (!TryParseMagnitude(start, length, radix, 65535, out var parsed))
+    {
+        return false;
+    }
+    result = char16(parsed);
+    return true;
+}
+
 bool TryParseSignedBase(int32 start, int32 length, uint32 radix,
     int64 minimum, int64 maximum, out int64 result)
 {
@@ -148,6 +158,17 @@ public static bool TryParseUInt64BaseInit(int32 start, int32 length, uint32 radi
 public static bool TryParseUInt32BaseInit(int32 start, int32 length, uint32 radix, init ref<uint32> result)
 {
     if (!TryParseUInt32Base(start, length, radix, out var parsed))
+    {
+        return false;
+    }
+
+    result = parsed;
+    return true;
+}
+
+public static bool TryParseChar16BaseInit(int32 start, int32 length, uint32 radix, init ref<char16> result)
+{
+    if (!TryParseChar16Base(start, length, radix, out var parsed))
     {
         return false;
     }

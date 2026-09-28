@@ -89,7 +89,7 @@ remain hosted in C#.
 | [WideIntegerTests](WideIntegerTests.terrum) | Signed arithmetic extrema, invalid digits/radices, per-radix unsigned/signed limits and conditional output publication | Executed through AOT and JIT with a shared entry wrapper under both failure policies |
 | [IntegerCheckedArithmetic](IntegerCheckedArithmetic.terrum) | Checked `int32`/`uint32` addition, subtraction, multiplication, division and remainder, plus signed negation and absolute value with conditional `init ref<T>` publication and total unsigned signed-magnitude extraction | Independent semantic-module producer/consumer with AOT/JIT and both failure policies; zero divisors, signed-minimum quotient overflow, negation and absolute value do not publish, while signed-minimum remainder by `-1` is zero and magnitude includes it; these are named library functions, not new operator syntax |
 | [IntegerFormatting](IntegerFormatting.terrum) | Invariant signed/unsigned 32- and 64-bit decimal and explicit radix-2..36 digits in reusable owned storage, with vacancy-only radix length queries for exact allocation | AOT/JIT per-radix length, exact-capacity and repeated-use fixtures; native heap checks cover same-allocation transfer and failure cleanup |
-| [IntegerParsing](IntegerParsing.terrum) | Strict signed/unsigned radix-2..36 ASCII parsing of an exact UTF-16 source slice with conditional 32- and 64-bit `out` or `init ref` outputs | AOT/JIT under both policies; full-range per-radix boundaries, invalid spelling/bounds and unpublished outputs; existing `out` entry points remain unchanged |
+| [IntegerParsing](IntegerParsing.terrum) | Strict signed/unsigned radix-2..36 ASCII parsing of an exact UTF-16 source slice with conditional 32-/64-bit and unsigned `char16` code-unit `out` or `init ref` outputs | AOT/JIT under both policies; full-range per-radix boundaries, invalid spelling/bounds and unpublished outputs; existing `out` entry points remain unchanged |
 | [IntegerCheckedConversions](IntegerCheckedConversions.terrum) | All twelve cross-type 32-/64-bit integer conversions preserving the value or leaving an `init ref` result vacant on out-of-range input | Independent semantic-module producer/consumer with AOT/JIT under both policies; provisional named alternatives to failing checked type-calls, not new syntax or conversion witnesses |
 | [IntegerSaturation](IntegerSaturation.terrum) | All twelve cross-type 32-/64-bit integer conversions preserving or clamping to the destination range | AOT/JIT range boundaries and an independent compiled-module consumer under both policies; these named functions are provisional, not general conversion syntax or witnesses |
 | [IntegerWrapping](IntegerWrapping.terrum) | All twelve cross-type signed/unsigned 32- and 64-bit conversions preserving destination-width low bits | AOT/JIT host-oracle cases and an independent compiled-module consumer under both policies; no `unchecked` syntax or new primitive conversion policy |
@@ -205,9 +205,10 @@ the **entire** nonempty slice, with no prefix, separator, whitespace or
 implicit plus sign, and returns false without publishing an output on
 malformed input, invalid bounds/radix or overflow. Negative zero is zero;
 `int64.MinValue` is handled by accumulating its unsigned magnitude.
-`TryParseUInt32Base` and `TryParseInt32Base` reuse the validated parsing
-and enforce their narrower ranges during digit accumulation; signed
-32-bit parsing does not first accumulate against the 64-bit range.
+`TryParseUInt32Base`, `TryParseInt32Base` and `TryParseChar16Base` reuse the
+validated parsing and enforce their narrower ranges during digit accumulation;
+`char16` admits code-unit values including surrogate units, not decoded Unicode
+scalars; signed 32-bit parsing does not first accumulate against the 64-bit range.
 These compiled library functions do not replace the scanner's contextual
 integer binding or create a runtime text representation.
 

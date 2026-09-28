@@ -38,6 +38,9 @@ public sealed class IntegerParsingComponentTests
             cases.Add(new("-" + ToBase(1UL << 31, radix), radix, true, "int32.MinValue", true));
             cases.Add(new(ToBase(1UL << 31, radix), radix, true, null, true));
             cases.Add(new("-" + ToBase((1UL << 31) + 1, radix), radix, true, null, true));
+            cases.Add(new(ToBase(65535, radix), radix, false, "char16.MaxValue", IsChar: true));
+            cases.Add(new(ToBase(65536, radix), radix, false, null, IsChar: true));
+            cases.Add(new(ToBase(55296, radix), radix, false, "char16(55296)", IsChar: true));
             if (radix is 2 or 3 or 10 or 16 or 36)
             {
                 cases.Add(new(maximum + "0", radix, false, null));
@@ -50,6 +53,10 @@ public sealed class IntegerParsingComponentTests
             new("-0", 10, true, "0"),
             new("0", 10, false, "0", true),
             new("-0", 10, true, "0", true),
+            new("0", 10, false, "char16(0)", IsChar: true),
+            new("-1", 10, false, null, IsChar: true),
+            new("\u0661", 10, false, null, IsChar: true),
+            new("", 10, false, null, IsChar: true),
             new("Ff", 16, false, "255", true),
             new("-1", 10, false, null, true),
             new("\u0661", 10, false, null, true),
@@ -88,11 +95,13 @@ public sealed class IntegerParsingComponentTests
             var start = source.Length;
             _ = source.Append(test.Text).Append('!');
             _ = checks.AppendLine("{");
-            var method = (test.IsSigned, test.IsNarrow) switch {
-                (false, false) => "TryParseUInt64Base",
-                (true, false) => "TryParseInt64Base",
-                (false, true) => "TryParseUInt32Base",
-                (true, true) => "TryParseInt32Base",
+            var method = (test.IsSigned, test.IsNarrow, test.IsChar) switch {
+                (false, false, false) => "TryParseUInt64Base",
+                (true, false, false) => "TryParseInt64Base",
+                (false, true, false) => "TryParseUInt32Base",
+                (true, true, false) => "TryParseInt32Base",
+                (false, false, true) => "TryParseChar16Base",
+                _ => throw new InvalidOperationException("Unsupported parse fixture."),
             };
             if (test.Expected is not null)
             {
@@ -104,7 +113,7 @@ public sealed class IntegerParsingComponentTests
                 _ = checks.AppendLine($"if ({method}({start}, {test.Text.Length}, {test.Radix}, out var ignored))"
                     + $" {{ return {index + 1}; }}");
             }
-            if (index < 9 || index == cases.Count - 1)
+            if (test.IsChar || index < 9 || index == cases.Count - 1)
             {
                 var initMethod = method + "Init";
                 if (test.Expected is not null)
@@ -128,11 +137,13 @@ public sealed class IntegerParsingComponentTests
         _ = checks.AppendLine("if (TryParseUInt64Base(-1, 1, 10, out var negativeStart)"
             + " || TryParseUInt64Base(int32.MaxValue, 1, 10, out var hugeStart)"
             + " || TryParseInt64Base(0, int32.MaxValue, 10, out var hugeLength)"
-            + " || TryParseInt64Base(0, -1, 10, out var negativeLength)) { return 100; }");
+            + " || TryParseInt64Base(0, -1, 10, out var negativeLength)"
+            + " || TryParseChar16Base(0, -1, 10, out var negativeCharLength)) { return 100; }");
         _ = checks.AppendLine("if (TryParseUInt64BaseInit(-1, 1, 10, init var initNegativeStart)"
             + " || TryParseUInt32BaseInit(int32.MaxValue, 1, 10, init var initHugeStart)"
             + " || TryParseInt64BaseInit(0, int32.MaxValue, 10, init var initHugeLength)"
-            + " || TryParseInt32BaseInit(0, -1, 10, init var initNegativeLength)) { return 101; }");
+            + " || TryParseInt32BaseInit(0, -1, 10, init var initNegativeLength)"
+            + " || TryParseChar16BaseInit(0, -1, 10, init var initNegativeCharLength)) { return 101; }");
         _ = checks.AppendLine("return 0;");
 
         var root = RepositoryRoot();
@@ -182,6 +193,8 @@ public sealed class IntegerParsingComponentTests
     [InlineData("TryParseInt64Base(1, 1, 10, out var value); return int32(value);")]
     [InlineData("TryParseUInt32Base(1, 1, 10, out var value); return int32(value);")]
     [InlineData("TryParseInt32Base(1, 1, 10, out var value); return value;")]
+    [InlineData("TryParseChar16Base(1, 1, 10, out var value); return int32(value);")]
+    [InlineData("TryParseChar16BaseInit(1, 1, 10, init var value); return int32(value);")]
     public void FailedParseCannotPublishOutput(string body)
     {
         ArgumentNullException.ThrowIfNull(body);
@@ -219,5 +232,6 @@ public sealed class IntegerParsingComponentTests
         return new string(characters, start, characters.Length - start);
     }
 
-    private sealed record ParseCase(string Text, int Radix, bool IsSigned, string? Expected, bool IsNarrow = false);
+    private sealed record ParseCase(string Text, int Radix, bool IsSigned, string? Expected,
+        bool IsNarrow = false, bool IsChar = false);
 }
