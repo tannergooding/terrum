@@ -833,7 +833,9 @@ parse strict ASCII slices into signed or unsigned 32- and 64-bit outputs.
 Signed and unsigned 32-bit paths bound each accumulated digit to the
 destination range rather than first parsing a 64-bit value. AOT/JIT fixtures
 cover every radix, both widths and both failure policies; malformed slices,
-invalid bounds and overflow leave outputs unpublished. It is not wired into
+invalid bounds and overflow leave outputs unpublished. Four `init ref` entry
+points reuse the existing `out` parsing paths, preserving the original APIs
+and adding vacancy-only publication for accepted values. It is not wired into
 `SyntaxTree.Parse(LexResult)` or the scanner-backed integer record: that
 record still supplies the binder's contextual literal magnitude.
 

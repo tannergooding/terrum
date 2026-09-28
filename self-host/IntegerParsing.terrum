@@ -133,3 +133,47 @@ public static bool TryParseInt32Base(int32 start, int32 length, uint32 radix, ou
     result = int32(parsed);
     return true;
 }
+
+public static bool TryParseUInt64BaseInit(int32 start, int32 length, uint32 radix, init ref<uint64> result)
+{
+    if (!TryParseUInt64Base(start, length, radix, out var parsed))
+    {
+        return false;
+    }
+
+    result = parsed;
+    return true;
+}
+
+public static bool TryParseUInt32BaseInit(int32 start, int32 length, uint32 radix, init ref<uint32> result)
+{
+    if (!TryParseUInt32Base(start, length, radix, out var parsed))
+    {
+        return false;
+    }
+
+    result = parsed;
+    return true;
+}
+
+public static bool TryParseInt64BaseInit(int32 start, int32 length, uint32 radix, init ref<int64> result)
+{
+    if (!TryParseInt64Base(start, length, radix, out var parsed))
+    {
+        return false;
+    }
+
+    result = parsed;
+    return true;
+}
+
+public static bool TryParseInt32BaseInit(int32 start, int32 length, uint32 radix, init ref<int32> result)
+{
+    if (!TryParseInt32Base(start, length, radix, out var parsed))
+    {
+        return false;
+    }
+
+    result = parsed;
+    return true;
+}

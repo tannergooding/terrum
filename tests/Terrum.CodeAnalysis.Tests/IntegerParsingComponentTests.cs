@@ -104,12 +104,30 @@ public sealed class IntegerParsingComponentTests
                 _ = checks.AppendLine($"if ({method}({start}, {test.Text.Length}, {test.Radix}, out var ignored))"
                     + $" {{ return {index + 1}; }}");
             }
+            if (index < 9 || index == cases.Count - 1)
+            {
+                var initMethod = method + "Init";
+                if (test.Expected is not null)
+                {
+                    _ = checks.AppendLine($"if (!{initMethod}({start}, {test.Text.Length}, {test.Radix}, init var initialized)"
+                        + $" || initialized != {test.Expected}) {{ return {index + 1}; }}");
+                }
+                else
+                {
+                    _ = checks.AppendLine($"if ({initMethod}({start}, {test.Text.Length}, {test.Radix}, init var vacant))"
+                        + $" {{ return {index + 1}; }}");
+                }
+            }
             _ = checks.AppendLine("}");
         }
         _ = checks.AppendLine("if (TryParseUInt64Base(-1, 1, 10, out var negativeStart)"
             + " || TryParseUInt64Base(int32.MaxValue, 1, 10, out var hugeStart)"
             + " || TryParseInt64Base(0, int32.MaxValue, 10, out var hugeLength)"
             + " || TryParseInt64Base(0, -1, 10, out var negativeLength)) { return 100; }");
+        _ = checks.AppendLine("if (TryParseUInt64BaseInit(-1, 1, 10, init var initNegativeStart)"
+            + " || TryParseUInt32BaseInit(int32.MaxValue, 1, 10, init var initHugeStart)"
+            + " || TryParseInt64BaseInit(0, int32.MaxValue, 10, init var initHugeLength)"
+            + " || TryParseInt32BaseInit(0, -1, 10, init var initNegativeLength)) { return 101; }");
         _ = checks.AppendLine("return 0;");
 
         var root = RepositoryRoot();
