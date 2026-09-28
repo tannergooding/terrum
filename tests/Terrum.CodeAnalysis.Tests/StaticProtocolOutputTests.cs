@@ -136,6 +136,62 @@ public sealed class StaticProtocolOutputTests
     }
 
     [Fact]
+    public void UnusedGenericInitOutputIsCheckedAtDefinition()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
+            [NoThrow] bool Fill<T>(T value, init ref<T> result) where T : [Copy] {
+                result = value;
+                return true;
+            }
+            int32 Main() { return 42; }
+            """));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.DoesNotContain(Assert.IsType<BoundProgram>(compilation.Program).Functions,
+            function => function.Name.StartsWith("Fill<", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void UntypedGenericInitDestinationDoesNotInferTheType()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
+            [NoThrow] bool None<T>(init ref<T> result) where T : [Copy] { return false; }
+            int32 Main() {
+                if (None(init var result)) { return 1; }
+                return 42;
+            }
+            """));
+        Assert.Contains(compilation.Diagnostics, error => error.Code == "TRM3011");
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData("return true;")]
+    [InlineData("return result.First;")]
+    [InlineData("if (publish) { result = value; } return true;")]
+    public void InvalidGenericInitPublicationRejectsAtDefinition(string body)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
+            bool Fill<T>(T value, bool publish, init ref<T> result) where T : [Copy] {
+            """ + body + "} int32 Main() { return 0; }"));
+        Assert.True(compilation.HasErrors);
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData("if (Fill<int32>(int32(1), init var result)) { return 1; } return result;", "TRM3016")]
+    [InlineData("require Fill<int32>(int32(1), out var result);", "TRM3011")]
+    [InlineData("require Fill<int32>(int32(1), init var result); require Fill<int32>(int32(2), init result);", "TRM3016")]
+    public void GenericInitCannotReadVacancyChangeModeOrRepublish(string body, string diagnostic)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(Value + """
+            bool Fill<T>(T value, init ref<T> result) where T : [Copy] { return false; }
+            int32 Main() {
+            """ + body + " return 0; }"));
+        Assert.Contains(compilation.Diagnostics, error => error.Code == diagnostic);
+        Assert.Null(compilation.Program);
+    }
+
+    [Fact]
     public void GenericScalarLookupUsesTheImportedTemplatesDeclaredReturnType()
     {
         var compilation = Compilation.Create([

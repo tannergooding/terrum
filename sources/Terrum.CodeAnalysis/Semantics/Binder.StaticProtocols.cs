@@ -28,7 +28,8 @@ internal sealed partial class Binder
     }
     internal sealed record GenericTypeParameter(string Name,
         ImmutableDictionary<StaticOperatorKey, GenericOperatorConstraint> Operations);
-    internal sealed record GenericParameter(string Name, PrimitiveType? ScalarType, int TypeParameterIndex, bool IsOut)
+    internal sealed record GenericParameter(string Name, PrimitiveType? ScalarType, int TypeParameterIndex,
+        bool IsOut, bool IsInit)
     {
         internal PrimitiveType Resolve(ImmutableArray<PrimitiveType> types) =>
             ScalarType ?? types[TypeParameterIndex];
@@ -456,9 +457,15 @@ internal sealed partial class Binder
         {
             var isOut = argument.Children is [SyntaxTokenElement { Token.Kind: TokenKind.OutKeyword },
                 SyntaxNode, SyntaxTokenElement];
+            var isInit = argument.Children is [SyntaxTokenElement { Token.Text: "init" },
+                SyntaxTokenElement { Token.Kind: TokenKind.RefKeyword },
+                SyntaxTokenElement { Token.Kind: TokenKind.Less }, SyntaxNode,
+                SyntaxTokenElement { Token.Kind: TokenKind.Greater }, SyntaxTokenElement];
+            var argumentType = isInit ? argument.Children[3] as SyntaxNode
+                : argument.Children.Length >= 2 ? argument.Children[^2] as SyntaxNode : null;
             if (argument.Kind != SyntaxKind.Parameter
-                || (argument.Children is not [SyntaxNode, SyntaxTokenElement] && !isOut)
-                || argument.Children[^2] is not SyntaxNode argumentType
+                || (argument.Children is not [SyntaxNode, SyntaxTokenElement] && !isOut && !isInit)
+                || argumentType is null
                 || argument.Children[^1] is not SyntaxTokenElement argumentName
                 || argumentType.Kind != SyntaxKind.TypeName
                 || !parameterNames.Add(argumentName.Token.Text))
@@ -475,7 +482,7 @@ internal sealed partial class Binder
                     valid = false;
                 }
                 templateParameters.Add(new GenericParameter(argumentName.Token.Text,
-                    index < 0 ? scalar : null, index, isOut));
+                    index < 0 ? scalar : null, index, isOut || isInit, isInit));
             }
         }
         foreach (var constraint in children.Where(static child => child.Kind == SyntaxKind.ConstraintClause))
@@ -541,7 +548,7 @@ internal sealed partial class Binder
         }
         if (!valid || _templates.Count >= MaximumStaticSpecializations)
         {
-            Report("TRM3007", "Generic function requires distinct local Copy type parameters, supported value or bool/out parameters, and explicit constraints for any operators.", declaration.Span);
+            Report("TRM3007", "Generic function requires distinct local Copy type parameters, supported value or bool/output parameters, and explicit constraints for any operators.", declaration.Span);
             return;
         }
         if (!_templates.TryAdd(qualified, new GenericTemplate(qualified,
@@ -606,11 +613,17 @@ internal sealed partial class Binder
             {
                 candidate = KnownType(value);
             }
-            else if (template.Parameters[index].IsOut
+            else if (template.Parameters[index] is { IsOut: true, IsInit: false }
                 && argument.Children is [SyntaxTokenElement { Token.Kind: TokenKind.OutKeyword },
                     SyntaxNode { Kind: SyntaxKind.NameExpression } output])
             {
                 candidate = KnownType(output);
+            }
+            else if (template.Parameters[index] is { IsInit: true }
+                && argument.Children is [SyntaxTokenElement { Token.Text: "init" },
+                    SyntaxNode { Kind: SyntaxKind.NameExpression } initOutput])
+            {
+                candidate = KnownType(initOutput);
             }
             if (candidate is not PrimitiveType typed)
             {
@@ -752,7 +765,7 @@ internal sealed partial class Binder
             return -1;
         }
         var parameters = template.Parameters.Select(parameter => new Parameter(parameter.Name, parameter.Resolve(types),
-            callee.Span, parameter.IsOut)).ToImmutableArray();
+            callee.Span, parameter.IsOut, parameter.IsInit)).ToImmutableArray();
         var index = _signatures.Count;
         _functions.Add(instantiated, index);
         var signature = new Signature(instantiated, template.ReturnType(types), parameters,
@@ -762,7 +775,10 @@ internal sealed partial class Binder
         if (_genericProofFunctions is not null)
         {
             var variables = parameters.Select(parameter => new BoundVariable(parameter.Name,
-                parameter.Type, parameter.IsOut, parameter.Span) { IsOut = parameter.IsOut }).ToImmutableArray();
+                parameter.Type, parameter.IsOut, parameter.Span) {
+                IsOut = parameter.IsOut,
+                IsInit = parameter.IsInit,
+            }).ToImmutableArray();
             var external = new BoundFunction(instantiated, signature.ReturnType, variables, parameters.Length,
                 new BoundBlock([], callee.Span), callee.Span) {
                 IsExternal = true,
@@ -869,9 +885,13 @@ internal sealed partial class Binder
             var symbolicName = template.Name + "<" + string.Join(", ",
                 symbolicTypes.Select(type => proofBinder._structs[(int)type - 100].Name)) + ">";
             var symbolicParameters = template.Parameters.Select(parameter => new Parameter(parameter.Name,
-                parameter.Resolve(symbolicTypes), template.Declaration.Span, parameter.IsOut)).ToImmutableArray();
+                parameter.Resolve(symbolicTypes), template.Declaration.Span, parameter.IsOut,
+                parameter.IsInit)).ToImmutableArray();
             var symbolicVariables = symbolicParameters.Select(parameter => new BoundVariable(parameter.Name,
-                parameter.Type, parameter.IsOut, parameter.Span) { IsOut = parameter.IsOut }).ToImmutableArray();
+                parameter.Type, parameter.IsOut, parameter.Span) {
+                IsOut = parameter.IsOut,
+                IsInit = parameter.IsInit,
+            }).ToImmutableArray();
             var symbolicReturn = template.ReturnType(symbolicTypes);
             var symbolicIndex = proofBinder._signatures.Count;
             proofBinder._functions.Add(symbolicName, symbolicIndex);
@@ -893,7 +913,10 @@ internal sealed partial class Binder
                     template.Declaration.Span);
                 if (parameter.IsOut)
                 {
-                    proofBinder._variables[slot] = proofBinder._variables[slot] with { IsOut = true };
+                    proofBinder._variables[slot] = proofBinder._variables[slot] with {
+                        IsOut = true,
+                        IsInit = parameter.IsInit,
+                    };
                 }
             }
             var body = proofBinder.BindGenericBody(new GenericInstantiation(template, symbolicTypes));

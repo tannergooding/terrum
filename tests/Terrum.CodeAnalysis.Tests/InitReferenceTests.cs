@@ -282,16 +282,28 @@ public sealed class InitReferenceTests
         _ = Assert.Throws<ModuleFormatException>(() => _ = ModuleCompiler.CreateReference(producer));
     }
 
-    [Fact]
-    public void GenericInitParametersDiagnoseUntilGenericLoanProofIsSupported()
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public void PrivateGenericInitKeepsManagedOutputRooted(NativeRuntimePolicy policy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            bool Fill<T>(T value, init ref<T> result) where T : [Copy] {
+            [NoThrow] bool Copy<T>(T value, init ref<T> result) where T : [Copy] {
                 result = value;
                 return true;
             }
-            int32 Main() { return 42; }
-            """));
-        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
+            int32 Main() {
+                require ManagedNode.TryCreate(42, out var created);
+                require Copy(created, init var node);
+                if (ManagedHeap.Collect() != 0) { return 1; }
+                return node.Value;
+            }
+            """), runtimePolicy: (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Contains(program.Functions, function => function.Name.StartsWith("Copy<", StringComparison.Ordinal)
+            && function.Variables[1].IsInit);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
     }
+
 }

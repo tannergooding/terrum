@@ -102,7 +102,9 @@ contracts use `init:` rather than `out:`; older private v33 declarations retain
 their original contract spelling. Public scalar, handle-free Copy and eligible
 unique outputs use the existing checked `out` scratch/cleanup and native ABI
 without a profile change. Managed graph boundaries admit Copy outputs only;
-generic init parameters and general references remain unsupported.
+compilation-local `Copy` generic templates may conditionally initialize
+`init ref<T>` using the existing private module contract and output scratch.
+General references and public generic contracts remain unsupported.
 Syntax-23 introduces explicit by-value getters on Copy structs and source
 classes. Semantic v34 persists property member identity and accessor effects
 independently of the callable implementation name. Getter reads use the

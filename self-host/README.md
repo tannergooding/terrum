@@ -18,7 +18,8 @@ Syntax-22 adds bounded conditional `init ref<T>` parameters and
 `init name` calls. Semantic v33 records their mode without changing
 scanner records or native output ABI. Bounded public `init ref<T>` contracts
 now distinguish `init:` from `out:` across module consumers; general
-references and generic init parameters remain unsupported.
+references remain unsupported. Compilation-local `Copy` generic templates
+can conditionally initialize `init ref<T>` without a public generic ABI.
 Syntax-23 adds explicit getter-only properties on Copy structs and source
 classes; semantic v34 records property identity without a scanner or native
 ABI change.
@@ -63,6 +64,8 @@ operations to symbolic type parameters; existing handle qualifications,
 conditional outputs and rooting still apply. See the detailed
 [generic implementation boundary](../docs/implementation.md#bounded-generic-functions).
 Scalars support Copy-only helpers, not primitive operator witnesses.
+Compilation-local Copy helpers may publish `bool`/`init ref<T>` outputs after
+definition-site verification, without introducing a public generic ABI.
 Explicit homogeneous Copy-struct witnesses support `+`, `-`, `*`, `/`, `%`,
 `&`, `|` and `^`; generic code still requires the corresponding declared
 nominal constraints. Syntax-19 also implements six separately constrained

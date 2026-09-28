@@ -428,10 +428,16 @@ successful publication; false and exceptional completion retire the scratch
 without granting a readable output. Source binding and IR verification reject
 public managed-handle init declarations, including forged public visibility.
 The self-host managed scanner uses this mode to publish a complete chain.
-Generic init parameters, general references and declaration postconditions
-remain unsupported. Public init contracts support eligible scalar, Copy-struct
-and unique outputs; managed graph boundaries admit only public handle-free
-Copy outputs, not unique owners or managed handles. Legacy `bool`/`out`
+Compilation-local `Copy` generic templates also accept `bool`/`init ref<T>`
+conditional outputs. Definition-site proof checks publication before
+specialization; explicit type arguments or a typed vacant destination may
+establish `T`, while `init var` alone cannot infer it. Closed specializations
+reuse the existing private init contract and output scratch; this does not
+export generic declarations or add a new native ABI. General references and
+declaration postconditions remain unsupported. Public init contracts support
+eligible scalar, Copy-struct and unique outputs; managed graph boundaries
+admit only public handle-free Copy outputs, not unique owners or managed
+handles. Legacy `bool`/`out`
 continues unchanged. Semantic v33 retains init parameter and call modes;
 exported declarations distinguish `init:` from `out:` while historical
 private declarations retain their earlier contract spelling. Both modes

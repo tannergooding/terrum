@@ -32,6 +32,49 @@ public sealed partial class GenericControlFlowModuleTests
             where A : [Copy] where U : [Copy] { return second; }
         public int32 Read() { return Forward(int32(42)); }
         """;
+    private const string GenericInitLibrary = """
+        struct Pair {
+            public int64 First;
+            public int64 Second;
+            public Pair(int64 first, int64 second) { First = first; Second = second; }
+        }
+        [NoThrow] bool Copy<T>(bool publish, T value, init ref<T> result) where T : [Copy] {
+            if (!publish) { return false; }
+            result = value;
+            return true;
+        }
+        [NoThrow] bool Forward<T>(T value, init ref<T> result) where T : [Copy] {
+            return Copy(true, value, init result);
+        }
+        [NoThrow] bool None<T>(init ref<T> result) where T : [Copy] { return false; }
+        public int32 Read() {
+            if (Copy(false, new Pair(1, 2), init var pair)) { return 1; }
+            if (None(init pair)) { return 3; }
+            require Forward(new Pair(40, 1), init pair);
+            require Copy(true, int32(2), init var scalar);
+            if (pair.First != 40 || pair.Second != 1) { return 2; }
+            return int32(pair.First) + scalar;
+        }
+        """;
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task GenericInitOutputsStayPrivateAcrossIndependentConsumersAsync(NativeRuntimePolicy policy)
+    {
+        var producer = ModuleCompiler.CreateProducer(Compile(GenericInitLibrary, policy), ["Read"]);
+        var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
+            policy, ModuleCompiler.CreateReference(producer), library: false), producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.Contains(linked.Functions, function => function.Name == "$producer.Forward<Pair>"
+            && function.Variables[1].IsInit);
+        Assert.Contains(linked.Functions, function => function.Name == "$producer.Copy<int32>"
+            && function.Variables[2].IsInit);
+        Assert.Contains(linked.Functions, function => function.Name == "$producer.None<Pair>"
+            && function.Variables[0].IsInit);
+        Assert.Equal(42, NativeJit.Execute(linked, policy));
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+    }
 
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
