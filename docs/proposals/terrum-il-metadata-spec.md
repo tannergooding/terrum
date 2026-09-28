@@ -110,18 +110,19 @@ Resource identity, resolution, integrity and limits remain schema decisions.
 | 6 | Format minor | `u16` | `0` in this proposal |
 | 8 | Header length | `u32` | `32` for this candidate layout |
 | 12 | Directory entry count | `u32` | Number of present sections, at most 22 for the assigned registry |
-| 16 | Total artifact length | `u64` | Exact byte length of the supplied `TRRM` slice |
-| 24 | Directory offset | `u64` | `32` in this candidate |
+| 16 | Total artifact length | `u32` | Exact byte length of the supplied `TRRM` slice |
+| 20 | Directory offset | `u32` | `32` in this candidate |
+| 24 | Reserved | 8 bytes | All zero; readers reject nonzero bytes |
 
-Each directory entry is 24 bytes:
+Each directory entry is 16 bytes:
 
 | Entry offset | Field | Width | Candidate meaning |
 |---:|---|---:|---|
 | 0 | Section kind | `u16` | One of the table assignments below |
 | 2 | Flags | `u16` | `0x0001` required or `0x0000` optional; all other bits reject |
 | 4 | Record count | `u32` | Number of records encoded in the section |
-| 8 | Section offset | `u64` | Artifact-relative section start |
-| 16 | Section byte length | `u64` | Exact section extent |
+| 8 | Section offset | `u32` | Artifact-relative section start |
+| 12 | Section byte length | `u32` | Exact section extent |
 
 Every present semantic table uses the required flag; SourceMap alone uses the
 optional flag. Empty tables are omitted rather than encoded as empty entries.
@@ -134,12 +135,14 @@ future revision policy.
 Candidate framing invariants:
 
 - `headerLength` is 32 and `directoryOffset` is 32; the directory has exactly
-  `entryCount * 24` bytes, with checked
+  `entryCount * 16` bytes, with checked
   multiplication and checked end-offset arithmetic.
-- `totalLength` equals the supplied `TRRM` slice length. Header, directory, and
-  every section lie wholly within `[0, totalLength)`. A section begins at or
-  after the directory end. Embedded readers translate to container positions
-  only after validating the slice boundary and the relative offset.
+- `totalLength` equals the supplied `TRRM` slice length and is at most
+  `0xFFFFFFFF` bytes. Header, directory, and every section lie wholly within
+  `[0, totalLength)`. Add section offsets and lengths using checked arithmetic
+  wide enough for their sum before checking containment. A section begins at
+  or after the directory end. Embedded readers translate to container
+  positions only after validating the slice boundary and the relative offset.
 - Directory entries are strictly ordered by section kind, so duplicate kinds
   are invalid. Section extents do not overlap the header, directory, or one
   another. Any alignment requirement is defined by the section schema and
@@ -155,9 +158,12 @@ Candidate framing invariants:
   variable sections validate their index and data extents as specified below.
 
 The directory remains fixed-width for direct section lookup. An artifact
-has 32 bytes of header plus 24 bytes **per present table** before section
-payloads. `u64` section offsets do not set a reader's acceptance ceiling;
-individual variable-table data is limited to `u32` bytes by its offset index.
+has 32 bytes of header plus 16 bytes **per present table** before section
+payloads. The eight reserved header bytes have no assigned flags or other
+semantics; writers set them to zero. Large payloads needing a wider address
+space require a separately specified resource reference, not wider offsets
+in ordinary metadata. Individual variable-table data is limited to `u32`
+bytes by its offset index.
 
 ## Metadata logical tables and row semantics (proposed)
 
@@ -491,9 +497,9 @@ otherwise. Candidate structural invariants are:
   units, not wall-clock time. Required checks that exceed their configured
   budget fail explicitly rather than skipping validation.
 
-The `u32` count field and `u64` offsets describe representable encodings, not
-practical acceptance ceilings. Numerical ceilings and exact accounting remain
-open.
+The `u32` total length bounds the encoded artifact; count and section
+length fields do not set practical reader acceptance ceilings. Numerical
+ceilings below the format maximum and exact accounting remain open.
 
 ## Validation, unknown data, and references
 

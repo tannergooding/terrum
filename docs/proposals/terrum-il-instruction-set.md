@@ -704,8 +704,8 @@ terminator offset `12`, and a 14-byte
 block (region 0, zero parameters, empty live-in/out and place lists,
 one `ConstBits` operation, one `Return` terminator). The Body section
 occupies 45 bytes including its row offsets. With the eight populated
-metadata sections in this example, the artifact occupies **397 bytes**
-before alignment: 32-byte header + 8 * 24-byte directory + 173 bytes of
+metadata sections in this example, the artifact occupies **333 bytes**
+before alignment: 32-byte header + 8 * 16-byte directory + 173 bytes of
 metadata/Body sections. This is an encoded-size calculation, **not** a
 throughput measurement; wider IDs, prefixes, block counts, decode work,
 branch count, debug information and alignment still matter.
