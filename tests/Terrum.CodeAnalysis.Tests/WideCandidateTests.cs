@@ -110,6 +110,53 @@ public sealed class WideCandidateTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task CheckedWideArithmeticPublishesOnlyInRangeAcrossModulesAsync(NativeRuntimePolicy policy)
+    {
+        var producer = CreateNumericsLibrary("WideIntegerFacts.terrum", policy,
+            "Terrum.CodeAnalysis.Numerics64.TryAddInt64",
+            "Terrum.CodeAnalysis.Numerics64.TrySubtractInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryMultiplyInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryAddUInt64",
+            "Terrum.CodeAnalysis.Numerics64.TrySubtractUInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryMultiplyUInt64");
+        var consumerSource = SyntaxTree.Parse("""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                if (TryAddInt64(int64.MaxValue, 1, init var addOverflow)
+                    || TryAddInt64(int64.MinValue, -1, init var addUnderflow)
+                    || TrySubtractInt64(int64.MaxValue, -1, init var subOverflow)
+                    || TrySubtractInt64(int64.MinValue, 1, init var subUnderflow)
+                    || TryMultiplyInt64(int64.MinValue, -1, init var mulOverflow)
+                    || TryMultiplyInt64(int64.MaxValue, 2, init var mulOverflow2)
+                    || TryAddUInt64(uint64.MaxValue, 1, init var unsignedAddOverflow)
+                    || TrySubtractUInt64(0, 1, init var unsignedSubUnderflow)
+                    || TryMultiplyUInt64(uint64.MaxValue, 2, init var unsignedMulOverflow)) { return 1; }
+                require TryAddInt64(int64.MinValue, int64.MaxValue, init var negativeOne);
+                require TrySubtractInt64(-1, int64.MinValue, init var maximum);
+                require TryMultiplyInt64(int64.MinValue, 1, init var minimum);
+                require TryMultiplyInt64(3037000499, 3037000499, init var signedSquare);
+                require TryAddUInt64(uint64.MaxValue - 1, 1, init var unsignedMaximum);
+                require TrySubtractUInt64(uint64.MaxValue, uint64.MaxValue, init var unsignedZero);
+                require TryMultiplyUInt64(uint64.MaxValue, 0, init var zeroProduct);
+                require TryMultiplyUInt64(4294967295, 4294967297, init var unsignedProduct);
+                if (negativeOne != -1 || maximum != int64.MaxValue
+                    || minimum != int64.MinValue || signedSquare != 9223372030926249001
+                    || unsignedMaximum != uint64.MaxValue || unsignedZero != 0
+                    || zeroProduct != 0 || unsignedProduct != uint64.MaxValue) { return 2; }
+                return 42;
+            }
+            """);
+        var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task SaturatingConversionsExecuteFromIndependentModuleAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerSaturation.terrum", policy,

@@ -62,6 +62,72 @@ public static bool TryMultiply(int64 left, int64 right, out int64 result)
     return true;
 }
 
+public static bool TryAddInt64(int64 left, int64 right, init ref<int64> result)
+{
+    if (!TryAdd(left, right, out var value))
+    {
+        return false;
+    }
+
+    result = value;
+    return true;
+}
+
+public static bool TrySubtractInt64(int64 left, int64 right, init ref<int64> result)
+{
+    if (!TrySubtract(left, right, out var value))
+    {
+        return false;
+    }
+
+    result = value;
+    return true;
+}
+
+public static bool TryMultiplyInt64(int64 left, int64 right, init ref<int64> result)
+{
+    if (!TryMultiply(left, right, out var value))
+    {
+        return false;
+    }
+
+    result = value;
+    return true;
+}
+
+public static bool TryAddUInt64(uint64 left, uint64 right, init ref<uint64> result)
+{
+    if (left > uint64.MaxValue - right)
+    {
+        return false;
+    }
+
+    result = left + right;
+    return true;
+}
+
+public static bool TrySubtractUInt64(uint64 left, uint64 right, init ref<uint64> result)
+{
+    if (left < right)
+    {
+        return false;
+    }
+
+    result = left - right;
+    return true;
+}
+
+public static bool TryMultiplyUInt64(uint64 left, uint64 right, init ref<uint64> result)
+{
+    if (right != 0 && left > uint64.MaxValue / right)
+    {
+        return false;
+    }
+
+    result = left * right;
+    return true;
+}
+
 public static bool TryAccumulateDecimal(uint64 value, uint32 digit, uint64 maximum, out uint64 result)
 {
     uint64 widenedDigit = uint64(digit);
