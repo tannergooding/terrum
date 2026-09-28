@@ -347,11 +347,11 @@ participate in integer arithmetic; `char16` is not implicitly an integer.
 
 | TypeSpec form | Body-facing interpretation |
 |---|---|
-| `0x01` primitive | Exact primitive type and width above; no default numeric type |
+| `0x01` built-in | Assigned atomic type has its exact width; high-bit family codes with an inline atomic argument are structurally decoded but are not executable in this subset |
 | `0x02` local nominal, `0x03` imported nominal | Resolve the referenced TypeDef or expected import and its complete layout/contracts; equal representation does not make two nominal types interchangeable |
-| `0x04` formal, `0x05` constructed | Preserve the formal or its ordered type substitutions; a body cannot assume numeric operations on an unconstrained formal |
+| `0x04` formal, `0x05` constructed | Preserve the formal or its ordered nominal type substitutions; a body cannot assume numeric operations on an unconstrained formal |
 | `0x06` optional | Separate presence on the fully qualified inner type; `None` cannot fabricate its payload |
-| `0x07..0x0B` ref/ptr/box/val/own | Distinct representation and capability families, not interchangeable operand modes; unsupported ones reject executable loading in this profile |
+| `0x07..0x0B` ref/ptr/box/val/own, `0x0C` indexed built-in | Indexed family argument when inline atomic encoding does not apply; preserve distinct representation/capability and reject unsupported executable use |
 
 Qualifiers are part of type equality and do not disappear when moving
 through an edge. An `r` has exactly one indexed value descriptor (and,

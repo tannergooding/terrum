@@ -572,13 +572,14 @@ TypeSpec form assignments and **entire** payload following `form, qualifiers`:
 
 | Form | Remaining bytes | Meaning |
 |---:|---|---|
-| `0x01` primitive | `u8 primitiveCode` | Assigned atomic built-in type; TypeSpec row is 3 bytes in `(1, 0)` |
+| `0x01` built-in | `u8 typeCode`, then `u8 argumentCode` iff the type code is `0x80..0xFE` | Atomic type in 3 bytes, or one-argument built-in family over an atomic type in 4 bytes |
 | `0x02` in-artifact | `u32 typeDefRow` | Nominal TypeDef in this artifact, including a direct resolved definition from another packed module |
 | `0x03` imported | `u32 importRow` | Import owned by the using declaration's module whose expected definition is TypeDef |
 | `0x04` formal | `u32 genericParamRow` | Declared type parameter owned by the using declaration's module |
-| `0x05` constructed | `u32 genericTypeSpec, u32 typeArgFirst, u32 typeArgCount` | Ordered substitution |
+| `0x05` constructed | `u32 genericTypeSpec, u32 typeArgFirst, u32 typeArgCount` | Ordered substitution for a nominal generic definition |
 | `0x06` optional | `u32 innerTypeSpec` | Presence on complete qualified type |
-| `0x07` ref / `0x08` ptr / `0x09` box / `0x0A` val / `0x0B` own | `u32 innerTypeSpec` | Distinct representation families |
+| `0x07` ref / `0x08` ptr / `0x09` box / `0x0A` val / `0x0B` own | `u32 innerTypeSpec` | Indexed representation-family argument when the inline built-in form does not apply |
+| `0x0C` indexed built-in | `u8 familyCode, u32 argumentTypeSpec` | Other one-argument built-in family over a non-inline TypeSpec argument |
 
 Nesting references in TypeSpec must point to an
 earlier TypeSpec row; nominal declarations may refer to each other through
@@ -589,7 +590,7 @@ In a merged artifact, the in-artifact form may name another module's TypeDef
 after a trusted merger resolves that import. The imported form preserves
 the consumer's selected expected TypeDef when the edge remains an Import.
 TypeArg rows for
-one constructed form are contiguous with ordinals `0..count-1`; arity,
+one constructed nominal form are contiguous with ordinals `0..count-1`; arity,
 qualification and constraints are checked against the selected nominal
 declaration. Qualifier bit `0x01` denotes `write` where that type form permits
 it; other bits reject. The proposed atomic built-in code registry is:
@@ -605,22 +606,43 @@ it; other bits reject. The proposed atomic built-in code registry is:
 | `0x12..0x16` | `float16`, `bfloat16`, `float32`, `float64`, `float128` |
 | `0x17..0x19` | `decimal32`, `decimal64`, `decimal128` |
 
-Codes `0x1A..0x7F` are reserved for further atomic types; `0x80..0xFE`
-are reserved for built-in type-family constructors, not complete types
-without operands. `0xFF` is reserved as a possible extended-code escape,
-not a type or a currently decodable prefix. Reserved codes reject in
-`(1, 0)`; a future constructor assignment needs its operand/arity,
-qualification, representation and validation rules, not just a code.
-Fixed and scalable SIMD families and `Span<T>` may use that constructor
-range once their complete TypeSpec forms are defined. `ref<T>`, `ptr<T>`,
-`box<T>`, `val<T>` and `own<T>` already have distinct TypeSpec forms;
-`out` and `init ref` are Param passing modes, not primitive types.
-Do not encode these twice as constructor codes without a specified
-canonical representation. Assigning an atomic code identifies a type for
-structural reading; it does not make unsupported widths, floating/decimal
-operations or generic families executable in the narrow `(1, 0)` body
-profile. Neither the reserved ranges nor this proposal's pre-release
-assignments authorize private reader-enum ordinals.
+Codes `0x1A..0x7F` are reserved for further atomic types. A `typeCode`
+with its high bit clear names one assigned atomic type and consumes no
+argument byte. A high-bit code in `0x80..0xFE` names a one-argument
+built-in family and **must** consume the following byte as the atomic
+type code for `T`. The common built-in instance therefore needs no
+TypeSpec operand lookup. Assigned family codes are:
+
+| Codes | Built-in family in increasing code order |
+|---|---|
+| `0x80..0x84` | `simd64<T>`, `simd128<T>`, `simd256<T>`, `simd512<T>`, scalable `simd<T>` |
+| `0x85..0x88` | `simd64mask<T>`, `simd128mask<T>`, `simd256mask<T>`, `simd512mask<T>` |
+| `0x89` | Reserved for a scalable mask form; no source name or representation assigned |
+| `0x8A` | `Span<T>` |
+| `0x8B..0x8F` | `ref<T>`, `ptr<T>`, `box<T>`, `val<T>`, `own<T>` |
+
+Codes `0x90..0xFE` are reserved for future built-in families; `0xFF`
+is reserved as a possible extended-code escape and rejects in `(1, 0)`.
+The inline `argumentCode` must be an assigned atomic code below `0x80`,
+not another family code or `0xFF`; family-specific membership and legal
+element types still require validation. An indexed family argument uses
+an earlier complete TypeSpec: forms `0x07..0x0B` for their corresponding
+representations, or form `0x0C` with the assigned `familyCode` for SIMD,
+masks and `Span<T>`. These indexed forms are required when `T` is nominal,
+imported, formal, qualified or itself constructed; they reject a plain
+unqualified atomic `T` for which the inline form is canonical. The
+indexed `familyCode` is the same `0x80..0xFE` registry value, not an
+independent enum. `out` and `init ref` remain Param passing modes, not
+types, and have no family codes; `ref<T>` may be their referent type
+without collapsing their distinct call modes. A built-in family form
+does not add a second `N` parameter: fixed SIMD width is in its family
+code, while scalable `simd<T>` has its own code.
+
+Assigning an atomic or family code identifies a type for structural
+reading; it does not make unsupported widths, floating/decimal
+operations, SIMD, spans or general references executable in the narrow
+`(1, 0)` body profile. Reserved codes reject rather than becoming private
+reader-enum ordinals.
 
 The low two bits (`flags & 0x03`) of every definition's `u32 flags` encode
 visibility: `0x00` private, `0x01` internal, `0x02` public; `0x03`
