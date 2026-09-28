@@ -88,11 +88,17 @@ unassigned until the wire design is adopted.
 
 Candidate byte order is little-endian. The header is fixed at 32 bytes in this
 layout; the directory follows the header, and sections follow the directory
-in ascending file-offset order. There is one directory entry per section
-kind. No compression is used in the initial candidate, simplifying bounds
+in ascending artifact-relative offset order. There is one directory entry per
+section kind. No compression is used in the initial candidate, simplifying bounds
 checking and random access. This candidate's 32-byte header length is
 unrelated to the historical semantic revision 32; the actual
 revision-32 prefix is documented in Appendix A.
+
+The artifact is the supplied `TRRM` byte slice, whether stored alone or
+embedded in a PE/ELF container. Its total length and offsets describe that
+slice, not the containing file. Large resources may be held separately and
+referenced by metadata; their payload bytes are not part of `totalLength`.
+Resource identity, resolution, integrity and limits remain schema decisions.
 
 | Offset | Field | Width | Candidate meaning |
 |---:|---|---:|---|
@@ -101,8 +107,8 @@ revision-32 prefix is documented in Appendix A.
 | 6 | Format minor | `u16` | Byte-schema evolution axis; value unassigned |
 | 8 | Header length | `u32` | `32` for this candidate layout |
 | 12 | Directory entry count | `u32` | Number of fixed-size directory entries |
-| 16 | Total artifact length | `u64` | Exact byte length of the complete artifact |
-| 24 | Directory offset | `u64` | File-relative start of the directory |
+| 16 | Total artifact length | `u64` | Exact byte length of the supplied `TRRM` slice |
+| 24 | Directory offset | `u64` | Artifact-relative start of the directory |
 
 Each directory entry is 24 bytes:
 
@@ -111,7 +117,7 @@ Each directory entry is 24 bytes:
 | 0 | Section kind | `u16` | Section registry key; numeric assignments open |
 | 2 | Flags | `u16` | Required/optional classification; reserved bits must be zero |
 | 4 | Record count | `u32` | Number of records encoded in the section |
-| 8 | Section offset | `u64` | File-relative section start |
+| 8 | Section offset | `u64` | Artifact-relative section start |
 | 16 | Section byte length | `u64` | Exact section extent |
 
 The entry may mark a section required or optional, but does not add a
@@ -127,9 +133,10 @@ Candidate framing invariants:
 - `headerLength` equals the selected header size; the directory begins at or
   after the header and has exactly `entryCount * 24` bytes, with checked
   multiplication and checked end-offset arithmetic.
-- `totalLength` equals the supplied artifact length. Header, directory, and
+- `totalLength` equals the supplied `TRRM` slice length. Header, directory, and
   every section lie wholly within `[0, totalLength)`. A section begins at or
-  after the directory end.
+  after the directory end. Embedded readers translate to container positions
+  only after validating the slice boundary and the relative offset.
 - Directory entries are strictly ordered by section kind, so duplicate kinds
   are invalid. Section extents do not overlap the header, directory, or one
   another. Any alignment requirement is defined by the section schema and
@@ -144,8 +151,8 @@ Candidate framing invariants:
   where its section schema permits an empty section; nonempty sections must
   contain at least one complete record.
 
-The candidate uses fixed-width section-directory entries and 64-bit file
-offsets with 32-bit local table indexes. This favors straightforward bounded
+The candidate uses fixed-width section-directory entries and 64-bit
+artifact-relative offsets with 32-bit local table indexes. This favors bounded
 parsing over compact varints. The exact widths and organization remain review
 choices; no size ceiling follows from the `u64` offset width.
 
@@ -386,7 +393,7 @@ minimum, review limits for:
 
 | Resource | Required accounting definition | Numeric target |
 |---|---|---|
-| Total bytes and framed payload | Whether headers, optional data, padding, and nested payload all count; checked before allocation. | Open |
+| Total bytes and framed payload | Count the complete `TRRM` slice, including headers, optional data, padding and nested encoded payload; separately referenced resource bytes and enclosing PE/ELF bytes are outside it. Check before allocation. | Open |
 | Record/section and table counts | Per-kind and aggregate counts, including duplicate detection and references. | Open |
 | String/byte sequences | Encoded byte length, encoding validation, and any decoded-memory accounting. | Open |
 | Lists, paths, and ranges | Element count, index bounds, arithmetic overflow, range containment, and valid empty forms. | Open |
