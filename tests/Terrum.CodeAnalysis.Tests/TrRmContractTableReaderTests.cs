@@ -64,7 +64,8 @@ public sealed class TrRmContractTableReaderTests
         var dependency = Contract(0x1600_0001, 4,
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
         Create(Section(output), recordCount: 1, declaredCount: 1,
-            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1);
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true);
         Create(Section(transfer), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1);
         Create(Section(dependency), recordCount: 1, declaredCount: 1,
@@ -73,7 +74,8 @@ public sealed class TrRmContractTableReaderTests
         output[12] = 2;
         Assert.Throws<InvalidDataException>(() => Create(Section(output),
             recordCount: 1, declaredCount: 1,
-            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1));
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true));
         transfer[15] = 1;
         Assert.Throws<InvalidDataException>(() => Create(Section(transfer),
             recordCount: 1, declaredCount: 1,
@@ -83,8 +85,36 @@ public sealed class TrRmContractTableReaderTests
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1));
     }
 
+    [Fact]
+    public void OutputStateRequiresBooleanResultAndAnOutputParameterOrdinal()
+    {
+        var output = Contract(0x1600_0001, 2, [0, 0, 0, 0, 1, 0, 0, 0]);
+        var section = Section(output);
+        Create(section, recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 2);
+        Assert.Throws<InvalidDataException>(() => Create(section,
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1));
+        Assert.Throws<InvalidDataException>(() => Create(section,
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0));
+        Assert.Throws<InvalidDataException>(() => Create(section,
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, nonBooleanResult: true));
+
+        output[8] = 1;
+        Assert.Throws<InvalidDataException>(() => Create(Section(output),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true));
+    }
+
     private static void Create(byte[] section, int recordCount = 2, int declaredCount = 2,
-        uint typeFirst = 1, uint typeCount = 1, uint methodFirst = 2, uint methodCount = 1)
+        uint typeFirst = 1, uint typeCount = 1, uint methodFirst = 2, uint methodCount = 1,
+        bool hasOutputParam = false, byte paramMode = 1, bool nonBooleanResult = false)
     {
         var names = new TrRmStringTableReader(TrRmStringTableWriter.EncodeTextRows(
             [("", 0), ("Module", 0), ("Widget", 0), ("Run", 0)]), 4);
@@ -105,10 +135,32 @@ public sealed class TrRmContractTableReaderTests
         var types = new TrRmTypeDefTableReader(type, 1, names, modules,
             0, 0, 0, declaredCount);
         byte[] spec = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
+        if (hasOutputParam && !nonBooleanResult)
+        {
+            spec[^1] = 1;
+        }
+
         var typeSpecs = new TrRmTypeSpecTableReader(spec, 1, 1, 0, 0, 0);
         var signature = new byte[24];
         Write(signature, 0, 1);
-        var signatures = new TrRmMethodSigTableReader(signature, 1, typeSpecs, 0, 0);
+        if (hasOutputParam)
+        {
+            Write(signature, 8, 1);
+            Write(signature, 12, 1);
+        }
+
+        var signatures = new TrRmMethodSigTableReader(signature, 1, typeSpecs,
+            hasOutputParam ? 1 : 0, 0);
+        var param = hasOutputParam ? new byte[16] : [];
+        if (hasOutputParam)
+        {
+            Write(param, 0, 1);
+            Write(param, 8, 1);
+            param[12] = paramMode;
+        }
+
+        var parameters = hasOutputParam
+            ? new TrRmParamTableReader(param, 1, signatures, typeSpecs) : default;
         var method = new byte[28];
         Write(method, 0, 1);
         Write(method, 4, 4);
@@ -117,7 +169,8 @@ public sealed class TrRmContractTableReaderTests
         Write(method, 20, methodCount);
         var methods = new TrRmMethodDefTableReader(method, 1, names, modules,
             types, signatures, declaredCount, 0);
-        _ = new TrRmContractTableReader(section, recordCount, types, methods);
+        _ = new TrRmContractTableReader(section, recordCount,
+            types, methods, signatures, parameters, typeSpecs);
     }
 
     private static byte[] Cleanup()

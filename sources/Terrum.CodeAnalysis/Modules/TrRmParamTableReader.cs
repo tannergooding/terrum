@@ -11,6 +11,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly ref struct TrRmParamTableReader
 {
     private const int RowSize = 16;
+    private readonly ReadOnlySpan<byte> _rows;
 
     public TrRmParamTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmMethodSigTableReader signatures, TrRmTypeSpecTableReader types)
@@ -22,6 +23,7 @@ public readonly ref struct TrRmParamTableReader
             throw InvalidParam();
         }
 
+        _rows = section;
         var previousOwner = 0;
         var ordinal = 0;
         for (var row = 1; row <= recordCount; row++)
@@ -41,6 +43,16 @@ public readonly ref struct TrRmParamTableReader
 
             previousOwner = expectedOwner;
         }
+    }
+
+    public byte GetMode(int row)
+    {
+        if (row <= 0 || (long)row * RowSize > _rows.Length)
+        {
+            throw InvalidParam();
+        }
+
+        return _rows[(row - 1) * RowSize + 12];
     }
 
     private static uint Read(ReadOnlySpan<byte> data, int offset)

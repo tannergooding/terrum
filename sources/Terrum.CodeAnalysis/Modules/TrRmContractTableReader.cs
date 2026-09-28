@@ -14,7 +14,9 @@ public readonly ref struct TrRmContractTableReader
     private readonly TrRmVariableTableIndex _rows;
 
     public TrRmContractTableReader(ReadOnlySpan<byte> section, int recordCount,
-        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods)
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader typeSpecs)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != types.ContractCount || recordCount != methods.ContractCount
@@ -60,7 +62,18 @@ public readonly ref struct TrRmContractTableReader
                     break;
                 case 2:
                     if (data.Length != 16 || data[12] > 1 || data[13] > 1
-                        || data[14] > 1 || data[15] != 0)
+                        || data[14] > 1 || data[15] != 0 || owner >> 24 != 0x16)
+                    {
+                        throw InvalidContract();
+                    }
+
+                    var signature = methods.GetSignature((int)(owner & 0xFF_FFFF));
+                    var result = typeSpecs.GetRow(signatures.GetResultTypeSpec(signature));
+                    var (paramFirst, paramCount) = signatures.GetParamRange(signature);
+                    var ordinal = Read(data, 8);
+                    if (result.Length != 3 || result[0] != 1 || result[1] != 0
+                        || result[2] != 1 || ordinal >= paramCount
+                        || parameters.GetMode(paramFirst + (int)ordinal) is not (1 or 2))
                     {
                         throw InvalidContract();
                     }

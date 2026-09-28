@@ -1044,7 +1044,8 @@ key uniqueness. GenericParam formal ordinals and Constraint row ownership,
 flags and required types are checked structurally; unassigned kinds and
 witnesses are not executable generic contracts. Contract row ownership,
 singleton clauses and assigned payload shapes are also checked without proving
-effects or making reserved clause modes executable. These do not bind imported
+effects or making reserved clause modes executable. OutputState additionally
+checks its Boolean return and `out`/`init ref` parameter ordinal. These do not bind imported
 contracts. A host-side
 writer emits indexed String sections with required names or optional empty
 namespace text; the self-host String-row

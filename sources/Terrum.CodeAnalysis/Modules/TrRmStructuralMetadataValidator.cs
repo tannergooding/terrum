@@ -79,7 +79,8 @@ public static class TrRmStructuralMetadataValidator
         var constraints = constraintCount == 0 ? default
             : new TrRmConstraintTableReader(constraintBytes, constraintCount,
                 generics, typeSpecs);
-        var contracts = new TrRmContractTableReader(contractBytes, contractCount, types, methods);
+        var contracts = new TrRmContractTableReader(contractBytes, contractCount,
+            types, methods, signatures, parameters, typeSpecs);
         var imports = new TrRmImportTableReader(importBytes, importCount,
             strings, moduleRefs, types, methods, properties);
         var exports = new TrRmExportTableReader(exportBytes, exportCount,

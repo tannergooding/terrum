@@ -97,6 +97,17 @@ public readonly ref struct TrRmMethodSigTableReader
         return (int)Read(_rows.Slice((row - 1) * RowSize, RowSize), 0);
     }
 
+    public (int Start, int Count) GetParamRange(int row)
+    {
+        if (row <= 0 || row > Count)
+        {
+            throw InvalidSignature();
+        }
+
+        var data = _rows.Slice((row - 1) * RowSize, RowSize);
+        return ((int)Read(data, 8), (int)Read(data, 12));
+    }
+
     public int GetGenericCount(int row)
     {
         if (row <= 0 || row > Count)
