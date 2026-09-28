@@ -9,6 +9,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
@@ -228,6 +229,45 @@ public sealed class StringLiteralComponentTests
                 return 0;
             }
             """, "string-row-entry.terrum");
+        var compilation = Compilation.Create(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(0, NativeJit.Execute(program, policy));
+        Assert.Equal(0, await ExecuteAotAsync(program, policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, 0, "Name", "\"\\u004Eame\"")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 0, "", "\"\"")]
+    [InlineData(NativeRuntimePolicy.FailFast, 1, "\u00E9\U0001F600", "\"\\u00E9\\U0001F600\"")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 1, "A\u0301", "\"A\u0301\"")]
+    [InlineData(NativeRuntimePolicy.FailFast, 2, "\U0001F600", "\"\\U0001F600\"")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 2, "\u00E9", "\"\u00E9\"")]
+    [InlineData(NativeRuntimePolicy.FailFast, 3, "\u00E9\U0001F600", "\"\u00E9\U0001F600\"")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 3, "", "\"\"")]
+    public async Task CompiledStringRowsMatchHostWireEncodingAsync(
+        NativeRuntimePolicy policy, int encoding, string text, string spelling)
+    {
+        var section = TrRmStringTableWriter.EncodeTextRows([(text, encoding)]);
+        var expected = new TrRmVariableTableIndex(section, 1, 8, 4).GetRow(1).ToArray();
+        var checks = string.Join(Environment.NewLine, expected.Select((value, index) =>
+            FormattableString.Invariant($"if (row.Read({index}) != {value}) {{ return 2; }}")));
+        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var entry = SyntaxTree.Parse($$"""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
+                require StringLiteral.TryCreate(spelling, out var literal);
+                require TryGetStringNamespaceRowByteLength(literal, {{encoding}}, init var length);
+                if (length != {{expected.Length}}) { return 1; }
+                require OwnedInt32Buffer.TryCreate(length, out var workspace);
+                OwnedInt32Buffer row = EncodeStringNamespaceRow(literal, {{encoding}}, move workspace);
+                {{checks}}
+                return 0;
+            }
+            """, "string-row-host-parity-entry.terrum");
         var compilation = Compilation.Create(trees.Add(entry),
             [new HostBuffer("Source", PrimitiveType.Char16, [.. spelling.Select(unit => (int)unit)], false)],
             (BoundRuntimePolicy)policy);
