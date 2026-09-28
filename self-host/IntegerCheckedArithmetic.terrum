@@ -24,6 +24,22 @@ public static bool TrySubtractInt32(int32 left, int32 right, init ref<int32> res
     return true;
 }
 
+public static bool TryNegateInt32(int32 value, init ref<int32> result)
+{
+    return TrySubtractInt32(0, value, init result);
+}
+
+public static bool TryAbsoluteInt32(int32 value, init ref<int32> result)
+{
+    if (value >= 0)
+    {
+        result = value;
+        return true;
+    }
+
+    return TryNegateInt32(value, init result);
+}
+
 public static bool TryMultiplyInt32(int32 left, int32 right, init ref<int32> result)
 {
     int64 value = int64(left) * int64(right);

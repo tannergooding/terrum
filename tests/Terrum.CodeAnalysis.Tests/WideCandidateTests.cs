@@ -84,6 +84,64 @@ public sealed class WideCandidateTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, "Int32")]
+    [InlineData(NativeRuntimePolicy.FailFast, "Int64")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "Int32")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "Int64")]
+    public async Task CheckedSignedMagnitudePublishesOnlyRepresentableResultsAcrossModulesAsync(
+        NativeRuntimePolicy policy, string suffix)
+    {
+        var library = suffix == "Int32" ? "IntegerCheckedArithmetic.terrum" : "WideIntegerFacts.terrum";
+        var producer = CreateNumericsLibrary(library, policy,
+            $"Terrum.CodeAnalysis.Numerics64.TryNegate{suffix}",
+            $"Terrum.CodeAnalysis.Numerics64.TryAbsolute{suffix}");
+        var type = suffix.ToLowerInvariant();
+        var consumerSource = SyntaxTree.Parse($$"""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                if (TryNegate{{suffix}}({{type}}.MinValue, init var negationOverflow)
+                    || TryAbsolute{{suffix}}({{type}}.MinValue, init var absoluteOverflow)) { return 1; }
+                require TryNegate{{suffix}}({{type}}.MaxValue, init var negativeMaximum);
+                require TryNegate{{suffix}}(-1, init var positiveOne);
+                require TryNegate{{suffix}}(0, init var zero);
+                require TryAbsolute{{suffix}}(-42, init var positive);
+                require TryAbsolute{{suffix}}(42, init var unchanged);
+                require TryAbsolute{{suffix}}(0, init var absoluteZero);
+                if (negativeMaximum != -{{type}}.MaxValue || positiveOne != 1
+                    || zero != 0 || positive != 42 || unchanged != 42
+                    || absoluteZero != 0) { return 2; }
+                return 42;
+            }
+            """);
+        var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData("Int32")]
+    [InlineData("Int64")]
+    public void FailedSignedMagnitudeCannotPublishVacantResult(string suffix)
+    {
+        var library = suffix == "Int32" ? "IntegerCheckedArithmetic.terrum" : "WideIntegerFacts.terrum";
+        var producer = CreateNumericsLibrary(library, NativeRuntimePolicy.FailFast,
+            $"Terrum.CodeAnalysis.Numerics64.TryAbsolute{suffix}");
+        var type = suffix.ToLowerInvariant();
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                bool valid = TryAbsolute{{suffix}}({{type}}.MinValue, init var result);
+                return int32(result);
+            }
+            """), ModuleCompiler.CreateReference(producer));
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CheckedInt32ArithmeticPublishesOnlyInRangeAcrossModulesAsync(NativeRuntimePolicy policy)

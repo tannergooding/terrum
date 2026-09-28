@@ -84,6 +84,22 @@ public static bool TrySubtractInt64(int64 left, int64 right, init ref<int64> res
     return true;
 }
 
+public static bool TryNegateInt64(int64 value, init ref<int64> result)
+{
+    return TrySubtractInt64(0, value, init result);
+}
+
+public static bool TryAbsoluteInt64(int64 value, init ref<int64> result)
+{
+    if (value >= 0)
+    {
+        result = value;
+        return true;
+    }
+
+    return TryNegateInt64(value, init result);
+}
+
 public static bool TryMultiplyInt64(int64 left, int64 right, init ref<int64> result)
 {
     if (!TryMultiply(left, right, out var value))
