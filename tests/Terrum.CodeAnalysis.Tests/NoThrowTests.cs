@@ -199,6 +199,106 @@ public sealed class NoThrowTests
     }
 
     [Theory]
+    [InlineData("(true && true) == true")]
+    [InlineData("(!false) == true")]
+    public void PureBooleanFactsSatisfyNoThrowRequire(string expression)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            $"[NoThrow] void Check() {{ require {expression}; }}"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        SemanticVerifier.VerifyLibrary(Assert.IsType<BoundProgram>(compilation.Program));
+    }
+
+    [Theory]
+    [InlineData("!false", true)]
+    [InlineData("!true", false)]
+    [InlineData("!!true", true)]
+    [InlineData("true && true", true)]
+    [InlineData("true && false", false)]
+    [InlineData("false && true", false)]
+    [InlineData("false && false", false)]
+    [InlineData("true || false", true)]
+    [InlineData("false || true", true)]
+    [InlineData("false || false", false)]
+    [InlineData("true & true", true)]
+    [InlineData("true & false", false)]
+    [InlineData("false & false", false)]
+    [InlineData("true | false", true)]
+    [InlineData("false | false", false)]
+    [InlineData("true ^ false", true)]
+    [InlineData("true ^ true", false)]
+    [InlineData("false ^ false", false)]
+    [InlineData("((true && true) == (!false)) ^ false", true)]
+    public void PureBooleanOperatorsBecomeTypedConstants(string expression, bool expected)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            $"[NoThrow] bool Fold() {{ return {expression}; }}"));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var function = Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Functions);
+        var returned = Assert.IsType<BoundReturn>(Assert.Single(function.Body.Statements));
+        var constant = Assert.IsType<BoundConstant>(returned.Value);
+        Assert.Equal(PrimitiveType.Bool, constant.Type);
+        Assert.Equal(expected ? 1L : 0L, constant.Value);
+        Assert.Equal(expression.Length, constant.Span.Length);
+    }
+
+    [Theory]
+    [InlineData("(!true) == false", true)]
+    [InlineData("(true && false) == true", false)]
+    [InlineData("(false | true) != true", false)]
+    public void NestedBooleanRequirementsKeepLiteralFailurePolicy(string expression, bool expected)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            $"[NoThrow] void Check() {{ require {expression}; }}"));
+        Assert.Equal(!expected, compilation.HasErrors);
+        if (expected)
+        {
+            var function = Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Functions);
+            var requirement = Assert.IsType<BoundRequire>(function.Body.Statements[0]);
+            Assert.Equal(1L, Assert.IsType<BoundConstant>(requirement.Condition).Value);
+        }
+        else
+        {
+            Assert.Null(compilation.Program);
+            Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3017");
+        }
+    }
+
+    [Theory]
+    [InlineData("bool Fold(bool value) { return false && value; }", typeof(BoundRead))]
+    [InlineData("bool Fold() { return true || Fail(); } bool Fail() { require false; return false; }", typeof(BoundCall))]
+    [InlineData("bool Fold() { return false & Fail(); } bool Fail() { require false; return false; }", typeof(BoundCall))]
+    [InlineData("bool Fold() { return false && int32.MaxValue + 1 > int32(0); }", typeof(BoundBinary))]
+    public void UnknownAndFailingBooleanOperandsRemainInIr(string source, Type rightType)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var function = Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Functions,
+            static function => function.Name == "Fold");
+        var returned = Assert.IsType<BoundReturn>(Assert.Single(function.Body.Statements));
+        var binary = Assert.IsType<BoundBinary>(returned.Value);
+        Assert.Equal(rightType, binary.Right.GetType());
+        if (binary.Right is BoundBinary comparison)
+        {
+            _ = Assert.IsType<BoundBinary>(comparison.Left);
+        }
+    }
+
+    [Theory]
+    [InlineData("[NoThrow] bool Fold() { return true || Fail(); } bool Fail() { return true; }", "TRM3017")]
+    [InlineData("[NoThrow] bool Fold() { return false && int32.MaxValue + 1 > int32(0); }", "TRM3017")]
+    [InlineData("bool Fold() { return false && Missing(); }", "TRM3011")]
+    [InlineData("bool Fold() { return true || int32(1) == uint32(1); }", "TRM3007")]
+    public void ConstantBooleanSidesDoNotHideInvalidOrEffectfulOperands(string source, string code)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.Null(compilation.Program);
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == code);
+    }
+
+    [Theory]
     [InlineData("int32.MinValue == int32.MinValue", true)]
     [InlineData("int32.MinValue != int32.MinValue", false)]
     [InlineData("int32.MinValue < int32.MaxValue", true)]

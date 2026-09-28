@@ -20,9 +20,11 @@ public sealed partial class GenericControlFlowModuleTests
     {
         const string Original = "public int32 Read() { return 40; }";
         const string Replacement = """
-            [NoThrow] bool Condition() { return uint64.MaxValue > uint64(int64.MaxValue); }
+            [NoThrow] bool Condition() {
+                return (uint64.MaxValue > uint64(int64.MaxValue)) && !false;
+            }
             [NoThrow] int32 Secret() {
-                require uint64.MaxValue > uint64(int64.MaxValue);
+                require (true & (uint64.MaxValue > uint64(int64.MaxValue))) == true;
                 return int32(uint32(6 * 7));
             }
             public int32 Read() { if (Condition()) { return Secret(); } return 0; }

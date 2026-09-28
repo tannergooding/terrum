@@ -14,6 +14,9 @@ internal sealed partial class Binder
         BigInteger value;
         switch (expression)
         {
+            case BoundUnary { Operator: TokenKind.Bang, Operand: BoundConstant { Type: PrimitiveType.Bool } boolean, Type: PrimitiveType.Bool }:
+                return new BoundConstant(boolean.Value == 0 ? 1 : 0, PrimitiveType.Bool, expression.Span);
+
             case BoundBinary { Left: BoundConstant boolLeft, Right: BoundConstant boolRight, Type: PrimitiveType.Bool } comparison:
                 if (boolLeft.Type != boolRight.Type)
                 {
@@ -37,6 +40,15 @@ internal sealed partial class Binder
                         result = firstValue == secondValue;
                         break;
                     case TokenKind.BangEquals:
+                        result = firstValue != secondValue;
+                        break;
+                    case TokenKind.AmpersandAmpersand or TokenKind.Ampersand when boolLeft.Type == PrimitiveType.Bool:
+                        result = firstValue != 0 && secondValue != 0;
+                        break;
+                    case TokenKind.PipePipe or TokenKind.Pipe when boolLeft.Type == PrimitiveType.Bool:
+                        result = firstValue != 0 || secondValue != 0;
+                        break;
+                    case TokenKind.Caret when boolLeft.Type == PrimitiveType.Bool:
                         result = firstValue != secondValue;
                         break;
                     case TokenKind.Less when boolLeft.Type != PrimitiveType.Bool:

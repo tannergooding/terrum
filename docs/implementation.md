@@ -587,12 +587,13 @@ NoThrow only with a statically constant index proven within that exact
 compilation grant. Before verification, binding folds already-typed constant
 integer arithmetic and bitwise operations, unary plus/negation/complement,
 and supported integer/code-unit conversions when each intermediate result is
-representable. Matching constant integer/code-unit comparisons and boolean
-equality produce boolean constants usable by the existing `require` and
-control-flow checks. Folding preserves the expression's type and source span; an
+representable. Matching constant integer/code-unit comparisons and built-in
+boolean operations with constant operands produce boolean constants usable by
+the existing `require` and control-flow checks. Folding preserves the expression's type and source span; an
 overflow, zero divisor or out-of-range conversion remains an operation with
 its original runtime failure behavior. Calls, variable/field reads and buffer
-contents are not evaluated or discarded. This normalization is unconditional,
+contents are not evaluated or discarded, even behind a constant short-circuit
+operand. This normalization is unconditional,
 not an optional optimization or a general constant evaluator.
 The verifier still conservatively rejects remaining checked arithmetic,
 potentially failing conversions and general buffer indexes without range or

@@ -35,6 +35,8 @@ public sealed partial class JitTests
             [NoThrow] int32 Check() {
                 require uint64.MaxValue > uint64(int64.MaxValue);
                 require char16(65535) >= char16(65535);
+                require (true && !false) == true;
+                require (true ^ false) | false;
                 if (uint32.MaxValue < uint32(0)) { return 0; }
                 return 42;
             }
@@ -52,6 +54,7 @@ public sealed partial class JitTests
     [InlineData("int32 Main() { require uint64.MaxValue < uint64(0); return 0; }", unchecked((int)0xE0540003))]
     [InlineData("int32 Main() { require int32.MaxValue + 1 == int32(0); return 0; }", unchecked((int)0xE0540001))]
     [InlineData("int32 Main() { require Fail() == int32(0); return 0; } int32 Fail() { require false; return 0; }", unchecked((int)0xE0540003))]
+    [InlineData("int32 Main() { require true && (int32.MaxValue + 1 > int32(0)); return 0; }", unchecked((int)0xE0540001))]
     public Task UnsafeScalarExpressionsStillFailInOrderAcrossAotAndJitAsync(string source, int failure) =>
         AssertFailFastExecutionAsync(source, failure);
 
@@ -63,6 +66,20 @@ public sealed partial class JitTests
     [InlineData("int32 Main() { unsafe { try { require uint64.MaxValue < uint64(0); } catch { return 42; } } return 0; }")]
     [InlineData("int32 Main() { unsafe { try { require int32.MaxValue + 1 == int32(0); } catch { return 42; } } return 0; }")]
     [InlineData("int32 Main() { unsafe { try { require Fail() == int32(0); } catch { return 42; } } return 0; } int32 Fail() { require false; return 0; }")]
+    [InlineData("int32 Main() { unsafe { try { require true && (int32.MaxValue + 1 > int32(0)); } catch { return 42; } } return 0; }")]
     public Task UnsafeScalarExpressionsStayCatchableAcrossAotAndJitAsync(string source) =>
         AssertCheckedExecutionAsync(source, 42);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task ConstantShortCircuitDoesNotDropUnknownOperandAcrossAotAndJitAsync(bool checkedFailures)
+    {
+        const string Source = """
+            bool Fail() { require false; return false; }
+            int32 Main() { require true || Fail(); return 42; }
+            """;
+        return checkedFailures ? AssertCheckedExecutionAsync(Source, 42)
+            : AssertFailFastExecutionAsync(Source, 42);
+    }
 }
