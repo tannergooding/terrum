@@ -67,7 +67,9 @@ and compatible replacements must preserve that intent. This does not add
 implicit conversions or relax exact checks for other module layouts.
 Revision 36 admits up to 32 managed-class fields (previous revisions retain
 the 16-field reader limit); construction tracks the final field in a 32-bit
-initialization mask. The collector descriptor remains an offset list.
+initialization mask. The collector descriptor remains an offset list. Private
+wide classes can be retained in producers, graph participants or consumers;
+this does not expose managed handles across module boundaries.
 Current source binding records the selected declaration and its closed generic
 arguments, not just a name. Linking or JIT loading validates and implements
 that selected target; it never reruns source overload resolution against a

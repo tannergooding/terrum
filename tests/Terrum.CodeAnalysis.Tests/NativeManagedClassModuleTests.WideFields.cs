@@ -157,6 +157,23 @@ public sealed partial class NativeManagedClassModuleTests
         Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task WidePrivateConsumerLinksScalarProviderAsync(NativeRuntimePolicy policy)
+    {
+        var producer = ModuleCompiler.CreateProducer(Compile(
+            "public int32 Bias() { return 0; }", policy), ["Bias"]);
+        var source = WideSource(32) + " int32 Main() { return Read() + Bias(); }";
+        var consumer = ModuleCompiler.CreateConsumer(Compile(source, policy,
+            ModuleCompiler.CreateReference(producer), library: false), producer);
+        Assert.Equal(36, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)));
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.Equal(32, Assert.Single(linked.Classes).Fields.Length);
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+        Assert.Equal(42, await RunSemanticModuleJitAsync(consumer, producer, policy).ConfigureAwait(true));
+    }
+
     private static string WideSource(int fieldCount, string resultSuffix = "")
     {
         var fields = string.Join(" ", Enumerable.Range(0, fieldCount - 1).Select(index => $"public bool F{index};"));
