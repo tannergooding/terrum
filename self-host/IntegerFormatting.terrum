@@ -38,6 +38,16 @@ OwnedInt32Buffer PrefixMinus(OwnedInt32Buffer workspace)
     return move buffer;
 }
 
+uint64 FormattingMagnitude(int64 value)
+{
+    if (value < 0)
+    {
+        return uint64(-(value + 1)) + 1;
+    }
+
+    return uint64(value);
+}
+
 public static OwnedInt32Buffer FormatUInt64(uint64 value, OwnedInt32Buffer workspace)
 {
     mut OwnedInt32Buffer buffer = move workspace;
@@ -61,9 +71,7 @@ public static OwnedInt32Buffer FormatInt64(int64 value, OwnedInt32Buffer workspa
         return FormatUInt64(uint64(value), move workspace);
     }
 
-    // Avoid negating int64.MinValue in the signed domain.
-    uint64 magnitude = uint64(-(value + 1)) + 1;
-    OwnedInt32Buffer buffer = FormatUInt64(magnitude, move workspace);
+    OwnedInt32Buffer buffer = FormatUInt64(FormattingMagnitude(value), move workspace);
     return PrefixMinus(move buffer);
 }
 
@@ -123,9 +131,7 @@ public static OwnedInt32Buffer FormatInt64Base(int64 value, uint32 radix, OwnedI
         return FormatUInt64Base(uint64(value), radix, move workspace);
     }
 
-    // Avoid negating int64.MinValue in the signed domain.
-    uint64 magnitude = uint64(-(value + 1)) + 1;
-    OwnedInt32Buffer buffer = FormatUInt64Base(magnitude, radix, move workspace);
+    OwnedInt32Buffer buffer = FormatUInt64Base(FormattingMagnitude(value), radix, move workspace);
     return PrefixMinus(move buffer);
 }
 
@@ -160,16 +166,7 @@ public static bool TryGetUInt64BaseLength(uint64 value, uint32 radix, init ref<i
 
 public static bool TryGetInt64BaseLength(int64 value, uint32 radix, init ref<int32> length)
 {
-    mut uint64 magnitude = 0;
-    if (value >= 0)
-    {
-        magnitude = uint64(value);
-    }
-    else
-    {
-        magnitude = uint64(-(value + 1)) + 1;
-    }
-    if (!TryGetUInt64BaseLength(magnitude, radix, init var digits))
+    if (!TryGetUInt64BaseLength(FormattingMagnitude(value), radix, init var digits))
     {
         return false;
     }
