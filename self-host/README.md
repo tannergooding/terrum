@@ -83,7 +83,7 @@ remain hosted in C#.
 
 | Candidate | Purpose | Gates before execution |
 |---|---|---|
-| [CopyAlgorithms](CopyAlgorithms.terrum) | NoThrow selection and conditional output of complete Copy values without operator witnesses | Composed AOT/JIT calls select scalars, nested tokens and ranges under both policies; invalid indices publish no value; no primitive operator conformance, borrowed views or generic runtime dispatch |
+| [CopyAlgorithms](CopyAlgorithms.terrum) | NoThrow selection and conditional `out` or `init ref<T>` output of complete Copy values without operator witnesses | Composed AOT/JIT calls select scalars, nested tokens and ranges under both policies; invalid indices publish no value; existing `out` calls remain valid; no primitive operator conformance, borrowed views or generic runtime dispatch |
 | [IntegerFacts](IntegerFacts.terrum) | Overflow-free signed-addition range predicate | Its internal `[ConstEval]` helper is required for a scalar local and remains callable at runtime; tested with native entry wrappers, not a full compiler bootstrap |
 | [WideIntegerFacts](WideIntegerFacts.terrum) | Checked signed and unsigned 64-bit addition, subtraction, multiplication, division and remainder with conditional `init ref` publication, plus bounded decimal/radix-2..36 accumulation through the full unsigned range | Executed as separately compiled modules with conditional wide outputs under both policies; division by zero and signed-minimum quotient overflow do not publish |
 | [WideIntegerTests](WideIntegerTests.terrum) | Signed arithmetic extrema, invalid digits/radices, per-radix unsigned/signed limits and conditional output publication | Executed through AOT and JIT with a shared entry wrapper under both failure policies |

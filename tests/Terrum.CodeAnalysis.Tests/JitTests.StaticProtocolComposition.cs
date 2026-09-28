@@ -283,9 +283,11 @@ public sealed partial class JitTests
                 require TrySelectCopy(0, wide, uint64(0), out var output);
                 require TrySelectCopy(1, int32(0), signed, out var intOutput);
                 require TrySelectCopy(0, true, false, out var boolOutput);
+                if (TrySelectCopyInit(2, wide, uint64(0), init var vacant)) { return 3; }
+                require TrySelectCopyInit(0, wide, uint64(0), init vacant);
                 if (contextual != 42 || typed != 41 || direct != 42 || intOutput != 42
                     || wide != output || destination != wide || narrow != 42
-                    || codeUnit != char16(65) || selected || !boolOutput) { return 1; }
+                    || vacant != wide || codeUnit != char16(65) || selected || !boolOutput) { return 1; }
                 return int32(contextual);
             }
             """;

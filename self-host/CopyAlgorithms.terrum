@@ -25,3 +25,14 @@ namespace Terrum;
 
     return false;
 }
+
+[NoThrow] bool TrySelectCopyInit<T>(int32 index, T first, T second, init ref<T> result) where T : [Copy]
+{
+    if (!TrySelectCopy(index, first, second, out var selected))
+    {
+        return false;
+    }
+
+    result = selected;
+    return true;
+}

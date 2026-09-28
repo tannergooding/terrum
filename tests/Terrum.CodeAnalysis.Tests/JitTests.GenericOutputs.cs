@@ -24,6 +24,9 @@ public sealed partial class JitTests
             [NoThrow] bool Choose<T>(int32 index, T first, T second, out T result) where T : [Copy] {
                 return TrySelectCopy<T>(index, first, second, out result);
             }
+            [NoThrow] bool ChooseInit<T>(int32 index, T first, T second, init ref<T> result) where T : [Copy] {
+                return TrySelectCopyInit<T>(index, first, second, init result);
+            }
             int32 Main() {
                 require SourceRange.TryCreate(12, 5, out var firstRange);
                 require SourceRange.TryCreate(42, 7, out var secondRange);
@@ -37,6 +40,11 @@ public sealed partial class JitTests
                 if (Choose<Token>(2, first, second, out var missing)) { return 3; }
                 require Choose<Token>(0, first, second, out var again);
                 require again.Kind == 1 && again.Range.Start == 12;
+                if (ChooseInit<Token>(-1, first, second, init var deferred)) { return 4; }
+                require ChooseInit<Token>(1, first, second, init deferred);
+                require ChooseInit<SourceRange>(0, firstRange, secondRange, init var initRange);
+                if (deferred.Kind != 2 || deferred.Range.Start != 42
+                    || initRange.Start != 12 || initRange.Length != 5) { return 5; }
                 return chosen.Range.Start;
             }
             """;
