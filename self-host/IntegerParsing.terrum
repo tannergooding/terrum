@@ -9,6 +9,10 @@ bool TryParseMagnitude(int32 start, int32 length, uint32 radix, uint64 maximum, 
     }
 
     mut uint64 value = 0;
+    uint64 divisor = uint64(radix);
+    // Bound each prefix before multiplication, without dividing per digit.
+    uint64 cutoff = maximum / divisor;
+    uint64 finalDigit = maximum - cutoff * divisor;
     int32 end = start + length;
     for (mut int32 index = start; index < end; index = index + 1)
     {
@@ -31,11 +35,12 @@ bool TryParseMagnitude(int32 start, int32 length, uint32 radix, uint64 maximum, 
             return false;
         }
 
-        if (!TryAccumulateBase(value, digit, radix, maximum, out var next))
+        if (digit >= radix || value > cutoff
+            || (value == cutoff && uint64(digit) > finalDigit))
         {
             return false;
         }
-        value = next;
+        value = value * divisor + uint64(digit);
     }
 
     result = value;
