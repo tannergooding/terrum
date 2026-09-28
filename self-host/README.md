@@ -96,8 +96,9 @@ remain hosted in C#.
 | [TokenCursor](TokenCursor.terrum) | Read-view traversal without copying backing storage or cleanup | Span indexing, matched access, stored backing dependencies, capture contract, constructor initialization |
 | [RangeTests](RangeTests.terrum) | Small success/failure and overflow boundary cases | Executed with a host-supplied entry wrapper; a Terrum test runner remains future work |
 | [TokenTests](TokenTests.terrum) | Nested value copies and reconstruction with a validated replacement range | Executed through the Windows indirect aggregate ABI; token and range fields stay read-only; no retained backing views |
-| [ManagedTokenChain](ManagedTokenChain.terrum) | Bounded linked storage for complete Copy tokens and validated source ranges | AOT/JIT fixtures under both policies; 64-link capacity, count/version changes, copied indexed results and collection after clear; not wired into the scanner |
+| [ManagedTokenChain](ManagedTokenChain.terrum) | Bounded linked storage for complete Copy tokens and validated source ranges | AOT/JIT fixtures under both policies; 64-link capacity, count/version changes, copied indexed results and collection after clear |
 | [Scanner](Scanner.terrum) | UTF-16 decoding, pinned Unicode identifiers, exact token kinds, lossless trivia, lexical diagnostics and bounded integer magnitudes | Executed through fixed checked host buffers; see the [precise subset](../docs/scanner.md) |
+| [ManagedScanner](ManagedScanner.terrum) | Copy a completed compiled scanner token stream into newly published managed storage | AOT/JIT parity with host token kinds/ranges under both policies; lexical failure, malformed host records and more than 64 tokens leave the output vacant; independent copies survive clear and collection |
 | [Host APIs](host.api.terrum) | Explicit source acquisition, cancellation, digest and output boundary | Interfaces, immutable publication, operation failures; host adapters |
 
 `SourceRange` deliberately mirrors the current host's signed 32-bit UTF-16
@@ -176,8 +177,13 @@ Its constructor still checks the nonnegative token category before publication.
 Clear drops its private links and increments the version; explicit collection
 reclaims them once the operation's temporary roots have retired.
 This exercises compact inline Copy fields alongside optional managed edges, not a
-generic collection, persistent iterator, complete token stream or scanner
-integration.
+generic collection, persistent iterator or complete token stream.
+`ManagedScanner.TryScanManaged` first fills the unchanged fixed host scanner
+records, then validates and copies up to 64 tokens (including EOF) into a new
+chain. Lexical errors, invalid records, capacity or allocation refusal leave
+the output vacant; a partially filled local chain is never published. The
+wrapper does not replace the scanner records, trivia, diagnostic or integer
+tables used by `build-component`, nor does it introduce a parser bootstrap.
 
 `StringLiteral.TryCreate` validates a complete quoted source range before
 publishing its spelling and scalar count. `TryReadScalar` reports a Unicode

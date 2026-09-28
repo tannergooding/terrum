@@ -794,6 +794,14 @@ magnitudes rather than decoding digits again, including signed-minimum operands.
 Coverage and tag validation do not prove a scanner's arithmetic; the component
 must be trusted, with differential fixtures checking its numeric behavior.
 Raw token text, source identity and lossless reconstruction remain unchanged.
+The executed `ManagedScanner` self-host candidate can instead copy a successful
+compiled scanner run's token triples into a fresh `ManagedTokenChain` of at most
+64 tokens including EOF. It validates ranges against the original UTF-16
+source, rejects malformed records and lexical diagnostics, and publishes no
+chain on failure. AOT/JIT fixtures compare host token kinds and spans, repeated
+scans, and collection after clearing links under both runtime policies. This
+does not alter scanner records or make the bounded chain the parser's token
+storage.
 
 `SourceText` owns exact input text and a diagnostic path label. All library
 offsets, line characters and lengths are UTF-16 units, not scalar/grapheme/display
