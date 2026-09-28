@@ -70,3 +70,53 @@ public static bool TryMultiplyUInt32(uint32 left, uint32 right, init ref<uint32>
     result = uint32(value);
     return true;
 }
+
+public static bool TryDivideInt32(int32 left, int32 right, init ref<int32> result)
+{
+    if (right == 0 || (left == int32.MinValue && right == -1))
+    {
+        return false;
+    }
+
+    result = left / right;
+    return true;
+}
+
+public static bool TryRemainderInt32(int32 left, int32 right, init ref<int32> result)
+{
+    if (right == 0)
+    {
+        return false;
+    }
+
+    if (left == int32.MinValue && right == -1)
+    {
+        result = 0;
+        return true;
+    }
+
+    result = left % right;
+    return true;
+}
+
+public static bool TryDivideUInt32(uint32 left, uint32 right, init ref<uint32> result)
+{
+    if (right == 0)
+    {
+        return false;
+    }
+
+    result = left / right;
+    return true;
+}
+
+public static bool TryRemainderUInt32(uint32 left, uint32 right, init ref<uint32> result)
+{
+    if (right == 0)
+    {
+        return false;
+    }
+
+    result = left % right;
+    return true;
+}

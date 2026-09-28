@@ -155,6 +155,58 @@ public sealed class WideCandidateTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, "Int32")]
+    [InlineData(NativeRuntimePolicy.FailFast, "UInt32")]
+    [InlineData(NativeRuntimePolicy.FailFast, "Int64")]
+    [InlineData(NativeRuntimePolicy.FailFast, "UInt64")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "Int32")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "UInt32")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "Int64")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "UInt64")]
+    public async Task CheckedDivisionAndRemainderPreserveBoundarySemanticsAcrossModulesAsync(
+        NativeRuntimePolicy policy, string suffix)
+    {
+        string type = suffix.ToLowerInvariant();
+        string library = suffix.EndsWith("32", StringComparison.Ordinal)
+            ? "IntegerCheckedArithmetic.terrum" : "WideIntegerFacts.terrum";
+        string signedCases = suffix.StartsWith("Int", StringComparison.Ordinal)
+            ? $$"""
+                if (TryDivide{{suffix}}({{type}}.MinValue, -1, init var overflow)) { return 3; }
+                require TryRemainder{{suffix}}({{type}}.MinValue, -1, init var minRemainder);
+                require TryDivide{{suffix}}(-7, 3, init var negativeQuotient);
+                require TryRemainder{{suffix}}(-7, 3, init var negativeRemainder);
+                if (minRemainder != 0 || negativeQuotient != -2 || negativeRemainder != -1) { return 4; }
+                """
+            : $$"""
+                require TryDivide{{suffix}}({{type}}.MaxValue, 2, init var half);
+                if (half != {{(suffix == "UInt32" ? "2147483647" : "9223372036854775807")}}) { return 4; }
+                """;
+        var producer = CreateNumericsLibrary(library, policy,
+            $"Terrum.CodeAnalysis.Numerics64.TryDivide{suffix}",
+            $"Terrum.CodeAnalysis.Numerics64.TryRemainder{suffix}");
+        var consumerSource = SyntaxTree.Parse($$"""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                if (TryDivide{{suffix}}(42, 0, init var divideByZero)
+                    || TryRemainder{{suffix}}(42, 0, init var remainderByZero)) { return 1; }
+                require TryDivide{{suffix}}(84, 2, init var quotient);
+                require TryRemainder{{suffix}}(85, 2, init var remainder);
+                require TryDivide{{suffix}}({{type}}.MaxValue, {{type}}.MaxValue, init var one);
+                require TryRemainder{{suffix}}({{type}}.MaxValue, {{type}}.MaxValue, init var zero);
+                if (quotient != 42 || remainder != 1 || one != 1 || zero != 0) { return 2; }
+                {{signedCases}}
+                return 42;
+            }
+            """);
+        var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task SaturatingConversionsExecuteFromIndependentModuleAsync(NativeRuntimePolicy policy)
