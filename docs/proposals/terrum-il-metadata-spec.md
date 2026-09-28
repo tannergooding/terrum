@@ -448,9 +448,9 @@ zero-copy ownership, GC rooting and direct aliasing are not implied.
 
 | Table | Ordered row payload |
 |---|---|
-| Module | `u32 identityBlob, u32 targetRequirement, u32 runtimePolicy, u32 entryMethod?, u32 moduleFlags, u32 featureFirst, u32 featureCount, u32 moduleRefStart, u32 typeDefStart, u32 methodDefStart, u32 sourceFileStart` |
+| Module | `str identity, u32 targetRequirement, u32 runtimePolicy, u32 entryMethod?, u32 moduleFlags, u32 featureFirst, u32 featureCount, u32 moduleRefStart, u32 typeDefStart, u32 methodDefStart, u32 sourceFileStart` |
 | Feature | `u32 featureId, u32 minimumRuleRevision` |
-| ModuleRef | `u32 producerIdentityBlob, u32 targetRequirement, u32 runtimePolicy` |
+| ModuleRef | `str producerIdentity, u32 targetRequirement, u32 runtimePolicy` |
 | TypeSpec (variable) | `u8 form, u8 qualifiers`, followed by only the operands specified for that form below |
 | TypeArg | `u32 ownerTypeSpec, u32 ordinal, u32 argumentTypeSpec` |
 | TypeDef | `str namespace, str name, u8 kind, u8 visibility, u8 layoutKind, u8 flags, u32 fieldFirst, u32 fieldCount, u32 genericFirst, u32 genericCount, u32 layoutRow?, u32 contractFirst, u32 contractCount` |
@@ -478,11 +478,12 @@ are allowed; declaration names, export keys and SourceFile paths are not
 empty. SourceFile requires `digestBlob=0` in `(1, 0)` because no digest
 algorithm is assigned.
 
-`Module.identityBlob` and `ModuleRef.producerIdentityBlob` are opaque nonempty
-byte identities, not hashes or proof of authorship. Identity equality is exact
-byte equality; Module identities must be distinct within one artifact.
-Replacing an identity describes another producer. Export keys
-are nonempty decoded strings, compared ordinally without normalization.
+`Module.identity` and `ModuleRef.producerIdentity` are nonempty String
+references, not hashes or proof of authorship. Identity equality uses
+ordinal decoded scalar text without normalization, even across different
+String row encodings; Module identities must be distinct within one artifact.
+Changing an identity selects another producer. Export keys are likewise
+nonempty decoded strings, compared ordinally without normalization.
 Metadata table indexes and `DefId` rows are artifact-wide. Rows in ModuleRef,
 TypeDef, MethodDef and SourceFile are grouped by owning Module row. For
 each such table, the first Module row's `*Start` is `1`; starts are
@@ -697,9 +698,9 @@ these are the relevant row references; row indexes are artifact-wide:
 
 | Table row | Payload values in column order |
 |---|---|
-| Blob 1 | UTF-8 bytes `Example` (opaque module identity) |
-| String 1 | `kind=0, unitCount=6, ASCII content=Answer, terminator=00, padding=00` (method name and export key) |
-| Module 1 | `identityBlob=1, targetRequirement=1, runtimePolicy=0, entryMethod=1, moduleFlags=0, featureFirst=0, featureCount=0, moduleRefStart=1, typeDefStart=1, methodDefStart=1, sourceFileStart=1` |
+| String 1 | `flags=0, unitCount=6, ASCII content=Answer, terminator=00, padding=00` (method name and export key) |
+| String 2 | `flags=0, unitCount=7, ASCII content=Example, terminator=00` (module identity) |
+| Module 1 | `identity=2, targetRequirement=1, runtimePolicy=0, entryMethod=1, moduleFlags=0, featureFirst=0, featureCount=0, moduleRefStart=1, typeDefStart=1, methodDefStart=1, sourceFileStart=1` |
 | TypeSpec 1 | `form=0x01, qualifiers=0, primitiveCode=0x03` (`int32`) |
 | MethodSig 1 | `resultTypeSpec=1, receiverTypeSpec=0, paramFirst=0, paramCount=0, genericFirst=0, genericCount=0` |
 | MethodDef 1 | `ownerTypeDef=0, name=1, signature=1, flags=1` (public), `contractFirst=0, contractCount=0, bodyRow=1` |
@@ -712,16 +713,18 @@ three-byte row. Neither the Module row nor an export authorizes a caller to
 skip bounds and contract compatibility checks; semantic body auditing is
 governed by the consumer's trust policy.
 
-String 1 has offsets `00 00 00 00 0C 00 00 00` followed by its
-12-byte row `00 06 00 00 41 6E 73 77 65 72 00 00`. The first `00`
-is the ASCII kind, `06 00 00` is the three-byte code-unit count, and the
-last `00` is alignment padding after the one-byte terminator.
+The two String rows have offsets `00 00 00 00 0C 00 00 00 18 00 00 00`.
+String 1 is the 12-byte row `00 06 00 00 41 6E 73 77 65 72 00 00`:
+the first `00` selects ASCII with no other flags, `06 00 00` is the
+three-byte code-unit count, and the last `00` is alignment padding after
+the one-byte terminator. String 2 is
+`00 07 00 00 45 78 61 6D 70 6C 65 00`, also 12 bytes.
 
-A merger could add Blob 2 (`Consumer`), Module 2
-(`identityBlob=2, targetRequirement=1, runtimePolicy=0, entryMethod=0,
+A merger could add String 3 (`Consumer`), Module 2
+(`identity=3, targetRequirement=1, runtimePolicy=0, entryMethod=0,
 moduleFlags=0, featureFirst=0, featureCount=0, moduleRefStart=1,
 typeDefStart=1, methodDefStart=2, sourceFileStart=1`), ModuleRef 1
-(`producerIdentityBlob=1, targetRequirement=1, runtimePolicy=0`), and
+(`producerIdentity=2, targetRequirement=1, runtimePolicy=0`), and
 MethodDef 2 (`ownerTypeDef=0, name=1, signature=1, flags=1,
 contractFirst=0, contractCount=0, bodyRow=0`).
 Import 1 binds ModuleRef 1, String 1 as export key, and expected local
