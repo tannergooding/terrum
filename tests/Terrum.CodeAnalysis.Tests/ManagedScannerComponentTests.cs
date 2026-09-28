@@ -78,6 +78,149 @@ public sealed class ManagedScannerComponentTests
             string.Join(" ", Enumerable.Repeat("a", identifiers)), fails);
 
     [Theory]
+    [InlineData("")]
+    [InlineData("alpha 42 // trailing\r\n\uD801\uDC00")]
+    public async Task CursorReadsPublishedTokensAndStopsAtEndAsync(string text)
+    {
+        var expected = Lexer.Lex(SourceText.From(text)).Tokens.ToArray();
+        var source = new StringBuilder("""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TryScanManagedCursor(init var cursor);
+                require cursor.IsCurrent;
+            """);
+        for (var index = 0; index < expected.Length; index++)
+        {
+            _ = source.Append(CultureInfo.InvariantCulture,
+                $"if (!cursor.TryRead(out var token{index}) || token{index}.Kind != {(int)expected[index].Kind} || token{index}.Range.Start != {expected[index].Span.Start} || token{index}.Range.Length != {expected[index].Span.Length}) {{ return 1; }}");
+        }
+        _ = source.Append("""
+                if (cursor.TryRead(out var pastEnd) || !cursor.IsCurrent) { return 2; }
+                if (cursor.TryRead(out var again)) { return 3; }
+                return 42;
+            }
+            """);
+
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, source.ToString(), (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Fact]
+    public Task CursorReadsFullCapacityAsync() =>
+        CursorReadsPublishedTokensAndStopsAtEndAsync(string.Join(" ", Enumerable.Repeat("a", 63)));
+
+    [Theory]
+    [InlineData("\uD800")]
+    [InlineData("a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a")]
+    public async Task FailedCursorScanDoesNotPublishAsync(string text)
+    {
+        var lexical = Lexer.Lex(SourceText.From(text));
+        Assert.True(lexical.Diagnostics.Length != 0 || lexical.Tokens.Length > 64);
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                if (TryScanManagedCursor(init var cursor)) { return 1; }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CursorRejectsMutationsWithoutPublishingOutputAsync(bool clear)
+    {
+        var mutation = clear ? "chain.TryClear()" : "chain.TryAppend(2, 1, 0)";
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require ManagedTokenChain.TryCreate(out var chain);
+                require chain.TryAppend(1, 0, 1);
+                require chain.TryCreateCursor(out var cursor);
+                require cursor.TryRead(out var first) && first.Kind == 1;
+                require chain.TryCreateCursor(out var stale);
+                require {{mutation}};
+                if (cursor.IsCurrent || stale.IsCurrent
+                    || cursor.TryRead(out var absent) || stale.TryRead(out var missed)) { return 1; }
+                require chain.TryCreateCursor(out var fresh);
+                if (!fresh.IsCurrent) { return 2; }
+                if ({{(clear ? "fresh.TryRead(out var cleared)" : "!fresh.TryRead(out var appended) || appended.Kind != 1")}}) { return 3; }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync("a", entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task CursorKeepsSourceGraphAliveAfterFactoryReturnsAsync(NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            bool MakeCursor(init ref<write ManagedTokenCursor> result) {
+                require ManagedTokenChain.TryCreate(out var chain);
+                require chain.TryAppend(7, 0, 1);
+                require chain.TryCreateCursor(out var cursor);
+                result = cursor;
+                return true;
+            }
+            int32 Main() {
+                require MakeCursor(init var cursor);
+                if (ManagedHeap.Collect() != 0) { return 1; }
+                if (!cursor.TryRead(out var token) || token.Kind != 7) { return 2; }
+                if (cursor.TryRead(out var pastEnd) || !cursor.IsCurrent) { return 3; }
+                if (ManagedHeap.Collect() != 0) { return 4; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync("a", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task FailedMutationKeepsCursorCurrentAndInvalidatedReadReleasesLinksAsync(NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require ManagedTokenChain.TryCreate(out var chain);
+                require chain.TryAppend(7, 0, 1);
+                require chain.TryCreateCursor(out var cursor);
+                if (chain.TryAppend(-1, 1, 0) || !cursor.IsCurrent) { return 1; }
+                if (!cursor.TryRead(out var token) || token.Kind != 7) { return 2; }
+                require chain.TryCreateCursor(out var stale);
+                require chain.TryClear();
+                if (stale.TryRead(out var absent) || stale.IsCurrent) { return 3; }
+                if (ManagedHeap.Collect() != 1) { return 4; }
+                if (cursor.TryRead(out var afterClear) || cursor.IsCurrent) { return 5; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync("a", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData(3, -1, 2)]
     [InlineData(5, 100, 2)]
     [InlineData(6, 1, 3)]

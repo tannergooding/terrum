@@ -96,9 +96,9 @@ remain hosted in C#.
 | [TokenCursor](TokenCursor.terrum) | Read-view traversal without copying backing storage or cleanup | Span indexing, matched access, stored backing dependencies, capture contract, constructor initialization |
 | [RangeTests](RangeTests.terrum) | Small success/failure and overflow boundary cases | Executed with a host-supplied entry wrapper; a Terrum test runner remains future work |
 | [TokenTests](TokenTests.terrum) | Nested value copies and reconstruction with a validated replacement range | Executed through the Windows indirect aggregate ABI; token and range fields stay read-only; no retained backing views |
-| [ManagedTokenChain](ManagedTokenChain.terrum) | Bounded linked storage for complete Copy tokens and validated source ranges | AOT/JIT fixtures under both policies; 64-link capacity, count/version changes, copied indexed results and collection after clear |
+| [ManagedTokenChain](ManagedTokenChain.terrum) | Bounded linked storage for complete Copy tokens and validated source ranges, with a sequential managed cursor | AOT/JIT fixtures under both policies; 64-link capacity, count/version changes, copied indexed and sequential results, mutation invalidation and collection after clear |
 | [Scanner](Scanner.terrum) | UTF-16 decoding, pinned Unicode identifiers, exact token kinds, lossless trivia, lexical diagnostics and bounded integer magnitudes | Executed through fixed checked host buffers; see the [precise subset](../docs/scanner.md) |
-| [ManagedScanner](ManagedScanner.terrum) | Copy a completed compiled scanner token stream into newly published managed storage | AOT/JIT parity with host token kinds/ranges under both policies; lexical failure, malformed host records and more than 64 tokens leave the output vacant; independent copies survive clear and collection |
+| [ManagedScanner](ManagedScanner.terrum) | Copy a completed compiled scanner token stream into newly published managed storage or a sequential cursor | AOT/JIT parity with host token kinds/ranges under both policies; lexical failure, malformed host records and more than 64 tokens leave the output vacant; independent copies survive clear and collection |
 | [Host APIs](host.api.terrum) | Explicit source acquisition, cancellation, digest and output boundary | Interfaces, immutable publication, operation failures; host adapters |
 
 `SourceRange` deliberately mirrors the current host's signed 32-bit UTF-16
@@ -171,6 +171,13 @@ starts, capacity exhaustion and version overflow before publishing a mutation.
 Allocation refusal leaves the existing chain unchanged. Indexed reads return
 independent Copy tokens that remain valid after the links are collected;
 no link handle or retained source view escapes the chain.
+`TryCreateCursor` allocates a sequential reader over the existing links rather
+than rescanning from the head for each token. The reader retains its chain and
+checks the chain version before every read. An append or clear invalidates old
+readers: `TryRead` then returns false without publishing an output, while
+`IsCurrent` distinguishes invalidation from ordinary end of stream. The reader
+releases its remaining link on a rejected read; it does not preserve a snapshot
+across mutation or expose a link handle.
 The link factory receives a complete `Token`, preserving the already checked
 `SourceRange` instead of decomposing and reconstructing it during allocation.
 Its constructor still checks the nonnegative token category before publication.
@@ -185,6 +192,10 @@ Lexical errors, invalid records, capacity or allocation refusal leave the
 output vacant; a partially filled local chain is never published. The
 wrapper does not replace the scanner records, trivia, diagnostic or integer
 tables used by `build-component`, nor does it introduce a parser bootstrap.
+`TryScanManagedCursor` publishes a reader only after the complete scan and
+cursor allocation succeed; its cursor retains the underlying chain after
+the scanner wrapper returns. It is a bounded sequential consumer, not a
+replacement for the host parser or a public token-stream wire contract.
 
 `StringLiteral.TryCreate` validates a complete quoted source range before
 publishing its spelling and scalar count. `TryReadScalar` reports a Unicode

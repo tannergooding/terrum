@@ -74,6 +74,10 @@ mut class ManagedTokenChain {
         return false;
     }
 
+    public bool TryCreateCursor(out write ManagedTokenCursor cursor) {
+        return ManagedTokenCursor.TryCreate(this, _first, _version, out cursor);
+    }
+
     public mut bool TryClear() {
         if (_count == 0 || _version == int32.MaxValue) { return false; }
         _first = null;
@@ -81,5 +85,32 @@ mut class ManagedTokenChain {
         _count = 0;
         _version = _version + 1;
         return true;
+    }
+}
+
+mut class ManagedTokenCursor {
+    private ManagedTokenChain _owner;
+    private mut write ManagedTokenLink? _next;
+    private int32 _version;
+
+    public ManagedTokenCursor(ManagedTokenChain owner, write ManagedTokenLink? next, int32 version) {
+        _owner = owner;
+        _next = next;
+        _version = version;
+    }
+
+    public bool IsCurrent { [NoThrow] get { return _owner.Version == _version; } }
+
+    public mut bool TryRead(out Token token) {
+        if (!IsCurrent) {
+            _next = null;
+            return false;
+        }
+        if (_next is some current) {
+            token = current.Value;
+            _next = current.Next;
+            return true;
+        }
+        return false;
     }
 }
