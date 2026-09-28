@@ -18,6 +18,10 @@ public unique struct SourceLineIndex
         while (true)
         {
             require TryReadSourceLine(position, out var content, out var includingBreak);
+            if (lineCount == int32.MaxValue)
+            {
+                return false;
+            }
             lineCount = lineCount + 1;
             if (content.Length == includingBreak.Length)
             {
