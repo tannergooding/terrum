@@ -6,13 +6,10 @@
 > boundary. Terms such as "must" below describe the proposed contract where
 > its representation has been specified; open choices are identified explicitly.
 
-The organization takes only a structural cue from ECMA-335 (6th edition):
-metadata tables and physical/container layout are treated separately here,
-as in Partition II §§22–25, while coded operations have their own
-[instruction proposal](terrum-il-instruction-set.md), analogous in scope to
-Partition III. Terrum does not adopt CIL instructions, CLI metadata tokens,
-CLI profiles, or PE as its required container. This is an engineering draft,
-not an attempt to reproduce a standards-body specification.
+This document defines metadata tables and physical framing; the
+[instruction proposal](terrum-il-instruction-set.md) defines coded operations.
+The artifact can be embedded in PE or ELF but does not require either
+container.
 
 ## Definitions and conventions
 
@@ -30,11 +27,11 @@ not an attempt to reproduce a standards-body specification.
 | Source revision, artifact revision, native profile | Independent axes for source syntax/semantics, `TRRM` encoding and requirements, and target/runtime ABI assumptions. The enclosing container format is separate. One revision number does not imply another. |
 | Required feature and optional data | A required semantic feature must be understood before binding or execution. An optional section can be skipped only if its registered kind is nonsemantic and explicitly safe to ignore. |
 
-Candidate field tables use `u8`, `u16`, `u32` and `u64` for fixed-width unsigned
+Field tables use `u8`, `u16`, `u32` and `u64` for fixed-width unsigned
 little-endian integers. Byte offsets are artifact-relative; lengths are byte
-counts unless stated otherwise. All numeric assignments in this proposal are
-**candidate assignments**, not values in the current repository artifact.
-Numerical resource ceilings and format-revision policy are not assigned here.
+counts unless stated otherwise. Numeric assignments below describe this
+proposed format. Numerical resource ceilings and future format-revision
+policy remain unspecified.
 
 ## Scope and conformance boundary
 
@@ -75,24 +72,17 @@ binary representation and validation; it does not redefine their rules.
 
 ## Format identity and revision scope
 
-`TRRM` is the format identifier; there is no separate `LMOD` family. Its four
-ASCII signature bytes are `54 52 52 4D`. The wire fields for encoding revision
-are assigned **provisionally** below as format `(0, 3)` for this compact
-candidate only. This is not semantic artifact revision 1, language version
-0.3, or a release label. The earlier `(0, 2)` working draft used LEB128
-body operands; it is incompatible and not a supported prior wire format.
-A reader of this candidate accepts the `(0, 3)` pair only; future
-revision and feature-negotiation policy remain open. Target ABI/profile
-requirements remain separate from source and artifact revisions. Pre-v1
-format changes may be incompatible; this proposal does not promise a
-historical reader range or a frozen wire version.
+`TRRM` is the format identifier, with ASCII signature bytes `54 52 52 4D`.
+The proposed encoding uses the format pair `(0, 3)`; a reader accepts exactly
+this pair and rejects other pairs. Future format revisions and feature
+negotiation remain unspecified. Source revisions and target ABI/profile
+requirements are independent of the artifact format pair.
 
 ## Physical framing and embedding (proposed)
 
-The following framing, table IDs, row layouts and initial opcodes form one
-proposed byte schema, **not the current encoding**. Future feature negotiation
-and numerical resource ceilings remain open. Implementers
-cannot infer that the current revision-35 reader accepts these bytes.
+The following framing, table IDs and row layouts describe the proposed
+encoding. Initial opcodes and bodies are defined in the
+[instruction proposal](terrum-il-instruction-set.md).
 
 ### Header and directory
 
@@ -161,12 +151,10 @@ Candidate framing invariants:
   has zero rows. Fixed sections have exactly `recordCount * rowStride` bytes;
   variable sections validate their index and data extents as specified below.
 
-The directory remains fixed-width for direct section lookup, while the common
-case no longer pays for empty tables. The former 19 required entries cost
-`32 + 19 * 24 = 488` bytes even with no metadata payload; this candidate
-starts at 32 bytes plus 24 bytes **per present table**. `u64` section offsets
-do not set a reader's acceptance ceiling; individual variable-table data is
-limited to `u32` bytes by its offset index.
+The directory remains fixed-width for direct section lookup. An artifact
+has 32 bytes of header plus 24 bytes **per present table** before section
+payloads. `u64` section offsets do not set a reader's acceptance ceiling;
+individual variable-table data is limited to `u32` bytes by its offset index.
 
 ## Metadata logical tables and row semantics (proposed)
 
@@ -422,8 +410,7 @@ visibility remain under review.
 ### Row-assignment example
 
 For the `return 42` [coded-body example](terrum-il-instruction-set.md#worked-bytes-and-illustrative-size),
-these are the relevant **candidate** row references, not current repository
-bytes or stable identifiers:
+these are the relevant row references; row indexes are local to this artifact:
 
 | Table row | Payload values in column order |
 |---|---|
