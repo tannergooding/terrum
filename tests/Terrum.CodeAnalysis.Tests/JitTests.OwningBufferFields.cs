@@ -195,4 +195,45 @@ public sealed partial class JitTests
             """;
         return AssertCheckedExecutionAsync(Source, 42);
     }
+
+    [Fact]
+    public Task CheckedNestedBufferWritesDoNotPublishFailedArgumentsAsync()
+    {
+        const string Source = """
+            int32 Overflow(int32 value) { return value + 1; }
+            unique struct Child {
+                public mut OwnedInt32Buffer Words;
+                public Child(OwnedInt32Buffer words) { Words = move words; }
+            }
+            unique struct Owner {
+                public mut Child Nested;
+                public Owner(Child child) { Nested = move child; }
+            }
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(2, out var raw);
+                mut Owner owner = new Owner(new Child(move raw));
+                require owner.Nested.Words.TryAppend(41);
+                mut int32 caught = 0;
+                unsafe {
+                    try { owner.Nested.Words.Set(0, Overflow(int32.MaxValue)); }
+                    catch { caught = caught + 1; }
+                    try { owner.Nested.Words.TryAppend(Overflow(int32.MaxValue)); }
+                    catch { caught = caught + 1; }
+                }
+                if (caught != 2 || owner.Nested.Words.Count != 1
+                    || owner.Nested.Words.Read(0) != 41) { return 0; }
+                {
+                    mut MutableInt32BufferView view = owner.Nested.Words.SliceMutable(0, 1);
+                    unsafe {
+                        try { view.Set(0, Overflow(int32.MaxValue)); }
+                        catch { caught = caught + 1; }
+                    }
+                    if (caught != 3 || view.Read(0) != 41) { return 0; }
+                    view.Set(0, 42);
+                }
+                return owner.Nested.Words.Read(0);
+            }
+            """;
+        return AssertCheckedExecutionAsync(Source, 42);
+    }
 }
