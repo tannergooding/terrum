@@ -1040,7 +1040,9 @@ ownership (not target ABI classification), and structural TypeSpec
 forms and TypeArg ownership/ranges, plus structural MethodSig/Param ranges and
 MethodDef module, signature and body ownership, PropertyDef getter
 owner/result matching, and structural Import/Export ownership, visibility and
-key uniqueness. These do not bind imported contracts. A host-side
+key uniqueness. GenericParam formal ordinals and Constraint ranges are checked
+structurally, not as executable generic contracts. These do not bind imported
+contracts. A host-side
 writer emits indexed String sections with required names or optional empty
 namespace text; the self-host String-row
 candidate emits individual rows. These exercise approved metadata contracts in isolation,

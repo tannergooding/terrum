@@ -107,6 +107,17 @@ public readonly ref struct TrRmMethodSigTableReader
         return (int)Read(_rows.Slice((row - 1) * RowSize, RowSize), 20);
     }
 
+    public (int Start, int Count) GetGenericRange(int row)
+    {
+        if (row <= 0 || row > Count)
+        {
+            throw InvalidSignature();
+        }
+
+        var data = _rows.Slice((row - 1) * RowSize, RowSize);
+        return ((int)Read(data, 16), (int)Read(data, 20));
+    }
+
     private static uint Read(ReadOnlySpan<byte> data, int offset)
         => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
 

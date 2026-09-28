@@ -155,6 +155,12 @@ public readonly ref struct TrRmTypeDefTableReader
         return Read(row - 1, 8);
     }
 
+    public (int Start, int Count) GetGenericRange(int row)
+    {
+        CheckRow(row);
+        return ((int)Read(row - 1, 20), (int)Read(row - 1, 24));
+    }
+
     private string ReadNamespace(int row)
     {
         var reference = Read(row, 0);
