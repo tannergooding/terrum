@@ -461,6 +461,7 @@ public sealed class Lexer
         => _diagnostics.Add(new Diagnostic(code, DiagnosticSeverity.Error, message, new TextSpan(start, length)));
 
     private static TokenKind Keyword(ReadOnlySpan<char> text) => text switch {
+        "_" => TokenKind.Underscore,
         "using" => TokenKind.UsingKeyword,
         "namespace" => TokenKind.NamespaceKeyword,
         "public" => TokenKind.PublicKeyword,

@@ -167,4 +167,6 @@ public enum TokenKind
     WhereKeyword,
     /// <summary>The write capability qualifier.</summary>
     WriteKeyword,
+    /// <summary>The reserved discard marker (<c>_</c>), never an identifier.</summary>
+    Underscore,
 }

@@ -43,6 +43,8 @@ public enum SyntaxKind
     ExpressionStatement,
     /// <summary>An assignment statement.</summary>
     AssignmentStatement,
+    /// <summary>Evaluates and discards one expression without introducing a named destination.</summary>
+    DiscardStatement,
     /// <summary>A statement consisting only of a semicolon.</summary>
     EmptyStatement,
     /// <summary>An identifier expression.</summary>

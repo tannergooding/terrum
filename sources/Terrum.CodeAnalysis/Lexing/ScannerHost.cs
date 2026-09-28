@@ -18,10 +18,10 @@ public static class ScannerHost
     public const int MaximumSourceLength = 16_384;
 
     /// <summary>The version of the lossless scanner and integer-decoder interchange.</summary>
-    public const int SchemaVersion = 4;
+    public const int SchemaVersion = 5;
 
     /// <summary>The component identity for the lossless scanner and integer-decoder protocol.</summary>
-    public const string ComponentName = "scanner-4";
+    public const string ComponentName = "scanner-5";
 
     // Lexemes are packed as (kind, UTF-16 length, code units...) and terminated by kind -1.
     private static readonly (TokenKind Kind, string Text)[] s_operatorSpellings =
@@ -73,6 +73,7 @@ public static class ScannerHost
     private static ImmutableArray<int> CreateKeywords()
     {
         var words = ImmutableArray.CreateBuilder<int>();
+        AddLexeme(words, TokenKind.Underscore, "_");
         foreach (var kind in Enum.GetValues<TokenKind>())
         {
             var name = kind.ToString();

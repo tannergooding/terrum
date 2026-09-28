@@ -12,7 +12,8 @@ NBSP, U+1680, U+2000–U+200A, U+202F, U+205F, and U+3000 are whitespace
 trivia, not line breaks.
 
 Identifiers start with `_` or Unicode 17.0.0 `XID_Start` and continue with
-`_` or `XID_Continue` (UAX #31). Spelling is compared ordinally; the lexer
+`_` or `XID_Continue` (UAX #31), except that `_` alone is the reserved
+`Underscore` token, never an identifier. Spelling is compared ordinally; the lexer
 neither normalizes nor folds case. The exact derived properties are generated
 from the pinned Unicode 17.0.0 `DerivedCoreProperties.txt`, independent of
 the host runtime's Unicode categories. `Join_Control` U+200C and U+200D
@@ -24,12 +25,14 @@ scalar is an error token, including Unicode digits at identifier start.
 Keywords are the lower-case ASCII spellings represented in `TokenKind`,
 including reserved future grammar such as `struct`, `unique`, `move`, `async`,
 and `try`; primitive type names remain identifiers. All other admissible
-spellings are identifiers. In particular, the lexer does not reserve `_` as a
-global discard or type-hole token; any special role is contextual grammar. The
-current binder treats `_` as an ordinary identifier and assignment; it has no
-special discard handling. General discard, wildcard-pattern and generic-hole
-forms are unsupported. Expression statements or unused-local cleanup do not
-implement the distinct discard semantics.
+spellings are identifiers. `_name` and `_123` remain identifiers.
+The standalone `_ = expression;` statement evaluates the bound expression
+once, with its effects and failures, and cleans up an owning result at statement
+exit. Existing void calls and named mutable-buffer-view `Set(index, value)`
+statements are also supported. It does not name a destination or infer a type
+for a context-free literal.
+Generic type holes, wildcard patterns and unnamed lambda parameters remain
+unsupported; the reserved token does not grant them discard semantics.
 
 Numeric tokens begin with a decimal digit and are unsuffixed. The syntax-16
 lexer recognizes decimal, hexadecimal and binary integer forms plus `_`
@@ -74,7 +77,7 @@ An underscore-starting name such as `_123` remains an identifier, not a number.
 Hex digits include `a` through `f`, so `0x1f32` is one integer token whose full
 value is hexadecimal; its `f32` tail is not a width suffix. A non-hex suffix
 such as `0x1u32` remains rejected as an attached width suffix. The unchanged
-scanner-4 five-word integer record uses tag 0 for valid decimal, hexadecimal
+scanner-5 five-word integer record uses tag 0 for valid decimal, hexadecimal
 and binary literals; recognized suffix tags remain only as metadata on
 rejected suffix tokens. The executable binder constructs context-typed
 decimal, hexadecimal and binary integer literals without a fallback numeric

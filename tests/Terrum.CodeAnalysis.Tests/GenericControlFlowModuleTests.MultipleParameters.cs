@@ -206,7 +206,7 @@ public sealed partial class GenericControlFlowModuleTests
     [InlineData("Left result = First<Left, Right>(new Left(1), new Left(2));", "TRM3007")]
     [InlineData("Right result = First(new Left(1), new Right(2));", "TRM3007")]
     [InlineData("var result = First<Left, Right>(new Left(1), new Right(2));", null)]
-    [InlineData("var result = First<Left, _>(new Left(1), new Right(2));", "TRM3011")]
+    [InlineData("var result = First<Left, _>(new Left(1), new Right(2));", "TRM1001")]
     public void ExplicitArgumentsNeedCompleteListsAndInferredPositionsNeedTypes(
         string body, string? diagnostic)
     {

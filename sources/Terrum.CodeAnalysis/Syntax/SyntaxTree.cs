@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Syntax;
 public sealed class SyntaxTree
 {
     /// <summary>Identifies the syntax contract used by this parser.</summary>
-    public const string LanguageVersion = "syntax-19";
+    public const string LanguageVersion = "syntax-20";
 
     private readonly Dictionary<SyntaxToken, ScannerIntegerValue>? _decodedIntegers;
 
@@ -110,7 +110,8 @@ public sealed class SyntaxTree
     /// with exact UTF-16 text at each span and one final, zero-width EOF at source length.
     /// Diagnostics require in-range spans, defined severity, a TRM-prefixed four-digit code,
     /// and a nonblank message. The caller owns lexical classification: defined token and trivia
-    /// kinds are accepted as supplied, not independently reclassified from source text.
+    /// kinds are accepted as supplied, not independently reclassified from source text,
+    /// except that the reserved <c>_</c> must have its dedicated token kind.
     /// </remarks>
     /// <param name="lexResult">A complete lexical stream and its source snapshot.</param>
     /// <param name="cancellationToken">A token to cancel validation, parsing, or content hashing.</param>
@@ -170,7 +171,9 @@ public sealed class SyntaxTree
             cancellationToken.ThrowIfCancellationRequested();
             var token = lexResult.Tokens[index];
             if (token is null || token.IsMissing || !Enum.IsDefined(token.Kind) || token.LeadingTrivia.IsDefault
-                || token.Text is null)
+                || token.Text is null
+                || (token.Kind == TokenKind.Identifier && token.Text == "_")
+                || (token.Kind == TokenKind.Underscore && token.Text != "_"))
             {
                 throw new ArgumentException("Invalid lexical token.", nameof(lexResult));
             }

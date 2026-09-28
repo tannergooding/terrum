@@ -6,7 +6,8 @@ classification, keyword and operator selection, numeric token boundaries,
 quoted strings and escapes, leading trivia and lexical diagnostics in Terrum.
 The C# host supplies buffers and pinned lexical data; it does not pretokenize
 or make source-dependent classification decisions for the component.
-The scanner-4 record contract remains current. Syntax-16 rejects attached
+The scanner-5 contract reserves `_` as a distinct token rather than an
+identifier; underscore-prefixed names remain identifiers. Syntax-16 rejects attached
 numeric width suffixes with `TRM0006`, diagnoses missing hexadecimal and
 binary prefix digits with `TRM0007` and `TRM0008`, and reports malformed digit
 separators as `TRM0009`. Valid decimal, hexadecimal and binary integer records
@@ -14,8 +15,9 @@ are untagged, while recognized rejected suffixes retain their tag value in the
 existing integer-record field for diagnostic fidelity. For example,
 `0x1f32` is an untagged hexadecimal integer; `0x1u32` is rejected as a
 width-suffixed token. This error metadata is not valid target syntax or a type
-selector. The five-word record shape and scanner-4/schema-4 identifiers remain
-unchanged. The executable numeric decoder handles decimal, hexadecimal and
+selector. The five-word integer record shape is unchanged; component and
+schema identifiers advance to scanner-5/schema-5. The executable numeric
+decoder handles decimal, hexadecimal and
 binary integers with digit separators; floating/custom literal parsing,
 registered string targets and `[ConstEval]` remain unsupported.
 
@@ -28,7 +30,7 @@ Both are execution-worker commands: compiled scanner code runs inside that CLI
 process. Supervising clients must launch a bounded subprocess and treat abnormal
 termination as a runtime failure. Ordinary `build` still uses the host lexer.
 When `scan-component`
-scanning completes, JSON uses `schemaVersion: 4`, `component: "scanner-4"`,
+scanning completes, JSON uses `schemaVersion: 5`, `component: "scanner-5"`,
 `coordinateSystem: "utf-16"`, the pinned `unicodeVersion`, `sourceLength`,
 `success`, and arrays of `tokens`, `integerValues`, and `diagnostics`. Each token has an exact
 lexical `kind`, `start`, `length` and its ordered `leadingTrivia` array.
@@ -42,7 +44,7 @@ return `success: false` and exit code 1 but still publish the full token stream
 and diagnostics on stdout. Without `--json`, token rows go to stdout and
 diagnostic code/spans go to stderr. Input, compilation, or invalid-result
 failures retain the standard schema-1 error response rather than producing a
-scanner-4 token response.
+scanner-5 token response.
 
 `build-component` instead adapts the native records to `LexResult`, pairs the
 validated integer values with that same source and token stream, feeds them

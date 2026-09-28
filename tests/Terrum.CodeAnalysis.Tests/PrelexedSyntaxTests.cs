@@ -60,6 +60,19 @@ public sealed class PrelexedSyntaxTests
         Assert.Equal(lexResult.Source.Text, tree.Root.ToFullString());
     }
 
+    [Fact]
+    public void ReservedUnderscoreCannotBeForgedAsAnIdentifierInPrelexedSource()
+    {
+        var lexResult = Lexer.Lex(SourceText.From("int32 Main() { _ = int32(42); return 42; }"));
+        var index = lexResult.Tokens.IndexOf(
+            lexResult.Tokens.Single(static token => token.Kind == TokenKind.Underscore));
+        var token = lexResult.Tokens[index];
+        var forged = ForgeToken(TokenKind.Identifier, token.Text, token.Span, token.LeadingTrivia);
+
+        _ = Assert.Throws<ArgumentException>(() =>
+            SyntaxTree.Parse(lexResult with { Tokens = lexResult.Tokens.SetItem(index, forged) }));
+    }
+
     [Theory]
     [InlineData("null-source")]
     [InlineData("default-tokens")]

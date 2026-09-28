@@ -12,6 +12,14 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class LexerTests
 {
+    [Fact]
+    public void StandaloneUnderscoreIsReservedWithoutChangingPrefixedIdentifiers()
+    {
+        var tokens = Lexer.Lex(SourceText.From("_ _name __ _123")).Tokens;
+        Assert.Equal([TokenKind.Underscore, TokenKind.Identifier, TokenKind.Identifier,
+            TokenKind.Identifier, TokenKind.EndOfFile], tokens.Select(static token => token.Kind));
+    }
+
     [Theory]
     [InlineData("𐐀_var", TokenKind.Identifier)]
     [InlineData("℘", TokenKind.Identifier)]

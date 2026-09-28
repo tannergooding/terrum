@@ -20,6 +20,37 @@ public sealed class OwnershipTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task DiscardedMoveDropsAtStatementBoundaryExactlyOnceAsync(BoundRuntimePolicy policy)
+    {
+        const string Source = """
+            unique struct Owner {
+                public int32 Id;
+                public Owner(int32 id) { Id = id; }
+                [NoThrow] [Cleanup] public void Close() {
+                    if (Host.Trace[0] == 0) { Host.Trace[0] = 1; }
+                    else if (Host.Trace[0] == 1) { Host.Trace[0] = 2; }
+                    else { Host.Trace[0] = 3; }
+                    Host.Trace[1] = Id;
+                }
+            }
+            int32 Main() {
+                {
+                    Owner owner = new Owner(40);
+                    _ = move owner;
+                    if (Host.Trace[0] != 1 || Host.Trace[1] != 40) { return 0; }
+                }
+                if (Host.Trace[0] != 1 || Host.Trace[1] != 40) { return 0; }
+                _ = new Owner(2);
+                if (Host.Trace[0] != 2 || Host.Trace[1] != 2) { return 0; }
+                return 42;
+            }
+            """;
+        Assert.Equal(42, await RunNativeAsync(Source, policy, [0, 0]).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
     public async Task MutatedBufferFieldRetainsOwnerAndDropsExactlyOnceAsync(BoundRuntimePolicy policy)
     {
         const string Source = """

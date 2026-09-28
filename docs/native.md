@@ -45,7 +45,7 @@ longer parsed. Based literals construct target-width bit patterns, while
 decimal literals retain numeric range semantics. Floating/custom literal
 parsing, registered literal targets and `[ConstEval]` remain outside this
 executable profile.
-The current parser version is syntax-19. Syntax-18 qualified generic-call type
+The current parser version is syntax-20. Syntax-18 qualified generic-call type
 arguments such as `write C` and `write C?` enable bounded managed-handle
 substitutions in compilation-local `Copy` templates. Syntax-19 adds the
 bounded nominal comparison protocols; neither changes the native profile,
@@ -508,8 +508,10 @@ aligned layouts. Copy structs cannot contain owning fields. `move name` transfer
 a live whole owner and leaves it
 vacant; a read or second move before reinitialization is rejected at branch
 and loop joins. Plain reads/copies of unique values, partial field moves,
-discarded owning results, and owning temporaries used as
-receivers diagnose. Owning fields are initialized once in sequential constructor
+and unbound owning temporaries used as receivers diagnose. Standalone
+`_ = expression;` transfers an owning result into an inaccessible local and
+cleans it at statement exit through the existing structured drop; it does not
+add a native ABI or semantic wire node. Owning fields are initialized once in sequential constructor
 flow, including straight-line `unsafe` wrappers. Branches, loops and nested
 exception regions cannot acquire owning fields in this profile;
 reinitialization and owning-field replacement are unsupported. Once the

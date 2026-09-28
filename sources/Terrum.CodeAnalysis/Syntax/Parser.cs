@@ -625,6 +625,12 @@ internal sealed class Parser
                 node = Node(SyntaxKind.EmptyStatement, [Take()]);
                 break;
             }
+            case TokenKind.Underscore:
+            {
+                node = Node(SyntaxKind.DiscardStatement,
+                    [Take(), Expect(TokenKind.Equals), ParseExpression(), Expect(TokenKind.Semicolon)]);
+                break;
+            }
             default:
             {
                 if (Current.Kind is TokenKind.VarKeyword or TokenKind.MutKeyword || LooksLikeLocal())

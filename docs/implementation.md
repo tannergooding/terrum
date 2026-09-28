@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-19, semantic v32 managed consumers, native-10 through native-20
+## Current boundary: syntax-20, semantic v32 managed consumers, native-10 through native-20
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -145,10 +145,10 @@ not a general unsafe escape hatch. Their consistency work is ordered in the
 | Surface | Implemented | Not yet implemented |
 |---|---|---|
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
-| Lexing | Pinned Unicode identifiers, ASCII decimal, `0x`/`0X` hexadecimal and `0b`/`0B` binary numeric tokens, digit separators, decimal fractional/exponent token boundaries, comments, leading trivia, strings, diagnostics including `TRM0006`–`TRM0009` for numeric suffixes, missing based digits and malformed separators, EOF; the scanner-4 integer record retains suffix metadata only for diagnostic-bearing tokens | Interpolation, raw/character/native literals, directives |
+| Lexing | Pinned Unicode identifiers with standalone `_` reserved, ASCII decimal, `0x`/`0X` hexadecimal and `0b`/`0B` binary numeric tokens, digit separators, decimal fractional/exponent token boundaries, comments, leading trivia, strings, diagnostics including `TRM0006`–`TRM0009` for numeric suffixes, missing based digits and malformed separators, EOF; the scanner-5 integer record retains suffix metadata only for diagnostic-bearing tokens | Interpolation, raw/character/native literals, directives |
 | Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, bounded source classes including `mut class`, readonly default and writable `mut` class receivers, non-owning compact-struct `mut` methods with named mutable-local receiver writeback, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Inheritance, unique/inline classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes and generic classes/structs (struct and field attributes diagnose `TRM3001`), parameter-only `implicit ref<T>` binding and ordinary reference-lifetime contracts, public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; source-class and `ManagedNode` optional handles with `write` capability preserved through fields, parameters, results and inference; repeated `?` diagnoses | Scalar options, general generic optional normalization after substitution, family defaults/conditional conformance, general ownership/form qualifiers and general borrowed references, transparent-wrapper ABI contracts |
-| Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, nearest-loop `break`/`continue`, return, statement-form `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements | `foreach`, labeled transfers, general switch/patterns and wildcard patterns, context-specific discard destinations, declaration pre/postconditions, `static require`/`static ensure` proofs, typed requirement-failure selection, general exception objects/throw, async, compound assignment |
+| Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, nearest-loop `break`/`continue`, return, statement-form `require`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements, standalone `_ = expression;` with statement-end owning cleanup | `foreach`, labeled transfers, general switch/patterns and wildcard patterns, other context-specific discard destinations, declaration pre/postconditions, `static require`/`static ensure` proofs, typed requirement-failure selection, general exception objects/throw, async, compound assignment |
 | Expressions | Names, raw literals, `()`, grouping, unary/binary operations, context-typed decimal/hexadecimal/binary integer literals without fallback (based values construct target-width bit patterns), numeric digit separators, checked numeric type-call conversions for `int32`/`uint32`/`int64`/`uint64`/`char16`, member/index access, calls, explicit closed static-protocol calls, bounded inference of multiple independent type parameters for top-level generic function templates over eligible `Copy` structs, existing scalar value types and existing qualified source-class/`ManagedNode` handles (preserving readonly/write and supported optional qualification) from typed arguments or typed existing `out` destinations (expected-result context fills unresolved parameters present in the return type), generic signature-based result-type lookup, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique and initialized owning-field loans, qualified source-class/`ManagedNode` writes and mutable-class receivers, named-place and writable nested-field loans for compact-struct `mut` receivers including fully initialized unique roots/children, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations including `Set`/`TryAppend`/`Clear` and lexical `SliceMutable` through writable owning fields, and lexical readonly buffer slices | Floating/custom literal binding, registered literal/`[ConstEval]` execution, `require` output-expression form and exception-type selection, implicit `ref<T>` call-site loan introduction and temporary materialization, character literals, partial owning-field moves, owning field replacement, general expression temporaries, temporary/managed-class-field mutating-struct receivers, partial-constructor mutation, rebinding `this`, public mutating-receiver ABI, general stored loans/references, evaluation outside the native profile, user-defined conversions, unique/owning generic arguments, views, generic classes/structs, user structs containing managed fields, primitive operator conformance, general argument/result inference and partial holes, constructor/method inference, ordinary overload declarations (rejected with `TRM3003`), contextual discard/lambda `_` forms, conditional expressions |
 | Managed storage | Aliasable `ManagedNode` and source-class handles, optional edges and non-null pattern snapshots, readonly bare handles and explicit `write` capability, mutable-class receiver checks, qualified field/parameter/result/inference paths, handle-free compact Copy fields in classes, descriptor-based cycle tracing, complete-publication class factories, exact frame/temporary roots and explicit nonmoving collection under both policies, including exceptional root retirement and escaping-frame unlink | Managed handles inside user structs, stored interior pointers, implicit GC, native DLL/module graph managed-handle ABI |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
@@ -562,6 +562,11 @@ This does not change the scanner-4 record/schema, wire format or native profile.
 `syntax-19` adds the bounded nominal equality/comparison protocols described
 above. It does not change the scanner-4 record/schema, semantic wire format or
 native profile.
+`syntax-20` reserves `_` as a non-identifier and supports standalone
+`_ = expression;`. Scanner-5/schema-5 classifies `_` distinctly while retaining
+the scanner-4 integer-record shape. Discard evaluation and immediate owning
+cleanup use existing semantic nodes, so feature-selected module versions and
+native profiles do not change.
 `[NoThrow]` on functions/constructors, `[DoesNotReturn]` on void functions and
 `[Cleanup]` on eligible unique instance methods are currently bound;
 unknown, duplicate and misplaced attributes diagnose rather
@@ -681,10 +686,10 @@ nodes, never discards input. `ToFullString` reconstructs from leaves rather than
 returning the original string. `Tokens` is the lexical stream; the root traversal
 also includes parser-inserted tokens.
 
-The lexer does not reserve `_`; the binder currently handles it as an ordinary
-identifier and assignment. Contextual discard values, wildcard patterns and
-generic type holes are not implemented, and existing expression statements or
-unused-local cleanup do not supply those semantics.
+The lexer reserves `_` as a distinct token; it never binds as an identifier.
+Only standalone `_ = expression;` is a discard statement, evaluating once and
+cleaning an owning result at statement exit through existing local/cleanup IR.
+Wildcard patterns, generic type holes and lambda placeholders remain unsupported.
 
 This compact kind-based CST avoids two divergent parser models. It lacks Roslyn's
 typed convenience wrappers and structural reuse today. Add generated typed

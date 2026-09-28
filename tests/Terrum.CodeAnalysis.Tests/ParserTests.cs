@@ -11,6 +11,20 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class ParserTests
 {
+    [Fact]
+    public void DiscardStatementRetainsItsDistinctShapeAndTrivia()
+    {
+        const string Source = "int32 Main() { _ /* destination */ = int32(42); return 42; }";
+        var tree = SyntaxTree.Parse(Source);
+        Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.Equal("syntax-20", SyntaxTree.LanguageVersion);
+        var discard = Assert.Single(tree.Root.DescendantNodes(), static node => node.Kind == SyntaxKind.DiscardStatement);
+        Assert.Equal(TokenKind.Underscore, Assert.IsType<SyntaxTokenElement>(discard.Children[0]).Token.Kind);
+        Assert.Equal(TokenKind.Equals, Assert.IsType<SyntaxTokenElement>(discard.Children[1]).Token.Kind);
+        Assert.Equal(SyntaxKind.InvocationExpression, Assert.IsType<SyntaxNode>(discard.Children[2]).Kind);
+        AssertLossless(tree);
+    }
+
     [Theory]
     [InlineData("mut class Leaf { public mut int32 Value; public Leaf(int32 value) { Value = value; } public mut void Set(int32 value) { Value = value; } }")]
     [InlineData("bool Create(out write ManagedNode node) { return ManagedNode.TryCreate(42, out node); }")]

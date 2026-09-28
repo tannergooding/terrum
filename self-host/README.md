@@ -4,12 +4,14 @@ These files are parallel design candidates, not a bootstrapped compiler.
 They are not linked into the C# implementation. The native profile executes
 the range, character, integer and nested token components and a bounded token scanner.
 The host test runner remains C#, even when it compiles and executes a candidate.
-The host parser's current language version is syntax-19. Syntax-18's qualified
+The host parser's current language version is syntax-20. Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle
 specializations described below. These reuse existing, feature-selected
 semantic contracts without changing the scanner record/schema, native profile
 or wire format. Syntax-19 adds the bounded source-defined nominal comparison
 protocols without changing those formats or the native profile.
+Syntax-20 reserves `_` as a discard marker; scanner-5 publishes that
+classification while keeping the existing integer-record layout.
 
 Host fixtures retain syntax round trips and add native execution of
 `SourceRange`, `CharacterFacts`, `RangeTests`, `Token` and `TokenTests` with entry wrappers.
@@ -174,7 +176,7 @@ type. Empty hexadecimal and binary prefixes
 report `TRM0007` and `TRM0008`, respectively. Hexadecimal and binary literals
 construct bits in their destination type; nonzero bits beyond its width are
 diagnosed, and decimal signed-range and negative-minimum rules are unchanged.
-Attached width suffixes are lexical errors (`TRM0006`); scanner-4 retains
+Attached width suffixes are lexical errors (`TRM0006`); scanner-5 retains
 recognized suffix-tag metadata only in the existing record for those rejected
 tokens, while valid integer records are untagged. Larger integer magnitudes
 are reported as beyond the decoder's range, not lexical errors. Floating

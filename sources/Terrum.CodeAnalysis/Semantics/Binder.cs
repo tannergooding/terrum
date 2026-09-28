@@ -1115,6 +1115,28 @@ internal sealed partial class Binder
         };
     }
 
+    private BoundViewSet? BindViewSetStatement(SyntaxNode expressionNode, TextSpan span)
+    {
+        if (expressionNode.Kind != SyntaxKind.InvocationExpression
+            || expressionNode.Children[0] is not SyntaxNode { Kind: SyntaxKind.MemberAccessExpression } member
+            || ((SyntaxTokenElement)member.Children[2]).Token.Text != "Set"
+            || KnownType((SyntaxNode)member.Children[0]) != PrimitiveType.MutableInt32BufferView)
+        {
+            return null;
+        }
+
+        var arguments = ((SyntaxNode)expressionNode.Children[1]).Children.OfType<SyntaxNode>().ToArray();
+        if (arguments.Length == 2 && arguments.All(static argument => argument.Children is [SyntaxNode]))
+        {
+            return new BoundViewSet(BindViewVariable((SyntaxNode)member.Children[0]),
+                BindExpression((SyntaxNode)arguments[0].Children[0], PrimitiveType.Int32),
+                BindExpression((SyntaxNode)arguments[1].Children[0], PrimitiveType.Int32), span);
+        }
+        Report("TRM3011", "A mutable native buffer view supports Set(index, value) with two positional int32 arguments.",
+            expressionNode.Span);
+        return null;
+    }
+
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unsupported syntax kinds are rejected by the default branch.")]
     private BoundStatement BindStatement(SyntaxNode node)
     {
@@ -1251,21 +1273,10 @@ internal sealed partial class Binder
             case SyntaxKind.ExpressionStatement:
             {
                 var expressionNode = (SyntaxNode)node.Children[0];
-                if (expressionNode.Kind == SyntaxKind.InvocationExpression
-                    && expressionNode.Children[0] is SyntaxNode { Kind: SyntaxKind.MemberAccessExpression } member
-                    && ((SyntaxTokenElement)member.Children[2]).Token.Text == "Set"
-                    && KnownType((SyntaxNode)member.Children[0]) == PrimitiveType.MutableInt32BufferView)
+                var viewSet = BindViewSetStatement(expressionNode, node.Span);
+                if (viewSet is not null)
                 {
-                    var arguments = ((SyntaxNode)expressionNode.Children[1]).Children.OfType<SyntaxNode>().ToArray();
-                    if (arguments.Length == 2 && arguments.All(static argument =>
-                        argument.Children is [SyntaxNode]))
-                    {
-                        return new BoundViewSet(BindViewVariable((SyntaxNode)member.Children[0]),
-                            BindExpression((SyntaxNode)arguments[0].Children[0], PrimitiveType.Int32),
-                            BindExpression((SyntaxNode)arguments[1].Children[0], PrimitiveType.Int32), node.Span);
-                    }
-                    Report("TRM3011", "A mutable native buffer view supports Set(index, value) with two positional int32 arguments.",
-                        expressionNode.Span);
+                    return viewSet;
                 }
                 if (expressionNode.Kind != SyntaxKind.InvocationExpression)
                 {
@@ -1273,6 +1284,51 @@ internal sealed partial class Binder
                 }
 
                 return new BoundExpressionStatement(BindExpression(expressionNode, null), node.Span);
+            }
+
+            case SyntaxKind.DiscardStatement:
+            {
+                var expressionNode = (SyntaxNode)node.Children[2];
+                var actionNode = expressionNode;
+                while (actionNode.Kind == SyntaxKind.ParenthesizedExpression)
+                {
+                    actionNode = (SyntaxNode)actionNode.Children[1];
+                }
+                var viewSet = BindViewSetStatement(actionNode, node.Span);
+                if (viewSet is not null)
+                {
+                    return viewSet;
+                }
+                var value = BindExpression(expressionNode, null);
+                if (value.Type == PrimitiveType.Void)
+                {
+                    if (value is BoundCall)
+                    {
+                        return new BoundExpressionStatement(value, node.Span);
+                    }
+                    if (value is BoundConstant)
+                    {
+                        return new BoundBlock([], node.Span);
+                    }
+                    Report("TRM3009", "This void expression cannot be discarded.", node.Span);
+                    return new BoundBlock([], node.Span);
+                }
+
+                var slot = _variables.Count;
+                _variables.Add(new BoundVariable("<discard>", value.Type, false, node.Span));
+                var statements = ImmutableArray.CreateBuilder<BoundStatement>();
+                statements.Add(new BoundLocal(slot, value, node.Span));
+                if (IsUnique(value.Type))
+                {
+                    var method = CleanupMethod(value.Type);
+                    var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
+                    statements.Add(new BoundTryFinally(new BoundBlock([], node.Span),
+                        new BoundBlock([new BoundDrop(slot, cleanupFunction, node.Span)], node.Span), node.Span));
+                }
+                return new BoundBlock(statements.ToImmutable(), node.Span) {
+                    IsManagedLexicalScope = true,
+                    RetiredManagedLocals = ManagedClassTypes.IsManaged(value.Type) ? [slot] : [],
+                };
             }
 
             case SyntaxKind.EmptyStatement:
