@@ -16,6 +16,7 @@ container.
 | Term | Meaning in this document |
 |---|---|
 | `TRRM` artifact | One complete, bounded byte slice carrying semantic IL and metadata. It may be a standalone file or embedded in another container. Its extent excludes the enclosing PE/ELF file and separately referenced resource payloads. |
+| Module | A project's semantic unit with its own identity. Ordinary compilation produces one `TRRM` artifact containing one module. A merged artifact could share physical sections among multiple logical modules; this candidate encoding still has one Module row and does not yet represent that case. No distinct assembly layer is defined. |
 | Artifact-relative offset | A zero-based byte position from the first byte of the `TRRM` signature. An extent `[offset, offset + length)` is end-exclusive and must be contained in the supplied artifact slice before an embedded reader adds any container base. |
 | Section directory (`directory`) | The fixed-width index following the header, containing one entry per present section kind, not the sections' bytes. Each entry records its kind, flags, record count, artifact-relative offset and byte length; the entry is not part of the section it indexes. |
 | Section | One contiguous artifact-relative byte extent identified by a directory entry and containing a metadata table or body stream. An absent table has no directory entry or section. |
@@ -381,6 +382,12 @@ algorithm is assigned.
 byte identities, not hashes or proof of authorship. Identity equality is exact
 byte equality; replacing the identity describes another producer. Export keys
 are nonempty decoded strings, compared ordinally without normalization.
+A future merged `TRRM` could retain multiple module identities while sharing
+physical tables, but the singleton Module row in this encoding cannot express
+that case. Such a schema must identify each declaration's owning module and
+scope imports, exports, entry points and remapped references before it can
+claim independently addressable modules. No assembly identity or manifest
+is defined here.
 Producers may assign keys as they choose, but must preserve a published key
 to offer a compatible replacement; an implementation name is not a binding
 algorithm. `runtimePolicy` candidate values
