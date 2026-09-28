@@ -6,6 +6,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
+using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -79,6 +81,34 @@ public sealed partial class NativeManagedClassModuleTests
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.True(Assert.Single(linked.Structures).IsTransparent);
         Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task WideClassDescriptorsSurviveFullHeapCollectionAsync(NativeRuntimePolicy policy)
+    {
+        var source = WideSource(32) + """
+            int32 Main() {
+                require Make(out var keep);
+                for (mut int32 i = 0; i < 2047; i = i + 1) {
+                    { require Make(out var temporary); }
+                }
+                if (ManagedHeap.Collect() != 4094 || keep.Edge.Value != 42 || !keep.F30) {
+                    return 1;
+                }
+                require Make(out var reused);
+                if (ManagedHeap.Collect() != 0 || reused.Edge.Value != 42 || !reused.F30) {
+                    return 2;
+                }
+                return keep.Edge.Value;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(program, policy)).ConfigureAwait(true));
     }
 
     private static string WideSource(int fieldCount, string resultSuffix = "")

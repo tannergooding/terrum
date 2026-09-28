@@ -325,6 +325,8 @@ not source defaults. Classes have at most 32 fields and payloads are bounded
 to 128 bytes; semantic revision 36 retains more than 16 fields, including
 alongside transparent layouts. Readonly/mutable field access, visibility and
 partial-construction checks remain mandatory.
+At the 4,096-object heap limit, a live 32-field class retains its final-field
+managed edge while collection reclaims unreachable wide classes and their edges.
 Class fields may contain acyclic handle-free Copy structs up to 16 bytes, including
 nested compact values. Those fields are copied as complete values, not traced as
 potential pointers. Unique owners, views and managed handles inside structs are
