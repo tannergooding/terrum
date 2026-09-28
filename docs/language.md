@@ -240,24 +240,52 @@ No universal root is required to supply `Equals`, `GetHashCode`, or
 is there automatic `IEquatable<T>`/`IFormattable` conformance. This rejects
 universal object-to-string behavior, not explicit opt-in formatting protocols.
 Primitive built-ins and compiler-verified operation capabilities remain valid;
-whether a root type exists at all is a separate open decision. Keep value equality,
-identity where identity exists, key equality paired with a compatible hash,
-machine-readable formatting, and display/debug rendering distinct. Compiler
-and debugger type metadata does not require user-visible root methods, and no
-contract requires every value to become a string.
+no universal root is introduced merely to supply these operations. Use
+operation-specific witnesses/interfaces and explicit adapters. Keep value
+equality, identity where identity exists, key equality paired with a compatible
+hash, machine-readable formatting, and display/debug rendering distinct.
+Compiler and debugger type metadata does not require user-visible root methods,
+and no contract requires every value to become a string.
 
 Behavioral conformance is nominal and uses a checked witness; conditional
 member guarantees are not themselves conformance. Conflicting type/interface
-witness claims are rejected, not selected by import order. Producer-owned,
-versioned witnesses are the recommended bounded policy; external conformance
-ownership and exact grammar remain open. Applicable members outrank extensions;
-conflicting extensions may be explicitly qualified, but extension lookup never
-replaces a nominal witness. Associated types and `Self` relations are intended
-for relationships such as integer `Wider`/`Signed`/`Unsigned` types and SIMD
-element/mask types. One selected witness binds an associated result; inference
-does not run backward through non-injective projections or choose an arbitrary
-implementer from a constraint. Multiple relations require explicit
-disambiguation.
+witness claims are rejected, not selected by import order. Types declare their
+own ordinary implementations; importing a package does not retroactively add
+a global conformance to an unrelated type. Explicit adapter types are the
+intended way to add an extension-interface behavior set without changing the
+original type's conformance.
+
+An ABI-transparent nominal wrapper and an adapter are distinct contracts. For
+example, `NeverNegativeInt32` could have the `int32` carrier ABI while allowing
+only nonnegative values; identical bits do not make every `int32` a valid
+wrapper value or permit arbitrary reinterpretation. Unused encodings may be
+potential niches, but no niche encoding is selected by this direction.
+`Int32Adapter` could carry an `int32` and explicitly implement `IExtra` without
+making `int32` itself conform to `IExtra`. The type system may select the
+original or adapter behavior set using separate dispatch tables/vtables or an
+equivalent mechanism; it does not require two physical vtable pointers in each
+value.
+
+One-way `Original`-to-`Adapter` projections are a possible explicit contract,
+including a possible `List<Original>`-to-`List<Adapter>` projection. They are
+not blanket generic-container reinterpretation or writable covariance: each
+projection must preserve validity, representation, access, ownership, lifetime
+and container representation. A narrowing invariant such as
+`NeverNegativeInt32` is not a total adapter merely because its payload bits
+match. Exact adapter syntax, forwarding, conflicts, dispatch metadata and
+projection eligibility remain specification work; `Blittable` is a separate
+fixed-representation promise.
+
+Applicable members outrank ordinary extension members; conflicting member
+extensions may be explicitly qualified. Ordinary extension-member lookup does
+not replace a nominal witness. An explicitly declared adapter is a separate
+nominal type with its own extension-interface witness and leaves the original
+type's conformance set unchanged.
+Associated types and `Self` relations are intended for relationships such as
+integer `Wider`/`Signed`/`Unsigned` types and SIMD element/mask types. One
+selected witness binds an associated result; inference does not run backward
+through non-injective projections or choose an arbitrary implementer from a
+constraint. Multiple relations require explicit disambiguation.
 
 Multiple behavioral interface bases retain declaring-member identity through
 diamonds; conflicting requirements need explicit disambiguation or an adapter.

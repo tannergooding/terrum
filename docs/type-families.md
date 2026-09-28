@@ -2,9 +2,10 @@
 
 These are accepted semantic directions expressed as design contracts, not
 accepted syntax or implemented APIs. The spelling of family declarations,
-conditional members, extensions, witnesses and custom participation remains
-open. The local pseudo-code below labels relationships rather than specifying
-Terrum grammar.
+conditional members, extensions and witnesses remains open; participation
+itself requires an explicit family opt-in with declared projections and
+constraints. The local pseudo-code below labels relationships rather than
+specifying Terrum grammar.
 
 Family substitution preserves the complete qualification chosen by the caller.
 A concrete default-readonly type does not erase a caller-supplied `write`
@@ -23,7 +24,7 @@ type argument or discard its original authority.
 
 ## Explicit families
 
-A family opts in explicitly to type-argument expansion and declares its members, including any distinguished specialization. A shared name or generic arity does not establish membership. The checker must preserve each member's representation and ABI, validity, copying and moving, partial initialization and cleanup, tracing and write barriers, access and backing dependencies, and lifetime across projections. An erased member may need a representation tag, a checked dictionary or a changed descriptor ABI; none follows automatically from substituting `void`. Generic extension lookup alone cannot establish a member's validity, representation, interface witnesses or lifetime obligations. Family operations must not turn erased or borrowed views into owning values, invent a `default(T)`, or assume that all members are interchangeable. Projection is legal only where the declared relationship and its costs and effects are checked. This is a general facility, not an automatic rule that every `Type<T>` acquires `Type<void>`; `void` is no universal top or bottom type.
+A family opts in explicitly to type-argument expansion and declares its members, including any distinguished specialization. A shared name or generic arity does not establish membership. The checker must preserve each member's representation and ABI, validity, copying and moving, partial initialization and cleanup, tracing and write barriers, access and backing dependencies, and lifetime across projections. An erased member may need a representation tag, a checked dictionary or a changed descriptor ABI; none follows automatically from substituting `void`. Generic extension lookup alone cannot establish a member's validity, representation, interface witnesses or lifetime obligations. Family operations must not turn erased or borrowed views into owning values, invent a `default(T)`, or assume that all members are interchangeable. Projection is legal only where the declared relationship and its costs and effects are checked. This is a general facility, not an automatic rule that every `Type<T>` acquires `Type<void>`; `void` is no universal top or bottom type. Explicit adapters may declare extension-interface behavior without changing the original type's witness set; ordinary extension-member lookup is not conformance. No universal root is introduced merely to provide equality, hashing or formatting.
 
 `Task<TResult = void>` has its own existing no-result meaning: `Task` expands to `Task<void>`. It does not thereby opt into an encoding-erasure projection or a general erasure rule. Hiding a result from `Task<T>` would require an explicit ownership, cleanup and observation contract for that result, not just a cast to `Task<void>`. Type defaults alone do not establish family relationships.
 
@@ -32,10 +33,33 @@ A family opts in explicitly to type-argument expansion and declares its members,
 Behavioral conformance is nominal and requires a checked witness; conditional
 member guarantees do not themselves establish conformance. Conflicting
 type/interface witness claims are rejected rather than selected by import
-order. Producer-owned, versioned witnesses are the recommended bounded policy,
-while external conformance ownership and exact syntax remain open. Applicable
-members outrank extensions; extension qualification syntax is open, and an
-extension never substitutes for a nominal witness.
+order. A type declares its ordinary implementations; package import or loading
+does not retroactively add a global conformance to an unrelated type. Explicit
+adapter types are the intended way to add an extension-interface behavior set
+without changing the original type's conformance.
+
+ABI-transparent nominal wrappers and adapters serve different purposes. A
+wrapper such as `NeverNegativeInt32` may share `int32` representation while
+allowing only nonnegative values; equal bits do not make every `int32` a valid
+wrapper or authorize arbitrary reinterpretation. Unused encodings are
+potential niches, not an adopted niche encoding. An explicit `Int32Adapter`
+may carry `int32` and implement `IExtra` without making `int32` conform to
+`IExtra`. The behavior sets may use two dispatch tables/vtables or an
+equivalent; the value need not physically store two vtable pointers.
+
+An explicitly declared one-way `Original`-to-`Adapter` projection, potentially
+including `List<Original>` to `List<Adapter>`, is a design possibility, not
+automatic covariance or a general container reinterpretation rule. A checked
+projection must preserve validity, representation, access, ownership, lifetime
+and container representation; writable storage remains invariant. A narrowing
+invariant is not a total projection just because its payload bits match.
+Exact adapter/projection syntax, forwarding, conflicts, dispatch metadata and
+eligibility remain specification work. `Blittable` is a separate
+fixed-representation promise. Applicable members outrank ordinary extension
+members; member-extension qualification syntax is open. Ordinary
+extension-member lookup never substitutes for a nominal witness; an explicitly
+declared adapter has its own nominal extension-interface witness and leaves
+the original type unchanged.
 
 Associated types and `Self` relationships are intended to express relations
 such as integer `Wider`, `Signed`, and `Unsigned` types and a SIMD member's
