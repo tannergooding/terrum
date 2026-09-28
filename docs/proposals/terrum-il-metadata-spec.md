@@ -383,8 +383,15 @@ non-ASCII units: typed length segments could live inside a string row or in
 an indexed segment table. Neither representation is required for ordinary
 strings. A packed type/length word is a possible segment descriptor, but
 the allocation of its bits, length unit and handling of surrogate pairs
-remain open. Segment lengths alone cannot replace the offset index without
-losing direct row lookup; any separate index must preserve that property.
+remain open. A byte-length field avoids encoding-dependent bounds; even a
+24-bit byte length admits almost 16 MiB per segment, already an outlier for
+ordinary metadata. Multi-gigabyte embedded payloads belong in separately
+managed resources rather than forcing the common string representation to
+accommodate them. Per-string and total-section limits are distinct. The
+existing row offset index already supplies the byte length of an ordinary
+row; adding a packed length to every such row would duplicate it without
+a separate benefit. Segment lengths alone cannot replace the offset index
+without losing direct row lookup; any separate index must preserve that property.
 Per-segment overhead, decoding cost and alternating-run cases need comparison
 with plain encodings before assigning a wire tag. This choice does not change
 the current UTF-8-only `(1, 0)` row grammar or authorize literal operands.
