@@ -1,98 +1,86 @@
-# Terrum IL and metadata working specification
+# Terrum semantic IL and metadata
 
 > [!IMPORTANT]
-> Proposal-only representation draft, not an accepted wire format or current
-> revision list. Consult [current implementation](../implementation.md) and
-> [roadmap](../roadmap.md) for actual support and migration boundaries.
+> Working proposal, not an accepted byte schema or a claim of compiler support.
+> See [implementation](../implementation.md) for the current executable
+> boundary. Terms such as "must" below describe the proposed contract where
+> its representation has been specified; open choices are identified explicitly.
 
-**Status:** pre-v1 working specification. `TRRM` is the selected identifier
-for the evolving Terrum semantic-IL/module format. There is no separate
-`LMOD` family. The main text gives one concrete replacement-layout candidate
-for review; Appendix A records the current positional revision-32 bytes.
-Where coherent implementation work needs a concrete choice, this candidate
-may serve as a provisional implementation basis, with retrospective correction
-allowed before v1. That does not finalize every field or optional choice,
-claim implementation support, or promise format stability; record actual
-support separately and leave explicitly open alternatives unresolved.
+## Definitions and conventions
 
-Semantic revision 32 was the highest revision implemented when this draft was
-written; the current repository has since introduced higher, feature-selected
-revisions. Calling that earlier repository state `0.32` is descriptive only:
-it does not select
-on-wire major/minor fields, assign a release, or imply `1.0`. The format may
-change incompatibly before v1. Support for historical revisions, including 10–32, and feature-dependent
-writer selection are temporary repository implementation
-facts scheduled for consolidation before v1, not a production compatibility
-obligation. No general future compatibility promise is made here.
+| Term | Meaning in this document |
+|---|---|
+| `TRRM` artifact | One complete, bounded byte slice carrying semantic IL and metadata. It may be a standalone file or embedded in another container. Its extent excludes the enclosing PE/ELF file and separately referenced resource payloads. |
+| Artifact-relative offset | A zero-based byte position from the first byte of the `TRRM` signature. An extent `[offset, offset + length)` is end-exclusive and must be contained in the supplied artifact slice before an embedded reader adds any container base. |
+| Directory and section | The candidate directory indexes sections by kind. Each section occupies one contiguous artifact-relative byte extent and contains records of its declared kind. |
+| Record | A schema-identified unit within a section. Any declared byte extent and nested counts must be consumed exactly; record kinds and encodings remain to be assigned. |
+| Local definition ID (`DefId`) | An index naming a declaration only within one artifact. Its numeric value is not a stable cross-artifact identity. |
+| Producer identity and export key | The selected dependency and published declaration identity used together to resolve an external reference. Exact identity/key encodings and authentication policy are open. |
+| Declared contract | Published type, callable, ownership/lifetime, access, effect and requirement facts against which consumers bind and check use. A contract is not inferred from a dependency body or source spelling. |
+| Body | Typed semantic operations and control flow for an executable declaration, distinct from declaration metadata. |
+| Source revision, artifact revision, native profile | Independent axes for source syntax/semantics, `TRRM` encoding and requirements, and target/runtime ABI assumptions. The enclosing container format is separate. One revision number does not imply another. |
+| Required feature and optional data | A required semantic feature must be understood before binding or execution. An optional section can be skipped only if its registered kind is nonsemantic and explicitly safe to ignore. |
 
-## 1. Purpose, authority, and trust boundary
+Candidate field tables use `u16`, `u32` and `u64` for fixed-width unsigned
+little-endian integers. Byte offsets are artifact-relative; lengths are byte
+counts unless stated otherwise. Field widths, numeric limits, encodings not
+shown in a table, and the format-revision policy remain proposed, not assigned
+wire contracts.
+
+## Scope and conformance boundary
 
 The semantic IL is a compact binary representation of the language and
 ecosystem: types, declarations, contracts, and operations. It is intended as
 input to metadata binding, reflection/tooling, linking, and AOT/JIT code
 generation without requiring source recompilation. It is not merely a
 serialization of a compiler's private object graph or a verifier certificate.
-Its role is comparable to CIL's ecosystem role, without adopting CIL, CLI, or
-CLR formats or semantics.
 
-The language specification remains authoritative for semantic rules:
-[language](../language.md), [lifetimes](../lifetimes.md),
-[conversions](../conversions.md), [type families](../type-families.md),
-[data layout and ABI](../data-layout-and-abi.md), and the
-[memory model](../memory-model.md).
-This draft specifies how a future artifact can carry and validate those
-contracts; it does not reopen or replace them.
-
-**Accepted binary trust boundary:** source compilation checks authored bodies
-against their declared contracts. A binary consumer checks safe decoding,
-structure, references, binding, contract compatibility, and caller use, then
+Source compilation checks authored bodies against their declared contracts.
+A binary consumer checks safe decoding, structure, references, binding,
+contract compatibility, and caller use, then
 trusts declared contracts for external dependencies rather than requiring
 dependency-body re-proof. Callers remain responsible for imported preconditions,
 access, ownership, effects, and other declared obligations. Deliberately
 dishonest dependency metadata is not ruled out by mandatory whole-program
 proof; malformed bytes, unresolved references, incompatible contracts, and
 unsupported semantic forms are not trusted. Optional deeper body audit is not
-a v1 promise. Signing or provenance does not establish semantic correctness.
+a required dependency-consumption step.
 
-Source-language revision, semantic artifact revision, and physical native
-profile/container revision are distinct concepts. The format must not conflate
-them accidentally. The present native containers and PE images remain separate
-artifacts; none is a second name for `TRRM`.
+The accepted language contracts remain authoritative for their semantics:
+[language](../language.md), [lifetimes](../lifetimes.md),
+[conversions](../conversions.md), [type families](../type-families.md),
+[data layout and ABI](../data-layout-and-abi.md), and the
+[memory model](../memory-model.md). This document describes their proposed
+binary representation and validation; it does not redefine their rules.
 
-## 2. Format identity and revision scope
+| Role | Required checks |
+|---|---|
+| Source compiler and writer | Check authored bodies against declared language contracts; encode complete, well-formed declarations and supported bodies. |
+| Binary reader | Bound and decode the supplied artifact; validate its structure, required features, references and declared contracts before accepting it. |
+| Linker or executable consumer | Resolve selected dependencies, check compatibility and caller use, and reject unsupported semantics before lowering or execution. It need not re-prove dependency bodies. |
 
-| Topic | Direction | Status |
-|---|---|---|
-| Identifier | Use `TRRM` for the evolving Terrum semantic-IL/module format; do not introduce a distinct `LMOD` family. | Accepted |
-| Pre-v1 evolution | Allow intentional breaking changes while the design solidifies; no current historical reader range becomes a release promise. | Accepted |
-| `0.32` | Optional prose label for the repository state whose highest implemented semantic revision is 32. It is not a wire revision encoding or a `1.0` assignment. | Clarification |
-| Wire revision field | Choose whether and how the future format identifies its encoding/schema and its semantic requirements. | Open |
-| Native target profile | Keep target ABI/profile requirements separate from source and artifact revisions; decide their exact metadata representation with the schema. | Principle accepted; representation open |
+## Format identity and revision scope
 
-The signature is the four ASCII bytes `TRRM` (`54 52 52 4D`). Header layout
-and revision numbering are separate choices; Appendix A describes the current
-encoding after that signature.
+`TRRM` is the format identifier; there is no separate `LMOD` family. Its four
+ASCII signature bytes are `54 52 52 4D`. The wire fields for encoding revision
+and semantic requirements are not settled. Target ABI/profile requirements
+remain separate from source and artifact revisions, with their exact
+representation open. Pre-v1 format changes may be incompatible; this proposal
+does not promise a historical reader range or a frozen wire version.
 
-## 3. TRRM replacement layout candidate
+## Candidate artifact layout
 
-**Proposal under review, not the current byte layout or an adopted schema.**
-This is one cohesive candidate for evolving the existing `TRRM` format from
-its current positional revision-32 layout. It makes concrete framing and
-record-shape choices so they can be evaluated together. The exact field
-selection, revision values, record-kind values, opcode values, feature policy,
-and numeric resource ceilings remain open. In particular, the candidate's
-revision fields do not encode repository label `0.32`; their values remain
-unassigned until the wire design is adopted.
+The following framing and record shapes form one proposed byte schema, not the
+current encoding. Exact field selection, revision values, record-kind values,
+opcodes, feature policy and numeric resource ceilings remain open.
 
-### 3.1 Header and directory
+### Header and directory
 
 Candidate byte order is little-endian. The header is fixed at 32 bytes in this
 layout; the directory follows the header, and sections follow the directory
 in ascending artifact-relative offset order. There is one directory entry per
 section kind. No compression is used in the initial candidate, simplifying bounds
-checking and random access. This candidate's 32-byte header length is
-unrelated to the historical semantic revision 32; the actual
-revision-32 prefix is documented in Appendix A.
+checking and random access.
 
 The artifact is the supplied `TRRM` byte slice, whether stored alone or
 embedded in a PE/ELF container. Its total length and offsets describe that
@@ -151,10 +139,9 @@ Candidate framing invariants:
   where its section schema permits an empty section; nonempty sections must
   contain at least one complete record.
 
-The candidate uses fixed-width section-directory entries and 64-bit
-artifact-relative offsets with 32-bit local table indexes. This favors bounded
-parsing over compact varints. The exact widths and organization remain review
-choices; no size ceiling follows from the `u64` offset width.
+The candidate uses fixed-width directory entries, 64-bit artifact-relative
+offsets and 32-bit local table indexes. Exact widths and organization remain
+open; representable `u64` offsets do not set a reader's acceptance ceiling.
 
 Candidate directory contents are organized by these section roles; their
 kind values and exact record encodings are unassigned:
@@ -172,7 +159,7 @@ Whether the first five roles are separate sections or records in fewer
 sections remains open; this table makes the candidate graph concrete without
 assigning section IDs.
 
-### 3.2 Metadata records and relationships
+### Metadata records and relationships
 
 The directory separates record classes; the following names and shapes are
 conceptual schema pseudocode for the candidate. They are not numeric record
@@ -262,9 +249,9 @@ ownership, move/transfer, cleanup, root and lifetime/backing requirements;
 initialization facts and correlations; effects, failures, and unsafe caller
 obligations. Public language-level signatures and declared layout, access,
 ownership, and effect contracts remain compatibility obligations. Their
-accepted source semantics are linked in §1 rather than restated here.
+accepted source semantics are linked above rather than restated here.
 
-### 3.3 Identity and contract invariants
+### Identity and contract invariants
 
 Local indexes are compact references within one artifact, not stable identities
 across rebuilds. External references resolve through a selected producer
@@ -294,7 +281,7 @@ Exact stable export keys, generic-template and witness exportability, the
 compatibility relation, and the representation commitments exposed by
 visibility remain under review.
 
-## 4. Body, instruction, and region structure
+## Body, instruction, and region structure
 
 The body format must represent typed values and addressable places distinctly,
 and make control flow, exceptional flow, cleanup, initialization, ownership,
@@ -302,11 +289,10 @@ and managed-root obligations verifiable. Source evaluation order, effects, and
 failure behavior come from the language contract; a wire representation must
 preserve them.
 
-The candidate body organization uses typed basic blocks with explicit
+The proposed body organization uses typed basic blocks with explicit
 arguments/edges and a region structure for lexical loans/views, cleanup,
 unsafe scopes, exception handling, and managed-root obligations. Source spans
 may be carried as optional diagnostic data; they do not determine execution.
-It replaces the current nested-tree body organization in the candidate.
 
 ```text
 Region {
@@ -355,8 +341,7 @@ function_region:
 `branch_if`, `initialize`, and `return` are semantic pseudocode, not assigned
 opcodes. The artifact must preserve the declared relation between the Boolean
 result and output initialization; it must not read vacant storage to discover
-the false case. Current executable modules retain bounded bool/`out` behavior
-until the coordinated `init ref<T>` migration.
+the false case.
 
 When a source compiler checks an authored body, or a separately selected
 audit checks an available body, verification must cover the applicable
@@ -385,21 +370,20 @@ whole-dependency implementation proof is not. The source-language
 is a separate compile-time contract and must not be conflated with binary
 reader work budgets.
 
-## 5. Limits, counts, ranges, and accounting
+## Limits, counts, ranges, and accounting
 
-The specification must define each limit in terms of what it bounds, when it
-is checked, and whether it is per-record, per-body, or per-artifact. At
-minimum, review limits for:
+Each limit must state what it bounds, when it is checked, and whether it is
+per-record, per-body, or per-artifact. The bounded reader accounts for:
 
-| Resource | Required accounting definition | Numeric target |
-|---|---|---|
-| Total bytes and framed payload | Count the complete `TRRM` slice, including headers, optional data, padding and nested encoded payload; separately referenced resource bytes and enclosing PE/ELF bytes are outside it. Check before allocation. | Open |
-| Record/section and table counts | Per-kind and aggregate counts, including duplicate detection and references. | Open |
-| String/byte sequences | Encoded byte length, encoding validation, and any decoded-memory accounting. | Open |
-| Lists, paths, and ranges | Element count, index bounds, arithmetic overflow, range containment, and valid empty forms. | Open |
-| Nesting and graph depth | Which recursive structures count and whether the bound is per body or artifact. | Open |
-| Decode and verification work | Deterministic structural/work units, including repeated analysis; no wall-clock deadlines. | Open |
-| Temporary memory | Whether expansion, decompression, and intermediate tables are budgeted. | Open |
+| Resource | Required accounting definition |
+|---|---|
+| Total bytes and framed payload | Count the complete `TRRM` slice, including headers, optional data, padding and nested encoded payload; separately referenced resource bytes and enclosing PE/ELF bytes are outside it. Check before allocation. |
+| Record/section and table counts | Per-kind and aggregate counts, including duplicate detection and references. |
+| String/byte sequences | Encoded byte length, encoding validation, and any decoded-memory accounting. |
+| Lists, paths, and ranges | Element count, index bounds, arithmetic overflow, range containment, and valid empty forms. |
+| Nesting and graph depth | Which recursive structures count and whether the bound is per body or artifact. |
+| Decode and verification work | Deterministic structural/work units, including repeated analysis; no wall-clock deadlines. |
+| Temporary memory | Whether expansion, decompression, and intermediate tables are budgeted. |
 
 Limits must make malformed or adversarial input bounded before expensive
 allocation or recursive processing. A structural parse budget and a semantic
@@ -416,21 +400,19 @@ otherwise. Candidate structural invariants are:
   dependency/key pair. Duplicate identities and duplicate singleton records
   reject.
 - Every offset/length pair uses checked `offset + length`; every range uses
-  checked `start + length`; negative signed offsets, lengths or counts, wraparound, and extents
-  beyond the containing artifact/section reject.
+  checked `start + length`. Negative signed offsets, lengths or counts,
+  wraparound, and extents beyond the containing artifact/section reject.
 - Decoding and verification budgets count deterministic structural/work
   units, not wall-clock time. Required checks that exceed their configured
   budget fail explicitly rather than skipping validation.
 
 The `u32` count field and `u64` offsets describe representable encodings, not
 practical acceptance ceilings. Numerical ceilings and exact accounting remain
-open. Current `.trm` measurements are listed separately in Appendix A and do
-not supply the candidate's limits.
+open.
 
-## 6. Validation, unknown data, and references
+## Validation, unknown data, and references
 
-Define validation in stages so a reader cannot execute a partially accepted
-artifact:
+Readers validate in stages before lowering or executing an artifact:
 
 1. Check signature, revision/requirements identity, framing, lengths, ranges,
    canonical encodings where required, and resource limits.
@@ -459,16 +441,12 @@ Candidate unknown-data rules are:
   implement.
 
 The exact registry, reserved values, feature declaration, and policy for
-preserving optional sections when rewriting remain open. The current positional
-revision-32 layout has no such directory/skip mechanism and rejects unknown
-revisions or body tags.
+preserving optional sections when rewriting remain open.
 
-The format is not an authorization system. Checksums can detect accidental
-changes only if their exact scope is defined; signatures, provenance, and
-distribution policy are separate concerns. None can bypass structural,
-reference, contract, or caller-use validation.
+Structural, reference, contract, and caller-use validation are required
+independently of any separately defined integrity check.
 
-## 7. Worked semantic relationship (not wire bytes)
+## Example: conditional output binding
 
 The following names are symbolic and illustrative; they assign no numeric
 IDs, record tags, opcodes, or source grammar:
@@ -490,170 +468,18 @@ module Consumer
   body: call the selected import; validate caller use against that contract
 ```
 
-The target source direction uses `Create(init value)` at an `init ref<T>`
-call site. Current module artifacts still carry their bounded bool/`out`
-behavior until coordinated implementation migration. A future metadata
-representation must preserve declared initialization facts without introducing
+The metadata must preserve declared initialization facts without introducing
 a separate output-publication transaction or reading vacant storage.
 
-## 8. Remaining format review
+## Unspecified schema details
 
-The following are concrete specification questions, not reopening accepted
-language policy:
+The candidate defines relationships and validation principles, but not the
+following byte-level contracts:
 
-1. Define the byte header, framing, encoding revision and any separately
-   represented semantic/runtime requirements.
-2. Select metadata record relationships, type forms, declaration identities,
-   import/export keys, and exact callable-contract representation.
-3. Select body control-flow and region representation; specify instruction
-   semantics, exception/cleanup edges, roots, and the verifier boundary.
-4. Define counts, length/range checks, nesting and work accounting, allocation
-   limits, and deterministic/canonical rules where required.
-5. Define unknown and reserved values, forward-compatibility behavior, and
-   which unsupported semantic additions must reject before lowering.
-6. Exercise independent readers/writers, malformed artifacts, binding and
-   contract mismatches, resource boundaries, and semantically equivalent
-   execution across conforming backends before adopting bytes.
-
-No future record IDs, opcodes, numerical limits, version fields, optional-data
-rules, module identity scheme, or feature-negotiation protocol are assigned by
-this draft.
-
-## Appendix A. Historical repository byte layout (semantic revision 32)
-
-This appendix is implementation evidence only. It is not the normative
-pre-v1 layout, and it does not preserve historical reader support as a future
-requirement. The relevant implementation is
-`sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs`, especially
-`Magic`, `Write`, `Read`, `ReadModuleHeader`, `PutFunction`,
-`PutStatement`, `PutExpression`, and their readers.
-
-### A.1 Header and top-level order
-
-Revision 32 writes fields in this order; integers are little-endian. There is
-no directory, total-length field, section table, integrity checksum,
-cryptographic signature, or compression layer in the semantic artifact itself.
-
-| Field | Current encoding |
+| Surface | Not yet specified |
 |---|---|
-| Magic | `i32` value `0x4D525254`, bytes `54 52 52 4D` (`TRRM`) |
-| Semantic revision | `i32`, value `32` for this layout |
-| Native profile | `PutString`: `i32` byte count followed by strict UTF-8 bytes |
-| Consumer kind | Canonical boolean byte (`0` or `1`) |
-| Runtime policy | One byte (`FailFast` or `CheckedExceptions`) |
-| Entry point | `i32`; consumer entry indexes its function table, producer uses `-1` |
-| Value-structure count | `i32`, followed by structure records |
-| Class count | `i32`, followed by class records (present from revision 19 onward) |
-| Imported-structure count | `i32`, followed by imported type-name strings |
-| Function count | `i32`, followed by function records |
-
-The top-level order is positional. `PutString` uses a signed 32-bit byte
-length, not a character count or null terminator. A span is two `i32` values:
-start and length. A body statement is a tag byte and span, followed by
-tag-specific operands. An expression is a tag byte, primitive-type `i32`,
-span, and tag-specific operands.
-
-### A.2 Revision-32 record shapes
-
-| Record | Current fields and relationships |
-|---|---|
-| Value structure | Name string; size `i32`; private, internal, unique booleans; cleanup-present boolean and optional cleanup-method name; field count; ordered fields. |
-| Structure field | Name string; type code `i32`; offset and size `i32`; private, internal, mutable booleans. |
-| Class | Name string; size `i32`; internal and mutable booleans; field count; ordered fields of the same field shape. |
-| Imported structure | Type name string; resolved against local declarations/layouts during module binding. |
-| Function declaration | Name string; declaration-derived contract string; import/export boolean; body-present boolean; ownership-transfer boolean. Producer exports and consumer-owned definitions carry bodies; consumer imports carry declarations without bodies. |
-| Function body | Name string; return type code; constructor, visibility, static, `NoThrow`, `DoesNotReturn`, cleanup flags; intrinsic byte; class-constructor flag and factory index; optional declaring-structure name; parameter count; local/slot count; source span; ordered variable records; nested statement body. |
-| Variable/slot | Name string; type code; mutable and `out` booleans; source span. Slot indexes in the body are local to the function. |
-
-Declaration contracts are currently serialized as delimiter-separated
-strings derived from declaration name, return and parameter types/modes,
-function/constructor kind, visibility, static/instance owner, mutable receiver,
-cleanup and effect/return promises. Ownership transfer is also recorded
-separately. A replacement must preserve the signature and transfer contract;
-it may strengthen `NoThrow` and `DoesNotReturn`, not weaken them. Exact
-contract-string syntax is an implementation encoding, not the future
-record schema.
-
-Function calls and cleanup targets in bodies are converted to symbolic names
-before serialization and resolved against the module's declaration table
-while reading/linking. Type codes referring to value structures and class
-records are local to the artifact and remapped when combining artifacts.
-Neither local type positions nor body slot indexes are global identities.
-Generic specializations in the present format are closed compilation-local
-functions; there is no public generic-template or witness ABI.
-
-### A.3 Existing body tags
-
-These byte values are present revision-32 persistence tags, not proposed
-normative IL opcodes or source tokens.
-
-| Statement tag | Current node |
-|---:|---|
-| 1–9 | block; local; assignment; expression statement; `if`; `while`; `require`; return; field assignment |
-| 10–17 | `try`/`finally`; unsafe block; `try`/`catch`; drop; owner declaration; constructed-field cleanup; lexical view scope; view write |
-| 18–20 | `break`; `continue`; `while` with iterator |
-
-| Expression tag | Current node |
-|---:|---|
-| 1–9 | constant; read; unary; binary; direct call; cast; field read; `out` argument; move |
-| 10–16 | receiver loan; readonly field loan; mutable receiver loan; view length; view read; null; optional lift |
-| 17–20 | null test; `Some` test; readonly projection; mutable field loan |
-
-The current body is a nested typed tree, not the candidate future typed
-basic-block/region representation. Revision gates control which later tags and
-fields a historical reader accepts. Calls serialize the selected symbolic
-callee name and arguments; the reader resolves the declaration and the
-semantic verifier checks the reconstructed body before execution.
-
-### A.4 Current reader limits and rejection behavior
-
-| Implementation bound | Current value |
-|---|---:|
-| Entire semantic artifact | 4 MiB |
-| Function records | 1,024 |
-| Value-structure records | 1,024 |
-| Class records | 256 |
-| Function slots and value-structure fields | 256 each |
-| Class fields | 16 |
-| Body graph-step counter | 100,000 |
-| Recursive body/path depth | 128 |
-| Individual strict UTF-8 string | 1,024 bytes |
-
-The body graph-step counter is shared across function bodies in one artifact;
-it charges serialized nodes and selected nested lists/paths. The semantic
-verifier has a separate 100,000-visit work bound. These are implementation
-limits, not selected `TRRM` limits or the source-language proof floor.
-
-The current reader rejects unsupported revisions and node tags, inputs below
-its 17-byte minimum or above the artifact limit, malformed or truncated fields,
-noncanonical boolean bytes, invalid strict UTF-8, out-of-range counts, invalid
-entry points, incompatible profile/policy combinations,
-unsupported revision-feature combinations, unresolved or contradictory
-declarations, and trailing bytes. It then checks reference/binding and
-contract rules; linked bodies pass the semantic verifier. The `.trm` artifact
-does not authenticate producer identity or bytes.
-
-## Appendix B. Repository history and related artifacts
-
-The current reader accepts historical semantic revisions 10–32. The writer
-selects a revision based on the retained program features rather than always
-writing the highest revision. This is useful repository migration/test
-behavior, not a future format rule. The historical variants are scheduled for
-removal/consolidation before v1; until that cleanup lands, documentation may
-describe them as present implementation facts.
-
-The native profile label (`native-10` through `native-20`) is independent of
-semantic revision and source syntax. Native containers are also separate:
-`TNPK` for a single provider/consumer package, `TNSP` for native module sets,
-and `TNGP` for native dependency graphs. Their image, import, digest, and
-unwind behavior belongs to
-[native modules](../native.md), [module sets](../module-sets.md),
-and [native graphs](../native-graph.md);
-these containers are not the `TRRM` semantic-IL encoding.
-
-**Canonical direction:** [language](../language.md),
-[roadmap](../roadmap.md#language-semantic-il-and-metadata-specification),
-and [implementation boundary](../implementation.md).
-The [grammar](terrum-grammar-spec.md) and
-[core-library](terrum-core-library-reference.md) companions are separate
-technical drafts; links do not adopt their detailed proposals.
+| Encoding and revisions | Final header, wire widths, assigned revision values, semantic/runtime requirement representation and compatibility rules. |
+| Declarations | Record tags and encodings, type forms, stable identity and export keys, resource references, generic/witness exportability and exact callable-contract representation. |
+| Executable bodies | Operation and region tags, block encoding, exception/cleanup edges, root records and precise verifier input rules. |
+| Limits | Per-record and per-artifact sizes, nesting and work budgets, allocation limits and canonical encoding requirements. |
+| Unknown data | Registry, reserved values, feature negotiation and safe handling or preservation of optional nonsemantic sections. |
