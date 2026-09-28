@@ -12,6 +12,6 @@ public static bool CheckToken()
     require SourceRange.TryCreate(int32.MaxValue - 1, 1, out var end);
     copy = new Token(copy.Kind, end);
 
-    return token.Kind == 7 && token.Range.GetEnd() == 5
-        && copy.Kind == 7 && copy.Range.GetEnd() == int32.MaxValue;
+    return token.Kind == 7 && token.Range.End == 5
+        && copy.Kind == 7 && copy.Range.End == int32.MaxValue;
 }

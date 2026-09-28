@@ -160,6 +160,7 @@ public sealed class ModuleTests
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
             "Terrum.CodeAnalysis.SourceRange.TryCreate",
             "Terrum.CodeAnalysis.SourceRange.GetEnd",
+            "Terrum.CodeAnalysis.SourceRange.#get:End",
             "Terrum.CodeAnalysis.IsAsciiDigit",
             "Terrum.CodeAnalysis.IsLineBreak",
             "Terrum.CodeAnalysis.GetDecimalDigit",
@@ -208,6 +209,7 @@ public sealed class ModuleTests
                 Path.Combine(root, "self-host", "SourceRange.terrum"), "Terrum.CodeAnalysis.SourceRange.TryCreate",
                 "--source", Path.Combine(root, "self-host", tokens ? "Token.terrum" : "CharacterFacts.terrum"),
                 "--export", "Terrum.CodeAnalysis.SourceRange.GetEnd",
+                "--export", "Terrum.CodeAnalysis.SourceRange.#get:End",
             };
             arguments.AddRange(tokens ? ["--export", "Terrum.CodeAnalysis.Token.#ctor"]
                 : ["--export", "Terrum.CodeAnalysis.IsAsciiDigit", "--export", "Terrum.CodeAnalysis.IsLineBreak",

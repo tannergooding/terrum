@@ -108,7 +108,7 @@ public sealed partial class JitTests
             using Terrum.CodeAnalysis;
             int32 Main() {
                 require ManagedTokenChain.TryCreate(out var chain);
-                if (chain.GetCount() != 0 || chain.GetVersion() != 0 || chain.TryClear()) { return 1; }
+                if (chain.Count != 0 || chain.Version != 0 || chain.TryClear()) { return 1; }
                 require chain.TryAppend(1, 0, 3);
                 require chain.TryAppend(7, 42, 5);
                 if (chain.TryAppend(-1, 43, 1) || chain.TryAppend(9, 41, 1)
@@ -116,17 +116,17 @@ public sealed partial class JitTests
                 if (chain.TryGet(-1, out var invalid)) { return 3; }
                 require chain.TryGet(1, out var token);
                 if (token.Kind != 7 || token.Range.Start != 42 || token.Range.Length != 5
-                    || token.Range.GetEnd() != 47 || chain.GetCount() != 2
-                    || chain.GetVersion() != 2) { return 4; }
+                    || token.Range.End != 47 || chain.Count != 2
+                    || chain.Version != 2) { return 4; }
                 require chain.TryClear();
-                if (chain.GetCount() != 0 || chain.GetVersion() != 3 || chain.TryClear()) { return 5; }
+                if (chain.Count != 0 || chain.Version != 3 || chain.TryClear()) { return 5; }
                 if (ManagedHeap.Collect() != 2) { return 6; }
                 if (token.Kind != 7 || token.Range.Start != 42 || token.Range.Length != 5) { return 10; }
                 for (mut int32 i = 0; i < 64; i = i + 1) {
                     require chain.TryAppend(i, i, 1);
                 }
-                if (chain.TryAppend(64, 64, 1) || chain.GetCount() != 64
-                    || chain.GetVersion() != 67) { return 7; }
+                if (chain.TryAppend(64, 64, 1) || chain.Count != 64
+                    || chain.Version != 67) { return 7; }
                 require chain.TryGet(63, out var last);
                 if (last.Kind != 63 || last.Range.Start != 63 || last.Range.Length != 1) { return 8; }
                 require chain.TryClear();

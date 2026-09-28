@@ -4,7 +4,7 @@ These files are parallel design candidates, not a bootstrapped compiler.
 They are not linked into the C# implementation. The native profile executes
 the range, character, integer and nested token components and a bounded token scanner.
 The host test runner remains C#, even when it compiles and executes a candidate.
-The host parser's current language version is syntax-23. Syntax-18's qualified
+The host parser's current language version is syntax-24. Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle
 specializations described below. These reuse existing, feature-selected
 semantic contracts without changing the scanner record/schema, native profile
@@ -92,6 +92,8 @@ coordinates, including the checked end bound. This is an interchange limit for
 the syntax protocol, not a decision that Terrum collection extents are signed or that
 runtime text must use UTF-16. A later larger-source protocol needs an explicit
 schema change. Source file UTF-8 decoding remains separate from coordinates.
+The range's explicit `End` getter is exported alongside the existing `GetEnd`
+method for independent module consumers; both compute the checked end.
 
 `CharacterFacts` uses `int32(value)` instead of a per-source conversion hook.
 Raw `char16` values are code units, not automatically validated Unicode scalars.
@@ -148,6 +150,8 @@ runtime text encoding or implement general format strings.
 `ManagedTokenChain` stores at most 64 complete `Token` values in source-defined
 managed links. It compiles with `Token.terrum` and `SourceRange.terrum`; each
 12-byte token contains a category and a validated start/length range.
+Its readonly `Count` and `Version` getters expose the same values as the
+existing methods without exposing its private mutable links.
 Append rejects negative categories, invalid/overflowing ranges, decreasing
 starts, capacity exhaustion and version overflow before publishing a mutation.
 Allocation refusal leaves the existing chain unchanged. Indexed reads return

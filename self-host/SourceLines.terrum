@@ -43,7 +43,7 @@ public bool TryGetSourcePosition(int32 position, out int32 line, out int32 chara
     while (true)
     {
         require TryReadSourceLine(start, out var content, out var includingBreak);
-        int32 next = includingBreak.GetEnd();
+        int32 next = includingBreak.End;
 
         // Break units belong to their preceding line; a trailing break adds an empty line.
         if (position < next || content.Length == includingBreak.Length)

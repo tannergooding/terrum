@@ -8,7 +8,7 @@ public static bool CheckSourceRange()
         return false;
     }
 
-    if (range.GetEnd() != 5)
+    if (range.End != 5 || range.GetEnd() != range.End)
     {
         return false;
     }
@@ -28,5 +28,5 @@ public static bool CheckSourceRange()
         return false;
     }
 
-    return end.GetEnd() == int32.MaxValue;
+    return end.End == int32.MaxValue;
 }

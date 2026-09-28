@@ -26,6 +26,8 @@ mut class ManagedTokenChain {
 
     public int32 GetCount() { return _count; }
     public int32 GetVersion() { return _version; }
+    public int32 Count { [NoThrow] get { return _count; } }
+    public int32 Version { [NoThrow] get { return _version; } }
 
     public mut bool TryAppend(int32 kind, int32 sourceOffset, int32 sourceLength) {
         // Bound per-chain heap use and linear indexed reads to 64 links.

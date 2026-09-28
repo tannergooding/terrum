@@ -28,4 +28,6 @@ public struct SourceRange
     {
         return Start + Length;
     }
+
+    public int32 End { get { return Start + Length; } }
 }

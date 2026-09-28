@@ -18,7 +18,7 @@ int32 CheckSourceLines()
         }
 
         more = content.Length != includingBreak.Length;
-        start = includingBreak.GetEnd();
+        start = includingBreak.End;
         index = index + 1;
     }
 

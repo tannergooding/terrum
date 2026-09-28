@@ -19,7 +19,7 @@ int32 CheckStringLiterals()
             }
             mut int32 seen = 0;
             mut int32 at = start - 1;
-            while (at <= spelling.GetEnd())
+            while (at <= spelling.End)
             {
                 if (literal.TryReadScalar(at, out var scalar, out var next))
                 {
@@ -56,7 +56,7 @@ int32 CheckStringLiterals()
                 cursor = next;
                 streamed = streamed + 1;
             }
-            if (streamed != count || cursor.Position != spelling.GetEnd() - 1)
+            if (streamed != count || cursor.Position != spelling.End - 1)
             {
                 return 10;
             }

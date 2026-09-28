@@ -19,7 +19,7 @@ public struct StringLiteral
             return false;
         }
 
-        int32 end = spelling.GetEnd() - 1;
+        int32 end = spelling.End - 1;
         if (Host.Source[spelling.Start] != 34 || Host.Source[end] != 34)
         {
             return false;
@@ -43,7 +43,7 @@ public struct StringLiteral
 
     public bool TryReadScalar(int32 position, out int32 scalar, out int32 next)
     {
-        int32 end = Spelling.GetEnd() - 1;
+        int32 end = Spelling.End - 1;
         if (position <= Spelling.Start || position >= end)
         {
             return false;
@@ -87,7 +87,7 @@ public struct StringLiteralCursor
 
     public bool TryRead(out int32 scalar, out StringLiteralCursor next)
     {
-        int32 end = Literal.Spelling.GetEnd() - 1;
+        int32 end = Literal.Spelling.End - 1;
         if (Position >= end)
         {
             return false;

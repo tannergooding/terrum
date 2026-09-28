@@ -23,7 +23,7 @@ public unique struct SourceLineIndex
             {
                 break;
             }
-            position = includingBreak.GetEnd();
+            position = includingBreak.End;
         }
 
         int32 finalStart = position;
@@ -51,7 +51,7 @@ public unique struct SourceLineIndex
             while (filled < lineCount - 1)
             {
                 require TryReadSourceLine(position, out var content, out var includingBreak);
-                position = includingBreak.GetEnd();
+                position = includingBreak.End;
                 require starts.TryAppend(position);
                 filled = filled + 1;
             }
