@@ -75,3 +75,23 @@ public static int64 WrapUInt64ToInt64(uint64 value)
     }
     return -int64(uint64.MaxValue - value) - 1;
 }
+
+public static char16 WrapInt32ToChar16(int32 value)
+{
+    return char16(value & 65535);
+}
+
+public static char16 WrapUInt32ToChar16(uint32 value)
+{
+    return char16(value & uint32(65535));
+}
+
+public static char16 WrapInt64ToChar16(int64 value)
+{
+    return char16(value & int64(65535));
+}
+
+public static char16 WrapUInt64ToChar16(uint64 value)
+{
+    return char16(value & uint64(65535));
+}

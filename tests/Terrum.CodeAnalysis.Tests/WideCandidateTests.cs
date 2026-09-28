@@ -526,6 +526,43 @@ public sealed class WideCandidateTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task SaturatingChar16ConversionsClampOnlyOutsideCodeUnitRangeAsync(NativeRuntimePolicy policy)
+    {
+        var producer = CreateNumericsLibrary("IntegerSaturation.terrum", policy,
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt32ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt32ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToChar16");
+        var source = SyntaxTree.Parse("""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                if (SaturateInt32ToChar16(int32.MinValue) != char16(0)
+                    || SaturateInt32ToChar16(-1) != char16(0)
+                    || SaturateInt32ToChar16(0) != char16(0)
+                    || SaturateInt32ToChar16(55296) != char16(55296)
+                    || SaturateInt32ToChar16(65535) != char16(65535)
+                    || SaturateInt32ToChar16(65536) != char16(65535)
+                    || SaturateUInt32ToChar16(55296) != char16(55296)
+                    || SaturateUInt32ToChar16(uint32.MaxValue) != char16(65535)
+                    || SaturateInt64ToChar16(int64.MinValue) != char16(0)
+                    || SaturateInt64ToChar16(65535) != char16(65535)
+                    || SaturateInt64ToChar16(int64.MaxValue) != char16(65535)
+                    || SaturateUInt64ToChar16(0) != char16(0)
+                    || SaturateUInt64ToChar16(uint64.MaxValue) != char16(65535)) { return 0; }
+                return 42;
+            }
+            """);
+        var compilation = Compilation.Create(source, ModuleCompiler.CreateReference(producer),
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task WrappingConversionsExecuteFromIndependentModuleAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerWrapping.terrum", policy,
@@ -560,6 +597,41 @@ public sealed class WideCandidateTests
             }
             """);
         var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task WrappingChar16ConversionsKeepLowSixteenBitsAsync(NativeRuntimePolicy policy)
+    {
+        var producer = CreateNumericsLibrary("IntegerWrapping.terrum", policy,
+            "Terrum.CodeAnalysis.Numerics64.WrapInt32ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.WrapUInt32ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.WrapInt64ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.WrapUInt64ToChar16");
+        var source = SyntaxTree.Parse("""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                if (WrapInt32ToChar16(-1) != char16(65535)
+                    || WrapInt32ToChar16(-65535) != char16(1)
+                    || WrapInt32ToChar16(int32.MinValue) != char16(0)
+                    || WrapInt32ToChar16(65536) != char16(0)
+                    || WrapUInt32ToChar16(55296) != char16(55296)
+                    || WrapUInt32ToChar16(uint32.MaxValue) != char16(65535)
+                    || WrapInt64ToChar16(-4294967297) != char16(65535)
+                    || WrapInt64ToChar16(int64.MinValue) != char16(0)
+                    || WrapInt64ToChar16(65536) != char16(0)
+                    || WrapUInt64ToChar16(uint64.MaxValue) != char16(65535)
+                    || WrapUInt64ToChar16(65536) != char16(0)) { return 0; }
+                return 42;
+            }
+            """);
+        var compilation = Compilation.Create(source, ModuleCompiler.CreateReference(producer),
             (BoundRuntimePolicy)policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
