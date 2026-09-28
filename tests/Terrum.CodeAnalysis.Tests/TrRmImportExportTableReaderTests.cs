@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
 using Xunit;
@@ -83,14 +84,25 @@ public sealed class TrRmImportExportTableReaderTests
                 producerTypeVisibility: 1));
     }
 
+    [Fact]
+    public void PackedImportAndExportTablesComposeThroughTheArtifactValidator()
+    {
+        Assert.True(Read(Import(), Export(0x1600_0001), frameArtifact: true));
+        Assert.True(Read(Import(), Export(0x1E00_0001),
+            propertyFlags: 2, frameArtifact: true));
+    }
+
     private static bool Read(byte[] importRows, byte[] exportRows,
         uint producerVisibility = 2, uint producerTypeVisibility = 2, uint propertyFlags = 0,
-        bool producerOwnsRef = false, bool producerMethodOwned = false)
+        bool producerOwnsRef = false, bool producerMethodOwned = false,
+        bool frameArtifact = false)
     {
-        var names = new TrRmStringTableReader(TrRmStringTableWriter.EncodeTextRows(
+        var nameBytes = TrRmStringTableWriter.EncodeTextRows(
             [("", 0), ("Producer", 0), ("Consumer", 0), ("Widget", 0),
-             ("Key", 0), ("Execute", 0), ("Value", 0), ("Key", 1)]), 8);
-        var modules = new TrRmModuleTableReader(Modules(producerOwnsRef), 2, names, 1, 2, 2, 0);
+             ("Key", 0), ("Execute", 0), ("Value", 0), ("Key", 1)]);
+        var names = new TrRmStringTableReader(nameBytes, 8);
+        var moduleRows = Modules(producerOwnsRef);
+        var modules = new TrRmModuleTableReader(moduleRows, 2, names, 1, 2, 2, 0);
         var typeRows = new byte[80];
         for (var index = 0; index < 2; index++)
         {
@@ -126,12 +138,65 @@ public sealed class TrRmImportExportTableReaderTests
             ? default
             : new TrRmPropertyDefTableReader(propertyRows, 1,
                 names, types, typeSpecs, methods, signatures);
-        var references = new TrRmModuleRefTableReader(ModuleRef(), 1, names, modules);
+        var moduleRefRows = ModuleRef();
+        var references = new TrRmModuleRefTableReader(moduleRefRows, 1, names, modules);
         var imports = new TrRmImportTableReader(importRows, importRows.Length / 12,
             names, references, types, methods, properties);
         _ = new TrRmExportTableReader(exportRows, exportRows.Length / 8,
             names, types, methods, properties, imports);
+        if (frameArtifact)
+        {
+            List<(ushort Kind, byte[] Bytes, int Count)> sections = [
+                (0x0001, moduleRows, 2), (0x0002, nameBytes, 8),
+                (0x0010, moduleRefRows, 1), (0x0011, typeSpecBytes, 1),
+                (0x0013, typeRows, 2), (0x0016, methodRows, 2),
+                (0x0017, signatureRows, 1),
+                (0x001C, importRows, importRows.Length / 12),
+                (0x001D, exportRows, exportRows.Length / 8),
+            ];
+            if (propertyFlags != 0)
+            {
+                sections.Add((0x001E, propertyRows, 1));
+            }
+
+            // This fixture checks Body framing and ownership, not executable instructions.
+            byte[] body = [0, 0, 0, 0, 1, 0, 0, 0, 0];
+            sections.Add((0x0020, body, 1));
+            TrRmStructuralMetadataValidator.Validate(Artifact(sections));
+        }
+
         return imports.IsExpectedDefinition(0x1600_0002);
+    }
+
+    private static byte[] Artifact(List<(ushort Kind, byte[] Bytes, int Count)> sections)
+    {
+        var length = 32 + sections.Count * 16;
+        foreach (var (_, bytes, _) in sections)
+        {
+            length += bytes.Length;
+        }
+
+        var artifact = new byte[length];
+        "TRRM"u8.CopyTo(artifact);
+        BinaryPrimitives.WriteUInt16LittleEndian(artifact.AsSpan(4), 1);
+        Write(artifact, 8, 32);
+        Write(artifact, 12, (uint)sections.Count);
+        Write(artifact, 16, (uint)length);
+        Write(artifact, 20, 32);
+        var offset = 32 + sections.Count * 16;
+        for (var entry = 0; entry < sections.Count; entry++)
+        {
+            var (kind, bytes, count) = sections[entry];
+            var directory = 32 + entry * 16;
+            BinaryPrimitives.WriteUInt16LittleEndian(artifact.AsSpan(directory), kind);
+            Write(artifact, directory + 4, (uint)count);
+            Write(artifact, directory + 8, (uint)offset);
+            Write(artifact, directory + 12, (uint)bytes.Length);
+            bytes.CopyTo(artifact.AsSpan(offset));
+            offset += bytes.Length;
+        }
+
+        return artifact;
     }
 
     private static byte[] Modules(bool producerOwnsRef)

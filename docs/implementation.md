@@ -1053,8 +1053,9 @@ including a framed callable-table fixture, but do not parse executable Body
 instructions or replace the current module writer. A provisional structural
 entry point composes the known table checks over one framed artifact without
 claiming semantic import binding, target-layout validity or executable clauses.
-It checks Blob and Body offset indexes, including empty Blob rows, but does
-not interpret Blob contents or Body instructions.
+It checks Blob and Body offset indexes, including empty Blob rows, and composes
+a two-module Import/Export fixture, but does not interpret Blob contents or
+Body instructions.
 Historical-revision readers and feature-dependent writer
 selection are temporary implementation support to remove before v1. That
 cleanup must update writers and fixtures together and reject unsupported
