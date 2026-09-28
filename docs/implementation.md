@@ -1051,7 +1051,9 @@ checks its Boolean return and `out`/`init ref` parameter ordinal, and Cleanup
 requires a declared `NoThrow` effect on the same-type target method. These do not bind imported
 contracts. A host-side
 writer emits indexed String sections with required names or optional empty
-namespace text; the self-host String-row
+namespace text; a fixed Module-row writer checks identities, partition
+cursors, requirements and entry ownership against the supplied String table
+and table counts. The self-host String-row
 candidate emits individual rows. These exercise approved metadata contracts in isolation,
 including a framed callable-table fixture, but do not parse executable Body
 instructions or replace the current module writer. A provisional structural
