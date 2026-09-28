@@ -111,6 +111,32 @@ public sealed partial class NativeManagedClassModuleTests
         Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(program, policy)).ConfigureAwait(true));
     }
 
+    [Fact]
+    public async Task FailedWideClassConstructionReleasesLastFieldEdgeAsync()
+    {
+        var source = WideSource(32).Replace("Edge = edge; }",
+            "Edge = edge; require edge.Value != 42; }", StringComparison.Ordinal) + """
+            int32 Main() {
+                unsafe {
+                    try {
+                        if (Make(out var abandoned)) { return 1; }
+                        return 2;
+                    } catch {
+                        if (ManagedHeap.Collect() != 1) { return 3; }
+                        require ManagedNode.TryCreate(42, out var reused);
+                        return reused.Value;
+                    }
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
+        Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(program,
+            NativeRuntimePolicy.CheckedExceptions)).ConfigureAwait(true));
+    }
+
     private static string WideSource(int fieldCount, string resultSuffix = "")
     {
         var fields = string.Join(" ", Enumerable.Range(0, fieldCount - 1).Select(index => $"public bool F{index};"));
