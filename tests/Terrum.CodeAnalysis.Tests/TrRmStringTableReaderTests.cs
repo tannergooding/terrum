@@ -52,6 +52,20 @@ public sealed class TrRmStringTableReaderTests
         Assert.Throws<InvalidDataException>(() => DecodeName(bytes, 2, 2));
     }
 
+    [Fact]
+    public void RejectsAnIndexDamagedAfterConstruction()
+    {
+        var bytes = TwoRowSection();
+        Assert.Throws<InvalidDataException>(() => DecodeNameAfterMutation(bytes));
+    }
+
+    private static string DecodeNameAfterMutation(byte[] section)
+    {
+        var table = new TrRmStringTableReader(section, 2);
+        section[8] = 255;
+        return table.DecodeName(2);
+    }
+
     private static string DecodeName(byte[] section, int recordCount, int row)
     {
         var table = new TrRmStringTableReader(section, recordCount);

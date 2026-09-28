@@ -6,6 +6,8 @@ using System.IO;
 
 namespace Terrum.CodeAnalysis.Modules;
 
+/// <summary>Validated index over one present TRRM String section.</summary>
+/// <remarks>The borrowed section bytes must remain unchanged while this reader is in use.</remarks>
 public readonly ref struct TrRmStringTableReader
 {
     private readonly ReadOnlySpan<byte> _index;
@@ -55,6 +57,12 @@ public readonly ref struct TrRmStringTableReader
 
         var start = (int)ReadOffset(row - 1);
         var end = (int)ReadOffset(row);
+        if (start < 0 || start > _data.Length - 8 || end > _data.Length
+            || end < start + 8 || ((start | end) & 3) != 0)
+        {
+            throw InvalidIndex();
+        }
+
         return TrRmStringRowReader.DecodeName(_data.Slice(start, end - start));
     }
 
