@@ -368,6 +368,21 @@ reference meaning. A merger may preserve or deduplicate Blob bytes but never
 silently treat their contents as relocatable references. Duplicate strings or
 blobs are not a second declaration identity.
 
+String literal storage is not assigned in `(1, 0)`: String rows above carry
+names and keys, not a general literal encoding. Before adding literal
+references, decide whether identifier and literal uses share a tagged String
+table rather than separate heaps. The design must accommodate ASCII, UTF-8,
+UTF-16LE and UTF-32LE, preserve exact bytes or code units where ill-formed
+literal data is permitted, and distinguish that use from identifier fields,
+which require well-formed decoded scalar text. A validity claim needs reader
+verification, not trust in a producer-supplied bit. ASCII may serve as a
+UTF-8-compatible fast path, allowing equal bytes to be shared across uses
+without silently transcoding raw literals. A counted ASCII/UTF-16LE run
+representation is another candidate for mixed text; per-run count overhead,
+decoding cost and worst-case alternating runs must be compared against plain
+encodings before assigning it a tag. This choice does not change the current
+UTF-8-only `(1, 0)` row grammar or authorize literal operands.
+
 | Table | Ordered row payload |
 |---|---|
 | Module | `u32 identityBlob, u32 targetRequirement, u32 runtimePolicy, u32 entryMethod?, u32 moduleFlags, u32 featureFirst, u32 featureCount, u32 moduleRefStart, u32 typeDefStart, u32 methodDefStart, u32 sourceFileStart` |
