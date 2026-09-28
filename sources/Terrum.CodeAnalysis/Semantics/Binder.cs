@@ -134,6 +134,7 @@ internal sealed partial class Binder
                     null, null, _trees[0], function.DeclaringStruct, function.IsConstructor,
                     false, false, false, function.IsStatic, function.IsNoThrow, function.DoesNotReturn, function) {
                     IsCleanup = function.IsCleanup,
+                    PropertyName = function.PropertyName,
                 });
             }
         }
@@ -274,7 +275,8 @@ internal sealed partial class Binder
                     foreach (var member in node.Children)
                     {
                         if (member is SyntaxNode declaration && declaration.Kind is SyntaxKind.FunctionDeclaration
-                            or SyntaxKind.ConstructorDeclaration or SyntaxKind.OperatorDeclaration)
+                            or SyntaxKind.ConstructorDeclaration or SyntaxKind.OperatorDeclaration
+                            or SyntaxKind.PropertyDeclaration)
                         {
                             Declare(declaration, structName);
                         }
@@ -479,6 +481,7 @@ internal sealed partial class Binder
                 DoesNotReturn = signature.DoesNotReturn,
                 DeclaringStruct = signature.StructName is null ? null
                    : (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".") + signature.StructName,
+                PropertyName = signature.PropertyName,
             });
         }
 
@@ -690,7 +693,8 @@ internal sealed partial class Binder
     {
         var constructor = declaration.Kind == SyntaxKind.ConstructorDeclaration;
         var operatorDeclaration = declaration.Kind == SyntaxKind.OperatorDeclaration;
-        var modifierCount = declaration.Children.Length - (constructor ? 3 : operatorDeclaration ? 5 : 4);
+        var property = declaration.Kind == SyntaxKind.PropertyDeclaration;
+        var modifierCount = declaration.Children.Length - (property ? 5 : constructor ? 3 : operatorDeclaration ? 5 : 4);
         var isMutable = false;
         var isPrivate = false;
         var isInternal = false;
@@ -703,7 +707,11 @@ internal sealed partial class Binder
         {
             if (declaration.Children[index] is SyntaxNode { Kind: SyntaxKind.Attribute } attribute)
             {
-                if (attribute.Children[1] is SyntaxTokenElement { Token.Text: "NoThrow" } && !isNoThrow)
+                if (property)
+                {
+                    Report("TRM3001", "Getter effects belong on the get accessor.", attribute.Span);
+                }
+                else if (attribute.Children[1] is SyntaxTokenElement { Token.Text: "NoThrow" } && !isNoThrow)
                 {
                     isNoThrow = true;
                 }
@@ -757,14 +765,37 @@ internal sealed partial class Binder
             Report("TRM3001", "A mut method requires a writable class or struct receiver.", declaration.Span);
         }
 
-        var returnNode = constructor ? null : (SyntaxNode)declaration.Children[operatorDeclaration ? ^5 : ^4];
-        var parameters = (SyntaxNode)declaration.Children[^2];
-        var nameToken = ((SyntaxTokenElement)declaration.Children[^3]).Token;
-        var operatorKey = new StaticOperatorKey(nameToken.Kind, parameters.Children.OfType<SyntaxNode>().Count());
+        var returnNode = constructor ? null : (SyntaxNode)declaration.Children[property || operatorDeclaration ? ^5 : ^4];
+        var parameters = property ? null : (SyntaxNode)declaration.Children[^2];
+        var nameToken = ((SyntaxTokenElement)declaration.Children[property ? ^4 : ^3]).Token;
+        var operatorKey = new StaticOperatorKey(nameToken.Kind, parameters?.Children.OfType<SyntaxNode>().Count() ?? 0);
         var validOperator = (operatorKey.Arity == 1 && IsStaticUnaryOperator(nameToken.Kind))
             || (operatorKey.Arity == 2 && IsStaticBinaryOperator(nameToken.Kind));
         var nameText = operatorDeclaration && validOperator ? OperatorName(operatorKey) : nameToken.Text;
-        var body = (SyntaxNode)declaration.Children[^1];
+        var getter = property ? (SyntaxNode)declaration.Children[^2] : null;
+        var body = getter is SyntaxNode accessor ? (SyntaxNode)accessor.Children[^1]
+            : (SyntaxNode)declaration.Children[^1];
+        if (getter is not null)
+        {
+            foreach (var attribute in getter.Children.OfType<SyntaxNode>()
+                .Where(static child => child.Kind == SyntaxKind.Attribute))
+            {
+                if (attribute.Children[1] is not SyntaxTokenElement { Token.Text: "NoThrow" } || isNoThrow)
+                {
+                    Report("TRM3001", "Only a single getter-local NoThrow effect is supported.", attribute.Span);
+                }
+                isNoThrow = true;
+            }
+            if (containingType is null || isStatic || isMutable || isCleanup || doesNotReturn
+                || (!TryResolveStruct(Qualify(containingType), out var propertyOwner)
+                    && !TryResolveClass(Qualify(containingType), out propertyOwner))
+                || (IsStruct(propertyOwner) && IsUnique(propertyOwner))
+                || TryFindField(propertyOwner, nameToken.Text, out _))
+            {
+                Report("TRM3001", "Getter-only properties require a distinct member on a Copy struct or source class with a readonly receiver.",
+                    declaration.Span);
+            }
+        }
         if (operatorDeclaration && (containingType is null || !isStatic || body.Kind != SyntaxKind.Block
             || !validOperator))
         {
@@ -772,6 +803,11 @@ internal sealed partial class Binder
         }
         var classConstructor = constructor && TryResolveClass(Qualify(containingType!), out _);
         var returnType = constructor ? ResolveDeclaredType(containingType!) : BindType(returnNode!, allowVoid: true);
+        if (property && (returnType == PrimitiveType.Void || !IsCopyGenericType(returnType)
+            || IsUnique(returnType)))
+        {
+            Report("TRM3007", "A getter must return a supported by-value Copy type.", declaration.Span);
+        }
         if (returnType is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
         {
             Report("TRM3023", "A native buffer view cannot be returned.", returnNode!.Span);
@@ -783,7 +819,7 @@ internal sealed partial class Binder
                 && IsStruct(structType) ? (int)structType - 100 : -1;
             var structure = structureIndex < 0 ? null : _structs[structureIndex];
             if (structure is null || !structure.IsUnique || isStatic || constructor || isMutable || !isNoThrow
-                || returnType != PrimitiveType.Void || parameters.Children.Length != 2
+                || returnType != PrimitiveType.Void || parameters?.Children.Length != 2
                 || structure.CleanupMethod is not null || isPrivate || isInternal)
             {
                 Report("TRM3023", "Cleanup requires one public, NoThrow, nonmutating, parameterless instance method on a unique struct.", declaration.Span);
@@ -802,7 +838,7 @@ internal sealed partial class Binder
         var declared = ImmutableArray.CreateBuilder<Parameter>();
         var names = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var child in parameters.Children)
+        foreach (var child in parameters?.Children ?? [])
         {
             if (child is not SyntaxNode parameter)
             {
@@ -864,7 +900,7 @@ internal sealed partial class Binder
 
         var qualifiedName = (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".")
             + (containingType is null ? "" : containingType + ".")
-            + (constructor ? "#ctor" : nameText);
+            + (constructor ? "#ctor" : property ? "#get:" + nameText : nameText);
         if (!_functions.TryAdd(qualifiedName, _signatures.Count))
         {
             Report("TRM3003", $"Duplicate function '{nameToken.Text}'; overloads are not supported.", nameToken.Span);
@@ -877,6 +913,7 @@ internal sealed partial class Binder
             IsCleanup = isCleanup,
             IsOperator = operatorDeclaration,
             IsClassConstructor = classConstructor,
+            PropertyName = property ? nameText : null,
         });
     }
 
@@ -1736,6 +1773,12 @@ internal sealed partial class Binder
                     expression = new BoundFieldRead(new BoundRead(0, _variables[0].Type, node.Span),
                         field, GetField(structure, field).Type, node.Span);
                 }
+                else if (_hasReceiver && _currentStruct is not null
+                    && TryFindGetter(ResolveDeclaredType(_currentStruct), token.Text, out var getter))
+                {
+                    expression = BindArguments(node, new SyntaxNode(SyntaxKind.ArgumentList, [], node.Span.End),
+                        getter, null);
+                }
                 else
                 {
                     Report("TRM3006", $"Unknown or not-yet-declared variable '{token.Text}'.", token.Span);
@@ -1782,6 +1825,13 @@ internal sealed partial class Binder
                     CheckFieldAccess(fieldType, field, node.Span);
                     expression = new BoundFieldRead(BindExpression(receiverNode, fieldType), field,
                         GetField(fieldType, field).Type, node.Span);
+                    break;
+                }
+                if (receiverType is PrimitiveType propertyType
+                    && TryFindGetter(propertyType, member, out var getter))
+                {
+                    expression = BindArguments(node, new SyntaxNode(SyntaxKind.ArgumentList, [], node.Span.End),
+                        getter, receiverNode);
                     break;
                 }
                 var typeName = NameText(receiverNode);
@@ -2412,6 +2462,15 @@ internal sealed partial class Binder
         return false;
     }
 
+    private bool TryFindGetter(PrimitiveType type, string name, out int getter)
+    {
+        var owner = IsClass(type) ? _classes[ManagedClassTypes.ClassIndex(type)].Name
+            : IsStruct(type) ? _structs[(int)type - 100].Name : null;
+        getter = -1;
+        return owner is not null && TryFindFunction(owner + ".#get:" + name, out getter)
+            && _signatures[getter].PropertyName == name;
+    }
+
     private BoundStructField GetField(PrimitiveType type, int field) => IsClass(type)
         ? _classes[ManagedClassTypes.ClassIndex(type)].Fields[field]
         : _structs[(int)type - 100].Fields[field];
@@ -2551,6 +2610,11 @@ internal sealed partial class Binder
                 {
                     return _variables[slot].Type;
                 }
+                if (_hasReceiver && _currentStruct is not null
+                    && TryFindGetter(ResolveDeclaredType(_currentStruct), name, out var getter))
+                {
+                    return _signatures[getter].ReturnType;
+                }
                 return _hasReceiver && _currentStruct is not null
                     && TryFindField(ResolveDeclaredType(_currentStruct), name, out var field)
                     ? GetField(ResolveDeclaredType(_currentStruct), field).Type : null;
@@ -2647,6 +2711,11 @@ internal sealed partial class Binder
                 if (receiverType is PrimitiveType type && TryFindField(type, member, out var field))
                 {
                     return GetField(type, field).Type;
+                }
+                if (receiverType is PrimitiveType propertyType
+                    && TryFindGetter(propertyType, member, out var getter))
+                {
+                    return _signatures[getter].ReturnType;
                 }
                 var text = NameText(node);
                 if (text is "int32.MinValue" or "int32.MaxValue")
@@ -2814,6 +2883,7 @@ internal sealed partial class Binder
         SyntaxNode? Body, SyntaxNode? Declaration, SyntaxTree Tree, string? StructName, bool IsConstructor, bool IsPrivate,
         bool IsInternal, bool IsMutable, bool IsStatic, bool IsNoThrow, bool DoesNotReturn, BoundFunction? External = null)
     {
+        internal string? PropertyName { get; init; }
         internal bool IsCleanup { get; init; }
         internal bool IsOperator { get; init; }
         internal GenericInstantiation? Generic { get; init; }

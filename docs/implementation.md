@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-22, semantic v33 private initialization loans, native-10 through native-20
+## Current boundary: syntax-23, semantic v34 explicit getters, native-10 through native-20
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -600,6 +600,16 @@ module bytes or native profiles.
 arguments for compilation-private boolean conditional initialization; v33
 records private initialization mode in semantic modules. The scanner record,
 native profile and physical output ABI remain unchanged.
+`syntax-23` adds explicit getter-only, by-value properties on compact Copy
+structs and source classes. Accessor-local `[NoThrow]` is verified like the
+same contract on a method. Member reads bind to a readonly-receiver call, not
+a field or a `get_Name` naming convention. Semantic v34 records the property's
+member identity alongside its function body and contract, including exported
+Copy-struct getter declarations; existing field layouts and their mutability
+are unchanged. Exported structs still require their existing public field
+layout, and managed class handles remain private to their image. Setter,
+auto-property, ref-return and expression-bodied forms are unsupported. No
+scanner or native ABI/profile version changes.
 `[NoThrow]` on functions/constructors, `[DoesNotReturn]` on void functions and
 `[Cleanup]` on eligible unique instance methods are currently bound;
 unknown, duplicate and misplaced attributes diagnose rather

@@ -273,6 +273,9 @@ public sealed record BoundStructField(string Name, PrimitiveType Type, int Offse
 public sealed record BoundFunction(string Name, PrimitiveType ReturnType, ImmutableArray<BoundVariable> Variables,
     int ParameterCount, BoundBlock Body, TextSpan Span)
 {
+    /// <summary>The declared property member name, distinct from the callable implementation's name.</summary>
+    public string? PropertyName { get; init; }
+
     /// <summary>Whether this method consumes its unique receiver during lexical cleanup.</summary>
     public bool IsCleanup { get; init; }
 

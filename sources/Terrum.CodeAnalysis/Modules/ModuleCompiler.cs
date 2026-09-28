@@ -39,6 +39,7 @@ public static partial class ModuleCompiler
     private const int ManagedValueExportVersion = 31;
     private const int ManagedGraphParticipantVersion = 32;
     private const int PrivateInitReferenceVersion = 33;
+    private const int ExplicitGetterVersion = 34;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -49,6 +50,9 @@ public static partial class ModuleCompiler
     private static bool HasPrivateInitReference(Module module) =>
         module.Functions.Any(static item => item.Function is BoundFunction function
             && function.Variables.Any(static variable => variable.IsInit));
+
+    private static bool HasExplicitGetter(Module module) =>
+        module.Functions.Any(static item => item.Function is BoundFunction { PropertyName: not null });
 
     /// <summary>Reads and verifies a producer artifact, exposing only exported declarations and their value layouts to source binding.</summary>
     public static CompilationReference CreateReference(byte[] producerBytes)
@@ -1016,6 +1020,10 @@ public static partial class ModuleCompiler
         {
             _ = result.Append("|MutReceiver");
         }
+        if (function.PropertyName is string property)
+        {
+            _ = result.Append("|Property:").Append(property);
+        }
         if (function.IsCleanup)
         {
             _ = result.Append("|Cleanup");
@@ -1363,7 +1371,9 @@ public static partial class ModuleCompiler
         }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-        var version = HasPrivateInitReference(module)
+        var version = HasExplicitGetter(module)
+            ? ExplicitGetterVersion
+            : HasPrivateInitReference(module)
             ? PrivateInitReferenceVersion
             : module.Consumer && HasPrivateManagedState(module)
             ? ManagedGraphParticipantVersion
@@ -1562,6 +1572,10 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Private initialization version requires an init parameter.");
             }
+            if (version == ExplicitGetterVersion && !HasExplicitGetter(module))
+            {
+                throw new ModuleFormatException("Explicit getter version requires a property.");
+            }
             if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
                 || !items.Any(static item => item.Import && item.Function is BoundFunction function
                     && !ManagedExportShape.ScalarOnly(function))))
@@ -1613,7 +1627,7 @@ public static partial class ModuleCompiler
             or StackClassFactoryVersion or ManagedAccessVersion or MutableStructReceiverVersion
             or MutableFieldReceiverVersion or UniqueMutableReceiverVersion or UniqueMutableFieldReceiverVersion
             or MutableBufferFieldReceiverVersion or MutableBufferFieldViewVersion or ManagedValueExportVersion
-            or ManagedGraphParticipantVersion or PrivateInitReferenceVersion))
+            or ManagedGraphParticipantVersion or PrivateInitReferenceVersion or ExplicitGetterVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -1824,6 +1838,14 @@ public static partial class ModuleCompiler
         writer.Write(function.IsNoThrow);
         writer.Write(function.DoesNotReturn);
         writer.Write(function.IsCleanup);
+        if (version >= ExplicitGetterVersion)
+        {
+            writer.Write(function.PropertyName is not null);
+            if (function.PropertyName is string property)
+            {
+                PutString(writer, property);
+            }
+        }
         writer.Write((byte)function.Intrinsic);
         if (version >= ManagedClassVersion)
         {
@@ -1877,6 +1899,7 @@ public static partial class ModuleCompiler
         var isNoThrow = GetBool(reader);
         var doesNotReturn = GetBool(reader);
         var isCleanup = version >= OwnershipVersion && GetBool(reader);
+        var propertyName = version >= ExplicitGetterVersion && GetBool(reader) ? GetString(reader) : null;
         var intrinsic = version >= BufferVersion ? (BoundIntrinsic)reader.ReadByte() : BoundIntrinsic.None;
         var classConstructor = version >= ManagedClassVersion && GetBool(reader);
         var classFactoryConstructor = version >= ManagedClassVersion ? reader.ReadInt32() : -1;
@@ -1935,6 +1958,7 @@ public static partial class ModuleCompiler
             IsNoThrow = isNoThrow,
             DoesNotReturn = doesNotReturn,
             IsCleanup = isCleanup,
+            PropertyName = propertyName,
             Intrinsic = intrinsic,
             DeclaringStruct = declaringStruct,
             IsClassConstructor = classConstructor,

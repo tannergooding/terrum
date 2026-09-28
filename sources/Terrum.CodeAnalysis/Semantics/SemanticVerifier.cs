@@ -301,7 +301,8 @@ public static class SemanticVerifier
             }
             if (function.Intrinsic != BoundIntrinsic.None)
             {
-                if (!NativeBufferIntrinsics.Matches(function) && !NativeManagedNodeIntrinsics.Matches(function))
+                if (function.PropertyName is not null
+                    || (!NativeBufferIntrinsics.Matches(function) && !NativeManagedNodeIntrinsics.Matches(function)))
                 {
                     throw Invalid();
                 }
@@ -366,6 +367,21 @@ public static class SemanticVerifier
                 }
             }
             else if (function.IsConstructor || function.IsPrivate)
+            {
+                throw Invalid();
+            }
+            if (function.PropertyName is string propertyName
+                && (string.IsNullOrEmpty(propertyName) || function.DeclaringStruct is not string owner
+                    || (function.Name != owner + ".#get:" + propertyName
+                        && function.Name != owner + ".$producer.#get:" + propertyName)
+                    || function.IsStatic || function.IsConstructor || function.IsClassConstructor
+                    || function.IsCleanup || function.DoesNotReturn || function.ParameterCount != 1
+                    || function.Variables[0].IsMutable || IsUnique(program, function.Variables[0].Type)
+                    || !IsClassArgumentType(function.ReturnType, program.Structures)
+                    || program.Structures.Any(structure => structure.Name == owner
+                        && structure.Fields.Any(field => field.Name == propertyName))
+                    || program.Classes.Any(@class => @class.Name == owner
+                        && @class.Fields.Any(field => field.Name == propertyName))))
             {
                 throw Invalid();
             }

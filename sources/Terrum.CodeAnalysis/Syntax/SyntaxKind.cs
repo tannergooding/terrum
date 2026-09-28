@@ -21,6 +21,10 @@ public enum SyntaxKind
     ConstructorDeclaration,
     /// <summary>A field declaration.</summary>
     FieldDeclaration,
+    /// <summary>A by-value property with an explicit getter.</summary>
+    PropertyDeclaration,
+    /// <summary>An explicit getter and its local effect attributes.</summary>
+    GetAccessor,
     /// <summary>A type name.</summary>
     TypeName,
     /// <summary>A function or constructor parameter list.</summary>

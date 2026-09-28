@@ -247,11 +247,12 @@ public int32 Count
 
 The getter is a named, source-bound callable member with a readonly receiver
 and by-value result; property/accessor identity and effects are checked
-metadata, not an inferred `get_Name` convention. This narrow direction does
-not adopt setters, auto-properties, ref returns or general property semantics.
-Expression-bodied properties are not established; if such a form is supported,
-`[get: Attr]` is a possible accessor-target direction. Current parser/binder
-support remains absent.
+metadata, not an inferred `get_Name` convention. Syntax-23 implements this
+getter-only subset, including accessor-local `[NoThrow]`, on source compact
+`Copy` structs and classes. A public Copy-struct getter may cross a module
+boundary when its containing struct already has an exportable public layout;
+managed class state remains image-private. Setters, auto-properties, ref
+returns, expression bodies and general property semantics remain unsupported.
 
 `where T : IFoo` requires a checked behavioral witness; `where T : [Sized]`, `[Copy]`, `[ManagedStorable]`, `[ThreadTransferable]`, `[ThreadShareable]`, `[TextCodeUnit]` or `[NativeComInterface]` asks for a compiler-verified property of the complete qualified form, **not** implementation of an `I...` interface or the mere presence of an attribute. Thread capabilities describe which checked transfer or concurrent-use contracts a complete form can satisfy; they do not imply that a value is currently shared, authorize mutation, or perform synchronization. Thread confinement is the default but does not bind a value to one OS thread or executor. `[Sized]` does not promise a size constant in shared generic code. `[TextCodeUnit]` admits `char8`, `char16`, `char32`, not arbitrary valid encoded text. Native COM additionally requires checked IID, inherited slots, signatures, layout and lifetime. User shape generation can provide witnesses or adapters only after checking costs, ownership and ABI.
 

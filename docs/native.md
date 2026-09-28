@@ -45,7 +45,7 @@ longer parsed. Based literals construct target-width bit patterns, while
 decimal literals retain numeric range semantics. Floating/custom literal
 parsing, registered literal targets and `[ConstEval]` remain outside this
 executable profile.
-The current parser version is syntax-22. Syntax-18 qualified generic-call type
+The current parser version is syntax-23. Syntax-18 qualified generic-call type
 arguments such as `write C` and `write C?` enable bounded managed-handle
 substitutions in compilation-local `Copy` templates. Syntax-19 adds the
 bounded nominal comparison protocols; neither changes the native profile,
@@ -63,6 +63,14 @@ retains the distinct private parameter and call mode across module servicing.
 The existing checked `out` scratch/cleanup and native ABI implement the
 bounded behavior without a native profile change; public init contracts and
 general references are not supported.
+Syntax-23 introduces explicit by-value getters on Copy structs and source
+classes. Semantic v34 persists property member identity and accessor effects
+independently of the callable implementation name. Getter reads use the
+existing readonly receiver call and result ABI in AOT and JIT. Public
+Copy-struct getters can be exported only where the existing public value
+layout permits it; private class getters remain within image-local managed
+state. Older field and method contracts retain their selected semantic
+versions, and the native profile/package format is unchanged.
 
 Terrum has no built-in marshalling. Source or generated tooling defines and
 performs conversions and wrappers for imported C APIs; the compiler/runtime

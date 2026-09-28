@@ -345,13 +345,52 @@ internal sealed class Parser
                 else if (containingType is not null && children.TrueForAll(static child =>
                     child is not SyntaxNode { Kind: SyntaxKind.TypeParameterList }))
                 {
-                    if (Current.Kind == TokenKind.Equals)
+                    if (Current.Kind == TokenKind.OpenBrace)
                     {
                         children.Add(Take());
-                        children.Add(ParseExpression());
+                        var accessor = new List<SyntaxElement>();
+                        while (Current.Kind == TokenKind.OpenBracket)
+                        {
+                            accessor.Add(Node(SyntaxKind.Attribute,
+                                [Take(), Expect(TokenKind.Identifier), Expect(TokenKind.CloseBracket)]));
+                        }
+                        if (Current.Kind != TokenKind.Identifier || Current.Text != "get")
+                        {
+                            Report("TRM1002", "A property requires an explicit get accessor.", Current.Span);
+                            children.Add(SkipDeclaration());
+                        }
+                        else
+                        {
+                            accessor.Add(Take());
+                            if (Current.Kind != TokenKind.OpenBrace)
+                            {
+                                Report("TRM1002", "A getter requires a braced body.", Current.Span);
+                                accessor.Add(SkipDeclaration());
+                            }
+                            else
+                            {
+                                accessor.Add(ParseBlock());
+                            }
+                            children.Add(Node(SyntaxKind.GetAccessor, accessor));
+                        }
+                        if (Current.Kind != TokenKind.CloseBrace)
+                        {
+                            Report("TRM1002", "Only a single explicit getter is supported.", Current.Span);
+                            children.Add(SkipDeclaration());
+                        }
+                        children.Add(Expect(TokenKind.CloseBrace));
+                        kind = SyntaxKind.PropertyDeclaration;
                     }
-                    children.Add(Expect(TokenKind.Semicolon));
-                    kind = SyntaxKind.FieldDeclaration;
+                    else
+                    {
+                        if (Current.Kind == TokenKind.Equals)
+                        {
+                            children.Add(Take());
+                            children.Add(ParseExpression());
+                        }
+                        children.Add(Expect(TokenKind.Semicolon));
+                        kind = SyntaxKind.FieldDeclaration;
+                    }
                 }
                 else
                 {
