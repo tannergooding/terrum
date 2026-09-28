@@ -58,3 +58,41 @@ public bool TryGetSourcePosition(int32 position, out int32 line, out int32 chara
         index = index + 1;
     }
 }
+
+public bool TryGetSourceOffset(int32 line, int32 character, out int32 offset)
+{
+    if (line < 0 || character < 0)
+    {
+        return false;
+    }
+
+    mut int32 start = 0;
+    mut int32 index = 0;
+    while (true)
+    {
+        require TryReadSourceLine(start, out var content, out var includingBreak);
+        bool finalLine = content.Length == includingBreak.Length;
+        if (index == line)
+        {
+            if (finalLine)
+            {
+                if (character > content.Length)
+                {
+                    return false;
+                }
+            }
+            else if (character >= includingBreak.Length)
+            {
+                return false;
+            }
+            offset = start + character;
+            return true;
+        }
+        if (finalLine)
+        {
+            return false;
+        }
+        start = includingBreak.End;
+        index = index + 1;
+    }
+}

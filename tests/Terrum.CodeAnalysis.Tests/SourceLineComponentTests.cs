@@ -42,6 +42,8 @@ public sealed partial class SourceLineComponentTests
     [InlineData("bool ok = TryReadSourceLine(-1, out var content, out var including); return including.Length;")]
     [InlineData("bool ok = TryGetSourcePosition(-1, out var line, out var character); return line;")]
     [InlineData("bool ok = TryGetSourcePosition(-1, out var line, out var character); return character;")]
+    [InlineData("bool ok = TryGetSourceOffset(-1, 0, out var offset); return offset;")]
+    [InlineData("bool ok = TryGetSourceOffset(0, 2, out var offset); return offset;")]
     public async Task FailedQueriesCannotPublishReadableOutputsAsync(string body)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
@@ -97,15 +99,19 @@ public sealed partial class SourceLineComponentTests
                 return CheckSourceLines();
             }
             """;
-        var compilation = Compilation.Create(trees.Add(SyntaxTree.Parse(Harness, "entry.terrum")),
-        [
-            new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false),
-            new HostBuffer("ExpectedLines", PrimitiveType.Int32, lines.ToImmutable(), false),
-            new HostBuffer("ExpectedPositions", PrimitiveType.Int32, positions.ToImmutable(), false),
-        ]);
-        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = Assert.IsType<BoundProgram>(compilation.Program);
-        await ExecuteAsync(program, NativeRuntimePolicy.FailFast).ConfigureAwait(true);
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var compilation = Compilation.Create(trees.Add(SyntaxTree.Parse(Harness, "entry.terrum")),
+            [
+                new HostBuffer("Source", PrimitiveType.Char16, [.. text.Select(unit => (int)unit)], false),
+                new HostBuffer("ExpectedLines", PrimitiveType.Int32, lines.ToImmutable(), false),
+                new HostBuffer("ExpectedPositions", PrimitiveType.Int32, positions.ToImmutable(), false),
+            ], (BoundRuntimePolicy)policy);
+            Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = Assert.IsType<BoundProgram>(compilation.Program);
+            Assert.Equal(0, NativeJit.Execute(program, policy));
+            await ExecuteAsync(program, policy).ConfigureAwait(true);
+        }
     }
 
     private static async Task ExecuteAsync(BoundProgram program, NativeRuntimePolicy policy, int expectedExit = 0)

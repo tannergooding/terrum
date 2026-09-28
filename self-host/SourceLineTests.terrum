@@ -36,7 +36,28 @@ int32 CheckSourceLines()
         {
             return 3;
         }
+        require TryGetSourceOffset(line, character, out var offset);
+        if (offset != at)
+        {
+            return 6;
+        }
+        if (at < Host.Source.Length
+            && Host.ExpectedPositions[(at + 1) * 2] != line
+            && TryGetSourceOffset(line, character + 1, out var nextLineStart))
+        {
+            return 7;
+        }
         at = at + 1;
+    }
+
+    require TryGetSourcePosition(Host.Source.Length, out var lastLine, out var lastCharacter);
+    if (TryGetSourceOffset(lastLine, lastCharacter + 1, out var pastEnd)
+        || TryGetSourceOffset(-1, 0, out var beforeOffset)
+        || TryGetSourceOffset(Host.ExpectedLines.Length / 3, 0, out var afterOffset)
+        || TryGetSourceOffset(0, -1, out var negativeCharacter)
+        || TryGetSourceOffset(0, int32.MaxValue, out var hugeCharacter))
+    {
+        return 8;
     }
 
     if (TryReadSourceLine(-1, out var before, out var beforeBreak)

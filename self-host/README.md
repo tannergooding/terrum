@@ -86,7 +86,7 @@ remain hosted in C#.
 | [WideIntegerTests](WideIntegerTests.terrum) | Signed extrema, invalid digits, decimal overflow and repeated output publication | Executed through AOT and JIT with a shared entry wrapper |
 | [IntegerFormatting](IntegerFormatting.terrum) | Invariant signed/unsigned decimal digits in reusable owned storage | AOT/JIT boundary and repeated-use fixtures; native heap checks cover same-allocation transfer and failure cleanup |
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and conditional bool/out publication |
-| [SourceLines](SourceLines.terrum) | Streaming line ranges and UTF-16 line/character mapping over an immutable source grant | Executed with conditional outputs; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
+| [SourceLines](SourceLines.terrum) | Streaming line ranges and bidirectional UTF-16 offset/line-position mapping over an immutable source grant | AOT/JIT conditional outputs under both policies; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
 | [SourceLineIndex](SourceLineIndex.terrum) | Owned line-start table and bidirectional UTF-16 offset/line-position lookup | Executed as AOT/JIT under both failure policies; every offset round-trips with host line positions, with invalid outputs and owner copies rejected |
 | [SourceLineTests](SourceLineTests.terrum) | Shared line-range/position fixtures, invalid offsets and repeated queries | Executed natively with host-supplied expected records; no source normalization or default output values |
 | [StringLiteral](StringLiteral.terrum) | Validated quoted spelling and scalar decoding from the immutable UTF-16 source grant | Executed with conditional creation/reads, all supported escapes and exact source boundaries; not a runtime text representation |
@@ -135,8 +135,11 @@ and the single-source capability restrictions without merging source text.
 enumerate physical lines by starting at zero and advancing past each returned
 break. EOF is a valid empty range. Position lookup scans those lines rather than
 using the host's allocated binary-search index. Break units belong to the preceding
-line, and a trailing break creates a final empty line. This is an executed bounded
-component, not an implemented `SourceText` collection or an efficient indexed replacement.
+line, and a trailing break creates a final empty line. Inverse position lookup
+also scans without allocation; only the final line admits an EOF character,
+and coordinates at a subsequent line's start must use that line number. This
+is an executed bounded component, not an implemented `SourceText` collection
+or an efficient indexed replacement.
 
 `SourceLineIndex` builds on that streaming reader. It owns a fixed-capacity native
 table of line starts, publishes the completed index through a conditional output,
