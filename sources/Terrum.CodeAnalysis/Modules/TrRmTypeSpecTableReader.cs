@@ -11,6 +11,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly ref struct TrRmTypeSpecTableReader
 {
     private readonly TrRmVariableTableIndex _rows;
+    private readonly int _recordCount;
     private readonly int _typeDefCount;
     private readonly int _importCount;
     private readonly int _genericParamCount;
@@ -26,6 +27,7 @@ public readonly ref struct TrRmTypeSpecTableReader
         }
 
         _rows = new TrRmVariableTableIndex(section, recordCount, 3, 1);
+        _recordCount = recordCount;
         _typeDefCount = typeDefCount;
         _importCount = importCount;
         _genericParamCount = genericParamCount;
@@ -38,6 +40,9 @@ public readonly ref struct TrRmTypeSpecTableReader
 
     public ReadOnlySpan<byte> GetRow(int row)
         => _rows.GetRow(row);
+
+    public int Count => _recordCount;
+    public int TypeArgCount => _typeArgCount;
 
     private void Validate(int row)
     {
