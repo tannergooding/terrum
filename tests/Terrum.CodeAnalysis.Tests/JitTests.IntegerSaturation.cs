@@ -14,6 +14,20 @@ public sealed partial class JitTests
     public async Task SaturatingIntegerConversionsClampAcrossAotAndJitAsync()
     {
         var checks = new[] {
+            "SaturateInt32ToInt64(int32.MinValue) != int64(int32.MinValue)",
+            "SaturateInt32ToInt64(42) != 42",
+            "SaturateInt32ToInt64(int32.MaxValue) != int64(int32.MaxValue)",
+            "SaturateInt32ToUInt64(int32.MinValue) != 0",
+            "SaturateInt32ToUInt64(-1) != 0",
+            "SaturateInt32ToUInt64(0) != 0",
+            "SaturateInt32ToUInt64(42) != 42",
+            "SaturateInt32ToUInt64(int32.MaxValue) != uint64(int32.MaxValue)",
+            "SaturateUInt32ToInt64(0) != 0",
+            "SaturateUInt32ToInt64(42) != 42",
+            "SaturateUInt32ToInt64(uint32.MaxValue) != int64(uint32.MaxValue)",
+            "SaturateUInt32ToUInt64(0) != 0",
+            "SaturateUInt32ToUInt64(42) != 42",
+            "SaturateUInt32ToUInt64(uint32.MaxValue) != uint64(uint32.MaxValue)",
             "SaturateUInt32ToInt32(0) != 0",
             "SaturateUInt32ToInt32(42) != 42",
             "SaturateUInt32ToInt32(uint32(int32.MaxValue)) != int32.MaxValue",

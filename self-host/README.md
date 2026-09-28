@@ -86,7 +86,7 @@ remain hosted in C#.
 | [WideIntegerTests](WideIntegerTests.terrum) | Signed extrema, invalid digits/radices, per-radix unsigned/signed limits and conditional output publication | Executed through AOT and JIT with a shared entry wrapper under both failure policies |
 | [IntegerFormatting](IntegerFormatting.terrum) | Invariant signed/unsigned 32- and 64-bit decimal and explicit radix-2..36 digits in reusable owned storage | AOT/JIT boundary, exact-capacity and repeated-use fixtures; native heap checks cover same-allocation transfer and failure cleanup |
 | [IntegerParsing](IntegerParsing.terrum) | Strict signed/unsigned radix-2..36 ASCII parsing of an exact UTF-16 source slice with conditional 32- and 64-bit outputs | Composed with `WideIntegerFacts` under AOT/JIT and both policies; full-range per-radix boundaries, invalid spelling/bounds and unpublished outputs |
-| [IntegerSaturation](IntegerSaturation.terrum) | Explicit 32-/64-bit integer narrowing and signedness conversions that clamp instead of throwing or wrapping | AOT/JIT range boundaries and an independent compiled-module consumer under both policies; these named functions are provisional, not general conversion syntax or witnesses |
+| [IntegerSaturation](IntegerSaturation.terrum) | All twelve cross-type 32-/64-bit integer conversions preserving or clamping to the destination range | AOT/JIT range boundaries and an independent compiled-module consumer under both policies; these named functions are provisional, not general conversion syntax or witnesses |
 | [IntegerWrapping](IntegerWrapping.terrum) | All twelve cross-type signed/unsigned 32- and 64-bit conversions preserving destination-width low bits | AOT/JIT host-oracle cases and an independent compiled-module consumer under both policies; no `unchecked` syntax or new primitive conversion policy |
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and conditional bool/out publication |
 | [SourceLines](SourceLines.terrum) | Streaming line ranges, line extents and bidirectional UTF-16 offset/line-position mapping over an immutable source grant | AOT/JIT conditional outputs under both policies; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
@@ -204,13 +204,14 @@ and enforce their narrower ranges before publishing a result.
 These compiled library functions do not replace the scanner's contextual
 integer binding or create a runtime text representation.
 
-`IntegerSaturation` supplies eight explicitly named integer conversion
-candidates. They compare in the source domain before checked destination
-conversion, clamping values outside the destination range to its nearest
-endpoint. In-range values are preserved, including signed minima and maxima.
+`IntegerSaturation` supplies all twelve explicitly named cross-type
+conversions among signed and unsigned 32-/64-bit integers. They compare in
+the source domain before checked destination conversion, clamping values
+outside the destination range to its nearest endpoint. In-range values are
+preserved, including signed minima and maxima.
 No ambient conversion policy, floating-point behavior or public generic
 conversion witness is implied by these library functions. A separate module
-consumer binds their eight published signatures and runs without incorporating
+consumer binds their twelve published signatures and runs without incorporating
 the producer's source.
 
 `IntegerWrapping` supplies all twelve named conversions across the four

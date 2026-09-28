@@ -38,6 +38,10 @@ public sealed class WideCandidateTests
     public async Task SaturatingConversionsExecuteFromIndependentModuleAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerSaturation.terrum", policy,
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt32ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt32ToUInt64",
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt32ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt32ToUInt64",
             "Terrum.CodeAnalysis.Numerics64.SaturateUInt32ToInt32",
             "Terrum.CodeAnalysis.Numerics64.SaturateInt32ToUInt32",
             "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToInt32",
@@ -49,6 +53,10 @@ public sealed class WideCandidateTests
         var consumerSource = SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
+                if (SaturateInt32ToInt64(int32.MinValue) != int64(int32.MinValue)
+                    || SaturateInt32ToUInt64(-1) != 0
+                    || SaturateUInt32ToInt64(uint32.MaxValue) != int64(uint32.MaxValue)
+                    || SaturateUInt32ToUInt64(uint32.MaxValue) != uint64(uint32.MaxValue)) { return 9; }
                 if (SaturateUInt32ToInt32(uint32.MaxValue) != int32.MaxValue
                     || SaturateUInt32ToInt32(42) != 42) { return 7; }
                 if (SaturateInt32ToUInt32(int32.MinValue) != 0

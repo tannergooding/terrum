@@ -822,8 +822,8 @@ invalid bounds and overflow leave outputs unpublished. It is not wired into
 record still supplies the binder's contextual literal magnitude.
 
 The separate [integer-saturation candidate](../self-host/IntegerSaturation.terrum)
-provides eight explicit signed/unsigned integer conversion functions with
-destination-range clamping for 32-bit results or 64-bit signedness changes.
+provides all twelve explicit cross-type signed/unsigned 32-/64-bit integer
+conversion functions with destination-range clamping where required.
 AOT/JIT exercise bounds and in-range values under both failure policies,
 including a separately compiled module consumer of the published functions.
 This does not add saturating conversion syntax, generic conversion witnesses
