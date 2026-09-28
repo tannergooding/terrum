@@ -82,6 +82,22 @@ public sealed partial class JitTests
                 unit = char16(55296);
                 return publish;
             }
+            [NoThrow] bool ForwardInit<T>(T first, T second, bool publish,
+                init ref<T> left, init ref<T> right, init ref<uint64> number, init ref<char16> unit)
+                where T : [Copy] {
+                return SplitInit<T>(first, 42, second, publish, init left, init right,
+                    init number, init unit);
+            }
+            [NoThrow] bool SplitInit<T>(T first, int32 marker, T second, bool publish,
+                init ref<T> left, init ref<T> right, init ref<uint64> number, init ref<char16> unit)
+                where T : [Copy] {
+                if (marker != 42 || !publish) { return false; }
+                left = first;
+                right = second;
+                number = 18446744073709551615;
+                unit = char16(55296);
+                return true;
+            }
             int32 Main() {
                 Pair first = new Pair(-9223372036854775808, 9223372036854775807);
                 Pair second = new Pair(40, 2);
@@ -91,6 +107,14 @@ public sealed partial class JitTests
                     out var number, out var unit);
                 require left.First == -9223372036854775808 && left.Second == 9223372036854775807;
                 require number == 18446744073709551615 && unit == char16(55296);
+                if (ForwardInit<Pair>(first, second, false, init var initLeft, init var initRight,
+                    init var initNumber, init var initUnit)) { return 2; }
+                require ForwardInit<Pair>(first, second, true, init initLeft, init initRight,
+                    init initNumber, init initUnit);
+                require initLeft.First == -9223372036854775808
+                    && initLeft.Second == 9223372036854775807;
+                require initRight.First == right.First && initRight.Second == right.Second;
+                require initNumber == number && initUnit == unit;
                 return int32(right.First + right.Second);
             }
             """;

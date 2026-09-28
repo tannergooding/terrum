@@ -434,7 +434,9 @@ specialization; explicit type arguments or a typed vacant destination may
 establish `T`, while `init var` alone cannot infer it. Closed specializations
 reuse the existing private init contract and output scratch. Semantic-module
 AOT/JIT and separately compiled native producer/consumer fixtures exercise the
-private specialization under both policies; this does not export generic
+private specialization under both policies. AOT/JIT also cover forwarding
+multiple scalar and 16-byte Copy init outputs through mixed stack arguments
+without publishing any result on false; this does not export generic
 declarations or add a new native ABI. General references and
 declaration postconditions remain unsupported. Public init contracts support
 eligible scalar, Copy-struct and unique outputs; managed graph boundaries
