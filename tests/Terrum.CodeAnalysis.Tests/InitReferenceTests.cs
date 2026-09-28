@@ -209,10 +209,13 @@ public sealed class InitReferenceTests
     public async Task ManagedInitStaysPrivateBehindAnUnchangedScalarConsumerAsync(NativeRuntimePolicy policy)
     {
         const string Library = """
+            [NoThrow] bool Copy<T>(T value, init ref<T> result) where T : [Copy] {
+                result = value;
+                return true;
+            }
             bool Fill(init ref<write ManagedNode> result) {
                 require ManagedNode.TryCreate(41, out var created);
-                result = created;
-                return true;
+                return Copy(created, init result);
             }
             public int32 Read() {
                 require Fill(init var node);
@@ -233,12 +236,17 @@ public sealed class InitReferenceTests
         var updated = ModuleCompiler.CreateProducer(updatedProgram, ["Read"]);
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.DoesNotContain(reference.Functions, function => function.Name == "Fill");
+        Assert.DoesNotContain(reference.Functions, function => function.Name.StartsWith("Copy<",
+            StringComparison.Ordinal));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
             reference, runtimePolicy: sourcePolicy);
         Assert.False(consumerCompilation.HasErrors, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumerCompilation.Program),
             producer);
-        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.Contains(linked.Functions, function => function.Name.StartsWith("$producer.Copy<",
+            StringComparison.Ordinal) && function.Variables[1].IsInit);
+        Assert.Equal(42, NativeJit.Execute(linked, policy));
         Assert.Equal(43, NativeJit.Execute(ModuleCompiler.Link(consumer, updated), policy));
 
         var nativeProducer = NativeModuleCompiler.CreateProducer(producerProgram, ["Read"], "NodeB", policy);
