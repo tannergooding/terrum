@@ -26,6 +26,31 @@ public sealed class TrRmArtifactIndexTests
     }
 
     [Fact]
+    public void FindsSectionsAtDirectoryBoundariesAndRejectsMissingKinds()
+    {
+        var artifact = TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, new byte[44]),
+            new TrRmSection(0x0002, 0, 1, TrRmStringTableWriter.EncodeNames([("A", 0)])),
+            new TrRmSection(0x8000, 1, 1, new byte[] { 1 }),
+            new TrRmSection(0xFFFF, 3, 1, new byte[] { 2 }),
+        ]);
+        var index = new TrRmArtifactIndex(artifact);
+
+        Assert.True(index.TryGetSection(0x0001, out var first, out var firstCount));
+        Assert.Equal(44, first.Length);
+        Assert.Equal(1, firstCount);
+        Assert.True(index.TryGetSection(0xFFFF, out var last, out var lastCount));
+        Assert.Equal((byte)2, last[0]);
+        Assert.Equal(1, lastCount);
+        foreach (var missing in new ushort[] { 0, 3, 0x7FFF, 0x8001 })
+        {
+            Assert.False(index.TryGetSection(missing, out var absent, out var count));
+            Assert.True(absent.IsEmpty);
+            Assert.Equal(0, count);
+        }
+    }
+
+    [Fact]
     public void IndexesModuleReferencesAndSourceFilesThroughOneArtifact()
     {
         var artifact = ArtifactWithMetadataTables();

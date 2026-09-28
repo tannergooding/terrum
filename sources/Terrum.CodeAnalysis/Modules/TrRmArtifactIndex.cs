@@ -122,21 +122,28 @@ public readonly ref struct TrRmArtifactIndex
 
     public bool TryGetSection(ushort kind, out ReadOnlySpan<byte> section, out int recordCount)
     {
-        for (var entry = 0; entry < _entryCount; entry++)
+        var low = 0;
+        var high = _entryCount;
+        while (low < high)
         {
-            if (Kind(entry) == kind)
+            var middle = low + (high - low) / 2;
+            if (Kind(middle) < kind)
             {
-                var start = ReadU32(_directory, entry * 16 + 8);
-                var length = ReadU32(_directory, entry * 16 + 12);
-                if ((long)start + length > _artifact.Length)
-                {
-                    throw InvalidArtifact();
-                }
-
-                section = _artifact.Slice((int)start, (int)length);
-                recordCount = (int)ReadU32(_directory, entry * 16 + 4);
-                return true;
+                low = middle + 1;
             }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        if (low < _entryCount && Kind(low) == kind)
+        {
+            var start = ReadU32(_directory, low * 16 + 8);
+            var length = ReadU32(_directory, low * 16 + 12);
+            section = _artifact.Slice((int)start, (int)length);
+            recordCount = (int)ReadU32(_directory, low * 16 + 4);
+            return true;
         }
 
         section = default;
