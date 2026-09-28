@@ -1,0 +1,67 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System.IO;
+using Terrum.CodeAnalysis.Modules;
+using Xunit;
+
+namespace Terrum.CodeAnalysis.Tests;
+
+public sealed class TrRmStringTableReaderTests
+{
+    [Fact]
+    public void IndexesNamesByOneBasedRowWithoutScanningPreviousRows()
+    {
+        var table = new TrRmStringTableReader(TwoRowSection(), 2);
+        Assert.Equal("Example", table.DecodeName(2));
+        Assert.Equal("Answer", table.DecodeName(1));
+        Assert.Throws<InvalidDataException>(() => DecodeName(TwoRowSection(), 2, 0));
+        Assert.Throws<InvalidDataException>(() => DecodeName(TwoRowSection(), 2, 3));
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(4, 0)]
+    [InlineData(4, 11)]
+    [InlineData(4, 20)]
+    [InlineData(8, 20)]
+    [InlineData(8, 28)]
+    public void RejectsMalformedOffsets(int byteIndex, byte replacement)
+    {
+        var bytes = TwoRowSection();
+        bytes[byteIndex] = replacement;
+        Assert.Throws<InvalidDataException>(() => new TrRmStringTableReader(bytes, 2));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(3)]
+    [InlineData(0x1_000000)]
+    public void RejectsInvalidRecordCounts(int recordCount)
+    {
+        Assert.Throws<InvalidDataException>(() => new TrRmStringTableReader(TwoRowSection(), recordCount));
+    }
+
+    [Fact]
+    public void ValidatesSelectedRowAfterTheIndex()
+    {
+        var bytes = TwoRowSection();
+        bytes[24] = 4;
+        var table = new TrRmStringTableReader(bytes, 2);
+        Assert.Equal("Answer", table.DecodeName(1));
+        Assert.Throws<InvalidDataException>(() => DecodeName(bytes, 2, 2));
+    }
+
+    private static string DecodeName(byte[] section, int recordCount, int row)
+    {
+        var table = new TrRmStringTableReader(section, recordCount);
+        return table.DecodeName(row);
+    }
+
+    private static byte[] TwoRowSection() =>
+    [
+        0, 0, 0, 0, 12, 0, 0, 0, 24, 0, 0, 0,
+        0, 6, 0, 0, 65, 110, 115, 119, 101, 114, 0, 0,
+        0, 7, 0, 0, 69, 120, 97, 109, 112, 108, 101, 0,
+    ];
+}
