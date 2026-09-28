@@ -12,9 +12,18 @@ policies are intentionally absent below even where implementation remains
 scheduled.
 In particular, the accepted `[ThreadTransferable]`/`[ThreadShareable]` names,
 qualified `mut`/`write` rules, ordinary-reference semantics and enclosing
-lexical-scope materialization for `implicit ref<T>`, and memory
-ordering/publication policy are not awaiting approval. Their exact syntax,
-ABI, formalization or target support may still be work.
+lexical-scope materialization for `implicit ref<T>`, conditional output state
+semantics and postcondition authoring direction, and memory ordering and
+shared-memory publication policy are not awaiting approval. The contract order is
+also accepted: prologue, preconditions, method body, postconditions, epilogue;
+the body includes its initialization, authored execution/`finally`, local
+cleanup and untransferred owned-parameter cleanup before postconditions.
+Preconditions and postconditions are declaration contracts outside the body.
+Language-versioned output defaults are also accepted: boolean-success outputs
+initialize on `true` and remain uninitialized on `false`, while outputs with
+other result types initialize on every normal return unless an explicit
+declaration postcondition says otherwise. Exact syntax, ABI, formalization or
+target support may still be work.
 
 ## Open policy choices
 
@@ -35,8 +44,7 @@ need review; that document is not accepted wholesale.
 
 | Proposal | Review boundary |
 |---|---|
-| Conditional postconditions and owning-output state | Review the guarded-postcondition representation, initialized/null state facts, and the policy for possibly initialized owning outputs. These are proposals, not canonical rules; see [§2](language-contract-review.md#2-outcome-initialization-and-nullability-are-separate). |
-| Normal-return ownership endpoint and entry snapshots | Review owned-parameter cleanup and explicit entry-state snapshots within the accepted broad body/postcondition/epilogue order. The detailed ownership endpoint still needs approval; see [§3](language-contract-review.md#3-contracts-bracket-semantic-body-completion). |
+| Entry snapshots and output publication/failure mechanics | Decide whether entry-state snapshots are supported; specify exact output/result publication and candidate cleanup when a postcondition fails. The body-cleanup endpoint is accepted: local and untransferred owned-parameter cleanup precedes postconditions, and consumed/moved values are unavailable through their former source; see [§3](language-contract-review.md#3-contracts-bracket-semantic-body-completion). |
 | Mandatory proof/evaluation profile and budget | Review whether required proofs use a mandatory versioned conservative profile and how deterministic evaluator/proof resources are accounted and bounded. Candidate ceilings are not accepted defaults; see [§4](language-contract-review.md#4-a-reproducible-proof-and-evaluation-foundation). |
 | Documentation comments | Decide whether to add a language/tooling contract and, if so, its syntax, structured fields, symbol links and packaging in [§5](language-contract-review.md#5-documentation-comments). |
 | ABI declarations and external boundaries | Review exact trivial-wrapper eligibility/declarations, whether any checked overlapping-union subset is allowed, which externally promised representations need an explicit encoding beyond the selected profile, and whether a future public managed boundary uses a stable ABI or versioned profiles/adapters. This does not reopen accepted memory guarantees or imply a current public managed-handle ABI; see [ABI decisions](data-layout-and-abi.md#remaining-decisions-requiring-review). |
@@ -54,5 +62,5 @@ support and conformance evidence follow the [roadmap](roadmap.md).
 | Numeric types, conversions and literals | Specify source/destination witness lookup and user-defined conversion declaration grammar after the remaining policies above are reviewed; separately design custom literal registration and compile-time evaluator APIs. Preserve the implemented bounded integer conversions and distinguish them from the proposed general primitive policies in `conversions.md`. | [Conversion policies](conversions.md#conversion-policies); [literal and constant-evaluation direction](language.md#provisional-source-notation-and-open-decisions); [roadmap](roadmap.md) |
 | Data layout and ABI profiles | Fill per-target size/alignment/representation and call-classification tables and implement checks for the accepted opaque-default and opt-in Sequential/Union/Transparent directions. The existing Windows x64 compact-value and module ABI is implemented and remains authoritative; additional target profiles and generalized layout/call-interface rules are not frozen or implemented. Memory guarantees are accepted; target instruction selection is engineering work, not a policy vote. | [Profile specification and implementation](data-layout-and-abi.md#profile-specification-and-implementation-work); [canonical layout direction](language.md#types-and-operations) |
 | Libraries and type families | Specify family membership/associated-member syntax, view and tensor shapes, iteration and allocator contracts, collection storage requirements beyond `[Copy]`, collection/text builders, handlers, text representation, equality/key/formatting APIs, and scalar/SIMD/reduction behavior. Do not infer family erasure, capabilities, or vectorization from matching names. | [Open library contract work](libraries.md#open-contract-work); [type families](type-families.md); [roadmap](roadmap.md) |
-| Calls, failures and runtime support | Complete the source/metadata and conformance work for `init ref<T>` invocation, exception/low-memory ABI, general overload binding, cleanup and root handling. The existing supported forms remain bounded by [implementation](implementation.md). | [Language notation](language.md#provisional-source-notation-and-open-decisions); [runtime roadmap](roadmap.md) |
+| Calls, failures and runtime support | Specify exact postcondition guard/pattern grammar and metadata for correlated output initialization facts; complete source/metadata and conformance work for `init ref<T>` invocation, exception/low-memory ABI, general overload binding, cleanup and root handling. Preserve the current bounded bool/out behavior until coordinated migration. | [Language notation](language.md#provisional-source-notation-and-open-decisions); [call/output contract](language-contract-review.md#2-outcome-initialization-and-nullability-are-separate); [runtime roadmap](roadmap.md) |
 | Memory specification and `MemoryPrimitives` | Formalize mixed SC/non-SC and fence relations; finalize exact API signatures and valid order pairs; publish target support/alignment/progress matrices and collector-aware reference protocols before implementing those operations. Lock-backed fallbacks remain explicit and globally coordinated across participants. | [Accepted memory model and remaining obligations](memory-model.md#specification-and-implementation-obligations); [implementation sequence](roadmap.md#memory-model-implementation-sequence) |

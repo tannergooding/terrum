@@ -545,7 +545,13 @@ literal contexts; it does not infer field capture, change ownership, choose a
 type from constraints or invert optional/box normalization. General constructor
 inference is not implemented by the current binder.
 
-The target parser contract is `IParsable<TSelf>.TryParse(TextSpan, init ref<TSelf>)`, including user types. `init ref<T>` is a vacant initialization loan: its destination cannot be read before complete initialization and publication. A boolean success contract publishes on true and leaves it vacant on false; other returns initialize it on every normal return unless an explicit condition such as `[OutputWhen]` says otherwise. Failure cleans partially initialized values, never fabricates `default(T)`; asynchronous publication occurs at operation completion. The call-site spelling is not settled. The bounded executable profile still implements `bool`/`out` conditional publication; its declarations and calls must migrate together rather than treating `init ref` as a parser alias or general writable reference. Expected invalid input normally branches on `Try...`/status. Domain outcomes may use response types; there is no mandatory language-wide `Option`/`Result` wrapper or typed-throws failure-set machinery.
+The target parser contract is `IParsable<TSelf>.TryParse(TextSpan, init ref<TSelf>)`, including user types. `init ref<T>` is a vacant initialization loan: its destination cannot be read before complete initialization and publication. Conditional initialization facts are normally authored as declaration postconditions, composed with ordinary patterns and expressions; they correlate the output's live/uninitialized state with the declared status/result. An initialized nullable value (including null) is a live `T` value; an uninitialized outcome has no `T` lifetime, access or cleanup, even if physical storage remains. Callers cannot receive an undiscriminated maybe-live owner or access/clean up a vacant arm. Exact guard/pattern syntax and metadata remain to be specified; equivalent routine output attributes are not a parallel authoring mechanism. Failure cleans partial initialization according to the declared contract and never fabricates `default(T)`; asynchronous publication occurs at operation completion. The `init ref` call-site spelling is not settled. The bounded executable profile still implements `bool`/`out` conditional publication; its declarations and calls must migrate together rather than treating `init ref` as a parser alias or general writable reference. Expected invalid input normally branches on `Try...`/status. Domain outcomes may use response types; there is no mandatory language-wide `Option`/`Result` wrapper or typed-throws failure-set machinery.
+
+The language-versioned boolean-success default initializes the output on
+`true` and leaves it uninitialized on `false`. For other result types, an
+`init ref<T>` output must be initialized on every normal return unless an
+explicit declaration postcondition states a conditional relationship. These
+defaults do not infer success from method names.
 
 `require predicate;` is a safe user-facing checked boolean requirement: evaluate
 the predicate once, continue on true, and raise the selected requirement failure
@@ -589,6 +595,18 @@ postcondition denotes the actual result contextually; it is not a new binder
 or lambda and does not reevaluate the return expression. A `void` function has
 no result-valued return. Static postconditions initially apply only to the
 outer function body. Proofs respect mutation/alias invalidation.
+
+The contract phase boundary is `prologue -> preconditions -> method body ->
+postconditions -> epilogue`. Preconditions and postconditions are public
+declaration/signature contracts outside the authored body. The body includes
+body-local initialization, authored execution and `finally`, local cleanup,
+and cleanup of untransferred owned parameters; all complete before
+postconditions. On successful return, no user-observable ownership cleanup is
+deferred to the mechanical epilogue. Postconditions can inspect surviving
+values and retained results, but not moved or destroyed values through their
+former sources. Exceptional departure has no normal-return postcondition.
+Entry snapshots and exact output/result publication and postcondition-failure
+cleanup remain open.
 
 The frontend should prove stable ordinary guards independently of optimization
 level. A proven-to-fail ordinary guard produces a warning by default,
@@ -707,7 +725,7 @@ layouts are not yet implemented. Generic specialization, sharing and explicit sc
 
 The design examples use canonical `ref<T>`, `ptr<T>`, `box<T>`, `val<T>`,
 `own<T>`, `init ref<T>`, `mut`, and `write` forms, plus `move`, bracketed
-checked predicates, `[ViewOf]`, `[Captures]`, `[OutputWhen]`, `[Pure]`,
+checked predicates, `[ViewOf]`, `[Captures]`, `[Pure]`,
 `[MatchedAccess]`, `[Layout(Transparent)]`, `require`, `[TextTarget]`,
 `[TextBuilder(typeof(...))]`, `[CollectionBuilder(typeof(...))]`,
 `[Literal(...)]`, `[ConstEval]`, `[Specialize(...)]`, `[NativeExport]`,

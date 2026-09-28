@@ -204,10 +204,23 @@ Public relationships come from declarations, language-versioned defaults and inh
 | Synchronous borrowed input | No retention beyond call, except its explicitly declared result relationship |
 | View result with one eligible receiver/input | Broad source relationship: result may borrow that source's own storage **or** forward its backing/access dependencies; no unrelated capture |
 | Multiple eligible sources | Explicit permitted source set; conservatively bound by **every** listed source, not by which branch today's body selects |
-| `init ref<T>` without a conditional status | Destination starts vacant, is unreadable until complete initialization, and is initialized on every normal return |
-| Conditional `init ref<T>` | Publish only when the declared success condition holds; false/exception leaves the destination vacant and cleans partial initialization |
+| Boolean-success `init ref<T>` without an explicit conditional postcondition | Destination starts vacant; `true` initializes it and `false` leaves it uninitialized |
+| Other result type with `init ref<T>` and no explicit conditional postcondition | Destination starts vacant and must be completely initialized on every normal return |
+| Explicit conditional postcondition for `init ref<T>` | The declared status/result relationship governs initialization; exact guard/pattern syntax and metadata remain open |
 | Declared `Task<TResult>` | May retain borrowed inputs/receiver until completion and required cleanup, whether or not the method is `async` |
 | Implemented interface/registered builder | Inherit the source, access, output and effect contract; no implementation-by-implementation repetition |
+
+For conditional outputs, initialization is a live-state fact: an initialized
+nullable value containing null is still a complete live `T`; an uninitialized
+outcome has no live `T` lifetime, value access or `T` cleanup, even if its
+storage remains allocated. Declaration postconditions are the normal authoring
+route, composed with ordinary patterns and expressions. Callers may retain a
+checked relation between output state and its discriminator before testing it,
+but must not access or clean up a vacant arm or receive an undiscriminated
+maybe-live owner. Exact guard/pattern syntax and metadata remain to be
+specified. The boolean-success and other-result defaults above are
+language-versioned, not inferred from method names. The current bounded
+`bool`/`out` behavior is unchanged.
 
 The task handle alone does not discharge responsibility for a started
 operation. Its obligation remains with a structured owner that joins it, an
@@ -231,9 +244,10 @@ direction, not bounded compiler support.
 An eligible view source can provide backing/borrowed access; outputs and independent scalars do not automatically qualify. A numeric parser's result is independent; a parser returning a view of input text retains the input dependency. A parameterless projection generally uses its receiver. An independent freshly allocated result needs its own owner/root and cost contract. More than one eligible input is not resolved by inspecting current control flow. Returning a view does **not** authorize storing it in an unrelated receiver. Constructor capture, exported callback factories and registrations need a declared destination/boundary. Local closures carry actual capture relationships; consuming a unique owner retains its ordinary transfer/cleanup rules rather than becoming an invisible borrowed capture.
 
 Working annotations `[ViewOf(From = nameof(source))]`,
-`[ViewOf(Access.Write)]`, `[Captures(nameof(value))]` and
-`[OutputWhen(nameof(result), Status.Success)]` express **exceptions to
-defaults**, not unchecked assertions, and their spelling is provisional.
+`[ViewOf(Access.Write)]` and `[Captures(nameof(value))]` express **exceptions
+to defaults**, not unchecked assertions, and their spelling is provisional.
+Conditional output initialization is normally stated in declaration
+postconditions, not a dedicated output attribute.
 Writable guard projections lend existing exclusive authority and block
 overlapping extraction; they do not upgrade a readonly guard. Conditional
 failure/exception cleanup leaves an initialization destination vacant; no

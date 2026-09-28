@@ -23,8 +23,8 @@ system for the prover.
 | Area | Confirmed direction | Recommendation requiring review |
 |---|---|---|
 | Calls | `implicit ref<T>` is an ordinary readonly `ref<T>`; existing places are borrowed; value arguments initialize a hidden local at the original argument-evaluation point in the current enclosing lexical scope; evaluation is left-to-right within expression structure | Specify place formation and general reference/loan metadata; do not introduce a special reservation/activation rule or lifetime-only scope for implicit arguments |
-| Conditional outputs | APIs declare which outcomes provide initialized and/or non-null outputs | Use guarded postconditions as the semantic representation, with attributes only as equivalent sugar; publish only the states the declaration guarantees |
-| Contract timing | Prologue, preconditions, authored body including `finally`, postconditions, epilogue; exceptional departure has no normal-return postcondition | Put all observable body/ownership cleanup before postconditions, keep result storage provisional until checks pass, and restrict checks to surviving values or explicit snapshots |
+| Conditional outputs | Postconditions are the normal authoring route, using ordinary pattern/expression composition without a routine output-attribute system; initialized, uninitialized and initialized-null states are distinct and correlated with the declared discriminator | Specify exact guard/pattern spelling and metadata for the accepted state relationships |
+| Contract timing | Prologue, preconditions, method body (including body-local initialization, authored execution, `finally`, local cleanup and untransferred owned-parameter cleanup), postconditions, epilogue; preconditions/postconditions are public declaration contracts outside the body; exceptional departure has no normal-return postcondition | Specify exact output/result publication and postcondition-failure cleanup mechanics, and decide whether entry snapshots are supported |
 | Proofs and evaluation | Static checks are compile-time-only; implementation choices must not silently change the contract | Version a mandatory conservative proof profile and deterministic evaluator, including their resource-accounting rules |
 | Memory | Explicit checked opt-in for sharing, not an assumption that arbitrary aliasable objects are thread-safe | Accepted separately; see the [memory model](memory-model.md) for its specification deliverables and target-profile work |
 | Documentation comments | Added as a topic for discussion; no documentation-comment syntax is selected | Structured API documentation with symbol-checked references and generated views of declared contracts, without making prose a source of semantics |
@@ -172,91 +172,56 @@ The following are different facts:
 | Fact | Meaning |
 |---|---|
 | Status | The operation returned true, false, or a particular declared domain status |
-| Initialization/publication | A complete value is available in an output destination |
+| Initialization/publication | A live, complete value exists in an output destination; explicitly uninitialized means no live `T` value/lifetime |
 | Presence/nullability | An initialized optional value is null or contains a value |
 | Value relationship | An initialized value satisfies a range, length, backing, or other checked predicate |
 
-Vacancy is not null. A null test cannot discover whether storage is initialized,
-because evaluating that test already requires a readable value. GC-safe private
-zeroing is not source-visible initialization.
+Uninitialized storage has no live `T` value: it cannot be read, accessed as a
+`T`, or cleaned up as a `T`. Its physical storage may still exist. Vacancy is
+not null. An initialized nullable value containing null has a live value and
+ordinary cleanup, even when its representation uses zero bits. A null test
+cannot discover whether storage is initialized, because evaluating that test
+already requires a readable value. GC-safe private zeroing is not
+source-visible initialization.
 
 For `bool TryGet(..., init ref<Customer?> value)`, true can publish either null
-or a non-null customer. False can leave the destination vacant. These are three
-distinct operation outcomes even if ordinary `Option<T?>` normalization would
-collapse two payload representations. Matching status precedes matching payload
-presence. Adapters must preserve that distinction or explicitly declare a lossy
-mapping; no new nested-optional type rule is necessary.
+or a non-null customer; false may leave it uninitialized. An initialized null,
+an initialized non-null value, and an uninitialized destination are distinct
+states even if representations overlap. A declaration's postconditions state
+which outcomes provide which facts. The implementation must construct every
+promised live value; neither compiler nor runtime may manufacture a default.
+Adapters must preserve status and initialization relationships or explicitly
+declare a lossy mapping; no new nested-optional type rule is necessary.
 
-### 2.2 Prefer one checked conditional-contract representation
-
-Use declaration postconditions to describe outcome partitions. Illustrative
-syntax, including the postfix guard and initialization predicate, needs review:
-
-```terrum
-bool TryGet(TextSpan key, init ref<Customer?> value)
-    ensure value is not null if return is true;
-    ensure value is null if return is false;
-```
-
-Here `return` is the already accepted contextual result, not a `result` binder.
-For a guarded clause, evaluate its guard first and evaluate the assertion only
-on that outcome. A value predicate entails that its operand is initialized.
-The compiler must prove publication before reading `value`; the runtime check
-cannot inspect vacant storage in the hope of detecting a contract failure.
-
-This particular declaration guarantees an initialized output on **both**
-normal outcomes: non-null on true, null on false. It is not equivalent to the
-default true-only publication contract. The implementation must construct the
-specified null on false; the compiler does not manufacture it.
-
-A distinct special predicate could express initialization without constraining
-presence:
-
-```text
-ensure initialized(value) if return is true
-```
-
-`initialized` above is a candidate contract predicate over compiler-tracked
-state, not a user-callable function that reads the value or tests arbitrary
-memory. Exact spelling remains open.
-
-**Recommended default:** preserve the accepted true-only publication for a
-bool conditional-output API, and every-normal-return publication for an
-unconditional initialization output. An explicit declaration can guarantee
-additional outcomes. On a conditional outcome with no publication guarantee,
-the output remains vacant to the caller; any private partially or completely
-constructed candidate is cleaned rather than secretly transferred.
-
-Consequently, "no ensure means uninitialized" applies to the unspecified
-failure outcomes of a conditional output, not to every `init ref<T>`
-declaration. Defaults must be language-versioned declaration metadata, not
-inferred from a `Try` name or today's body.
+### 2.2 Declared outcome relationships
 
 | Declared output contract | True | False |
 |---|---|---|
-| Default bool conditional `init ref<T?>` | Initialized; may be null | Vacant |
-| Default plus non-null-on-true refinement | Initialized, non-null | Vacant |
-| Non-null on true and null on false | Initialized, non-null | Initialized, null |
-| Explicit every-normal-return publication of `T?` | Initialized; may be null | Initialized; may be null |
+| Conditional success contract | Initialized; may be null if `T?` | Uninitialized |
+| Success plus non-null refinement | Initialized, non-null | Uninitialized |
+| Declared initialized-null failure outcome | Initialized, non-null | Initialized, null |
 
-`[MaybeNullWhen(false)]` means *may be null*, not *is null*. It describes
-nullability of an initialized value, not publication by itself.
-`[MaybeUninitWhen(false)]` would instead withhold a readable-value guarantee.
-Neither should be an independent unchecked attribute system: if retained as
-convenience syntax, it must lower to the same state/conditional-contract
-representation as the clauses.
+This table describes distinct contract choices, not defaults inferred from
+method names. If an output may be live on one path and uninitialized on another,
+the caller may carry that known relationship to the discriminator before
+testing it. Once the discriminator is tested, flow analysis permits value access
+or cleanup only on an initialized arm. An API cannot transfer an undiscriminated
+maybe-live owner to the caller, and no caller may access or clean up a vacant
+arm.
 
-Terrum also must not copy C#'s warning-only nullability escape into a hard
-non-null representation contract. A null outcome requires a complete type that
-admits null, such as `T?`; an annotation cannot insert null into arbitrary `T`.
-Use refinements to establish non-nullness of initialized optional storage.
+Postconditions are the normal source-authoring route for these outcome facts;
+ordinary patterns and expressions compose the initialization tests with status
+and value predicates. Do not define equivalent routine output attributes as a
+parallel authoring mechanism. Illustrations such as `return is !init` and
+`ensure return is init when true` describe intent only; neither is selected
+source grammar. Exact guard/pattern syntax and its metadata representation
+remain specification work.
 
-**Recommendation for the first profile:** require exact publication outcomes.
-Do not transfer an owning output that is only *possibly* initialized on the
-same observable status. Supporting that weaker promise would require a checked
-runtime initialization discriminator and a cleanup protocol; it is not just a
-flow-analysis annotation. This is why exact publication predicates are preferable
-to introducing `MaybeUninitWhen` as the primary authoring form.
+The language-versioned default for a boolean-success output contract is
+initialized on `true` and uninitialized on `false`. For other result types,
+outputs must be initialized on every normal return unless a declaration
+postcondition explicitly states a conditional relationship. These defaults do
+not come from method names.
 
 ### 2.3 Checking and consuming the contract
 
@@ -265,12 +230,14 @@ the relevant normal paths. A contract cannot initialize storage merely by
 claiming it is initialized. Null/range assertions may retain runtime checks,
 but the safety of evaluating those checks is a static obligation.
 
-Publication is provisional until normal completion and all applicable
-postconditions succeed. The method cannot write through an initialization
-loan and expose its not-yet-published storage through another alias. A failed
-postcondition or escaping exception cleans candidates according to ordinary
-ownership rules and publishes no output. This is not rollback of unrelated
-writes or external effects.
+**Pending proposal:** keep output publication provisional until normal
+completion and all applicable postconditions succeed; do not expose
+not-yet-published initialization storage through another alias. If a
+postcondition fails, clean saved owning results and output candidates on
+defined unwind, without rolling back unrelated writes or external effects.
+Predicate exceptions propagate rather than becoming the false-predicate
+failure. This concrete recommendation remains open for review and is separate
+from the accepted body-cleanup endpoint below.
 
 Caller flow keeps the correlation between a particular call's saved status and
 its outputs. Reassigning the status, overwriting the destination, moving its
@@ -314,9 +281,9 @@ after a postcondition that callers are meant to rely on.
 | Argument staging | Evaluate once in source order; establish explicit references, staged values, and ordinary temporary lifetimes |
 | Prologue | Establish frame/root/ownership responsibility and parameter storage before executing user contracts |
 | Preconditions | Check published conditions in declaration order; body scopes have not been entered |
-| Body | Execute the authored body, save a return candidate, execute relevant `finally` blocks and semantic scope cleanup |
+| Body | Perform body-local initialization and authored execution, save a return candidate, execute relevant `finally` blocks, then complete local-scope and untransferred owned-parameter cleanup |
 | Postconditions | Check normal-return guarantees over the saved candidate and surviving state, in declaration order |
-| Epilogue | Commit publication, retire frame/root bookkeeping, and return; no new user-visible mutation or throwing cleanup |
+| Epilogue | Retire frame/root bookkeeping and return; the exact publication step and postcondition-failure handling remain separately unspecified |
 
 On invocation, by-value owned arguments already belong to the callee before
 its preconditions execute. A failed precondition therefore takes ordinary
@@ -334,19 +301,20 @@ observes its permitted backing and aliases. A finally that changes backing can
 therefore affect a subsequent postcondition through that reference without
 reevaluating the return expression.
 
-**Recommended ownership endpoint:** semantic body completion includes implicit
-cleanup of callee-owned parameters that were not transferred, as well as local
-scope cleanup and unpublished output candidates. Scalar/Copy parameters and
-non-owning references whose backing survives remain available to postconditions.
-A consumed/destroyed parameter cannot be dereferenced merely because its old
-bytes still exist in the frame. A moved owner is inspected through its new
-result/output, not through the vacant source.
+**Accepted ownership endpoint:** semantic body completion includes body-local
+initialization and authored execution, relevant `finally` blocks, local-scope
+cleanup, and cleanup of callee-owned parameters not transferred elsewhere.
+These complete before postconditions. Preconditions and postconditions are
+public declaration/signature contracts outside the authored method body. On a
+successful return, no user-observable ownership cleanup is deferred to the
+mechanical epilogue.
 
-This endpoint is an explicit choice needing approval. Keeping owner parameters
-alive through postconditions would instead require specifying how subsequent
-cleanup effects invalidate the promised facts. It would not satisfy a simple
-"only mechanical work remains in the epilogue" contract. The recommendation
-avoids that hidden after-check mutation.
+Postconditions can inspect surviving values and results retained for the
+declared contract. A moved or consumed parameter is unavailable through its
+vacated source, and a destroyed value cannot be dereferenced merely because
+its old bytes remain in the frame. A transferred result is observed through
+its destination, not the consumed source. Exact output/result publication and
+failure cleanup remain open; this decision does not select their machinery.
 
 The same applies to locks and leases: if the body releases a guard, a
 postcondition cannot inspect its former protected mutable state without valid
@@ -373,7 +341,7 @@ initial proposal.
 | Exception escapes the body, even after successful finally cleanup | No |
 | Cleanup replaces a pending return with an escaping exception | No |
 | Failure while checking a precondition | No |
-| Failure while checking a postcondition | Do not restart checking; take ordinary failure departure |
+| Failure while checking a postcondition | The pending proposal is defined failure departure with candidate cleanup; see below |
 | Fail-fast, process termination, or a non-returning operation | No normal-return guarantee and no cleanup promise |
 
 Searching the stack for a handler is not execution of a method's normal
@@ -381,10 +349,13 @@ epilogue. Neither handler search nor unwind itself runs `ensure`. A check after
 the authored body is also outside that body's `try`/`catch`; only an enclosing
 caller recovery scope could handle its propagated failure.
 
-A failed postcondition cleans the saved owning result and unpublished outputs
-on defined unwinding. It does not rerun already completed finally blocks, and
-does not undo body side effects. An exception from predicate evaluation is not
-translated into the false-predicate failure type.
+**Pending recommendation:** a failed postcondition takes defined failure
+departure, cleans saved owning results and unpublished outputs, does not rerun
+completed body `finally` blocks, and does not roll back body side effects.
+Exceptions from predicate evaluation propagate unchanged rather than becoming
+the false-predicate failure. These failure mechanics have not been accepted;
+the accepted cleanup endpoint requires only that ordinary body and
+owned-parameter cleanup has completed before normal postconditions run.
 
 An outer-body `static ensure` uses this same normal-completion boundary.
 It proves all such paths; it is not registered only on paths that execute its
@@ -605,11 +576,15 @@ validation.
 | Reference adaptation | Accepted baseline | Ordinary readonly-reference semantics; no implicit-only escape prohibition |
 | Materialized temporary endpoint | Accepted design | Hidden local belongs to the current enclosing lexical scope and is initialized at the argument-evaluation point; no lifetime-only scope, hoisting, or widening of existing dependencies |
 | Loan timing | Accepted equivalence | Same as explicitly written reference operations; convenience syntax does not introduce a second loan model |
-| Conditional contract surface | Needs review | Guarded `ensure` plus checked initialization facts; attributes, if provided, are sugar for the same metadata |
-| Failure-output default | Review generalized contract; preserve current bounded behavior | Preserve vacancy without a declared publication guarantee; null is an explicitly initialized value |
-| Possibly initialized owning output | Needs review | Defer until a real state discriminator/cleanup protocol exists |
-| Normal-return ownership endpoint | Needs review | Include callee-owned parameter cleanup in body completion, before postconditions and mechanical publication/epilogue |
-| Consumed parameter observations | Needs review of snapshot facility | Only surviving values or explicit permitted entry snapshots; no after-destruction dereference or implicit graph snapshot |
+| Conditional output state | Accepted semantics | Live, complete initialization is distinct from uninitialized storage and initialized null; callers retain a checked relationship to the declared discriminator and cannot access or clean up a vacant arm |
+| Conditional output authoring | Accepted direction; exact grammar remains work | Postconditions are the normal authoring route; ordinary patterns/expressions compose initialization, status and value facts. Do not add equivalent routine output attributes as a parallel mechanism |
+| Undiscriminated maybe-live owner | Not permitted | A possibly live owner must remain correlated with a checked discriminator; a caller cannot receive, access or clean up a maybe-live owner without that relationship |
+| Language-versioned output defaults | Accepted | Boolean-success output initializes on `true` and remains uninitialized on `false`; other result types initialize on every normal return unless a declaration postcondition specifies a conditional relationship |
+| Output contract syntax and metadata | Specification work, not policy review | Formalize exact guard/pattern spelling and encode correlated initialization facts; preserve the current bounded bool/out behavior until coordinated migration |
+| Normal-return ownership endpoint | Accepted | Body includes body-local initialization/execution, `finally`, local cleanup and untransferred owned-parameter cleanup before postconditions; no successful-return ownership cleanup is deferred to the epilogue |
+| Consumed parameter observations | Accepted boundary; snapshots remain open | Moved/consumed/destroyed values are unavailable through their former source; surviving values and retained results remain available to applicable checks |
+| Entry snapshots | Needs review of snapshot facility | Decide whether any values may be captured after preconditions and before the body; no implicit graph snapshot |
+| Output publication and postcondition failure | Specification/review work | Exact publication point, candidate cleanup and predicate-failure behavior remain open; the cleanup endpoint does not select this machinery |
 | Proof acceptance | Needs review | Mandatory versioned conservative profile, independent of optimizer sophistication |
 | Constant-evaluation budget | Needs review of accounting contract | Semantic accounting with declared limits; candidate defaults require parser-workload validation |
 | Documentation comments | Needs review | Discuss a distinguished comment form, prose format, checked symbol links, declaration-derived contract documentation, inheritance, and packaging before selecting syntax |
