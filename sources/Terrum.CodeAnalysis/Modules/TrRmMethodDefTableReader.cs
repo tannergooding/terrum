@@ -16,6 +16,7 @@ public readonly ref struct TrRmMethodDefTableReader
     private readonly TrRmModuleTableReader _modules;
     private readonly int _recordCount;
     private readonly int _contractCount;
+    private readonly int[] _bodyOwners;
 
     public int ContractCount => _contractCount;
 
@@ -38,7 +39,7 @@ public readonly ref struct TrRmMethodDefTableReader
         _modules = modules;
         _recordCount = recordCount;
         _contractCount = contractCount;
-        var ownedBodies = new bool[bodyCount + 1];
+        _bodyOwners = new int[bodyCount + 1];
         var usedGenericSignatures = new bool[signatures.Count + 1];
         var module = 1;
         for (var row = 1; row <= recordCount; row++)
@@ -65,7 +66,7 @@ public readonly ref struct TrRmMethodDefTableReader
                 || name is 0 or > 0xFF_FFFF
                 || signature == 0 || signature > signatures.Count
                 || flags > 2 || !ValidRange(first, count, contractCount)
-                || body > bodyCount || (body != 0 && ownedBodies[body]))
+                || body > bodyCount || (body != 0 && _bodyOwners[body] != 0))
             {
                 throw InvalidMethod();
             }
@@ -87,7 +88,7 @@ public readonly ref struct TrRmMethodDefTableReader
 
             if (body != 0)
             {
-                ownedBodies[body] = true;
+                _bodyOwners[body] = row;
             }
 
             _ = _strings.DecodeName((int)name);
@@ -95,7 +96,7 @@ public readonly ref struct TrRmMethodDefTableReader
 
         for (var body = 1; body <= bodyCount; body++)
         {
-            if (!ownedBodies[body])
+            if (_bodyOwners[body] == 0)
             {
                 throw InvalidMethod();
             }
@@ -129,6 +130,16 @@ public readonly ref struct TrRmMethodDefTableReader
 
     public int GetBodyRow(int row)
         => (int)Read(GetRow(row), 24);
+
+    public int GetBodyOwnerMethod(int row)
+    {
+        if (row <= 0 || row >= _bodyOwners.Length)
+        {
+            throw InvalidMethod();
+        }
+
+        return _bodyOwners[row];
+    }
 
     public (int Start, int Count) GetContractRange(int row)
     {

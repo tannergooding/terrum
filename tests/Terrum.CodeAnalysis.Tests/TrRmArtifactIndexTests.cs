@@ -66,6 +66,7 @@ public sealed class TrRmArtifactIndexTests
         var withBlob = ArtifactWithCallableMetadata(includeEmptyBlob: true);
         TrRmStructuralMetadataValidator.Validate(withBlob);
         TrRmStructuralMetadataValidator.Validate(ArtifactWithCallableMetadata(includeBody: true));
+        TrRmStructuralMetadataValidator.Validate(ArtifactWithCallableMetadata(includeSourceMap: true));
         TrRmStructuralMetadataValidator.Validate(WithReferenceSlottedExtension());
 
         var invalidBlob = ArtifactWithCallableMetadata(includeEmptyBlob: true);
@@ -81,6 +82,12 @@ public sealed class TrRmArtifactIndexTests
         _ = new TrRmArtifactIndex(invalidBody);
         Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(invalidBody));
+
+        var invalidMap = ArtifactWithCallableMetadata(includeSourceMap: true);
+        invalidMap[^12] = 1;
+        _ = new TrRmArtifactIndex(invalidMap);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(invalidMap));
 
         var invalid = ArtifactWithCallableMetadata();
         var stringsLength = TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]).Length;
@@ -303,9 +310,11 @@ public sealed class TrRmArtifactIndexTests
     }
 
     private static byte[] ArtifactWithCallableMetadata(bool includeEmptyBlob = false,
-        bool includeBody = false)
+        bool includeBody = false, bool includeSourceMap = false)
     {
-        var strings = TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]);
+        var strings = includeSourceMap
+            ? TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0), ("src/file", 0)])
+            : TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]);
         var module = new byte[44];
         Write(module, 0, 1);
         Write(module, 4, 1);
@@ -318,7 +327,7 @@ public sealed class TrRmArtifactIndexTests
         Write(method, 4, 2);
         Write(method, 8, 1);
         Write(method, 12, 2);
-        if (includeBody)
+        if (includeBody || includeSourceMap)
         {
             Write(method, 24, 1);
         }
@@ -331,10 +340,35 @@ public sealed class TrRmArtifactIndexTests
         ushort[] kinds = includeEmptyBlob
             ? [0x0001, 0x0002, 0x0003, 0x0011, 0x0016, 0x0017]
             : [0x0001, 0x0002, 0x0011, 0x0016, 0x0017];
-        if (includeBody)
+        if (includeSourceMap)
+        {
+            var source = new byte[8];
+            Write(source, 0, 3);
+            sections = [.. sections, source];
+            kinds = [.. kinds, 0x001F];
+        }
+
+        if (includeBody || includeSourceMap)
         {
             sections = [.. sections, new byte[] { 0, 0, 0, 0, 1, 0, 0, 0, 0 }];
             kinds = [.. kinds, 0x0020];
+        }
+
+        if (includeSourceMap)
+        {
+            var map = new byte[52];
+            Write(map, 0, 2);
+            WriteU16(map, 4, 0x0020);
+            WriteU16(map, 6, 1);
+            Write(map, 8, 1);
+            Write(map, 12, 1);
+            WriteU16(map, 20, 0x001F);
+            Write(map, 24, 1);
+            Write(map, 36, 1);
+            Write(map, 40, 2);
+            Write(map, 48, 2);
+            sections = [.. sections, map];
+            kinds = [.. kinds, 0x7F00];
         }
         var length = 32 + sections.Length * 16;
         foreach (var section in sections)
@@ -354,7 +388,12 @@ public sealed class TrRmArtifactIndexTests
         {
             var directory = 32 + entry * 16;
             WriteU16(artifact, directory, kinds[entry]);
-            Write(artifact, directory + 4, entry == 1 ? 2u : 1u);
+            Write(artifact, directory + 4,
+                entry == 1 ? (includeSourceMap ? 3u : 2u) : 1u);
+            if (kinds[entry] == 0x7F00)
+            {
+                WriteU16(artifact, directory + 2, 2);
+            }
             Write(artifact, directory + 8, (uint)offset);
             Write(artifact, directory + 12, (uint)sections[entry].Length);
             sections[entry].CopyTo(artifact.AsSpan(offset));

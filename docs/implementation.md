@@ -1055,7 +1055,8 @@ entry point composes the known table checks over one framed artifact without
 claiming semantic import binding, target-layout validity or executable clauses.
 It checks Blob and Body offset indexes, including empty Blob rows, and composes
 a two-module Import/Export fixture, but does not interpret Blob contents or
-Body instructions.
+Body instructions. SourceMap rows check slots, spans and Body/SourceFile module
+association; block/ordinal existence still requires instruction-aware verification.
 Historical-revision readers and feature-dependent writer
 selection are temporary implementation support to remove before v1. That
 cleanup must update writers and fixtures together and reject unsupported

@@ -57,12 +57,23 @@ public readonly ref struct TrRmSourceFileTableReader
             throw InvalidSource();
         }
 
-        for (var module = 1; module <= _modules.Count; module++)
+        var low = 1;
+        var high = _modules.Count;
+        while (low <= high)
         {
-            var (start, end) = _modules.GetSourceFileRange(module);
-            if (row >= start && row < end)
+            var middle = low + (high - low) / 2;
+            var (start, end) = _modules.GetSourceFileRange(middle);
+            if (row < start)
             {
-                return module;
+                high = middle - 1;
+            }
+            else if (row >= end)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                return middle;
             }
         }
 

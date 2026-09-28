@@ -36,6 +36,7 @@ public static class TrRmStructuralMetadataValidator
         index.TryGetSection(0x001F, out var sourceFileBytes, out var sourceFileCount);
         index.TryGetSection(0x0003, out var blobBytes, out var blobCount);
         index.TryGetSection(0x0020, out var bodyBytes, out var bodyCount);
+        index.TryGetSection(0x7F00, out var sourceMapBytes, out var sourceMapCount);
 
         if (blobCount != 0)
         {
@@ -85,6 +86,9 @@ public static class TrRmStructuralMetadataValidator
             strings, types, methods, properties, imports);
         var sourceFiles = sourceFileCount == 0 ? default
             : new TrRmSourceFileTableReader(sourceFileBytes, sourceFileCount, strings, modules);
+        var sourceMaps = sourceMapCount == 0 ? default
+            : new TrRmSourceMapTableReader(sourceMapBytes, sourceMapCount,
+                methods, sourceFiles);
 
         _ = typeArgs;
         _ = fields;
@@ -94,6 +98,7 @@ public static class TrRmStructuralMetadataValidator
         _ = contracts;
         _ = exports;
         _ = sourceFiles;
+        _ = sourceMaps;
     }
 
     private static InvalidDataException InvalidMetadata()
