@@ -116,3 +116,47 @@ public static bool TryConvertInt64ToUInt64(int64 value, init ref<uint64> result)
     result = uint64(value);
     return true;
 }
+
+public static bool TryConvertInt32ToChar16(int32 value, init ref<char16> result)
+{
+    if (value < 0 || value > 65535)
+    {
+        return false;
+    }
+
+    result = char16(value);
+    return true;
+}
+
+public static bool TryConvertUInt32ToChar16(uint32 value, init ref<char16> result)
+{
+    if (value > 65535)
+    {
+        return false;
+    }
+
+    result = char16(value);
+    return true;
+}
+
+public static bool TryConvertInt64ToChar16(int64 value, init ref<char16> result)
+{
+    if (value < 0 || value > 65535)
+    {
+        return false;
+    }
+
+    result = char16(value);
+    return true;
+}
+
+public static bool TryConvertUInt64ToChar16(uint64 value, init ref<char16> result)
+{
+    if (value > 65535)
+    {
+        return false;
+    }
+
+    result = char16(value);
+    return true;
+}

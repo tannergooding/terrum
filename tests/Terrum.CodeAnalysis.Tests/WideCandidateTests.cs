@@ -419,6 +419,60 @@ public sealed class WideCandidateTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task CheckedChar16ConversionsPreserveCodeUnitsAcrossModulesAsync(NativeRuntimePolicy policy)
+    {
+        var producer = CreateNumericsLibrary("IntegerCheckedConversions.terrum", policy,
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToChar16");
+        var source = SyntaxTree.Parse("""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                if (TryConvertInt32ToChar16(-1, init var negative32)
+                    || TryConvertInt32ToChar16(65536, init var large32)
+                    || TryConvertUInt32ToChar16(uint32.MaxValue, init var largeUnsigned32)
+                    || TryConvertInt64ToChar16(int64.MinValue, init var negative64)
+                    || TryConvertInt64ToChar16(int64.MaxValue, init var large64)
+                    || TryConvertUInt64ToChar16(uint64.MaxValue, init var largeUnsigned64)) { return 1; }
+                require TryConvertInt32ToChar16(0, init var zero);
+                require TryConvertInt32ToChar16(65535, init var max32);
+                require TryConvertUInt32ToChar16(55296, init var surrogate);
+                require TryConvertInt64ToChar16(65535, init var max64);
+                require TryConvertUInt64ToChar16(65535, init var maxUnsigned64);
+                if (zero != char16(0) || max32 != char16(65535)
+                    || surrogate != char16(55296) || max64 != char16(65535)
+                    || maxUnsigned64 != char16(65535)) { return 2; }
+                return 42;
+            }
+            """);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var compilation = Compilation.Create(source, reference, (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public void FailedCheckedChar16ConversionDoesNotPublishAnInitResult()
+    {
+        var producer = CreateNumericsLibrary("IntegerCheckedConversions.terrum", NativeRuntimePolicy.FailFast,
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToChar16");
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                bool valid = TryConvertInt32ToChar16(-1, init var result);
+                return int32(result);
+            }
+            """), ModuleCompiler.CreateReference(producer));
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task SaturatingConversionsExecuteFromIndependentModuleAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerSaturation.terrum", policy,
