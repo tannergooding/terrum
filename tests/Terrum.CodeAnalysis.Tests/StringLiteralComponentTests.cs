@@ -33,6 +33,9 @@ public sealed class StringLiteralComponentTests
         var utf16Units = ImmutableArray.CreateBuilder<int>();
         var asciiRecords = ImmutableArray.CreateBuilder<int>();
         var asciiBytes = ImmutableArray.CreateBuilder<int>();
+        var utf32Records = ImmutableArray.CreateBuilder<int>();
+        var utf32Bytes = ImmutableArray.CreateBuilder<int>();
+        var utf32Encoder = new UTF32Encoding(false, false, true);
         foreach (var fixture in Fixtures())
         {
             var lexed = Lexer.Lex(SourceText.From(fixture.Text));
@@ -50,6 +53,8 @@ public sealed class StringLiteralComponentTests
             utf16Records.Add(fixture.Scalars is null ? -1 : 0);
             asciiRecords.Add(asciiBytes.Count);
             asciiRecords.Add(-1);
+            utf32Records.Add(utf32Bytes.Count);
+            utf32Records.Add(fixture.Scalars is null ? -1 : 0);
             if (fixture.Scalars is ScalarFixture[] values)
             {
                 foreach (var value in values)
@@ -69,6 +74,9 @@ public sealed class StringLiteralComponentTests
                     asciiRecords[^1] = values.Length;
                     asciiBytes.AddRange(values.Select(static value => value.Value));
                 }
+                var encoded32 = utf32Encoder.GetBytes(decoded);
+                utf32Records[^1] = encoded32.Length;
+                utf32Bytes.AddRange(encoded32.Select(static value => (int)value));
             }
             _ = source.Append(fixture.Text).Append('\n');
         }
@@ -93,6 +101,8 @@ public sealed class StringLiteralComponentTests
             new HostBuffer("ExpectedUtf16Units", PrimitiveType.Int32, utf16Units.ToImmutable(), false),
             new HostBuffer("ExpectedAsciiRecords", PrimitiveType.Int32, asciiRecords.ToImmutable(), false),
             new HostBuffer("ExpectedAsciiBytes", PrimitiveType.Int32, asciiBytes.ToImmutable(), false),
+            new HostBuffer("ExpectedUtf32Records", PrimitiveType.Int32, utf32Records.ToImmutable(), false),
+            new HostBuffer("ExpectedUtf32Bytes", PrimitiveType.Int32, utf32Bytes.ToImmutable(), false),
         ], policy == NativeRuntimePolicy.FailFast ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
@@ -101,29 +111,32 @@ public sealed class StringLiteralComponentTests
     }
 
     [Theory]
-    [InlineData("Utf8", "\"\u00E9\"", 195, 169)]
-    [InlineData("Utf16", "\"\uD83D\uDE00\"", 0xD83D, 0xDE00)]
+    [InlineData("TryGetUtf8Length", "EncodeUtf8", "\"\u00E9\"", new[] { 195, 169 })]
+    [InlineData("TryGetUtf16Length", "EncodeUtf16", "\"\uD83D\uDE00\"", new[] { 0xD83D, 0xDE00 })]
+    [InlineData("TryGetUtf32ByteLength", "EncodeUtf32LeBytes", "\"\u00E9\"", new[] { 233, 0, 0, 0 })]
     public async Task LiteralEncodingRejectsUndersizedStorageAndReleasesItOnCheckedFailureAsync(
-        string encoding, string spelling, int first, int second)
+        string measure, string encode, string spelling, int[] expected)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var checks = string.Join(Environment.NewLine, expected.Select((value, index) =>
+            FormattableString.Invariant($"if (encoded.Read({index}) != {value}) {{ return 3; }}")));
         var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
                 require StringLiteral.TryCreate(spelling, out var literal);
-                require literal.TryGet{{encoding}}Length(init var unitLength);
-                if (unitLength != 2) { return 1; }
-                require OwnedInt32Buffer.TryCreate(1, out var small);
+                require literal.{{measure}}(init var unitLength);
+                if (unitLength != {{expected.Length}}) { return 1; }
+                require OwnedInt32Buffer.TryCreate(unitLength - 1, out var small);
                 unsafe {
                     try {
-                        OwnedInt32Buffer partial = literal.Encode{{encoding}}(move small);
+                        OwnedInt32Buffer partial = literal.{{encode}}(move small);
                         return 2;
                     } catch {
                         require OwnedInt32Buffer.TryCreate(unitLength, out var exact);
-                        OwnedInt32Buffer encoded = literal.Encode{{encoding}}(move exact);
-                        if (encoded.Count != 2 || encoded.Capacity != 2
-                            || encoded.Read(0) != {{first}} || encoded.Read(1) != {{second}}) { return 3; }
+                        OwnedInt32Buffer encoded = literal.{{encode}}(move exact);
+                        if (encoded.Count != unitLength || encoded.Capacity != unitLength) { return 3; }
+                        {{checks}}
                         return 0;
                     }
                 }
