@@ -120,6 +120,11 @@ public sealed class IntegerParsingComponentTests
             }
             _ = checks.AppendLine("}");
         }
+        var zeroStart = source.Length;
+        _ = source.Append('0');
+        _ = checks.AppendLine($"if (TryParseUInt64BaseInit(0, 1, 10, init var reusable)) {{ return 102; }}"
+            + $" require TryParseUInt64BaseInit({zeroStart}, 1, 10, init reusable);"
+            + " if (reusable != 0) { return 103; }");
         _ = checks.AppendLine("if (TryParseUInt64Base(-1, 1, 10, out var negativeStart)"
             + " || TryParseUInt64Base(int32.MaxValue, 1, 10, out var hugeStart)"
             + " || TryParseInt64Base(0, int32.MaxValue, 10, out var hugeLength)"
