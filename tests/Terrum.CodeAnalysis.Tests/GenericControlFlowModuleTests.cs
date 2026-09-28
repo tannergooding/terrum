@@ -74,6 +74,13 @@ public sealed partial class GenericControlFlowModuleTests
             && function.Variables[0].IsInit);
         Assert.Equal(42, NativeJit.Execute(linked, policy));
         Assert.Equal(42, await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true));
+
+        var nativeProducer = NativeModuleCompiler.CreateProducer(Compile(GenericInitLibrary, policy), ["Read"],
+            "Leaf", policy);
+        var nativeConsumer = NativeModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
+            policy, NativeModuleCompiler.CreateReference(nativeProducer), library: false), nativeProducer, policy);
+        Assert.Equal(42, await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(true));
     }
 
     [Theory]
