@@ -24,6 +24,7 @@ internal sealed partial class Binder
     private readonly List<Diagnostic> _diagnostics = [];
     private readonly List<SourceDiagnostic> _sourceDiagnostics = [];
     private readonly List<Signature> _signatures = [];
+    private readonly HashSet<BoundLocal> _constRequired = new(ReferenceEqualityComparer.Instance);
     private readonly List<BoundStruct> _structs = [];
     private readonly Dictionary<int, (SyntaxTree Tree, SyntaxNode Declaration)> _structDeclarations = [];
     private readonly HashSet<int> _layingOut = [];
@@ -489,6 +490,10 @@ internal sealed partial class Binder
         {
             return null;
         }
+        if (!ResolveRequiredConstants(bound))
+        {
+            return null;
+        }
         var program = new BoundProgram(bound.ToImmutable(), entryPoint) {
             Structures = [.. _structs],
             Classes = [.. _classes],
@@ -722,6 +727,7 @@ internal sealed partial class Binder
         var isStatic = false;
         var isNoThrow = false;
         var isCleanup = false;
+        var isConstEval = false;
         var doesNotReturn = false;
         var accessModifiers = 0;
         for (var index = 0; index < modifierCount; index++)
@@ -744,9 +750,14 @@ internal sealed partial class Binder
                 {
                     isCleanup = true;
                 }
+                else if (attribute.Children is [_, SyntaxTokenElement { Token.Text: "ConstEval" }, _]
+                    && !isConstEval)
+                {
+                    isConstEval = true;
+                }
                 else
                 {
-                    Report("TRM3001", "Only distinct parameterless NoThrow, DoesNotReturn, and Cleanup contracts are supported.", attribute.Span);
+                    Report("TRM3001", "Only distinct parameterless NoThrow, DoesNotReturn, Cleanup, and ConstEval contracts are supported.", attribute.Span);
                 }
                 continue;
             }
@@ -856,6 +867,11 @@ internal sealed partial class Binder
         {
             Report("TRM3018", "DoesNotReturn requires a void function.", declaration.Span);
         }
+        if (isConstEval && (containingType is not null || !isInternal || constructor || isCleanup
+            || doesNotReturn || !ConstEvalScalar(returnType)))
+        {
+            Report("TRM3024", "ConstEval requires an internal scalar-returning top-level function.", declaration.Span);
+        }
         var declared = ImmutableArray.CreateBuilder<Parameter>();
         var names = new HashSet<string>(StringComparer.Ordinal);
 
@@ -896,6 +912,10 @@ internal sealed partial class Binder
                 Report("TRM3011", "Init ref parameters require supported scalar, Copy-struct, or unique outputs.",
                     parameter.Span);
             }
+            if (isConstEval && (isOut || isInit || !ConstEvalScalar(type)))
+            {
+                Report("TRM3024", "ConstEval parameters must be non-output scalar values.", parameter.Span);
+            }
 
             if (!names.Add(token.Text))
             {
@@ -930,6 +950,7 @@ internal sealed partial class Binder
             IsOperator = operatorDeclaration,
             IsClassConstructor = classConstructor,
             PropertyName = property ? nameText : null,
+            IsConstEval = isConstEval,
         });
     }
 
@@ -1289,6 +1310,22 @@ internal sealed partial class Binder
                 // Locals enter scope only after their initializer, including in nested blocks.
                 var slot = AddVariable(name.Text, declaredType ?? initializer.Type, isMutable, name.Span);
                 return new BoundLocal(slot, initializer, node.Span);
+            }
+
+            case SyntaxKind.ConstDeclaration:
+            {
+                var declaration = (SyntaxNode)node.Children[1];
+                if (declaration.Children[0] is not SyntaxNode type
+                    || !ConstEvalScalar(BindType(type, allowVoid: false)))
+                {
+                    Report("TRM3024", "A const local requires an explicit scalar type.", node.Span);
+                }
+                var local = BindStatement(declaration);
+                if (local is BoundLocal boundLocal)
+                {
+                    _ = _constRequired.Add(boundLocal);
+                }
+                return local;
             }
 
             case SyntaxKind.AssignmentStatement:
@@ -2905,5 +2942,6 @@ internal sealed partial class Binder
         internal GenericInstantiation? Generic { get; init; }
         internal bool IsClassConstructor { get; init; }
         internal int ClassConstructor { get; init; } = -1;
+        internal bool IsConstEval { get; init; }
     }
 }

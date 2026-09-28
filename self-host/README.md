@@ -4,7 +4,7 @@ These files are parallel design candidates, not a bootstrapped compiler.
 They are not linked into the C# implementation. The native profile executes
 the range, character, integer and nested token components and a bounded token scanner.
 The host test runner remains C#, even when it compiles and executes a candidate.
-The host parser's current language version is syntax-24. Syntax-18's qualified
+The host parser's current language version is syntax-25. Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle
 specializations described below. These reuse existing, feature-selected
 semantic contracts without changing the scanner record/schema, native profile
@@ -22,6 +22,10 @@ references and generic init parameters remain unsupported.
 Syntax-23 adds explicit getter-only properties on Copy structs and source
 classes; semantic v34 records property identity without a scanner or native
 ABI change.
+Syntax-24 supports one-field transparent scalar wrappers with semantic v35
+layout identity. Syntax-25 supports bounded internal scalar `[ConstEval]`
+functions and required `const T name = expression;` locals without adding
+public constant-evaluation metadata or a native ABI.
 
 Host fixtures retain syntax round trips and add native execution of
 `SourceRange`, `CharacterFacts`, `RangeTests`, `Token` and `TokenTests` with entry wrappers.

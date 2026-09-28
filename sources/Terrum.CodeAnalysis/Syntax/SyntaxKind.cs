@@ -35,6 +35,8 @@ public enum SyntaxKind
     Block,
     /// <summary>A variable declaration.</summary>
     VariableDeclaration,
+    /// <summary>A local whose initializer must evaluate to a compile-time scalar value.</summary>
+    ConstDeclaration,
     /// <summary>An <c>if</c> statement.</summary>
     IfStatement,
     /// <summary>An <c>else</c> clause.</summary>

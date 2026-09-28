@@ -43,9 +43,16 @@ width suffixes diagnose as `TRM0006`; missing hexadecimal/binary digits and
 malformed separators diagnose as `TRM0007`–`TRM0009`; prefix casts are no
 longer parsed. Based literals construct target-width bit patterns, while
 decimal literals retain numeric range semantics. Floating/custom literal
-parsing, registered literal targets and `[ConstEval]` remain outside this
-executable profile.
-The current parser version is syntax-24. Syntax-18 qualified generic-call type
+parsing and registered literal targets remain outside this executable profile.
+Syntax-25 supports internal scalar `[ConstEval]`
+functions and required `const T name = expression;` locals. The compiler
+replaces successful required initializers with scalar constants before
+verification and native emission; ordinary calls remain executable. Checked
+arithmetic, short-circuiting and branch/loop behavior match the target; failures
+and the 64-call/4,096-step limits diagnose at compile time rather than falling
+back to native execution. No public contract, semantic wire field or native
+ABI changes; imported functions cannot satisfy required constant calls.
+The current parser version is syntax-25. Syntax-18 qualified generic-call type
 arguments such as `write C` and `write C?` enable bounded managed-handle
 substitutions in compilation-local `Copy` templates. Syntax-19 adds the
 bounded nominal comparison protocols; neither changes the native profile,

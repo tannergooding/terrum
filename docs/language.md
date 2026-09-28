@@ -561,8 +561,11 @@ attach to a decimal point, exponent marker or sign.
 `[ConstEval]` marks declarations eligible for bounded deterministic
 compile-time execution; `const T a = F()`
 requires a constant declaration value, while `T b = const F()` requires only
-the expression. Literal parsing always uses the registered compile-time
-parser, even in ordinary local initialization; there is no runtime fallback.
+the expression. The current syntax-25 implementation supports the first form
+for internal scalar functions and locals; expression-level requirements and
+other result forms remain planned. Literal parsing always uses the registered
+compile-time parser, even in ordinary local initialization; there is no runtime
+fallback.
 The evaluator has no ambient I/O, preserves target semantics and recorded
 producer/rule/value-ABI dependencies, and permits only checked bounded
 evaluation. It does not change type checking, overload binding or optimizer
@@ -1053,8 +1056,10 @@ and malformed separators as `TRM0009`; prefix casts are no longer parsed. It
 supports contextual decimal, hexadecimal and binary integer literals without
 a fallback type, numeric digit separators and checked numeric type-call
 conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`.
-Floating/custom literal parsing, registered string targets and `[ConstEval]`
-execution remain unsupported.
+Floating/custom literal parsing and registered string targets remain
+unsupported. Syntax-25 supports internal scalar `[ConstEval]` functions and
+required `const T name = expression;` locals only; it neither exports an
+evaluation promise nor registers literal parsers.
 Bounded ownership and lexical-view checks, source-defined managed classes,
 optional edges and explicit cycle tracing are implemented; general
 ownership/lifetime analysis, public managed module contracts and

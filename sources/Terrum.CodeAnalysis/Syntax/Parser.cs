@@ -692,7 +692,13 @@ internal sealed class Parser
             }
             default:
             {
-                if (Current.Kind is TokenKind.VarKeyword or TokenKind.MutKeyword || LooksLikeLocal())
+                if (Current.Kind == TokenKind.Identifier && Current.Text == "const"
+                    && Peek(1).Kind is not TokenKind.OpenParen)
+                {
+                    var keyword = Take();
+                    node = Node(SyntaxKind.ConstDeclaration, [keyword, ParseLocal()]);
+                }
+                else if (Current.Kind is TokenKind.VarKeyword or TokenKind.MutKeyword || LooksLikeLocal())
                 {
                     node = ParseLocal();
                 }

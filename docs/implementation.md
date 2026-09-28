@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-24, semantic v35 transparent wrappers, native-10 through native-20
+## Current boundary: syntax-25, semantic v35 transparent wrappers, native-10 through native-20
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -38,8 +38,31 @@ operations permitted by those constraints. Distinct parameters stay distinct
 even when they select the same type. Scalars support
 Copy-only templates, without primitive operator witnesses. Unique/owning
 type parameters, constructor/method inference, ordinary overloads, partial
-holes and a public generic ABI remain unsupported. Floating literal binding,
-custom literal/string-target execution and `[ConstEval]` remain unsupported.
+holes and a public generic ABI remain unsupported. Floating literal binding
+and custom literal/string-target execution remain unsupported.
+
+Syntax-25 adds a bounded compile-time requirement: `const T name = expression;`
+declares an immutable scalar local whose initializer must evaluate during
+compilation. `[ConstEval]` is supported on internal top-level functions with
+scalar inputs and result (`bool`, `char16`, signed/unsigned 32/64-bit integers).
+Bodies support scalar locals/assignment, branches, `while`/`for` with loop
+transfer, and calls to other `[ConstEval]` functions. Every reachable or
+unreachable expression in such a body must use only scalar reads, checked
+built-in operators/conversions and `[ConstEval]` calls: I/O, ownership,
+managed state and calls to ordinary functions are not permitted. Evaluation
+uses target-width checked arithmetic, short-circuit boolean operators, a
+64-call depth limit and 4,096 statement/expression steps per required
+initializer; invalid operations or exhausted limits diagnose without
+executing the expression at runtime. A normal call to the same function
+remains a normal executable call. The requirement is resolved after all
+function bodies are bound, so forward calls work. The marker is not exported
+or persisted as a promise in imported signatures; private functions and
+their folded local values use existing semantic/native module representations
+without a wire-version change. Required expressions cannot call imported
+functions. Expression-level `const F()`, public/generic `[ConstEval]`,
+non-scalar values, registered literal parsers and ambient I/O remain
+unsupported.
+
 Semantic v24 validates source-class/`ManagedNode` readonly-versus-writable
 access and mutable-class receivers. Semantic v25 adds a distinct persisted,
 non-exported `MutReceiver` contract for methods on non-owning compact structs;
