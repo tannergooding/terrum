@@ -10,6 +10,7 @@ The [language](language.md) defines accepted semantic direction, while
 | Decimal type-call and suffix migration (implemented; syntax-14) | Context-typed decimal integer literals without a fallback type; checked numeric `T(expression)` conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`; attached width suffixes diagnose as `TRM0006`, and prefix casts are no longer parsed. Source-function/local shadowing retains existing call precedence. The scanner-4 five-word integer record is unchanged: valid literals are untagged, while rejected suffix tokens retain tag metadata for diagnostics | Parser/binder/native and scanner-component agree on direct decimal literal binding, supported conversions, signed minima, no fallback type and call precedence; diagnostics include `TRM0006` without changing the scanner record shape or schema version |
 | Contextual hexadecimal integer support (implemented; syntax-15) | Unsuffixed `0x`/`0X` integer literals bind directly in their expected type without a fallback; at least one ASCII hex digit is required (`TRM0007` otherwise), and `a`–`f` are digits, so `0x1f32` is not a width suffix. At syntax-15, based values used nonnegative magnitude/range interpretation; syntax-16 supersedes it with target-width bit patterns. Attached width suffixes remain rejected with `TRM0006`; the scanner-4 record layout/schema and semantic/native artifact versions are unchanged | Host and compiled scanner preserve exact token spans, agree on decimal/hex magnitudes and overflow, distinguish missing digits from width-suffix diagnostics, and parser/binder/native execution agree for contextual literals and checked type-call conversions |
 | Based integer bit patterns and separators (implemented; syntax-16) | Adds `0b`/`0B` integers and `_` separators in decimal, hexadecimal and binary digit runs, including runs after based prefixes. Based literals construct the expected target width as a bit pattern; leading zeroes/separators do not add significant bits, nonzero excess bits reject. Decimal range and signed-minimum behavior is unchanged. Missing binary digits diagnose as `TRM0008`; malformed separators as `TRM0009`; the scanner-4 record layout and semantic/native artifact versions remain unchanged | Host and compiled scanner agree on radix/separator token boundaries and diagnostics; scanner magnitudes ignore separators; binder and AOT/JIT agree on signed/unsigned target-width patterns, decimal ranges, checked typed conversions and checked unary-minus behavior |
+| General numeric conversion policies (accepted direction; implementation scheduled) | Checked integer-to-integer conversions preserve value or throw on range overflow; unchecked conversions wrap to destination-width bits; saturating integer conversions are explicit APIs. Floating-to-floating conversions follow IEEE-754 with nearest/ties-even default rounding, no language failures for inexactness, overflow to infinity, underflow, NaN or infinity, and no enabled FP traps. Floating-to-integer truncates toward zero; checked out-of-range throws, unchecked or explicitly saturating conversion saturates rather than modulo-narrows, with NaN converting to zero. Preserve bounded checked integer conversions; floating support is not implemented | Pair-specific conversion/witness conformance, explicit alternate-rounding APIs, checked/unchecked range edges and floating exceptional values; do not change existing integer conversions or imply cross-format NaN payload preservation/exactness |
 | Integer binding and native AOT (implemented) | Typed functions/locals, contextual literals, structured control flow, mandatory verifier, direct Windows x64 PE emission | Positive/negative semantic tests, real native execution, checked failures, stack arguments, imports/unwind inspection and safe artifact replacement |
 | Bounded values and compiler components (bounded milestone implemented) | Checked signed/unsigned/code-unit numerics, nested aggregates up to 16 bytes, explicit places, conditional outputs, checked host buffers | Executed range/character/token/scanner candidates, exact token kinds and lossless trivia, shared pinned Unicode fixtures, boundary and invalid-state tests, independent C direct/indirect aggregate/out caller |
 | Early JIT and module proofs (bounded milestone implemented) | Shared x64 encoder, W^X/unwind lifetime, protected exception continuations, independent library/reference binding, versioned semantic contracts and native packages | AOT/JIT agreement; root-only JIT against unchanged persisted dependency DLLs; unchanged semantic/native consumer against compatible producer replacement; incompatible public contracts rejected before execution |
@@ -135,12 +136,35 @@ format choices. The semantic IL and metadata format are first-class work
 within full runtime/structured contracts and general separate compilation,
 not merely serialization details of the current compiler's private IR.
 
+Maintain one evolving language specification, organized into syntax, types,
+static-semantics and execution chapters. Distinguish intended rules, actual
+implementation coverage and unresolved proposals. The specification is
+authoritative for current intent, not frozen forever; intentional pre-v1
+changes, including breaking changes, remain allowed and should become
+increasingly infrequent as the design solidifies. This does not require
+independently versioned chapters or create a perpetual compatibility promise.
+Existing implemented compatibility behavior and explicit migration
+requirements remain unchanged.
+
+The intended IL is a compact binary representation of the language and
+ecosystem, carrying type information, metadata/contracts and operations. It is
+usable as compilation input for metadata binding, reflection and tooling, and
+for linking and AOT/JIT machine-code generation without source recompilation.
+It is not merely serialization of a private compiler object graph or a
+verifier certificate. Its ecosystem role is comparable to CIL without adopting
+its format. Compactness does not select a compression codec or container;
+pre-v1 IL breaks remain allowed and no frozen versioning scheme is selected.
+The verifier is one consumer of metadata and may use public contracts for
+external dependencies without source recompilation or mandatory dependency-
+body inspection; this neither trusts every producer claim nor forbids
+verification of available bodies, and does not change the current verifier.
+
 Specify the source language, semantic operations and verifier, metadata/module
 interchange, and runtime/target profiles with explicit boundaries. The exact
-document organization, normative IL and wire encoding remain design work, not
-a selected new format. Cover declaration identities and references, types,
-generic constraints/witnesses, access/ownership/lifetime and output contracts,
-effects, capabilities, layouts and runtime dependencies. Accepted documentation
+normative IL and wire encoding remain design work, not a selected new format.
+Cover declaration identities and references, types, generic
+constraints/witnesses, access/ownership/lifetime and output contracts, effects,
+capabilities, layouts and runtime dependencies. Accepted documentation
 direction: source-attached friendly markup with structured XML/HTML-style tags
 is compiled into a separate XML documentation artifact; common references
 resolve to structured references. Delimiters, markup details, schema/member

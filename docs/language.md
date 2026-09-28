@@ -524,12 +524,22 @@ truncates toward zero; signed minimum divided by `-1` fails while its remainder
 is zero. Shift counts are checked; left shift is width-truncating bit
 manipulation, not checked multiplication. Floating operations use target-format
 round-to-nearest ties-even without implicit FMA, reassociation, ambient rounding
-or flush dependence; arithmetic NaNs canonicalize in the working profile,
-while bitcasts/copies preserve bits. [Conversion policies](conversions.md)
-distinguish range, fractional rounding, modulo narrowing, nonfinite handling
-and bit reinterpretation. Numeric-key comparer semantics (all NaNs equal,
-signed zeros equal, decimal cohorts normalized) are separate from IEEE
-operator equality.
+or flush dependence; arithmetic NaNs canonicalize in the working profile.
+Arithmetic NaN canonicalization does not apply to bitcasts or copies, which
+preserve bits under their representation contracts. Representation-level
+`FromBits`/`ToBits` operations have their own bit contracts.
+Floating-to-floating conversions follow IEEE-754:
+inexactness, finite overflow to infinity, underflow, NaN and infinity do not
+raise language failures, and no floating-point exception traps are enabled.
+Other rounding modes require explicit APIs/adapters; there is no global
+floating-point control-word API. Checked floating-to-integer conversions
+truncate toward zero then throw if out of range; unchecked conversions truncate
+then saturate rather than wrap, with NaN converting to zero.
+[Conversion policies](conversions.md) distinguish range, fractional rounding,
+integer wrapping, nonfinite handling and bit reinterpretation; floating
+conversion does not promise cross-format NaN-payload preservation or exactness.
+Numeric-key comparer semantics (all NaNs equal, signed zeros equal, decimal
+cohorts normalized) are separate from IEEE operator equality.
 
 Source text is UTF-8; runtime text has **no default encoding**. The single `TextSpan<TCodeUnit = void>` family has immutable validated `char8`/`char16`/`char32` members and a family-declared encoding-erased `void` specialization: bare `TextSpan` is exactly `TextSpan<void>`. Here `void` does not mean zero-size units or a default encoding. Erasure needs no text copy/transcoding and retains actual encoding, backing, access and lifetime/lease dependencies. Checked typed projection rejects a mismatched representation rather than transcoding; only known-code-unit forms expose typed `AsSpan` and contiguous-sequence conformance. Common `IsEmpty`, ordinal and formatting operations work on either form. A raw `AsSpan()` can forget text validity but not immutable backing, access, lifetime or rooting. Raw slices can split scalars; text slices must preserve scalar boundaries. Editing copies into mutable raw storage or a builder, then validates and freezes before publication; transferring an exclusively held initial buffer may avoid a copy only by revoking all writes. Readonly aliasing or validation alone cannot establish immutable text. Registered string targets use ordinary calls such as `utf8z("Terrum")`, not lexer prefixes or suffix tokens; the target validates encoding, termination and embedded-zero rules without implying pointer lifetime. Final storage, string facade, adaptive/block/RLE representation and projection ABI require experiments.
 

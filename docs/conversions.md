@@ -184,25 +184,27 @@ optimizer folding.
 ## Conversion policies
 
 `TDestination(value)` selects the pair's checked numeric conversion, not
-`FromInt32`/`FromUInt32` method families. Checked means validated range and
-representation, **not exactness**: `int32` to `float32` may round. Fractional
-rounding, range handling and bit reinterpretation are separate decisions.
+`FromInt32`/`FromUInt32` method families. Checked integer-to-integer
+conversions preserve the value or fail on destination-range overflow.
+Floating-to-floating conversion follows IEEE-754 rather than turning
+inexactness, overflow to infinity, underflow, NaN or infinity into a language
+failure. Numeric conversion is distinct from bit reinterpretation.
 
-| Operation | Proposed primitive policy |
+| Operation | Accepted direction |
 |---|---|
-| Checked integer to integer | Preserve value or throw on range failure. |
-| Checked finite floating to integer | Round fraction toward zero, then check the integer result's range; throw on failure. NaN and infinities throw. |
-| Checked integer/floating to floating | Round to nearest, ties to even. A finite value that would round to infinity throws; inexact finite results and underflow to subnormal/zero are allowed. Existing infinities remain infinities; NaNs follow the destination's numeric NaN policy. |
-| Saturating to integer | Round a finite fraction toward zero, then clamp to the destination range; infinities clamp to endpoints. NaN throws because it has no ordered endpoint. |
-| Truncating to integer | For finite floating input, first remove the fraction toward zero; then reduce the mathematical integer modulo the destination width. Signed destinations interpret those bits in two's complement. NaN and infinities throw. |
+| Integer to integer, checked | Preserve the value or throw when it is outside the destination range. |
+| Integer to integer, unchecked | Reduce modulo 2^N for an N-bit destination (retain the low N bits), then interpret the result in two's complement for signed destinations. This applies across width and signedness changes, including widening conversions; it is not checked conversion. |
+| Integer to integer, saturating | An explicitly selected API clamps to the destination range; saturation is not implicit. |
+| Floating to integer, checked | Truncate toward zero, then range-check; throw if the truncated result is out of range. NaN has no integer representation and throws; infinities are out of range. |
+| Floating to integer, unchecked or explicitly saturating | Truncate toward zero, then saturate out-of-range results to the destination endpoints, including infinities. NaN converts to zero. This is **not** modulo narrowing. |
+| Integer/floating to floating | Follow IEEE-754 target-format conversion with default round-to-nearest, ties-to-even. Inexact results, finite overflow to infinity, and underflow to subnormal/zero do not fail; NaN and infinities are ordinary floating values. No floating-point exception traps are enabled. Other rounding modes require explicit APIs/adapters; there is no global floating-point control-word API. |
 | Bit reinterpretation | `FromBits`/`ToBits` preserve the specified representation, including payload bits; this is not numeric conversion. Width, validity and representation must match the declared operation. |
 
-The proposed primitive policies above are distinct from IEEE arithmetic
-exceptions and do not grant arbitrary user-defined conversions. Binary/decimal
-cross-format conversions need a specified direct rounding implementation;
-floating-destination saturating/truncating policies are **open**, not aliases
-for integer modulo or blanket promises on every numeric type. Exact conversions,
-if exposed, need their own contract.
+Floating-to-floating numeric conversion does not promise fixed NaN payload
+preservation or cross-format exactness; bit-preserving `FromBits`/`ToBits`
+operations remain distinct. These policies do not grant arbitrary user-defined
+conversions or choose witness lookup/declaration grammar. Exact conversion and
+other per-pair APIs remain specification work.
 
 Granular `ICheckedConversion<TSelf, TSource>`,
 `ISaturatingConversion<...>` and `ITruncatingConversion<...>` sketches in
@@ -210,23 +212,27 @@ Granular `ICheckedConversion<TSelf, TSource>`,
 supported policy for a source/destination pair. Neither a broad number marker
 nor the existence of a checked conversion promises the other two. Final
 source/destination witness lookup and user-defined operator declaration grammar
-remain open; consumers must bind to a published contract, never inspect a body
-or silently switch to another policy.
+remain to be specified; consumers must bind to a published contract, never
+inspect a body or silently switch to another policy.
 
-Named wrapping operations remain sufficient for the current sketches.
-When implemented, lexical `unchecked` selects a declared wrapping
-**operator, conversion, or arithmetic-function variant** at the use site;
-`AtomicAdd` is an example of a function family whose arithmetic policy may be
-selected explicitly. This is not ambient checkedness flowing into arbitrary
-callees. Prefer paired checked and wrapping declarations; exact syntax and
+Named wrapping operations remain sufficient for the current sketches. When
+implemented, lexical `unchecked` selects a declared unchecked variant of an
+operator, conversion, or arithmetic function at the use site; `AtomicAdd` is an
+example of a function family whose arithmetic policy may be selected
+explicitly. Integer-to-integer conversion wraps modulo 2^N for an N-bit destination;
+floating-to-integer conversion truncates toward zero and saturates, with NaN
+converting to zero. This is not ambient checkedness flowing into arbitrary
+callees. Prefer paired checked and unchecked declarations; exact syntax and
 metadata remain open, and a compile-time policy argument is one possible
 implementation. No unchecked block/parser form is established here. A missing
 requested variant does not fall back to checked behavior or another overload.
-Only arithmetic overflow behavior changes; bounds, niche validity, lifetime
-and other safety checks remain checked.
-General saturating-expression/block syntax remains open.
-Random counter wrapping and numeric-key bit hashing intentionally keep their
-explicit `AddWrapping` and `FromBits`/`ToBits` calls. See the
+Only arithmetic overflow behavior and the selected conversion policy change;
+bounds, validity, lifetime and other safety checks remain checked. Named
+`AddWrapping` and `Try...` APIs such as `TryAdd` remain explicit library
+alternatives.
+General saturating-expression/block syntax remains open. Random counter
+wrapping and numeric-key bit hashing intentionally keep their explicit
+`AddWrapping` and `FromBits`/`ToBits` calls. See the
 [memory-model arithmetic policy](memory-model.md#arithmetic-policy).
 
 ## Character intent

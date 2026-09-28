@@ -78,8 +78,9 @@ public interface ISaturatingConversion<TSelf, TSource>
 public interface ITruncatingConversion<TSelf, TSource>
     where TSelf : ITruncatingConversion<TSelf, TSource>
 {
-    // Finite float -> integer removes the fraction, then performs modulo narrowing.
-    // Not a promise about floating-destination policies; see docs/conversions.md.
+    // Built-in integer -> integer unchecked conversion wraps to destination
+    // width. Float -> integer truncates toward zero, then saturates; NaN maps
+    // to zero. Checked conversion is the distinct ConvertChecked policy.
     static abstract TSelf ConvertTruncating(TSource value);
 }
 
