@@ -52,6 +52,16 @@ public static bool TryParseUInt64Base(int32 start, int32 length, uint32 radix, o
     return true;
 }
 
+public static bool TryParseUInt32Base(int32 start, int32 length, uint32 radix, out uint32 result)
+{
+    if (!TryParseMagnitude(start, length, radix, uint64(uint32.MaxValue), out var parsed))
+    {
+        return false;
+    }
+    result = uint32(parsed);
+    return true;
+}
+
 public static bool TryParseInt64Base(int32 start, int32 length, uint32 radix, out int64 result)
 {
     if (start < 0 || length <= 0 || start > Host.Source.Length
@@ -92,5 +102,16 @@ public static bool TryParseInt64Base(int32 start, int32 length, uint32 radix, ou
     {
         result = int64(magnitude);
     }
+    return true;
+}
+
+public static bool TryParseInt32Base(int32 start, int32 length, uint32 radix, out int32 result)
+{
+    if (!TryParseInt64Base(start, length, radix, out var parsed)
+        || parsed < int64(int32.MinValue) || parsed > int64(int32.MaxValue))
+    {
+        return false;
+    }
+    result = int32(parsed);
     return true;
 }

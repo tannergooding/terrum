@@ -32,6 +32,12 @@ public sealed class IntegerParsingComponentTests
             cases.Add(new(maximum, radix, false, ulong.MaxValue.ToString(CultureInfo.InvariantCulture)));
             cases.Add(new(signedMaximum, radix, true, "int64.MaxValue"));
             cases.Add(new("-" + signedMinimum, radix, true, "int64.MinValue"));
+            cases.Add(new(ToBase(uint.MaxValue, radix), radix, false, "uint32.MaxValue", true));
+            cases.Add(new(ToBase((ulong)uint.MaxValue + 1, radix), radix, false, null, true));
+            cases.Add(new(ToBase((ulong)int.MaxValue, radix), radix, true, "int32.MaxValue", true));
+            cases.Add(new("-" + ToBase(1UL << 31, radix), radix, true, "int32.MinValue", true));
+            cases.Add(new(ToBase(1UL << 31, radix), radix, true, null, true));
+            cases.Add(new("-" + ToBase((1UL << 31) + 1, radix), radix, true, null, true));
             if (radix is 2 or 3 or 10 or 16 or 36)
             {
                 cases.Add(new(maximum + "0", radix, false, null));
@@ -42,6 +48,13 @@ public sealed class IntegerParsingComponentTests
         cases.AddRange([
             new("0", 10, false, "0"),
             new("-0", 10, true, "0"),
+            new("0", 10, false, "0", true),
+            new("-0", 10, true, "0", true),
+            new("Ff", 16, false, "255", true),
+            new("-1", 10, false, null, true),
+            new("\u0661", 10, false, null, true),
+            new("1", 37, true, null, true),
+            new("", 10, true, null, true),
             new("Z", 36, false, "35"),
             new("z", 36, true, "35"),
             new("Ff", 16, false, "255"),
@@ -59,6 +72,14 @@ public sealed class IntegerParsingComponentTests
             new("", 10, false, null),
         ]);
 
+        foreach (var batch in cases.Chunk(64))
+        {
+            await AssertParseBatchAsync(batch, policy).ConfigureAwait(true);
+        }
+    }
+
+    private static async Task AssertParseBatchAsync(IReadOnlyList<ParseCase> cases, NativeRuntimePolicy policy)
+    {
         var source = new StringBuilder("!");
         var checks = new StringBuilder();
         for (var index = 0; index < cases.Count; index++)
@@ -67,7 +88,12 @@ public sealed class IntegerParsingComponentTests
             var start = source.Length;
             _ = source.Append(test.Text).Append('!');
             _ = checks.AppendLine("{");
-            var method = test.IsSigned ? "TryParseInt64Base" : "TryParseUInt64Base";
+            var method = (test.IsSigned, test.IsNarrow) switch {
+                (false, false) => "TryParseUInt64Base",
+                (true, false) => "TryParseInt64Base",
+                (false, true) => "TryParseUInt32Base",
+                (true, true) => "TryParseInt32Base",
+            };
             if (test.Expected is not null)
             {
                 _ = checks.AppendLine($"if (!{method}({start}, {test.Text.Length}, {test.Radix}, out var parsed)"
@@ -131,6 +157,8 @@ public sealed class IntegerParsingComponentTests
     [Theory]
     [InlineData("TryParseUInt64Base(1, 1, 10, out var value); return int32(value);")]
     [InlineData("TryParseInt64Base(1, 1, 10, out var value); return int32(value);")]
+    [InlineData("TryParseUInt32Base(1, 1, 10, out var value); return int32(value);")]
+    [InlineData("TryParseInt32Base(1, 1, 10, out var value); return value;")]
     public void FailedParseCannotPublishOutput(string body)
     {
         ArgumentNullException.ThrowIfNull(body);
@@ -168,5 +196,5 @@ public sealed class IntegerParsingComponentTests
         return new string(characters, start, characters.Length - start);
     }
 
-    private sealed record ParseCase(string Text, int Radix, bool IsSigned, string? Expected);
+    private sealed record ParseCase(string Text, int Radix, bool IsSigned, string? Expected, bool IsNarrow = false);
 }

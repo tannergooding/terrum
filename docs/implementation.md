@@ -815,8 +815,8 @@ storage.
 
 The separate [integer-parsing candidate](../self-host/IntegerParsing.terrum)
 uses the immutable host source grant and checked wide-radix accumulation to
-parse strict ASCII slices into signed or unsigned 64-bit outputs. AOT/JIT
-fixtures cover every radix and both failure policies; malformed slices,
+parse strict ASCII slices into signed or unsigned 32- and 64-bit outputs. AOT/JIT
+fixtures cover every radix, both widths and both failure policies; malformed slices,
 invalid bounds and overflow leave outputs unpublished. It is not wired into
 `SyntaxTree.Parse(LexResult)` or the scanner-backed integer record: that
 record still supplies the binder's contextual literal magnitude.

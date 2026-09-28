@@ -85,7 +85,7 @@ remain hosted in C#.
 | [WideIntegerFacts](WideIntegerFacts.terrum) | Checked signed addition and bounded decimal/radix-2..36 accumulation through the full unsigned 64-bit range | Executed as a separately compiled module with conditional wide outputs |
 | [WideIntegerTests](WideIntegerTests.terrum) | Signed extrema, invalid digits/radices, per-radix unsigned/signed limits and conditional output publication | Executed through AOT and JIT with a shared entry wrapper under both failure policies |
 | [IntegerFormatting](IntegerFormatting.terrum) | Invariant signed/unsigned decimal and explicit radix-2..36 digits in reusable owned storage | AOT/JIT boundary, exact-capacity and repeated-use fixtures; native heap checks cover same-allocation transfer and failure cleanup |
-| [IntegerParsing](IntegerParsing.terrum) | Strict signed/unsigned radix-2..36 ASCII parsing of an exact UTF-16 source slice with conditional wide outputs | Composed with `WideIntegerFacts` under AOT/JIT and both policies; full-range per-radix boundaries, invalid spelling/bounds and unpublished outputs |
+| [IntegerParsing](IntegerParsing.terrum) | Strict signed/unsigned radix-2..36 ASCII parsing of an exact UTF-16 source slice with conditional 32- and 64-bit outputs | Composed with `WideIntegerFacts` under AOT/JIT and both policies; full-range per-radix boundaries, invalid spelling/bounds and unpublished outputs |
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and conditional bool/out publication |
 | [SourceLines](SourceLines.terrum) | Streaming line ranges, line extents and bidirectional UTF-16 offset/line-position mapping over an immutable source grant | AOT/JIT conditional outputs under both policies; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
 | [SourceLineIndex](SourceLineIndex.terrum) | Owned line-start table, random-access line extents and bidirectional UTF-16 offset/line-position lookup | Executed as AOT/JIT under both failure policies; every offset round-trips with host line positions, with invalid outputs and owner copies rejected |
@@ -194,6 +194,8 @@ the **entire** nonempty slice, with no prefix, separator, whitespace or
 implicit plus sign, and returns false without publishing an output on
 malformed input, invalid bounds/radix or overflow. Negative zero is zero;
 `int64.MinValue` is handled by accumulating its unsigned magnitude.
+`TryParseUInt32Base` and `TryParseInt32Base` reuse the validated parsing
+and enforce their narrower ranges before publishing a result.
 These compiled library functions do not replace the scanner's contextual
 integer binding or create a runtime text representation.
 
