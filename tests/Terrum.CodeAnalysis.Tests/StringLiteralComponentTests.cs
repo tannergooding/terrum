@@ -304,6 +304,45 @@ public sealed class StringLiteralComponentTests
     }
 
     [Theory]
+    [InlineData("\"\"")]
+    [InlineData("\"\\0\"")]
+    [InlineData("\"A\\0B\"")]
+    public async Task InvalidMetadataNameEmissionReleasesWorkspaceOnCheckedFailureAsync(string invalid)
+    {
+        var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
+        var entry = SyntaxTree.Parse($$"""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                require SourceRange.TryCreate(0, {{invalid.Length}}, out var badSpelling);
+                require StringLiteral.TryCreate(badSpelling, out var bad);
+                require SourceRange.TryCreate({{invalid.Length}}, 4, out var goodSpelling);
+                require StringLiteral.TryCreate(goodSpelling, out var good);
+                require OwnedInt32Buffer.TryCreate(8, out var workspace);
+                unsafe {
+                    try {
+                        OwnedInt32Buffer invalidRow = EncodeStringNameRow(bad, 0, move workspace);
+                        return 1;
+                    } catch {
+                        require OwnedInt32Buffer.TryCreate(8, out var nextWorkspace);
+                        OwnedInt32Buffer row = EncodeStringNameRow(good, 0, move nextWorkspace);
+                        if (row.Count != 8 || row.Read(0) != 0 || row.Read(1) != 2
+                            || row.Read(4) != 79 || row.Read(5) != 107
+                            || row.Read(6) != 0 || row.Read(7) != 0) { return 2; }
+                        return 0;
+                    }
+                }
+            }
+            """, "invalid-name-emission-entry.terrum");
+        var compilation = Compilation.Create(trees.Add(entry),
+            [new HostBuffer("Source", PrimitiveType.Char16, [.. (invalid + "\"Ok\"").Select(unit => (int)unit)], false)],
+            BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Equal(0, NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions));
+        Assert.Equal(0, await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+    }
+
+    [Theory]
     [InlineData(NativeRuntimePolicy.FailFast, 257, 1, 1, 0)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, 65536, 0, 0, 1)]
     public async Task StringRowUnitCountUsesThreeLittleEndianBytesAsync(
