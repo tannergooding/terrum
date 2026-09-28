@@ -1,24 +1,33 @@
-# Terrum core-library signature reference (draft)
+# Terrum core-library proposal
 
 > [!IMPORTANT]
-> Proposal-only library inventory, not an accepted API set or executable
-> library. Consult [current implementation](../implementation.md) and
-> [self-host components](../../self-host/README.md) for actual support.
+> Proposal only: signatures and inventories are candidate designs, not
+> approved APIs or claims of implementation.
 
-**Status:** provisional library-design reference; declaration shapes only. .NET is a breadth baseline, not a mandate to reproduce its legacy surface. Most declarations are design-only; the current executable compiler profile does not bind these library inventories. Where coherent implementation work needs concrete details, this draft may be used as a provisional basis subject to retrospective correction before v1. That does not approve every inventory or signature, claim compiler/runtime support, or promise stability. Exact grammar is illustrative where noted. This is not an ABI layout specification.
+This proposal describes candidate library declarations and dependency layers.
+Accepted semantic direction is identified separately from proposed signatures;
+exact syntax and several API contracts remain open. Examples do not establish
+conformance or implementation. This is not an ABI layout specification.
 
-**Canonical inputs:** `library/foundation.api.terrum`, `collections.api.terrum`, `numerics.api.terrum`, `algorithms.api.terrum`, `simd.api.terrum`, `tensors.api.terrum`; `docs/libraries.md`, `language.md`, `lifetimes.md`, `type-families.md`, `conversions.md`, `memory-model.md`, `lexical-grammar.md`, `implementation.md`, `roadmap.md`, and `language-library-review.md`.
+The [grammar proposal](terrum-grammar-spec.md) and
+[semantic IL/metadata proposal](terrum-il-metadata-spec.md) are separate
+documents; neither adopts the signatures here. Related accepted direction is
+described in [language](../language.md), [libraries](../libraries.md),
+[lifetimes](../lifetimes.md), [type families](../type-families.md),
+[conversions](../conversions.md), and [memory model](../memory-model.md).
 
-**Companion drafts:** [grammar specification](terrum-grammar-spec.md) and
-[semantic IL/metadata specification](terrum-il-metadata-spec.md). These are
-provisional working designs that may guide coherent implementation work where
-needed, subject to retrospective correction before v1; they do not imply
-blanket adoption, actual support, or stability. Canonical language direction is in `docs/language.md` and
-`docs/libraries.md`; current lexical and implementation boundaries remain
-`docs/lexical-grammar.md` and `docs/implementation.md`, with future semantic IL
-work recorded in `docs/roadmap.md`.
+## Scope, status, and notation
 
-## Scope and profile classification
+**ACCEPTED DIRECTION** identifies a semantic constraint also stated in the
+canonical language references; it does not approve a nearby declaration.
+**PROPOSED** marks a candidate signature or API contract. **OPEN** marks a
+decision not made here. Signature syntax is illustrative unless an accepted
+source form is explicitly identified. No proposal-only declaration is required
+for language conformance. Conformance to a library profile requires adoption
+of its declarations together with their contracts and feature dependencies;
+these candidate inventories establish no such conformance.
+
+## Dependency layers
 
 **Accepted layering direction:** distinguish the genuinely minimal
 requirements for core language operation from a standard application-library/
@@ -29,20 +38,19 @@ reference, especially the application services proposed in §13, are not
 mandatory for language conformance and do not require a universal object root,
 heap, tracing GC, scheduler or OS services solely for the language.
 
-The current **Core**, **Foundation** and **Application** headings are draft
-library dependency layers, not standardized runtime-profile names. Features
+The **Core**, **Foundation** and **Application** headings are proposed library
+dependency layers, not standardized runtime-profile names. Features
 that need runtime facilities retain those dependencies and their checked
 contracts when used. An environment without a required facility cannot claim
 that feature by silently weakening its semantics or substituting an implicit
-fallback. This direction allows embedded/kernel environments in principle; it
-does not claim such a backend exists or that every environment supports every
-feature. Exact baseline/API mapping and feature-to-runtime support remain
-specification work.
+fallback. This direction allows embedded/kernel environments in principle; it does not
+require every environment to support every feature. Exact baseline/API mapping
+and feature-to-runtime support remain open.
 
 ## Reading declarations
 
 - `mut` grants a writable place or receiver; `write` qualifies authority through a reference/view. They are not interchangeable. Readonly is the declaration default.
-- `ref<T>` is an ordinary reference/loan. `init ref<T>` names a vacant output destination, not writable access; invoke it with the accepted call-site form `Create(init value)`. Parser/binder support and coordinated migration remain pending; executable APIs still use legacy `out`/`ref` where documented.
+- `ref<T>` is an ordinary reference/loan. `init ref<T>` names a vacant output destination, not writable access; the accepted call-site form is `Create(init value)`. Exact grammar, output contracts, and migration from `out` remain open.
 - `write Span<T>` lends write access to backing slots; `mut Span<T>` only permits descriptor rebinding. `Span<write C>` is separately writable through each retained handle. Generic substitutions preserve their complete qualification.
 - `[Copy]`, `[Sized]`, `[ManagedStorable]`, `[TextCodeUnit]`, and `[SimdElement]` are checked properties/capabilities, not user assertions inferred from an interface name.
 - A signature does not express all dependencies. A returned view retains its backing/root/lease and any shape metadata. Ownership, allocation, checked failure, effect and task-completion rules are stated under the relevant family.
@@ -51,7 +59,7 @@ specification work.
 
 `void` is the zero-data result type, with value `()`, usable as `func<void>` or `Task<void>`; there is no public `unit` or `never` primitive. There is no universal `default(T)` and no required universal root with `Equals`, `GetHashCode`, or `ToString`.
 
-The accepted semantic direction normalizes optional `T?` substitutions: `T?` with already-optional `T` remains one optional layer. `Option<T>` is an optional projection/alias intent for that same normalized presence type, not a nominal `Some(T)` wrapper; its exact source spelling remains pending grammar/binder support. `Option<void>` still represents absent versus present `()`.
+The accepted semantic direction normalizes optional `T?` substitutions: `T?` with already-optional `T` remains one optional layer. `Option<T>` is an optional projection/alias intent for that same normalized presence type, not a nominal `Some(T)` wrapper; its exact source spelling remains open. `Option<void>` still represents absent versus present `()`.
 
 A distinct nominal union can preserve distinctions that optional normalization cannot, including missing versus present-null by making its payload itself optional. These are illustrative type shapes, not approved declaration grammar:
 
@@ -67,7 +75,7 @@ public nominal union Lookup<T>
 }
 ```
 
-`Lookup<T>.Missing` remains distinct from `Lookup<T>.Found(null)` when `T` is optional; `Option<T>` itself does not add a second presence state. Niche representations must be declared and validated; no invalid bit pattern, padding, or null encoding is available implicitly. The bounded bool/out contract leaves its output unpublished on false. General `init ref<T>` does **not** universally mean false leaves the destination vacant: a declaration must specify initialization/publication outcomes and the checker must verify them. For example, an API contract for `bool TryParse(TextSpan, init ref<T>)` may specify false => vacant and true => initialized; the signature alone does not convey that rule. These shapes do not alter current bool/out behavior before coordinated migration.
+`Lookup<T>.Missing` remains distinct from `Lookup<T>.Found(null)` when `T` is optional; `Option<T>` itself does not add a second presence state. Niche representations must be declared and validated; no invalid bit pattern, padding, or null encoding is available implicitly. The bounded `bool`/`out` contract leaves its output vacant on false. General `init ref<T>` does **not** universally mean false leaves the destination vacant: a declaration must specify initialization/publication outcomes and the checker must verify them. For example, an API contract for `bool TryParse(TextSpan, init ref<T>)` may specify false => vacant and true => initialized; the signature alone does not convey that rule. The `bool`/`out` and `init ref<T>` contracts are distinct until any migration is specified.
 
 Expected domain alternatives should be represented by a status/union/result contract; the proposed `Result<T,E>` shape is defined once in §13. Exceptional failures propagate. `require` can lift a declared false outcome into checked failure, but no general library-wide exception hierarchy/object ABI is selected. Catch/recovery is not implied by `require`.
 
@@ -108,7 +116,7 @@ The single proposed view family is `TextSpan<TCodeUnit = void>`: bare `TextSpan`
 public struct Span<T> : IContiguousSequence<T>
 {
     public nuint Length { get; }
-    // Recommended borrowed-place shape; the canonical inventory currently spells this by value.
+    // Candidate borrowed-place shape; the by-value alternative remains open.
     [MatchedAccess] public ref<T> this[nuint index] { get; }
     [MatchedAccess] public Span<T> Slice(nuint start, nuint length);
     Span<T> IContiguousSequence<T>.AsSpan(); // explicit interface projection
@@ -182,7 +190,7 @@ Conditional family/extension syntax above is pseudocode pending grammar/custom-f
 
 ### General span and inline storage
 
-`Span<T>` is one language-defined view type; backing/owner relationship is opaque and carried as a dependency, not as a public owner generic argument. `Length`, a borrowed indexer and slice are the useful public observations. Empty/end slices retain lease/root/lifetime. The canonical `application.api.terrum` indexer is spelled `T { get; set; }` without a `[Copy]` restriction, although the accepted span/backing model permits non-Copy values. Do not treat that by-value getter as a usable contract for unique `T`: it would duplicate a value from even a readonly view. Recommend the matched-access borrowed-place/ref indexer shown in §3: read-only views yield `ref<T>`, while `write ref<T>` is available only through a write-authorized view. If property syntax cannot express that matched place, define an explicit compiler-owned place category; by-value get/copy APIs require `[Copy]`. Concrete spans deliberately do not expose `AsSpan()`; interface projection is explicit. Exact stored-view anchors and ABI are open.
+`Span<T>` is one language-defined view type; backing/owner relationship is opaque and carried as a dependency, not as a public owner generic argument. `Length`, a borrowed indexer and slice are the useful public observations. Empty/end slices retain lease/root/lifetime. A by-value getter without a `[Copy]` restriction is not a usable contract for unique `T`: it would duplicate a value from even a readonly view. A candidate matched-access borrowed-place/ref indexer is shown in §3: read-only views yield `ref<T>`, while `write ref<T>` is available only through a write-authorized view. If property syntax cannot express that matched place, define an explicit compiler-owned place category; by-value get/copy APIs require `[Copy]`. Concrete spans deliberately do not expose `AsSpan()`; interface projection is explicit. Exact stored-view anchors and ABI are open.
 
 ```terrum
 public struct InlineArray<T, const nuint N>
@@ -310,7 +318,37 @@ public static class MemoryPrimitives
 }
 ```
 
-These signatures regularize accepted result families but remain illustrative where parameter grammar or overload details are not implemented. Add, subtract, increment, decrement, AND, OR, XOR, NOT, min and max each have `void`, `GetPrevious`, and `GetUpdated` forms; exchange has `void` and `GetPrevious` forms. The success-only `AtomicCompareExchange` shape is distinct from the proposed `AtomicCompareExchangeObserve`, which returns a named `CompareExchangeObservation<T> { Exchanged, Previous }`; distinct names avoid return-type-only overloads. Its `T` must have a defined bitwise-comparable representation and be eligible for a copied observation; no user `==` or equality witness participates. Defaults remain load-acquire, store-release, strong CAS and all RMWs/fences sequentially consistent with full before/after ordering. One compile-time-known `MemoryOrder` selects other valid orders; non-constant values and invalid operation/order pairs are rejected. Atomic defaults are lock-free; lock fallback must be explicit and globally coordinated. Checked RMW overflow leaves storage unchanged; lexical `unchecked` selects the separately declared wrapping variant without changing atomicity, ordering, bounds, lifetime or access permissions. Explicit unaligned value access is not an atomic snapshot. `UnalignedRead`/`UnalignedWrite` take a `uint8` span and byte offset, check that the complete target-sized range is in bounds without offset overflow, and only materialize representations valid for `T`; they never fabricate an unaligned `ref<T>`. Non-temporal and cache operations require explicit target support and valid backing, range, memory type, alignment, alias/concurrency and completion conditions. A span supplies bounds/lifetime authority, not proof that hardware effects are safe. Cache maintenance may affect whole cache lines, and invalidation may discard dirty data; the target contract must define line-granularity ownership and concurrency preconditions. Unsupported ranges must be rejected or handled by an explicit supported path. These operations do not imply publication or persistence by name. Managed-reference operations need collector roots/barriers independently of memory order.
+These **PROPOSED** signatures express accepted result and ordering direction;
+parameter grammar, overload mapping, target range contracts, and some CAS
+declarations remain open. Add, subtract, increment, decrement, AND, OR, XOR,
+NOT, min and max each have `void`, `GetPrevious`, and `GetUpdated` forms;
+exchange has `void` and `GetPrevious` forms. The success-only
+`AtomicCompareExchange` shape is distinct from the proposed
+`AtomicCompareExchangeObserve`, which returns a named
+`CompareExchangeObservation<T> { Exchanged, Previous }`; distinct names avoid
+return-type-only overloads. Its `T` must have a defined bitwise-comparable
+representation and be eligible for a copied observation; no user `==` or
+equality witness participates. Defaults are load-acquire, store-release,
+strong CAS, and sequential consistency with full before/after ordering for
+all RMWs/fences. One compile-time-known `MemoryOrder` selects other valid
+orders; non-constant values and invalid operation/order pairs are rejected.
+Atomic defaults are lock-free; lock fallback must be explicit and globally
+coordinated. Checked RMW overflow leaves storage unchanged; lexical
+`unchecked` selects the separately declared wrapping variant without changing
+atomicity, ordering, bounds, lifetime or access permissions. Explicit
+unaligned value access is not an atomic snapshot. `UnalignedRead`/
+`UnalignedWrite` take a `uint8` span and byte offset, check that the complete
+target-sized range is in bounds without offset overflow, and only materialize
+representations valid for `T`; they never fabricate an unaligned `ref<T>`.
+Non-temporal and cache operations require explicit target support and valid
+backing, range, memory type, alignment, alias/concurrency and completion
+conditions. A span supplies bounds/lifetime authority, not proof that hardware
+effects are safe. Cache maintenance may affect whole cache lines, and
+invalidation may discard dirty data; the target contract must define
+line-granularity ownership and concurrency preconditions. Unsupported ranges
+must be rejected or handled by an explicit supported path. These operations
+do not imply publication or persistence by name. Managed-reference operations
+need collector roots/barriers independently of memory order.
 
 `GetPrevious` returns the value observed by that RMW; `GetUpdated` returns the value produced by that same RMW, not a subsequent read that might observe another writer. `[Copy]` and `[Sized]` alone do not establish raw-byte representation eligibility. The proposed ordinary byte-span unaligned overloads exclude managed-reference-containing types; arbitrary bytes cannot manufacture a managed handle or bypass collector/provenance requirements. Any collector-aware typed-memory operation needs its own explicit contract.
 
@@ -534,7 +572,7 @@ public struct decimal32 : IParsable<decimal32>, IFormattable, IScalarIeee754<dec
 
 `IScalarNumber` and `IScalarIeee754` are optional composites; universal number protocol is not required. `TOther`/`TResult` may differ from `TSelf`. Vector arithmetic is not scalar classification. Named integer associated types such as `Wider`/`Signed`/`Unsigned` resolve through the selected interface witness; explicit associated equality can bind another type parameter, with no reverse inference from a projection. Exact member, equality, witness-selection and conversion-witness syntax remains specification work.
 
-`int32.TryAdd/Subtract/Multiply` are checked expected failures; false publishes no output. `int32.FromBits` and `float32.ToBits` reinterpret bits, not numerically convert. Integer arithmetic is checked by default. Existing executable checked type-call conversions cover `int32`, `uint32`, `int64`, `uint64`, and `char16`; other declarations/conversions here are design-only. Bare numeric literals have no default width; target context parses directly. The canonical [conversion policy](../conversions.md#conversion-policies) is: checked integer conversion preserves or throws, unchecked integer conversion wraps to destination-width bits, and saturation is explicit; floating-to-floating conversion follows IEEE-754 without language failure; float-to-int truncates toward zero then checked-throws or unchecked/explicitly-saturates, never modulo-narrows, with NaN converting to zero. Floating support remains target-only; exact source/destination witness lookup and user-defined declarations remain specification work.
+`int32.TryAdd/Subtract/Multiply` are checked expected failures; false publishes no output. `int32.FromBits` and `float32.ToBits` reinterpret bits, not numerically convert. Integer arithmetic is checked by default. Existing executable checked type-call conversions cover `int32`, `uint32`, `int64`, `uint64`, and `char16`; see the [implementation reference](../implementation.md) for current support. Other declarations/conversions here are design-only. Bare numeric literals have no default width; target context selects their type. The canonical [conversion policy](../conversions.md#conversion-policies) is: checked integer conversion preserves or throws, unchecked integer conversion wraps to destination-width bits, and saturation is explicit; floating-to-floating conversion follows IEEE-754 without language failure; float-to-int truncates toward zero then checked-throws or unchecked/explicitly-saturates, never modulo-narrows, with NaN converting to zero. Floating APIs are target-specific; exact source/destination witness lookup and user-defined declarations remain open.
 
 ## 7. Fixed SIMD, scalable vectors and tensors
 
@@ -619,7 +657,17 @@ Task<TResult = void>
 Task // expands to Task<void>, not general type erasure
 ```
 
-Async methods return task-like completion, including `Task<void>` for no result; `async void` is not allowed. The accepted [async execution direction](../language.md#storage-concurrency-entry-and-boundaries) is eager inline start through actual suspension, inline continuation for completed awaits, and no automatic caller-executor capture or mandatory worker hop for incomplete awaits. Declared affinity and checked transfer/share/lifetime rules remain in force. A started operation retains borrowed inputs through completion/cleanup; every operation needs a responsible structured owner, explicit transfer, or supervisor; discarding it neither cancels it nor discharges errors/captures. Cancellation is a request, not completion. Exact task, executor, affinity and awaiter APIs remain separate specification work. The older cold-start/default-scheduler sketch is superseded.
+Async methods return task-like completion, including `Task<void>` for no
+result; `async void` is not allowed. The accepted
+[async execution direction](../language.md#storage-concurrency-entry-and-boundaries)
+is eager inline start through actual suspension, inline continuation for
+completed awaits, and no automatic caller-executor capture or mandatory
+worker hop for incomplete awaits. Declared affinity and checked
+transfer/share/lifetime rules remain in force. A started operation retains
+borrowed inputs through completion/cleanup; every operation needs a
+responsible structured owner, explicit transfer, or supervisor; discarding it
+neither cancels it nor discharges errors/captures. Cancellation is a request,
+not completion. Exact task, executor, affinity and awaiter APIs remain open.
 
 `IRandom` is referenced as a nominal protocol for mutable generic use through `write ref<TRandom>`, without defensive copies/boxing; storing concrete `TRandom` additionally requires `[Sized]`. The design sample defines `mut uint32 NextUInt32()` and `ISeedableRandom.Reseed(uint32 seed)` only; no RNG quality, entropy or cryptographic guarantee is specified.
 
@@ -666,42 +714,45 @@ public mut class TextWriter : ITextWriter
 
 Standard output is default; `Error` selects stderr. Writes can expose partial progress; async formatting occurs once into operation-owned buffering then drains to completion. Dropping returned task cannot cancel I/O or release captures. `TryWrite` refusal differs from format-contract failure.
 
-## 9. Concrete decisions and unresolved items
+## 9. Accepted direction and unresolved choices
 
-Accepted contracts should not be sent back for reapproval merely because declarations are unimplemented. Decisions/grammar/runtime work include:
+The following separates semantic constraints from source and API decisions
+that remain open:
 
 1. **Presence/result:** normalized optional flattening is the accepted semantic direction; settle only the source spelling/alias projection for `Option<T>`. A nominal `Missing | Found(T?)` union remains distinct when present-null must differ from missing. `Result<T,E>` and error payload design remain proposed; declaration-specific vacancy/publication contracts must be explicit.
 2. **Equality/hash semantics:** clarify how concrete `int32.GetHashCode()` relates to numeric-key hashing; it does not imply a universal root contract. Settle reusable primitive key-comparer declarations.
-3. **`init ref<T>` migration:** semantics and `Create(init value)` call-site spelling are accepted direction; conditional outcome metadata, optional outputs and coordinated migration remain open. Do not adopt signatures as executable ABI.
+3. **`init ref<T>` migration:** semantics and `Create(init value)` call-site spelling are accepted direction; conditional outcome metadata, optional outputs and coordinated migration remain open. These proposed signatures define no executable ABI.
 4. **Memory signatures:** checked location/range grammar; legal CAS success/failure order pairs and bitwise-eligible representations; fence coverage/compiler-fence scope; non-temporal/cache safety and target support. Preserve compile-time-known ordering, accepted defaults, lock-free default and checked/wrapping selection.
 5. **Collections/elements:** allocator/failure contract, non-Copy/borrowed/affine storage, guard alias/reentrancy enforcement, write-access naming, builder abandonment/error contract, lending iteration.
 6. **Numerics:** integer associated-relation declarations and witness lookup; primitive operator/conversion matrix; floating/decimal policy gaps; align key hashing with comparer.
 7. **SIMD/tensors:** fixed family/mask syntax, member registration/ABI and scalable restrictions; tensor shape storage/anchor, checked stride math, alias contract and reproducible reduction API.
-8. **Tasks/errors/services:** Task members/awaiter/completion ownership representation; exact scheduling/affinity APIs; cancellation; error/exception object/failure ABI; RNG guarantees beyond the sample methods; time and filesystem/network abstractions. Current sources define bounds/examples, not concrete API families.
+8. **Tasks/errors/services:** Task members/awaiter/completion ownership representation; exact scheduling/affinity APIs; cancellation; error/exception object/failure ABI; RNG guarantees beyond the sample methods; time and filesystem/network abstractions.
 9. **Notation/metadata:** generic defaults, family/extension/constraint syntax, fixed-signature `func`/`fnptr` family notation, handler/output attributes, public metadata and ABI. Source spellings remain illustrative.
 10. **Collection `params`:** modifier changes call form, not parameter type; bind a matching collection directly in normal form and use expanded form to construct new slots. Apply the accepted per-argument dominance and declared-specificity rules; fixed arity beats expanded form only on an otherwise equal match, and crossed argument matches are ambiguous. Specify exact grammar/diagnostics and generic collection-expression inference; any future enumeration needs explicit spread.
 11. **Adapters/extension interfaces:** ordinary implementations remain declared by their type; package imports do not add retroactive global conformances. Explicit adapters may add extension-interface behavior without changing the original witness set. Keep ABI-transparent nominal wrappers distinct from adapters; equal payload bits do not prove validity or total projection. Specify adapter intent/forwarding, dispatch metadata and any one-way projections only with validity, representation, access, ownership, lifetime and container guarantees. No blanket generic covariance or physical multiple-vtable layout is selected.
 12. **Families and operation protocols:** families explicitly opt in and declare checked projections/constraints; no universal `Type<T>`-to-`Type<void>` erasure or inferred covariance follows. Preserve declared family relationships such as `TextSpan<void>`. No universal root is introduced merely for equality/hash/formatting; use operation-specific witnesses/interfaces and explicit adapters. Specify eligible adapter projections and readonly views with representation, validity, access, backing/lifetime and cost checks; writable storage remains invariant.
 
-## 10. Coverage gaps and canonical consistency notes
+## 10. Open signature and contract alignments
 
-**Reviewed and covered:** all seven `library/*.api.terrum` inventories: foundation memory/ownership, managed collections, numeric protocols/primitives, equality/algorithm functors, text/application writer/terminal, fixed SIMD sketch and tensors. Concrete members and public state/capabilities are reproduced selectively; private storage fields are omitted. Accepted language/lifetime/type-family/conversion/memory contracts are consolidated.
+The application-library proposal includes `Result<T,E>`/`Error`,
+`Dictionary`/`HashSet`, task completion and ownership, clocks/time,
+cancellation, file/stream and network endpoints, and application entry. RNG
+quality/state guarantees beyond the scoped sample, console input, and general
+service registration are outside this proposal. No signature freezes private
+layout or establishes a public managed ABI.
 
-**Application-library gaps addressed by the proposal below:** `Result<T,E>`/Error, Dictionary/HashSet key collections, Task completion and ownership, clocks/time, cancellation, owned file/stream and network endpoints, plus application entry are proposed in §13. RNG quality/state contracts beyond the small design sample, console input, broad streams, and general service registration remain deliberately out of scope. The proposed signatures are recommendations, not adopted APIs.
-
-**Status boundary:** inventories are mostly design-only. Current executable profile lacks general span/text/collections/Task/SIMD/tensor/MemoryPrimitives binding. Supported numeric literals/type-call conversions and bounded memory/managed ownership are narrower. Proposed `init ref<T>` signatures coexist with legacy bool/out implementation. No signature freezes private layout or public managed ABI.
-
-**Potential inconsistencies and unresolved alignments:**
+The following distinctions and signature questions remain open:
 - `int32.GetHashCode()` does not imply a universal root contract. Review only whether the primitive method denotes the same key-hash semantics as `float32`/`decimal32` or is a separate concrete helper; generic map-key use remains governed by explicit comparer witnesses.
 - `TensorShape.Lengths`/`Strides` are `Span` properties but docs require immutable independently live metadata. Their exact readonly/view qualification and ownership source are not expressed by these signatures.
 - `TensorViews.View` must preserve both data and shape dependencies, but no final multi-source lifetime/anchor syntax exists; shown signature alone is insufficient proof.
-- `IParsable.TryParse(... init ref<T>)` differs from current legacy bool/out calls; this is acknowledged staging, not immediate contract contradiction.
-- The memory-model prose establishes accepted operation families/result forms and ordering; the signatures above spell out the result variants while keeping exact source grammar, target range contracts and some CAS declarations visibly illustrative.
-- `Task<TResult = void>` is a type-family direction; type-default grammar and Task members are not finalized. `Task` does not erase an owning `Task<T>` result. The implementation document says nested `Option<Option<T>>` syntax is accepted while normalization after type substitution is future binder work; language design describes `Option<T>` as normalizing optional payloads. Keep that target/runtime support distinction explicit.
+- `IParsable.TryParse(... init ref<T>)` uses the accepted `init` direction; its output contract and the migration from `bool`/`out` remain open.
+- The [memory model](../memory-model.md) defines accepted operation families, result forms and ordering; the signatures above propose source forms while exact grammar, target range contracts and some CAS declarations remain open.
+- `Task<TResult = void>` is a type-family direction; type-default grammar and Task members are not finalized. `Task` does not erase an owning `Task<T>` result. Optional normalization is semantic; its type-substitution rules and exact source grammar remain open.
 
-## 11. Scoped sample signatures: random and `uint32`
+## 11. Scoped proposed signatures: random and `uint32`
 
-The design sample (not a production RNG API) declares only these public members:
+This scoped proposal (not a production RNG API) declares only these public
+members:
 
 ```terrum
 public interface IRandom
@@ -724,33 +775,33 @@ public struct uint32 : IFormattable
 
 The sample also has `CounterRandom(uint32 seed)` and `DifferentRandom<TRandom>(TRandom inner, uint32 mask)` with `TRandom : IRandom, [Sized]`; their backing state/algorithm is not reproduced. `NextUInt32` provides no implied entropy, statistical quality, cryptographic security, or OS randomness guarantee.
 
-## 12. Recommended treatment of consequential open shapes
+## 12. Proposed treatment of consequential open shapes
 
-The following are review recommendations, not accepted declarations. Keep each choice separate from already accepted access, lifetime and failure semantics.
+The following are candidate treatments, not accepted declarations. Each
+remains subject to the accepted access, lifetime, and failure semantics.
 
-| Open shape | Illustrative declaration | Recommendation and tradeoff |
+| Open shape | Illustrative declaration | Candidate rationale and tradeoff |
 |---|---|---|
 | Presence versus expected failure | `T?` for absence; `Result<T, E>` as `Success(T)` / `Failure(E)` only if an API genuinely exposes a closed domain-failure set | Treat `T?` as the canonical presence spelling; do not add a second `Option<T>` runtime representation. Add nominal `Result<T,E>` only after `E`, initialization, and failure cleanup are specified. It makes domain errors composable, at the cost of a union/witness and more explicit handling. Keep thrown exceptions separate. |
-| Conditional output | `bool TryParse(TextSpan, init ref<T> value);` | Preserve false => vacant and success => fully initialized; do not rewrite current bool/out ABI until call grammar and guarded outcome metadata migrate together. `require` is a caller-side lift, not a parser exception convention. This avoids default fabrication but makes output-flow checking a language/metadata obligation. |
+| Conditional output | `bool TryParse(TextSpan, init ref<T> value);` | Preserve false => vacant and success => fully initialized; grammar and guarded outcome metadata must be specified together. `require` is a caller-side lift, not an exception convention. This avoids default fabrication but makes output-flow checking a language/metadata obligation. |
 | CAS observation | `CompareExchangeObservation<T> AtomicCompareExchangeObserve<T>(...)`, with `bool Exchanged` and `T Previous`; distinct from success-only `bool AtomicCompareExchange<T>(...)` | Use a named observation record only when callers need both success and the previous bits. Restrict it to copied values with eligible defined representations; do not infer success through user `==`. ABI, validity and order-pair rules remain open. |
 | Task responsibility | `Task<TResult = void>` remains a completion result; responsibility belongs to a structured owner/supervisor contract | Do not make possession or dropping of a task silently imply join, cancellation, or cleanup. A separate structured owner is more explicit and permits transfer/supervision, but requires a defined scope/ownership API. The accepted [async execution direction](../language.md#storage-concurrency-entry-and-boundaries) is independent of concurrency and parallelism; exact responsibility APIs remain separate library work. |
 | General conversion matrix | `T(value)` for checked; separately declared checked/saturating/truncating source-destination witnesses | Accepted: checked integer-to-integer preserves or throws, unchecked wraps destination-width bits, and saturation is explicit; floating-to-floating conversion follows IEEE-754 with nearest/ties-even default and no language failure for inexactness, infinity, underflow or NaN; float-to-int truncates then checked-throws or unchecked/explicitly-saturates, never modulo-narrows, with NaN converting to zero. Keep floating support target-only; specify witness lookup and APIs separately. |
 | Collection `params` | `Collect<T>(params List<T> values)` | `params` changes call form, not parameter type: bind a matching collection directly in normal form, or use expanded form to construct new slots. Apply ordinary match quality/specificity; fixed arity beats expanded `params` only on an otherwise equal match. Diagnose unresolved ambiguity; exact severity remains open. Explicit collection construction expresses nesting, and future enumeration requires spread. |
 | Time and randomness | Proposed signatures in §13 | Do not copy `DateTime`/`Random` APIs by analogy. §13 proposes distinct UTC and monotonic clock contracts, checked nanosecond duration arithmetic, and leaves RNG quality/entropy/cryptographic guarantees unspecified. This gains testable time APIs without pretending resolution equals precision, at the cost of separate timestamp domains and explicit clock injection. |
 
-## 13. PROPOSED STANDARD APPLICATION-LIBRARY/RUNTIME SURFACE (not accepted wholesale)
+## 13. Proposed standard application-library/runtime surface
 
 This section sketches one possible standard application-library/runtime
-surface, not the minimal language baseline or a named target profile. It fills
-common application gaps with concrete declaration shapes. Nothing here is
-canonical, implemented, or made compilable by its spelling, and the inventory
-is not mandatory for language conformance. Feature-specific runtime
-dependencies remain explicit when used; a missing facility does not weaken
-semantics or trigger an implicit fallback. Any cold/single-shot task example
-below is not the accepted async function-call model; task lifecycle remains a
-separate library proposal. The accepted [async execution direction](../language.md#storage-concurrency-entry-and-boundaries)
-does not select concurrent/parallel execution. Fields
-below are semantic public state, not frozen private layout or wire ABI.
+surface, not the minimal language baseline or a named target profile. It
+offers candidate declaration shapes; none is approved by its spelling, and
+the inventory is not mandatory for language conformance. Feature-specific
+runtime dependencies remain explicit when used; a missing facility does not
+weaken semantics or trigger an implicit fallback. The task lifecycle proposed
+below does not change the accepted async function-call model. The accepted
+[async execution direction](../language.md#storage-concurrency-entry-and-boundaries)
+does not select concurrent/parallel execution. Fields below are semantic
+public state, not frozen private layout or wire ABI.
 
 ### Expected failures and error values
 
@@ -778,7 +829,7 @@ public nominal union Result<T, E>
 }
 ```
 
-`Domain`/`Value` identify a documented condition; numeric assignments/registry are open and should not be guessed from OS error constants. `Message` is optional owned immutable text, not a mandatory allocation or an implicit `ToString`; callers can handle codes without formatting. A failed Result is data, not an exception. `require` and thrown exceptions remain separate. Keep `T?`/`Option<T>` for absence, not error status. An output parameter remains useful where the established bool/out API is the compatibility contract.
+`Domain`/`Value` identify a documented condition; numeric assignments/registry are open and should not be guessed from OS error constants. `Message` is optional owned immutable text, not a mandatory allocation or an implicit `ToString`; callers can handle codes without formatting. A failed Result is data, not an exception. `require` and thrown exceptions remain separate. Keep `T?`/`Option<T>` for absence, not error status. A bool/out form remains an alternative where its contract explicitly specifies that result shape.
 
 ### Keyed collections (proposed baseline)
 
@@ -879,7 +930,13 @@ The accepted execution model starts an async function inline when called and con
 
 The `TaskScope`, `Start`, capture, task-handle disposal and outcome APIs shown here remain a separate library proposal, not an adopted lifecycle contract. Their cold-task behavior in particular does not describe or override the accepted async function-call model. Repeated observation, responsibility ownership, cancellation and retained dependencies still require coherent exact API contracts. Any cross-thread scheduling requires every captured value to satisfy explicit transfer/share and lifetime contracts; arbitrary thread-confined captures cannot be sent to a worker. `Task<T>` is not automatically `[ThreadShareable]`, and no ambient scheduler can waive these checks. Dropping a handle is never cancellation. `CancellationSource` uniquely controls a shared request; its token is a non-owning view and may not be default-fabricated. Requesting cancellation is an idempotent, monotonic, cooperative signal; it does not forcibly stop an operation or end borrowed-buffer, receiver, or owner dependencies before the operation stops and cleans up. Cross-thread request/observation guarantees remain a memory/runtime contract to specify.
 
-`GetAwaiter` and result observation signatures are proposed only; exact `await` integration, task-state synchronization, error aggregation in `JoinAsync`, executor selection and task result borrowing rules require review. Captured borrows cannot outlive their declared backing lifetime. The accepted no-implicit-caller-executor-capture direction and declared affinity rules do not settle how this draft's task/scope API realizes scheduling; a general executor contract and callback effects remain specification work.
+`GetAwaiter` and result observation signatures are **PROPOSED**; exact `await`
+integration, task-state synchronization, error aggregation in `JoinAsync`,
+executor selection and task result borrowing rules remain open. Captured
+borrows cannot outlive their declared backing lifetime. The accepted
+no-implicit-caller-executor-capture direction and declared affinity rules do
+not settle how this draft's task/scope API realizes scheduling; a general
+executor contract and callback effects remain open.
 
 ### Time values and clock capabilities
 

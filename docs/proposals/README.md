@@ -1,18 +1,21 @@
-# Terrum working proposals
+# Terrum specification proposals
 
-These are review drafts, **not accepted specifications or claims of compiler
-support**. Individual decisions explicitly marked accepted in the drafts retain
-their status, but that does not approve each surrounding proposal. The format,
-syntax, API shapes and examples may change before v1.
+These documents are proposals, not approved specifications or claims of
+implementation. An **accepted direction** records a settled semantic boundary;
+it does not approve adjacent grammar or API forms. **Proposed** examples are
+illustrative and may change before v1.
 
-- [Grammar working draft](terrum-grammar-spec.md) distinguishes a historical
-  parser snapshot, accepted direction and proposed syntax.
-- [IL and metadata working draft](terrum-il-metadata-spec.md) explores a future
-  `TRRM` representation; its revision-32 appendix describes historical bytes,
-  not the current highest semantic revision or a compatibility commitment.
-- [Core-library signature reference](terrum-core-library-reference.md) inventories
-  proposed declarations and dependency layers, not implemented library APIs.
+- [Grammar proposal](terrum-grammar-spec.md) defines notation, accepted
+  semantic direction, candidate productions and unresolved grammar.
+- [IL and metadata proposal](terrum-il-metadata-spec.md) explores a proposed
+  representation and metadata contract; implementation history and support
+  are documented in [implementation](../implementation.md).
+- [Core-library proposal](terrum-core-library-reference.md) records candidate
+  declarations, dependency layers and unresolved API contracts.
 
-For accepted language direction and actual current support, use
-[language](../language.md), [roadmap](../roadmap.md),
-[implementation](../implementation.md) and [self-host components](../../self-host/README.md).
+Canonical language and library direction is described in
+[language](../language.md), [libraries](../libraries.md),
+[memory model](../memory-model.md), and [roadmap](../roadmap.md).
+Implementation history and support boundaries remain in
+[implementation](../implementation.md) and
+[self-host components](../../self-host/README.md).

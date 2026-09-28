@@ -1,39 +1,40 @@
-# Terrum grammar specification draft
+# Terrum grammar proposal
 
 > [!IMPORTANT]
-> Proposal-only working reference, not an accepted grammar or a statement of
-> current parser support. Consult [current implementation](../implementation.md)
-> and [language direction](../language.md) before implementing a production.
+> Proposal only: this document is not an approved grammar or a claim of
+> implementation. Accepted semantic direction does not approve the candidate
+> productions below.
 
-**Status: historical parser snapshot and provisional grammar/design reference.** Parser tables and examples record the historical syntax-19 baseline, not a claim about the current branch. The standalone discard migration is verified and implemented in syntax-20/scanner-5/schema-5; wildcard patterns, lambda placeholders and generic type holes remain unsupported. Preserve syntax-19 details only as historical reference. The document distinguishes (A) that parser snapshot, (B) accepted language shapes whose parser/binder support may be incomplete, and (C) productions still requiring exact specification. Where coherent implementation work needs details from this draft, use its concrete working designs provisionally, subject to retrospective correction before v1. This does not imply parser support, blanket approval of every production, or a stability promise; examples remain labeled by status. The canonical lexical contract remains `docs/lexical-grammar.md`; semantic direction and implementation limits remain in `docs/language.md`, `docs/conversions.md`, and `docs/implementation.md`. This companion does not turn an illustrative BCL signature into compilable source.
+This proposal covers source notation, candidate syntax, and selected semantic
+constraints. It is not a complete or approved language specification; exact
+grammar and several semantic contracts remain open. Examples are informative
+unless explicitly identified as accepted semantic direction.
 
-The authoritative language direction is in [language](../language.md); the
-accepted specification organization and IL purpose are summarized in the
-[roadmap](../roadmap.md#language-semantic-il-and-metadata-specification),
-and library/runtime layering in
-[libraries](../libraries.md#dependency-layers-and-package-boundaries).
-The [semantic IL/metadata](terrum-il-metadata-spec.md) and
+The [language](../language.md), [memory model](../memory-model.md),
+[conversions](../conversions.md), [lifetimes](../lifetimes.md), and
+[libraries](../libraries.md) documents define the related accepted semantic
+direction. The [semantic IL/metadata](terrum-il-metadata-spec.md) and
 [core-library reference](terrum-core-library-reference.md) are separate
-technical drafts, not grammar authority; cross-references do not adopt their
-detailed proposals.
+proposals; cross-references do not adopt their candidate forms.
 
-## 1. Notation and authority
+## 1. Scope, status, and notation
 
-The notation below is EBNF-like: `{ X }` means zero or more, `[ X ]` means optional, `|` means alternative, terminals are in quotes, and named lexical tokens such as `Identifier` are supplied by the lexer. Productions marked **PARSER** describe what the historical `syntax-19` `Parser.cs` snapshot builds, including constructs that its binder may reject; they do not assert the current branch's parser state. Productions marked **DIRECTION** summarize accepted language intent but are not claims of parser support. Productions marked **PROPOSAL** are candidate productions, not final normative grammar; where needed, they may guide provisional implementation under the roadmap direction and remain correctable before v1.
+The notation is EBNF-like: `{ X }` means zero or more, `[ X ]` means
+optional, `|` means alternative, terminals are in quotes, and named lexical
+tokens such as `Identifier` are supplied by the lexer. A production labeled
+**PROPOSED** is a candidate, not normative grammar. **ACCEPTED DIRECTION** identifies a semantic constraint that is normative in
+the canonical language references; it does not approve the syntax used to
+illustrate it. **OPEN**
+marks a decision not made by this proposal. Examples are informative and
+conformance cannot be inferred from matching an example.
 
-**Accepted specification organization:** Terrum has one evolving language
-specification, organized into syntax, types, static-semantics and execution
-chapters. It distinguishes intended rules, actual implementation coverage and
-unresolved proposals. The specification is authoritative for current intent,
-not frozen forever; intentional pre-v1 changes, including breaks, remain
-possible and should become less frequent as the design solidifies. This does
-not require independently versioned chapters or add a perpetual compatibility
-promise. Existing implemented compatibility behavior and explicit migration
-requirements remain unchanged. This grammar draft is the syntax-focused
-working chapter/reference; its PARSER, DIRECTION and PROPOSAL labels keep
-syntax support distinct from intended semantics and unresolved choices.
+The proposal uses three distinct kinds of statement: accepted semantic
+constraints, candidate source forms, and unresolved choices. It makes no
+compatibility promise or implementation claim.
 
-This is a bounded source-language profile, not a complete grammar for all advertised keywords. The presence of a keyword or token does not establish a production. Parser recovery can synthesize missing tokens and preserve skipped syntax; recovery trees are not conforming programs.
+This is a bounded source-language proposal, not a complete grammar for all
+language features. A lexical token does not by itself establish a production.
+Recovery syntax is not a conforming source form.
 
 **Documentation-comment direction (accepted source form, detailed grammar
 open):** attach `///` documentation to declarations, with `/** ... */` as an
@@ -48,12 +49,13 @@ documentation artifact and do not create executable contracts; effects,
 ownership, lifetime, output and failure guarantees come from checked
 declaration metadata. Exact Markdown tokenization/escaping, complex generic
 and overload reference grammar, XML schema, member IDs, inheritance and
-packaging remain work. Normal extraction does not execute embedded code or
-fetch remote includes. This direction does not imply current parser support.
+packaging remain work. Normal extraction does not execute embedded code or fetch remote includes.
 
-## 2. Lexical contract (PARSER)
+## 2. Lexical notation
 
-Lexing is specified in full by `docs/lexical-grammar.md` in the repository; this historical parser draft is a separate proposal. Key syntax-boundary facts:
+The lexical contract is specified in the canonical
+[lexical grammar](../lexical-grammar.md). The following summarizes relevant
+syntax boundaries:
 
 - Source positions and token lengths count UTF-16 code units. Identifier starts/continues follow the pinned Unicode 17.0.0 XID properties plus `_`; spelling is ordinal, case-sensitive, and not normalized. Keywords are lower-case ASCII token spellings. Primitive names such as `int32` are ordinary identifiers.
 - Whitespace and comments are leading trivia; line breaks include CRLF, CR, LF, NEL, LS, PS. Line/block comments do not nest. EOF owns trailing trivia.
@@ -86,11 +88,15 @@ Trivia           = whitespace | line-comment | non-nesting-block-comment ;
 
 `StringCharacter` excludes an unescaped quote, backslash, or line break; `\U` must decode to a Unicode scalar. Separators may repeat between digits and after a based prefix, but not at the end of a run or beside a decimal point/exponent marker/sign. The lexical reference defines malformed-token recovery and exact diagnostics.
 
-`Number` is one token: unary `-` is parsed as an operator, not part of the number. Consequently, the parser accepts decimal, hex, and binary token shapes, but numeric target selection/range and the lack of a default type are semantic rules (see `docs/conversions.md`).
+`Number` is one token: unary `-` is an operator, not part of the number.
+Numeric target selection/range and the lack of a default type are semantic
+rules (see [conversions](../conversions.md)).
 
-## 3. Historical parser snapshot (`syntax-19`)
+## 3. Candidate grammar productions (PROPOSED)
 
-The productions in this section follow `sources/Terrum.CodeAnalysis/Syntax/Parser.cs`. `Identifier` means one lexical identifier token; dotted names are written explicitly. Semantic restrictions are called out separately below.
+The productions below are candidates, not an adopted grammar. `Identifier`
+means one lexical identifier token; dotted names are written explicitly.
+Semantic constraints are stated separately.
 
 ### 3.1 Source-file structure and declarations
 
@@ -131,7 +137,10 @@ OperatorSymbol    = "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^"
                   | "==" | "!=" | "<" | "<=" | ">" | ">=" ;
 ```
 
-Actual parser permissiveness differs from a polished grammar in a few intentional ways: it accepts repeated/arbitrary modifier tokens and reports semantic/shape errors later; it accepts attributes only in the parameterless `[Name]` shape; it parses a class without a conformance clause (only structs have the `: Type, ...` production here); and a parsed interface has a mandatory type-parameter list, with no interface base list in this grammar. A field is parsed only inside a class/struct and cannot have declared type parameters. A constructor is recognized only in a class/struct body by matching its name to that containing type. Interface members do not use a containing-type context and therefore have no constructor/field form here. `SkippedSyntax` is parser recovery, not a valid declaration production. The file grammar permits at most one file-scoped namespace and requires it after usings and before declarations; ordering violations diagnose. Nested type declarations are parsed recursively. Implemented syntax is not equivalent to implemented semantics: for example, struct/class attributes may parse but can still be rejected by binding.
+This candidate requires a single file-scoped namespace after using directives
+and before declarations. Fields and constructors occur in class/struct bodies;
+interface members do not include fields or constructors. These are proposed
+grammar boundaries, not implementation facts.
 
 ### 3.2 Types, parameters, and arguments
 
@@ -147,9 +156,17 @@ Argument        = [ Identifier, ":" ],
                   ( "out", "var", Identifier | [ PassingMode ], Expression ) ;
 ```
 
-The parser reports a repeated `?` on the same source type (`TRM1005`); it does not parse repeated optional markers as valid grammar. Optional normalization such as `T?` with an already-optional substitution is a semantic/type-system rule, distinct from spelling `T??`. `write` is the only type-prefix qualifier parsed here; `mut` in a parameter is a passing mode (`mut ref`), not a type argument. Since `ref` and `own` are reserved tokens rather than identifiers, their canonical `ref<T>` and `own<T>` spellings are not type names accepted by this parser, despite being accepted design forms. Do not read the grammar as granting a particular lifetime, write authority, representation conversion, or generic variance.
+Repeated optional markers such as `T??` are not a proposed source form.
+Optional normalization such as `T?` with an already-optional substitution is a
+separate semantic rule. In these productions, `mut` in a parameter is a
+passing mode (`mut ref`), not a type argument. Grammar does not itself grant a
+particular lifetime, write authority, representation conversion, or generic
+variance.
 
-Argument labels and passing modes parse, but argument reordering, overload resolution, and output behavior are binder contracts. The current bounded bool/out forms are implemented only in the documented profile. The design spelling `init ref<T>` is not recognized by this `Type` production (both `init` and `ref` prevent it from matching the current type shape) and is not represented by `PassingMode`. The accepted call-site spelling is `Create(init value)`; parser/binder support and coordinated migration remain pending.
+Argument labels and passing modes are source forms only; argument reordering,
+overload resolution, and output behavior are semantic contracts. The proposed
+`Type` production does not define `init ref<T>`; `init` is a distinct argument
+mode with the accepted call-site spelling `Create(init value)`.
 
 ### 3.3 Statements and local declarations
 
@@ -179,11 +196,20 @@ ExpressionStatement = Expression, ";" ;
 ExpressionStatementNoSemi = Expression, [ "=", Expression ] ;
 ```
 
-`for` initializer and iterator use specialized no-semicolon parsing; the iterator can be an expression or one `=` assignment. Local declarations require an initializer. Blocks are required after `if`, `while`, `for`, `try`, `catch`, `finally`, and `unsafe`; a single unbraced statement is not the parser form. `catch` has no exception type or binding syntax. Assignment is a statement-level form, not a general right-associative expression. Parser recovery around a missing token/block is not an alternate accepted syntax.
+`for` initializers and iterators omit their internal semicolon; an iterator
+may be an expression or one `=` assignment. Local declarations require an
+initializer. Blocks are required after `if`, `while`, `for`, `try`, `catch`,
+`finally`, and `unsafe`; a single unbraced statement is not part of this
+candidate. `catch` has no exception type or binding syntax. Assignment is a
+statement-level form, not a general right-associative expression. Recovery
+forms are not alternate accepted syntax.
 
 ### 3.4 Expressions and precedence
 
-The parser handles unary and binary operators with precedence climbing. All binary operators are left-associative in the resulting parse tree (the recursive right operand uses the current precedence, so equal-precedence operators return to the outer loop). Calls/member/index postfixes bind inside a primary expression. `is null` and `is some name` are parsed at equality precedence. The precise parser table, highest first:
+The candidate grammar makes binary operators left-associative. Calls,
+member-access and index postfixes bind within a primary expression. `is null`
+and `is some name` have equality precedence. The proposed precedence table,
+highest first:
 
 | Level | Syntax | Associativity |
 |---:|---|---|
@@ -198,7 +224,10 @@ The parser handles unary and binary operators with precedence climbing. All bina
 | 2 | `&&` | left |
 | 1 | `||` | left |
 
-There is deliberately no level 8 operator in `Parser.cs`. Comparisons chain syntactically (`a < b < c`) and require semantic checking; the grammar does not imply C-style chained-comparison meaning. `is some` consumes the contextual identifier `some` followed by one identifier naming the bound value, e.g. `maybe is some value`; `is` and `some` are identifiers in the lexer and contextual in this parser branch.
+Comparisons may chain syntactically (`a < b < c`) and require semantic
+checking; the grammar does not imply chained-comparison meaning. In
+`is some`, `some` is contextual and is followed by an identifier naming the
+bound value, e.g. `maybe is some value`.
 
 ```ebnf
 Expression      = LogicalOr ;
@@ -221,53 +250,113 @@ Primary         = "(", [ Expression ], ")" | "new", Type, Arguments
 TypeArguments   = "<", Type, { ",", Type }, ">" ;
 ```
 
-For precision, the generic-call alternative is parsed only after a simple identifier and only when lookahead finds a balanced generic argument list immediately followed by `(`. This is explicit generic function-call syntax, not a general expression type-application operator. It does not express partial holes (`_`), static type methods, constructor-specific generic parameters/inference, or type packs. The parser has no conditional `?:`, null-coalescing, lambda, tuple, range, `await`, `throw`, type-test, prefix-cast, or general assignment-expression production. `CastExpression` exists as a syntax-node kind but `ParseExpression` does not produce it. `T(expression)` is parsed as an ordinary invocation/type-call-shaped expression; its numeric checked-conversion interpretation is semantic and bounded.
+The generic-call alternative is explicit function-call syntax, not a general
+expression type-application operator. It does not express partial holes (`_`),
+static type methods, constructor-specific generic parameters/inference, or
+type packs. The proposed productions do not define conditional `?:`,
+null-coalescing, lambda, tuple, range, `await`, `throw`, type-test,
+prefix-cast, or general assignment expressions. `T(expression)` is an
+ordinary type-call-shaped expression; its checked-conversion interpretation
+is semantic.
 
-## 4. Implemented parser versus executable semantic subset
+## 4. Accepted language direction
 
-"Parses" below means syntax-tree shape in the recorded syntax-19 snapshot only; it does not mean every program runs or describe current-branch support. The then-current binder/native executable profile was narrower than that parser snapshot.
+These accepted semantic constraints do not approve the proposed source forms
+or claim an implementation.
 
-| Surface | Historical parser (`syntax-19`) | Bounded executable status at that snapshot |
-|---|---|---|
-| Decimal/hex/binary integer tokens, strings, bool/null | Parsed literals | Contextual decimal/hex/binary integers and booleans in supported places; null is limited to supported managed-handle contexts. String tokens parse but registered string-target execution is unsupported. No fallback numeric type; fractions/exponents, character literals, suffixes/custom literal parsers are not executable. |
-| `T(value)` | Ordinary call syntax | Checked numeric conversions implemented for `int32`, `uint32`, `int64`, `uint64`, `char16`; target-selected literals parse directly. Not a prefix cast or general user conversion. |
-| `ptr<T>`, `box<T>`, `val<T>`, `write T?` | Parsed as identifier/generic/qualifier shapes | Language direction documented; supported source subset varies. No assumption that parser acceptance implements arbitrary refs, raw pointers, owners or conversion. |
-| `ref<T>`, `own<T>` | Not parsed as type names (`ref`/`own` are keyword tokens; `ParseType` accepts `write`, `void`, or identifier) | Accepted representation direction is not parser support; use is restricted to separately implemented/declared surfaces. |
-| `mut` declarations and `mut ref` parameters/arguments | Parsed | Local rebinding, mutable nominal declarations, mutable receiver rules and ref/out behavior are bounded; `mut` is not a generic referent qualifier. |
-| `where T : IFoo` and property forms like `where T : [Copy]` | Function constraints parse; interfaces/types parse | Generic operators and selected Copy-constrained function templates are implemented in a restricted profile. General witness, generic class/interface and method support is not implied. |
-| Function declarations with duplicate names / source overload candidates | Parsed as ordinary declarations | Source-time overload binding is accepted language direction but general selection is not implemented; duplicate ordinary overloads currently diagnose (`TRM3003`). The selected declaration is fixed before IL/JIT/runtime execution. |
-| `operator` declarations and expression operators | Parsed | Static operator protocol is compilation-local and restricted; this does not implement general function overload selection. |
-| `is null`, `is some name` | Parsed | Managed-handle null/some tests supported only for bounded managed forms. |
-| `try/catch/finally`, `unsafe`, `require` | Parsed | Checked failure policy and recovery are profile-scoped; general exception construction/ABI, arbitrary catch types and caller-unsafe declarations are absent. |
-| `using`, file namespace, nested class/struct/interface | Parsed | Visibility, modules, full import/name resolution, attributes, declaration kinds and ABI promises have additional semantic checks. |
+- **Access, borrowing, and output state:** canonical forms include `ref<T>`,
+  `ptr<T>`, `box<T>`, `val<T>`, `own<T>` and `write`. `mut` qualifies a place,
+  nominal declaration or receiver; here `mut ref` is a passing mode, not a
+  generic type qualifier. Access and receiver rules follow [language types and
+  operations](../language.md#types-and-operations); readonly access does not
+  upgrade to writable access. `implicit ref<T>` follows the [parameter-only
+  loan contract](../lifetimes.md#parameter-only-implicit-readonly-loans); it
+  adds no noescape rule or permission to widen declared dependencies.
+  Conditional outputs follow [declaration postconditions](../language-contract-review.md#2-outcome-initialization-and-nullability-are-separate):
+  `ensure` is an ordinary Boolean postcondition, live/nullable-live/vacant
+  states remain distinct, and vacant storage is never read. Exact `ensure`
+  placement and metadata remain open (see [§5.8](#58-postcondition-syntax-for-conditional-output-state)).
+  `init ref<T>` means
+  vacant-storage initialization, distinct from ordinary `ref`/`write ref` and
+  `out`; `Create(init value)` is the accepted call-site spelling, with exact
+  grammar and output metadata still open.
+- **Generic type checking:** explicit parameters, constraints and static
+  operator protocols are accepted direction; associated types and family
+  membership follow [type-family contracts](../type-families.md#explicit-families)
+  and [associated relationships](../type-families.md#nominal-witnesses-and-associated-relationships).
+  Optional projection is non-injective and semantically idempotent, but
+  repeated source `T??` is not proposed syntax. Inference, partial holes,
+  generic methods/classes/constructors, and exact associated-type grammar
+  remain open; type packs are out of scope.
+- **Functions and overloads:** overload selection is source-time and fixes the
+  selected declaration and closed type arguments; runtime virtual/interface
+  dispatch is separate. Applicability and ranking follow [callable and
+  `params` rules](../language.md#callable-values-params-and-tuples): only
+  declared projections/attenuations apply, no implicit numeric/conversion-chain
+  search is performed, constraints do not create overloads, return type is not
+  a tie-breaker, and applicable members outrank extensions. By-value `T` beats
+  `implicit ref<T>` when both apply; fixed arity beats an equally good expanded
+  `params` candidate. Exact grammar, diagnostics and extension disambiguation
+  remain open.
+- **Types and declarations:** type/declaration semantics follow [language
+  interfaces and generic properties](../language.md#interfaces-access-and-generic-properties).
+  Lexical recognition of `enum`, `union`, `async`, `await`, `switch`, `case`,
+  `foreach`, `throw`, `own` or `unique` does not itself define a declaration or
+  statement production.
+- **Adapters, families, and protocols:** conformance, adapters, associated
+  projections and family erasure follow [type-family contracts](../type-families.md#nominal-witnesses-and-associated-relationships).
+  Conformance and projections are explicit and checked; imports, matching
+  members, or equal representation do not create them. Adapters do not change
+  the original witness set; ABI-transparent wrappers are distinct from
+  adapters. No universal `Type<T>`-to-`Type<void>` erasure, inferred covariance,
+  or equality/hash/formatting root is implied. Exact source forms, forwarding,
+  metadata, projection eligibility and readonly-view backing/lifetime/cost
+  remain open.
+- **Layout and interop:** `Auto` leaves fields private/unfixed; `Sequential`
+  follows declaration order; `Union` overlays at offset zero and requires
+  `Blittable`. `Transparent` is exactly one carrier field; `Blittable` fixes
+  per-profile size/alignment/offsets; `Transparent` commits to its carrier's
+  representation and direct call classification. Public fields require fixed `Blittable`
+  representation. Declared overlap is available only with `Union`; alternative
+  access is unsafe, with no active-member tracking or safe typed-overlap form.
+  Unsafe pointer aliasing is separate. Safe tagged sums require tag checks
+  that preserve validity, ownership, roots and cleanup; they do not authorize
+  raw reinterpretation. Padding is uninitialized. Published
+  language/layout/access/ownership/effect contracts are binary-replacement
+  commitments, distinct from foreign ABI and serialization; incompatible
+  changes break, while compatible extensions or stronger guarantees are not
+  inherently breaking. No global bool/reference/SIMD wire format is selected.
+  Unfrozen layout-dependent values cross only layout-coupled
+  compile/rebuild/invalidation boundaries; JIT/AOT labels alone do not
+  establish coupling. Power-of-two member packing and aggregate over-alignment
+  are separate and may combine. Raw object-byte blits and unmediated foreign
+  transfers are unsafe; serializers account for emitted bytes, and verified/
+  trusted raw copying requires a covering contract. See [layout
+  definitions](../data-layout-and-abi.md#definitions), [fixed
+  representations](../data-layout-and-abi.md#fixed-directly-interoperable-representations),
+  [packing/alignment](../data-layout-and-abi.md#packing-and-aggregate-alignment),
+  and [overlap safety](../memory-model.md#overlap-representation-access-and-unions).
+  Exact syntax and profile limits remain open.
+- **Text and numeric forms:** [conversion policies](../conversions.md#conversion-policies)
+  define numeric behavior and [character intent](../conversions.md#character-intent)
+  defines character forms. There are no width suffixes or default numeric type;
+  `T(expression)` is a checked conversion, literals are context-typed, and
+  numeric operators are checked by default. Floating APIs are target-specific;
+  character literals and custom literal registration remain proposed, floating
+  forms may lex but are not executable values, and `utf8z("...")` is an
+  ordinary call rather than a lexer prefix.
 
-Do not copy future library examples into the historical `syntax-19` executable subset. The core-library companion may propose declarations beyond that parser; a reference API shape is not proof that its syntax compiles or that its runtime contract exists.
+## 5. Open grammar and semantic choices
 
-## 5. Accepted language direction without complete parser/binder support
-
-These are established semantic directions, but their presence here does not declare complete source grammar or execution:
-
-- **Access and representation:** canonical forms include `ref<T>`, `ptr<T>`, `box<T>`, `val<T>`, `own<T>` and `write` access. `mut` applies to a place, nominal declaration, or receiver: a `mut class C` declares mutable nominal storage, while instance receivers are readonly by default and a `mut` method requires a writable receiver. `write` qualifies access through a reference/view and grants no authority absent from the source; readonly access never upgrades, and write-to-readonly attenuation is constrained and not recursive. `implicit ref<T>` is ordinary readonly-reference behavior, including eligible existing places or a hidden local initialized at the argument's evaluation point in the current enclosing lexical scope. It adds no special noescape rule or permission to widen existing dependencies. For conditional outputs, postconditions use `ensure <expr>` with an ordinary Boolean expression and ordinary pattern/short-circuit behavior; legal value predicates imply initialization, while body/path analysis must establish legal reads and never inspect vacant storage to discover falsity. Live complete `T`, initialized nullable value (including null), and uninitialized storage are distinct. A caller may keep a checked relation to the status discriminator, but cannot access/clean up a vacant arm or receive an undiscriminated maybe-live owner. Exact `ensure` placement/grammar and metadata remain work. `init ref<T>` denotes vacant-storage initialization; the accepted call-site spelling is `Create(init value)`, while parser/binder support and coordinated migration remain pending.
-- **Generic type checking:** explicit type parameters, constraints and static operator protocols have an implemented bounded subset. Generic inference and partial holes, general methods/classes/constructors, and associated-type grammar/binding are not generally supported. Associated-type relationships themselves are accepted direction; only their exact source productions remain open. Optional projection is non-injective; `T?` is normalized/idempotent semantically, while repeated source `??` is rejected.
-- **Functions and overloads:** same-name declarations form source-time overload candidates; source binding selects and records one declaration and closed generic arguments. Linkers/JITs implement that binding rather than rerunning source overload resolution; runtime virtual/interface dispatch is separate. Exact matches precede only previously permitted, declared projections/erasures; there is no implicit numeric or general type-conversion search. Permitted access/qualification weakening may participate in matching, but no new projection, family erasure or reverse direction is inferred. Constraints filter applicability but do not create overloads, return-only overloads are excluded, applicable members beat extensions, and a by-value `T` beats `implicit ref<T>` when both apply to ordinary `F(value)`. A source literal can therefore become ambiguous when distinct numeric parameter overloads are added, while an already-bound caller retains its recorded target. These accepted semantic invariants do not mean the syntax-19 baseline binder supported ordinary overload sets: exact declaration/call grammar, full ranking, and extension-disambiguation spellings remain review work. `implicit ref<T>` was not parsed as a parameter modifier in that snapshot; see the implementation document for current coverage.
-- **Types/declarations:** ordinary `struct`/`class` semantics, unique forms, enum/union design, attributes, visibility and layout have varying design/implementation limits. Keywords such as `enum`, `union`, `async`, `await`, `switch`, `case`, `foreach`, `throw`, `own` and `unique` being lexed do not themselves supply declaration/statement productions.
-- **Adapters, families and operation protocols:** ordinary implementations are declared by their type; imports do not add retroactive global conformance. Explicit nominal adapters may add extension-interface behavior without changing the original witness set; ABI-transparent wrappers are distinct. Families opt in explicitly and declare checked associated projections/constraints; there is no universal `Type<T>`-to-`Type<void>` erasure or inferred covariance. No universal root is introduced merely for equality, hashing or formatting; use operation-specific witnesses/interfaces and explicit adapters. Exact adapter/family syntax, forwarding, metadata and projection eligibility remain specification work, including any explicit readonly array views and their representation, validity, backing, lifetime and cost checks.
-- **Layout and interop direction (accepted semantics, grammar/spec work open):** `Auto` is the default with private fields; `Sequential` follows declaration order; `Union` gives every field offset zero and requires the fixed `Blittable` commitment; neither kind freezes representation across versions. Declared overlapping field storage is available only through explicit `Union` layout; access to overlapping alternatives is unsafe, with no active-member tracking or safe typed-overlap subset. This does not prohibit unsafe pointer-based aliasing/reinterpretation or compiler-private overlapping representations. A safe non-Blittable tagged/sum type is separate: case/tag checks must preserve ordinary validity, ownership, roots and cleanup, never grant raw reinterpretation; its grammar and representation remain open. Public field access requires fixed `Blittable` representation. Published language-level signatures and their layout/access/ownership/effect contracts are binary compatibility commitments without necessarily being foreign-interoperability promises; incompatible changes break replacement, while contract-preserving implementation changes and compatible extensions or stronger guarantees are not automatically breaking. This language/module contract is distinct from foreign ABI and serialization. Define additional serialization/callback/interchange encodings for concrete protocols as needed; no global bool/reference/SIMD wire format is selected. Unfrozen fields stay private; fixed representation may expose fields without changing ordinary readonly/`mut` access rules. `Transparent` is exactly one field with the carrier representation and argument/result ABI, inheriting the carrier and rejecting custom packing/alignment. `Blittable` is the accepted target-specific fixed/direct-interoperability contract over size, alignment, offsets and transitively compatible fields; ordinary `ref<T>` is excluded and `ptr<T>` may qualify under pointer-safety rules. A kind alone does not freeze; only `Blittable` freezes the per-profile representation. Unfrozen layout-dependent values may cross only layout-coupled compile/rebuild/invalidation scopes, not independently replaceable dynamic boundaries; JIT/AOT labels alone do not decide coupling. Both power-of-two member packing and aggregate over-alignment are accepted and may combine; exact attribute/argument grammar, limits and metadata remain work. Padding is uninitialized after field initialization; raw object-byte blits and unmediated raw foreign transfers are unsafe. Serializers account for every emitted byte; verified/trusted raw copy is allowed under a covering contract. These are semantic directions only, not claims about the current branch or the historical `syntax-19` parser/compiler-support snapshot.
-- **Text/numeric intent:** no width suffixes or numeric fallback type; checked `T(expression)` numeric conversions and contextual integer literals are bounded support, and numeric operators are checked by default. Accepted conversion direction: checked integer conversions preserve value or throw; unchecked integer narrowing wraps to destination-width bits, while saturation is explicit. Floating-to-floating conversions follow IEEE-754 with nearest/ties-even default rounding and no language failures for inexactness, infinity, underflow or NaN. Float-to-integer truncates toward zero; checked range failure throws, unchecked or explicitly saturating conversion saturates rather than modulo-narrows, with NaN converting to zero. Floating support is target-only. Character literal notation and custom literal registration are design-only. Floating-point lexical forms are not executable. Encoded string targets such as `utf8z("...")` are ordinary target/call forms, not lexer prefixes, and are illustrative without target declarations.
-
-For reference, ownership, lifetime and conversion rules, use the canonical docs rather than deriving semantics from EBNF: `docs/language.md`, `docs/conversions.md`, `docs/lifetimes.md`, and `docs/references.md`.
-
-## 6. Open exact grammar decisions with recommendations
-
-Examples in this section are illustrative and do not claim parser support.
-Sections explicitly marked **accepted** record settled semantic direction;
-remaining grammar, metadata and implementation questions are stated separately.
+Examples in this section are informative. **Accepted direction** records
+settled semantic constraints; **PROPOSED** forms remain candidates and
+**OPEN** choices are unresolved.
 See the canonical [language direction](../language.md),
 [library layering](../libraries.md#dependency-layers-and-package-boundaries),
 and [specification roadmap](../roadmap.md#language-semantic-il-and-metadata-specification)
 for authoritative organization and semantic IL/reference boundaries.
 
-### 6.1 Initialization loans at call sites
+### 5.1 Initialization loans at call sites
 
 **Accepted target spelling:** use `init` as the call-site argument mode for an
 `init ref<T>` parameter, e.g. `Create(init value)`. It designates vacant
@@ -276,26 +365,39 @@ storage and is distinct from ordinary `ref`/`write ref` access and legacy
 through the initialization loan.
 
 ```terrum
-// Accepted target call spelling; parser/binder migration is pending:
+// Accepted semantic direction; candidate grammar form:
 Create(init value);
 ```
 
-This does not silently migrate existing `out` calls or select every production
-for labels, places, overload binding, or conditional output contracts. Keep
-the bounded `bool`/`out` implementation unchanged until declarations and call
-sites migrate coherently. The migration and verifier/metadata work are
-separate from this spelling decision; do not introduce an extra transactional
-publication protocol.
+This does not define migration from `out` or settle productions for labels,
+places, overload binding, or conditional output contracts. It does not
+introduce an extra transactional publication protocol.
 
-### 6.2 Exact overload grammar, ranking, and disambiguation
+### 5.2 Exact overload grammar, ranking, and disambiguation
 
-**Accepted semantics, not open for reconsideration:** ordinary same-name declarations form source-time candidates; binding selects one concrete declaration and closed generic arguments. That target is recorded for downstream validation and code generation. Linkers/JITs do not rerun overload resolution; runtime virtual/interface dispatch is a separate mechanism. A by-value `T` wins over `implicit ref<T>` for ordinary `F(value)` when both apply. Exact matches precede previously permitted, declared projections/erasures; there is no implicit numeric or general type-conversion search. Permitted access/qualification weakening may participate in matching (for example, `write Span<T>` to a readonly `Span<T>` parameter), but no new or reversed projection/erasure is inferred. Constraints filter applicability, not form constraint-only overloads. Return type alone does not distinguish overloads. Applicable members outrank extensions. These decisions are authoritative in [language](../language.md#callable-values-params-and-tuples), [conversions](../conversions.md#conversion-policies), and [type families](../type-families.md); overload grammar and ranking details remain specification work.
+**Accepted semantic direction:** ordinary same-name declarations form
+source-time candidates; binding selects one concrete declaration and closed
+generic arguments. That target is recorded for downstream validation and code
+generation. Linkers/JITs do not rerun overload resolution; runtime
+virtual/interface dispatch is a separate mechanism. A by-value `T` wins over
+`implicit ref<T>` for ordinary `F(value)` when both apply. Exact matches
+precede previously permitted, declared projections/erasures; there is no
+implicit numeric or general type-conversion search. Permitted
+access/qualification weakening may participate in matching (for example,
+`write Span<T>` to a readonly `Span<T>` parameter), but no new or reversed
+projection/erasure is inferred. Constraints filter applicability, not form
+constraint-only overloads. Return type alone does not distinguish overloads.
+Applicable members outrank extensions. These decisions are authoritative in
+[language](../language.md#callable-values-params-and-tuples),
+[conversions](../conversions.md#conversion-policies), and
+[type families](../type-families.md); exact overload grammar remains open.
 
-**Historical implementation boundary:** the syntax-19 parser snapshot admitted repeated function declarations with the same spelling, but its binder rejected ordinary overload groups (`TRM3003`). The semantic ranking below is accepted direction; source grammar, diagnostics, and binder/metadata implementation remain work. No new overload keyword is required by the accepted model.
+The declarations below illustrate accepted overload semantics; their exact
+source grammar and diagnostics remain open. No new overload keyword is
+required by this direction.
 
 ```terrum
-// Accepted overload model; the syntax-19 snapshot parsed these declaration shapes,
-// while its binder rejected this ordinary overload group.
+// Candidate declarations illustrating accepted overload semantics.
 int32 Parse(int32 value) { return value; }
 uint32 Parse(uint32 value) { return value; }
 
@@ -308,10 +410,10 @@ void ParseExample()
 
 The accepted `implicit ref<T>` form also participates, but a by-value match
 wins for ordinary `Inspect(item)` when both candidates apply. Its exact source
-parameter modifier is not yet parsed; the accepted illustration is:
+parameter modifier remains open:
 
 ```terrum
-// Accepted direction, but not part of the historical syntax-19 parser snapshot:
+// Candidate parameter form illustrating accepted overload semantics:
 int32 Inspect(Item value) { return 0; }
 int32 Inspect(implicit ref<Item> value) { return 1; }
 void InspectExample(Item item) { int32 selected = Inspect(item); }
@@ -332,13 +434,13 @@ but do not form constraint-only overloads. Source binding records the selected
 declaration and closed generic arguments; downstream tools do not rerun source
 overload resolution.
 
-**Specification work:** formalize the complete applicability and declared
+**Open:** formalize the complete applicability and declared
 specificity relation, interaction with generic inference and the accepted
 by-value/`implicit ref<T>`/`params` priorities, exact ambiguity diagnostics,
 extension-disambiguation spelling, and serialized binding metadata. This is
-accepted semantic direction, not current general binder support.
+accepted semantic direction, not an adopted grammar or complete contract.
 
-### 6.3 Caller-unsafe declarations and explicit unsafe blocks
+### 5.3 Caller-unsafe declarations and explicit unsafe blocks
 
 **Accepted target syntax:** `unsafe` on a callable declaration exposes its
 caller obligations, e.g. `unsafe void M()`. An ordinary `void M()` does not
@@ -348,7 +450,7 @@ an explicit `unsafe { ... }` block. A caller invoking the unsafe declaration
 must likewise satisfy the contract in an explicit unsafe block.
 
 ```terrum
-// Accepted target spelling; implementation support remains pending.
+// Candidate declaration form:
 unsafe uint32 LoadAligned(uint64 address)
 {
     unsafe { return 0; }
@@ -376,11 +478,10 @@ contract is checked; no extra trusted-implementation source marker is required. 
 default binary-trust model does not require downstream consumers to re-prove
 dependency bodies.
 
-Current parser/binder/runtime behavior remains bounded: unsafe recovery does
-not currently implement general caller obligations or authorize arbitrary
-unsafe operations. These target declarations do not claim compiler support.
+The exact declaration grammar and contract metadata remain open. The example
+does not claim compiler support.
 
-### 6.4 Associated types: accepted direction, open source grammar; type packs out of scope
+### 5.4 Associated types: accepted direction, open source grammar; type packs out of scope
 
 **Accepted semantic direction:** families opt in explicitly and declare
 checked associated projections and constraints. Existing explicit
@@ -395,19 +496,20 @@ original `T` backward from an associated result, choose an arbitrary
 implementer from a constraint, or silently resolve collisions; ambiguous
 witness/projection uses require explicit qualification.
 
-**Specification work:** formalize the interface/member, implementation
+**Open:** formalize the interface/member, implementation
 binding, projection, and associated-equality productions; witness selection,
 qualification and collision rules; and their metadata representation. Keep
 family opt-in and declared checked projections; do not introduce universal
 erasure or inferred covariance.
 
-**Source type packs are outside this task's scheduled scope.** No production or recommendation for variadic type parameters is made here; this is not a deferred implementation item in this grammar review.
+**Source type packs are outside this proposal's scope.** No production or
+recommendation for variadic type parameters is made here.
 
-### 6.5 Accepted temporary scope for `implicit ref<T>`
+### 5.5 Accepted temporary scope for `implicit ref<T>`
 
-For `Foo(5).Bar(); Baz();`, materialization is shorthand for initializing an ordinary hidden local at the argument's original evaluation point in the current enclosing lexical scope, then passing its readonly reference. The local is not hoisted to scope entry and does not create a shorter lifetime-only scope. If conditional or short-circuit control flow skips the argument, no local is initialized and there is no owner to clean up. Scope exit follows ordinary initialized/moved-state cleanup. A valid returned reference may be used by later statements in that scope, subject to ordinary declared dependencies; existing place/backing lifetimes are not widened and capture/suspension/escape permissions do not change. This is accepted semantic direction, not parser support. See the canonical [reference contract](../language-contract-review.md#1-one-call-and-reference-model) and [implicit-loan lifetime rules](../lifetimes.md#parameter-only-implicit-readonly-loans). General source/loan metadata and implementation remain scheduled.
+For `Foo(5).Bar(); Baz();`, materialization is shorthand for initializing an ordinary hidden local at the argument's original evaluation point in the current enclosing lexical scope, then passing its readonly reference. The local is not hoisted to scope entry and does not create a shorter lifetime-only scope. If conditional or short-circuit control flow skips the argument, no local is initialized and there is no owner to clean up. Scope exit follows ordinary initialized/moved-state cleanup. A valid returned reference may be used by later statements in that scope, subject to ordinary declared dependencies; existing place/backing lifetimes are not widened and capture/suspension/escape permissions do not change. See the canonical [reference contract](../language-contract-review.md#1-one-call-and-reference-model) and [implicit-loan lifetime rules](../lifetimes.md#parameter-only-implicit-readonly-loans). General source/loan metadata remain open.
 
-### 6.6 Reserved underscore and discard statement
+### 5.6 Reserved underscore and discard statement
 
 **Accepted target semantics:** `_` is reserved and is never an identifier.
 `_ = expression;` is the standalone discard statement: evaluate once, preserve
@@ -418,18 +520,8 @@ the matched value or alter argument evaluation/parameter mode. A possible
 generic type hole is another distinct nonbinding grammar role, not a named
 identifier and not approved by the discard decision.
 
-**Historical migration boundary:** the syntax-19 snapshot treated `_` as an
-ordinary identifier, so `_ = expression;` assigned to it when bound and
-mutable. In the verified syntax-20/scanner-5/schema-5 implementation, `_` is
-reserved and standalone `_ = expression;` evaluates once with ordinary
-ownership/cleanup. Other wildcard, lambda-placeholder and type-hole contexts
-remain unsupported; see the [implementation boundary](../implementation.md).
-
 ```terrum
-// Historical syntax-19 ordinary binding, not a discard:
-int32 Existing() { mut int32 _ = 1; _ = 2; return _; }
-
-// Implemented standalone discard in syntax-20/scanner-5/schema-5:
+// Accepted discard semantics; candidate source form:
 _ = MakeOwner(); // Evaluate once; clean the returned owner at statement end.
 _ = int32(42);   // The type call supplies the literal's target.
 ```
@@ -439,7 +531,7 @@ ordinary expression and statement cleanup rules; this does not force
 collection. Further statement-context details are grammar/specification work,
 not permission to alter the accepted nonbinding semantics.
 
-### 6.7 Unary operator contract direction (accepted; protocol mapping remains work)
+### 5.7 Unary operator contract direction (accepted; protocol mapping remains open)
 
 **Accepted direction:** ordinary unary `+`, `-`, `!` and `~` have
 one operand of the containing type `T` (or `T?`) and separate operand/result
@@ -447,8 +539,8 @@ types; `!` is not inherently bool-result. Return type alone does not
 distinguish overloads. Static `++` and `--` have operand-shaped results rather
 than arbitrary independent result types. No derived-result relation is adopted.
 `true` and `false` are another explicit exception: both must be declared
-together and return `bool`. These rules describe the intended unary contract
-shape, not implemented interfaces, exact protocol names, or compiler support.
+together and return `bool`. These rules describe the accepted unary contract shape, not the exact
+protocol names or source declarations.
 
 ```terrum
 // Conceptual signatures only; no interface names or source declarations selected:
@@ -470,19 +562,18 @@ constraints, conformance shape, dispatch metadata and source syntax remain
 specification work. Existing binary contracts are unchanged.
 
 C# 14 separately permits instance `++`/`--` and instance compound-assignment
-operators with `void` return to mutate a receiver. That mutable-instance form
-is not adopted here; it needs independent review and must not be inferred from
-the static operator direction.
+operators with `void` return to mutate a receiver. That form is not part of
+this proposal and must not be inferred from the static operator direction.
 
 **Official comparison sources:** [C# language specification, §15.10.2 Unary
 operators](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/classes#15102-unary-operators)
 for unary result relationships and the `true`/`false` pair; [C# operator
 overloading reference](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/operators/operator-overloading)
 for the separate C# 14 instance increment/decrement and compound-assignment
-forms. These sources inform only the explicitly accepted comparison above;
-they do not import C# inheritance, interface names, or implementation features.
+forms. These links are comparisons only; they do not specify Terrum
+inheritance, interface names, or runtime behavior.
 
-### 6.8 Postcondition syntax for conditional output state
+### 5.8 Postcondition syntax for conditional output state
 
 **Accepted semantics:** declaration postconditions are the normal authoring
 route for conditional output initialization facts, with an `ensure <expr>`
@@ -504,7 +595,7 @@ initialized on every normal return unless an explicit declaration postcondition
 specifies a conditional relationship. These defaults are not inferred from
 method names. Postconditions may state observable boundary facts, including
 relations to unchanged value inputs; such relations are behavioral guarantees,
-not optimizer-only hints. A historical relation could also state a genuine
+not optimizer-only hints. A relation to prior state could state a genuine
 behavioral obligation, but is deferred with state-history support; this does
 not imply that such contracts lack value. A clause may refer only to declarations visible at
 the method's effective accessibility and permitted by ordinary contract
@@ -526,13 +617,13 @@ ordinary failure/unwinding; completed body `finally` blocks are not rerun and
 body side effects are not rolled back. This does not add a separate output
 publication transaction.
 
-**Specification work:** exact `ensure` clause placement/grammar and the
+**Open:** exact `ensure` clause placement/grammar and the
 source-to-metadata mapping for correlated initialization facts. There is no
-special conditional postcondition block grammar. The bounded `bool`/`out` form
-remains executable until a coordinated migration. See the canonical
+special conditional postcondition block grammar. A `bool`/`out` form remains
+distinct from an `init ref<T>` contract. See the canonical
 [conditional output contract](../language-contract-review.md#2-outcome-initialization-and-nullability-are-separate).
 
-### 6.9 Static-proof floor and constant evaluation
+### 5.9 Static-proof floor and constant evaluation
 
 **Accepted policy, not parser-support claim:** required static obligations use
 a versioned portable minimum of proof rules/complexity and guaranteed
@@ -563,9 +654,9 @@ soundly redundant. A runtime alternative is unavailable for compile-time-only
 layout/type/metadata requirements and does not weaken structural lifetime or
 initialization safety. No example fixes the exact source spelling.
 
-### 6.10 Getter-only properties and accessor-local effects (accepted direction)
+### 5.10 Getter-only properties and accessor-local effects (accepted direction)
 
-**Accepted target direction, not parser/binder support:** this brief is limited
+**Accepted target direction:** this brief is limited
 to explicit getter-only, by-value properties on compact `Copy` structs and
 source classes. It does not adopt setters, auto-properties, ref-returning
 properties, or general property/accessor behavior.
@@ -575,7 +666,7 @@ is authored or where `[NoThrow]` attaches. An explicit body should make the
 getter an ordinary checked read-only callable member:
 
 ```terrum
-// Accepted target spelling direction; not supported by the recorded syntax-19 snapshot.
+// Candidate property form illustrating the accepted direction:
 struct Point
 {
     int32 _x;
@@ -602,9 +693,8 @@ expression-bodied property form is supported, `[get: Attr] public int32 Count
 => 5` is a possible attribute-target direction; this does not select
 expression-bodied property support or an alternate effect placement.
 
-An ordinary `[NoThrow] public int32 GetCount() { ... }` method is an alternative
-when the compiler profile lacks property support; it is not a property-effect
-placement option.
+An ordinary `[NoThrow] public int32 GetCount() { ... }` method is an
+alternative callable form; it is not a property-effect placement option.
 
 Treat the accessor as a named, source-bound
 callable member with a readonly receiver and by-value result. The property
@@ -613,42 +703,26 @@ do not infer a hidden `get_Name` function from a property name. A module may
 encode the accessor as a callable internally, but consumers bind the declared
 property/accessor identity and contract rather than a magic naming convention.
 
-**Historical implementation boundary:** the `syntax-19` `MemberDeclaration`
-production had fields, functions and other declaration forms but no property
-production. Its binder had no property-getter binding contract, and its bounded
-module contract had no declared property/accessor identity or property effect
-record. Check the implementation document for validated current-branch
-coverage; existing `{ get; }` documentation sketches do not establish parser,
-binder or module support.
+The exact property and accessor grammar, effect placement, and metadata
+representation remain open. This example does not claim compiler support.
 
-## 7. Conformance examples (checked against source and tests)
+## 6. Examples and conformance boundary
 
-This table records the syntax-19 parser snapshot, not current-branch coverage. “Parser yes” means that snapshot recognized the shape; it does not assert successful binding. Its lexical grammar and parser source were checked directly, with focused parser tests for representative statement/declaration forms. Additional parser CLI probes confirmed empty parentheses, `void<int32>`, `void?`, `_` as an ordinary generic type argument, field initializers, empty statements, and based-literal forms.
+Examples illustrate status and semantic rules; none independently defines
+grammar or establishes implementation support.
 
-| Example | Historical `syntax-19` parse | What that snapshot establishes |
-|---|---:|---|
-| `using A.B; namespace Demo.Core; int32 Main() { return 0; }` | Yes | File ordering and declaration shape; runtime entry semantics are separate. |
-| `struct Pair : ICopy { int32 First; }` | Yes | Struct conformance/field shape; witness and field-initialization checks are semantic. |
-| `int32 Add<T>(T x, T y) where T : [Copy] { return x + y; }` | Yes | Function generic/constraint syntax; eligibility/operator witness is profile-specific. |
-| `void F() { int32 x = int32(0x_FF); }` | Yes | Local declaration, invocation/type-call-shaped AST, and based literal token; checked conversion is only for listed targets. |
-| `void F(Span<int32> values) { for (mut int32 i = 0; i < 2; i = i + 1) { values[i] = i; } }` | Yes | Local/for/assignment/index syntax; type/effect validity still requires binding. |
-| `void F() { if (item is some value) { Use(value); } else { ; } }` | Yes | Contextual pattern-like syntax; only bounded managed optional handle binding is supported. |
-| `void F() { unsafe { try { require false; } catch { ; } finally { ; } } }` | Yes | Recovery/cleanup syntax; not general exception construction or arbitrary unsafe operations. |
-| `void F(int32?? value) {}` | No conforming type syntax | Repeated marker gets `TRM1005`; recovery may retain a tree, but it is invalid. |
-| `int32 F() { return (int32)1; }` | No | Prefix cast is not parsed; use a checked type-call where supported. |
-| `int32 F() { return -1i32; }` | No conforming executable literal | Attached numeric width suffix diagnoses lexically; negative sign is a separate token. |
-| `char32 F() { return 'x'; }` | No | Single-quoted character literals are not tokens. |
-| `init ref<int32> target; F(init target);` | No | The `init` call-site spelling is accepted direction, but this snapshot has no init-lending call form; parser/binder support and coordinated migration remain pending. |
-| `void F() { func<_, int32> f = Convert; }` | Yes, as type syntax | `_` is an ordinary identifier type argument, not a special generic/callable hole; the spelling gains no inference semantics. |
-| `void F() { return (); }` | Yes | Empty parentheses produce the parser's `VoidExpression`; semantic use still requires a valid void context. |
-| `void<int32> F() {}` / `void? F() {}` | Yes | `ParseType` permits generic and optional suffixes on `void`; semantic type validation is separate. |
-| `struct Holder { int32 Value = 1; }` | Yes | Field initializers are part of the parser grammar; type/constant restrictions are semantic. |
-| `void F() { ; }` | Yes | Empty statements parse. |
-| `void F() { int32 h = int32(0x_FF); uint32 b = uint32(0b_1010); }` | Yes | Both based-literal forms/separators and type-call-shaped invocations parse. |
-| `int32 Parse(int32 x) { return x; } uint32 Parse(uint32 x) { return x; }` | Parsed as declarations | The syntax parser accepts each function declaration; the syntax-19 binder rejected the ordinary overload group (`TRM3003`), while the accepted language direction requires source-time selection. |
+| Status | Example | Rule illustrated |
+|---|---|---|
+| Accepted direction | `Create(init value);` | `init` denotes vacant-storage initialization and is distinct from `out` or writable access. Exact source grammar and publication contracts remain open. |
+| Accepted direction | `int32 Parse(int32 x) { return x; }` and `uint32 Parse(uint32 x) { return x; }` | Same-name declarations are source-time overload candidates. `Parse(42)` is ambiguous when neither candidate is better; return type is not a tie-breaker. |
+| Accepted direction | `F(value)` with by-value `T` and `implicit ref<T>` candidates | The by-value match wins when both apply. |
+| Accepted direction | `_ = MakeOwner();` | Evaluate once, discard the result, and apply ordinary ownership and cleanup. |
+| Not a proposed form | `T??` | Repeated optional markers are not source syntax; optional normalization is a separate semantic rule. |
+| Open | `operator +(T operand) -> R;` | Illustrative operation contract; protocol names and declaration syntax are unresolved. |
 
-## 8. Parser recovery and conformance boundary
-
-The parser's `Expect` inserts zero-width missing tokens; `ParseExpression` can produce `MissingExpression`; declaration recovery preserves unknown tokens in `SkippedSyntax`. Nesting deeper than 128 emits `TRM1004` and preserves the token stream as skipped syntax. Parse diagnostics, lexical diagnostics, or any skipped/missing syntax make the source unsuitable as a conforming program even if a partial tree is returned. Lossless token/trivia preservation is an editor/compiler property, not permission to execute malformed source.
-
-The reliable authority for implemented support is the current lexer/parser/binder plus tests and `docs/lexical-grammar.md`/`docs/implementation.md`. This grammar is an organized review aid only. Any change to lexical spelling, an accepted production, precedence, associativity or recovery contract requires a separate explicit decision and corresponding conformance tests.
+An implementation conforms only to an adopted language specification and its
+specified lexical, grammatical, and static-semantic rules. A recovery tree or
+an example accepted in isolation is not evidence of conformance. Actual
+implementation and historical support details are maintained in the
+[implementation reference](../implementation.md); the lexical contract is in
+the [lexical grammar](../lexical-grammar.md).
