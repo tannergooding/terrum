@@ -89,6 +89,44 @@ public sealed class NativeMutableBufferViewTests
     }
 
     [Fact]
+    public async Task CheckedWriteArgumentFailurePreservesOwnerAndActiveViewAsync()
+    {
+        const string Source = """
+            int32 Overflow(int32 value) { return value + 1; }
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(3, out var created);
+                mut OwnedInt32Buffer buffer = move created;
+                require buffer.TryAppend(40);
+                require buffer.TryAppend(1);
+                mut int32 caught = 0;
+                unsafe {
+                    try { buffer.Set(1, Overflow(int32.MaxValue)); }
+                    catch { caught = caught + 1; }
+                    try { buffer.Set(Overflow(int32.MaxValue), 99); }
+                    catch { caught = caught + 1; }
+                    try { buffer.TryAppend(Overflow(int32.MaxValue)); }
+                    catch { caught = caught + 1; }
+                }
+                if (caught != 3 || buffer.Count != 2
+                    || buffer.Read(0) != 40 || buffer.Read(1) != 1) { return 0; }
+                {
+                    mut MutableInt32BufferView window = buffer.SliceMutable(0, 2);
+                    unsafe {
+                        try { window.Set(1, Overflow(int32.MaxValue)); }
+                        catch { caught = caught + 1; }
+                        try { window.Set(Overflow(int32.MaxValue), 99); }
+                        catch { caught = caught + 1; }
+                    }
+                    if (caught != 5 || window.Read(0) != 40 || window.Read(1) != 1) { return 0; }
+                    window.Set(1, 2);
+                }
+                return buffer.Read(0) + buffer.Read(1);
+            }
+            """;
+        Assert.Equal(42, await RunAsync(Source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+    }
+
+    [Fact]
     public void ClearOnLiveOwnerCanBeNoThrow()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""

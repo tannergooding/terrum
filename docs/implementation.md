@@ -286,6 +286,9 @@ but cannot invalidate it. Exclusion is conservative for composite owners:
 even reads or independent views of sibling fields are blocked while the
 mutable field view is active. Scope exit or checked unwind ends only the
 loan, preserving prior element writes and the owner's cleanup obligation.
+Checked failure while evaluating a `Set` index or value, or a `TryAppend`
+value, leaves that individual write unapplied; an active mutable view and
+its owner remain usable after the exception is caught.
 `Clear()` resets only the initialized count and
 retains the allocation and capacity; it cannot run during any active view.
 There is no resize, general aliasable view or generic
