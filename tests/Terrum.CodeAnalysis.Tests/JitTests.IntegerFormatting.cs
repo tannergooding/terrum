@@ -190,17 +190,25 @@ public sealed partial class JitTests
         var checks = string.Join(Environment.NewLine, expected.Select((digit, index) =>
             FormattableString.Invariant($"if (digits.Read({index}) != {(int)digit}) {{ return 2; }}")));
         var format = FormatterName(signed, isNarrow, true);
+        var measure = (signed, isNarrow) switch {
+            (false, false) => "TryGetUInt64BaseLength",
+            (true, false) => "TryGetInt64BaseLength",
+            (false, true) => "TryGetUInt32BaseLength",
+            (true, true) => "TryGetInt32BaseLength",
+        };
         var component = await File.ReadAllTextAsync(
             Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
         var source = component + $$"""
 
             int32 Main() {
-                require OwnedInt32Buffer.TryCreate({{expected.Length}}, out var workspace);
+                require {{measure}}({{value}}, {{radix}}, init var capacity);
+                if (capacity != {{expected.Length}}) { return 4; }
+                require OwnedInt32Buffer.TryCreate(capacity, out var workspace);
                 OwnedInt32Buffer digits = {{format}}({{value}}, {{radix}}, move workspace);
-                if (digits.Count != {{expected.Length}} || digits.Capacity != {{expected.Length}}) { return 1; }
+                if (digits.Count != capacity || digits.Capacity != capacity) { return 1; }
                 {{checks}}
                 OwnedInt32Buffer zero = {{format}}(0, {{radix}}, move digits);
-                if (zero.Count != 1 || zero.Read(0) != 48 || zero.Capacity != {{expected.Length}}) { return 3; }
+                if (zero.Count != 1 || zero.Read(0) != 48 || zero.Capacity != capacity) { return 3; }
                 return 42;
             }
             """;

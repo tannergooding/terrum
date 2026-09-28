@@ -138,3 +138,56 @@ public static OwnedInt32Buffer FormatInt32Base(int32 value, uint32 radix, OwnedI
 {
     return FormatInt64Base(int64(value), radix, move workspace);
 }
+
+public static bool TryGetUInt64BaseLength(uint64 value, uint32 radix, init ref<int32> length)
+{
+    if (radix < 2 || radix > 36)
+    {
+        return false;
+    }
+
+    uint64 divisor = uint64(radix);
+    mut uint64 remaining = value;
+    mut int32 count = 1;
+    while (remaining >= divisor)
+    {
+        remaining = remaining / divisor;
+        count = count + 1;
+    }
+    length = count;
+    return true;
+}
+
+public static bool TryGetInt64BaseLength(int64 value, uint32 radix, init ref<int32> length)
+{
+    mut uint64 magnitude = 0;
+    if (value >= 0)
+    {
+        magnitude = uint64(value);
+    }
+    else
+    {
+        magnitude = uint64(-(value + 1)) + 1;
+    }
+    if (!TryGetUInt64BaseLength(magnitude, radix, init var digits))
+    {
+        return false;
+    }
+    mut int32 count = digits;
+    if (value < 0)
+    {
+        count = count + 1;
+    }
+    length = count;
+    return true;
+}
+
+public static bool TryGetUInt32BaseLength(uint32 value, uint32 radix, init ref<int32> length)
+{
+    return TryGetUInt64BaseLength(uint64(value), radix, init length);
+}
+
+public static bool TryGetInt32BaseLength(int32 value, uint32 radix, init ref<int32> length)
+{
+    return TryGetInt64BaseLength(int64(value), radix, init length);
+}

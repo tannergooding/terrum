@@ -35,6 +35,57 @@ public sealed class WideCandidateTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task RadixLengthsPublishOnlyForValidBasesAcrossModulesAsync(NativeRuntimePolicy policy)
+    {
+        var producer = CreateNumericsLibrary("IntegerFormatting.terrum", policy,
+            "Terrum.CodeAnalysis.Numerics64.TryGetUInt64BaseLength",
+            "Terrum.CodeAnalysis.Numerics64.TryGetInt64BaseLength",
+            "Terrum.CodeAnalysis.Numerics64.TryGetUInt32BaseLength",
+            "Terrum.CodeAnalysis.Numerics64.TryGetInt32BaseLength");
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerSource = SyntaxTree.Parse("""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                if (TryGetUInt64BaseLength(0, 1, init var low)
+                    || TryGetInt64BaseLength(-1, 37, init var high)
+                    || TryGetUInt32BaseLength(0, 0, init var low32)
+                    || TryGetInt32BaseLength(0, 37, init var high32)) { return 1; }
+                require TryGetUInt64BaseLength(uint64.MaxValue, 2, init var unsigned64);
+                require TryGetInt64BaseLength(int64.MinValue, 2, init var signed64);
+                require TryGetUInt32BaseLength(uint32.MaxValue, 2, init var unsigned32);
+                require TryGetInt32BaseLength(int32.MinValue, 2, init var signed32);
+                require TryGetInt64BaseLength(0, 36, init var zero);
+                if (unsigned64 != 64 || signed64 != 65 || unsigned32 != 32
+                    || signed32 != 33 || zero != 1) { return 2; }
+                return 42;
+            }
+            """);
+        var compilation = Compilation.Create(consumerSource, reference, (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public void InvalidRadixLengthCannotBeReadAfterFailure()
+    {
+        var producer = CreateNumericsLibrary("IntegerFormatting.terrum", NativeRuntimePolicy.FailFast,
+            "Terrum.CodeAnalysis.Numerics64.TryGetUInt64BaseLength");
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                bool valid = TryGetUInt64BaseLength(0, 1, init var length);
+                return length;
+            }
+            """), ModuleCompiler.CreateReference(producer));
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3016");
+        Assert.Null(compilation.Program);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CheckedInt32ArithmeticPublishesOnlyInRangeAcrossModulesAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerCheckedArithmetic.terrum", policy,
