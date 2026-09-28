@@ -55,12 +55,9 @@ public static bool TryGetStringRowByteLength(StringLiteral literal, int32 flags,
     return true;
 }
 
-public static bool TryGetStringNameRowByteLength(StringLiteral literal, int32 flags,
-    init ref<int32> byteLength)
+bool IsValidStringName(StringLiteral literal)
 {
-    if (literal.ScalarCount == 0
-        || !TryMeasureStringRow(literal, flags, init var contentBytes, init var unitWidth,
-            init var rowBytes))
+    if (literal.ScalarCount == 0)
     {
         return false;
     }
@@ -74,6 +71,17 @@ public static bool TryGetStringNameRowByteLength(StringLiteral literal, int32 fl
         }
         cursor = next;
     }
+    return true;
+}
+
+public static bool TryGetStringNameRowByteLength(StringLiteral literal, int32 flags,
+    init ref<int32> byteLength)
+{
+    if (!TryMeasureStringRow(literal, flags, init var contentBytes, init var unitWidth,
+            init var rowBytes) || !IsValidStringName(literal))
+    {
+        return false;
+    }
     byteLength = rowBytes;
     return true;
 }
@@ -81,8 +89,7 @@ public static bool TryGetStringNameRowByteLength(StringLiteral literal, int32 fl
 public static bool TryCompareStringNames(StringLiteral left, StringLiteral right,
     init ref<bool> equal)
 {
-    if (!TryGetStringNameRowByteLength(left, 1, init var leftBytes)
-        || !TryGetStringNameRowByteLength(right, 1, init var rightBytes))
+    if (!IsValidStringName(left) || !IsValidStringName(right))
     {
         return false;
     }
@@ -109,6 +116,7 @@ public static OwnedInt32Buffer EncodeStringRow(StringLiteral literal, int32 flag
 {
     require TryMeasureStringRow(literal, flags, init var contentBytes, init var unitWidth,
         init var rowBytes);
+    require workspace.Capacity >= rowBytes;
     mut OwnedInt32Buffer bytes = move workspace;
     if (flags == 0) { bytes = literal.EncodeAscii(move bytes); }
     else if (flags == 1) { bytes = literal.EncodeUtf8(move bytes); }
