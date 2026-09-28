@@ -34,7 +34,7 @@ mut class ManagedTokenChain {
         if (kind < 0 || _count == 64 || _version == int32.MaxValue) {
             return false;
         }
-        if (!SourceRange.TryCreate(sourceOffset, sourceLength, out var range)) {
+        if (!SourceRange.TryCreateInit(sourceOffset, sourceLength, init var range)) {
             return false;
         }
         if (_last is some previous) {
