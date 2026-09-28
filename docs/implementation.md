@@ -813,6 +813,14 @@ scans, and collection after clearing links under both runtime policies. This
 does not alter scanner records or make the bounded chain the parser's token
 storage.
 
+The separate [integer-parsing candidate](../self-host/IntegerParsing.terrum)
+uses the immutable host source grant and checked wide-radix accumulation to
+parse strict ASCII slices into signed or unsigned 64-bit outputs. AOT/JIT
+fixtures cover every radix and both failure policies; malformed slices,
+invalid bounds and overflow leave outputs unpublished. It is not wired into
+`SyntaxTree.Parse(LexResult)` or the scanner-backed integer record: that
+record still supplies the binder's contextual literal magnitude.
+
 `SourceText` owns exact input text and a diagnostic path label. All library
 offsets, line characters and lengths are UTF-16 units, not scalar/grapheme/display
 columns; ranges are half-open. Lines and characters are zero-based. Only human

@@ -1,0 +1,96 @@
+namespace Terrum.CodeAnalysis.Numerics64;
+
+bool TryParseMagnitude(int32 start, int32 length, uint32 radix, uint64 maximum, out uint64 result)
+{
+    if (start < 0 || length <= 0 || start > Host.Source.Length
+        || length > Host.Source.Length - start || radix < 2 || radix > 36)
+    {
+        return false;
+    }
+
+    mut uint64 value = 0;
+    int32 end = start + length;
+    for (mut int32 index = start; index < end; index = index + 1)
+    {
+        int32 codeUnit = int32(Host.Source[index]);
+        mut uint32 digit = 0;
+        if (codeUnit >= 48 && codeUnit <= 57)
+        {
+            digit = uint32(codeUnit - 48);
+        }
+        else if (codeUnit >= 65 && codeUnit <= 90)
+        {
+            digit = uint32(codeUnit - 65 + 10);
+        }
+        else if (codeUnit >= 97 && codeUnit <= 122)
+        {
+            digit = uint32(codeUnit - 97 + 10);
+        }
+        else
+        {
+            return false;
+        }
+
+        if (!TryAccumulateBase(value, digit, radix, maximum, out var next))
+        {
+            return false;
+        }
+        value = next;
+    }
+
+    result = value;
+    return true;
+}
+
+public static bool TryParseUInt64Base(int32 start, int32 length, uint32 radix, out uint64 result)
+{
+    if (!TryParseMagnitude(start, length, radix, uint64.MaxValue, out var parsed))
+    {
+        return false;
+    }
+    result = parsed;
+    return true;
+}
+
+public static bool TryParseInt64Base(int32 start, int32 length, uint32 radix, out int64 result)
+{
+    if (start < 0 || length <= 0 || start > Host.Source.Length
+        || length > Host.Source.Length - start)
+    {
+        return false;
+    }
+
+    bool negative = Host.Source[start] == char16(45);
+    mut int32 digitStart = start;
+    mut int32 digitLength = length;
+    if (negative)
+    {
+        digitStart = digitStart + 1;
+        digitLength = digitLength - 1;
+    }
+
+    mut uint64 maximum = uint64(int64.MaxValue);
+    if (negative)
+    {
+        maximum = maximum + 1;
+    }
+
+    if (!TryParseMagnitude(digitStart, digitLength, radix, maximum, out var magnitude))
+    {
+        return false;
+    }
+
+    if (negative && magnitude == maximum)
+    {
+        result = int64.MinValue;
+    }
+    else if (negative)
+    {
+        result = -int64(magnitude);
+    }
+    else
+    {
+        result = int64(magnitude);
+    }
+    return true;
+}

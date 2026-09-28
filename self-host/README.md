@@ -85,6 +85,7 @@ remain hosted in C#.
 | [WideIntegerFacts](WideIntegerFacts.terrum) | Checked signed addition and bounded decimal/radix-2..36 accumulation through the full unsigned 64-bit range | Executed as a separately compiled module with conditional wide outputs |
 | [WideIntegerTests](WideIntegerTests.terrum) | Signed extrema, invalid digits/radices, per-radix unsigned/signed limits and conditional output publication | Executed through AOT and JIT with a shared entry wrapper under both failure policies |
 | [IntegerFormatting](IntegerFormatting.terrum) | Invariant signed/unsigned decimal and explicit radix-2..36 digits in reusable owned storage | AOT/JIT boundary, exact-capacity and repeated-use fixtures; native heap checks cover same-allocation transfer and failure cleanup |
+| [IntegerParsing](IntegerParsing.terrum) | Strict signed/unsigned radix-2..36 ASCII parsing of an exact UTF-16 source slice with conditional wide outputs | Composed with `WideIntegerFacts` under AOT/JIT and both policies; full-range per-radix boundaries, invalid spelling/bounds and unpublished outputs |
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and conditional bool/out publication |
 | [SourceLines](SourceLines.terrum) | Streaming line ranges, line extents and bidirectional UTF-16 offset/line-position mapping over an immutable source grant | AOT/JIT conditional outputs under both policies; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
 | [SourceLineIndex](SourceLineIndex.terrum) | Owned line-start table, random-access line extents and bidirectional UTF-16 offset/line-position lookup | Executed as AOT/JIT under both failure policies; every offset round-trips with host line positions, with invalid outputs and owner copies rejected |
@@ -184,6 +185,17 @@ points accept exact output capacity, including a single word for zero; a
 20-word workspace can be reused for any decimal value. This is a bounded
 library operation, not a language format string or an operation-specific
 formatting witness.
+
+`IntegerParsing` reads a bounded slice of the immutable `Host.Source`
+capability and uses `WideIntegerFacts.TryAccumulateBase` for each digit.
+It accepts ASCII `0`-`9`, `A`-`Z` and `a`-`z` only where the digit is in
+radix 2..36; signed parsing optionally accepts a leading `-`. It consumes
+the **entire** nonempty slice, with no prefix, separator, whitespace or
+implicit plus sign, and returns false without publishing an output on
+malformed input, invalid bounds/radix or overflow. Negative zero is zero;
+`int64.MinValue` is handled by accumulating its unsigned magnitude.
+These compiled library functions do not replace the scanner's contextual
+integer binding or create a runtime text representation.
 
 `ManagedTokenChain` stores at most 64 complete `Token` values in source-defined
 managed links. It compiles with `Token.terrum` and `SourceRange.terrum`; each
