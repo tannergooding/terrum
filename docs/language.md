@@ -460,8 +460,10 @@ and omitted lambda parameter names are separate nonbinding contexts; they do
 not drop the matched/argument value or alter parameter mode. Separately
 proposed type holes are not identifiers and are not covered by this discard
 rule. Exact grammar contexts beyond the accepted discard direction remain to
-specify; a coordinated parser/semantic migration is pending, and syntax-19
-currently still binds `_` as an identifier.
+specify; the historical syntax-19 baseline bound `_` as an identifier. The
+standalone discard statement is implemented in syntax-20/scanner-5/schema-5.
+Wildcard patterns, lambda placeholders and generic type holes remain
+unsupported; see the [implementation boundary](implementation.md).
 
 Adding an interface member compatibly for existing implementations requires a
 default implementation that satisfies
@@ -870,13 +872,24 @@ semantics and examples are in [samples](samples.md) and [libraries](libraries.md
 
 Asynchronous operations return task-like completion, including `Task<void>` for
 no result; synchronous `void` remains valid, but `async void` is not permitted.
+An async function call starts eagerly and runs inline on the calling flow until
+it actually suspends. Awaiting an already-completed operation continues inline;
+awaiting an incomplete operation suspends and resumes according to the
+operation/runtime scheduling policy, without implicitly capturing the caller's
+executor or requiring a worker-pool hop.
 The accepted terminology keeps three properties separate: asynchronous work
 can happen independently of the main program flow, and may or may not be
 concurrent; concurrency means a system can execute multiple flows of code, and
 may or may not be parallel; parallelism is the ability to execute multiple
 flows simultaneously. These definitions do not imply that async work is queued,
-uses a thread/thread pool, always suspends, captures a scheduler, starts hot or
-cold, or is concurrent or parallel.
+uses a thread/thread pool, always suspends, captures a scheduler, or is
+concurrent or parallel.
+Default confinement can keep state on one serialized flow when checked
+transfer rules permit it; it does not erase backing lifetimes, outstanding
+aliases, nontransferability, affinity or cleanup obligations. A function or
+callback with declared executor affinity retains its own placement across
+suspension, including cleanup and unwinding. An otherwise-unbound helper does
+not inherit UI affinity merely because it was called from UI code.
 Every started operation retains a responsible owner: a structured
 scope that joins it, an explicit transfer to another responsible owner, or a
 supervisor with error, lifetime and shutdown policy. Returning a task alone is
@@ -889,23 +902,32 @@ include `Main` returning `void`/`int32` or `MainAsync` returning `Task`/
 `Task<int32>`, with no arguments or `Span<TextSpan> args` excluding the program
 name. Host-selected arguments/rooting last through async completion and
 structured cleanup. `async` describes implementation, `Async` describes API
-behavior, and no implicit blocking bridge is inserted. Start policy (cold or
-hot), ownership-transfer mechanics and scheduler/affinity policy remain open;
-these contracts do not mandate actors. `Terminal.Write`/`WriteLine` default to
+behavior, and no implicit blocking bridge is inserted. An explicit `Run`
+schedules an initial invocation and represents its full async completion, but
+does not bind all helper continuations to that executor or select the caller's
+continuation, nor does it guarantee that the caller suspends. An explicit
+awaitable adapter such as `ResumeOn(executor)` selects the awaiting
+continuation, including when completion or failure has already occurred. It
+dispatches when the awaiting flow is not already on that executor and may
+continue inline when it is; fault/unwinding follows the selected continuation
+policy. It does not reschedule the producer. An explicit `Yield` can request a
+scheduling boundary, but does not promise fairness. Executor choice never
+grants unsafe access or bypasses checked transfer, sharing, lifetime or
+affinity rules. These are semantic directions, not exact library signatures
+or an implemented runtime; API spelling and affinity annotations remain
+specification work.
+These contracts do not mandate actors. `Terminal.Write`/`WriteLine` default to
 standard output; `output: TerminalOutput.Error` selects stderr, with writer
 access for composition. Redirected streams work without an interactive
 terminal; terminal controls require endpoint capabilities.
 
-Recommended continuation policy remains no ambient `SynchronizationContext`-style
-capture by default and explicit execution/affinity scopes for thread-bound/UI
-continuations, including cleanup and cancellation; this is not a frozen
-scheduler contract. No capture is **not** "always
-switch to a thread pool": synchronous continuation is possible, logical
-serialized authority need not mean one OS thread, and nontransferable/affine
-state must never migrate unsafely. A caller's explicit UI obligation must remain
-valid across a library call without imposing it on every internal continuation.
-Scheduler/awaiter syntax, propagation and boundary validation still need
-design; there is no implemented async runtime.
+The execution-policy model does not imply a thread pool: synchronous
+continuation is possible, logical serialized authority need not mean one OS
+thread, and nontransferable/affine state must never migrate unsafely. Explicit
+affinity obligations remain attached to the declared function or callback,
+not imposed on every internal continuation. Exact scheduler/awaiter syntax,
+propagation, boundary validation and runtime support remain to be specified
+and implemented.
 
 Reflection respects visibility, access, lifetime and trimming. Symbol-resolved tokens and compiler-checked `[ConstantExpected]` names (including through wrappers) support safe bounded lookup; open-ended runtime discovery or private access needs a *different* privileged unsafe API, explicit authorization and retained targets. Retention of layout, executable bodies, descriptors and debugging data is independent. Author-authorized deterministic generation can inspect its own defining module's private members but cannot grant consumers friendship or bypass normal checks. Foreign interop uses source or generated tooling for marshalling; the compiler/runtime provide checked native symbols, calling conventions, representations, ownership, callback-lifetime and exception-containment prerequisites for safe imported-C APIs, not built-in value marshalling. COM requires exact profiles, not behavioral-interface resemblance.
 
@@ -938,8 +960,10 @@ conditional copy capabilities, first-class
 stored-loan ABI, erased-interface dispatch ABI, span-anchor layout/calling
 convention, inline `val<C>`, native ownership transitions, structural unions,
 decimal encoding, text storage, wither omission/overloads,
-handling/registration, async start/cancellation, generic dispatch selectors
-and exception ABI.
+handling/registration, task lifecycle/cancellation APIs, generic dispatch
+selectors and exception ABI. Eager async invocation and ordinary-await
+continuation semantics are accepted; the exact awaiter, executor and affinity
+syntax remain open.
 The applicable accepted semantics and current implementation limits are
 distinct; syntax should follow checked contracts rather than determine them.
 

@@ -385,11 +385,20 @@ It proves all such paths; it is not registered only on paths that execute its
 source location. A body `static require` remains a point obligation. Neither
 automatically becomes a published declaration guarantee.
 
-Async eventually needs the analogous boundary at operation-body completion,
-before publishing task success, not merely when returning the startup handle.
-Recommend that model, but keep startup/completion contracts and coroutine
-lowering separately scheduled; this document does not select task start policy,
-an async ABI, or permission for stack loans to survive suspension.
+Accepted async execution starts a call eagerly and inline through its first
+actual suspension. Completed awaits continue inline; incomplete awaits do not
+implicitly capture the caller's executor or mandate a worker hop. An
+affinity-bound function or callback retains its declared placement through
+suspension, cleanup and unwinding; an unbound helper does not inherit affinity
+from its caller. Explicit scheduling of an initial invocation and explicit
+placement of the awaiting continuation are distinct operations; scheduling the
+initial invocation does not bind every helper continuation or guarantee that
+the caller suspends. Async declaration postconditions, when specified, apply
+before publishing successful completion, not merely when returning a task
+handle. The exact awaiter/API and affinity syntax, async ABI, task lifecycle,
+coroutine lowering and implementation remain scheduled specification/runtime
+work. Stack loans remain governed by checked backing lifetime and transfer
+rules, not by async syntax alone.
 
 ## 4. A reproducible proof and evaluation foundation
 
@@ -597,14 +606,20 @@ consumer's publication, lifetime, or arithmetic contract.
 ## 5. Documentation comments
 
 **Accepted source-documentation direction; exact grammar and schema remain
-open.** Attach `///` documentation to declarations, with `/** ... */` as an
-equivalent block form. Use GFM-compatible prose; leading prose before the
-first recognized metadata heading is the implicit summary, with optional
+open.** Attach `///` documentation before declaration attributes/modifiers,
+with `/** ... */` as an equivalent block form. Use GFM-compatible prose;
+leading prose before the first recognized metadata heading is the implicit summary, with optional
 `# summary`. Top-level `# remarks`, `# param name`, `# typeparam name`,
 `# returns`, `# value`, `# throws Type`, `# safety`, and `# example` headings
 introduce structured sections; ordinary lower-level headings remain prose.
+Blank lines separate paragraphs within the current section, including the
+implicit summary; they do not switch the summary to remarks. Each structured
+section continues until the next recognized metadata heading.
 Metadata recognition follows parsed Markdown structure, not raw-line prefix
-scanning. Documentation compiles to a separate XML artifact, and references
+scanning: remove comment decoration and common indentation before parsing,
+and do not recognize headings inside code, block quotes or lists as metadata.
+Heading-name case sensitivity and unknown-heading handling remain to specify.
+Documentation compiles to a separate XML artifact, and references
 resolve against declarations into structured links rather than unvalidated
 text.
 
@@ -614,7 +629,13 @@ links. They are not interpreted inside code, URLs, or email addresses; `\@`
 escapes a literal at-sign. Ordinary Markdown links remain for section/document
 navigation (`[label](#anchor)`, `[label](relative.md)`); explicit
 `[custom label](xref:Type.Member)` links are available for qualified/custom
-references. Backticks denote code, not implicit symbol references. Exact
+references. Markdown reference-style links retain their ordinary meaning;
+they are not implicit symbol references. Backticks denote code, not implicit
+symbol references. Explicit XML references such as `<see cref="..."/>` and
+`<paramref name="..."/>` remain available and normalize to structured XML
+references; XML attribute values use ordinary escaping, including `&lt;`
+and `&gt;` for generic angle brackets. Declaration identity and parameter
+names bind to declarations rather than being defined by documentation text. Exact
 mention tokenization, complex generic/overload reference grammar, and escaping
 edge cases remain to formalize. This does not adopt GitHub app-specific
 postprocessing as a compiler feature.
@@ -722,6 +743,16 @@ The minimum conformance corpus should cover:
   `MaybeNullWhen` and `NotNullWhen` communicate conditional null-state facts.
   They do not supply Terrum's vacant-storage/publication or owning-output
   cleanup protocol.
+- [GitHub Flavored Markdown specification](https://github.github.com/gfm/) and
+  [GitHub writing guide](https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax):
+  CommonMark plus GFM extensions supplies the prose baseline; GitHub site-level
+  postprocessing is separate from Terrum's structured headings and mentions.
+- [C# XML documentation](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/xmldoc/),
+  [Rustdoc documentation guidance](https://doc.rust-lang.org/rustdoc/how-to-write-documentation.html)
+  and [item links](https://doc.rust-lang.org/rustdoc/write-documentation/linking-to-items-by-name.html),
+  and [Swift markup](https://developer.apple.com/library/archive/documentation/Xcode/Reference/xcode_markup_formatting_ref/MarkupSyntax.html):
+  prior art for declaration attachment, structured fields and symbol resolution,
+  not adoption of their complete source markup or implicit reference rules.
 - Terrum's [lifetime defaults](lifetimes.md#declaration-defaults-exceptions-and-published-compatibility),
   [numeric contracts](conversions.md), and
   [module contracts](modules.md) provide the existing integration boundaries.
