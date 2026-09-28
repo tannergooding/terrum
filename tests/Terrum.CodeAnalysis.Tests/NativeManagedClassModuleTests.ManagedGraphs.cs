@@ -95,6 +95,62 @@ public sealed partial class NativeManagedClassModuleTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task PrivateInitInManagedGraphMiddlePreservesDownstreamImagesAsync(NativeRuntimePolicy policy)
+    {
+        const string Leaf = """
+            namespace Source;
+            public int32 Bias() { return 2; }
+            """;
+        const string Middle = """
+            using Source;
+            class Cell {
+                public int32 Value;
+                public Cell(int32 value) { Value = value; }
+            }
+            bool Fill(init ref<int32> value) {
+                value = Bias();
+                return true;
+            }
+            public int32 Middle() {
+                require Cell.TryCreate(40, out var cell);
+                require Fill(init var offset);
+                require ManagedHeap.Collect() == 0;
+                return cell.Value + offset;
+            }
+            """;
+        const string Root = "int32 Main() { return Middle(); }";
+        var leaf = NativeModuleCompiler.CreateProducer(Compile(Leaf, policy), ["Source.Bias"], "NodeB", policy);
+        var middle = NativeModuleCompiler.CreateGraphProducer(Compile(Middle, policy,
+            NativeModuleCompiler.CreateGraphReference([leaf])), ["Middle"], "NodeA", [leaf], policy);
+        Assert.Equal(33, GraphSemanticVersion(middle));
+        var middleHash = SHA256.HashData(middle);
+        var root = NativeModuleCompiler.CreateGraphConsumer(Compile(Root, policy,
+            NativeModuleCompiler.CreateGraphReference([middle]), library: false), [middle], policy);
+        var rootHash = SHA256.HashData(root);
+        NativeModuleCompiler.ValidateGraph(root, [leaf, middle]);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [middle, leaf],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+
+        var replacement = NativeModuleCompiler.CreateProducer(Compile(
+            Leaf.Replace("return 2", "return 3", StringComparison.Ordinal), policy),
+            ["Source.Bias"], "NodeB", policy);
+        NativeModuleCompiler.ValidateGraph(root, [replacement, middle]);
+        Assert.Equal(43, await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        var framework = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = framework.Parent?.Name
+            ?? throw new InvalidOperationException("Missing test configuration directory.");
+        var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
+            configuration, framework.Name, "terrumc.exe");
+        Assert.Equal(43, await NativeModuleCompiler.RunGraphJitAsync(root, [middle, replacement],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+        Assert.Equal(rootHash, SHA256.HashData(root));
+        Assert.Equal(middleHash, SHA256.HashData(middle));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ManagedRootAndMiddleKeepSeparateHeapsAcrossGraphReplacementAsync(NativeRuntimePolicy policy)
     {
         var originalProgram = Compile(ManagedGraphLeaf, policy);

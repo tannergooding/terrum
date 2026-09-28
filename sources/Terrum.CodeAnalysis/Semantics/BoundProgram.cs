@@ -319,6 +319,9 @@ public sealed record BoundVariable(string Name, PrimitiveType Type, bool IsMutab
 {
     /// <summary>Whether this parameter receives a value only on a true bool return.</summary>
     public bool IsOut { get; init; }
+
+    /// <summary>Whether this source parameter uses the compilation-private initialization loan mode.</summary>
+    public bool IsInit { get; init; }
 }
 
 /// <summary>A structured statement, retaining its source range.</summary>
@@ -514,7 +517,11 @@ public sealed record BoundCast(BoundExpression Operand, PrimitiveType Type, Text
 public sealed record BoundFieldRead(BoundExpression Receiver, int Field, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
 /// <summary>A caller-owned output slot passed through private callee scratch storage.</summary>
-public sealed record BoundOutArgument(int Variable, bool DeclaresVariable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+public sealed record BoundOutArgument(int Variable, bool DeclaresVariable, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+{
+    /// <summary>Requires vacant caller storage before the conditional initialization call.</summary>
+    public bool IsInit { get; init; }
+}
 
 /// <summary>A checked read from a compiler-supplied buffer.</summary>
 public sealed record BoundBufferRead(int Buffer, BoundExpression Index, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);

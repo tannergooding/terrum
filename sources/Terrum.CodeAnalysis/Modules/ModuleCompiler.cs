@@ -38,12 +38,17 @@ public static partial class ModuleCompiler
     private const int MutableBufferFieldViewVersion = 30;
     private const int ManagedValueExportVersion = 31;
     private const int ManagedGraphParticipantVersion = 32;
+    private const int PrivateInitReferenceVersion = 33;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
     private const int MaximumNodes = 100_000;
     private const int MaximumDepth = 128;
     private const int MaximumStringBytes = 1024;
+
+    private static bool HasPrivateInitReference(Module module) =>
+        module.Functions.Any(static item => item.Function is BoundFunction function
+            && function.Variables.Any(static variable => variable.IsInit));
 
     /// <summary>Reads and verifies a producer artifact, exposing only exported declarations and their value layouts to source binding.</summary>
     public static CompilationReference CreateReference(byte[] producerBytes)
@@ -1358,7 +1363,9 @@ public static partial class ModuleCompiler
         }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-        var version = module.Consumer && HasPrivateManagedState(module)
+        var version = HasPrivateInitReference(module)
+            ? PrivateInitReferenceVersion
+            : module.Consumer && HasPrivateManagedState(module)
             ? ManagedGraphParticipantVersion
             : HasPrivateManagedState(module) && module.Functions.Any(static item =>
                 item.Import && item.Function is BoundFunction function && !ManagedExportShape.ScalarOnly(function))
@@ -1551,6 +1558,10 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Managed graph participant version requires private managed state.");
             }
+            if (version == PrivateInitReferenceVersion && !HasPrivateInitReference(module))
+            {
+                throw new ModuleFormatException("Private initialization version requires an init parameter.");
+            }
             if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
                 || !items.Any(static item => item.Import && item.Function is BoundFunction function
                     && !ManagedExportShape.ScalarOnly(function))))
@@ -1602,7 +1613,7 @@ public static partial class ModuleCompiler
             or StackClassFactoryVersion or ManagedAccessVersion or MutableStructReceiverVersion
             or MutableFieldReceiverVersion or UniqueMutableReceiverVersion or UniqueMutableFieldReceiverVersion
             or MutableBufferFieldReceiverVersion or MutableBufferFieldViewVersion or ManagedValueExportVersion
-            or ManagedGraphParticipantVersion))
+            or ManagedGraphParticipantVersion or PrivateInitReferenceVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -1833,6 +1844,10 @@ public static partial class ModuleCompiler
             writer.Write((int)variable.Type);
             writer.Write(variable.IsMutable);
             writer.Write(variable.IsOut);
+            if (version >= PrivateInitReferenceVersion)
+            {
+                writer.Write(variable.IsInit);
+            }
             PutSpan(writer, variable.Span);
         }
         PutStatement(writer, function.Body, names, ref remaining, 0, version);
@@ -1904,7 +1919,11 @@ public static partial class ModuleCompiler
             }
             var mutable = GetBool(reader);
             var isOut = GetBool(reader);
-            variables.Add(new BoundVariable(variableName, variableType, mutable, GetSpan(reader)) { IsOut = isOut });
+            var isInit = version >= PrivateInitReferenceVersion && GetBool(reader);
+            variables.Add(new BoundVariable(variableName, variableType, mutable, GetSpan(reader)) {
+                IsOut = isOut,
+                IsInit = isInit,
+            });
         }
         var body = GetStatement(reader, ref remaining, 0, version) as BoundBlock
             ?? throw new ModuleFormatException("Function requires a block body.");
@@ -2217,6 +2236,7 @@ public static partial class ModuleCompiler
             BoundCall => (byte)5,
             BoundCast => (byte)6,
             BoundFieldRead => (byte)7,
+            BoundOutArgument { IsInit: true } => (byte)21,
             BoundOutArgument => (byte)8,
             BoundMove => (byte)9,
             BoundReceiverLoan => (byte)10,
@@ -2358,6 +2378,8 @@ public static partial class ModuleCompiler
                 return new BoundFieldRead(GetExpression(reader, ref remaining, depth + 1, version), field, type, span);
             case 8:
                 return new BoundOutArgument(reader.ReadInt32(), GetBool(reader), type, span);
+            case 21 when version >= PrivateInitReferenceVersion:
+                return new BoundOutArgument(reader.ReadInt32(), GetBool(reader), type, span) { IsInit = true };
             case 9:
                 return new BoundMove(reader.ReadInt32(), type, span);
             case 10:

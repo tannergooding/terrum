@@ -285,8 +285,10 @@ public static class SemanticVerifier
                     {
                         throw Invalid();
                     }
-                    if (variable.IsOut && (variableIndex >= function.ParameterCount + (function.IsConstructor ? 1 : 0)
-                        || function.ReturnType != PrimitiveType.Bool))
+                    if ((variable.IsInit && (!variable.IsOut
+                        || (!function.IsPrivate && !function.IsInternal)))
+                        || (variable.IsOut && (variableIndex >= function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                            || function.ReturnType != PrimitiveType.Bool)))
                     {
                         throw Invalid();
                     }
@@ -2607,7 +2609,10 @@ public static class SemanticVerifier
                                 && (!function.Variables[output.Variable].IsOut || output.DeclaresVariable))
                             || output.Type != function.Variables[output.Variable].Type
                             || (output.DeclaresVariable && (!declarations.Add(output.Variable) || initialized[output.Variable]))
-                            || (!output.DeclaresVariable && !function.Variables[output.Variable].IsMutable))
+                            || (!output.DeclaresVariable && !output.IsInit
+                                && !function.Variables[output.Variable].IsMutable)
+                            || (output.IsInit && initialized[output.Variable])
+                            || output.IsInit != target.Variables[i + (target.IsConstructor ? 1 : 0)].IsInit)
                         {
                             throw Invalid();
                         }

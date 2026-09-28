@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Syntax;
 public sealed class SyntaxTree
 {
     /// <summary>Identifies the syntax contract used by this parser.</summary>
-    public const string LanguageVersion = "syntax-21";
+    public const string LanguageVersion = "syntax-22";
 
     private readonly Dictionary<SyntaxToken, ScannerIntegerValue>? _decodedIntegers;
 

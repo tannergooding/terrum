@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-21, semantic v32 managed consumers, native-10 through native-20
+## Current boundary: syntax-22, semantic v33 private initialization loans, native-10 through native-20
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -67,7 +67,7 @@ and mutability rather than trusting serialized byte offsets. Whole-local
 non-owning receiver loans still use v25. Older module headers reject the respective
 contracts; programs needing neither retain their existing semantic versions
 and bytes. Primitive
-buffer-view alignment and the `out`-to-`init ref<T>` migration remain scheduled.
+buffer-view alignment and public/general `out`-to-`init ref<T>` migration remain scheduled.
 Readers still normalize private managed artifacts from versions 18 through 23
 without granting more authority than their original contract. Writer version
 selection follows the required receiver contracts, not managedness.
@@ -355,11 +355,19 @@ and fills unknown starts in a second scan; already known endpoints and fully
 dense single-unit breaks need no second source scan.
 General borrowed references and stored loans remain unsupported. The accepted
 `ref<T>`/`ptr<T>`/`box<T>`/`val<T>` forms, general `write` views, `own<T>` and
-`init ref<T>` invocation still require their respective representation,
-lifetime, cleanup and ABI implementations; they are scheduled implementation
-work, not deferred to the Later capabilities bucket. The current explicit
-`bool`/`out` publication path remains in place until its coherent migration is
-implemented and verified.
+general `init ref<T>` invocation still requires its representation,
+lifetime, cleanup and ABI implementation; it is scheduled implementation
+work, not deferred to the Later capabilities bucket. Syntax-22 admits the
+bounded compilation-private `bool`/`init ref<T>` parameter and `init name`
+call mode for supported output values, with `init var name` introducing a
+vacant destination in the call. A named destination must still be vacant;
+an initialized value cannot be overwritten by `init`. A true result requires
+complete initialization; false and exceptional paths do not publish.
+Generic init parameters, public init contracts, general references and
+declaration postconditions remain unsupported. Legacy `bool`/`out` continues
+unchanged. Private init mode is retained in semantic v33 function and call
+records; the existing checked output scratch, cleanup, and native ABI are
+shared without reinterpreting public `out` contracts.
 For-loop initialization runs once, followed by condition, body and iterator;
 the iterator does not run after a returning or breaking body. `continue` runs
 the iterator before testing the next condition. An omitted condition is true.
@@ -588,6 +596,10 @@ native profiles do not change.
 `Copy`-struct protocols with independent `Copy` results, using the existing
 closed-call servicing path without changing scanner-5/schema-5, semantic
 module bytes or native profiles.
+`syntax-22` adds contextual `init ref<T>` parameters and `init name`/`init var name`
+arguments for compilation-private boolean conditional initialization; v33
+records private initialization mode in semantic modules. The scanner record,
+native profile and physical output ABI remain unchanged.
 `[NoThrow]` on functions/constructors, `[DoesNotReturn]` on void functions and
 `[Cleanup]` on eligible unique instance methods are currently bound;
 unknown, duplicate and misplaced attributes diagnose rather

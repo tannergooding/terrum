@@ -319,12 +319,13 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Graph library cannot have an entry point.");
             }
             var (structures, names) = ReadStructures(reader, version);
-            if (version is >= ManagedClassVersion and not (LoopTransferVersion or ManagedGraphParticipantVersion))
+            if (version is >= ManagedClassVersion and not
+                (LoopTransferVersion or ManagedGraphParticipantVersion or PrivateInitReferenceVersion))
             {
                 throw new ModuleFormatException("Graph libraries cannot use the private class module version.");
             }
             var classes = version >= ManagedClassVersion ? ReadClasses(reader, names, version) : [];
-            if (version != ManagedGraphParticipantVersion && !classes.IsEmpty)
+            if (version < ManagedGraphParticipantVersion && !classes.IsEmpty)
             {
                 throw new ModuleFormatException("Graph libraries cannot retain private classes.");
             }
@@ -343,6 +344,8 @@ public static partial class ModuleCompiler
                 SerializedProfile = profile,
             };
             if ((version == ManagedGraphParticipantVersion && !HasPrivateManagedState(module))
+                || (version == PrivateInitReferenceVersion && !HasPrivateInitReference(module))
+                || (profile == "native-20" && classes.IsEmpty)
                 || stream.Position != stream.Length || profile != RetainedNativeProfile(module))
             {
                 throw new ModuleFormatException("Graph semantic profile or payload is invalid.");

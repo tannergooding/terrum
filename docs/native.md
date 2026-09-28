@@ -45,7 +45,7 @@ longer parsed. Based literals construct target-width bit patterns, while
 decimal literals retain numeric range semantics. Floating/custom literal
 parsing, registered literal targets and `[ConstEval]` remain outside this
 executable profile.
-The current parser version is syntax-21. Syntax-18 qualified generic-call type
+The current parser version is syntax-22. Syntax-18 qualified generic-call type
 arguments such as `write C` and `write C?` enable bounded managed-handle
 substitutions in compilation-local `Copy` templates. Syntax-19 adds the
 bounded nominal comparison protocols; neither changes the native profile,
@@ -56,6 +56,13 @@ Syntax-21 adds compilation-local unary `+`, `-`, `!` and `~` protocols with
 separate operand/result formals. Their closed calls reuse existing verified
 native calls and private module servicing without a new scanner record,
 semantic wire format, native profile, or public generic ABI.
+Syntax-22 adds compilation-private `bool`/`init ref<T>` initialization loans:
+the caller supplies vacant storage via `init name`, or declares it with
+`init var name`; a completed value transfers only on true. Semantic v33
+retains the distinct private parameter and call mode across module servicing.
+The existing checked `out` scratch/cleanup and native ABI implement the
+bounded behavior without a native profile change; public init contracts and
+general references are not supported.
 
 Terrum has no built-in marshalling. Source or generated tooling defines and
 performs conversions and wrappers for imported C APIs; the compiler/runtime
@@ -281,8 +288,8 @@ ABI/profile nor graph package format. See the
 [managed graph replacement example](native-graph.md).
 Primitive
 `OwnedInt32Buffer` views keep their separate legacy access rules; general
-`ref<T>`/view/`own<T>`/`init ref<T>` call-site implementations remain
-unsupported.
+`ref<T>`/view/`own<T>` and general `init ref<T>` call-site implementations
+remain unsupported beyond the private conditional-init subset.
 The [class sample](../samples/native/managed-classes.terrum)
 returns 42 through shared aliases and heterogeneous managed edges. The independent
 C heap probe checks multiple-edge liveness, pointer-shaped scalar nonroots,
@@ -802,13 +809,14 @@ false, even if its backing storage still contains a previous value's bits.
 Calls stage output storage separately from ordinary arguments. Aliased output
 targets and reads of not-yet-initialized outputs are rejected. Conditional
 assignment facts follow evaluated short-circuit paths, and `require` carries
-the true-path facts forward. Owning outputs remain unsupported. Checked-policy
-exceptional cleanup uses the same out scratch protocol and cannot publish
-partial outputs.
-This bool/`out` behavior is the current bounded implementation contract, not a
-synonym for the accepted `init ref<T>` initialization loan. Declaration and
-call-site migration is scheduled separately; call-site loan syntax remains
-open, and no syntax or implementation support is claimed here.
+the true-path facts forward. Supported unique owning outputs clean partial
+values on false or checked exceptional paths; neither path publishes a
+partial output.
+This bool/`out` behavior remains supported. The private `bool`/`init ref<T>`
+source mode additionally requires a vacant caller destination and an exact
+`init` argument; v33 persists that distinction, while both modes share the
+same verified scratch/publication and native output ABI. Public/general init
+contracts and predicate-based postconditions remain scheduled.
 
 [`self-host/SourceRange`](../self-host/SourceRange.terrum),
 [`CharacterFacts`](../self-host/CharacterFacts.terrum),

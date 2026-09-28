@@ -464,8 +464,20 @@ internal sealed class Parser
         {
             var start = _position;
             var parameter = new List<SyntaxElement>();
-            ParsePassingMode(parameter);
-            parameter.Add(ParseType());
+            if (Current.Kind == TokenKind.Identifier && Current.Text == "init"
+                && Peek(1).Kind == TokenKind.RefKeyword)
+            {
+                parameter.Add(Take());
+                parameter.Add(Take());
+                parameter.Add(Expect(TokenKind.Less));
+                parameter.Add(ParseType());
+                parameter.Add(Expect(TokenKind.Greater));
+            }
+            else
+            {
+                ParsePassingMode(parameter);
+                parameter.Add(ParseType());
+            }
             parameter.Add(Expect(TokenKind.Identifier));
             children.Add(Node(SyntaxKind.Parameter, parameter));
 
@@ -866,7 +878,9 @@ internal sealed class Parser
                 argument.Add(Take());
             }
 
-            var isOut = Current.Kind == TokenKind.OutKeyword;
+            var isOut = Current.Kind == TokenKind.OutKeyword
+                || (Current.Kind == TokenKind.Identifier && Current.Text == "init"
+                    && Peek(1).Kind is TokenKind.VarKeyword or TokenKind.Identifier);
             ParsePassingMode(argument);
 
             if (isOut && Current.Kind == TokenKind.VarKeyword)
@@ -902,7 +916,12 @@ internal sealed class Parser
 
     private void ParsePassingMode(List<SyntaxElement> children)
     {
-        if (Current.Kind == TokenKind.MutKeyword)
+        if (Current.Kind == TokenKind.Identifier && Current.Text == "init"
+            && Peek(1).Kind is TokenKind.VarKeyword or TokenKind.Identifier)
+        {
+            children.Add(Take());
+        }
+        else if (Current.Kind == TokenKind.MutKeyword)
         {
             children.Add(Take());
             children.Add(Expect(TokenKind.RefKeyword));

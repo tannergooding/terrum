@@ -20,6 +20,39 @@ public sealed class OwnershipTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task InitReferencePublishesOneOwnerAndDropsOnlyTheCompletedValueAsync(BoundRuntimePolicy policy)
+    {
+        const string Source = """
+            unique struct Owner {
+                public int32 Number;
+                public Owner(int32 number) { Number = number; }
+                [NoThrow] [Cleanup] public void Close() {
+                    if (Host.Trace[0] == 0) { Host.Trace[0] = 1; }
+                    else { Host.Trace[0] = 2; }
+                    Host.Trace[1] = Number;
+                }
+            }
+            bool Create(bool publish, init ref<Owner> result) {
+                result = new Owner(42);
+                return publish;
+            }
+            int32 Main() {
+                {
+                    if (Create(false, init var owner)) { return 1; }
+                    if (Host.Trace[0] != 1 || Host.Trace[1] != 42) { return 2; }
+                    require Create(true, init owner);
+                    if (owner.Number != 42 || Host.Trace[0] != 1) { return 3; }
+                }
+                if (Host.Trace[0] != 2 || Host.Trace[1] != 42) { return 4; }
+                return 42;
+            }
+            """;
+        Assert.Equal(42, await RunNativeAsync(Source, policy, [0, 0]).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
     public async Task DiscardedMoveDropsAtStatementBoundaryExactlyOnceAsync(BoundRuntimePolicy policy)
     {
         const string Source = """

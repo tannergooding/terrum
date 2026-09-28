@@ -127,7 +127,8 @@ internal sealed partial class Binder
                 for (var index = offset; index < function.Variables.Length; index++)
                 {
                     var parameter = function.Variables[index];
-                    parameters.Add(new Parameter(parameter.Name, parameter.Type, default, parameter.IsOut));
+                    parameters.Add(new Parameter(parameter.Name, parameter.Type, default, parameter.IsOut,
+                        parameter.IsInit));
                 }
                 _signatures.Add(new Signature(function.Name, function.ReturnType, parameters.ToImmutable(),
                     null, null, _trees[0], function.DeclaringStruct, function.IsConstructor,
@@ -423,7 +424,7 @@ internal sealed partial class Binder
                 var slot = AddVariable(parameter.Name, parameter.Type, parameter.IsOut, parameter.Span);
                 if (parameter.IsOut)
                 {
-                    _variables[slot] = _variables[slot] with { IsOut = true };
+                    _variables[slot] = _variables[slot] with { IsOut = true, IsInit = parameter.IsInit };
                 }
             }
 
@@ -808,7 +809,7 @@ internal sealed partial class Binder
                 continue;
             }
 
-            var typeNode = (SyntaxNode)parameter.Children[^2];
+            var typeNode = parameter.Children.OfType<SyntaxNode>().Single();
             var token = ((SyntaxTokenElement)parameter.Children[^1]).Token;
             var type = BindType(typeNode, allowVoid: false);
             if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
@@ -816,16 +817,32 @@ internal sealed partial class Binder
                 Report("TRM3023", "A native buffer view cannot be a parameter.", parameter.Span);
             }
 
+            var isInit = parameter.Children is [SyntaxTokenElement { Token.Text: "init" },
+                SyntaxTokenElement { Token.Kind: TokenKind.RefKeyword },
+                SyntaxTokenElement { Token.Kind: TokenKind.Less }, SyntaxNode,
+                SyntaxTokenElement { Token.Kind: TokenKind.Greater }, SyntaxTokenElement];
             var isOut = parameter.Children.Length == 3
                 && parameter.Children[0] is SyntaxTokenElement passing
                 && passing.Token.Kind == TokenKind.OutKeyword;
-            if (parameter.Children.Length != 2 && !isOut)
+            if (parameter.Children.Length != 2 && !isOut && !isInit)
             {
                 Report("TRM3001", "Passing modes are not supported.", parameter.Span);
             }
-            if (isOut && returnType != PrimitiveType.Bool)
+            if ((isOut || isInit) && returnType != PrimitiveType.Bool)
             {
-                Report("TRM3011", "An out parameter requires a bool return type.", parameter.Span);
+                Report("TRM3011", "An output parameter requires a bool return type.", parameter.Span);
+            }
+            if (isInit && !isPrivate && !isInternal)
+            {
+                Report("TRM3011", "Init ref parameters require compilation-private declarations until their module contract is supported.",
+                    parameter.Span);
+            }
+            if (isInit && type is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
+                or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                && !IsStruct(type) && !IsUnique(type))
+            {
+                Report("TRM3011", "Private init ref parameters require supported scalar, Copy-struct, or unique outputs.",
+                    parameter.Span);
             }
 
             if (!names.Add(token.Text))
@@ -833,7 +850,7 @@ internal sealed partial class Binder
                 Report("TRM3004", $"Duplicate parameter '{token.Text}'.", token.Span);
             }
 
-            declared.Add(new Parameter(token.Text, type, token.Span, isOut));
+            declared.Add(new Parameter(token.Text, type, token.Span, isOut || isInit, isInit));
         }
         if (operatorDeclaration && operatorKey.Arity == 1
             && (containingType is null || !TryResolveStruct(Qualify(containingType), out var ownerType)
@@ -2280,11 +2297,15 @@ internal sealed partial class Binder
             var position = bound.Count - receiverCount;
             var expectedParameter = signature is not null && position < signature.Parameters.Length
                 ? signature.Parameters[position] : null;
-            if (argument.Children[0] is SyntaxTokenElement passing && passing.Token.Kind == TokenKind.OutKeyword)
+            if (argument.Children[0] is SyntaxTokenElement passing
+                && (passing.Token.Kind == TokenKind.OutKeyword
+                    || (passing.Token.Kind == TokenKind.Identifier && passing.Token.Text == "init")))
             {
-                if (expectedParameter is null || !expectedParameter.IsOut)
+                var isInit = passing.Token.Text == "init";
+                if (expectedParameter is null || !expectedParameter.IsOut
+                    || expectedParameter.IsInit != isInit)
                 {
-                    Report("TRM3011", "Unexpected out argument.", argument.Span);
+                    Report("TRM3011", "Output argument mode does not match the parameter.", argument.Span);
                     bound.Add(ErrorExpression(argument.Span));
                     continue;
                 }
@@ -2305,18 +2326,21 @@ internal sealed partial class Binder
                 var slot = declares ? AddVariable(outName.Text, expectedParameter.Type, false, outName.Span)
                     : TryFindVariable(outName.Text, out var existing) ? existing : -1;
                 if (slot < 0 || _variables[slot].Type != expectedParameter.Type
-                    || (!declares && (!_variables[slot].IsMutable || (_hasReceiver && slot == 0))))
+                    || (!declares && ((!isInit && !_variables[slot].IsMutable)
+                        || (_hasReceiver && slot == 0))))
                 {
-                    Report("TRM3011", "Output target must be a mutable local of matching type.", argument.Span);
+                    Report("TRM3011", "Output target must be a matching local with a valid passing mode.", argument.Span);
                     bound.Add(ErrorExpression(argument.Span));
                     continue;
                 }
-                bound.Add(new BoundOutArgument(slot, declares, expectedParameter.Type, argument.Span));
+                bound.Add(new BoundOutArgument(slot, declares, expectedParameter.Type, argument.Span) {
+                    IsInit = isInit,
+                });
                 continue;
             }
             if (expectedParameter?.IsOut == true)
             {
-                Report("TRM3011", "An out parameter requires an out argument.", argument.Span);
+                Report("TRM3011", "An output parameter requires the matching out or init argument.", argument.Span);
             }
             if (argument.Children.Length != 1 || argument.Children[0] is not SyntaxNode value)
             {
@@ -2784,7 +2808,7 @@ internal sealed partial class Binder
         _sourceDiagnostics.Add(new SourceDiagnostic(_tree, diagnostic));
     }
 
-    private sealed record Parameter(string Name, PrimitiveType Type, TextSpan Span, bool IsOut);
+    private sealed record Parameter(string Name, PrimitiveType Type, TextSpan Span, bool IsOut, bool IsInit = false);
 
     private sealed record Signature(string Name, PrimitiveType ReturnType, ImmutableArray<Parameter> Parameters,
         SyntaxNode? Body, SyntaxNode? Declaration, SyntaxTree Tree, string? StructName, bool IsConstructor, bool IsPrivate,
