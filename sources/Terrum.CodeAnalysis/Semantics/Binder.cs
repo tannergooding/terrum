@@ -868,16 +868,11 @@ internal sealed partial class Binder
             {
                 Report("TRM3011", "An output parameter requires a bool return type.", parameter.Span);
             }
-            if (isInit && !isPrivate && !isInternal)
-            {
-                Report("TRM3011", "Init ref parameters require compilation-private declarations until their module contract is supported.",
-                    parameter.Span);
-            }
             if (isInit && type is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
                 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
                 && !IsStruct(type) && !IsUnique(type))
             {
-                Report("TRM3011", "Private init ref parameters require supported scalar, Copy-struct, or unique outputs.",
+                Report("TRM3011", "Init ref parameters require supported scalar, Copy-struct, or unique outputs.",
                     parameter.Span);
             }
 

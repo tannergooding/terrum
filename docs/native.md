@@ -56,13 +56,15 @@ Syntax-21 adds compilation-local unary `+`, `-`, `!` and `~` protocols with
 separate operand/result formals. Their closed calls reuse existing verified
 native calls and private module servicing without a new scanner record,
 semantic wire format, native profile, or public generic ABI.
-Syntax-22 adds compilation-private `bool`/`init ref<T>` initialization loans:
+Syntax-22 adds bounded `bool`/`init ref<T>` initialization loans:
 the caller supplies vacant storage via `init name`, or declares it with
 `init var name`; a completed value transfers only on true. Semantic v33
-retains the distinct private parameter and call mode across module servicing.
-The existing checked `out` scratch/cleanup and native ABI implement the
-bounded behavior without a native profile change; public init contracts and
-general references are not supported.
+retains the distinct parameter and call mode across module servicing. Exported
+contracts use `init:` rather than `out:`; older private v33 declarations retain
+their original contract spelling. Public scalar, handle-free Copy and eligible
+unique outputs use the existing checked `out` scratch/cleanup and native ABI
+without a profile change. Managed graph boundaries admit Copy outputs only;
+generic init parameters and general references remain unsupported.
 Syntax-23 introduces explicit by-value getters on Copy structs and source
 classes. Semantic v34 persists property member identity and accessor effects
 independently of the callable implementation name. Getter reads use the
@@ -297,7 +299,7 @@ ABI/profile nor graph package format. See the
 Primitive
 `OwnedInt32Buffer` views keep their separate legacy access rules; general
 `ref<T>`/view/`own<T>` and general `init ref<T>` call-site implementations
-remain unsupported beyond the private conditional-init subset.
+remain unsupported beyond the bounded conditional-init subset.
 The [class sample](../samples/native/managed-classes.terrum)
 returns 42 through shared aliases and heterogeneous managed edges. The independent
 C heap probe checks multiple-edge liveness, pointer-shaped scalar nonroots,
@@ -820,11 +822,12 @@ assignment facts follow evaluated short-circuit paths, and `require` carries
 the true-path facts forward. Supported unique owning outputs clean partial
 values on false or checked exceptional paths; neither path publishes a
 partial output.
-This bool/`out` behavior remains supported. The private `bool`/`init ref<T>`
+This bool/`out` behavior remains supported. The bounded `bool`/`init ref<T>`
 source mode additionally requires a vacant caller destination and an exact
 `init` argument; v33 persists that distinction, while both modes share the
-same verified scratch/publication and native output ABI. Public/general init
-contracts and predicate-based postconditions remain scheduled.
+same verified scratch/publication and native output ABI. Exported init
+contracts remain distinct from out contracts. General references and
+predicate-based postconditions remain scheduled.
 
 [`self-host/SourceRange`](../self-host/SourceRange.terrum),
 [`CharacterFacts`](../self-host/CharacterFacts.terrum),

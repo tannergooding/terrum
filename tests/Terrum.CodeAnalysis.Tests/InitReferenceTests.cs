@@ -55,11 +55,14 @@ public sealed class InitReferenceTests
     }
 
     [Fact]
-    public void PublicInitContractIsRejectedUntilItsModuleModeIsRepresented()
+    public void PublicInitContractRetainsItsDistinctModuleMode()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(ScalarSource.Replace("bool Fill(",
-            "public bool Fill(", StringComparison.Ordinal)));
-        Assert.Contains(compilation.Diagnostics, item => item.Code == "TRM3011");
+            "public bool Fill(", StringComparison.Ordinal).Replace("int32 Main()",
+            "public int32 Read()", StringComparison.Ordinal)));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program), ["Fill"]);
+        Assert.True(Assert.Single(ModuleCompiler.CreateReference(producer).Functions).Variables[1].IsInit);
     }
 
     [Fact]

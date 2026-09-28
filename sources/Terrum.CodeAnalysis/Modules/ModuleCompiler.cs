@@ -47,9 +47,10 @@ public static partial class ModuleCompiler
     private const int MaximumDepth = 128;
     private const int MaximumStringBytes = 1024;
 
-    private static bool HasPrivateInitReference(Module module) =>
-        module.Functions.Any(static item => item.Function is BoundFunction function
-            && function.Variables.Any(static variable => variable.IsInit));
+    private static bool HasInitReference(Module module) =>
+        module.Functions.Any(static item => item.Contract.Contains("|init:", StringComparison.Ordinal)
+            || (item.Function is BoundFunction function
+                && function.Variables.Any(static variable => variable.IsInit)));
 
     private static bool HasExplicitGetter(Module module) =>
         module.Functions.Any(static item => item.Function is BoundFunction { PropertyName: not null });
@@ -1013,7 +1014,10 @@ public static partial class ModuleCompiler
         for (var i = 0; i < function.ParameterCount; i++)
         {
             var parameter = function.Variables[i + (function.IsConstructor ? 1 : 0)];
-            _ = result.Append('|').Append(parameter.IsOut ? "out:" : "in:")
+            // Private v33 headers recorded init as out; their explicit IsInit bit still checks the body.
+            var mode = parameter.IsInit && !function.IsPrivate && !function.IsInternal ? "init:"
+                : parameter.IsOut ? "out:" : "in:";
+            _ = result.Append('|').Append(mode)
                 .Append(ContractType(parameter.Type, structures));
         }
         if (HasMutableStructReceiver(function))
@@ -1373,7 +1377,7 @@ public static partial class ModuleCompiler
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         var version = HasExplicitGetter(module)
             ? ExplicitGetterVersion
-            : HasPrivateInitReference(module)
+            : HasInitReference(module)
             ? PrivateInitReferenceVersion
             : module.Consumer && HasPrivateManagedState(module)
             ? ManagedGraphParticipantVersion
@@ -1568,9 +1572,9 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Managed graph participant version requires private managed state.");
             }
-            if (version == PrivateInitReferenceVersion && !HasPrivateInitReference(module))
+            if (version == PrivateInitReferenceVersion && !HasInitReference(module))
             {
-                throw new ModuleFormatException("Private initialization version requires an init parameter.");
+                throw new ModuleFormatException("Initialization version requires an init parameter.");
             }
             if (version == ExplicitGetterVersion && !HasExplicitGetter(module))
             {
@@ -1772,6 +1776,10 @@ public static partial class ModuleCompiler
             if (name.Length == 0 || !seen.Add(name) || (expectedConsumer ? import == hasBody : !hasBody))
             {
                 throw new ModuleFormatException("Invalid module declaration.");
+            }
+            if (version < PrivateInitReferenceVersion && contract.Contains("|init:", StringComparison.Ordinal))
+            {
+                throw new ModuleFormatException("Init contracts require semantic module version 33.");
             }
             var function = hasBody ? GetFunction(reader, ref remaining, version) : null;
             if (version < AggregateClassFactoryVersion && function is BoundFunction classFunction

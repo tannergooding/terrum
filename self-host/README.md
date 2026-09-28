@@ -4,7 +4,7 @@ These files are parallel design candidates, not a bootstrapped compiler.
 They are not linked into the C# implementation. The native profile executes
 the range, character, integer and nested token components and a bounded token scanner.
 The host test runner remains C#, even when it compiles and executes a candidate.
-The host parser's current language version is syntax-22. Syntax-18's qualified
+The host parser's current language version is syntax-23. Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle
 specializations described below. These reuse existing, feature-selected
 semantic contracts without changing the scanner record/schema, native profile
@@ -14,9 +14,14 @@ Syntax-20 reserves `_` as a discard marker; scanner-5 publishes that
 classification while keeping the existing integer-record layout.
 Syntax-21 adds compilation-local unary `+`, `-`, `!` and `~` protocols;
 it adds no scanner record/schema or semantic/native wire change.
-Syntax-22 adds compilation-private conditional `init ref<T>` parameters and
-`init name` calls. Semantic v33 records their private mode without changing
-scanner records or native output ABI; public init contracts remain unsupported.
+Syntax-22 adds bounded conditional `init ref<T>` parameters and
+`init name` calls. Semantic v33 records their mode without changing
+scanner records or native output ABI. Bounded public `init ref<T>` contracts
+now distinguish `init:` from `out:` across module consumers; general
+references and generic init parameters remain unsupported.
+Syntax-23 adds explicit getter-only properties on Copy structs and source
+classes; semantic v34 records property identity without a scanner or native
+ABI change.
 
 Host fixtures retain syntax round trips and add native execution of
 `SourceRange`, `CharacterFacts`, `RangeTests`, `Token` and `TokenTests` with entry wrappers.

@@ -345,7 +345,7 @@ public static partial class ModuleCompiler
                 SerializedProfile = profile,
             };
             if ((version == ManagedGraphParticipantVersion && !HasPrivateManagedState(module))
-                || (version == PrivateInitReferenceVersion && !HasPrivateInitReference(module))
+                || (version == PrivateInitReferenceVersion && !HasInitReference(module))
                 || (version == ExplicitGetterVersion && !HasExplicitGetter(module))
                 || (profile == "native-20" && classes.IsEmpty)
                 || stream.Position != stream.Length || profile != RetainedNativeProfile(module))

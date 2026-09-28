@@ -323,7 +323,7 @@ public sealed record BoundVariable(string Name, PrimitiveType Type, bool IsMutab
     /// <summary>Whether this parameter receives a value only on a true bool return.</summary>
     public bool IsOut { get; init; }
 
-    /// <summary>Whether this source parameter uses the compilation-private initialization loan mode.</summary>
+    /// <summary>Whether this source parameter uses the vacant initialization loan mode.</summary>
     public bool IsInit { get; init; }
 }
 
