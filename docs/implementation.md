@@ -1038,7 +1038,8 @@ ModuleRef identities and co-located producer requirements, optional SourceFile
 paths, nominal TypeDef ranges and FieldDef ownership, unique Layout row
 ownership (not target ABI classification), and structural TypeSpec
 forms and TypeArg ownership/ranges, plus structural MethodSig/Param ranges and
-MethodDef module, signature and body ownership. A host-side
+MethodDef module, signature and body ownership, and PropertyDef getter
+owner/result matching. A host-side
 writer emits indexed String sections with required names or optional empty
 namespace text; the self-host String-row
 candidate emits individual rows. These exercise approved metadata contracts in isolation,

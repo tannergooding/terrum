@@ -111,6 +111,24 @@ public readonly ref struct TrRmMethodDefTableReader
         return _strings.DecodeName((int)name);
     }
 
+    public int GetOwnerType(int row)
+        => (int)Read(GetRow(row), 0);
+
+    public int GetSignature(int row)
+        => (int)Read(GetRow(row), 8);
+
+    public int Count => _recordCount;
+
+    private ReadOnlySpan<byte> GetRow(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidMethod();
+        }
+
+        return _rows.Slice((row - 1) * RowSize, RowSize);
+    }
+
     private static uint Read(ReadOnlySpan<byte> data, int offset)
         => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
 
