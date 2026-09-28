@@ -66,6 +66,16 @@ public static OwnedInt32Buffer FormatInt64(int64 value, OwnedInt32Buffer workspa
     return PrefixMinus(move buffer);
 }
 
+public static OwnedInt32Buffer FormatUInt32(uint32 value, OwnedInt32Buffer workspace)
+{
+    return FormatUInt64(uint64(value), move workspace);
+}
+
+public static OwnedInt32Buffer FormatInt32(int32 value, OwnedInt32Buffer workspace)
+{
+    return FormatInt64(int64(value), move workspace);
+}
+
 public static OwnedInt32Buffer FormatUInt64Base(uint64 value, uint32 radix, OwnedInt32Buffer workspace)
 {
     require radix >= 2 && radix <= 36;
@@ -115,4 +125,14 @@ public static OwnedInt32Buffer FormatInt64Base(int64 value, uint32 radix, OwnedI
     uint64 magnitude = uint64(-(value + 1)) + 1;
     OwnedInt32Buffer buffer = FormatUInt64Base(magnitude, radix, move workspace);
     return PrefixMinus(move buffer);
+}
+
+public static OwnedInt32Buffer FormatUInt32Base(uint32 value, uint32 radix, OwnedInt32Buffer workspace)
+{
+    return FormatUInt64Base(uint64(value), radix, move workspace);
+}
+
+public static OwnedInt32Buffer FormatInt32Base(int32 value, uint32 radix, OwnedInt32Buffer workspace)
+{
+    return FormatInt64Base(int64(value), radix, move workspace);
 }

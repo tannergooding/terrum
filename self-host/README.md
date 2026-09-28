@@ -84,7 +84,7 @@ remain hosted in C#.
 | [IntegerFacts](IntegerFacts.terrum) | Overflow-free signed-addition range predicate | Its internal `[ConstEval]` helper is required for a scalar local and remains callable at runtime; tested with native entry wrappers, not a full compiler bootstrap |
 | [WideIntegerFacts](WideIntegerFacts.terrum) | Checked signed addition and bounded decimal/radix-2..36 accumulation through the full unsigned 64-bit range | Executed as a separately compiled module with conditional wide outputs |
 | [WideIntegerTests](WideIntegerTests.terrum) | Signed extrema, invalid digits/radices, per-radix unsigned/signed limits and conditional output publication | Executed through AOT and JIT with a shared entry wrapper under both failure policies |
-| [IntegerFormatting](IntegerFormatting.terrum) | Invariant signed/unsigned decimal and explicit radix-2..36 digits in reusable owned storage | AOT/JIT boundary, exact-capacity and repeated-use fixtures; native heap checks cover same-allocation transfer and failure cleanup |
+| [IntegerFormatting](IntegerFormatting.terrum) | Invariant signed/unsigned 32- and 64-bit decimal and explicit radix-2..36 digits in reusable owned storage | AOT/JIT boundary, exact-capacity and repeated-use fixtures; native heap checks cover same-allocation transfer and failure cleanup |
 | [IntegerParsing](IntegerParsing.terrum) | Strict signed/unsigned radix-2..36 ASCII parsing of an exact UTF-16 source slice with conditional 32- and 64-bit outputs | Composed with `WideIntegerFacts` under AOT/JIT and both policies; full-range per-radix boundaries, invalid spelling/bounds and unpublished outputs |
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and conditional bool/out publication |
 | [SourceLines](SourceLines.terrum) | Streaming line ranges, line extents and bidirectional UTF-16 offset/line-position mapping over an immutable source grant | AOT/JIT conditional outputs under both policies; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
@@ -169,16 +169,19 @@ source view, managed line collection, or general allocator API.
 
 `IntegerFormatting` consumes and returns a unique `int32`-word workspace.
 The decimal entry points require capacity for the actual output (at most
-twenty words for either signed or unsigned 64-bit values). Each formatter clears
+twenty words for 64-bit values, or eleven for signed 32-bit values).
+`FormatUInt32` and `FormatInt32` widen their values through the same
+decimal formatting path. Each formatter clears
 the initialized prefix without reallocating, then uses
 exclusive lexical views to reverse digits or insert a minus sign. The signed
 minimum is handled without negating it in the signed domain. Output words hold
 explicit ASCII decimal code values; this component does not select a default
 runtime text encoding or implement general format strings.
-`FormatUInt64Base` and `FormatInt64Base` accept an explicit radix from 2 through
+The 32- and 64-bit `Base` entry points accept an explicit radix from 2 through
 36 and publish lowercase ASCII digits (`0`-`9`, `a`-`z`), with a minus sign
 for negative values rather than a two's-complement rendering. Their workspace
-must hold the actual output (up to 64 unsigned or 65 signed words in base 2);
+must hold the actual output (up to 32 unsigned or 33 signed words for 32-bit
+values, or 64 unsigned or 65 signed words for 64-bit values in base 2);
 an invalid radix or insufficient capacity raises the existing checked
 requirement failure without publishing a partial result. The decimal entry
 points accept exact output capacity, including a single word for zero; a

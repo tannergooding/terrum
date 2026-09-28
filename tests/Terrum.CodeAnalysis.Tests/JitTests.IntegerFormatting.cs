@@ -96,10 +96,15 @@ public sealed partial class JitTests
     [InlineData("0", true, 1)]
     [InlineData("-1", true, 2)]
     [InlineData("-9223372036854775808", true, 20)]
-    public async Task DecimalFormattingAcceptsExactOutputCapacityAsync(string value, bool isSigned, int capacity)
+    [InlineData("4294967295", false, 10, true)]
+    [InlineData("2147483647", true, 10, true)]
+    [InlineData("-2147483648", true, 11, true)]
+    [InlineData("0", false, 1, true)]
+    public async Task DecimalFormattingAcceptsExactOutputCapacityAsync(
+        string value, bool isSigned, int capacity, bool isNarrow = false)
     {
         ArgumentNullException.ThrowIfNull(value);
-        var format = isSigned ? "FormatInt64" : "FormatUInt64";
+        var format = FormatterName(isSigned, isNarrow, false);
         var component = await File.ReadAllTextAsync(
             Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
         var checks = string.Join(Environment.NewLine, value.Select((digit, index) =>
@@ -122,11 +127,14 @@ public sealed partial class JitTests
     [InlineData("0", false, 0)]
     [InlineData("-1", true, 1)]
     [InlineData("-9223372036854775808", true, 19)]
-    public async Task DecimalFormattingRejectsUndersizedOutputAsync(string value, bool isSigned, int capacity)
+    [InlineData("4294967295", false, 9, true)]
+    [InlineData("-2147483648", true, 10, true)]
+    public async Task DecimalFormattingRejectsUndersizedOutputAsync(
+        string value, bool isSigned, int capacity, bool isNarrow = false)
     {
         var component = await File.ReadAllTextAsync(
             Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
-        var format = isSigned ? "FormatInt64" : "FormatUInt64";
+        var format = FormatterName(isSigned, isNarrow, false);
         var attempt = $$"""
 
             int32 Attempt() {
@@ -161,7 +169,7 @@ public sealed partial class JitTests
     [InlineData("-1", 36, true)]
     [InlineData("-1234567890123456789", 35, true)]
     public async Task IntegerBaseFormattingUsesExactWorkspaceAcrossAotAndJitAsync(
-        string value, int radix, bool signed)
+        string value, int radix, bool signed, bool isNarrow = false)
     {
         var number = signed ? new BigInteger(long.Parse(value, CultureInfo.InvariantCulture))
             : new BigInteger(ulong.Parse(value, CultureInfo.InvariantCulture));
@@ -181,7 +189,7 @@ public sealed partial class JitTests
         var expected = new string(expectedDigits, start, expectedDigits.Length - start);
         var checks = string.Join(Environment.NewLine, expected.Select((digit, index) =>
             FormattableString.Invariant($"if (digits.Read({index}) != {(int)digit}) {{ return 2; }}")));
-        var format = signed ? "FormatInt64Base" : "FormatUInt64Base";
+        var format = FormatterName(signed, isNarrow, true);
         var component = await File.ReadAllTextAsync(
             Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
         var source = component + $$"""
@@ -205,6 +213,8 @@ public sealed partial class JitTests
         for (var radix = 2; radix <= 36; radix++)
         {
             yield return [ulong.MaxValue.ToString(CultureInfo.InvariantCulture), radix, false];
+            yield return [uint.MaxValue.ToString(CultureInfo.InvariantCulture), radix, false, true];
+            yield return [int.MinValue.ToString(CultureInfo.InvariantCulture), radix, true, true];
         }
     }
 
@@ -214,13 +224,17 @@ public sealed partial class JitTests
     [InlineData(16, 15, false)]
     [InlineData(2, 63, false)]
     [InlineData(2, 64, true)]
+    [InlineData(2, 31, false, true)]
+    [InlineData(2, 32, true, true)]
     public async Task IntegerBaseFormattingRejectsInvalidRadixAndInsufficientStorageAsync(
-        int radix, int capacity, bool signed)
+        int radix, int capacity, bool signed, bool isNarrow = false)
     {
         var component = await File.ReadAllTextAsync(
             Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
-        var format = signed ? "FormatInt64Base" : "FormatUInt64Base";
-        var value = signed ? "int64.MinValue" : "uint64.MaxValue";
+        var format = FormatterName(signed, isNarrow, true);
+        var value = signed
+            ? isNarrow ? "int32.MinValue" : "int64.MinValue"
+            : isNarrow ? "uint32.MaxValue" : "uint64.MaxValue";
         var attempt = $$"""
 
             int32 Attempt() {
@@ -240,4 +254,16 @@ public sealed partial class JitTests
             }
             """, 42).ConfigureAwait(true);
     }
+
+    private static string FormatterName(bool signed, bool isNarrow, bool isBase) =>
+        (signed, isNarrow, isBase) switch {
+            (false, false, false) => "FormatUInt64",
+            (true, false, false) => "FormatInt64",
+            (false, true, false) => "FormatUInt32",
+            (true, true, false) => "FormatInt32",
+            (false, false, true) => "FormatUInt64Base",
+            (true, false, true) => "FormatInt64Base",
+            (false, true, true) => "FormatUInt32Base",
+            (true, true, true) => "FormatInt32Base",
+        };
 }
