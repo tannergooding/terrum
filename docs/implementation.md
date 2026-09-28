@@ -833,6 +833,14 @@ invalid bounds and overflow leave outputs unpublished. It is not wired into
 `SyntaxTree.Parse(LexResult)` or the scanner-backed integer record: that
 record still supplies the binder's contextual literal magnitude.
 
+The [checked integer-conversion candidate](../self-host/IntegerCheckedConversions.terrum)
+provides all twelve cross-type signed/unsigned 32-/64-bit pairs as named
+`bool`/`init ref` functions. A value outside the destination range returns
+false without publishing; successful conversions preserve its numeric value.
+Independent semantic-module consumers execute the boundaries under AOT/JIT
+and both failure policies. These provisional APIs do not replace the existing
+throwing checked `T(value)` conversions, select witness policy or add syntax.
+
 The separate [integer-saturation candidate](../self-host/IntegerSaturation.terrum)
 provides all twelve explicit cross-type signed/unsigned 32-/64-bit integer
 conversion functions with destination-range clamping where required.

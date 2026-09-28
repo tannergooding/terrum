@@ -1,0 +1,118 @@
+namespace Terrum.CodeAnalysis.Numerics64;
+
+public static bool TryConvertInt32ToInt64(int32 value, init ref<int64> result)
+{
+    result = int64(value);
+    return true;
+}
+
+public static bool TryConvertInt32ToUInt64(int32 value, init ref<uint64> result)
+{
+    if (value < 0)
+    {
+        return false;
+    }
+
+    result = uint64(value);
+    return true;
+}
+
+public static bool TryConvertUInt32ToInt64(uint32 value, init ref<int64> result)
+{
+    result = int64(value);
+    return true;
+}
+
+public static bool TryConvertUInt32ToUInt64(uint32 value, init ref<uint64> result)
+{
+    result = uint64(value);
+    return true;
+}
+
+public static bool TryConvertUInt32ToInt32(uint32 value, init ref<int32> result)
+{
+    if (value > uint32(int32.MaxValue))
+    {
+        return false;
+    }
+
+    result = int32(value);
+    return true;
+}
+
+public static bool TryConvertInt32ToUInt32(int32 value, init ref<uint32> result)
+{
+    if (value < 0)
+    {
+        return false;
+    }
+
+    result = uint32(value);
+    return true;
+}
+
+public static bool TryConvertInt64ToInt32(int64 value, init ref<int32> result)
+{
+    if (value < int64(int32.MinValue) || value > int64(int32.MaxValue))
+    {
+        return false;
+    }
+
+    result = int32(value);
+    return true;
+}
+
+public static bool TryConvertInt64ToUInt32(int64 value, init ref<uint32> result)
+{
+    if (value < 0 || value > int64(uint32.MaxValue))
+    {
+        return false;
+    }
+
+    result = uint32(value);
+    return true;
+}
+
+public static bool TryConvertUInt64ToInt32(uint64 value, init ref<int32> result)
+{
+    if (value > uint64(int32.MaxValue))
+    {
+        return false;
+    }
+
+    result = int32(value);
+    return true;
+}
+
+public static bool TryConvertUInt64ToUInt32(uint64 value, init ref<uint32> result)
+{
+    if (value > uint64(uint32.MaxValue))
+    {
+        return false;
+    }
+
+    result = uint32(value);
+    return true;
+}
+
+public static bool TryConvertUInt64ToInt64(uint64 value, init ref<int64> result)
+{
+    if (value > uint64(int64.MaxValue))
+    {
+        return false;
+    }
+
+    result = int64(value);
+    return true;
+}
+
+public static bool TryConvertInt64ToUInt64(int64 value, init ref<uint64> result)
+{
+    if (value < 0)
+    {
+        return false;
+    }
+
+    result = uint64(value);
+    return true;
+}

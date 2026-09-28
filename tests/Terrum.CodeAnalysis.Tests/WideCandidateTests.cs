@@ -209,6 +209,73 @@ public sealed class WideCandidateTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task CheckedConversionsPublishOnlyRepresentableValuesAcrossModulesAsync(NativeRuntimePolicy policy)
+    {
+        var producer = CreateNumericsLibrary("IntegerCheckedConversions.terrum", policy,
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToUInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToUInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToUInt64");
+        var consumerSource = SyntaxTree.Parse("""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                if (TryConvertInt32ToUInt64(-1, init var unsigned64FromNegative32)
+                    || TryConvertInt32ToUInt32(-1, init var unsigned32FromNegative32)
+                    || TryConvertUInt32ToInt32(uint32.MaxValue, init var int32FromLarge32)
+                    || TryConvertInt64ToInt32(int64.MinValue, init var int32FromSmall64)
+                    || TryConvertInt64ToInt32(int64.MaxValue, init var int32FromLarge64)
+                    || TryConvertInt64ToUInt32(-1, init var unsigned32FromNegative64)
+                    || TryConvertInt64ToUInt32(int64.MaxValue, init var unsigned32FromLarge64)
+                    || TryConvertUInt64ToInt32(uint64.MaxValue, init var int32FromLargeUnsigned)
+                    || TryConvertUInt64ToUInt32(uint64.MaxValue, init var unsigned32FromLargeUnsigned)
+                    || TryConvertUInt64ToInt64(uint64.MaxValue, init var int64FromLargeUnsigned)
+                    || TryConvertInt64ToUInt64(-1, init var unsigned64FromNegative64)) { return 1; }
+                require TryConvertInt32ToInt64(int32.MinValue, init var minInt64);
+                require TryConvertInt32ToUInt64(int32.MaxValue, init var unsigned64From32);
+                require TryConvertUInt32ToInt64(uint32.MaxValue, init var int64FromUnsigned32);
+                require TryConvertUInt32ToUInt64(uint32.MaxValue, init var unsigned64FromUInt32);
+                require TryConvertUInt32ToInt32(uint32(int32.MaxValue), init var int32From32);
+                require TryConvertInt32ToUInt32(int32.MaxValue, init var unsigned32From32);
+                require TryConvertInt64ToInt32(int64(int32.MinValue), init var int32From64);
+                require TryConvertInt64ToUInt32(int64(uint32.MaxValue), init unsigned32FromNegative64);
+                require TryConvertUInt64ToInt32(uint64(int32.MaxValue), init var int32FromUnsigned64);
+                require TryConvertUInt64ToUInt32(uint64(uint32.MaxValue), init var unsigned32FromUnsigned64);
+                require TryConvertUInt64ToInt64(uint64(int64.MaxValue), init var int64FromUnsigned64);
+                require TryConvertInt64ToUInt64(int64.MaxValue, init var unsigned64From64);
+                if (minInt64 != int64(int32.MinValue)
+                    || unsigned64From32 != uint64(int32.MaxValue)
+                    || int64FromUnsigned32 != int64(uint32.MaxValue)
+                    || unsigned64FromUInt32 != uint64(uint32.MaxValue)
+                    || int32From32 != int32.MaxValue
+                    || unsigned32From32 != uint32(int32.MaxValue)
+                    || int32From64 != int32.MinValue
+                    || unsigned32FromNegative64 != uint32.MaxValue
+                    || int32FromUnsigned64 != int32.MaxValue
+                    || unsigned32FromUnsigned64 != uint32.MaxValue
+                    || int64FromUnsigned64 != int64.MaxValue
+                    || unsigned64From64 != uint64(int64.MaxValue)) { return 2; }
+                return 42;
+            }
+            """);
+        var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task SaturatingConversionsExecuteFromIndependentModuleAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerSaturation.terrum", policy,
