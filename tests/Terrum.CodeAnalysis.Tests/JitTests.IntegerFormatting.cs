@@ -227,6 +227,89 @@ public sealed partial class JitTests
     }
 
     [Theory]
+    [MemberData(nameof(EveryChar16Radix))]
+    [InlineData(0, 10)]
+    [InlineData(55296, 16)]
+    [InlineData(65535, 2)]
+    public async Task Char16FormattingMeasuresExactCapacityAcrossAotAndJitAsync(int value, int radix)
+    {
+        var remaining = new BigInteger(value);
+        var digits = new char[16];
+        var start = digits.Length;
+        do
+        {
+            remaining = BigInteger.DivRem(remaining, radix, out var digit);
+            digits[--start] = "0123456789abcdefghijklmnopqrstuvwxyz"[(int)digit];
+        }
+        while (remaining > 0);
+        var expected = new string(digits, start, digits.Length - start);
+        var checks = string.Join(Environment.NewLine, expected.Select((digit, index) =>
+            FormattableString.Invariant($"if (formatted.Read({index}) != {(int)digit}) {{ return 2; }}")));
+        var decimalText = value.ToString(CultureInfo.InvariantCulture);
+        var decimalChecks = string.Join(Environment.NewLine, decimalText.Select((digit, index) =>
+            FormattableString.Invariant($"if (decimalDigits.Read({index}) != {(int)digit}) {{ return 5; }}")));
+        var component = await File.ReadAllTextAsync(
+            Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+        var source = component + $$"""
+
+            int32 Main() {
+                if (TryGetChar16BaseLength(char16({{value}}), 1, init var bad)) { return 6; }
+                require TryGetChar16BaseLength(char16({{value}}), {{radix}}, init var capacity);
+                if (capacity != {{expected.Length}}) { return 1; }
+                require OwnedInt32Buffer.TryCreate(capacity, out var workspace);
+                OwnedInt32Buffer formatted = FormatChar16Base(char16({{value}}), {{radix}}, move workspace);
+                if (formatted.Count != capacity || formatted.Capacity != capacity) { return 3; }
+                {{checks}}
+                require TryGetChar16BaseLength(char16({{value}}), 10, init var decimalLength);
+                require OwnedInt32Buffer.TryCreate(decimalLength, out var decimalWorkspace);
+                OwnedInt32Buffer decimalDigits = FormatChar16(char16({{value}}), move decimalWorkspace);
+                if (decimalLength != {{decimalText.Length}} || decimalDigits.Count != decimalLength
+                    || decimalDigits.Capacity != decimalLength) { return 4; }
+                {{decimalChecks}}
+                return 42;
+            }
+            """;
+        await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
+        await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+    }
+
+    public static IEnumerable<object[]> EveryChar16Radix()
+    {
+        for (var radix = 2; radix <= 36; radix++)
+        {
+            yield return [65535, radix];
+        }
+    }
+
+    [Theory]
+    [InlineData(1, 16)]
+    [InlineData(37, 16)]
+    [InlineData(2, 15)]
+    public async Task Char16FormattingRejectsInvalidBaseAndInsufficientStorageAsync(int radix, int capacity)
+    {
+        var component = await File.ReadAllTextAsync(
+            Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+        var attempt = $$"""
+
+            int32 Attempt() {
+                require OwnedInt32Buffer.TryCreate({{capacity}}, out var workspace);
+                OwnedInt32Buffer digits = FormatChar16Base(char16.MaxValue, {{radix}}, move workspace);
+                return digits.Count;
+            }
+            """;
+        await AssertFailFastExecutionAsync(component + attempt + "int32 Main() { return Attempt(); }",
+            unchecked((int)0xE0540003)).ConfigureAwait(true);
+        await AssertCheckedExecutionAsync(component + attempt + """
+            int32 Main() {
+                unsafe {
+                    try { return Attempt(); }
+                    catch { return 42; }
+                }
+            }
+            """, 42).ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData(1, 16, false)]
     [InlineData(37, 16, false)]
     [InlineData(16, 15, false)]

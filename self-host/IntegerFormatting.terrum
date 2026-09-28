@@ -85,6 +85,11 @@ public static OwnedInt32Buffer FormatInt32(int32 value, OwnedInt32Buffer workspa
     return FormatInt64(int64(value), move workspace);
 }
 
+public static OwnedInt32Buffer FormatChar16(char16 value, OwnedInt32Buffer workspace)
+{
+    return FormatUInt32(uint32(value), move workspace);
+}
+
 public static OwnedInt32Buffer FormatUInt64Base(uint64 value, uint32 radix, OwnedInt32Buffer workspace)
 {
     require radix >= 2 && radix <= 36;
@@ -145,6 +150,11 @@ public static OwnedInt32Buffer FormatInt32Base(int32 value, uint32 radix, OwnedI
     return FormatInt64Base(int64(value), radix, move workspace);
 }
 
+public static OwnedInt32Buffer FormatChar16Base(char16 value, uint32 radix, OwnedInt32Buffer workspace)
+{
+    return FormatUInt32Base(uint32(value), radix, move workspace);
+}
+
 public static bool TryGetUInt64BaseLength(uint64 value, uint32 radix, init ref<int32> length)
 {
     if (radix < 2 || radix > 36)
@@ -187,4 +197,9 @@ public static bool TryGetUInt32BaseLength(uint32 value, uint32 radix, init ref<i
 public static bool TryGetInt32BaseLength(int32 value, uint32 radix, init ref<int32> length)
 {
     return TryGetInt64BaseLength(int64(value), radix, init length);
+}
+
+public static bool TryGetChar16BaseLength(char16 value, uint32 radix, init ref<int32> length)
+{
+    return TryGetUInt32BaseLength(uint32(value), radix, init length);
 }
