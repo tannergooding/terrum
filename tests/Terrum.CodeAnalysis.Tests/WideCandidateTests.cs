@@ -35,6 +35,46 @@ public sealed class WideCandidateTests
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task CheckedInt32ArithmeticPublishesOnlyInRangeAcrossModulesAsync(NativeRuntimePolicy policy)
+    {
+        var producer = CreateNumericsLibrary("IntegerCheckedArithmetic.terrum", policy,
+            "Terrum.CodeAnalysis.Numerics64.TryAddInt32",
+            "Terrum.CodeAnalysis.Numerics64.TrySubtractInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryMultiplyInt32");
+        var consumerSource = SyntaxTree.Parse("""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                if (TryAddInt32(int32.MaxValue, 1, init var addOverflow)
+                    || TryAddInt32(int32.MinValue, -1, init var addUnderflow)
+                    || TrySubtractInt32(int32.MaxValue, -1, init var subOverflow)
+                    || TrySubtractInt32(int32.MinValue, 1, init var subUnderflow)
+                    || TryMultiplyInt32(int32.MaxValue, 2, init var mulOverflow)
+                    || TryMultiplyInt32(int32.MinValue, -1, init var mulNegOverflow)
+                    || TryMultiplyInt32(int32.MinValue, 2, init var mulUnderflow)) { return 1; }
+                require TryAddInt32(int32.MinValue, int32.MaxValue, init var negativeOne);
+                require TryAddInt32(40, 2, init var fortyTwo);
+                require TrySubtractInt32(-1, int32.MinValue, init var maximum);
+                require TrySubtractInt32(int32.MinValue, int32.MinValue, init var zero);
+                require TryMultiplyInt32(int32.MinValue, 1, init var minimum);
+                require TryMultiplyInt32(-1, int32.MaxValue, init var negativeMaximum);
+                require TryMultiplyInt32(46340, 46340, init var square);
+                if (negativeOne != -1 || fortyTwo != 42 || maximum != int32.MaxValue
+                    || zero != 0 || minimum != int32.MinValue
+                    || negativeMaximum != -int32.MaxValue || square != 2147395600) { return 2; }
+                return 42;
+            }
+            """);
+        var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task SaturatingConversionsExecuteFromIndependentModuleAsync(NativeRuntimePolicy policy)
     {
         var producer = CreateNumericsLibrary("IntegerSaturation.terrum", policy,

@@ -1,0 +1,37 @@
+namespace Terrum.CodeAnalysis.Numerics64;
+
+public static bool TryAddInt32(int32 left, int32 right, init ref<int32> result)
+{
+    int64 value = int64(left) + int64(right);
+    if (value < int64(int32.MinValue) || value > int64(int32.MaxValue))
+    {
+        return false;
+    }
+
+    result = int32(value);
+    return true;
+}
+
+public static bool TrySubtractInt32(int32 left, int32 right, init ref<int32> result)
+{
+    int64 value = int64(left) - int64(right);
+    if (value < int64(int32.MinValue) || value > int64(int32.MaxValue))
+    {
+        return false;
+    }
+
+    result = int32(value);
+    return true;
+}
+
+public static bool TryMultiplyInt32(int32 left, int32 right, init ref<int32> result)
+{
+    int64 value = int64(left) * int64(right);
+    if (value < int64(int32.MinValue) || value > int64(int32.MaxValue))
+    {
+        return false;
+    }
+
+    result = int32(value);
+    return true;
+}
