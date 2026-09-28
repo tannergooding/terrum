@@ -2172,7 +2172,7 @@ internal sealed partial class PeCompiler
                     return;
                 }
                 Expression(binary.Left, spill);
-                if (TryEmitUnsignedPowerOfTwoBinary(binary))
+                if (TryEmitUnsignedPowerOfTwoBinary(binary) || TryEmitSignedPowerOfTwoBinary(binary))
                 {
                     break;
                 }
@@ -2508,6 +2508,92 @@ internal sealed partial class PeCompiler
                 _code.Int64(unchecked((long)mask));
                 _code.Bytes(0x48, 0x21, 0xC8);
             }
+        }
+
+        return true;
+    }
+
+    private bool TryEmitSignedPowerOfTwoBinary(BoundBinary binary)
+    {
+        if (binary.Operator is not (TokenKind.Slash or TokenKind.Percent)
+            || binary.Left.Type is not (PrimitiveType.Int32 or PrimitiveType.Int64)
+            || binary.Right is not BoundConstant constant)
+        {
+            return false;
+        }
+
+        var divisor = constant.Value;
+        if (divisor <= 0 || (divisor & (divisor - 1)) != 0)
+        {
+            return false;
+        }
+
+        if (divisor == 1)
+        {
+            if (binary.Operator == TokenKind.Percent)
+            {
+                _code.Bytes(0x31, 0xC0);
+            }
+            return true;
+        }
+
+        var wide = binary.Left.Type == PrimitiveType.Int64;
+        var width = wide ? 64 : 32;
+        var shift = BitOperations.TrailingZeroCount((ulong)divisor);
+        if (binary.Operator == TokenKind.Percent)
+        {
+            if (wide)
+            {
+                _code.Byte(0x48);
+            }
+            _code.Bytes(0x89, 0xC2); // preserve the numerator in rdx
+        }
+
+        // Only negative numerators receive a bias of divisor - 1. Its addition cannot
+        // overflow: a negative n plus at most divisor - 1 is at most divisor - 2.
+        if (wide)
+        {
+            _code.Byte(0x48);
+        }
+        _code.Bytes(0x89, 0xC1); // mov rcx,rax
+        if (wide)
+        {
+            _code.Byte(0x48);
+        }
+        _code.Bytes(0xC1, 0xF9, (byte)(width - 1)); // sar rcx,width-1
+        if (wide)
+        {
+            _code.Byte(0x48);
+        }
+        _code.Bytes(0xC1, 0xE9, (byte)(width - shift)); // logical shift yields 0 or divisor - 1
+        if (wide)
+        {
+            _code.Byte(0x48);
+        }
+        _code.Bytes(0x01, 0xC8); // add rax,rcx
+        if (wide)
+        {
+            _code.Byte(0x48);
+        }
+        _code.Bytes(0xC1, 0xF8, (byte)shift); // arithmetic quotient truncated toward zero
+
+        if (binary.Operator == TokenKind.Percent)
+        {
+            if (wide)
+            {
+                _code.Byte(0x48);
+            }
+            _code.Bytes(0xC1, 0xE0, (byte)shift); // quotient * divisor is within the numerator's range
+            if (wide)
+            {
+                _code.Byte(0x48);
+            }
+            _code.Bytes(0x29, 0xC2); // sub rdx,rax
+            if (wide)
+            {
+                _code.Byte(0x48);
+            }
+            _code.Bytes(0x89, 0xD0);
         }
 
         return true;

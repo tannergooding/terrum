@@ -236,6 +236,80 @@ public sealed class Integer64Tests
             """), 42);
 
     [Theory]
+    [InlineData("int32", "1")]
+    [InlineData("int32", "2")]
+    [InlineData("int32", "1073741824")]
+    [InlineData("int64", "1")]
+    [InlineData("int64", "2")]
+    [InlineData("int64", "4611686018427387904")]
+    public void SignedPowerOfTwoDivisionsAvoidGeneralDivision(string type, string divisor)
+    {
+        var program = Compile($$"""
+            {{type}} Quot({{type}} n) { return n / {{type}}({{divisor}}); }
+            {{type}} Rem({{type}} n) { return n % {{type}}({{divisor}}); }
+            int32 Main() { return 42; }
+            """);
+        var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
+        var general = NativeEmitter.EmitCode(Compile($$"""
+            {{type}} Quot({{type}} n) { return n / {{type}}(3); }
+            {{type}} Rem({{type}} n) { return n % {{type}}(3); }
+            int32 Main() { return 42; }
+            """), NativeRuntimePolicy.FailFast);
+        ReadOnlySpan<byte> signedDivision = type == "int32" ? [0x99, 0xF7, 0xF9] : [0x48, 0x99, 0x48, 0xF7, 0xF9];
+        for (var index = 0; index < 2; index++)
+        {
+            var start = code.SourceFunctionOffsets[index];
+            var length = code.SourceFunctionOffsets[index + 1] - start;
+            var bytes = code.Code.AsSpan(start, length);
+            Assert.True(bytes.IndexOf(signedDivision) < 0);
+            var generalStart = general.SourceFunctionOffsets[index];
+            var generalLength = general.SourceFunctionOffsets[index + 1] - generalStart;
+            Assert.True(general.Code.AsSpan(generalStart, generalLength).IndexOf(signedDivision) >= 0);
+            Assert.True(length < generalLength);
+        }
+    }
+
+    [Theory]
+    [InlineData("int32", "-1")]
+    [InlineData("int32", "-2")]
+    [InlineData("int32", "0")]
+    [InlineData("int32", "3")]
+    [InlineData("int64", "-1")]
+    [InlineData("int64", "-2")]
+    [InlineData("int64", "0")]
+    [InlineData("int64", "3")]
+    public void OtherSignedDivisorsRetainGeneralDivision(string type, string divisor)
+    {
+        var program = Compile($$"""
+            {{type}} Quot({{type}} n) { return n / {{type}}({{divisor}}); }
+            {{type}} Rem({{type}} n) { return n % {{type}}({{divisor}}); }
+            int32 Main() { return 42; }
+            """);
+        var code = NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast);
+        ReadOnlySpan<byte> signedDivision = type == "int32" ? [0x99, 0xF7, 0xF9] : [0x48, 0x99, 0x48, 0xF7, 0xF9];
+        for (var index = 0; index < 2; index++)
+        {
+            var start = code.SourceFunctionOffsets[index];
+            var length = code.SourceFunctionOffsets[index + 1] - start;
+            Assert.True(code.Code.AsSpan(start, length).IndexOf(signedDivision) >= 0);
+        }
+    }
+
+    [Theory]
+    [InlineData("int32", "/", "1")]
+    [InlineData("int32", "%", "2")]
+    [InlineData("int64", "/", "4611686018427387904")]
+    [InlineData("int64", "%", "1")]
+    public void SignedPowerOfTwoSelectionDoesNotRelaxNoThrowProof(string type, string operation, string divisor)
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            [NoThrow] {{type}} Calculate({{type}} n) { return n {{operation}} {{type}}({{divisor}}); }
+            int32 Main() { return 42; }
+            """));
+        Assert.Contains(compilation.Diagnostics, static diagnostic => diagnostic.Code == "TRM3017");
+    }
+
+    [Theory]
     [InlineData("uint32", "/", "2")]
     [InlineData("uint32", "%", "2147483648")]
     [InlineData("uint64", "/", "9223372036854775808")]

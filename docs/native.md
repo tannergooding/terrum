@@ -780,9 +780,15 @@ The shared AOT/JIT encoder lowers `uint32` and `uint64` division by a
 nonzero constant power of two to a logical shift, and remainder to a mask.
 Dividing by one retains the numerator; remainder by one produces zero after
 evaluating the numerator. Each numerator still evaluates exactly once, with
-its original effects and failures. Signed operations, zero divisors and other
-divisors retain their existing paths. This instruction selection changes
-neither verified IR nor source `NoThrow` acceptance, module formats or ABI.
+its original effects and failures. Signed `int32` and `int64` division/remainder
+by a positive constant power of two uses a negative-numerator bias before an
+arithmetic quotient shift, then subtracts quotient times divisor for the
+remainder. This retains truncation toward zero and negative remainder signs,
+including signed minima. Signed divisor one keeps the numerator for division
+and yields zero for remainder after evaluating it. Zero, negative and other
+non-power-of-two divisors retain their checked general paths. This instruction
+selection changes neither verified IR nor source `NoThrow` acceptance, module
+formats or ABI.
 
 A bool-returning declaration with `out` parameters promises initialized outputs
 on true. Callees construct outputs in private scratch storage and publish only

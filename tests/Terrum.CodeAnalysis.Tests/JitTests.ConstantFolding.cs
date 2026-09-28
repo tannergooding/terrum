@@ -119,4 +119,160 @@ public sealed partial class JitTests
             """;
         return AssertCheckedExecutionAsync(source, 42);
     }
+
+    [Theory]
+    [InlineData("int32", "0", "1")]
+    [InlineData("int32", "-1", "1")]
+    [InlineData("int32", "-2147483648", "1")]
+    [InlineData("int32", "2147483647", "1")]
+    [InlineData("int32", "-3", "2")]
+    [InlineData("int32", "3", "2")]
+    [InlineData("int32", "-4", "2")]
+    [InlineData("int32", "-2147483648", "2")]
+    [InlineData("int32", "2147483647", "2")]
+    [InlineData("int32", "-1073741825", "1073741824")]
+    [InlineData("int32", "-2147483648", "1073741824")]
+    [InlineData("int32", "2147483647", "1073741824")]
+    [InlineData("int64", "0", "1")]
+    [InlineData("int64", "-1", "1")]
+    [InlineData("int64", "-9223372036854775808", "1")]
+    [InlineData("int64", "9223372036854775807", "1")]
+    [InlineData("int64", "-3", "2")]
+    [InlineData("int64", "3", "2")]
+    [InlineData("int64", "-9223372036854775808", "2")]
+    [InlineData("int64", "9223372036854775807", "2")]
+    [InlineData("int64", "-4611686018427387905", "4611686018427387904")]
+    [InlineData("int64", "-9223372036854775808", "4611686018427387904")]
+    [InlineData("int64", "9223372036854775807", "4611686018427387904")]
+    public async Task SignedPowerOfTwoDivisionAndRemainderMatchExactValuesAcrossAotAndJitAsync(
+        string type, string numerator, string divisor)
+    {
+        var value = long.Parse(numerator, System.Globalization.CultureInfo.InvariantCulture);
+        var power = long.Parse(divisor, System.Globalization.CultureInfo.InvariantCulture);
+        var source = $$"""
+            {{type}} Quot({{type}} n) { return n / {{type}}({{divisor}}); }
+            {{type}} Rem({{type}} n) { return n % {{type}}({{divisor}}); }
+            int32 Main() {
+                {{type}} n = {{type}}({{numerator}});
+                if (Quot(n) != {{type}}({{value / power}})
+                    || Rem(n) != {{type}}({{value % power}})) { return 1; }
+                return 42;
+            }
+            """;
+        await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
+        await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData("int32", "/", "1")]
+    [InlineData("int32", "%", "1073741824")]
+    [InlineData("int64", "/", "4611686018427387904")]
+    [InlineData("int64", "%", "1")]
+    public async Task SignedPowerOfTwoNumeratorEffectsAndFailuresRemainObservableAcrossAotAndJitAsync(
+        string type, string operation, string divisor)
+    {
+        var source = $$"""
+            struct Counter {
+                public mut int32 Calls;
+                public Counter() { Calls = 0; }
+                public mut {{type}} Read() { Calls = Calls + 1; return {{type}}(-3); }
+            }
+            int32 Main() {
+                mut Counter counter = new Counter();
+                {{type}} result = counter.Read() {{operation}} {{type}}({{divisor}});
+                if (counter.Calls != 1) { return 1; }
+                return 42;
+            }
+            """;
+        await AssertFailFastExecutionAsync(source, 42).ConfigureAwait(true);
+        await AssertCheckedExecutionAsync(source, 42).ConfigureAwait(true);
+
+        var failing = $$"""
+            {{type}} Fail() { require false; return {{type}}(1); }
+            int32 Main() {
+                unsafe {
+                    try {
+                        {{type}} result = Fail() {{operation}} {{type}}({{divisor}});
+                    }
+                    catch { return 42; }
+                }
+                return 1;
+            }
+            """;
+        await AssertCheckedExecutionAsync(failing, 42).ConfigureAwait(true);
+        await AssertFailFastExecutionAsync($$"""
+            {{type}} Fail() { require false; return {{type}}(1); }
+            int32 Main() {
+                {{type}} result = Fail() {{operation}} {{type}}({{divisor}});
+                return 1;
+            }
+            """, unchecked((int)0xE0540003)).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData("int32", "-3", "-2", "1", "-1")]
+    [InlineData("int32", "-2147483648", "-2", "1073741824", "0")]
+    [InlineData("int32", "-2147483648", "-1", null, "0")]
+    [InlineData("int64", "-3", "-2", "1", "-1")]
+    [InlineData("int64", "-9223372036854775808", "-2", "4611686018427387904", "0")]
+    [InlineData("int64", "-9223372036854775808", "-1", null, "0")]
+    public async Task SignedNegativeDivisorControlsKeepExistingBehaviorAcrossAotAndJitAsync(
+        string type, string numerator, string divisor, string? quotient, string remainder)
+    {
+        var source = $$"""
+            {{type}} Quot({{type}} n) { return n / {{type}}({{divisor}}); }
+            {{type}} Rem({{type}} n) { return n % {{type}}({{divisor}}); }
+            int32 Main() {
+                {{type}} n = {{type}}({{numerator}});
+                if (Rem(n) != {{type}}({{remainder}})) { return 1; }
+                {{(quotient is null ? "Quot(n); return 1;" : $"if (Quot(n) != {type}({quotient})) {{ return 1; }} return 42;")}}
+            }
+            """;
+        var expected = quotient is null ? unchecked((int)0xE0540001) : 42;
+        await AssertFailFastExecutionAsync(source, expected).ConfigureAwait(true);
+        if (quotient is null)
+        {
+            await AssertCheckedExecutionAsync($$"""
+                {{type}} Quot({{type}} n) { return n / {{type}}({{divisor}}); }
+                int32 Main() {
+                    unsafe {
+                        try { {{type}} result = Quot({{type}}.MinValue); }
+                        catch { return 42; }
+                    }
+                    return 1;
+                }
+                """, 42).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertCheckedExecutionAsync(source, expected).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData("int32", "/")]
+    [InlineData("int32", "%")]
+    [InlineData("int64", "/")]
+    [InlineData("int64", "%")]
+    public async Task SignedZeroDivisorStillFailsAcrossAotAndJitAsync(string type, string operation)
+    {
+        var source = $$"""
+            {{type}} Calculate({{type}} n) { return n {{operation}} {{type}}(0); }
+            int32 Main() {
+                {{type}} result = Calculate({{type}}.MinValue);
+                return 42;
+            }
+            """;
+        await AssertFailFastExecutionAsync(source, unchecked((int)0xE0540002)).ConfigureAwait(true);
+        await AssertCheckedExecutionAsync($$"""
+            {{type}} Calculate({{type}} n) { return n {{operation}} {{type}}(0); }
+            int32 Main() {
+                unsafe {
+                    try { {{type}} result = Calculate({{type}}.MinValue); }
+                    catch { return 42; }
+                }
+                return 1;
+            }
+            """, 42).ConfigureAwait(true);
+    }
 }

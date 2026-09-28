@@ -607,8 +607,10 @@ invariant inference. Its rules and persisted formats are unchanged: folded
 source expressions use existing constant records, while externally constructed
 or persisted arithmetic must independently satisfy the existing verifier.
 After verification, native instruction selection replaces unsigned 32- and
-64-bit division/remainder by a nonzero constant power of two with shifts/masks,
-preserving numerator evaluation and failures. Unlike binding normalization,
+64-bit division/remainder by a nonzero constant power of two with logical
+shifts/masks, and signed division/remainder by a positive constant power of two
+with a sign-corrected quotient and derived remainder. Both preserve numerator
+evaluation and failures. Unlike binding normalization,
 this shared AOT/JIT optimization does not establish additional source facts or
 change `NoThrow` acceptance.
 The [native contract](native.md) describes
