@@ -205,12 +205,16 @@ concatenate their fixed-size row payloads, without per-row lengths. **Variable**
 tables start with `u32 offsets[recordCount + 1]`, followed by their data bytes.
 Offsets are relative to the start of the data (after the index), start at zero,
 are nondecreasing and end at the exact data length (`<= 0xFFFF_FFFF`). Row `i`
-occupies `[offsets[i-1], offsets[i])`, for one-based `i`. Empty String/Blob
-rows are permitted; semantic variable rows must be nonempty. The checked
+occupies `[offsets[i-1], offsets[i])`, for one-based `i`. Empty Blob
+rows are permitted; a String row always contains its header and
+terminator even when its content is empty, so String offsets strictly
+increase. Other semantic variable rows must be nonempty. The checked
 index size plus the final offset equals the section length. This indexes
 strings, type forms, contracts and bodies directly without scanning prior
-records; a one-row heap pays four additional bytes versus length-prefixing,
-while larger heaps pay the same four bytes per row plus one sentinel.
+records; a one-row heap without per-row headers pays four additional bytes
+versus length-prefixing, while larger heaps pay the same four bytes per row
+plus one sentinel. String also retains this index alongside its tagged
+header, which costs eight index bytes for one row but preserves direct lookup.
 This deliberately favors repeated reader lookup after validating the index:
 writers and mergers may first compute row lengths, buffer rows, or backpatch
 offsets. A reader still validates every offset and extent before use; the
@@ -231,7 +235,8 @@ A contiguous range is `u32 firstRow, u32 count`; its empty encoding is
 `(0, 0)`, otherwise `firstRow` is nonzero, has a zero high byte, and the
 checked last row is at most `0xFF_FFFF` and belongs to that table.
 Ranges for one owner must not overlap or include another owner's rows.
-There are no pointer-sized fields or implicit string terminators.
+There are no pointer-sized fields or implicit string terminators; the
+String row's explicit terminator is specified below.
 
 ### Optional section reference slots
 
@@ -276,7 +281,7 @@ bytes remain valid after semantic changes.
 | Kind (`u16`) | Table | Row payload and role |
 |---:|---|---|
 | `0x0001` | Module | One row per logical module: identity, runtime requirement and entry point |
-| `0x0002` | String | Variable UTF-8 bytes for names and keys |
+| `0x0002` | String | Offset-indexed, tagged ASCII/UTF-8/UTF-16LE/UTF-32LE rows |
 | `0x0003` | Blob | Variable opaque non-reference bytes, interpreted only by their referring field |
 | `0x0004` | Feature | Required semantic feature identifiers |
 | `0x0010` | ModuleRef | A consumer module's selected producer identity, in this artifact or external |
@@ -355,9 +360,10 @@ the referenced instruction still has the same meaning.
 
 The next tables show **row payloads**, excluding the variable section's offset
 index. `str` and `blob` mean one-based rows in their respective tables;
-zero is allowed only where a column says `?`. String rows contain their exact
-UTF-8 bytes (no BOM, NUL terminator or normalization); readers reject invalid
-UTF-8 and compare names/keys by decoded ordinal scalar sequence. Blob rows
+zero is allowed only where a column says `?`. A String row has the physical
+encoding below; fields for names, paths and keys require valid decoded scalar
+text and compare by ordinal scalar sequence without normalization, even when
+the rows use different encodings. Blob rows
 are bytes only: each use must name its interpretation and validate its
 contents. A Blob payload must not encode a semantically meaningful table
 index, `DefId`, token, Body instruction location or other reference that
@@ -368,34 +374,61 @@ reference meaning. A merger may preserve or deduplicate Blob bytes but never
 silently treat their contents as relocatable references. Duplicate strings or
 blobs are not a second declaration identity.
 
-String literal storage is not assigned in `(1, 0)`: String rows above carry
-names and keys, not a general literal encoding. Before adding literal
-references, decide whether identifier and literal uses share a tagged String
-table rather than separate heaps. The design must accommodate ASCII, UTF-8,
-UTF-16LE and UTF-32LE, preserve exact bytes or code units where ill-formed
-literal data is permitted, and distinguish that use from identifier fields,
-which require well-formed decoded scalar text. A validity claim needs reader
-verification, not trust in a producer-supplied bit. ASCII may serve as a
-UTF-8-compatible fast path, allowing equal bytes to be shared across uses
-without silently transcoding raw literals. An **additional** segmented
-ASCII/UTF-16LE representation may suit mostly ASCII text with occasional
-non-ASCII units: typed length segments could live inside a string row or in
-an indexed segment table. Neither representation is required for ordinary
-strings. A packed type/length word is a possible segment descriptor, but
-the allocation of its bits, length unit and handling of surrogate pairs
-remain open. A byte-length field avoids encoding-dependent bounds; even a
-24-bit byte length admits almost 16 MiB for one string, already an outlier for
-ordinary metadata. Bounding only individual segments would not bound the
-combined string. Multi-gigabyte embedded payloads belong in separately
-managed resources rather than forcing the common string representation to
-accommodate them. Per-string and total-section limits are distinct. The
-existing row offset index already supplies the byte length of an ordinary
-row; adding a packed length to every such row would duplicate it without
-a separate benefit. Segment lengths alone cannot replace the offset index
-without losing direct row lookup; any separate index must preserve that property.
-Per-segment overhead, decoding cost and alternating-run cases need comparison
-with plain encodings before assigning a wire tag. This choice does not change
-the current UTF-8-only `(1, 0)` row grammar or authorize literal operands.
+The String section begins at a 4-byte-aligned artifact offset. Each indexed
+row starts at a 4-byte-aligned offset relative to its data region and contains
+`u8 encodingKind, u24 byteLength` (the length stored in three little-endian
+bytes), followed immediately by `byteLength` content bytes, an all-zero
+terminator of the encoding's code-unit width, and the minimum zero padding
+needed to align the next row to four bytes. The length excludes the header,
+terminator and padding; it is in `0..0xFF_FFFF`. The offset index addresses
+whole rows, not content bytes; its difference includes the header, terminator
+and padding. The reader validates that the computed row extent exactly equals
+the indexed extent and that the padding and terminator are zero. For ASCII and
+UTF-16LE, padding can otherwise make the content byte count ambiguous from
+adjacent offsets alone. Content
+begins four bytes after the row start and is therefore 4-byte aligned in the
+artifact for every encoding. The terminator makes eligible NUL-free content
+convenient for interop and bounds accidental scans at the row end, but does
+not replace the explicit length or checked access.
+
+| `encodingKind` | Content | Terminator | Content-length rule |
+|---:|---|---:|---|
+| `0` | ASCII code units (`0..0x7F`) | One zero byte | Any byte count |
+| `1` | UTF-8 bytes, no BOM | One zero byte | Any byte count |
+| `2` | UTF-16 little-endian code units, no BOM | Two zero bytes | Multiple of 2 |
+| `3` | UTF-32 little-endian code units, no BOM | Four zero bytes | Multiple of 4 |
+
+Kinds `4..255` reject in `(1, 0)`; there is no validity or normalization
+bit. A name, path or key reference must decode to well-formed scalar text:
+UTF-8 uses shortest sequences; UTF-16 rejects unmatched surrogates; UTF-32
+rejects surrogates and values above `0x10FFFF`. ASCII rejects high-bit bytes.
+Name/path/key uses also reject embedded zero scalars. The explicit length
+remains authoritative: raw literal data could contain zero code units, so
+the trailing terminator alone never makes arbitrary content safe for a
+NUL-terminated interop call. Identifier ASCII and UTF-8 rows with equal
+ASCII content compare equally; raw bytes/code units are not silently
+transcoded. The per-row 24-bit bound applies to the complete unsegmented
+content, not each piece of a larger composite; the total section and artifact
+retain their separate `u32` byte bounds. Multi-gigabyte payloads belong in
+separately managed resources, not mainstream String rows.
+
+These physical rows can carry names and keys now. Literal references,
+ill-formed literal payload permissions and their use-site validation remain
+unassigned in `(1, 0)`; a producer cannot acquire literal semantics by
+tagging a row or claiming that its bytes are valid. An **additional**
+segmented ASCII/UTF-16LE representation for mostly ASCII data remains open,
+not the default. It must bound the *combined* content, preserve direct row
+lookup and account for per-segment cost, decoding and alternating-run cases.
+The four initial kinds above do not allocate a segmented wire kind.
+
+The mapped content can back a validated, immutable typed `TextSpan` only
+while its artifact backing remains live. A String row is not directly a
+`Text` object with `nint _length` followed by inline data: its header has
+a kind and a 24-bit **byte** count, not a target-width native length or
+necessarily a code-unit count, and the row is owned by the artifact rather
+than by a runtime text object. A runtime may copy/transcode into owned `Text`
+or explicitly retain the artifact lease in a compatible text representation;
+zero-copy ownership, GC rooting and direct aliasing are not implied.
 
 | Table | Ordered row payload |
 |---|---|
@@ -649,7 +682,7 @@ these are the relevant row references; row indexes are artifact-wide:
 | Table row | Payload values in column order |
 |---|---|
 | Blob 1 | UTF-8 bytes `Example` (opaque module identity) |
-| String 1 | UTF-8 bytes `Answer` (method name and export key) |
+| String 1 | `kind=0, byteLength=6, ASCII content=Answer, terminator=00, padding=00` (method name and export key) |
 | Module 1 | `identityBlob=1, targetRequirement=1, runtimePolicy=0, entryMethod=1, moduleFlags=0, featureFirst=0, featureCount=0, moduleRefStart=1, typeDefStart=1, methodDefStart=1, sourceFileStart=1` |
 | TypeSpec 1 | `form=0x01, qualifiers=0, primitiveCode=0x03` (`int32`) |
 | MethodSig 1 | `resultTypeSpec=1, receiverTypeSpec=0, paramFirst=0, paramCount=0, genericFirst=0, genericCount=0` |
@@ -662,6 +695,11 @@ For example, the TypeSpec table with its single `int32` row is exactly
 three-byte row. Neither the Module row nor an export authorizes a caller to
 skip bounds and contract compatibility checks; semantic body auditing is
 governed by the consumer's trust policy.
+
+String 1 has offsets `00 00 00 00 0C 00 00 00` followed by its
+12-byte row `00 06 00 00 41 6E 73 77 65 72 00 00`. The first `00`
+is the ASCII kind, `06 00 00` is the three-byte content length, and the
+last `00` is alignment padding after the one-byte terminator.
 
 A merger could add Blob 2 (`Consumer`), Module 2
 (`identityBlob=2, targetRequirement=1, runtimePolicy=0, entryMethod=0,
