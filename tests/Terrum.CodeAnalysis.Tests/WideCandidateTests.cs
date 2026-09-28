@@ -142,6 +142,40 @@ public sealed class WideCandidateTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, "Int32")]
+    [InlineData(NativeRuntimePolicy.FailFast, "Int64")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "Int32")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "Int64")]
+    public async Task SignedMagnitudeIncludesMinimumAcrossModulesAsync(NativeRuntimePolicy policy, string suffix)
+    {
+        var library = suffix == "Int32" ? "IntegerCheckedArithmetic.terrum" : "WideIntegerFacts.terrum";
+        var producer = CreateNumericsLibrary(library, policy,
+            $"Terrum.CodeAnalysis.Numerics64.Magnitude{suffix}");
+        var type = suffix.ToLowerInvariant();
+        var unsignedType = "u" + type;
+        var consumerSource = SyntaxTree.Parse($$"""
+            using Terrum.CodeAnalysis.Numerics64;
+            int32 Main() {
+                if (Magnitude{{suffix}}({{type}}.MinValue)
+                        != {{unsignedType}}({{type}}.MaxValue) + 1
+                    || Magnitude{{suffix}}({{type}}.MaxValue)
+                        != {{unsignedType}}({{type}}.MaxValue)
+                    || Magnitude{{suffix}}(-42) != 42
+                    || Magnitude{{suffix}}(42) != 42
+                    || Magnitude{{suffix}}(0) != 0
+                    || Magnitude{{suffix}}(-1) != 1) { return 1; }
+                return 42;
+            }
+            """);
+        var compilation = Compilation.Create(consumerSource, ModuleCompiler.CreateReference(producer),
+            (BoundRuntimePolicy)policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(compilation.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy));
+        await ExecuteBothAsync(consumer, producer, 42, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task CheckedInt32ArithmeticPublishesOnlyInRangeAcrossModulesAsync(NativeRuntimePolicy policy)

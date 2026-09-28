@@ -100,6 +100,16 @@ public static bool TryAbsoluteInt64(int64 value, init ref<int64> result)
     return TryNegateInt64(value, init result);
 }
 
+public static uint64 MagnitudeInt64(int64 value)
+{
+    if (value < 0)
+    {
+        return uint64(-(value + 1)) + 1;
+    }
+
+    return uint64(value);
+}
+
 public static bool TryMultiplyInt64(int64 left, int64 right, init ref<int64> result)
 {
     if (!TryMultiply(left, right, out var value))
