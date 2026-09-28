@@ -17,11 +17,13 @@ public readonly ref struct TrRmTypeDefTableReader
     private readonly int _recordCount;
     private readonly int _fieldCount;
     private readonly int _layoutCount;
+    private readonly int _contractCount;
     private readonly int[] _fieldOwners;
 
     public int Count => _recordCount;
     public int FieldCount => _fieldCount;
     public int LayoutCount => _layoutCount;
+    public int ContractCount => _contractCount;
 
     public TrRmTypeDefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmModuleTableReader modules,
@@ -43,6 +45,7 @@ public readonly ref struct TrRmTypeDefTableReader
         _recordCount = recordCount;
         _fieldCount = fieldCount;
         _layoutCount = layoutCount;
+        _contractCount = contractCount;
         _fieldOwners = new int[fieldCount + 1];
         for (var row = 1; row <= recordCount; row++)
         {
@@ -159,6 +162,12 @@ public readonly ref struct TrRmTypeDefTableReader
     {
         CheckRow(row);
         return ((int)Read(row - 1, 20), (int)Read(row - 1, 24));
+    }
+
+    public (int Start, int Count) GetContractRange(int row)
+    {
+        CheckRow(row);
+        return ((int)Read(row - 1, 32), (int)Read(row - 1, 36));
     }
 
     private string ReadNamespace(int row)

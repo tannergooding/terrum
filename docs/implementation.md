@@ -1042,7 +1042,9 @@ MethodDef module, signature and body ownership, PropertyDef getter
 owner/result matching, and structural Import/Export ownership, visibility and
 key uniqueness. GenericParam formal ordinals and Constraint row ownership,
 flags and required types are checked structurally; unassigned kinds and
-witnesses are not executable generic contracts. These do not bind imported
+witnesses are not executable generic contracts. Contract row ownership,
+singleton clauses and assigned payload shapes are also checked without proving
+effects or making reserved clause modes executable. These do not bind imported
 contracts. A host-side
 writer emits indexed String sections with required names or optional empty
 namespace text; the self-host String-row

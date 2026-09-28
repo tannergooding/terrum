@@ -15,6 +15,9 @@ public readonly ref struct TrRmMethodDefTableReader
     private readonly TrRmStringTableReader _strings;
     private readonly TrRmModuleTableReader _modules;
     private readonly int _recordCount;
+    private readonly int _contractCount;
+
+    public int ContractCount => _contractCount;
 
     public TrRmMethodDefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmModuleTableReader modules,
@@ -33,6 +36,7 @@ public readonly ref struct TrRmMethodDefTableReader
         _strings = strings;
         _modules = modules;
         _recordCount = recordCount;
+        _contractCount = contractCount;
         var ownedBodies = new bool[bodyCount + 1];
         var usedGenericSignatures = new bool[signatures.Count + 1];
         var module = 1;
@@ -124,6 +128,12 @@ public readonly ref struct TrRmMethodDefTableReader
 
     public int GetBodyRow(int row)
         => (int)Read(GetRow(row), 24);
+
+    public (int Start, int Count) GetContractRange(int row)
+    {
+        var data = GetRow(row);
+        return ((int)Read(data, 16), (int)Read(data, 20));
+    }
 
     public int GetOwnerModule(int row)
     {
