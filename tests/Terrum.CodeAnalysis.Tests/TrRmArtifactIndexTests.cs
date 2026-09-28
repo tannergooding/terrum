@@ -360,7 +360,8 @@ public sealed class TrRmArtifactIndexTests
         var signature = new byte[24];
         Write(signature, 0, 1);
         byte[][] sections = includeEmptyBlob
-            ? [module, strings, new byte[8], typeSpec, method, signature]
+            ? [module, strings, TrRmVariableTableWriter.EncodeBlobs([ReadOnlyMemory<byte>.Empty]),
+                typeSpec, method, signature]
             : [module, strings, typeSpec, method, signature];
         ushort[] kinds = includeEmptyBlob
             ? [0x0001, 0x0002, 0x0003, 0x0011, 0x0016, 0x0017]
@@ -375,7 +376,7 @@ public sealed class TrRmArtifactIndexTests
 
         if (includeBody || includeSourceMap)
         {
-            sections = [.. sections, new byte[] { 0, 0, 0, 0, 1, 0, 0, 0, 0 }];
+            sections = [.. sections, TrRmVariableTableWriter.EncodeBodies([new byte[] { 0 }])];
             kinds = [.. kinds, 0x0020];
         }
 
