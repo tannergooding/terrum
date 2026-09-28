@@ -17,7 +17,11 @@ public readonly ref struct TrRmModuleTableReader
     private readonly ReadOnlySpan<byte> _rows;
     private readonly TrRmStringTableReader _strings;
     private readonly int _recordCount;
+    private readonly int _moduleRefCount;
     private readonly Dictionary<string, int> _identities;
+
+    public int Count => _recordCount;
+    public int ModuleRefCount => _moduleRefCount;
 
     public TrRmModuleTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, int moduleRefCount, int typeDefCount,
@@ -34,6 +38,7 @@ public readonly ref struct TrRmModuleTableReader
         _rows = section;
         _strings = strings;
         _recordCount = recordCount;
+        _moduleRefCount = moduleRefCount;
         _identities = new Dictionary<string, int>(StringComparer.Ordinal);
 
         Span<int> cursorOffsets = [28, 32, 36, 40];
@@ -77,6 +82,40 @@ public readonly ref struct TrRmModuleTableReader
         }
 
         return ReadIdentity(row - 1);
+    }
+
+    public (int Start, int End) GetModuleRefRange(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidModule();
+        }
+
+        var start = (int)Read(row - 1, 28);
+        var end = row < _recordCount ? (int)Read(row, 28) : _moduleRefCount + 1;
+        if (start <= 0 || end < start || end > _moduleRefCount + 1)
+        {
+            throw InvalidModule();
+        }
+
+        return (start, end);
+    }
+
+    public (uint TargetRequirement, uint RuntimePolicy) GetRequirements(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidModule();
+        }
+
+        var target = Read(row - 1, 4);
+        var policy = Read(row - 1, 8);
+        if (target > 1 || policy > 1)
+        {
+            throw InvalidModule();
+        }
+
+        return (target, policy);
     }
 
     public bool TryFindModule(string identity, out int row)
