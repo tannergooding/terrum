@@ -61,15 +61,18 @@ extension-member lookup never substitutes for a nominal witness; an explicitly
 declared adapter has its own nominal extension-interface witness and leaves
 the original type unchanged.
 
-Associated types and `Self` relationships are intended to express relations
-such as integer `Wider`, `Signed`, and `Unsigned` types and a SIMD member's
-element and mask types. One selected witness binds an associated result;
-inference does not run backward through a non-injective projection or choose
-an arbitrary implementer from a constraint. If one type has multiple valid
-relations, the use must disambiguate them. The relationship policy is accepted
-direction, but declaration, witness-selection, and disambiguation syntax are
-not settled. Associated bindings do not replace independent `[Copy]`,
-access, ownership, or family constraints.
+Associated types are named type members of a selected interface witness and
+`Self` relationships express relations such as integer `Wider`, `Signed`, and
+`Unsigned` types and a SIMD member's element and mask types. For example,
+`IInteger<TSelf>` may declare `type Wider;`, with an implementation binding
+that member to a concrete type; `T.Wider` is resolved through the selected
+`IInteger<T>` witness. A constraint may explicitly bind an associated type,
+for example `where T : IInteger<T, Wider = U>`. This does not infer the
+original `T` backward from an associated result. If multiple valid witnesses
+or relations could supply a projection, the use must explicitly disambiguate
+them. These semantic directions are accepted; exact grammar and metadata
+remain to be specified. Associated bindings do not replace independent
+`[Copy]`, access, ownership, or family constraints.
 For a lending iterator, `Item<'a>` is one candidate associated relation; it
 must retain the complete item's qualification and its declared backing and
 loan dependencies. The exact iterator/item selection and ABI are later library

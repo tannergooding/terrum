@@ -23,11 +23,11 @@ system for the prover.
 | Area | Confirmed direction | Recommendation requiring review |
 |---|---|---|
 | Calls | `implicit ref<T>` is an ordinary readonly `ref<T>`; existing places are borrowed; value arguments initialize a hidden local at the original argument-evaluation point in the current enclosing lexical scope; evaluation is left-to-right within expression structure | Specify place formation and general reference/loan metadata; do not introduce a special reservation/activation rule or lifetime-only scope for implicit arguments |
-| Conditional outputs | Postconditions are the normal authoring route, using ordinary pattern/expression composition without a routine output-attribute system; initialized, uninitialized and initialized-null states are distinct and correlated with the declared discriminator | Specify exact guard/pattern spelling and metadata for the accepted state relationships |
-| Contract timing | Prologue, preconditions, method body (including local/output initialization, authored execution, `finally`, local cleanup and untransferred owned-parameter cleanup), postconditions, epilogue; preconditions/postconditions are public declaration contracts outside the body; exceptional departure has no normal-return postcondition | Keep public facts within effective accessibility and ordinary contract-expression rules; exact output/result publication and postcondition-failure cleanup remain to specify |
+| Conditional outputs | Postconditions use `ensure <expr>` with ordinary Boolean expressions, patterns and short-circuit behavior; initialized, uninitialized and initialized-null states are distinct and correlated with the declared discriminator. Legal value predicates imply initialization, subject to checked legal reads. | Specify exact clause placement/grammar and metadata for the accepted state relationships; never read vacant storage to discover a false predicate |
+| Contract timing | Prologue, preconditions, method body (including local/output initialization, authored execution, `finally`, local cleanup and untransferred owned-parameter cleanup), postconditions, epilogue; preconditions/postconditions are public declaration contracts outside the body; exceptional departure has no normal-return postcondition | Keep public facts within effective accessibility and ordinary contract-expression rules; formalize exact `ensure` placement and metadata |
 | Proofs and evaluation | Required static obligations are compile-time-only; ordinary runtime contracts and required constant evaluation remain distinct | Specify the exact mandatory proof-floor rules/complexity and minimum resources, plus separate constant-evaluator operations/accounting/limits |
 | Memory | Explicit checked opt-in for sharing, not an assumption that arbitrary aliasable objects are thread-safe | Accepted separately; see the [memory model](memory-model.md) for its specification deliverables and target-profile work |
-| Documentation comments | Source-attached friendly markup with structured XML/HTML-style tags is compiled to a separate XML documentation artifact; common symbol, parameter, and type references resolve to structured references rather than textual substitution. Normal extraction does not execute embedded code or fetch remote includes | Specify the source grammar, supported markup and HTML normalization, XML schema/member IDs, inheritance, diagnostics, and packaging; keep the documentation artifact separate from executable ABI/runtime data |
+| Documentation comments | Declaration-attached GFM-compatible docs use parsed top-level headings for structured sections, leading prose for the implicit summary, and declaration-scoped `@value`/`@T`/`@Type.Member` mentions; docs emit a separate structured XML artifact and do not define executable contracts | Formalize tokenizer/escaping and complex reference rules, XML schema/member IDs, inheritance, diagnostics and packaging; ordinary Markdown links remain navigation and explicit `xref:` links cover custom/qualified references |
 
 The accepted implicit-loan rule in [language](language.md) and
 [lifetimes](lifetimes.md#parameter-only-implicit-readonly-loans) is ordinary
@@ -209,12 +209,16 @@ or cleanup only on an initialized arm. An API cannot transfer an undiscriminated
 maybe-live owner to the caller, and no caller may access or clean up a vacant
 arm.
 
-Postconditions are the normal source-authoring route for these outcome facts;
-ordinary patterns and expressions compose the initialization tests with status
-and value predicates. Do not define equivalent routine output attributes as a
-parallel authoring mechanism. Illustrations such as `return is !init` and
-`ensure return is init when true` describe intent only; neither is selected
-source grammar. Exact guard/pattern syntax and its metadata representation
+Postconditions are the normal source-authoring route for these outcome facts.
+Their accepted expression form is `ensure <expr>`, where `<expr>` is an
+ordinary Boolean expression and may use ordinary patterns and short-circuit
+behavior. A value predicate such as `param > 0` itself requires and therefore
+establishes that `param` is initialized; no redundant `param is init` test is
+required. Source-body and path analysis must establish that every value read
+by the predicate is legal, and must never read vacant storage to discover that
+the predicate is false. A successful value predicate implies initialization.
+Do not add a special `ensure-if` statement grammar or equivalent routine output
+attributes. Exact clause placement, grammar, and metadata representation
 remain specification work.
 
 The language-versioned default for a boolean-success output contract is
@@ -230,14 +234,13 @@ the relevant normal paths. A contract cannot initialize storage merely by
 claiming it is initialized. Null/range assertions may retain runtime checks,
 but the safety of evaluating those checks is a static obligation.
 
-**Pending proposal:** keep output publication provisional until normal
-completion and all applicable postconditions succeed; do not expose
-not-yet-published initialization storage through another alias. If a
-postcondition fails, clean saved owning results and output candidates on
-defined unwind, without rolling back unrelated writes or external effects.
-Predicate exceptions propagate rather than becoming the false-predicate
-failure. This concrete recommendation remains open for review and is separate
-from the accepted body-cleanup endpoint below.
+Postcondition checks are ordinary code in the declared postcondition phase.
+False predicates and exceptions from predicate evaluation follow ordinary
+failure/unwinding; completed body cleanup and `finally` blocks are not rerun,
+and body effects are not transactionally rolled back. This does not define a
+separate all-output publication transaction or authorize reads of vacant
+storage. Initialization, alias access and ownership remain governed by their
+ordinary checked contracts.
 
 Caller flow keeps the correlation between a particular call's saved status and
 its outputs. Reassigning the status, overwriting the destination, moving its
@@ -253,11 +256,10 @@ API that provides an initialized failure output still fails the requirement;
 the temporary's cleanup remains due. Multiple outputs and failure payloads
 remain explicit initially. No vacant read or manufactured default is needed.
 
-Changing a publication outcome is not necessarily a harmless strengthening.
-Publishing a new owning output on false adds a caller cleanup responsibility.
-Compatibility must compare the publication protocol as well as logical
-postconditions; a replacement needs an explicit adapter or a compatible
-versioned representation, not just a theorem that its predicate is stronger.
+Changing a declared output-initialization relation can change caller
+obligations and compatibility. Compare the published conditional facts and
+ordinary ownership contract; do not infer an extra transactional publication
+protocol from postcondition ordering.
 
 ## 3. Contracts bracket semantic body completion
 
@@ -281,9 +283,9 @@ after a postcondition that callers are meant to rely on.
 | Argument staging | Evaluate once in source order; establish explicit references, staged values, and ordinary temporary lifetimes |
 | Prologue | Establish frame/root/ownership responsibility and parameter storage before executing user contracts |
 | Preconditions | Check published conditions in declaration order; body scopes have not been entered |
-| Body | Perform initialization within the body, including local/output values; execute authored code and save a return candidate; execute relevant `finally` blocks, then complete local-scope and untransferred owned-parameter cleanup |
-| Postconditions | Check normal-return guarantees over the saved candidate and surviving state, in declaration order |
-| Epilogue | Retire frame/root bookkeeping and return; the exact publication step and postcondition-failure handling remain separately unspecified |
+| Body | Perform initialization within the body, including local/output values; execute authored code and evaluate any return expression once; execute relevant `finally` blocks, then complete local-scope and untransferred owned-parameter cleanup |
+| Postconditions | Check normal-return guarantees over the return value and surviving state available under ordinary ownership/lifetime rules, in declaration order |
+| Epilogue | Retire frame/root bookkeeping and return under the ordinary return/failure contract |
 
 On invocation, by-value owned arguments already belong to the callee before
 its preconditions execute. A failed precondition therefore takes ordinary
@@ -294,12 +296,12 @@ is fail-fast, no cleanup is promised.
 
 ### 3.2 Saved results and cleanup
 
-Evaluate a return expression once into checked result storage. It remains
-rooted and owned while the body's `finally` and scope cleanup finish. A copied
-scalar result retains its computed value; a copied handle or returned
-reference still observes its permitted backing and aliases. A finally that
-changes backing can therefore affect a subsequent postcondition through that
-reference without reevaluating the return expression.
+Evaluate a return expression once. Its value remains available under ordinary
+ownership and lifetime rules while the body's `finally` and scope cleanup
+finish. A copied scalar result retains its computed value; a copied handle or
+returned reference still observes its permitted backing and aliases. A finally
+that changes backing can therefore affect a subsequent postcondition through
+that reference without reevaluating the return expression.
 
 **Accepted ownership endpoint:** semantic body completion includes
 initialization within the method body (including local and output values),
@@ -314,8 +316,8 @@ Postconditions can inspect surviving values and results retained for the
 declared contract. A moved or consumed parameter is unavailable through its
 vacated source, and a destroyed value cannot be dereferenced merely because
 its old bytes remain in the frame. A transferred result is observed through
-its destination, not the consumed source. Exact output/result publication and
-failure cleanup remain open; this decision does not select their machinery.
+its destination, not the consumed source. This phase ordering does not add a
+transactional output-publication protocol.
 
 The same applies to locks and leases: if the body releases a guard, a
 postcondition cannot inspect its former protected mutable state without valid
@@ -362,7 +364,7 @@ and historical mutable-state contracts are not part of the initial model.
 | Exception escapes the body, even after successful finally cleanup | No |
 | Cleanup replaces a pending return with an escaping exception | No |
 | Failure while checking a precondition | No |
-| Failure while checking a postcondition | The pending proposal is defined failure departure with candidate cleanup; see below |
+| Failure while checking a postcondition | Ordinary failure/unwinding begins at the failed check; completed body cleanup and `finally` blocks are not rerun |
 | Fail-fast, process termination, or a non-returning operation | No normal-return guarantee and no cleanup promise |
 
 Searching the stack for a handler is not execution of a method's normal
@@ -370,13 +372,13 @@ epilogue. Neither handler search nor unwind itself runs `ensure`. A check after
 the authored body is also outside that body's `try`/`catch`; only an enclosing
 caller recovery scope could handle its propagated failure.
 
-**Pending recommendation:** a failed postcondition takes defined failure
-departure, cleans saved owning results and unpublished outputs, does not rerun
-completed body `finally` blocks, and does not roll back body side effects.
-Exceptions from predicate evaluation propagate unchanged rather than becoming
-the false-predicate failure. These failure mechanics have not been accepted;
-the accepted cleanup endpoint requires only that ordinary body and
-owned-parameter cleanup has completed before normal postconditions run.
+Postconditions are ordinary code in the postcondition phase. A false predicate
+fails there and follows ordinary failure/unwinding; predicate evaluation that
+throws propagates through ordinary failure handling. No transactional rollback
+of body effects occurs, and completed body `finally` blocks are not rerun.
+Any still-live values are handled by their ordinary ownership and failure
+contracts; this does not introduce a separate candidate-cleanup or output
+publication transaction.
 
 An outer-body `static ensure` uses this same normal-completion boundary.
 It proves all such paths; it is not registered only on paths that execute its
@@ -437,6 +439,17 @@ budgets, and accept additional programs. A required proof that is disproved or
 not established by that compiler's supported analysis is a compile error, not
 a runtime fallback. Diagnostics distinguish false from not established
 (including complexity or analysis-limit failure where appropriate).
+
+The guaranteed budget is structural/work-based, not wall-clock time. Its
+catalog should keep common proofs cheap and simple, avoid exponential or
+excessive linear work, and define explicit ways to simplify hard cases where
+runtime behavior is legal. A bounded tree-depth rule is one possible kind of
+limit; a value such as 64 is only an example, not an accepted threshold.
+Exact structural limits, work accounting and any additional escape syntax
+remain specification work. A compiler may establish a proof beyond the floor
+with stronger sound analysis; if its supported analysis does not establish a
+required proof, it rejects that requirement as not established rather than
+silently weakening or demoting it.
 
 **Candidate rule areas for specification, not an adopted baseline:**
 
@@ -583,23 +596,38 @@ consumer's publication, lifetime, or arithmetic contract.
 
 ## 5. Documentation comments
 
-**Accepted two-layer direction; exact grammar and schema remain open.** Source
-declarations can carry friendly markup with structured XML/HTML-style tags, and
-the compiler emits a separate XML documentation artifact. Common references to
-symbols, parameters, and types resolve against declarations and become
-structured references in that artifact, not unvalidated textual substitutions.
-This selects neither a comment delimiter nor a markup dialect, XML schema,
-member-ID syntax, supported tag set, or packaging rule.
+**Accepted source-documentation direction; exact grammar and schema remain
+open.** Attach `///` documentation to declarations, with `/** ... */` as an
+equivalent block form. Use GFM-compatible prose; leading prose before the
+first recognized metadata heading is the implicit summary, with optional
+`# summary`. Top-level `# remarks`, `# param name`, `# typeparam name`,
+`# returns`, `# value`, `# throws Type`, `# safety`, and `# example` headings
+introduce structured sections; ordinary lower-level headings remain prose.
+Metadata recognition follows parsed Markdown structure, not raw-line prefix
+scanning. Documentation compiles to a separate XML artifact, and references
+resolve against declarations into structured links rather than unvalidated
+text.
+
+Semantic mentions such as `@value`, `@T`, and `@Type.Member` resolve
+declaration-scoped references and may be post-processed into structured XML
+links. They are not interpreted inside code, URLs, or email addresses; `\@`
+escapes a literal at-sign. Ordinary Markdown links remain for section/document
+navigation (`[label](#anchor)`, `[label](relative.md)`); explicit
+`[custom label](xref:Type.Member)` links are available for qualified/custom
+references. Backticks denote code, not implicit symbol references. Exact
+mention tokenization, complex generic/overload reference grammar, and escaping
+edge cases remain to formalize. This does not adopt GitHub app-specific
+postprocessing as a compiler feature.
 
 | Topic | Remaining specification work |
 |---|---|
-| Delimiters and attachment | Choose the source delimiter(s); define attachment across attributes, blank lines, multiple declarations, and generated/partial declarations |
-| Friendly markup and normalization | Define whether/how Markdown prose is supported and its dialect; specify structured fields/shortcut spellings for summaries, remarks, parameters, type parameters, returns, conditional outputs, examples, and links; select supported XML/HTML-style tags and their normalization without freezing a broader HTML runtime |
+| Delimiters and attachment | Formalize the accepted `///` and `/** ... */` forms and attachment across attributes, blank lines, multiple declarations, and generated/partial declarations |
+| Friendly markup and normalization | Formalize the accepted GFM-compatible prose and structured top-level headings; define heading recognition/name details, section continuation, supported XML/HTML-style tags, and normalization without freezing a broader HTML runtime |
 | XML artifact schema | Define element structure, schema versioning, member IDs, source location and overload/generic identity, and compatibility/evolution rules |
-| Structured references | Resolve parameter/type-parameter names and API references against actual declarations; encode overloads, qualified types, and generic members without guessing from display text |
+| Structured references | Formalize declaration-scoped `@value`/`@T`/`@Type.Member` mentions and literal escaping; keep ordinary Markdown links for navigation and explicit `xref:` links for custom/qualified references. Define overloads, qualified types, and complex generic member targets without guessing from display text |
 | Declared contracts | Generate access, ownership, lifetime, publication, effects, pre/postconditions, and selected failure behavior from checked declaration metadata; prose explains intent, costs, and usage |
 | Inheritance and forwarding | Define documentation inheritance for interface members, aliases, and compatibility forwarders; select a declaration explicitly rather than by arbitrary name match |
-| Diagnostics | Specify malformed markup, unresolved references, stale parameter names, and missing public documentation separately; choose warning/build-policy behavior without changing executable semantics |
+| Diagnostics | Specify malformed markup, unresolved/ambiguous references, stale parameter names, and unknown-heading handling; decide separately how optional documentation-coverage lint/policy works without making prose a mandatory language contract |
 | Examples | Define how explicitly marked examples declare language/target context and distinguish complete programs, fragments, and design-only pseudocode; execution is opt-in, not a side effect of extraction or rendering |
 | Distribution and tooling | Specify stable symbol identities, source versus compiled-package documentation, visibility/trimming, and IDE/site rendering; keep the XML documentation artifact separate from executable ABI/runtime data |
 
@@ -611,11 +639,17 @@ corresponding language contracts remain authoritative. Generated API
 documentation should expose those contracts so authors do not have to maintain
 an independent annotation system inside comments.
 
-Doc inheritance must preserve that boundary: inheriting an interface's prose
-does not import extra effects or strengthen an implementation's guarantees.
-An implementation-specific note can explain behavior only within the checked
-contract it actually publishes. Automatically generated sections and authored
-prose need a defined presentation order and conflict policy.
+For callable declarations marked `unsafe`, encourage a `# safety` section
+describing caller responsibilities in human terms. That prose is informative;
+it is not a compiler-enforced proof and cannot replace the checked declaration
+contract or caller obligations.
+
+If documentation inheritance is provided, it must preserve that boundary:
+inheriting an interface's prose does not import extra effects or strengthen
+an implementation's guarantees. An implementation-specific note can explain
+behavior only within the checked contract it actually publishes. Automatically
+generated sections and authored prose need a defined presentation order and
+conflict policy.
 
 Normal documentation extraction should be deterministic and must not execute
 embedded code, fetch remote includes, or expose private declarations merely to
@@ -642,14 +676,14 @@ XML output, and reproducible opt-in example validation.
 | Conditional output authoring | Accepted direction; exact grammar remains work | Postconditions are the normal authoring route; ordinary patterns/expressions compose initialization, status and value facts. Do not add equivalent routine output attributes as a parallel mechanism |
 | Undiscriminated maybe-live owner | Not permitted | A possibly live owner must remain correlated with a checked discriminator; a caller cannot receive, access or clean up a maybe-live owner without that relationship |
 | Language-versioned output defaults | Accepted | Boolean-success output initializes on `true` and remains uninitialized on `false`; other result types initialize on every normal return unless a declaration postcondition specifies a conditional relationship |
-| Output contract syntax and metadata | Specification work, not policy review | Formalize exact guard/pattern spelling and encode correlated initialization facts; preserve the current bounded bool/out behavior until coordinated migration |
+| Output contract syntax and metadata | Specification work, not policy review | Formalize `ensure <expr>` clause placement/grammar and encode correlated initialization facts; preserve the current bounded bool/out behavior until coordinated migration |
 | Normal-return ownership endpoint | Accepted | Body includes body-local initialization/execution, `finally`, local cleanup and untransferred owned-parameter cleanup before postconditions; no successful-return ownership cleanup is deferred to the epilogue |
 | Consumed parameter observations | Accepted boundary; snapshots deliberately deferred | Moved/consumed/destroyed values are unavailable through their former source; surviving values and retained results remain available to applicable checks |
 | Entry snapshots and state history | Accepted deferral | No snapshot/history facility in the initial contract model and no promise to add one; reconsider narrow explicit captures only if concrete APIs justify their cost |
-| Output publication and postcondition failure | Specification/review work | Exact publication point, candidate cleanup and predicate-failure behavior remain open; the cleanup endpoint does not select this machinery |
+| Postcondition failure semantics | Accepted phase behavior | False predicates and thrown evaluation follow ordinary failure/unwinding; completed body `finally` blocks are not rerun and body effects are not rolled back. No separate output-publication transaction is implied |
 | Static-proof floor | Accepted policy; specification work remains | Versioned minimum rules/complexity and guaranteed resource floor; sound extensions may accept more, without identical acceptance or a fixed compiler maximum. Exact rule catalog, accounting units and numeric minimum remain to specify |
 | Constant-evaluation semantics and budget | Semantics accepted; specification work remains | Successful evaluation has exact target semantics and no runtime fallback. Evaluator operation set, resource accounting and limits remain separate from optional proof extensions and need specification |
-| Documentation comments | Architecture accepted; specification work remains | Source-attached friendly markup with structured XML/HTML-style tags emits a separate XML artifact; common references become checked structured references. Specify delimiters, markup dialect/tag set and normalization, schema/member IDs, inheritance, diagnostics, and packaging; normal extraction does not execute embedded code or fetch remote includes |
+| Documentation comments | Source-documentation direction accepted; specification work remains | `///` and `/** ... */`; GFM-compatible prose; implicit leading summary and structured top-level headings; declaration-scoped `@` mentions; ordinary Markdown navigation and explicit custom `xref:` links. Specify exact tokenization/escaping, complex reference grammar, XML schema/member IDs, inheritance, diagnostics and packaging. Normal extraction does not execute embedded code or fetch remote includes |
 
 Approval of a remaining recommendation should be followed by canonical documentation changes and
 scheduled implementation, not immediate execution of the illustrative grammar.

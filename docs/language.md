@@ -7,7 +7,7 @@ Terrum (TAIR-um), from TerraFX, is a proposed C#-shaped language for application
 - C#/.NET application and API ergonomics are the baseline; ownership, access, representation, lifetime, effects and placement are distinct contracts. An application can use managed cyclic graphs without propagating lifetime parameters through every edge; unique native resources and deterministic cleanup remain nonduplicable. There is no implicit copy, boxing, pinning, retain, synchronization or materialization to repair an invalid program.
 - AOT and JIT must implement the same semantics for supported features. Independently serviced modules, DLLs and plugins require published, versioned contracts and binding-time compatibility; closed-world optimization or implementation pinning is explicit. The initial backend emits Windows x64 native code; the C#/.NET compiler host does not define Terrum's type system, semantic IL or permanent ABI.
 - Concrete types are sealed by default; `sealed` prohibits inheritance, not interface dispatch or API evolution. Types are evolvable by default: closed case sets, fixed layouts and frozen APIs are separate scoped contracts. Interface inheritance and composition replace general concrete inheritance. Public namespaces express concepts, not library tiers. Public source visibility is `public`, `internal` (module) and `private` (declaring type); there is no protected-family or friend-module access through `unsafe` or linking. Author-approved generation may act within the declaring module's implementation scope, but grants no consumer private access. A public Terrum surface is not automatically a native export.
-- Exceptions propagate exceptional failures; expected alternatives use conditional outputs or explicit domain statuses. `require` is a safe checked failure; only catching/recovering requires unsafe authorization. Cleanup and `try/finally` do not. Unsafe recovery does not prove an object's invariant has survived. Platform callbacks must contain faults or terminate rather than unwind across a foreign ABI.
+- Exceptions propagate exceptional failures; expected alternatives use conditional outputs or explicit domain statuses. `require` is a safe checked failure; catching/recovering requires unsafe recovery authorization, while unsafe operations and caller-unsafe invocations require explicit `unsafe { ... }` blocks. Cleanup and `try/finally` do not require unsafe authorization. Unsafe recovery does not prove an object's invariant has survived. Platform callbacks must contain faults or terminate rather than unwind across a foreign ABI.
 - Type, declaration, interface and metadata contracts are authoritative. A compiler may infer private implementation facts but cannot silently publish stronger or weaker promises from a replaceable body. Consumers bind against the producer's resolved contracts and rule version, not their own reinterpretation of its source defaults. [Lifetimes](lifetimes.md) specifies this distinction for borrowed results.
 - Source compilation checks authored bodies against declared contracts. Ordinary binary consumers safely decode and structurally validate artifacts, resolve references, check binding/contract compatibility and validate caller use, then trust declared metadata contracts for external dependencies instead of re-proving dependency implementations. Callers still satisfy imported preconditions, access, ownership and effects. This is not permission to trust malformed bytes; optional deeper audit tooling is not a v1 promise. Signing/provenance is separate from semantic correctness; no mandatory signature or trust store is selected, and signer identity does not prove a contract true. This target direction does not change current reader/verifier behavior.
 - Keep minimum language requirements separate from the standard application-library/runtime surface and feature-specific dependencies. Foundational types such as `ref<T>`, `ptr<T>` and `int32` are illustrative, not a complete mandatory API list. Language conformance alone does not require heap/GC, a scheduler or OS services; richer features retain their dependencies and checked contracts when used, with no silent semantic weakening or fallback. This can enable embedded/kernel environments in principle, but does not promise a backend there or universal support for every feature.
@@ -21,12 +21,18 @@ authorize arbitrary behavior when analysis discovers a violation. Existing
 explicit checks remain. Optional diagnostics may identify misuse without
 inserting repairs or changing the contract after inlining or specialization.
 
-A callable may expose caller-unsafe obligations or explicitly contain them
-behind a trusted safe contract. Safe clients still obey checked access,
-lifetime and sharing rules; a safe signature does not claim that its unsafe
-implementation was compiler-proven. These boundaries must survive imported
-metadata. General caller-unsafe/trusted declaration syntax and propagation
-remain to implement; current `unsafe` recovery is only a bounded subset.
+Mark caller obligations with `unsafe` on the callable declaration:
+`unsafe void M()` propagates obligations to callers, while ordinary
+`void M()` does not. This modifier does not make the callable body an unsafe
+context: unsafe operations inside either form still require explicit
+`unsafe { ... }` blocks, and calls to caller-unsafe declarations require an
+explicit unsafe block at the call site. Encourage a `# safety` documentation
+section to explain caller responsibilities; prose is informative, not a
+compiler proof or a substitute for checked contract metadata. Safe declarations
+may contain internally scoped unsafe work without an extra
+trusted-implementation marker.
+These are target directions, not current support; existing `unsafe` recovery
+remains a bounded subset.
 
 ### Types and operations
 
@@ -216,16 +222,35 @@ Language/module compatibility is distinct from foreign ABI and serialization:
 external wire or callback encodings are specified for concrete protocols, not
 as one global boolean, reference or SIMD format.
 Declared overlapping field storage is available only through an explicit
-`[Layout(Union)]` declaration; it is unsafe to access overlapping alternatives,
-with no active-member tracking or special safe subset. This does not prohibit
-unsafe pointer-based aliasing/reinterpretation or compiler-private overlapping
-representations. Whether raw `Union` also
-requires `Blittable: true` remains open. A future checked tagged/sum type is a
-separate feature: case/tag checks must preserve ordinary validity, ownership,
-roots and cleanup, and do not grant raw reinterpretation. Its grammar and
-representation remain open.
+`[Layout(Union)]` declaration with the fixed `Blittable: true` commitment; it
+is unsafe to access overlapping alternatives, with no active-member tracking
+or special safe subset. This does not prohibit unsafe pointer-based
+aliasing/reinterpretation or compiler-private overlapping representations. A
+safe non-Blittable discriminated-union/sum type is a separate higher language
+feature: case/tag checks must preserve ordinary validity, ownership, roots and
+cleanup, and do not grant raw reinterpretation. Its grammar and representation
+remain open.
 
 ### Interfaces, access and generic properties
+
+For getter-only, by-value properties on compact `Copy` structs and source
+classes, the accepted authoring direction uses an explicit accessor body with
+accessor-local effects:
+
+```terrum
+public int32 Count
+{
+    [NoThrow] get { return _count; }
+}
+```
+
+The getter is a named, source-bound callable member with a readonly receiver
+and by-value result; property/accessor identity and effects are checked
+metadata, not an inferred `get_Name` convention. This narrow direction does
+not adopt setters, auto-properties, ref returns or general property semantics.
+Expression-bodied properties are not established; if such a form is supported,
+`[get: Attr]` is a possible accessor-target direction. Current parser/binder
+support remains absent.
 
 `where T : IFoo` requires a checked behavioral witness; `where T : [Sized]`, `[Copy]`, `[ManagedStorable]`, `[ThreadTransferable]`, `[ThreadShareable]`, `[TextCodeUnit]` or `[NativeComInterface]` asks for a compiler-verified property of the complete qualified form, **not** implementation of an `I...` interface or the mere presence of an attribute. Thread capabilities describe which checked transfer or concurrent-use contracts a complete form can satisfy; they do not imply that a value is currently shared, authorize mutation, or perform synchronization. Thread confinement is the default but does not bind a value to one OS thread or executor. `[Sized]` does not promise a size constant in shared generic code. `[TextCodeUnit]` admits `char8`, `char16`, `char32`, not arbitrary valid encoded text. Native COM additionally requires checked IID, inherited slots, signatures, layout and lifetime. User shape generation can provide witnesses or adapters only after checking costs, ownership and ABI.
 
@@ -323,10 +348,23 @@ borrow lifetimes, dispatch and ABI remain to be specified.
 Source overload resolution records the selected declaration and closed generic
 arguments. A linker or JIT validates and implements that binding rather than
 rerunning source resolution; runtime virtual/interface dispatch is separate.
-Exact matches precede permitted erasure, with no invented numeric conversions.
-Constraints filter applicability but do not create overloads differing only by
-constraints or require arbitrary logical subsumption; return-only overloads
-are not introduced. Applicable members beat extensions. Thus a sole
+Exact matches precede only previously permitted, declared projections or
+erasures. Overload binding does not search implicit numeric or arbitrary type
+conversions; permitted access/qualification weakening can affect match
+quality (for example, `write Span<T>` to a readonly `Span<T>` parameter), but
+does not infer a new or reversed family projection. Binding first determines
+applicability, then compares each argument's match quality independently:
+identity is better than permitted access/qualification weakening. One
+candidate is better only when it is no worse for every argument and better
+for at least one; crossed better/worse arguments are ambiguous rather than
+combined into a score. Declared specificity resolves otherwise tied
+applicable shapes, including by-value versus `implicit ref<T>` and the
+accepted `params` normal/expanded rules. A fixed-arity non-expanded candidate
+wins over an otherwise equal expanded `params` candidate. Constraints filter
+applicability but do not create overloads differing only by constraints or
+require arbitrary logical subsumption; return-only overloads are not
+introduced. Declaration order, return type, and literal numeric fit do not
+break ties. Applicable members beat extensions. Thus a sole
 `Set(int32)` accepts `Set(1)`, but adding `Set(uint32)` makes the source literal
 ambiguous while an already compiled caller retains its `int32` binding.
 Removing the bound declaration remains a compatibility break.
@@ -397,7 +435,15 @@ operator directly. Operator spelling does not imply `[NoThrow]` or
 derive complements or ordering laws. This does not establish universal equality,
 hashing, or managed identity policy, nor primitive/heterogeneous witnesses or
 a public generic ABI. See the detailed [bounded generic contract](implementation.md#bounded-generic-functions).
-Unary and shift protocols remain unsupported.
+The intended unary contract gives unary `+`, `-`, `!` and `~` one operand of
+the containing `T` or `T?` and an independent result type; `!` is not
+inherently bool-result, and result type alone does not distinguish overloads.
+Static `++`/`--` have operand-shaped results rather than an arbitrary result
+type; this does not import C# inheritance. `true` and
+`false` are the explicit exception: both return `bool` and are declared
+together. C# 14's instance-mutating `++`/`--` and `void` compound-assignment
+operators are not adopted here. These are target directions only; unary and
+shift protocols remain unsupported.
 
 The implementation does not infer unique/owning `T`, constructor or
 method type arguments, ordinary overloads, or partial `_` holes. It does not
@@ -406,20 +452,16 @@ still flow into untyped arithmetic (for example, `int64 x = 50000 * 50000`),
 but do not retarget typed numeric operands. General overload selection and
 argument/result inference remain scheduled.
 
-Underscore has context-specific roles rather than one universal discard
-operation. In a discard-value context, evaluate once and apply ordinary value
-ownership and cleanup; in a wildcard pattern, match without binding or
-dropping the source; in a lambda parameter, omit the local name without
-changing argument evaluation or parameter mode. As a generic type-argument
-hole, `_` is filled only by unique inference, has no default or wildcard
-meaning, and cannot remain unresolved in an exported contract. These are
-target semantics; exact syntax and contexts remain open, and the compiler
-does not implement general discard, wildcard-pattern or generic-hole forms.
-The binder currently treats `_` as an ordinary identifier and assignment;
-expression statements and unused-local cleanup are not implementations of
-these contextual roles.
-The lexer continues to recognize underscore in identifiers outside
-grammar-defined special contexts; there is no blanket underscore reservation.
+`_` is reserved and never names an identifier. `_ = expression;` is the
+accepted standalone discard statement: evaluate the expression once, preserve
+its effects and failures, and apply ordinary ownership/cleanup. It is not an
+assignment and has no name-dependent fallback. Positional wildcard patterns
+and omitted lambda parameter names are separate nonbinding contexts; they do
+not drop the matched/argument value or alter parameter mode. Separately
+proposed type holes are not identifiers and are not covered by this discard
+rule. Exact grammar contexts beyond the accepted discard direction remain to
+specify; a coordinated parser/semantic migration is pending, and syntax-19
+currently still binds `_` as an identifier.
 
 Adding an interface member compatibly for existing implementations requires a
 default implementation that satisfies
@@ -611,10 +653,15 @@ argument matching the declared collection binds directly in normal form;
 expanded form gathers individual arguments into a new collection. Resolve
 overloads by ordinary match quality and specificity first; a fixed-arity,
 non-expanded candidate wins an otherwise equal match over expanded `params`,
-not regardless of conversion quality. Diagnose unresolved ambiguity rather
-than selecting arbitrarily. Exact overload ranking, diagnostic severity and
-generic collection-expression inference remain specification work. Binding is
-fixed at source compilation; a backend does not choose among overloads. For
+not regardless of conversion quality. Accepted ranking compares candidates
+by per-argument dominance: identity is better than permitted
+access/qualification weakening, and crossed better/worse arguments are
+ambiguous rather than summed into a score. Apply declared specificity and the
+by-value/`implicit ref<T>`/`params` priorities. Return type, declaration
+order, literal numeric fit and conversion-chain search do not resolve a tie.
+Exact grammar, diagnostics and generic collection-expression inference remain
+specification work. Binding is fixed at source compilation; a backend does not
+choose among overloads. For
 example, given `Log<T>(T item)` and `Log<T>(params List<T> items)`, a
 `List<int32>` argument selects the `List<T>` overload: both infer one `T` and
 have identity matches after inference, but the declared `List<T>` parameter
@@ -639,7 +686,7 @@ literal contexts; it does not infer field capture, change ownership, choose a
 type from constraints or invert optional/box normalization. General constructor
 inference is not implemented by the current binder.
 
-The target parser contract is `IParsable<TSelf>.TryParse(TextSpan, init ref<TSelf>)`, including user types. `init ref<T>` is a vacant initialization loan: its destination cannot be read before complete initialization and publication. Conditional initialization facts are normally authored as declaration postconditions, composed with ordinary patterns and expressions; they correlate the output's live/uninitialized state with the declared status/result. An initialized nullable value (including null) is a live `T` value; an uninitialized outcome has no `T` lifetime, access or cleanup, even if physical storage remains. Callers cannot receive an undiscriminated maybe-live owner or access/clean up a vacant arm. Exact guard/pattern syntax and metadata remain to be specified; equivalent routine output attributes are not a parallel authoring mechanism. Failure cleans partial initialization according to the declared contract and never fabricates `default(T)`; asynchronous publication occurs at operation completion. The `init ref` call-site spelling is not settled. The bounded executable profile still implements `bool`/`out` conditional publication; its declarations and calls must migrate together rather than treating `init ref` as a parser alias or general writable reference. Expected invalid input normally branches on `Try...`/status. Domain outcomes may use response types; there is no mandatory language-wide `Option`/`Result` wrapper or typed-throws failure-set machinery.
+The target parser contract is `IParsable<TSelf>.TryParse(TextSpan, init ref<TSelf>)`, including user types. `init ref<T>` is a vacant initialization loan: its destination cannot be read before complete initialization and publication. The accepted call-site form is `TryParse(text, init result)`; parser/binder support and coordinated migration remain pending. Conditional initialization facts are normally authored as declaration postconditions using `ensure <expr>`, an ordinary Boolean expression that may compose patterns and short-circuit predicates. A legal value predicate such as `result > 0` implies initialization; source-body/path checking must prove reads are legal and may not inspect vacant storage to decide a predicate's result. A successful value predicate establishes initialization. These clauses correlate the output's live/uninitialized state with the declared status/result; they are not a separate conditional-assertion block language. An initialized nullable value (including null) is a live `T` value; an uninitialized outcome has no `T` lifetime, access or cleanup, even if physical storage remains. Callers cannot receive an undiscriminated maybe-live owner or access/clean up a vacant arm. Exact clause placement, grammar and metadata remain to be specified; equivalent routine output attributes are not a parallel authoring mechanism. Failure cleans partial initialization according to the declared contract and never fabricates `default(T)`; asynchronous publication occurs at operation completion. The bounded executable profile still implements `bool`/`out` conditional publication; its declarations and calls must migrate together rather than treating `init ref` as a parser alias or general writable reference. Expected invalid input normally branches on `Try...`/status. Domain outcomes may use response types; there is no mandatory language-wide `Option`/`Result` wrapper or typed-throws failure-set machinery.
 
 The language-versioned boolean-success default initializes the output on
 `true` and leaves it uninitialized on `false`. For other result types, an
@@ -729,8 +776,9 @@ state observable boundary facts about initialization, nullability, ranges and
 relationships to unchanged value inputs; these are behavioral guarantees, not
 merely optimizer hints. Historical relations such as a count increasing by
 one require state-history support and remain outside the initial model.
-Proving or folding predicates may optimize enforcement only while preserving
-the published guarantee. Clauses may refer only to declarations visible at the
+Proving or folding predicates may optimize enforcement only when legally
+redundant and without losing observable evaluation or effects. Clauses may
+refer only to declarations visible at the
 method's effective accessibility and expressions permitted by the ordinary
 contract language: an accessible public `Count` abstraction may be used when
 ordinary evaluation permits it, but a private representation invariant cannot
@@ -739,16 +787,19 @@ guarantees checked or proved for the callee, never private-body inference, and
 are invalidated by relevant mutation, alias effects or lifetime changes. This
 adds no getter-purity syntax; proving or folding a predicate does not replace
 the public guarantee. Initialization safety is static and never checks vacant
-storage by reading it. Exact output/result publication and
-postcondition-failure cleanup remain open.
+storage by reading it. Postconditions are ordinary code at their declared
+phase: failure follows ordinary unwinding, with no transactional rollback or
+rerun of completed `finally` blocks. This does not add a separate
+output-publication protocol.
 
 The guaranteed static-proof floor is available independently of optimization
 level; beyond-floor proof support may vary, but must remain sound. A
 proven-to-fail ordinary guard produces a warning by default,
 promotable to an error; an intentionally failing `require` remains a valid
 path when that diagnostic is not promoted. Failed required static/constant
-proofs diagnose. Removing runtime guards preserves evaluation, effects, exceptions,
-output publication and cleanup. Neither `NoThrow` nor another public promise
+proofs diagnose. Removing runtime guards preserves required evaluation,
+effects, exceptions, declared output-initialization outcomes and cleanup.
+Neither `NoThrow` nor another public promise
 is inferred from a conditional body check.
 
 `require` does not need an unsafe context. Catching/recovery does; `finally`
@@ -819,6 +870,13 @@ semantics and examples are in [samples](samples.md) and [libraries](libraries.md
 
 Asynchronous operations return task-like completion, including `Task<void>` for
 no result; synchronous `void` remains valid, but `async void` is not permitted.
+The accepted terminology keeps three properties separate: asynchronous work
+can happen independently of the main program flow, and may or may not be
+concurrent; concurrency means a system can execute multiple flows of code, and
+may or may not be parallel; parallelism is the ability to execute multiple
+flows simultaneously. These definitions do not imply that async work is queued,
+uses a thread/thread pool, always suspends, captures a scheduler, starts hot or
+cold, or is concurrent or parallel.
 Every started operation retains a responsible owner: a structured
 scope that joins it, an explicit transfer to another responsible owner, or a
 supervisor with error, lifetime and shutdown policy. Returning a task alone is
@@ -869,7 +927,9 @@ checked predicates, `[ViewOf]`, `[Captures]`, `[Pure]`,
 numeric `T(expression)` conversion subset. Attached width suffixes diagnose
 as `TRM0006`; prefix casts are not parsed. In particular, `out` remains the
 current bounded implementation spelling while a coherent migration to
-initialization loans is planned; invocation spelling for `init ref` is open.
+initialization loans is planned; the accepted `init ref` call-site form is
+`Create(init value)`, pending parser/binder implementation and coordinated
+migration.
 Exact generic constraint,
 associated-type and extension-disambiguation syntax, inference-hole spelling,
 closed-case marker/match grammar and compatibility-forwarder attributes/source

@@ -206,7 +206,7 @@ Public relationships come from declarations, language-versioned defaults and inh
 | Multiple eligible sources | Explicit permitted source set; conservatively bound by **every** listed source, not by which branch today's body selects |
 | Boolean-success `init ref<T>` without an explicit conditional postcondition | Destination starts vacant; `true` initializes it and `false` leaves it uninitialized |
 | Other result type with `init ref<T>` and no explicit conditional postcondition | Destination starts vacant and must be completely initialized on every normal return |
-| Explicit conditional postcondition for `init ref<T>` | The declared status/result relationship governs initialization; exact guard/pattern syntax and metadata remain open |
+| Explicit conditional postcondition for `init ref<T>` | The declared status/result relationship governs initialization; `ensure <expr>` uses an ordinary Boolean expression, with exact clause placement/grammar and metadata still to specify |
 | Declared `Task<TResult>` | May retain borrowed inputs/receiver until completion and required cleanup, whether or not the method is `async` |
 | Implemented interface/registered builder | Inherit the source, access, output and effect contract; no implementation-by-implementation repetition |
 
@@ -214,11 +214,15 @@ For conditional outputs, initialization is a live-state fact: an initialized
 nullable value containing null is still a complete live `T`; an uninitialized
 outcome has no live `T` lifetime, value access or `T` cleanup, even if its
 storage remains allocated. Declaration postconditions are the normal authoring
-route, composed with ordinary patterns and expressions. Callers may retain a
-checked relation between output state and its discriminator before testing it,
-but must not access or clean up a vacant arm or receive an undiscriminated
-maybe-live owner. Exact guard/pattern syntax and metadata remain to be
-specified. The boolean-success and other-result defaults above are
+route, using `ensure <expr>` with an ordinary Boolean expression, patterns and
+short-circuit behavior. A legal value predicate implies initialization; body
+and path analysis must establish that reads are legal and must never read
+vacant storage to discover a false predicate. A successful value predicate
+establishes initialization. Callers may retain a checked relation between
+output state and its discriminator before testing it, but must not access or
+clean up a vacant arm or receive an undiscriminated maybe-live owner. Exact
+clause placement/grammar and metadata remain to be specified. The
+boolean-success and other-result defaults above are
 language-versioned, not inferred from method names. The current bounded
 `bool`/`out` behavior is unchanged.
 

@@ -162,13 +162,18 @@ be elements when normal storage and lifetime contracts permit them. `params`
 modifies the collection parameter's call form, not its type. A matching
 collection argument binds directly in normal form; expanded form gathers
 individual arguments into a new collection.
-Resolve overloads by ordinary match quality and specificity first; a
-fixed-arity, non-expanded candidate wins over an otherwise equally good
-expanded `params` candidate, but not against a better conversion. Diagnose
-remaining ambiguity rather than choosing arbitrarily. Full overload ranking,
-diagnostic severity and generic collection-expression inference remain
-specification work. Binding is fixed at source compilation, not selected by a
-backend. For `Log<T>(T item)` versus `Log<T>(params List<T> items)`, a
+Resolve applicability first, then compare argument quality independently:
+identity is better than permitted access/qualification weakening, and a
+candidate is better only if it is no worse for every argument and better for
+at least one. Crossed better/worse arguments are ambiguous; do not sum match
+scores. Apply declared specificity and the accepted by-value/`implicit ref<T>`
+and `params` rules; a fixed-arity, non-expanded candidate wins over an
+otherwise equal expanded `params` candidate. Do not break ties by return type,
+declaration order or literal numeric fit, and do not search conversion chains.
+Exact grammar and diagnostic wording remain specification work, as does
+generic collection-expression inference. Binding is fixed at source
+compilation, not selected by a backend. For `Log<T>(T item)` versus
+`Log<T>(params List<T> items)`, a
 `List<int32>` argument selects `List<T>`: both infer one `T` and match by
 identity after inference, but `List<T>` is more specific than bare `T`. This
 does not depend on the `params` modifier or on the number/cost of inferred

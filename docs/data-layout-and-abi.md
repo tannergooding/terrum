@@ -11,9 +11,8 @@
 
 | Status | Covered here |
 |---|---|
-| Accepted design | Primitive and eligible-wrapper access guarantees; no aggregate atomicity inferred from size; opaque `Auto` layout with private fields by default; declaration-order `Sequential`, offset-zero `Union`, and one-field carrier `Transparent`; fixed target-specific interop under an explicit `Blittable` commitment, not layout kind alone; separation of layout, call classification, atomicity, validity, ownership and sharing; preservation of published boundaries |
+| Accepted design | Primitive and eligible-wrapper access guarantees; no aggregate atomicity inferred from size; opaque `Auto` layout with private fields by default; declaration-order `Sequential`, offset-zero `Union` requiring `Blittable`, and one-field carrier `Transparent`; fixed target-specific interop under an explicit `Blittable` commitment, not layout kind alone; separation of layout, call classification, atomicity, validity, ownership and sharing; preservation of published boundaries |
 | Implemented bounded profile | The existing Windows x64 compact-value and module ABIs. Their exact current contracts remain authoritative; they are not superseded by an unspecified future profile |
-| Needs policy or declaration review | Whether raw `Union` layout additionally requires the fixed `Blittable` commitment; see [remaining decisions](#remaining-decisions-requiring-review) |
 | Specification and implementation work | Recording chosen target rules, checking layouts and metadata, validating compatible replacement, and testing lowering against accepted guarantees; see [profile work](#profile-specification-and-implementation-work) |
 
 Unimplemented does not mean unapproved. Completing a table from an already
@@ -131,7 +130,8 @@ representation may expose fields without changing ordinary readonly or `mut`
 access rules. Public field access requires the fixed `Blittable` commitment,
 regardless of layout kind; neither `Sequential` nor `Transparent` alone makes
 an exposed field a `Blittable` field. `Sequential` lays fields out in
-declaration order; `Union` places every field at offset zero. Neither permits
+declaration order; `Union` places every field at offset zero and requires the
+fixed `Blittable` commitment. Neither permits
 arbitrary user-selected field offsets. Those kinds do not themselves freeze
 the layout or carrier across versions. Layout-dependent values without a fixed commitment
 cannot cross an independently replaceable dynamic boundary; they may be used
@@ -178,8 +178,9 @@ The size/alignment/representation table is still to be completed; this document
 does not choose a default serialization format, boolean encoding, reference
 encoding, or SIMD ABI. Register classification is not inferred from storage
 size alone. Explicit raw `Union` layout permits overlapping storage, not safe
-typed access to inactive alternatives. Whether that layout must also carry the
-fixed `Blittable` commitment remains open. See the
+typed access to inactive alternatives, and requires the fixed `Blittable`
+commitment. Safe non-Blittable discriminated-union/sum types are a separate
+higher language feature. See the
 [accepted layout direction](language.md#types-and-operations).
 The currently implemented compact value/module layouts remain exact contracts,
 not an already implemented resilient-layout mechanism.
@@ -209,9 +210,9 @@ incompatible typed views requires unsafe code. A raw `Union` layout is the only
 accepted way to request overlapping field storage, and it does not provide
 active-member tracking or a safe subset of typed reinterpretation. A future
 tagged/sum type is a separate feature whose case and tag checks must preserve
-ordinary validity, ownership, roots and cleanup. Whether raw `Union` also
-requires `Blittable` remains a narrow policy choice; matching fields are not
-sufficient by themselves.
+ordinary validity, ownership, roots and cleanup, and need not be Blittable.
+Raw `Union` requires the explicit fixed `Blittable` commitment; matching
+fields are not sufficient by themselves.
 
 The backend may implement a valid source operation with register bit moves or
 overlapping machine accesses when all observable source guarantees survive.
@@ -284,13 +285,10 @@ managed ABI is implied here.
 
 ## Remaining decisions requiring review
 
-| Decision | Accepted boundary that the decision must preserve |
-|---|---|
-| `Blittable` requirement for raw `Union` | Raw overlapping storage is unsafe and has no active-member-tracked safe subset. Decide whether requesting `Union` layout also requires the fixed, directly interoperable `Blittable` commitment; this does not change the unsafe status of overlapping access |
-
-These decisions need not block unrelated compiler work. Keep unsupported forms
-unsupported until their contracts are selected; do not infer approval from a
-current backend representation. Define serialization, callback and other
+No unresolved policy choice remains in the accepted layout model. Keep
+unsupported forms unsupported until their specifications and implementations
+are complete; do not infer compiler support from a current backend
+representation. Define serialization, callback and other
 external protocol encodings for concrete boundaries as needed, reusing the
 selected profile where it determines representation; no global boolean,
 reference or SIMD wire format is selected.
