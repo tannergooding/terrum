@@ -129,6 +129,33 @@ public sealed partial class JitTests
     }
 
     [Fact]
+    public async Task GenericInitDoesNotPublishAfterCheckedFailureAsync()
+    {
+        const string Source = """
+            bool FailAfterWrite<T>(T value, init ref<T> result) where T : [Copy] {
+                result = value;
+                require false;
+                return true;
+            }
+            [NoThrow] bool Fill<T>(T value, init ref<T> result) where T : [Copy] {
+                result = value;
+                return true;
+            }
+            [NoThrow] bool None<T>(init ref<T> result) where T : [Copy] { return false; }
+            int32 Main() {
+                if (None<int32>(init var target)) { return 1; }
+                unsafe {
+                    try { FailAfterWrite<int32>(41, init target); }
+                    catch { }
+                }
+                require Fill(42, init target);
+                return target;
+            }
+            """;
+        await AssertCheckedExecutionAsync(Source, 42).ConfigureAwait(true);
+    }
+
+    [Fact]
     public async Task GenericScalarResultsParticipateInControlFlowAndNumericContextAsync()
     {
         const string Source = """
