@@ -1035,7 +1035,8 @@ a stable 1.0 specification. Host-side candidate readers validate `(1, 0)` header
 then String
 offsets and name rows, fixed Module rows and their partition cursors,
 ModuleRef identities and co-located producer requirements, optional SourceFile
-paths, nominal TypeDef ranges and FieldDef ownership, and structural TypeSpec
+paths, nominal TypeDef ranges and FieldDef ownership, unique Layout row
+ownership (not target ABI classification), and structural TypeSpec
 forms and TypeArg ownership/ranges, plus structural MethodSig/Param ranges and
 MethodDef module, signature and body ownership. A host-side
 writer emits indexed String sections with required names or optional empty

@@ -16,10 +16,12 @@ public readonly ref struct TrRmTypeDefTableReader
     private readonly TrRmModuleTableReader _modules;
     private readonly int _recordCount;
     private readonly int _fieldCount;
+    private readonly int _layoutCount;
     private readonly int[] _fieldOwners;
 
     public int Count => _recordCount;
     public int FieldCount => _fieldCount;
+    public int LayoutCount => _layoutCount;
 
     public TrRmTypeDefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmModuleTableReader modules,
@@ -40,6 +42,7 @@ public readonly ref struct TrRmTypeDefTableReader
         _modules = modules;
         _recordCount = recordCount;
         _fieldCount = fieldCount;
+        _layoutCount = layoutCount;
         _fieldOwners = new int[fieldCount + 1];
         for (var row = 1; row <= recordCount; row++)
         {
