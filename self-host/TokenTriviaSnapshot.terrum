@@ -1,0 +1,120 @@
+namespace Terrum.CodeAnalysis;
+
+// Trivia records retain scanner-5 kind/start/length/leading-token-index words.
+public unique struct TokenTriviaSnapshot
+{
+    private OwnedInt32Buffer _records;
+    private int32 _count;
+
+    private TokenTriviaSnapshot(OwnedInt32Buffer records, int32 count)
+    {
+        _records = move records;
+        _count = count;
+    }
+
+    public int32 GetCount()
+    {
+        return _count;
+    }
+
+    public bool TryGet(int32 index, out Token trivia, out int32 owner)
+    {
+        if (index < 0 || index >= _count)
+        {
+            return false;
+        }
+
+        int32 offset = index * 4;
+        require SourceRange.TryCreate(_records.Read(offset + 1), _records.Read(offset + 2),
+            out var range);
+        trivia = new Token(_records.Read(offset), range);
+        owner = _records.Read(offset + 3);
+        return true;
+    }
+
+    public static bool TryBuild(int32 tokenCount, init ref<TokenTriviaSnapshot> result)
+    {
+        if (Host.Diagnostics[0] != 0 || tokenCount < 1
+            || tokenCount > Host.Tokens.Length / 3
+            || Host.Trivia.Length < 1)
+        {
+            return false;
+        }
+
+        int32 count = Host.Trivia[0];
+        if (count < 0 || count > (Host.Trivia.Length - 1) / 4
+            || count > int32.MaxValue / 4
+            || !OwnedInt32Buffer.TryCreate(count * 4, out var created))
+        {
+            return false;
+        }
+
+        mut OwnedInt32Buffer records = move created;
+        mut int32 position = 0;
+        mut int32 nextTrivia = 0;
+        mut int32 previousEnd = 0;
+        for (mut int32 index = 0; index < tokenCount; index = index + 1)
+        {
+            int32 tokenOffset = index * 3;
+            int32 tokenKind = Host.Tokens[tokenOffset];
+            int32 tokenStart = Host.Tokens[tokenOffset + 1];
+            int32 tokenLength = Host.Tokens[tokenOffset + 2];
+            if (!IsValidScannerToken(index, tokenCount, previousEnd,
+                tokenKind, tokenStart, tokenLength))
+            {
+                return false;
+            }
+
+            while (nextTrivia < count && Host.Trivia[nextTrivia * 4 + 4] == index)
+            {
+                int32 offset = nextTrivia * 4 + 1;
+                int32 kind = Host.Trivia[offset];
+                int32 start = Host.Trivia[offset + 1];
+                int32 length = Host.Trivia[offset + 2];
+                if (kind < 0 || kind > 3 || length <= 0 || start != position
+                    || length > tokenStart - start)
+                {
+                    return false;
+                }
+                require records.TryAppend(kind);
+                require records.TryAppend(start);
+                require records.TryAppend(length);
+                require records.TryAppend(index);
+                position = start + length;
+                nextTrivia = nextTrivia + 1;
+            }
+            if (tokenStart != position)
+            {
+                return false;
+            }
+            position = tokenStart + tokenLength;
+            previousEnd = position;
+        }
+        if (nextTrivia != count || position != Host.Source.Length)
+        {
+            return false;
+        }
+
+        result = new TokenTriviaSnapshot(move records, count);
+        return true;
+    }
+}
+
+bool TryBuildLossless(int32 count,
+    init ref<TokenSnapshot> tokens, init ref<TokenTriviaSnapshot> trivia)
+{
+    if (!TokenSnapshot.TryBuild(count, init var scanned)
+        || !TokenTriviaSnapshot.TryBuild(count, init var leading))
+    {
+        return false;
+    }
+
+    tokens = move scanned;
+    trivia = move leading;
+    return true;
+}
+
+bool TryScanLossless(init ref<TokenSnapshot> tokens, init ref<TokenTriviaSnapshot> trivia)
+{
+    return TryBuildLossless(Scan(), init tokens, init trivia);
+}

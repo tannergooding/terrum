@@ -160,6 +160,114 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("")]
+    [InlineData("  // leading\r\nalpha /* block */ beta\t")]
+    [InlineData("alpha\u2028beta // trailing")]
+    public async Task OwnedTriviaSnapshotMatchesHostedLeadingTriviaAsync(string text)
+    {
+        var expected = Lexer.Lex(SourceText.From(text)).Tokens
+            .SelectMany((token, owner) => token.LeadingTrivia.Select(trivia =>
+                ((int)trivia.Kind, trivia.Span.Start, trivia.Span.Length, owner)))
+            .ToArray();
+        var entry = new StringBuilder("""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TryScanLossless(init var tokens, init var trivia);
+            """);
+        _ = entry.Append(CultureInfo.InvariantCulture,
+            $"if (trivia.GetCount() != {expected.Length} || trivia.TryGet(-1, out var negative, out var negativeOwner) || trivia.TryGet({expected.Length}, out var beyond, out var beyondOwner)) {{ return 1; }}");
+        if (expected.Length > 0)
+        {
+            _ = entry.Append("Host.Trivia[1] = -1;");
+        }
+        for (var index = 0; index < expected.Length; index++)
+        {
+            var (kind, start, length, owner) = expected[index];
+            _ = entry.Append(CultureInfo.InvariantCulture,
+                $"require trivia.TryGet({index}, out var part{index}, out var owner{index});"
+                + $" if (part{index}.Kind != {kind} || part{index}.Range.Start != {start}"
+                + $" || part{index}.Range.Length != {length} || owner{index} != {owner}) {{ return 2; }}");
+        }
+        _ = entry.Append("return 42; }");
+
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, entry.ToString(), (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task OwnedTriviaSnapshotSurvivesTheManagedChainLimitAsync(NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TryScanLossless(init var tokens, init var trivia);
+                if (tokens.GetCount() != 129 || trivia.GetCount() != 128) { return 1; }
+                require trivia.TryGet(0, out var first, out var firstOwner);
+                require trivia.TryGet(63, out var middle, out var middleOwner);
+                require trivia.TryGet(127, out var last, out var lastOwner);
+                if (first.Kind != 0 || first.Range.Start != 1 || first.Range.Length != 1
+                    || firstOwner != 1 || middle.Range.Start != 127 || middleOwner != 64
+                    || last.Range.Start != 255 || lastOwner != 128) { return 2; }
+                return 42;
+            }
+            """;
+        var input = string.Concat(Enumerable.Repeat("a ", 128));
+        var program = await CompileAsync(input, Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task LexicalFailureLeavesBothLosslessSnapshotsVacantAsync(NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                if (TryScanLossless(init var tokens, init var trivia)) { return 1; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync("\uD800", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(0, int.MaxValue)]
+    [InlineData(1, -1)]
+    [InlineData(2, 1)]
+    [InlineData(3, 0)]
+    [InlineData(4, 0)]
+    [InlineData(4, 3)]
+    public async Task InvalidTriviaDoesNotPublishOwnedSnapshotAsync(int word, int value)
+    {
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                int32 count = Scan();
+                Host.Trivia[{{word}}] = {{value}};
+                if (TryBuildLossless(count, init var tokens, init var trivia)) { return 1; }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync("alpha beta", entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData("int32 Answer() { return 42; }", true)]
     [InlineData("int32 Answer() { return -42; }", true)]
     [InlineData("int32 Answer() { return (42); }", false)]
@@ -450,7 +558,7 @@ public sealed class ManagedScannerComponentTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         string[] names = ["SourceRange", "Token", "ManagedTokenChain", "Scanner", "ManagedScanner",
-            "TokenSnapshot", "ScalarFunctionParser"];
+            "TokenSnapshot", "TokenTriviaSnapshot", "ScalarFunctionParser"];
         var trees = new List<SyntaxTree>(names.Length + 1);
         foreach (var name in names)
         {
