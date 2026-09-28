@@ -386,7 +386,7 @@ All operand notation follows the encoding table above. Each listed
 opcode number is a byte, not a source-language operator spelling.
 The table assigns decode shapes; the executable subset is narrower,
 as specified after the opcode tables. Assigned but unsupported shapes
-can be inspected but must not be emitted as executable `(0, 3)` bodies.
+can be inspected but must not be emitted as executable `(1, 0)` bodies.
 
 | Opcode | Operation; operands in byte order | Semantics and writer/audit requirement |
 |---:|---|---|
@@ -547,14 +547,14 @@ checked-exception policy:
 Failure departures never become unchecked numeric results or `None`.
 Checked operations with a potentially failing edge cannot occur in a
 `NoThrow` method unless a separately specified static-proof rule establishes
-that failure cannot occur; format `(0, 3)` makes no such exception. `Invoke`
+that failure cannot occur; format `(1, 0)` makes no such exception. `Invoke`
 still checks selected method signature, effects, argument modes and return
 ownership. For an operation with an implicit success result, the target
 parameter count is `edge.argumentCount + 1` and its first type is the result
 type. The failure policy does not synthesize a catch region; if the caller
 owns something requiring cleanup on failure, this profile cannot encode
 the call. The `CheckedIndex` and `Leave` opcode assignments reserve their
-shapes but are rejected by a `(0, 3)` executable reader.
+shapes but are rejected by a `(1, 0)` executable reader.
 
 For `CheckedBinary` kinds 1..5, operands share one of `int32`, `uint32`,
 `int64`, `uint64`; zero divisors fail. Signed minimum divided by `-1`
@@ -595,7 +595,7 @@ callable's spelling or assume an arbitrary `CallNoThrow` is an intrinsic.
 
 A function returning `int32` with one by-value `int32` parameter starts with
 its parameter as block value `r1`. The following is **executable** in the
-narrow fail-fast `(0, 3)` profile; `t1` is the `int32` TypeSpec:
+narrow fail-fast `(1, 0)` profile; `t1` is the `int32` TypeSpec:
 
 ```text
 B1(r1: t1): r2 = ConstSigned t1, 5
@@ -619,7 +619,7 @@ definitions. It does not infer an evaluation stack from machine code.
 For `local = local + 5`, instead declare a mutable, initially vacant
 `int32` place `p1` in the body place table. Its header and operations would
 have the following shape (shown to expose the tables, **not** as an
-executable `(0, 3)` body):
+executable `(1, 0)` body):
 
 | Block | Value parameters | Live-in / live-out values | Inherited places | Starts / ends | Operations and terminator |
 |---|---|---|---|---|---|
@@ -675,7 +675,7 @@ unsupported place operations.
 | Mutable local | `PlaceLocal` obtains its `rPlace`; `Load` defines a Copy `r`. On the successful edge, `Assign` writes the result through the place after verifying authority and state. |
 | Field of an addressable owner | `PlaceField` derives a field place and `Load` obtains its value; for a Copy aggregate held by value, `Extract` returns a field value instead. Provenance and owner lifetime are not lost. |
 
-Only the first two rows are executable in `(0, 3)`. An interpreter can
+Only the first two rows are executable in `(1, 0)`. An interpreter can
 materialize values in body-local slots and places in verified storage;
 JIT/AOT may choose registers or memory independently. The format does not
 require a distinct add opcode for every source operand combination, nor
@@ -702,17 +702,13 @@ contains a four-byte owner row, a zero body layout, four one-byte counts,
 one `(t1,value)` descriptor, the block-offset index `[0,14]`,
 terminator offset `12`, and a 14-byte
 block (region 0, zero parameters, empty live-in/out and place lists,
-one `ConstBits` operation, one `Return` terminator). Old `(0,1)` required
-96 bytes for that Body record; `(0,3)` uses 45 bytes including its section
-offsets. With the exact eight populated metadata sections in the example,
-the earlier 19-entry directory and length-prefixed rows occupied **729
-bytes** before alignment: 32-byte header + 19 * 24-byte directory + 241
-bytes of sections. Omitting empty tables and length prefixes, indexing
-variable rows and using this coded body reduces that illustrative artifact
-to **397 bytes**: 32-byte header + 8 * 24-byte directory + 173 bytes
-of metadata/Body sections. These are encoded-size calculations, **not**
-measured throughput improvements; wider IDs, prefixes, block counts,
-decode work, branch count, debug information and alignment still matter.
+one `ConstBits` operation, one `Return` terminator). The Body section
+occupies 45 bytes including its row offsets. With the eight populated
+metadata sections in this example, the artifact occupies **397 bytes**
+before alignment: 32-byte header + 8 * 24-byte directory + 173 bytes of
+metadata/Body sections. This is an encoded-size calculation, **not** a
+throughput measurement; wider IDs, prefixes, block counts, decode work,
+branch count, debug information and alignment still matter.
 
 For the preceding by-value checked-add function (assuming the stated MethodSig
 and `t1`), the Body **section** uses three values, two blocks and no places or
@@ -776,7 +772,7 @@ whole-body traversal; no throughput ratio is implied.
 
 ### Executable subset versus assigned decode shapes
 
-For `(0, 3)`, an executable body uses only scalar TypeSpecs (`bool`,
+For `(1, 0)`, an executable body uses only scalar TypeSpecs (`bool`,
 `char16`, `int32`, `uint32`, `int64`, `uint64`) and optional forms of those
 scalars, by-value parameters, no receiver, no places, and no generic or
 external call. It can contain loop regions as constrained above. Operations
