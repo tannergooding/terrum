@@ -170,33 +170,14 @@ public sealed class TrRmImportExportTableReaderTests
 
     private static byte[] Artifact(List<(ushort Kind, byte[] Bytes, int Count)> sections)
     {
-        var length = 32 + sections.Count * 16;
-        foreach (var (_, bytes, _) in sections)
+        var entries = new TrRmSection[sections.Count];
+        for (var index = 0; index < sections.Count; index++)
         {
-            length += bytes.Length;
+            var (kind, bytes, count) = sections[index];
+            entries[index] = new TrRmSection(kind, 0, (uint)count, bytes);
         }
 
-        var artifact = new byte[length];
-        "TRRM"u8.CopyTo(artifact);
-        BinaryPrimitives.WriteUInt16LittleEndian(artifact.AsSpan(4), 1);
-        Write(artifact, 8, 32);
-        Write(artifact, 12, (uint)sections.Count);
-        Write(artifact, 16, (uint)length);
-        Write(artifact, 20, 32);
-        var offset = 32 + sections.Count * 16;
-        for (var entry = 0; entry < sections.Count; entry++)
-        {
-            var (kind, bytes, count) = sections[entry];
-            var directory = 32 + entry * 16;
-            BinaryPrimitives.WriteUInt16LittleEndian(artifact.AsSpan(directory), kind);
-            Write(artifact, directory + 4, (uint)count);
-            Write(artifact, directory + 8, (uint)offset);
-            Write(artifact, directory + 12, (uint)bytes.Length);
-            bytes.CopyTo(artifact.AsSpan(offset));
-            offset += bytes.Length;
-        }
-
-        return artifact;
+        return TrRmArtifactWriter.Encode(entries);
     }
 
     private static byte[] Modules(bool producerOwnsRef)
