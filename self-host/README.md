@@ -239,8 +239,9 @@ Attached width suffixes are lexical errors (`TRM0006`); scanner-5 retains
 recognized suffix-tag metadata only in the existing record for those rejected
 tokens, while valid integer records are untagged. Larger integer magnitudes
 are reported as beyond the decoder's range, not lexical errors. Floating
-literal binding, custom literal parsers and `[ConstEval]`
-remain unsupported. Contextual integer literal typing/range checks
+literal binding and custom literal parsers remain unsupported; bounded
+scalar `[ConstEval]` is implemented separately from literal registration.
+Contextual integer literal typing/range checks
 and parser routines remain hosted, while
 `build-component` binds the scanner's validated integer records without a host
 magnitude-decoding fallback. The string-literal candidate
