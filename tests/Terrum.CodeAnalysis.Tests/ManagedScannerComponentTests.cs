@@ -99,11 +99,17 @@ public sealed class ManagedScannerComponentTests
         {
             var method = index % 2 == 0 ? "TryReadInit" : "TryRead";
             var mode = index % 2 == 0 ? "init" : "out";
+            if (index == 0 || index == expected.Length / 2 || index == expected.Length - 1)
+            {
+                _ = source.Append(CultureInfo.InvariantCulture,
+                    $"if (!cursor.TryPeek(out var peek{index}) || !cursor.TryPeekInit(init var repeated{index}) || peek{index}.Kind != {(int)expected[index].Kind} || repeated{index}.Range.Start != {expected[index].Span.Start}) {{ return 4; }}");
+            }
             _ = source.Append(CultureInfo.InvariantCulture,
                 $"if (!cursor.{method}({mode} var token{index}) || token{index}.Kind != {(int)expected[index].Kind} || token{index}.Range.Start != {expected[index].Span.Start} || token{index}.Range.Length != {expected[index].Span.Length}) {{ return 1; }}");
         }
         _ = source.Append("""
-                if (cursor.TryRead(out var pastEnd) || !cursor.IsCurrent) { return 2; }
+                if (cursor.TryPeek(out var pastPeek) || cursor.TryPeekInit(init var againPeek)
+                    || cursor.TryRead(out var pastEnd) || !cursor.IsCurrent) { return 2; }
                 if (cursor.TryReadInit(init var again)) { return 3; }
                 return 42;
             }
@@ -159,7 +165,8 @@ public sealed class ManagedScannerComponentTests
                 require chain.TryCreateCursorInit(init var stale);
                 require {{mutation}};
                 if (cursor.IsCurrent || stale.IsCurrent
-                    || cursor.TryReadInit(init var absent) || stale.TryRead(out var missed)) { return 1; }
+                    || cursor.TryPeekInit(init var absent) || stale.TryPeek(out var missed)
+                    || cursor.TryReadInit(init var unread) || stale.TryRead(out var ignored)) { return 1; }
                 require chain.TryCreateCursorInit(init var fresh);
                 if (!fresh.IsCurrent) { return 2; }
                 if ({{(clear ? "fresh.TryRead(out var cleared)" : "!fresh.TryRead(out var appended) || appended.Kind != 1")}}) { return 3; }

@@ -113,6 +113,24 @@ mut class ManagedTokenCursor {
 
     public bool IsCurrent { [NoThrow] get { return _owner.Version == _version; } }
 
+    public mut bool TryPeek(out Token token) {
+        if (!IsCurrent) {
+            _next = null;
+            return false;
+        }
+        if (_next is some current) {
+            token = current.Value;
+            return true;
+        }
+        return false;
+    }
+
+    public mut bool TryPeekInit(init ref<Token> token) {
+        if (!TryPeek(out var next)) { return false; }
+        token = next;
+        return true;
+    }
+
     public mut bool TryRead(out Token token) {
         if (!IsCurrent) {
             _next = null;

@@ -52,6 +52,21 @@ and core-library drafts. None is evidence of current compiler support.
 | Contextually generic lambdas (scheduled) | Generic lambdas as shorthand for the same checked generic-functor contract, not a new type-pack facility | Constrained symbolic operations such as `x => x * x` validate `T` operations and Copy requirements; contextual scalar/SIMD behavior matches the named functor contract; capture and diagnostics are checked without arbitrary pack expansion or polymorphic callable erasure |
 | Later capabilities | Production JIT and additional native targets, async runtime implementation, generation/reflection, interop, scalable SIMD | Workload-specific correctness, ABI, lifetime, servicing and measured cost evidence |
 
+The hosted C# compiler and a Terrum-authored bootstrap compiler are intended
+to remain maintained in parallel through at least 1.0 GA, not replace one
+another when the first self-build succeeds. Start with a bounded compiler and
+explicit host source/output adapters; add only the library contracts its real
+phases require. Compare both compilers on the same sources, dependencies,
+options, runtime policy and target profile: lexical and diagnostic facts first,
+then canonical semantic artifacts, and finally deterministic native output
+for their shared supported subset. A self-build gate compiles that bounded
+compiler with the hosted implementation, rebuilds it with the resulting
+compiler, and checks the next rebuild and native execution against shared
+fixtures. Byte equality applies only to specified canonical output, not to
+unspecified container metadata; differences must be explained rather than
+silently normalized away. The current scanner and library components are
+precursors, not evidence that this gate already passes.
+
 Do not implement all stages simultaneously. The source-class/`ManagedNode`
 readonly/writable, mutable-class-receiver, and named/nested mutable compact-struct
 receiver-writeback batches are validated. They preserve historical authority
