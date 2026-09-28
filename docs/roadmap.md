@@ -5,6 +5,9 @@ The [language](language.md) defines accepted semantic direction, while
 [implementation](implementation.md) records actual support and tool contracts.
 The [pending language and library index](language-library-review.md) tracks
 detailed specification work separately from this implementation sequence.
+The [grammar, semantic IL and core-library working drafts](proposals/README.md)
+are proposal-only references, not accepted as a whole or evidence of current
+compiler support.
 
 | Stage | Deliverable | Exit evidence |
 |---|---|---|
