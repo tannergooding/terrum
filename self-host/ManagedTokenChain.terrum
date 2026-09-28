@@ -114,11 +114,25 @@ mut class ManagedTokenCursor {
     public bool IsCurrent { [NoThrow] get { return _owner.Version == _version; } }
 
     public mut bool TryPeek(out Token token) {
+        return TryPeekAhead(0, out token);
+    }
+
+    public mut bool TryPeekAhead(int32 distance, out Token token) {
         if (!IsCurrent) {
             _next = null;
             return false;
         }
-        if (_next is some current) {
+
+        if (distance < 0) { return false; }
+        mut write ManagedTokenLink? cursor = _next;
+        for (mut int32 index = 0; index < distance; index = index + 1) {
+            if (cursor is some current) {
+                cursor = current.Next;
+            } else {
+                return false;
+            }
+        }
+        if (cursor is some current) {
             token = current.Value;
             return true;
         }
@@ -126,7 +140,11 @@ mut class ManagedTokenCursor {
     }
 
     public mut bool TryPeekInit(init ref<Token> token) {
-        if (!TryPeek(out var next)) { return false; }
+        return TryPeekAheadInit(0, init token);
+    }
+
+    public mut bool TryPeekAheadInit(int32 distance, init ref<Token> token) {
+        if (!TryPeekAhead(distance, out var next)) { return false; }
         token = next;
         return true;
     }

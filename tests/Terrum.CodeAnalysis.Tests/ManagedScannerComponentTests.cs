@@ -128,6 +128,41 @@ public sealed class ManagedScannerComponentTests
         CursorReadsPublishedTokensAndStopsAtEndAsync(string.Join(" ", Enumerable.Repeat("a", 63)));
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task CursorLookaheadDoesNotConsumeAndRejectsInvalidDistancesAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require ManagedTokenChain.TryCreate(out var chain);
+                require chain.TryAppend(7, 0, 1);
+                require chain.TryAppend(8, 1, 1);
+                require chain.TryAppend(9, 2, 1);
+                require chain.TryCreateCursor(out var cursor);
+                if (cursor.TryPeekAhead(-1, out var negative)
+                    || cursor.TryPeekAhead(3, out var outside)
+                    || cursor.TryPeekAheadInit(3, init var beyond)) { return 1; }
+                require cursor.TryPeekAhead(2, out var last) && last.Kind == 9;
+                require cursor.TryPeekAheadInit(1, init var middle) && middle.Kind == 8;
+                require cursor.TryRead(out var first) && first.Kind == 7;
+                require cursor.TryPeekAhead(1, out var remaining) && remaining.Kind == 9;
+                require cursor.TryRead(out var second) && second.Kind == 8;
+                require cursor.TryRead(out var third) && third.Kind == 9;
+                if (cursor.TryPeekAhead(0, out var afterEnd) || !cursor.IsCurrent) { return 2; }
+                require chain.TryCreateCursor(out var stale);
+                require chain.TryClear();
+                if (stale.TryPeekAhead(1, out var invalidated) || stale.IsCurrent) { return 3; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync("abc", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData("\uD800")]
     [InlineData("a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a")]
     public async Task FailedCursorScanDoesNotPublishAsync(string text)

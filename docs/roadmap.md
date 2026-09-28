@@ -62,7 +62,13 @@ then canonical semantic artifacts, and finally deterministic native output
 for their shared supported subset. A self-build gate compiles that bounded
 compiler with the hosted implementation, rebuilds it with the resulting
 compiler, and checks the next rebuild and native execution against shared
-fixtures. Byte equality applies only to specified canonical output, not to
+fixtures. Terrum's compiler architecture need not imitate C# internals;
+semantic rules, optimization capabilities and target ABI should agree even
+when their algorithms and intermediate structures differ. Identical native
+bytes are achievable where both implementations deliberately share a
+deterministic lowering and emission profile, including ordering, layout and
+tie-breaking; equivalent behavior alone does not establish that profile.
+Byte equality applies only to specified canonical output, not to
 unspecified container metadata; differences must be explained rather than
 silently normalized away. The current scanner and library components are
 precursors, not evidence that this gate already passes.
