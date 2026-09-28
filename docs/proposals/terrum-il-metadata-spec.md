@@ -127,26 +127,26 @@ Each directory entry is 16 bytes:
 | Entry offset | Field | Width | Candidate meaning |
 |---:|---|---:|---|
 | 0 | Section kind | `u16` | One of the table assignments below |
-| 2 | Flags | `u16` | One of the section policies below |
+| 2 | Flags | `u16` | Two-bit section-policy selector; upper 14 bits reserved and zero |
 | 4 | Record count | `u32` | Number of records encoded in the section, `1..0xFF_FFFF` when present |
 | 8 | Section offset | `u32` | Artifact-relative section start |
 | 12 | Section byte length | `u32` | Exact section extent |
 
-Directory flags are a policy selector, not producer authority to declare a
-section safe to skip:
+The low two directory-flag bits form one policy selector, not independent
+permissions or producer authority to declare a section safe to skip:
 
 | Flags | Reader and rewriter policy |
 |---:|---|
-| `0x0001` | Required semantics: a consumer must understand this section before binding or execution. A rewriter must understand and update it or reject the rewrite. |
-| `0x0000` | Optional, self-contained: a consumer may ignore it; a rewriter may preserve its bytes if its registered contract guarantees that changes elsewhere cannot invalidate them. |
+| `0x0000` | Required semantics: a consumer must understand this section before binding or execution. A rewriter must understand and update it or reject the rewrite. |
+| `0x0001` | Optional, self-contained: a consumer may ignore it; a rewriter may preserve its bytes if its registered contract guarantees that changes elsewhere cannot invalidate them. |
 | `0x0002` | Optional, reference-slotted: a consumer may ignore its payload. A rewriter may preserve the unchanged payload if it remaps every declared reference slot and proves each target still has the same meaning; otherwise it drops the section. |
-| `0x0004` | Optional, discard-on-rewrite: a consumer may ignore it, but a rewriter that does not understand and regenerate it drops it whenever the artifact changes. |
+| `0x0003` | Optional, discard-on-rewrite: a consumer may ignore it, but a rewriter that does not understand and regenerate it drops it whenever the artifact changes. |
 
-Other values reject; these policies are mutually exclusive. The section-kind
+Nonzero upper bits reject; these policies are mutually exclusive. The section-kind
 registry must authorize the exact policy for assigned kinds. Unassigned
 kinds are skippable only in the reserved nonsemantic extension namespace
 defined below; their flags cannot override that namespace policy.
-Every present semantic table uses `0x0001`; SourceMap uses `0x0002`.
+Every present semantic table uses `0x0000`; SourceMap uses `0x0002`.
 Empty tables are omitted rather than encoded as empty entries. The entry does
 not add a minimum-reader-version field, and a matching major version does
 not imply acceptance of a different minor version. A separate minimum-reader
@@ -302,13 +302,13 @@ row's feature range is `(0, 0)`. A new semantic feature requires an explicit
 schema update, not merely a feature
 number in an otherwise unsupported artifact. Kinds `0x8000..0xFFFF` are
 reserved for **nonsemantic optional extensions**. A reader can skip an
-unrecognized kind in this range only with flags `0x0000`, `0x0002` or `0x0004`,
+unrecognized kind in this range only with flags `0x0001`, `0x0002` or `0x0003`,
 after checking its directory framing and any `0x0002` prelude. `0x0002`
 extensions use only selector 0 to refer to assigned core tables or selector
 1 to refer to Body instructions; their payload uses slots for all such
 references. They cannot define executable behavior, contract obligations,
 or new interpretations of core rows, and core sections cannot refer to them.
-Required flags or unknown kinds outside this range reject. Numeric gaps
+Required-policy entries or unknown kinds outside this range reject. Numeric gaps
 below this range are reserved, not available for execution semantics. A
 required feature is identified by `u32` in `Feature`; its registry, minimum
 revision rule and negotiation policy still require a decision. Until then,
