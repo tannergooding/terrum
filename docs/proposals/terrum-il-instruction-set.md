@@ -110,13 +110,20 @@ means the selected reference width, `count` the selected count width,
 | `rNew?` | `ref` | New value ID, or zero iff the selected callable returns void; zero defines nothing |
 | `p` | `ref` | Body-local place descriptor ID `1..placeCount` |
 | `t` | `ref` | Artifact-wide TypeSpec row ID interpreted in the body module's context, never a primitive code in place of a row ID |
-| `m` | `ref` | One-based MethodDef row within the body module's MethodDef range; resolve by checked `methodDefStart + m - 1`. Imported methods, including packed producers, use the consumer module's bound expected MethodDef |
-| `fieldDefRow` | `ref` | Artifact-wide FieldDef row ID owned by the body module |
+| `m` | `ref`, then `u32 DefId` only when `m=0` | Nonzero: one-based MethodDef row within the body module's MethodDef range, resolved by checked `methodDefStart + m - 1`; retained imports use its bound expected MethodDef. Zero: resolved direct call to an authored MethodDef in another packed module, with an exact little-endian MethodDef `DefId` following the selected-width zero. Invalid in a single-module artifact |
+| `fieldDefRow` | `ref` | Artifact-wide FieldDef row ID for the selected owner type; a trusted merger may bind it directly to a field of a packed producer's resolved TypeDef |
 | `targetBlock`, `regionId` | `ref` | Body-local block or region ID; only explicitly specified region roots permit zero |
 | `args` | `count`, then `ref[count]` | Ordered value IDs; zero is not an argument |
 | `edge` | `ref targetBlock`, then `args` | Target's typed parameter list consumes the arguments, subject to implicit checked results |
 | `data(bits)`, `signedData(value)` | `data` | Unsigned bit pattern or signed two's-complement literal, respectively |
 | `kind`, `policy`, `reason` | `u8` | Numeric discriminant from the assigned tables below; zero and unassigned values reject |
+
+At one-byte reference width, a resolved direct call to packed MethodDef
+row 1 encodes its `m` operand as `00 01 00 00 16`: one zero reference
+followed by the little-endian `DefId=0x1600_0001`. At two- or four-byte
+reference width, the selected-width zero precedes the same four-byte
+token. This conditional operand has a known length; it does not make
+unknown opcodes skippable.
 
 `rNew` and an edge target are the same-width *class*, but different ID
 namespaces. Prefixes affect width, not namespace. A decoder selects a

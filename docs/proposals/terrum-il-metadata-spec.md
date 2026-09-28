@@ -44,16 +44,21 @@ serialization of a compiler's private object graph or a verifier certificate.
 
 Source compilation checks authored bodies against their declared contracts.
 A binary consumer checks safe decoding, structure, supported semantics,
-references, binding and contract compatibility. It may trust a compiler's
-body-level facts and promises for artifacts admitted by its trust policy,
+references, and binding/contract compatibility for retained imports. A
+trusted merger performs the corresponding checks when it resolves imports
+to direct packed definitions and produces a transformed artifact; loading
+that trusted artifact need not repeat the merger's semantic proof. A
+consumer may trust a compiler's or merger's body-level facts and promises
+for artifacts admitted by its trust policy,
 without re-proving dominance, liveness, effect/ownership flow, or every
 call site. This is an explicit unsafe-like trust boundary, not a property
 conferred by a byte flag in the artifact. An optional semantic audit checks
-those facts for untrusted input or diagnostics; otherwise the producer is
-responsible for their truth. Callers remain responsible for imported
+those facts for untrusted input or diagnostics; otherwise the compiler or
+merger is responsible for their truth. Callers remain responsible for imported
 preconditions, access, ownership and effects when they are compiled.
-Malformed framing, unresolved references, incompatible contracts and
-unknown required semantic forms still reject; trusting a producer does
+Malformed framing, unresolved retained imports, incompatible retained
+contracts and unknown required semantic forms still reject; trusting a
+producer does
 not justify reading outside its byte extents or calling with a mismatched ABI.
 An environment that cannot trust an artifact's author must audit its
 semantic facts before safe execution or decline to execute it.
@@ -420,28 +425,39 @@ Strings and blobs can be shared by equal bytes when the referring fields
 give them the same interpretation. Structural TypeSpec/TypeArg and
 MethodSig/Param rows may be shared only when their resolved nominal, formal
 and imported references and passing modes remain identical in every using
-module. Distinct module identities, nominal TypeDefs, expected imported
-definitions, contracts and bodies are not coalesced merely because names,
-shapes or code bytes match. References to
-a definition owned by another module must use that consumer's Import and
-expected local definition, even when the producer resides in the same
-artifact; a direct local TypeSpec or call cannot bypass that boundary.
-An imported expected definition is owned by its consumer, not an alias
-of the producer's authored row. Packing cannot rewrite it into a direct
-producer reference without changing the binding contract.
+module. Distinct module identities and nominal TypeDefs are not coalesced
+merely because names or layouts match. A source compiler binds a
+cross-module declaration through its own Import and expected contract.
+A trusted merger may resolve that edge against the producer's export,
+preserve the selected semantic contract, and rewrite uses to the
+producer's definition in the same artifact. It may then omit an
+unneeded Import and expected definition; module identities remain
+distinct. Several consumer modules can directly share one physical
+definition when they resolve to the same nominal identity and compatible
+declared contract. Equal spelling, layout or body bytes alone never
+establish that identity or compatibility. A retained Import remains
+available when independently replaceable binding is needed. A shared
+structural row cannot be rewritten in place if another module still
+uses its original imported meaning; the merger writes a distinct row
+and remaps only the affected uses.
 
 A ModuleRef selects the matching Module identity within this artifact when
 present, otherwise an external producer; its requirement and policy must
-match the selected module. Internal and external imports use the same
-export key and complete expected-contract compatibility checks.
-Each module's runtime policy and target requirement are checked for its
-selected dependency closure; packing modules does not waive a mismatch.
+match the selected module. Retained internal and external imports use the
+same export key and complete expected-contract compatibility checks.
+Each module's runtime policy and target requirement must be compatible
+with the dependencies the merger resolves; retained imports still require
+binding checks. Packing modules does not waive a mismatch.
 Export keys are unique per Module identity, not across the whole artifact.
 An entry point is selected by Module identity; several modules may each
 declare one, but no loader guesses from their row order. A merger must
-remap all row references and reconcile imports, exports and optional
-reference-slotted sections; trimming cannot silently discard a published
-contract while claiming full compatibility under the same identity.
+remap all row references, reconcile imports and exports, and update or
+drop optional reference-slotted sections. A trusted merger checks semantic
+compatibility when rewriting an edge; the resolved artifact does not
+require repeating that proof on each trusted load. Later replacement of
+a direct-bound module requires revalidation or relinking, not a new
+module identity. Trimming cannot silently discard a published contract
+while claiming full compatibility under the same identity.
 The artifact still has one physical directory and no assembly manifest.
 Producers may assign keys as they choose, but must preserve a published key
 to offer a compatible replacement; an implementation name is not a binding
@@ -465,7 +481,7 @@ TypeSpec form assignments and **entire** payload following `form, qualifiers`:
 | Form | Remaining bytes | Meaning |
 |---:|---|---|
 | `0x01` primitive | `u8 primitiveCode` | Built-in type; TypeSpec row is 3 bytes |
-| `0x02` local | `u32 typeDefRow` | Nominal type owned by the using declaration's module |
+| `0x02` in-artifact | `u32 typeDefRow` | Nominal TypeDef in this artifact, including a direct resolved definition from another packed module |
 | `0x03` imported | `u32 importRow` | Import owned by the using declaration's module whose expected definition is TypeDef |
 | `0x04` formal | `u32 genericParamRow` | Declared type parameter owned by the using declaration's module |
 | `0x05` constructed | `u32 genericTypeSpec, u32 typeArgFirst, u32 typeArgCount` | Ordered substitution |
@@ -475,10 +491,11 @@ TypeSpec form assignments and **entire** payload following `form, qualifiers`:
 Nesting references in TypeSpec must point to an
 earlier TypeSpec row; nominal declarations may refer to each other through
 their TypeSpec rows, subject to storage-cycle validation. A TypeSpec reached
-from several modules must pass these ownership checks in every context;
-identical spelling alone cannot make a module-local or imported type shared.
-Body calls similarly select MethodDefs owned by the body module, using that
-module's expected imported MethodDef for calls across module boundaries.
+from several modules must retain the same resolved nominal identity in
+each context; identical spelling alone cannot make unrelated types shared.
+In a merged artifact, the in-artifact form may name another module's TypeDef
+after a trusted merger resolves that import. The imported form preserves
+the consumer's selected expected TypeDef when the edge remains an Import.
 TypeArg rows for
 one constructed form are contiguous with ordinals `0..count-1`; arity,
 qualification and constraints are checked against the selected nominal
@@ -618,9 +635,10 @@ String 1, TypeSpec 1 and MethodSig 1 are shared, but the two MethodDefs
 retain different owners and the consumer's expected contract is not
 silently replaced by the producer's body. This adds rows to the same
 artifact-wide sections, not a second directory or nested artifact. A
-call in Module 2 uses body operand `m=1` to select its own MethodDef 2
-(`DefId=0x1600_0002`), then Import 1 to resolve Module 1's exported
-MethodDef 1. It cannot encode a direct call to Module 1's MethodDef 1.
+caller subsequently added to Module 2 could use operand `m=1` to select its
+own expected MethodDef 2 (`DefId=0x1600_0002`), then Import 1 to resolve
+Module 1's exported MethodDef 1. A trusted merger can instead resolve that call
+directly to MethodDef 1 and omit the unused expected row and Import.
 
 ## Body table and coded-instruction boundary
 
@@ -632,14 +650,27 @@ must be owned by exactly one local MethodDef, and an imported declaration has
 no body. Body-to-method identity and type references use the metadata tables
 above; block/value/region IDs are **body-local**, not metadata `DefId`s.
 The coded-body `m` operand is the exception to artifact-wide metadata row
-numbering: it is a one-based index within the owning module's MethodDef
-range. Its physical row is `methodDefStart + m - 1` after checked range
-arithmetic. The importing module's expected MethodDef is in that same
-range, even if its producer is packed alongside it. In an ordinary
-single-module artifact, the local and physical row numbers coincide;
-after merging, call operands need not widen just because earlier modules
-added rows. TypeSpec operands remain artifact-wide and may widen after
-deduplication; a separate body-local dictionary would have its own
+numbering. A nonzero `m` is a one-based index within the owning module's
+MethodDef range; its physical row is `methodDefStart + m - 1` after checked
+range arithmetic. An importing module's retained expected MethodDef is
+in that same range. `m=0` is a resolved packed-call escape followed by an
+exact little-endian `u32 DefId` naming an authored MethodDef of another
+Module row in this artifact. Its kind must be MethodDef and its row must
+exist; the escape is invalid in a single-module artifact or when targeting
+an unbound external producer. It carries no extra per-call certificate:
+the trusted merger checked the selected binding and semantic obligations
+before replacing the import. A reader still checks the escape and target
+for safe decoding, while its trust policy determines whether to audit
+body-level call correctness. In an ordinary single-module artifact,
+nonzero local and physical row numbers coincide; after merging, common
+calls need not widen just because earlier modules added rows. A merger
+may retain an Import for repeated calls instead of paying the escape on
+every use. At one-byte reference width, the escape takes five bytes
+instead of one; a retained Import and expected MethodDef occupy their
+fixed table rows once for any number of calls. A merger can choose per
+binding based on actual references and shared rows, not a universal
+encoding preference. TypeSpec operands remain artifact-wide and may
+widen after deduplication; a separate body-local dictionary would have its own
 prelude and lookup cost and is not specified without representative
 size and decode measurements.
 Bodies cannot redefine a published signature, effect or result contract.
