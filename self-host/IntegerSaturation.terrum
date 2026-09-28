@@ -1,5 +1,23 @@
 namespace Terrum.CodeAnalysis.Numerics64;
 
+public static int32 SaturateUInt32ToInt32(uint32 value)
+{
+    if (value > uint32(int32.MaxValue))
+    {
+        return int32.MaxValue;
+    }
+    return int32(value);
+}
+
+public static uint32 SaturateInt32ToUInt32(int32 value)
+{
+    if (value < 0)
+    {
+        return 0;
+    }
+    return uint32(value);
+}
+
 public static int32 SaturateInt64ToInt32(int64 value)
 {
     if (value < int64(int32.MinValue))

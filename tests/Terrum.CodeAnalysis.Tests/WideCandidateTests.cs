@@ -41,6 +41,8 @@ public sealed class WideCandidateTests
         var library = Compilation.CreateLibrary(source, (BoundRuntimePolicy)policy);
         Assert.False(library.HasErrors, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(library.Program), [
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt32ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.SaturateInt32ToUInt32",
             "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToInt32",
             "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToUInt32",
             "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToInt32",
@@ -51,6 +53,10 @@ public sealed class WideCandidateTests
         var consumerSource = SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
+                if (SaturateUInt32ToInt32(uint32.MaxValue) != int32.MaxValue
+                    || SaturateUInt32ToInt32(42) != 42) { return 7; }
+                if (SaturateInt32ToUInt32(int32.MinValue) != 0
+                    || SaturateInt32ToUInt32(42) != 42) { return 8; }
                 if (SaturateInt64ToInt32(int64.MinValue) != int32.MinValue
                     || SaturateInt64ToInt32(int64.MaxValue) != int32.MaxValue
                     || SaturateInt64ToInt32(42) != 42) { return 1; }
