@@ -21,9 +21,9 @@ not an attempt to reproduce a standards-body specification.
 | `TRRM` artifact | One complete, bounded byte slice carrying semantic IL and metadata. It may be a standalone file or embedded in another container. Its extent excludes the enclosing PE/ELF file and separately referenced resource payloads. |
 | Artifact-relative offset | A zero-based byte position from the first byte of the `TRRM` signature. An extent `[offset, offset + length)` is end-exclusive and must be contained in the supplied artifact slice before an embedded reader adds any container base. |
 | Directory and section | The candidate directory indexes one metadata table or body stream per section kind. Each section occupies one contiguous artifact-relative byte extent. |
-| Record | One `u32` byte length followed by exactly that many payload bytes. A table's section count gives its number of records; record lengths do not include their own four-byte prefix. |
-| Local definition ID (`DefId`) | A `(table kind, one-based row)` pair naming a declaration only within one artifact. Zero is reserved for a nullable row reference, not a definition. Its numeric value is not a stable cross-artifact identity. |
-| Producer identity and export key | The selected dependency and published declaration identity used together to resolve an external reference. Exact identity/key encodings and authentication policy are open. |
+| Row | A fixed-stride payload in a fixed table, or an extent in a variable table's offset-indexed data. Rows have one-based indexes; absent table means zero rows. |
+| Local definition ID (`DefId`) | A `u32` token: high byte is a registered definition-table kind, low 24 bits are its one-based row. Zero is the only null token. Its value is not a stable cross-artifact identity. |
+| Producer identity and export key | The selected dependency and published declaration identity used together to resolve an external reference. Bytes and ordinal keys are specified below; source-side key assignment and authentication are separate. |
 | Declared contract | Published type, callable, ownership/lifetime, access, effect and requirement facts against which consumers bind and check use. A contract is not inferred from a dependency body or source spelling. |
 | Body | Typed semantic operations and control flow for an executable declaration, distinct from declaration metadata. |
 | Source revision, artifact revision, native profile | Independent axes for source syntax/semantics, `TRRM` encoding and requirements, and target/runtime ABI assumptions. The enclosing container format is separate. One revision number does not imply another. |
@@ -71,9 +71,9 @@ binary representation and validation; it does not redefine their rules.
 
 `TRRM` is the format identifier; there is no separate `LMOD` family. Its four
 ASCII signature bytes are `54 52 52 4D`. The wire fields for encoding revision
-are assigned **provisionally** below as format `(0, 1)` for the initial
+are assigned **provisionally** below as format `(0, 2)` for this compact
 candidate only. This is not semantic artifact revision 1, language version
-0.1, or a release label. Its initial reader accepts that exact pair; future
+0.2, or a release label. Its initial reader accepts that exact pair; future
 revision and feature-negotiation policy remain open. Target ABI/profile
 requirements remain separate from source and artifact revisions. Pre-v1
 format changes may be incompatible; this proposal does not promise a
@@ -89,10 +89,11 @@ cannot infer that the current revision-35 reader accepts these bytes.
 ### Header and directory
 
 Candidate byte order is little-endian. The header is fixed at 32 bytes in this
-layout; the directory follows the header, and sections follow the directory
-in ascending artifact-relative offset order. There is one directory entry per
-section kind. No compression is used in the initial candidate, simplifying bounds
-checking and random access.
+layout; the directory follows the header, and present sections follow the
+directory in ascending artifact-relative offset order. There is one entry
+per **present** table kind. An absent known table is empty; Module cannot be
+absent. No compression or whole-section transform is used, so a consumer can
+bound and index rows without inflating the complete artifact.
 
 The artifact is the supplied `TRRM` byte slice, whether stored alone or
 embedded in a PE/ELF container. Its total length and offsets describe that
@@ -104,9 +105,9 @@ Resource identity, resolution, integrity and limits remain schema decisions.
 |---:|---|---:|---|
 | 0 | Magic | 4 bytes | ASCII `TRRM` |
 | 4 | Format major | `u16` | `0` in this candidate |
-| 6 | Format minor | `u16` | `1` in this candidate |
+| 6 | Format minor | `u16` | `2` in this candidate |
 | 8 | Header length | `u32` | `32` for this candidate layout |
-| 12 | Directory entry count | `u32` | `19`, or `20` with optional SourceMap |
+| 12 | Directory entry count | `u32` | Number of present sections, at most 22 for the assigned registry |
 | 16 | Total artifact length | `u64` | Exact byte length of the supplied `TRRM` slice |
 | 24 | Directory offset | `u64` | `32` in this candidate |
 
@@ -120,11 +121,12 @@ Each directory entry is 24 bytes:
 | 8 | Section offset | `u64` | Artifact-relative section start |
 | 16 | Section byte length | `u64` | Exact section extent |
 
-Every assigned metadata table and Body section uses the required flag;
-SourceMap alone uses the optional flag. An unknown section's optional bit is
+Every present semantic table uses the required flag; SourceMap alone uses the
+optional flag. Empty tables are omitted rather than encoded as empty entries.
+An unknown section's optional bit is
 not permission to ignore it without a nonsemantic registry entry. The entry
 does not add a minimum-reader-version field. This candidate rejects any
-header format pair other than `(0, 1)`; a different reader compatibility
+header format pair other than `(0, 2)`; a different reader compatibility
 policy requires a format revision, not a silent interpretation of minor
 versions. A separate minimum-reader field remains an alternative for review.
 
@@ -147,29 +149,43 @@ Candidate framing invariants:
 - Section parsers consume exactly their declared extents and record counts.
   All offsets, lengths, additions, multiplications, counts, and index
   conversions use checked arithmetic before slicing, allocation, or iteration.
-- A zero-record section has zero records and may have zero byte length only
-  where its section schema permits an empty section; nonempty sections must
-  contain at least one complete record.
+- A present section has a positive record count. An absent registered table
+  has zero rows. Fixed sections have exactly `recordCount * rowStride` bytes;
+  variable sections validate their index and data extents as specified below.
 
-The candidate uses fixed-width directory entries, 64-bit artifact-relative
-offsets and 32-bit local table indexes. Exact widths and organization remain
-open; representable `u64` offsets do not set a reader's acceptance ceiling.
+The directory remains fixed-width for direct section lookup, while the common
+case no longer pays for empty tables. The former 19 required entries cost
+`32 + 19 * 24 = 488` bytes even with no metadata payload; this candidate
+starts at 32 bytes plus 24 bytes **per present table**. `u64` section offsets
+do not set a reader's acceptance ceiling; individual variable-table data is
+limited to `u32` bytes by its offset index.
 
 ## Metadata logical tables and row semantics (proposed)
 
 ### Table stream and token encoding
 
-Each registered metadata section is a table. It contains exactly the directory
-entry's `recordCount` successive records, each encoded as `u32 payloadLength`
-followed by its payload. An empty table has a zero count and zero length.
-Fixed-layout rows reject a payload of any other size; variable rows validate
-their embedded lengths and consume the entire payload. Row numbers are assigned
-in byte order, starting at 1. A same-table reference is a `u32` row; a `DefId`
-is `u16 tableKind, u32 row` (six bytes). Unless explicitly nullable, row zero
-rejects. A contiguous range is `u32 firstRow, u32 count`; its empty encoding
-is `(0, 0)`, otherwise `firstRow` is nonzero and the checked last row is in
-that table. Ranges for one owner must not overlap or include another owner's
-rows. There are no pointer-sized fields or implicit string terminators.
+Each present table has the directory's `recordCount` rows. **Fixed** tables
+concatenate their fixed-size row payloads, without per-row lengths. **Variable**
+tables start with `u32 offsets[recordCount + 1]`, followed by their data bytes.
+Offsets are relative to the start of the data (after the index), start at zero,
+are nondecreasing and end at the exact data length (`<= 0xFFFFFFFF`). Row `i`
+occupies `[offsets[i-1], offsets[i])`, for one-based `i`. Empty String/Blob
+rows are permitted; semantic variable rows must be nonempty. The checked
+index size plus the final offset equals the section length. This indexes
+strings, type forms, contracts and bodies directly without scanning prior
+records; a one-row heap pays four additional bytes versus length-prefixing,
+while larger heaps pay the same four bytes per row plus one sentinel.
+
+A same-table reference is a one-based `u32` row. `DefId` is a four-byte `u32`
+token: `(tableKind << 24) | row`, with `tableKind` the low byte of a registered
+definition table (TypeDef `0x13`, FieldDef `0x14`, MethodDef `0x16`,
+GenericParam `0x19`, PropertyDef `0x1E`). Its row must be in `1..0xFFFFFF`;
+only token zero is
+null where allowed. Other table kinds in a DefId reject. A contiguous range
+is `u32 firstRow, u32 count`; its empty encoding is `(0, 0)`, otherwise
+`firstRow` is nonzero and the checked last row belongs to that table.
+Ranges for one owner must not overlap or include another owner's rows.
+There are no pointer-sized fields or implicit string terminators.
 
 | Kind (`u16`) | Table | Row payload and role |
 |---:|---|---|
@@ -178,7 +194,7 @@ rows. There are no pointer-sized fields or implicit string terminators.
 | `0x0003` | Blob | Variable opaque bytes, interpreted only by their referring field |
 | `0x0004` | Feature | Required semantic feature identifiers |
 | `0x0010` | ModuleRef | Selected external producer identity |
-| `0x0011` | TypeSpec | Complete type reference or constructed type |
+| `0x0011` | TypeSpec (variable) | Complete type reference or constructed type |
 | `0x0012` | TypeArg | Ordered arguments for one constructed TypeSpec |
 | `0x0013` | TypeDef | Nominal type declaration |
 | `0x0014` | FieldDef | Field declaration and optional fixed offset |
@@ -188,25 +204,37 @@ rows. There are no pointer-sized fields or implicit string terminators.
 | `0x0018` | Param | Complete parameter type and passing mode |
 | `0x0019` | GenericParam | Declared formal, owner and ordered constraints |
 | `0x001A` | Constraint | One definition-site formal requirement |
-| `0x001B` | Contract | One published semantic clause on a declaration |
+| `0x001B` | Contract (variable) | One published semantic clause on a declaration |
 | `0x001C` | Import | Producer/key binding to a local expected declaration |
 | `0x001D` | Export | Stable key assigned to a local definition |
-| `0x0020` | Body | One length-delimited coded body for a MethodDef |
+| `0x001E` | PropertyDef | Named getter identity, distinct from its callable implementation |
+| `0x001F` | SourceFile | Optional source identity for diagnostic locations |
+| `0x0020` | Body (variable) | One offset-indexed coded body for a MethodDef |
 | `0x7F00` | SourceMap | Optional nonsemantic body-to-source mapping |
 
-All sections except `SourceMap` are required **kinds** (possibly empty), not
-necessarily required to contain a row. `Module` has exactly one row. In format `(0, 1)`, the Feature table is empty;
-later features require a new explicitly understood format. Unknown
+`Module` is always present with exactly one row. Other known tables are absent
+when empty, not encoded as empty directory entries. In format `(0, 2)`, the
+Feature table is absent, and Module's feature range is `(0, 0)`; later
+features require a new explicitly understood format. Unknown
 section kinds are not self-declared safe to skip. The numeric gaps are
 reserved, not available for vendor-specific execution semantics. A required
 feature is identified by `u32` in `Feature`; its registry, minimum revision
 rule and negotiation policy still require a decision. Until then, a producer
 cannot emit an unrecognized semantic form by merely writing a feature number.
-`SourceMap` rows are uninterpreted byte records that a reader may discard;
-they cannot change any semantic table, instruction or binding.
+`SourceMap` is skippable for execution, not uninterpretable for tools. Its
+fixed 24-byte rows are `u32 bodyRow, u32 blockId, u32 instructionOrdinal,
+u32 sourceFileRow, u32 startUtf16, u32 lengthUtf16`.
+Rows sort by body, block and ordinal and do not duplicate a location.
+Ordinal zero means the first operation, `operationCount` means its terminator.
+SourceFile paths are identifiers, not permissions to read a local file;
+`digestBlob` is an optional exact-content digest whose algorithm requires
+an assigned feature before nonzero use. Spans validate checked end arithmetic
+and need not imply that source bytes are embedded. Rewriting may omit
+SourceMap without changing execution or contracts; tools preserving debug
+data must retain its referenced SourceFile rows.
 
-The next tables show **row payloads**, excluding the common `u32` record-length
-prefix. `str` and `blob` mean one-based rows in their respective tables;
+The next tables show **row payloads**, excluding the variable section's offset
+index. `str` and `blob` mean one-based rows in their respective tables;
 zero is allowed only where a column says `?`. String rows contain their exact
 UTF-8 bytes (no BOM, NUL terminator or normalization); readers reject invalid
 UTF-8 and compare names/keys by decoded ordinal scalar sequence. Blob rows
@@ -218,7 +246,7 @@ contents. Duplicate strings or blobs are not a second declaration identity.
 | Module | `u32 identityBlob, u32 targetRequirement, u32 runtimePolicy, u32 entryMethod?, u32 moduleFlags, u32 featureFirst, u32 featureCount` |
 | Feature | `u32 featureId, u32 minimumRuleRevision` |
 | ModuleRef | `u32 producerIdentityBlob, u32 targetRequirement, u32 runtimePolicy` |
-| TypeSpec | `u8 form, u8 qualifiers, u16 reserved=0, u32 a, u32 b, u32 c` |
+| TypeSpec (variable) | `u8 form, u8 qualifiers`, followed by only the operands specified for that form below |
 | TypeArg | `u32 ownerTypeSpec, u32 ordinal, u32 argumentTypeSpec` |
 | TypeDef | `str namespace, str name, u8 kind, u8 visibility, u8 layoutKind, u8 flags, u32 fieldFirst, u32 fieldCount, u32 genericFirst, u32 genericCount, u32 layoutRow?, u32 contractFirst, u32 contractCount` |
 | FieldDef | `u32 ownerTypeDef, str name, u32 typeSpec, u32 flags, u32 byteOffset` |
@@ -226,32 +254,58 @@ contents. Duplicate strings or blobs are not a second declaration identity.
 | MethodDef | `u32 ownerTypeDef?, str name, u32 signature, u32 flags, u32 contractFirst, u32 contractCount, u32 bodyRow?` |
 | MethodSig | `u32 resultTypeSpec, u32 receiverTypeSpec?, u32 paramFirst, u32 paramCount, u32 genericFirst, u32 genericCount` |
 | Param | `u32 ownerMethodSig, u32 ordinal, u32 typeSpec, u8 mode, u8 flags, u16 reserved=0` |
-| GenericParam | `DefId owner, u32 ordinal, str name, u32 constraintFirst, u32 constraintCount` |
+| GenericParam | `u32 ownerDefId, u32 ordinal, str name, u32 constraintFirst, u32 constraintCount` |
 | Constraint | `u32 ownerGenericParam, u16 kind, u16 flags, u32 targetTypeSpec, u32 witnessRef?` |
-| Import | `u32 moduleRef, str exportKey, DefId expectedLocalDefinition` |
-| Export | `DefId localDefinition, str exportKey` |
+| Import | `u32 moduleRef, str exportKey, u32 expectedLocalDefId` |
+| Export | `u32 localDefId, str exportKey` |
+| PropertyDef | `u32 ownerTypeDef, str name, u32 typeSpec, u32 getterMethodDef, u32 flags` |
+| SourceFile | `str path, u32 digestBlob?` |
 
-`Module.identityBlob` and `ModuleRef.producerIdentityBlob` are opaque byte
-identities, not hashes or proof of authorship. `runtimePolicy` candidate values
+The fixed row strides in bytes, in registry order excluding variable tables,
+are: Module 28, Feature 8, ModuleRef 12, TypeArg 12, TypeDef 40,
+FieldDef 20, Layout 24, MethodDef 28, MethodSig 24, Param 16,
+GenericParam 20, Constraint 16, Import 12, Export 8, PropertyDef 20,
+SourceFile 8, and SourceMap 24. String, Blob, TypeSpec, Contract and Body
+use offset indexes. A consumer rejects an incorrect stride or an unconsumed
+field, rather than guessing a trailing extension. Empty namespace strings
+are allowed; declaration names, export keys and SourceFile paths are not
+empty. SourceFile requires `digestBlob=0` in `(0, 2)` because no digest
+algorithm is assigned.
+
+`Module.identityBlob` and `ModuleRef.producerIdentityBlob` are opaque nonempty
+byte identities, not hashes or proof of authorship. Identity equality is exact
+byte equality; replacing the identity describes another producer. Export keys
+are nonempty decoded strings, compared ordinally without normalization.
+Producers may assign keys as they choose, but must preserve a published key
+to offer a compatible replacement; an implementation name is not a binding
+algorithm. `runtimePolicy` candidate values
 are `0` fail-fast and `1` checked exceptions; `targetRequirement` values are
 `0` portable semantic (no native assumption) and `1` Windows x64 native.
-Other targets and nonzero module flags still need assignments. The entry
-method, if present, is a local
+Other targets and nonzero module flags still need assignments and reject
+in `(0, 2)`. The entry method, if present, is a local
 MethodDef row. Imports identify **one** selected module and key; their expected
-local TypeDef or MethodDef (including its referenced signature, layout and
-contracts) is the complete consumer-side contract. The expected definition has
+local TypeDef, MethodDef or PropertyDef (including its referenced signature,
+layout and contracts) is the complete consumer-side contract. The expected definition has
 no body. Export keys are unique within a producer; imports are unique by
 `(moduleRef, exportKey, expectedLocalDefinition)`, and duplicate conflicting
 bindings reject. MethodDef `bodyRow` is nonzero only for locally authored
-implementations. An exported body may be private; the export is the contract,
-not permission to inspect or trust private implementation facts.
+implementations. A public exported declaration may have a body containing
+private implementation facts; the export is its declared contract, not
+permission to trust those private facts for caller binding.
 
-For the initial TypeSpec encoding, `form` assignments are `0x01` primitive
-(`a=primitiveCode`), `0x02` local TypeDef (`a=typeDefRow`), `0x03` imported
-TypeDef (`a=importRow`), `0x04` formal (`a=genericParamRow`), `0x05` constructed
-(`a=genericTypeSpec, b=typeArgFirst, c=typeArgCount`), `0x06` optional,
-`0x07` ref, `0x08` ptr, `0x09` box, `0x0A` val, `0x0B` own (each `a=innerTypeSpec`).
-Unused `a/b/c` are zero. Nesting references in TypeSpec must point to an
+TypeSpec form assignments and **entire** payload following `form, qualifiers`:
+
+| Form | Remaining bytes | Meaning |
+|---:|---|---|
+| `0x01` primitive | `u8 primitiveCode` | Built-in type; TypeSpec row is 3 bytes |
+| `0x02` local | `u32 typeDefRow` | Nominal type in this artifact |
+| `0x03` imported | `u32 importRow` | Import whose expected definition is TypeDef |
+| `0x04` formal | `u32 genericParamRow` | Declared type parameter |
+| `0x05` constructed | `u32 genericTypeSpec, u32 typeArgFirst, u32 typeArgCount` | Ordered substitution |
+| `0x06` optional | `u32 innerTypeSpec` | Presence on complete qualified type |
+| `0x07` ref / `0x08` ptr / `0x09` box / `0x0A` val / `0x0B` own | `u32 innerTypeSpec` | Distinct representation families |
+
+Nesting references in TypeSpec must point to an
 earlier TypeSpec row; nominal declarations may refer to each other through
 their TypeSpec rows, subject to storage-cycle validation. TypeArg rows for
 one constructed form are contiguous with ordinals `0..count-1`; arity,
@@ -269,7 +323,10 @@ profile, `MethodDef.flags` uses bit `0x01` for public and `0x02` for internal
 (neither means private; both together reject). FieldDef flags use the same
 visibility bits plus `0x04` for mutable. All other definition flags and
 call-classification masks need assignments before use; unknown bits reject.
-Only a public MethodDef can be exported in the initial profile. `Layout` is
+PropertyDef visibility uses the same public/internal bits; its getter
+MethodDef belongs to the same declaring type, has the same result TypeSpec,
+and is bound by its PropertyDef identity, never a `get_Name` spelling.
+Exported properties and methods require public visibility. `Layout` is
 required only for a published fixed representation;
 private `Auto` has no layout row. `FieldDef.byteOffset` is `0xFFFFFFFF` when
 no fixed offset is published. A fixed layout validates size, alignment,
@@ -278,9 +335,11 @@ overlap, field offsets and ABI classification against its target requirement;
 call classification. Equal layout is not implicit conversion.
 
 Param modes are `0x00` by-value, `0x01` `out`, `0x02` `init ref`,
-`0x03` readonly `ref`, `0x04` writable `ref`. Only by-value mode `0x00`
-is executable in the initial [coded-body profile](terrum-il-instruction-set.md);
-other modes have no instruction encoding yet. `MethodSig` records
+`0x03` readonly `ref`, `0x04` writable `ref`. The
+[coded-body proposal](terrum-il-instruction-set.md) has local place
+operations; publishing `out`/`init ref` across calls and loaning general
+references still require their specified call/exception/loan rules.
+Unimplemented modes cannot be silently treated as by-value. `MethodSig` records
 declaration order; argument labels and receiver access need registered
 contract fields rather than name-based inference. GenericParam, Constraint
 and constructed TypeSpec rows are reserved for a separately specified generic
@@ -291,8 +350,10 @@ their owning MethodSig or declaration. Unused range fields are `(0, 0)`.
 
 ### Semantic contracts and stable binding
 
-Each Contract row has `DefId owner, u16 clauseKind, u16 flags=0, u32 dataLength,
-byte[dataLength]`. The outer row length must equal `14 + dataLength`.
+Each Contract row is `u32 ownerDefId, u16 clauseKind, u16 flags=0, data`.
+The offset index gives its exact extent; each clause defines the length of
+`data`. Unknown clauses reject semantic consumption, even if the row is
+well framed; no producer can reclassify one as debug data.
 Contracts for a TypeDef or MethodDef occupy its contiguous `contractFirst/count`
 range; duplicates of a singleton clause reject. The initial candidate clause
 assignments are:
@@ -303,10 +364,15 @@ assignments are:
 | `0x0002` OutputState | `u32 parameterOrdinal, u8 onTrue, u8 onFalse, u8 onExceptional, u8 reserved=0` | A declared result-correlated output state (`0` vacant, `1` fully initialized). Legal only for a Boolean result and `out`/`init ref` parameter. |
 | `0x0003` Transfer | `u32 parameterOrdinal, u8 transferMode, u8 cleanupMode, u16 reserved=0` | A selected owned-parameter transfer/cleanup obligation; mode IDs beyond the initial profile are not yet assigned. |
 | `0x0004` Dependency | `u8 resultKind, u8 sourceKind, u16 flags, u32 resultOrdinal, u32 sourceOrdinal` | A declared result/view backing, root, or lifetime dependency; kind/flag registry remains to be assigned. |
+| `0x0005` Cleanup | `u32 cleanupMethodDef` | On a unique TypeDef, names its checked NoThrow cleanup method. This declares an obligation; an IR Drop or verified exceptional cleanup must discharge it exactly once. |
 
-The bounded profile can encode effects and Boolean output-state correlation.
-It does **not** encode unspecified Transfer/Dependency variants, pre/postcondition
-expression trees, arbitrary witnesses or public managed-handle ABI. Those
+The bounded profile gives inspectable row shapes for effects, Boolean
+output-state correlation and a nominal cleanup target. Only Effects is
+usable by the narrow executable subset; OutputState and Cleanup require
+publication, exceptional-path and ownership verification rules before a
+consumer can accept them as executable contracts. It does **not** encode unspecified
+Transfer/Dependency variants, pre/postcondition expression trees, arbitrary
+witnesses or public managed-handle ABI. Those
 need assigned values, required feature IDs and verifier rules before emission;
 their reserved rows must not be ignored. Effects do not follow from an opcode
 name, a method name, or an implementation body. A source-selected declaration
@@ -317,8 +383,9 @@ binding rather than rerunning overload resolution.
 
 Local indexes are compact references within one artifact, not stable identities
 across rebuilds. External references resolve through a selected producer
-identity and exported declaration key. A digest is not automatically a
-nominal identity. The identity algorithms and stable-key allocation remain
+identity and exported declaration key with the equality rules above. A
+digest is not automatically a nominal identity. Stable-key assignment,
+authentication and compatibility across published contract changes remain
 open.
 
 An adopted schema must preserve the complete published contract rather than
@@ -346,7 +413,7 @@ visibility remain under review.
 
 ### Row-assignment example
 
-For the `return 42` [coded-body example](terrum-il-instruction-set.md#encoded-example-and-invalid-forms),
+For the `return 42` [coded-body example](terrum-il-instruction-set.md#worked-byte-example-and-measured-format-costs),
 these are the relevant **candidate** row references, not current repository
 bytes or stable identifiers:
 
@@ -355,32 +422,34 @@ bytes or stable identifiers:
 | Blob 1 | UTF-8 bytes `Example` (opaque module identity) |
 | String 1 | UTF-8 bytes `Answer` (method name and export key) |
 | Module 1 | `identityBlob=1, targetRequirement=1, runtimePolicy=0, entryMethod=1, moduleFlags=0, featureFirst=0, featureCount=0` |
-| TypeSpec 1 | `form=0x01, qualifiers=0, reserved=0, a=0x03` (`int32`), `b=0, c=0` |
+| TypeSpec 1 | `form=0x01, qualifiers=0, primitiveCode=0x03` (`int32`) |
 | MethodSig 1 | `resultTypeSpec=1, receiverTypeSpec=0, paramFirst=0, paramCount=0, genericFirst=0, genericCount=0` |
 | MethodDef 1 | `ownerTypeDef=0, name=1, signature=1, flags=1` (public), `contractFirst=0, contractCount=0, bodyRow=1` |
-| Export 1 | `DefId=(0x0016, 1), exportKey=1` |
+| Export 1 | `localDefId=0x16000001, exportKey=1` |
 | Body 1 | `ownerMethod=1`, followed by the body bytes specified in the companion proposal |
 
-For example, TypeSpec 1 is exactly `10 00 00 00 01 00 00 00 03 00 00 00
-00 00 00 00 00 00 00 00`: four bytes of payload length followed by its
-16-byte payload. Neither the Module row nor an export authorizes a caller to
+For example, the TypeSpec table with its single `int32` row is exactly
+`00 00 00 00 03 00 00 00 01 00 03`: two four-byte offsets followed by the
+three-byte row. Neither the Module row nor an export authorizes a caller to
 skip bounds, contract or body validation.
 
 ## Body table and coded-instruction boundary
 
-Each Body row uses the table's common `u32 payloadLength` prefix and carries
+Each Body row is the variable table's offset-indexed extent and carries
 exactly the coded bytes defined in the
-[instruction-set proposal](terrum-il-instruction-set.md#coded-body-layout).
-Its one-based row matches the MethodDef `bodyRow` that owns it. Every Body row
+[instruction-set proposal](terrum-il-instruction-set.md#body-record-direct-block-index-and-regions).
+Its one-based row is referenced by the MethodDef `bodyRow` that owns it. Every Body row
 must be owned by exactly one local MethodDef, and an imported declaration has
 no body. Body-to-method identity and type references use the metadata tables
 above; block/value/region IDs are **body-local**, not metadata `DefId`s.
 Bodies cannot redefine a published signature, effect or result contract.
 
-The instruction proposal assigns an initial executable subset with exact
-record layout, opcodes and edge payloads. Exception regions, general loans,
-owner cleanup, rooted managed values, witness calls and correlated outputs
-must receive additional feature-gated encodings before they can be emitted.
+The instruction proposal assigns a narrow scalar executable subset with exact
+record layout, opcodes and edge payloads. The other assigned opcode shapes
+are structurally inspectable but not executable. Exception regions, general
+loans, owner cleanup, rooted managed values, witness calls and correlated
+outputs must receive additional feature-gated encodings before they can be
+emitted as executable bodies.
 They are not silently modeled as ordinary branch instructions. An ordinary
 binary consumer need not re-prove dependency bodies, but it must reject
 malformed or unsupported coded bodies it accepts for execution.
@@ -408,8 +477,8 @@ otherwise. Candidate structural invariants are:
 - Before allocating a directory or record array, validate its declared count
   against the containing byte extent, its encoded element width where fixed,
   the remaining artifact budget, and checked arithmetic.
-- Every length-delimited record and list is consumed wholly within its parent
-  section/record; the parser consumes exactly its declared length and count.
+- Every variable row and list is consumed wholly within its indexed extent or
+  parent row; the parser consumes exactly its declared length and count.
 - Each local index is in range for the specific table and refers to the
   expected record kind. Each external reference resolves to one declared
   dependency/key pair. Duplicate identities and duplicate singleton records
@@ -468,13 +537,13 @@ has `Param.mode=0x02` (`init ref`). If it promises initialization exactly
 when the Boolean result is true, its Contract row is:
 
 ```text
-16 00 00 00  16 00 01 00 00 00  02 00 00 00
-08 00 00 00  03 00 00 00  01 00 00 00
+00 00 00 00  10 00 00 00
+01 00 00 16  02 00 00 00  03 00 00 00  01 00 00 00
 ```
 
-The first four bytes say the row has a 22-byte payload; the next six name
-MethodDef row 1 (`DefId=(0x0016, 1)`), then clause `0x0002`, flags zero,
-eight data bytes, parameter ordinal 3, and states `(1, 0, 0)` for true,
+The first eight bytes index one 16-byte row; the next four name MethodDef
+row 1 (`DefId=0x16000001`), then clause `0x0002`, flags zero, parameter
+ordinal 3 and states `(1, 0, 0)` for true,
 false, and exceptional departure. A consumer can compare this declared
 promise with a producer without reading the output to discover whether it
 was initialized. The [coded instruction proposal](terrum-il-instruction-set.md)
@@ -488,8 +557,8 @@ following byte-level contracts:
 
 | Surface | Not yet specified |
 |---|---|
-| Encoding and revisions | Adoption of candidate widths, assigned revision values, feature/minimum-rule registry and compatibility rules. |
-| Declarations | Stable identity and export-key allocation, resource references, generic/witness exportability, nonzero flags, richer qualifier/contract clauses and their validation. Initial table kinds, rows and bounded clause tags are assigned above. |
-| Executable bodies | Beyond the [assigned initial opcodes and block encoding](terrum-il-instruction-set.md): output places, exceptional handlers/cleanup, loans, roots, witness bindings and their precise verifier rules. |
+| Encoding and revisions | Adoption of candidate widths, future version/feature policy and reader compatibility rules. `(0, 2)` currently accepts only its registered semantic forms. |
+| Declarations | Resource references, generic/witness exportability, type/field/layout flags, richer qualifier/contract clauses and their validation. Module identity and export-key equality are specified; assigning a stable key to a source declaration is a writer policy. |
+| Executable bodies | Beyond the [narrow executable subset and other assigned decode shapes](terrum-il-instruction-set.md#executable-subset-versus-assigned-decode-shapes): output places, exceptional handlers/cleanup, loans, roots, witness bindings and their precise verifier rules. |
 | Limits | Per-record and per-artifact sizes, nesting and work budgets, allocation limits and canonical encoding requirements. |
 | Unknown data | Registry, reserved values, feature negotiation and safe handling or preservation of optional nonsemantic sections. |
