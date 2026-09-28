@@ -15,11 +15,19 @@ internal sealed partial class Binder
     private const int MaximumStaticSpecializations = 32;
     private readonly Dictionary<string, StaticProtocol> _protocols = new(StringComparer.Ordinal);
     private readonly Dictionary<string, GenericTemplate> _templates = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, HashSet<string>> _conformances = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Dictionary<string, PrimitiveType>> _conformances = new(StringComparer.Ordinal);
 
-    private sealed record StaticProtocol(string Name, TokenKind Operator, bool IsNoThrow, SyntaxNode Declaration,
+    internal readonly record struct StaticOperatorKey(TokenKind Operator, int Arity);
+    private sealed record StaticProtocol(string Name, StaticOperatorKey Key, bool IsNoThrow, SyntaxNode Declaration,
         SyntaxTree Tree);
-    internal sealed record GenericTypeParameter(string Name, ImmutableDictionary<TokenKind, string> Operations);
+    internal sealed record GenericOperatorConstraint(string Protocol, PrimitiveType? FixedResult,
+        int ResultTypeParameterIndex)
+    {
+        internal PrimitiveType Resolve(ImmutableArray<PrimitiveType> types) =>
+            FixedResult ?? types[ResultTypeParameterIndex];
+    }
+    internal sealed record GenericTypeParameter(string Name,
+        ImmutableDictionary<StaticOperatorKey, GenericOperatorConstraint> Operations);
     internal sealed record GenericParameter(string Name, PrimitiveType? ScalarType, int TypeParameterIndex, bool IsOut)
     {
         internal PrimitiveType Resolve(ImmutableArray<PrimitiveType> types) =>
@@ -109,7 +117,13 @@ internal sealed partial class Binder
         _structs.Add(structure with { Fields = fields.MoveToImmutable() });
         if (source._conformances.TryGetValue(structure.Name, out var witnesses))
         {
-            _conformances.Add(structure.Name, witnesses);
+            var mapped = new Dictionary<string, PrimitiveType>(StringComparer.Ordinal);
+            foreach (var (protocol, type) in witnesses)
+            {
+                mapped.Add(protocol, HydrateProofType(type)
+                    ?? throw new InvalidOperationException("Missing proof witness result."));
+            }
+            _conformances.Add(structure.Name, mapped);
         }
         return result;
     }
@@ -185,29 +199,36 @@ internal sealed partial class Binder
         or TokenKind.Pipe or TokenKind.Caret or TokenKind.EqualsEquals or TokenKind.BangEquals
         or TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals;
 
+    private static bool IsStaticUnaryOperator(TokenKind kind) =>
+        kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde;
+
     private static bool IsComparisonOperator(TokenKind kind) => kind is TokenKind.EqualsEquals or TokenKind.BangEquals
         or TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals;
 
     private static PrimitiveType StaticOperatorResult(TokenKind kind, PrimitiveType operand) =>
         IsComparisonOperator(kind) ? PrimitiveType.Bool : operand;
 
-    [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Only supported static binary operators have names.")]
-    private static string OperatorName(TokenKind kind) => kind switch {
-        TokenKind.Plus => "op_Addition",
-        TokenKind.Minus => "op_Subtraction",
-        TokenKind.Star => "op_Multiply",
-        TokenKind.Slash => "op_Division",
-        TokenKind.Percent => "op_Modulus",
-        TokenKind.Ampersand => "op_BitwiseAnd",
-        TokenKind.Pipe => "op_BitwiseOr",
-        TokenKind.Caret => "op_ExclusiveOr",
-        TokenKind.EqualsEquals => "op_Equality",
-        TokenKind.BangEquals => "op_Inequality",
-        TokenKind.Less => "op_LessThan",
-        TokenKind.LessEquals => "op_LessThanOrEqual",
-        TokenKind.Greater => "op_GreaterThan",
-        TokenKind.GreaterEquals => "op_GreaterThanOrEqual",
-        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Only supported static operators have names.")]
+    private static string OperatorName(StaticOperatorKey key) => key switch {
+        { Operator: TokenKind.Plus, Arity: 1 } => "op_UnaryPlus",
+        { Operator: TokenKind.Minus, Arity: 1 } => "op_UnaryNegation",
+        { Operator: TokenKind.Bang, Arity: 1 } => "op_LogicalNot",
+        { Operator: TokenKind.Tilde, Arity: 1 } => "op_OnesComplement",
+        { Operator: TokenKind.Plus, Arity: 2 } => "op_Addition",
+        { Operator: TokenKind.Minus, Arity: 2 } => "op_Subtraction",
+        { Operator: TokenKind.Star, Arity: 2 } => "op_Multiply",
+        { Operator: TokenKind.Slash, Arity: 2 } => "op_Division",
+        { Operator: TokenKind.Percent, Arity: 2 } => "op_Modulus",
+        { Operator: TokenKind.Ampersand, Arity: 2 } => "op_BitwiseAnd",
+        { Operator: TokenKind.Pipe, Arity: 2 } => "op_BitwiseOr",
+        { Operator: TokenKind.Caret, Arity: 2 } => "op_ExclusiveOr",
+        { Operator: TokenKind.EqualsEquals, Arity: 2 } => "op_Equality",
+        { Operator: TokenKind.BangEquals, Arity: 2 } => "op_Inequality",
+        { Operator: TokenKind.Less, Arity: 2 } => "op_LessThan",
+        { Operator: TokenKind.LessEquals, Arity: 2 } => "op_LessThanOrEqual",
+        { Operator: TokenKind.Greater, Arity: 2 } => "op_GreaterThan",
+        { Operator: TokenKind.GreaterEquals, Arity: 2 } => "op_GreaterThanOrEqual",
+        _ => throw new ArgumentOutOfRangeException(nameof(key)),
     };
 
     private static PrimitiveType? GenericScalarType(string name) => name switch {
@@ -248,12 +269,13 @@ internal sealed partial class Binder
                 var variables = parameters?.Children.OfType<SyntaxTokenElement>()
                     .Where(static child => child.Token.Kind == TokenKind.Identifier)
                     .Select(static child => child.Token.Text).ToArray() ?? [];
-                if (variables.Length != 3 || variables.Distinct(StringComparer.Ordinal).Count() != 3
+                if (variables.Length is not (2 or 3)
+                    || variables.Distinct(StringComparer.Ordinal).Count() != variables.Length
                     || node.Children.OfType<SyntaxTokenElement>().Any(static child =>
                         child.Token.Kind is TokenKind.PublicKeyword or TokenKind.PrivateKeyword
                             or TokenKind.StaticKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword))
                 {
-                    Report("TRM3001", "Local static operator interfaces require three distinct type parameters and internal visibility.", node.Span);
+                    Report("TRM3001", "Local static operator interfaces require two or three distinct type parameters and internal visibility.", node.Span);
                     continue;
                 }
                 var members = node.Children.OfType<SyntaxNode>()
@@ -266,7 +288,8 @@ internal sealed partial class Binder
                 }
                 var member = members[0];
                 var op = member.Children.OfType<SyntaxTokenElement>()
-                    .FirstOrDefault(static child => IsStaticBinaryOperator(child.Token.Kind))?.Token.Kind;
+                    .FirstOrDefault(static child => IsStaticBinaryOperator(child.Token.Kind)
+                        || IsStaticUnaryOperator(child.Token.Kind))?.Token.Kind;
                 var signature = member.Children.OfType<SyntaxNode>()
                     .Where(static child => child.Kind != SyntaxKind.Attribute).ToArray();
                 var formals = signature.FirstOrDefault(static child => child.Kind == SyntaxKind.ParameterList);
@@ -275,13 +298,17 @@ internal sealed partial class Binder
                     child.Kind == SyntaxKind.Attribute && NameText(child) == "[NoThrow]");
                 var noThrowCount = member.Children.OfType<SyntaxNode>().Count(static child =>
                     child.Kind == SyntaxKind.Attribute && NameText(child) == "[NoThrow]");
-                if (op is not TokenKind operation || !IsStaticBinaryOperator(operation) || signature.Length != 2
+                var arity = arguments.Length;
+                if (op is not TokenKind operation
+                    || !((arity == 1 && IsStaticUnaryOperator(operation))
+                        || (arity == 2 && IsStaticBinaryOperator(operation)))
+                    || variables.Length != arity + 1 || signature.Length != 2
                     || signature[0].Kind != SyntaxKind.TypeName
-                    || NameText(signature[0]) != variables[2]
-                    || arguments.Length != 2
+                    || NameText(signature[0]) != variables[^1]
                     || arguments[0].Children is not [SyntaxNode first, SyntaxTokenElement]
-                    || arguments[1].Children is not [SyntaxNode second, SyntaxTokenElement]
-                    || NameText(first) != variables[0] || NameText(second) != variables[1]
+                    || NameText(first) != variables[0]
+                    || (arity == 2 && (arguments[1].Children is not [SyntaxNode second, SyntaxTokenElement]
+                        || NameText(second) != variables[1]))
                     || member.Children[^1] is not SyntaxTokenElement { Token.Kind: TokenKind.Semicolon }
                     || member.Children.OfType<SyntaxTokenElement>().Count(static child =>
                         child.Token.Kind == TokenKind.StaticKeyword) != 1
@@ -294,10 +321,11 @@ internal sealed partial class Binder
                         child.Kind == SyntaxKind.Attribute && NameText(child) != "[NoThrow]")
                     || noThrowCount > 1)
                 {
-                    Report("TRM3001", "Static operator protocol signatures must match (left, right) -> result and end in ';'.", member.Span);
+                    Report("TRM3001", "Static operator protocol signatures must match their operand and result formals and end in ';'.", member.Span);
                     continue;
                 }
-                if (!_protocols.TryAdd(qualified, new StaticProtocol(qualified, op.Value, noThrow, node, tree)))
+                if (!_protocols.TryAdd(qualified, new StaticProtocol(qualified,
+                    new StaticOperatorKey(operation, arity), noThrow, node, tree)))
                 {
                     Report("TRM3003", $"Duplicate static operator interface '{qualified}'.", node.Span);
                 }
@@ -326,7 +354,7 @@ internal sealed partial class Binder
             {
                 continue;
             }
-            var witnesses = new HashSet<string>(StringComparer.Ordinal);
+            var witnesses = new Dictionary<string, PrimitiveType>(StringComparer.Ordinal);
             if (!_structs[index].IsInternal)
             {
                 Report("TRM3007", "Static protocol witnesses are compilation-local and require an internal struct.", declaration.Span);
@@ -336,11 +364,19 @@ internal sealed partial class Binder
                 var shape = TryProtocolApplication(name, out var head, out var parts);
                 var protocolName = shape ? FindProtocol(head) : null;
                 if (protocolName is null
-                    || !MatchesProtocolArguments(_protocols[protocolName].Operator, parts,
-                        StructName(declaration).Text, typeName)
-                    || !witnesses.Add(protocolName))
+                    || !MatchesProtocolArguments(_protocols[protocolName].Key, parts,
+                        StructName(declaration).Text, typeName))
                 {
                     Report("TRM3007", "Conformance requires a distinct declared local protocol with exact operand and result types.", name.Span);
+                    continue;
+                }
+                var result = BindType(parts[^1], allowVoid: false);
+                if (!IsCopyGenericType(result) || IsUnique(result)
+                    || witnesses.Any(item => _protocols[item.Key].Key == _protocols[protocolName].Key
+                        && item.Value != result)
+                    || !witnesses.TryAdd(protocolName, result))
+                {
+                    Report("TRM3007", "Conformance requires a unique Copy result for each operator signature.", name.Span);
                 }
             }
             _conformances.Add(typeName, witnesses);
@@ -353,10 +389,10 @@ internal sealed partial class Binder
         {
             _cancellationToken.ThrowIfCancellationRequested();
             var type = _structNames[name];
-            foreach (var protocolName in protocols)
+            foreach (var (protocolName, result) in protocols)
             {
                 var protocol = _protocols[protocolName];
-                var operation = name + "." + OperatorName(protocol.Operator);
+                var operation = name + "." + OperatorName(protocol.Key);
                 if (!_functions.TryGetValue(operation, out var index))
                 {
                     SetContext(protocol.Tree);
@@ -364,8 +400,8 @@ internal sealed partial class Binder
                     continue;
                 }
                 var signature = _signatures[index];
-                if (signature.ReturnType != StaticOperatorResult(protocol.Operator, type)
-                    || signature.Parameters.Length != 2
+                if (signature.ReturnType != result
+                    || signature.Parameters.Length != protocol.Key.Arity
                     || signature.Parameters.Any(parameter => parameter.Type != type || parameter.IsOut)
                     || !signature.IsStatic || !signature.IsOperator || signature.IsPrivate || signature.IsConstructor
                     || (protocol.IsNoThrow && !signature.IsNoThrow))
@@ -398,7 +434,7 @@ internal sealed partial class Binder
         var parameterNames = new HashSet<string>(StringComparer.Ordinal);
         var templateParameters = ImmutableArray.CreateBuilder<GenericParameter>(arguments.Length);
         var operations = typeNames.Select(static _ =>
-            ImmutableDictionary.CreateBuilder<TokenKind, string>()).ToArray();
+            ImmutableDictionary.CreateBuilder<StaticOperatorKey, GenericOperatorConstraint>()).ToArray();
         var copies = new bool[typeNames.Length];
         var constrained = new HashSet<string>(StringComparer.Ordinal);
         var returnIndex = Array.IndexOf(typeNames, returnName);
@@ -469,15 +505,28 @@ internal sealed partial class Binder
                 }
                 var shape = TryProtocolApplication(item, out var head, out var parts);
                 var protocol = shape ? FindProtocol(head) : null;
-                if (protocol is null || !MatchesProtocolArguments(_protocols[protocol].Operator, parts,
+                if (protocol is null || !MatchesProtocolArguments(_protocols[protocol].Key, parts,
                         formal.Token.Text)
-                    || operations[index].ContainsKey(_protocols[protocol].Operator))
+                    || operations[index].ContainsKey(_protocols[protocol].Key))
                 {
                     valid = false;
                 }
                 else
                 {
-                    operations[index].Add(_protocols[protocol].Operator, protocol);
+                    var resultName = NameText(parts[^1]);
+                    var resultIndex = Array.IndexOf(typeNames, resultName);
+                    var fixedResult = resultIndex >= 0 ? (PrimitiveType?)null : GenericScalarType(resultName);
+                    if (resultIndex < 0 && fixedResult is null)
+                    {
+                        fixedResult = BindType(parts[^1], allowVoid: false);
+                    }
+                    if (fixedResult is PrimitiveType concrete
+                        && (!IsCopyGenericType(concrete) || IsUnique(concrete)))
+                    {
+                        valid = false;
+                    }
+                    operations[index].Add(_protocols[protocol].Key,
+                        new GenericOperatorConstraint(protocol, fixedResult, resultIndex));
                 }
             }
         }
@@ -486,7 +535,7 @@ internal sealed partial class Binder
             || Enumerable.Range(0, typeNames.Length).Any(index => returnIndex != index
                 && !templateParameters.Any(parameter => parameter.TypeParameterIndex == index))
             || (noThrow && operations.Any(operators =>
-                operators.Values.Any(protocol => !_protocols[protocol].IsNoThrow))))
+                operators.Values.Any(operation => !_protocols[operation.Protocol].IsNoThrow))))
         {
             valid = false;
         }
@@ -669,14 +718,17 @@ internal sealed partial class Binder
                 {
                     if (enclosing.Types[callerIndex] == item.type)
                     {
-                        return required.Any(protocol =>
-                            !enclosing.Template.TypeParameters[callerIndex].Operations.ContainsValue(protocol));
+                        return required.Any(operation =>
+                            !enclosing.Template.TypeParameters[callerIndex].Operations.Values.Any(caller =>
+                                caller.Protocol == operation.Protocol
+                                && caller.Resolve(enclosing.Types) == operation.Resolve(types)));
                     }
                 }
             }
             return required.Any()
                 && (!IsStruct(item.type) || !_conformances.TryGetValue(typeNames[item.index], out var witnesses)
-                    || required.Any(protocol => !witnesses.Contains(protocol)));
+                    || required.Any(operation => !witnesses.TryGetValue(operation.Protocol, out var result)
+                        || result != operation.Resolve(types)));
         }))
         {
             Report("TRM3007", "A helper call requires declared protocol witnesses for every selected Copy type.",
@@ -773,26 +825,36 @@ internal sealed partial class Binder
                     [new BoundStructField("$opaque", PrimitiveType.Int32, 0, 4) { IsPrivate = true }], 4) {
                     IsInternal = true,
                 });
-                foreach (var (operation, protocolName) in template.TypeParameters[parameterIndex].Operations)
+            }
+            var symbolicTypes = probeTypes.MoveToImmutable();
+            for (var parameterIndex = 0; parameterIndex < template.TypeParameters.Length; parameterIndex++)
+            {
+                var probeType = symbolicTypes[parameterIndex];
+                var probeName = proofBinder._structs[(int)probeType - 100].Name;
+                foreach (var (key, constraint) in template.TypeParameters[parameterIndex].Operations)
                 {
-                    var name = probeName + "." + OperatorName(operation);
+                    var name = probeName + "." + OperatorName(key);
                     var operatorSpan = template.Declaration.Span;
-                    var variables = ImmutableArray.Create(
-                        new BoundVariable("left", probeType, false, operatorSpan),
-                        new BoundVariable("right", probeType, false, operatorSpan));
-                    var resultType = StaticOperatorResult(operation, probeType);
-                    var external = new BoundFunction(name, resultType, variables, 2,
+                    ImmutableArray<BoundVariable> variables = key.Arity == 1
+                        ? [new BoundVariable("value", probeType, false, operatorSpan)]
+                        : [new BoundVariable("left", probeType, false, operatorSpan),
+                            new BoundVariable("right", probeType, false, operatorSpan)];
+                    var resultType = constraint.FixedResult is PrimitiveType fixedResult
+                        ? proofBinder.HydrateProofType(fixedResult)
+                            ?? throw new InvalidOperationException("Missing proof operator result.")
+                        : constraint.Resolve(symbolicTypes);
+                    var external = new BoundFunction(name, resultType, variables, key.Arity,
                         new BoundBlock([], operatorSpan), operatorSpan) {
                         IsExternal = true,
                         IsStatic = true,
-                        IsNoThrow = _protocols[protocolName].IsNoThrow,
+                        IsNoThrow = _protocols[constraint.Protocol].IsNoThrow,
                         DeclaringStruct = probeName,
                     };
                     proofBinder._functions.Add(name, proofBinder._signatures.Count);
-                    proofBinder._signatures.Add(new Signature(name, resultType, [
-                        new Parameter("left", probeType, operatorSpan, false),
-                        new Parameter("right", probeType, operatorSpan, false),
-                    ], null, null, template.Tree, probeName, false, false, false, false, true,
+                    var parameters = variables.Select(variable =>
+                        new Parameter(variable.Name, probeType, operatorSpan, false)).ToImmutableArray();
+                    proofBinder._signatures.Add(new Signature(name, resultType, parameters,
+                        null, null, template.Tree, probeName, false, false, false, false, true,
                         external.IsNoThrow, false, external) { IsOperator = true });
                     functions.Add(external);
                 }
@@ -804,7 +866,6 @@ internal sealed partial class Binder
             {
                 proofBinder._templates.Add(helper.Name, helper);
             }
-            var symbolicTypes = probeTypes.MoveToImmutable();
             var symbolicName = template.Name + "<" + string.Join(", ",
                 symbolicTypes.Select(type => proofBinder._structs[(int)type - 100].Name)) + ">";
             var symbolicParameters = template.Parameters.Select(parameter => new Parameter(parameter.Name,
@@ -966,18 +1027,20 @@ internal sealed partial class Binder
         var tokens = type.Children.OfType<SyntaxTokenElement>().Select(static child => child.Token).ToArray();
         var open = Array.FindIndex(tokens, static token => token.Kind == TokenKind.Less);
         head = open > 0 ? string.Concat(tokens.Take(open).Select(static token => token.Text)) : "";
-        return type.Kind == SyntaxKind.TypeName && open > 0 && arguments.Length == 3
+        return type.Kind == SyntaxKind.TypeName && open > 0 && arguments.Length is 2 or 3
             && tokens[^1].Kind == TokenKind.Greater
             && NameText(type) == head + "<" + string.Join(",", arguments.Select(NameText)) + ">";
     }
 
-    private static bool MatchesProtocolArguments(TokenKind operation, SyntaxNode[] arguments, string type,
+    private static bool MatchesProtocolArguments(StaticOperatorKey key, SyntaxNode[] arguments, string type,
         string? qualified = null)
     {
-        var operandCount = IsComparisonOperator(operation) ? 2 : 3;
-        return arguments.Length == 3
+        var operandCount = key.Arity;
+        return arguments.Length == operandCount + 1
             && arguments.Take(operandCount).All(argument =>
                 NameText(argument) == type || NameText(argument) == qualified)
-            && (operandCount == 3 || NameText(arguments[2]) == "bool");
+            && (key.Arity == 1 || (IsComparisonOperator(key.Operator)
+                ? NameText(arguments[2]) == "bool"
+                : NameText(arguments[2]) == type || NameText(arguments[2]) == qualified));
     }
 }

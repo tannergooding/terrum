@@ -45,13 +45,17 @@ longer parsed. Based literals construct target-width bit patterns, while
 decimal literals retain numeric range semantics. Floating/custom literal
 parsing, registered literal targets and `[ConstEval]` remain outside this
 executable profile.
-The current parser version is syntax-20. Syntax-18 qualified generic-call type
+The current parser version is syntax-21. Syntax-18 qualified generic-call type
 arguments such as `write C` and `write C?` enable bounded managed-handle
 substitutions in compilation-local `Copy` templates. Syntax-19 adds the
 bounded nominal comparison protocols; neither changes the native profile,
 scanner record/schema or semantic wire format. Managed-handle substitutions
 reuse the existing managed contracts, with feature-dependent semantic version
 selection.
+Syntax-21 adds compilation-local unary `+`, `-`, `!` and `~` protocols with
+separate operand/result formals. Their closed calls reuse existing verified
+native calls and private module servicing without a new scanner record,
+semantic wire format, native profile, or public generic ABI.
 
 Terrum has no built-in marshalling. Source or generated tooling defines and
 performs conversions and wrappers for imported C APIs; the compiler/runtime

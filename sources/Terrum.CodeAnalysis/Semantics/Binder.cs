@@ -757,13 +757,17 @@ internal sealed partial class Binder
         }
 
         var returnNode = constructor ? null : (SyntaxNode)declaration.Children[operatorDeclaration ? ^5 : ^4];
-        var nameToken = ((SyntaxTokenElement)declaration.Children[^3]).Token;
-        var nameText = operatorDeclaration ? OperatorName(nameToken.Kind) : nameToken.Text;
         var parameters = (SyntaxNode)declaration.Children[^2];
+        var nameToken = ((SyntaxTokenElement)declaration.Children[^3]).Token;
+        var operatorKey = new StaticOperatorKey(nameToken.Kind, parameters.Children.OfType<SyntaxNode>().Count());
+        var validOperator = (operatorKey.Arity == 1 && IsStaticUnaryOperator(nameToken.Kind))
+            || (operatorKey.Arity == 2 && IsStaticBinaryOperator(nameToken.Kind));
+        var nameText = operatorDeclaration && validOperator ? OperatorName(operatorKey) : nameToken.Text;
         var body = (SyntaxNode)declaration.Children[^1];
-        if (operatorDeclaration && (containingType is null || !isStatic || body.Kind != SyntaxKind.Block))
+        if (operatorDeclaration && (containingType is null || !isStatic || body.Kind != SyntaxKind.Block
+            || !validOperator))
         {
-            Report("TRM3001", "A static operator implementation requires a struct body.", declaration.Span);
+            Report("TRM3001", "A static operator implementation requires a supported arity and a struct body.", declaration.Span);
         }
         var classConstructor = constructor && TryResolveClass(Qualify(containingType!), out _);
         var returnType = constructor ? ResolveDeclaredType(containingType!) : BindType(returnNode!, allowVoid: true);
@@ -830,6 +834,15 @@ internal sealed partial class Binder
             }
 
             declared.Add(new Parameter(token.Text, type, token.Span, isOut));
+        }
+        if (operatorDeclaration && operatorKey.Arity == 1
+            && (containingType is null || !TryResolveStruct(Qualify(containingType), out var ownerType)
+                || !IsCopyGenericType(ownerType) || IsUnique(ownerType)
+                || declared.Count != 1 || declared[0].Type != ownerType || declared[0].IsOut
+                || !IsCopyGenericType(returnType) || IsUnique(returnType)))
+        {
+            Report("TRM3007", "A unary static operator requires one Copy operand of its containing struct and a Copy result.",
+                declaration.Span);
         }
 
         var qualifiedName = (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".")
@@ -1806,6 +1819,28 @@ internal sealed partial class Binder
                     }
                     break;
                 }
+                if (KnownType(operandNode) is PrimitiveType concrete
+                    && IsStruct(concrete) && IsStaticUnaryOperator(op.Kind))
+                {
+                    var operandValue = BindExpression(operandNode, concrete);
+                    var operatorName = _structs[(int)concrete - 100].Name + "."
+                        + OperatorName(new StaticOperatorKey(op.Kind, 1));
+                    if (!TryFindFunction(operatorName, out var method)
+                        || _signatures[method].Parameters is not [var parameter]
+                        || parameter.Type != concrete || parameter.IsOut
+                        || !_signatures[method].IsStatic || !_signatures[method].IsOperator)
+                    {
+                        Report("TRM3007", "No matching accessible unary static operator is declared.", op.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+                    if (_signatures[method].IsPrivate && _currentStruct != _signatures[method].StructName)
+                    {
+                        Report("TRM3011", "Private operator is inaccessible.", op.Span);
+                    }
+                    expression = new BoundCall(method, [operandValue], _signatures[method].ReturnType, node.Span);
+                    break;
+                }
                 var operandType = op.Kind == TokenKind.Bang ? PrimitiveType.Bool
                     : KnownType(operandNode) ?? expected ?? PrimitiveType.Int32;
 
@@ -1954,7 +1989,8 @@ internal sealed partial class Binder
             var leftValue = BindExpression(leftNode, concrete);
             var rightValue = BindExpression(rightNode, concrete);
             var comparisonResult = StaticOperatorResult(op.Kind, concrete);
-            var name = _structs[(int)concrete - 100].Name + "." + OperatorName(op.Kind);
+            var name = _structs[(int)concrete - 100].Name + "."
+                + OperatorName(new StaticOperatorKey(op.Kind, 2));
             if (!TryFindFunction(name, out var method) || _signatures[method].ReturnType != comparisonResult
                 || _signatures[method].Parameters.Length != 2
                 || _signatures[method].Parameters.Any(parameter => parameter.Type != concrete)
@@ -2615,8 +2651,18 @@ internal sealed partial class Binder
                 return TryFindBuffer((SyntaxNode)node.Children[0], out var buffer)
                     ? _buffers[buffer].ElementType : null;
             case SyntaxKind.UnaryExpression:
-                return ((SyntaxTokenElement)node.Children[0]).Token.Kind == TokenKind.Bang
-                    ? PrimitiveType.Bool : KnownType((SyntaxNode)node.Children[1]);
+            {
+                var operand = KnownType((SyntaxNode)node.Children[1]);
+                var operation = ((SyntaxTokenElement)node.Children[0]).Token.Kind;
+                if (operand is PrimitiveType concrete && IsStruct(concrete)
+                    && IsStaticUnaryOperator(operation)
+                    && TryFindFunction(_structs[(int)concrete - 100].Name + "."
+                        + OperatorName(new StaticOperatorKey(operation, 1)), out var method))
+                {
+                    return _signatures[method].ReturnType;
+                }
+                return operation == TokenKind.Bang ? PrimitiveType.Bool : operand;
+            }
             case SyntaxKind.BinaryExpression:
             {
                 var op = ((SyntaxTokenElement)node.Children[1]).Token.Kind;

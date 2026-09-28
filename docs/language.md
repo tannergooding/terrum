@@ -435,15 +435,17 @@ operator directly. Operator spelling does not imply `[NoThrow]` or
 derive complements or ordering laws. This does not establish universal equality,
 hashing, or managed identity policy, nor primitive/heterogeneous witnesses or
 a public generic ABI. See the detailed [bounded generic contract](implementation.md#bounded-generic-functions).
-The intended unary contract gives unary `+`, `-`, `!` and `~` one operand of
-the containing `T` or `T?` and an independent result type; `!` is not
-inherently bool-result, and result type alone does not distinguish overloads.
+Syntax-21 implements a provisional compilation-local unary contract for
+`+`, `-`, `!` and `~` with one `Copy`-struct operand and an independent
+`Copy` result type. `!` is not inherently bool-result, and result type
+alone does not distinguish overloads. Nullable operands remain a target
+direction, not part of this bounded profile.
 Static `++`/`--` have operand-shaped results rather than an arbitrary result
 type; this does not import C# inheritance. `true` and
 `false` are the explicit exception: both return `bool` and are declared
 together. C# 14's instance-mutating `++`/`--` and `void` compound-assignment
-operators are not adopted here. These are target directions only; unary and
-shift protocols remain unsupported.
+operators are not adopted here. `++`/`--`, `true`/`false` and shift
+protocols remain unsupported.
 
 The implementation does not infer unique/owning `T`, constructor or
 method type arguments, ordinary overloads, or partial `_` holes. It does not

@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-20, semantic v32 managed consumers, native-10 through native-20
+## Current boundary: syntax-21, semantic v32 managed consumers, native-10 through native-20
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -478,6 +478,22 @@ they add no primitive or heterogeneous witnesses and no public generic ABI.
 This adds no scanner-record/schema, semantic-wire-format or native-profile
 version.
 
+**Unary operator protocols (implemented; syntax-21).**
+
+Compilation-local interfaces may declare one static abstract unary `+`, `-`,
+`!`, or `~` with two formals (`TOperand`, `TResult`), such as
+`interface Negation<T, R> { static abstract R operator -(T value); }`.
+Closed nominal conformances require a `Copy` struct operand and a supported
+`Copy` result. The result is independent of the operand and `!` need not
+return `bool`; result-only overloads are not supported. Unary and binary
+`+`/`-` have distinct arity-aware identities. Generic bodies require explicit
+nominal constraints and use the declared effects; concrete operands may call
+accessible declared operators without conformance. Closed specializations
+lower through existing verified calls and private module servicing. No
+primitive witnesses, nullable operand operators, `++`/`--`, `true`/`false`,
+public generic ABI, new semantic bytes or native-profile change are implied.
+The two-formal source shape is provisional pending broader language review.
+
 Forward calls, imported local templates, and direct/mutual recursion reuse
 closed specializations; recursion has the ordinary native call/stack behavior,
 not a compile-time evaluator or a termination guarantee. At most 32 templates
@@ -568,6 +584,10 @@ native profile.
 the scanner-4 integer-record shape. Discard evaluation and immediate owning
 cleanup use existing semantic nodes, so feature-selected module versions and
 native profiles do not change.
+`syntax-21` adds unary static operator declarations for compilation-local
+`Copy`-struct protocols with independent `Copy` results, using the existing
+closed-call servicing path without changing scanner-5/schema-5, semantic
+module bytes or native profiles.
 `[NoThrow]` on functions/constructors, `[DoesNotReturn]` on void functions and
 `[Cleanup]` on eligible unique instance methods are currently bound;
 unknown, duplicate and misplaced attributes diagnose rather
