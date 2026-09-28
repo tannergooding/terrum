@@ -25,11 +25,12 @@ public readonly ref struct TrRmTypeDefTableReader
         TrRmStringTableReader strings, TrRmModuleTableReader modules,
         int fieldCount, int genericParamCount, int layoutCount, int contractCount)
     {
-        if (recordCount <= 0 || recordCount > 0xFF_FFFF
+        if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != modules.TypeDefCount
             || (long)recordCount * RowSize != section.Length
             || !ValidCount(fieldCount) || !ValidCount(genericParamCount)
-            || !ValidCount(layoutCount) || !ValidCount(contractCount))
+            || !ValidCount(layoutCount) || !ValidCount(contractCount)
+            || (recordCount == 0 && (fieldCount != 0 || layoutCount != 0)))
         {
             throw InvalidType();
         }
@@ -106,12 +107,23 @@ public readonly ref struct TrRmTypeDefTableReader
     public int GetOwnerModule(int row)
     {
         CheckRow(row);
-        for (var module = 1; module <= _modules.Count; module++)
+        var low = 1;
+        var high = _modules.Count;
+        while (low <= high)
         {
-            var (start, end) = _modules.GetTypeDefRange(module);
-            if (row >= start && row < end)
+            var middle = low + (high - low) / 2;
+            var (start, end) = _modules.GetTypeDefRange(middle);
+            if (row < start)
             {
-                return module;
+                high = middle - 1;
+            }
+            else if (row >= end)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                return middle;
             }
         }
 

@@ -11,6 +11,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly ref struct TrRmMethodSigTableReader
 {
     private const int RowSize = 24;
+    private readonly ReadOnlySpan<byte> _rows;
     private readonly int[] _paramOwners;
 
     public int Count { get; }
@@ -28,6 +29,7 @@ public readonly ref struct TrRmMethodSigTableReader
         }
 
         Count = recordCount;
+        _rows = section;
         _paramOwners = new int[paramCount + 1];
         for (var row = 1; row <= recordCount; row++)
         {
@@ -73,6 +75,26 @@ public readonly ref struct TrRmMethodSigTableReader
         }
 
         return _paramOwners[row];
+    }
+
+    public int GetReceiverTypeSpec(int row)
+    {
+        if (row <= 0 || row > Count)
+        {
+            throw InvalidSignature();
+        }
+
+        return (int)Read(_rows.Slice((row - 1) * RowSize, RowSize), 4);
+    }
+
+    public int GetGenericCount(int row)
+    {
+        if (row <= 0 || row > Count)
+        {
+            throw InvalidSignature();
+        }
+
+        return (int)Read(_rows.Slice((row - 1) * RowSize, RowSize), 20);
     }
 
     private static uint Read(ReadOnlySpan<byte> data, int offset)

@@ -1036,8 +1036,8 @@ then String
 offsets and name rows, fixed Module rows and their partition cursors,
 ModuleRef identities and co-located producer requirements, optional SourceFile
 paths, nominal TypeDef ranges and FieldDef ownership, and structural TypeSpec
-forms and TypeArg ownership/ranges, plus structural MethodSig and Param
-ownership/ordinals. A host-side
+forms and TypeArg ownership/ranges, plus structural MethodSig/Param ranges and
+MethodDef module, signature and body ownership. A host-side
 writer emits indexed String sections with required names or optional empty
 namespace text; the self-host String-row
 candidate emits individual rows. These exercise approved metadata contracts in isolation,

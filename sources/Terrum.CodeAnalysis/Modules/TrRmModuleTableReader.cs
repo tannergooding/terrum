@@ -19,12 +19,14 @@ public readonly ref struct TrRmModuleTableReader
     private readonly int _recordCount;
     private readonly int _moduleRefCount;
     private readonly int _typeDefCount;
+    private readonly int _methodDefCount;
     private readonly int _sourceFileCount;
     private readonly Dictionary<string, int> _identities;
 
     public int Count => _recordCount;
     public int ModuleRefCount => _moduleRefCount;
     public int TypeDefCount => _typeDefCount;
+    public int MethodDefCount => _methodDefCount;
     public int SourceFileCount => _sourceFileCount;
 
     public TrRmModuleTableReader(ReadOnlySpan<byte> section, int recordCount,
@@ -44,6 +46,7 @@ public readonly ref struct TrRmModuleTableReader
         _recordCount = recordCount;
         _moduleRefCount = moduleRefCount;
         _typeDefCount = typeDefCount;
+        _methodDefCount = methodDefCount;
         _sourceFileCount = sourceFileCount;
         _identities = new Dictionary<string, int>(StringComparer.Ordinal);
 
@@ -134,6 +137,23 @@ public readonly ref struct TrRmModuleTableReader
         var start = (int)Read(row - 1, 32);
         var end = row < _recordCount ? (int)Read(row, 32) : _typeDefCount + 1;
         if (start <= 0 || end < start || end > _typeDefCount + 1)
+        {
+            throw InvalidModule();
+        }
+
+        return (start, end);
+    }
+
+    public (int Start, int End) GetMethodDefRange(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidModule();
+        }
+
+        var start = (int)Read(row - 1, 36);
+        var end = row < _recordCount ? (int)Read(row, 36) : _methodDefCount + 1;
+        if (start <= 0 || end < start || end > _methodDefCount + 1)
         {
             throw InvalidModule();
         }
