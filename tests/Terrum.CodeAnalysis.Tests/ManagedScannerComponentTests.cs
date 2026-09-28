@@ -49,12 +49,18 @@ public sealed class ManagedScannerComponentTests
                     $"if (!chain.TryGet({index}, out var token{index}) || token{index}.Kind != {(int)expected[index].Kind} || token{index}.Range.Start != {expected[index].Span.Start} || token{index}.Range.Length != {expected[index].Span.Length}) {{ return 4; }}");
             }
             _ = source.Append(CultureInfo.InvariantCulture,
+                $"if (chain.TryGetInit({expected.Length}, init var copied)) {{ return 9; }}"
+                + $" require chain.TryGetInit(0, init copied);"
+                + $" if (copied.Kind != {(int)expected[0].Kind} || copied.Range.Start != {expected[0].Span.Start}) {{ return 10; }}");
+            _ = source.Append(CultureInfo.InvariantCulture,
                 $"if (!chain.TryClear() || ManagedHeap.Collect() != {expected.Length}) {{ return 5; }}");
             for (var index = 0; index < expected.Length; index++)
             {
                 _ = source.Append(CultureInfo.InvariantCulture,
                     $"if (token{index}.Kind != {(int)expected[index].Kind} || token{index}.Range.Start != {expected[index].Span.Start}) {{ return 6; }}");
             }
+            _ = source.Append(CultureInfo.InvariantCulture,
+                $"if (copied.Kind != {(int)expected[0].Kind} || copied.Range.Start != {expected[0].Span.Start}) {{ return 11; }}");
             _ = source.Append(CultureInfo.InvariantCulture,
                 $"if (!TryScanManaged(init var again) || again.Count != {expected.Length}) {{ return 7; }}");
             _ = source.Append(CultureInfo.InvariantCulture,
@@ -91,12 +97,14 @@ public sealed class ManagedScannerComponentTests
             """);
         for (var index = 0; index < expected.Length; index++)
         {
+            var method = index % 2 == 0 ? "TryReadInit" : "TryRead";
+            var mode = index % 2 == 0 ? "init" : "out";
             _ = source.Append(CultureInfo.InvariantCulture,
-                $"if (!cursor.TryRead(out var token{index}) || token{index}.Kind != {(int)expected[index].Kind} || token{index}.Range.Start != {expected[index].Span.Start} || token{index}.Range.Length != {expected[index].Span.Length}) {{ return 1; }}");
+                $"if (!cursor.{method}({mode} var token{index}) || token{index}.Kind != {(int)expected[index].Kind} || token{index}.Range.Start != {expected[index].Span.Start} || token{index}.Range.Length != {expected[index].Span.Length}) {{ return 1; }}");
         }
         _ = source.Append("""
                 if (cursor.TryRead(out var pastEnd) || !cursor.IsCurrent) { return 2; }
-                if (cursor.TryRead(out var again)) { return 3; }
+                if (cursor.TryReadInit(init var again)) { return 3; }
                 return 42;
             }
             """);
@@ -151,7 +159,7 @@ public sealed class ManagedScannerComponentTests
                 require chain.TryCreateCursor(out var stale);
                 require {{mutation}};
                 if (cursor.IsCurrent || stale.IsCurrent
-                    || cursor.TryRead(out var absent) || stale.TryRead(out var missed)) { return 1; }
+                    || cursor.TryReadInit(init var absent) || stale.TryRead(out var missed)) { return 1; }
                 require chain.TryCreateCursor(out var fresh);
                 if (!fresh.IsCurrent) { return 2; }
                 if ({{(clear ? "fresh.TryRead(out var cleared)" : "!fresh.TryRead(out var appended) || appended.Kind != 1")}}) { return 3; }

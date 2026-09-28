@@ -74,6 +74,12 @@ mut class ManagedTokenChain {
         return false;
     }
 
+    public bool TryGetInit(int32 index, init ref<Token> token) {
+        if (!TryGet(index, out var found)) { return false; }
+        token = found;
+        return true;
+    }
+
     public bool TryCreateCursor(out write ManagedTokenCursor cursor) {
         return ManagedTokenCursor.TryCreate(this, _first, _version, out cursor);
     }
@@ -112,5 +118,11 @@ mut class ManagedTokenCursor {
             return true;
         }
         return false;
+    }
+
+    public mut bool TryReadInit(init ref<Token> token) {
+        if (!TryRead(out var next)) { return false; }
+        token = next;
+        return true;
     }
 }

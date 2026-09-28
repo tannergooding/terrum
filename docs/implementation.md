@@ -827,7 +827,10 @@ source, rejects malformed records and lexical diagnostics, and publishes no
 chain on failure. AOT/JIT fixtures compare host token kinds and spans, repeated
 scans, and collection after clearing links under both runtime policies. This
 does not alter scanner records or make the bounded chain the parser's token
-storage.
+storage. Indexed and sequential cursor reads also offer `init ref<Token>`
+publication beside their existing `out` forms. Failed indexes, end-of-chain
+and invalidated cursors leave the destination vacant; copied tokens remain
+valid after their source links are collected.
 
 The separate [integer-parsing candidate](../self-host/IntegerParsing.terrum)
 uses the immutable host source grant and checked wide-radix accumulation to
