@@ -863,7 +863,11 @@ source spans, and rejects unpublished or malformed output. This is an
 in-process bridge, not a standalone compiler or persisted native bootstrap
 artifact. The native compiler-primitives DLL does not include the frontend
 because its token and `Host.Source` dependencies still require a source
-adapter.
+adapter. `terrumc frontend-component self-host <input|-> --runtime fail-fast --json`
+executes the native phase and projects typed facts or scanner/shape errors
+through that bridge for inspection; binding and emission still use
+the hosted compiler. Its bounded result is a provisional component protocol,
+not approved TRRM metadata.
 
 The separate [integer-parsing candidate](../self-host/IntegerParsing.terrum)
 uses the immutable host source grant and checked wide-radix accumulation to

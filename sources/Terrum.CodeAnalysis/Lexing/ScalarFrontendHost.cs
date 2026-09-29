@@ -15,8 +15,15 @@ public static class ScalarFrontendHost
     public const int BufferIndex = 9;
 
     public static ImmutableArray<HostBuffer> CreateBuffers(SourceText source)
-        => ScannerHost.CreateBuffers(source).Add(
-            new HostBuffer("Frontend", PrimitiveType.Int32, [.. new int[WordCount]], true));
+    {
+        var buffers = ScannerHost.CreateBuffers(source);
+        if (buffers.Length != BufferIndex)
+        {
+            throw new InvalidOperationException("The scanner host buffer layout changed.");
+        }
+        return buffers.Add(new HostBuffer("Frontend", PrimitiveType.Int32,
+            [.. new int[WordCount]], true));
+    }
 
     public static ScalarFrontendResult ReadResult(SourceText source, ReadOnlySpan<byte> bytes)
     {

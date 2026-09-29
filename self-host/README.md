@@ -86,6 +86,12 @@ the official host parser, binder and native emitter; the binder also consumes
 its decoded integer magnitudes. It does not re-lex or decode integer magnitudes
 from the target input again. The scanner's own compilation and the later compiler phases
 remain hosted in C#.
+`frontend-component self-host <input|-> --runtime <fail-fast|checked-exceptions> --json`
+executes the bounded native scalar frontend with explicit source buffers and
+projects its typed result for inspection. Invalid shapes produce a code and
+source span; lexical failures retain scanner diagnostics and publish no typed
+result. This command does not use the typed result to bind or emit a program;
+it needs supervision like the other in-process component commands.
 
 | Candidate | Purpose | Gates before execution |
 |---|---|---|
