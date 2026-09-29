@@ -11,9 +11,9 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class TrRmProposedBodyExampleTests
 {
     [Theory]
-    [InlineData("### Checked add end to end", 109, 5, false, 38, 36, 3)]
+    [InlineData("GeneralCheckedAdd", 109, 5, false, 38, 36, 3)]
     [InlineData("## Value and place state through checked arithmetic", 126, 5, true, 51, 49, 7)]
-    [InlineData("## Worked bytes and illustrative size", 61, 1, false, 18, 16, 1)]
+    [InlineData("GeneralConstantReturn", 61, 1, false, 18, 16, 1)]
     public void ProposedBodyExamplesHaveDirectDefinitionAndUseIndexes(
         string heading, int sectionLength, int valueCount, bool hasPlace,
         int blockLength, int terminatorOffset, int operationCount)
@@ -163,7 +163,7 @@ public sealed class TrRmProposedBodyExampleTests
     [Fact]
     public void ProposedConditionalMergeHasIndexedDefsUsesAndNormalEdges()
     {
-        var bytes = ReadExample("### Conditional merge and loop");
+        var bytes = ReadExample("GeneralConditionalMerge");
         Assert.Equal(169, bytes.Length);
         var position = 0;
         Assert.Equal(0u, ReadUInt32(bytes, ref position));
@@ -247,7 +247,7 @@ public sealed class TrRmProposedBodyExampleTests
     }
 
     [Theory]
-    [InlineData("#### Compact linear checked add (same logical body)", 35, 3, 5, 2)]
+    [InlineData("#### Compact linear checked add (recommended illustrative form)", 35, 3, 5, 2)]
     [InlineData("### Compact linear constant return", 25, 1, 1, 0)]
     [InlineData("#### Compact linear parameter return", 21, 0, 1, 1)]
     public void ProposedCompactLinearDerivesDefinitionsAndUses(
@@ -305,7 +305,7 @@ public sealed class TrRmProposedBodyExampleTests
     [Fact]
     public void ProposedCompactIndexedMergeRetainsDirectFlowFacts()
     {
-        var bytes = ReadExample("#### Compact indexed conditional merge (same logical body)");
+        var bytes = ReadExample("#### Compact indexed conditional merge");
         Assert.Equal(104, bytes.Length);
         var position = 0;
         Assert.Equal(0u, ReadUInt32(bytes, ref position));
@@ -470,6 +470,52 @@ public sealed class TrRmProposedBodyExampleTests
 
     private static byte[] ReadExample(string heading)
     {
+        var generalHex = heading switch
+        {
+            "GeneralCheckedAdd" => """
+                00 00 00 00 65 00 00 00
+                01 00 00 00 00 01 05 00 00 01 01 00 00 00
+                01 00 01 01 00 01 01 00 01 01 00 01 01 00 01
+                00 05
+                FF FF FF FF FF FF FF FF 16 00 00 00 1B 00 00 00 1F 00 00 00
+                00 00 00 00 26 00 00 00 24 00 00 00
+                00 02 01 02 00 00 00 00 00 05 01 00 02 00 03 02 04 02 05 03 00 03
+                15 03 01 01 02 02 04 01 03 15 05 01 03 04 83 05
+                """,
+            "GeneralConstantReturn" => """
+                00 00 00 00 35 00 00 00
+                01 00 00 00 00 01 01 00 00 01
+                01 00 00 00
+                01 00 01 00 01 0C 00 00 00
+                00 00 00 00 12 00 00 00 10 00 00 00
+                00 00 00 00 00 00 00 01 01 01 00 01 01 01 01 2A 83 01
+                """,
+            "GeneralConditionalMerge" => """
+                00 00 00 00 A1 00 00 00
+                01 00 00 00 00 04 04 00 00 02 01 00 00 00 02 00 00 00
+                01 00 01 02 00 01 02 00 01 02 00 01
+                00 03 03 03 04
+                FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF
+                00 00 00 00 17 00 00 00 29 00 00 00
+                3B 00 00 00 4A 00 00 00
+                11 00 00 00 0E 00 00 00 0E 00 00 00 0D 00 00 00
+                00 03 01 02 03 00 02 02 03 00 00 00 01 01 00 00 00
+                81 01 02 00 03 00
+                00 00 01 03 01 03 00 00 00 01 03 00 00 00
+                80 04 01 03
+                00 00 01 02 01 02 00 00 00 01 02 00 00 00
+                80 04 01 02
+                00 01 04 00 00 00 00 00 01 04 00 00 00
+                83 04
+                """,
+            _ => null,
+        };
+
+        if (generalHex is not null)
+        {
+            return Convert.FromHexString(Regex.Replace(generalHex, @"\s+", ""));
+        }
+
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var document = File.ReadAllText(Path.Combine(root, "docs", "proposals",

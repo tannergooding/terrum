@@ -90,7 +90,8 @@ companion document, retain this contract map and links from the
 normative rules; splitting the examples must not orphan the fast-import
 story or silently promote a pending Body schema to approved metadata.
 The [example fixture checks](../../tests/Terrum.CodeAnalysis.Tests/TrRmProposedBodyExampleTests.cs)
-independently decode the general and compact example bytes below; they are test-only checks of
+independently decode the compact bytes below and general-form bytes kept
+in the tests; they are test-only checks of
 this **proposed** schema, not an executable TRRM Body reader.
 
 The examples progress from a checked scalar sum in one block to a
@@ -165,10 +166,15 @@ multiplying the opcode catalog by width combinations. It adds two bytes to a
 wide instruction and avoids continuation decoding per operand; no read or
 validation cost is implied.
 
-The general-form fixtures below expose every field. `bodyLayout=0`
-selects one-byte local fields in the general form; the compact form
-tags below select different **storage for the same logical Body**.
-The general form is not an acceptable default size for trivial methods:
+For eligible trivial methods, compact linear is the recommended
+space-saving representation: one entry block, the root region, by-value
+parameters and empty place/liveness inventories need no stored records
+when their state follows from the signature and bounded instruction
+stream. A writer may still choose a valid general form; compact is not
+required and consumers must accept either. `bodyLayout=0` selects
+one-byte local fields in the general form, whereas compact form tags
+select different **storage for the same logical Body**.
+The general form is not a suitable space-first default for trivial methods:
 the one-block checked-add section is 109 bytes for 16 instruction bytes,
 and `return 42` is 61 bytes for 6 instruction bytes. The section
 index accounts for 8 bytes in each; the rest is mostly repeated type,
@@ -198,8 +204,9 @@ Its row after `bodyLayout` is `local typeCount`,
 `u32 typeMap[typeCount]`, `local operationCount`, exactly that many
 operations and one `Return` or `Fail` terminator, consuming the row
 exactly. No other index or block header is stored. Block ID 1 and its
-region 0 are implicit. Entry parameter IDs, types and modes come from
-MethodSig in order; every value type, including a parameter or returned
+region 0 are implicit; absent places, other regions, normal edges and
+boundary liveness are not empty arrays to serialize. Entry parameter IDs,
+types and modes come from MethodSig in order; every value type, including a parameter or returned
 value not named by an instruction, must occur exactly once in `typeMap`.
 The mapped complete type must match each MethodSig type. Results such as
 comparison `bool` need their own mapped type even when no instruction
@@ -278,9 +285,14 @@ representable. The common one-block target includes such methods when
 their selected calls, access paths, roots and effects have a complete
 compact contract, not by dropping any of those facts.
 
-These two specified encodings are *candidates*, not a measured
-canonical writer choice. Prefer testing compact linear for eligible
-single blocks, which need one operation scan anyway. For two or three
+These two specified encodings are *candidates*, not a mandatory or
+measured canonical writer choice. Prefer compact linear as the initial
+space-saving choice for eligible one-block bodies: their absent state
+is implied and their value facts are derived on the single import
+scan. A writer may choose general form if direct indexes are worth its
+extra bytes; this recommendation must be tested against cold import
+and repeated/selective-import costs before fixing a canonical policy.
+For two or three
 small blocks, compare compact indexed against an unassigned
 **boundary-only** candidate: direct block/terminator extents and typed
 edge parameters, with value definitions, use inventories and boundary
@@ -425,130 +437,57 @@ currently encoded Body examples **do not yet contain** GC roots.
 
 ### Checked add end to end (informative)
 
-Consider `AddThenThree` under the fail-fast policy. This first shows
-the *logical* one-block value flow, then an expanded general-form
-encoding for checking every field, followed by its compact-linear form.
-The 109-byte fixture is valid under the general layout but is **not**
-the compact encoding for this method.
-Assume MethodDef row
-1 owns the body, its MethodSig declares two by-value `int32` parameters
+Consider `AddThenThree` under the fail-fast policy. The example uses
+the compact-linear encoding appropriate to this root-free, one-block
+method. Assume MethodDef row 1 owns the body, its MethodSig
+declares two by-value `int32` parameters
 and an `int32` result, and TypeSpec row 1 describes `int32`. The
 expected `int32` context types the literal `3`; each `+` selects
 checked primitive addition, not a numeric fallback or user witness.
 
-The notation below exposes the metadata and general-form Body facts needed
-to read the example; it is not wire syntax or a required source rewrite. `t1` is
-Body-local type ID 1, mapped by a fixed `u32` header entry to TypeSpec
-row 1. That TypeSpec row's built-in form uses primitive code `0x08`
-for `int32`. `r1`–`r5` are one-based Body value IDs, not machine registers.
-The value-descriptor array declares each ID's type and kind; the block
-parameters or operations define its value. `B1` is a one-based
-block ID. A block's parameter list declares values received on entry,
-not all values that its operations will define. The definition index gives
-`r1` and `r2` the B1 parameter sentinel, then points `r3`, `r4` and
-`r5` to B1 operations at byte offsets 22, 27 and 31, respectively.
-
 ```text
-Source:   int32 AddThenThree(int32 x, int32 y) { return x + y + 3; }
-
-TypeSpec[1] = Builtin(int32)                // row payload 01 00 08
-MethodSig[1] = (parameter[0]: TypeSpec[1], parameter[1]: TypeSpec[1])
-               -> TypeSpec[1]              // x, y in source order
-MethodDef[1] = (signature=1, bodyRow=1)
-General-form Body: ownerMethod=1, bodyLayout=0
-      blockCount=1, valueCount=5, placeCount=0, regionCount=0, typeCount=1
-      typeMap=[t1: TypeSpec[1]]             // fixed u32 typed reference
-      valueDescriptors=[r1:(t1,value,useBlocks=1), r2:(t1,value,useBlocks=1),
-                        r3:(t1,value,useBlocks=1), r4:(t1,value,useBlocks=1),
-                        r5:(t1,value,useBlocks=1)]
-      valueDefStarts=[0,5]
-      valueDefinitionOffsets=[parameter,parameter,22,27,31]
-      blockOffsets=[0,38], terminatorOffsets=[36]
-      B1 operationCount=3, region=0, liveIns=[], liveOuts=[], place lists=[]
-      B1 valueLastUses=[(r1,op0),(r2,op0),(r3,op2),(r4,op2),
-                        (r5,terminator3)]
-
-B1(r1 <- parameter[0], r2 <- parameter[1]):  // x, y defined on entry
+Source: int32 AddThenThree(int32 x, int32 y) { return x + y + 3; }
+MethodSig[1] = (int32 x, int32 y) -> int32
+B1(r1 <- x, r2 <- y):
     r3 = CheckedBinary add r1, r2
-    r4 = ConstSigned t1, 3
+    r4 = ConstSigned int32, 3
     r5 = CheckedBinary add r3, r4
     Return r5
 ```
 
-The operations define `r3`, `r4` and `r5` in source order within B1;
-`ConstSigned` types the literal `3`. On first-add overflow the later
-operations do not run; on second-add overflow the return does not run.
-Both failures follow the module policy without manufacturing normal CFG
-edges or block parameters. Every value has one descriptor
-and one definition; the descriptor alone does not create a value.
-`r1` and `r2` become available at block entry and are last read by
-operation 0. Their parameter sentinel is not a machine slot or an
-instruction that needs executing.
-`r3` becomes available after operation 0 and is last read by operation 2;
-`r4` becomes available after operation 1 and is also last read by
-operation 2. `r5` becomes available after operation 2 and is last read
-by the return terminator (ordinal 3). Neither value lives across a block
-boundary; the five `useBlocks=1` counts are corroborated by B1's five
-last-use entries. This describes ordinary operand uses, not a GC-root
-lifetime or an instruction's permission to be deleted.
-The Body stores numeric IDs, not the source names or these comments.
-The TypeSpec row reference occupies four bytes in `typeMap`, as it does
-in MethodSig; repeated `t1` references are one-byte local IDs because
-this Body has one type. The equal numbers in `t1` and `TypeSpec[1]` are
-coincidental: the map may assign a different local ID to that row.
-Under the inline-word candidate, the `typeMap` entry for an unqualified
-`int32` could instead be `0xFE_00_00_08` (`08 00 00 FE` on the wire).
-That keeps `t1` one byte per use without the TypeSpec lookup; it does
-not license replacing the current `01 00 00 00` entry in this fixture
-until the metadata reference rule changes.
+#### Compact linear checked add (recommended illustrative form)
 
-The general-form Body **section** uses one mapped type, five values, one
-block and no places or regions. Its 109-byte structure is:
-
-| Region | Size and contents |
-|---|---|
-| Body-section offset index | 8 bytes: `00 00 00 00 65 00 00 00` = `[0,101]`; not an instruction |
-| Body row header and definition index | 51 bytes: `ownerMethod=1`, `bodyLayout=0`, counts `(block,value,place,region,type)=(1,5,0,0,1)`, `typeMap=[TypeSpec row 1]`, five `(t1,value,useBlockCount=1)` descriptors, `valueDefStarts=[0,5]`, and five fixed-`u32` definition offsets |
-| Body row offset arrays | 12 fixed-`u32` bytes: `blockOffsets=[0,38]`, `terminatorOffsets=[36]` |
-| Block data | 38 bytes: B1 has five last-use entries, three operations and one return |
-
-The compact-linear form derives the two parameter definitions from
-MethodSig and the three result definitions and last uses from its
-instruction scan. It implies B1 and region 0 and omits the empty
-place/region/live lists, 20-byte definition-offset array and repeated
-descriptor pairs. The ordered checked operations and their failure
-sites remain unchanged.
-
-Here `bodyLayout=0` selects one-byte Body-local widths in the
-**general** layout; it does not select or forbid a compact form. The owner,
-type-map entries and offset arrays remain fixed `u32`; instruction
-widths are independent, and none here has an `F0` prefix.
-Body fields and validation rules are specified in
-[Body record, direct block index and regions](#body-record-direct-block-index-and-regions).
-
-The exact **general-form** section bytes are the eight-byte offset index
-followed by the 101-byte Body row:
+One mapped type and three operations suffice. The compact-linear row
+stores `ownerMethod=1`, `bodyLayout=0x04`, `typeCount=1`,
+`typeMap=[TypeSpec row 1]`, `operationCount=3`, then the 16
+instruction bytes. The Body section is 35 bytes (8-byte shared row
+index and 27-byte row):
 
 ```text
-00 00 00 00  65 00 00 00
-01 00 00 00  00  01 05 00 00 01  01 00 00 00
-01 00 01  01 00 01  01 00 01  01 00 01  01 00 01
-00 05
-FF FF FF FF  FF FF FF FF  16 00 00 00  1B 00 00 00  1F 00 00 00
-00 00 00 00  26 00 00 00  24 00 00 00
-00 02 01 02 00 00 00 00 00  05 01 00 02 00 03 02 04 02 05 03  00 03
+00 00 00 00  1B 00 00 00
+01 00 00 00  04 01 01 00 00 00 03
 15 03 01 01 02  02 04 01 03  15 05 01 03 04  83 05
 ```
 
-| Location | Opcode-specific schema, in byte order | Widths / layout | Encoded fields | Reading |
-|---|---|---|---|---|
-| B1 operation 1 | `15 CheckedBinary ref(rNew) u8(kind) ref(rLeft) ref(rRight)` | Common; ref=1; kind=`u8` | `15` opcode · `03` rNew · `01` kind · `01` rLeft · `02` rRight | `kind=1` checked add; define `r3` from `r1` and `r2` |
-| B1 operation 2 | `02 ConstSigned ref(rNew) ref(t) signedData(value)` | Common; ref=1, data=1 | `02` opcode · `04` rNew · `01` t · `03` signedData | Define `r4` as mapped `t1` value `3` |
-| B1 operation 3 | `15 CheckedBinary ref(rNew) u8(kind) ref(rLeft) ref(rRight)` | Common; ref=1; kind=`u8` | `15` opcode · `05` rNew · `01` kind · `03` rLeft · `04` rRight | Define `r5` from `r3` and `r4` |
-| B1 terminator | `83 Return ref(result)` | Common; ref=1 | `83` opcode · `05` result | Return `r5`, the second checked result |
+There is no separate entry-block record, region 0 record, place or
+boundary-live array, parameter-definition sentinel, value descriptor,
+definition-offset table or last-use list in this row. B1 and region 0
+are implicit; MethodSig supplies `r1` and `r2`, and the three ordered
+operations define `r3`–`r5`. A bounded scan derives their types,
+definitions and last-use ordinals `(0,0,2,2,3)`, as well as the
+checked failure order and return. The `typeMap` still supplies complete
+`int32` identity. Those omitted records are either inapplicable here
+or derivable, not permissions to discard an effect or weaken validation.
+The tradeoff is no direct definition seek: a later uncached consumer
+must scan again. This is a size recommendation, not a mandate for every
+writer or a measured cold-import win.
 
-Each checked operation encodes its own destination and has no success
-edge. `ConstSigned` carries signed data, not an add immediate.
+On first-add overflow the later operations do not run; on second-add
+overflow Return does not run. Each failure follows the module policy
+at its operation site without a normal CFG edge or an artificial block.
+`ConstSigned` types the literal `3`; its bytes are not an add immediate.
+The `typeMap` entry is the fixed `u32` reference to TypeSpec row 1;
+the `t1` operand is a Body-local ID, not a shortened metadata reference.
 By-value parameters need no place; an addressable mutable local needs
 `PlaceLocal` then `Load`, with
 `Assign` through that place on success. See the
@@ -567,28 +506,6 @@ its result ID were 256, it would use
 the opcode's semantic identity. Conformance should independently verify
 the bytes, decoded records and audited CFG/types/states; a same-writer
 round trip alone is insufficient.
-
-#### Compact linear checked add (same logical body)
-
-For the preceding MethodDef, one mapped type and three operations, the
-compact-linear row stores `ownerMethod=1`, `bodyLayout=0x04`,
-`typeCount=1`, `typeMap=[TypeSpec row 1]`, `operationCount=3`, then
-the **same 16 instruction bytes**. The Body section is 35 bytes
-(8-byte row index and 27-byte row), rather than the general form's
-109 bytes:
-
-```text
-00 00 00 00  1B 00 00 00
-01 00 00 00  04 01 01 00 00 00 03
-15 03 01 01 02  02 04 01 03  15 05 01 03 04  83 05
-```
-
-This loses direct definition seeks *by design*: one scan establishes
-the same `(r1..r5)` descriptors, B1 parameter/result definitions,
-last-use ordinals `(0,0,2,2,3)`, checked failure order and Return.
-The type map still supplies the complete `int32` identity. Importing
-the method again requires another scan unless a consumer retains its
-decoded records; no per-method cache or performance win is assumed.
 
 ### Adding a conditional to the sum
 
@@ -719,44 +636,17 @@ where the final number is `useBlockCount`. All four blocks have
 | B3 | `(r2,0)` | `r2` is live-in and supplied as B4's edge argument |
 | B4 | `(r4,0)` | `r4` is defined at entry and used by Return |
 
-With one-byte Body-local IDs and common instructions, the **169-byte
-Body section** for this shape has a 161-byte row. Its direct indexes
-are `blockOffsets=[0,23,41,59,74]` and
-`terminatorOffsets=[17,14,14,13]`; all four value-definition offsets
-are `0xFFFF_FFFF` because these definitions are block parameters.
-The eight-byte section index, row header, block indexes and four block
-extents are:
-
-```text
-00 00 00 00  A1 00 00 00
-01 00 00 00  00  04 04 00 00 02  01 00 00 00  02 00 00 00
-01 00 01  02 00 01  02 00 01  02 00 01
-00 03 03 03 04
-FF FF FF FF  FF FF FF FF  FF FF FF FF  FF FF FF FF
-00 00 00 00  17 00 00 00  29 00 00 00
-3B 00 00 00  4A 00 00 00
-11 00 00 00  0E 00 00 00  0E 00 00 00  0D 00 00 00
-00 03 01 02 03 00 02 02 03 00 00 00 01 01 00 00 00
-81 01 02 00 03 00
-00 00 01 03 01 03 00 00 00 01 03 00 00 00
-80 04 01 03
-00 00 01 02 01 02 00 00 00 01 02 00 00 00
-80 04 01 02
-00 01 04 00 00 00 00 00 01 04 00 00 00
-83 04
-```
-
-#### Compact indexed conditional merge (same logical body)
+#### Compact indexed conditional merge
 
 The four-block `Choose` example qualifies for compact indexed despite
 having more than three blocks: it has only Copy values and normal
 edges, and its direct definitions/uses and branch addresses remain
 available. The local-width (one-byte) definition-offset sentinels,
 block offsets `[0,18,31,44,53]` and terminator offsets
-`[12,9,9,7]` replace the general form's `u32` arrays. Each block's
+`[12,9,9,7]` directly index the definitions and terminators. Each block's
 presence byte omits zero counts and lists; the four value descriptor
 kinds are implicitly by-value. Its Body section is 104 bytes
-(8-byte index, 96-byte row), compared with 169 bytes above:
+(8-byte index, 96-byte row):
 
 ```text
 00 00 00 00  60 00 00 00
@@ -774,9 +664,8 @@ The indexed compact header still says that B1 uses `r1`, B2 uses
 `r3`, B3 uses `r2`, and B4 uses `r4` at their terminators. B1's
 `r2`/`r3` live-outs remain transit-only. An inliner may follow the
 four terminator offsets and decrement B3's `r2` use-block count when
-discarding that arm, just as with the general form. The eight bytes
-for the section's row index are unchanged; these savings are only
-within the Body row.
+discarding that arm. The section's eight-byte row index is not
+compressed by this Body layout.
 
 B1's terminator selects B2 or B3, each with zero edge arguments.
 B2 and B3 each send one typed argument to B4; the sent `r3` or `r2`
@@ -1531,47 +1420,18 @@ source.
 
 For [metadata example](../il-metadata.md#row-assignment-example),
 MethodDef row 1 returns `int32` with no arguments; TypeSpec row 1 is
-`int32`. Its `return 42` body has one value, one block, zero places and
-zero explicit regions. This is another **general-form fixture**, not
-the expected compact representation of a constant getter. Its Body
-**section** for one row is:
-
-```text
-00 00 00 00  35 00 00 00
-01 00 00 00  00  01 01 00 00 01
-01 00 00 00
-01 00 01  00 01  0C 00 00 00
-00 00 00 00  12 00 00 00  10 00 00 00
-00 00 00 00 00 00 00  01 01 01  00 01  01 01 01 2A  83 01
-```
-
-The block-offset array is eight bytes and the terminator-offset array
-four; the Body row is 53 bytes. It contains owner row 1, `bodyLayout=0`,
-five one-byte counts, a fixed `u32` map entry for TypeSpec row 1,
-one `(t1,value,useBlockCount=1)` descriptor, definition starts `[0,1]`,
-the `ConstBits` definition offset 12, block offsets `[0,18]`,
-terminator offset `16`, and an 18-byte block. That block has region 0, no
-parameters, live values or places, a last use of `r1` at its return,
-one `ConstBits` operation and one `Return`. Including the eight-byte
-section row index, the Body section is 61 bytes. With eight populated
-metadata sections, the artifact is **365 bytes** before alignment: a
-32-byte header, eight 16-byte directory entries and 205 bytes of sections.
-The direct definition/use indexes increase this tiny Body section from
-the former 50 bytes to 61 bytes; their cost on representative bodies
-still needs measurement before approval. The single block, parameterless
-signature and trivial definition/return should be candidates for a
-compact form, but substituting guessed short bytes here would falsely
-claim a registered form. This is encoded size, not throughput;
-IDs, prefixes, blocks, decoding, branches, debug data and alignment also
-affect cost.
+`int32`. Its `return 42` body has one value, one implicit entry block,
+no places and no explicit regions. Compact linear is the natural
+space-saving illustration; the general form remains valid but is not
+repeated here.
 
 ### Compact linear constant return
 
-The same `return 42` method uses a compact-linear Body section of
-25 bytes (8-byte row index and 17-byte row), compared with the
-61-byte general fixture above. `ConstBits` and Return are unchanged;
-the method's result type comes from MethodSig and the operation's
-mapped type:
+The `return 42` method uses a compact-linear Body section of
+25 bytes (8-byte row index and 17-byte row). `ConstBits` and Return
+are unchanged; MethodSig and the mapped type supply the complete
+result type. The absent block header, place/region records, descriptor
+and definition/last-use indexes need no empty placeholders:
 
 ```text
 00 00 00 00  11 00 00 00
@@ -1591,7 +1451,7 @@ with a 13-byte row:
 01 00 00 00  04 01 01 00 00 00 00 83 01
 ```
 
-It has the same one-block *shape* as `return 42` but a different
+`Identity` has the same one-block *shape* as `return 42` but a different
 definition/use graph. There is no second type-independent opcode or
 license to share an executable Body across different MethodSigs.
 Interning a reusable shape across methods would require a new
