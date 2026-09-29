@@ -65,6 +65,10 @@ All operands of a class in **one instruction** use its selected width;
 other instructions choose independently. A class unused by an instruction
 has code 0. Fixed enumerations (`kind`, `policy`, `reason`) are always `u8`,
 not references, counts or data; only their assigned values are valid.
+The reference-class list gives *possible* operand kinds, not a sequence
+included in every instruction. The registered opcode supplies the actual
+operands and their order; `layout` changes their encoded widths, never that
+schema or the meaning of an ID.
 References and counts are unsigned; data is unsigned for `bits`/`Switch`
 patterns and two's-complement signed for `ConstSigned`. Each class uses the
 smallest listed width that represents *all* its operands in the instruction.
@@ -139,6 +143,21 @@ the beginning of exactly one registered terminator that ends the block.
 The last condition is a writer obligation and an optional semantic audit;
 even a trusted decoder bounds its direct terminator access. The reader
 never scans for marker bytes or guesses an unregistered opcode's length.
+
+For example, the checked `add` terminator
+`CheckedBinary add r1, r2 -> B2()` follows the `CheckedBinary` schema:
+`u8(kind=1)`, reference `rLeft=1`, reference `rRight=2`, then an edge with
+reference `targetBlock=2`, count `argumentCount=0` and no explicit argument
+IDs. It uses neither a data operand nor a place, TypeSpec, method, region or
+field operand. In common form, all three references and the count fit in one
+byte, giving `84 01 01 02 02 00`. If the target were block 256 instead,
+the *same* opcode would require layout `01` (two-byte references, one-byte
+count, unused data), giving `F0 01 84 01 01 00 02 00 00 01 00`; `r1`
+and `r2` widen too because reference width is shared within this
+instruction. The separate `ConstSigned r2, t1, 5` operation has reference
+operands `r2` and `t1` **and** signed data `5`, but no edge or count. Neither
+example says anything about the widths selected by other instructions or
+the enclosing Body's structural `bodyLayout`.
 
 ## Body record, direct block index and regions
 
