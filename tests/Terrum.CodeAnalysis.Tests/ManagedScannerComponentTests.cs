@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -3133,6 +3134,67 @@ public sealed class ManagedScannerComponentTests
             PrimitiveType.Int32, default);
         var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
             new BoundBlock([new BoundReturn(call, default)], default), default);
+        var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
+        SemanticVerifier.Verify(executable);
+        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return ~(x + y); }", 4057, "int32", 10L, 32L, 2, -43L)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return ~((x) & (y)); }", 4071, "int32", 7L, 3L, 2, -4L)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x) { return ~(5 | x); }", 4373, "int32", 2L, 0L, 1, -8L)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return ~(0xF ^ 0xA); }", 4575, "int32", 0L, 0L, 0, -6L)]
+    [InlineData(NativeRuntimePolicy.FailFast, "uint64 Value(uint64 x) { return ~(x & 0xFFFFFFFFFFFFFFFF); }", 4171, "uint64", 15L, 0L, 1, -16L)]
+    public async Task NativeScalarFrontendComplementedBinaryExecutesAsync(
+        NativeRuntimePolicy policy, string text, int operation, string typeName,
+        long first, long second, int parameterCount, long expected)
+    {
+        var source = SourceText.From(text);
+        var stage = await CompileAsync(text,
+            "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+            (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
+        var native = NativeJit.ExecuteWithData(stage, policy);
+        Assert.Equal(42, native.ExitCode);
+        var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+            ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
+        Assert.Equal(11, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, 10);
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, 11);
+        var operationOffset = 23 * sizeof(int);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), operation + 1);
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), operation);
+        var operandOffset = 24 * sizeof(int);
+        var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(operandOffset));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operandOffset), original ^ 1);
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operandOffset), original);
+        if (operation == 4057)
+        {
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+                SourceText.From(text.Replace("x + y", "x - y", StringComparison.Ordinal)), bytes));
+        }
+        var type = typeName == "uint64" ? PrimitiveType.UInt64 : PrimitiveType.Int32;
+        ImmutableArray<BoundExpression> arguments = parameterCount switch
+        {
+            0 => [],
+            1 => [new BoundConstant(first, type, default)],
+            _ => [new BoundConstant(first, type, default),
+                new BoundConstant(second, type, default)],
+        };
+        var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
+        var call = new BoundCall(0, arguments, type, default);
+        var matches = new BoundBinary(TokenKind.EqualsEquals, call,
+            new BoundConstant(expected, type, default), PrimitiveType.Bool, default);
+        var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
+            new BoundBlock([new BoundIf(matches,
+                new BoundBlock([new BoundReturn(new BoundConstant(42, PrimitiveType.Int32,
+                    default), default)], default),
+                new BoundBlock([new BoundReturn(new BoundConstant(0, PrimitiveType.Int32,
+                    default), default)], default), default)], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
         Assert.Equal(42, NativeJit.Execute(executable, policy));

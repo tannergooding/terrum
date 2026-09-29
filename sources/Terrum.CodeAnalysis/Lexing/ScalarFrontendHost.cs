@@ -39,7 +39,7 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10)
+        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11)
             || words[1] is not (1 or 2))
         {
             throw InvalidResult();
@@ -337,9 +337,22 @@ public static class ScalarFrontendHost
                         : operation is >= 2700 and < 3200 ? 9 : 10)
                     && expression.Type == 5 && type == 5
                     && ValidSpan(expression.Span, nonempty: true)
-                    && TryNegatedBinarySpan(source, expression.Span, out var nestedSpan)
+                    && TryGroupedUnaryBinarySpan(source, expression.Span,
+                        TokenKind.Bang, out var nestedSpan)
                     && ValidExpression(new ScalarFrontendExpression(5, operation - 2000,
                         left, right, nestedSpan), 5, parameters);
+            }
+            if (IsComplementedIntegerBinary(operation))
+            {
+                return words[0] >= 11 && expression.Type == type
+                    && type is >= 1 and <= 4
+                    && ((operation - 4000 is not (>= 57 and <= 61 or 71 or 73 or 75))
+                        || left >= 1 && right >= 1)
+                    && ValidSpan(expression.Span, nonempty: true)
+                    && TryGroupedUnaryBinarySpan(source, expression.Span,
+                        TokenKind.Tilde, out var nestedSpan)
+                    && ValidExpression(new ScalarFrontendExpression(type, operation - 4000,
+                        left, right, nestedSpan), type, parameters);
             }
             if (operation / 100 is 7 or 9
                 && operation % 100 is 65 or 66 or >= 71 and <= 75)
@@ -684,14 +697,28 @@ public static class ScalarFrontendHost
             && (comparison % 100 is >= 65 and <= 70);
     }
 
-    private static bool TryNegatedBinarySpan(SourceText source, TextSpan span,
-        out TextSpan nested)
+    private static bool IsComplementedIntegerBinary(int operation)
+    {
+        if (operation < 4000)
+        {
+            return false;
+        }
+        var nested = operation - 4000;
+        var binary = nested >= 1600 ? nested - 1600
+            : nested >= 1200 ? nested - 1200 : nested;
+        return binary is >= 57 and <= 61 or 71 or 73 or 75
+            || (binary / 100 is >= 1 and <= 5)
+                && (binary % 100 is >= 57 and <= 61 or 71 or 73 or 75);
+    }
+
+    private static bool TryGroupedUnaryBinarySpan(SourceText source, TextSpan span,
+        TokenKind prefix, out TextSpan nested)
     {
         nested = default;
         var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(span.Start, span.Length)));
         var tokens = lexical.Tokens;
         if (!lexical.Diagnostics.IsEmpty || tokens.Length < 7
-            || tokens[0].Kind != TokenKind.Bang || tokens[0].Span.Start != 0)
+            || tokens[0].Kind != prefix || tokens[0].Span.Start != 0)
         {
             return false;
         }
@@ -908,7 +935,8 @@ public static class ScalarFrontendHost
             }
             if (IsNegatedBooleanBinary(expression.Operation))
             {
-                if (!TryNegatedBinarySpan(source, expression.Span, out var nestedSpan))
+                if (!TryGroupedUnaryBinarySpan(source, expression.Span,
+                    TokenKind.Bang, out var nestedSpan))
                 {
                     throw InvalidResult();
                 }
@@ -916,6 +944,20 @@ public static class ScalarFrontendHost
                     expression.LeftParameter, expression.RightParameter, nestedSpan);
                 return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Bang,
                     Expression(nested), PrimitiveType.Bool, expression.Span));
+            }
+            if (IsComplementedIntegerBinary(expression.Operation))
+            {
+                if (!TryGroupedUnaryBinarySpan(source, expression.Span,
+                    TokenKind.Tilde, out var nestedSpan))
+                {
+                    throw InvalidResult();
+                }
+                var nested = new ScalarFrontendExpression(expression.Type,
+                    expression.Operation - 4000, expression.LeftParameter,
+                    expression.RightParameter, nestedSpan);
+                var type = Type(expression.Type);
+                return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Tilde,
+                    Expression(nested), type, expression.Span));
             }
             if (expression.Operation / 100 is 7 or 9
                 && expression.Operation % 100 is 65 or 66 or >= 71 and <= 75)
