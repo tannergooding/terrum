@@ -3141,13 +3141,20 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return ~(x + y); }", 4057, "int32", 10L, 32L, 2, -43L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return ~((x) & (y)); }", 4071, "int32", 7L, 3L, 2, -4L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x) { return ~(5 | x); }", 4373, "int32", 2L, 0L, 1, -8L)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return ~(0xF ^ 0xA); }", 4575, "int32", 0L, 0L, 0, -6L)]
-    [InlineData(NativeRuntimePolicy.FailFast, "uint64 Value(uint64 x) { return ~(x & 0xFFFFFFFFFFFFFFFF); }", 4171, "uint64", 15L, 0L, 1, -16L)]
-    public async Task NativeScalarFrontendComplementedBinaryExecutesAsync(
-        NativeRuntimePolicy policy, string text, int operation, string typeName,
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return ~(x + y); }", 11, 4057, "int32", 10L, 32L, 2, -43L)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return ~((x) & (y)); }", 11, 4071, "int32", 7L, 3L, 2, -4L)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x) { return ~(5 | x); }", 11, 4373, "int32", 2L, 0L, 1, -8L)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return ~(0xF ^ 0xA); }", 11, 4575, "int32", 0L, 0L, 0, -6L)]
+    [InlineData(NativeRuntimePolicy.FailFast, "uint64 Value(uint64 x) { return ~(x & 0xFFFFFFFFFFFFFFFF); }", 11, 4171, "uint64", 15L, 0L, 1, -16L)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return +(x + y); }", 12, 6057, "int32", 10L, 32L, 2, 42L)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return -((x) + (y)); }", 12, 8057, "int32", 10L, 32L, 2, -42L)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int64 Value(int64 x, int64 y) { return -(x & y); }", 12, 8071, "int64", 7L, 3L, 2, -3L)]
+    [InlineData(NativeRuntimePolicy.FailFast, "uint32 Value(uint32 x) { return +(x | 5); }", 12, 6173, "uint32", 2L, 0L, 1, 7L)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x) { return -(5 ^ x); }", 12, 8375, "int32", 2L, 0L, 1, -7L)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return +(42 + 1); }", 12, 6557, "int32", 0L, 0L, 0, 43L)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return -(0xF ^ 0xA); }", 12, 8575, "int32", 0L, 0L, 0, -5L)]
+    public async Task NativeScalarFrontendGroupedIntegerUnaryExecutesAsync(
+        NativeRuntimePolicy policy, string text, int version, int operation, string typeName,
         long first, long second, int parameterCount, long expected)
     {
         var source = SourceText.From(text);
@@ -3158,11 +3165,11 @@ public sealed class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(11, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.Equal(version, BinaryPrimitives.ReadInt32LittleEndian(bytes));
         Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
-        BinaryPrimitives.WriteInt32LittleEndian(bytes, 10);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, version - 1);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-        BinaryPrimitives.WriteInt32LittleEndian(bytes, 11);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, version);
         var operationOffset = 23 * sizeof(int);
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), operation + 1);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
@@ -3172,12 +3179,18 @@ public sealed class ManagedScannerComponentTests
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operandOffset), original ^ 1);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operandOffset), original);
-        if (operation == 4057)
+        if (operation is 4057 or 6057)
         {
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
                 SourceText.From(text.Replace("x + y", "x - y", StringComparison.Ordinal)), bytes));
         }
-        var type = typeName == "uint64" ? PrimitiveType.UInt64 : PrimitiveType.Int32;
+        var type = typeName switch
+        {
+            "int64" => PrimitiveType.Int64,
+            "uint32" => PrimitiveType.UInt32,
+            "uint64" => PrimitiveType.UInt64,
+            _ => PrimitiveType.Int32,
+        };
         ImmutableArray<BoundExpression> arguments = parameterCount switch
         {
             0 => [],

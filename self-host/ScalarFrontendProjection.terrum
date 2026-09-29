@@ -104,6 +104,12 @@ bool TryPublishScalarFrontend()
     {
         Host.Frontend[0] = 11;
     }
+    if (result.WhenTrue.Operation >= 6000
+        || (result.HasCondition && (result.Condition.Operation >= 6000
+            || result.WhenFalse.Operation >= 6000)))
+    {
+        Host.Frontend[0] = 12;
+    }
     Host.Frontend[1] = 1;
     return true;
 }

@@ -39,7 +39,7 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11)
+        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12)
             || words[1] is not (1 or 2))
         {
             throw InvalidResult();
@@ -352,6 +352,21 @@ public static class ScalarFrontendHost
                     && TryGroupedUnaryBinarySpan(source, expression.Span,
                         TokenKind.Tilde, out var nestedSpan)
                     && ValidExpression(new ScalarFrontendExpression(type, operation - 4000,
+                        left, right, nestedSpan), type, parameters);
+            }
+            if (IsSignedIntegerBinary(operation))
+            {
+                var minus = operation >= 8000;
+                var offset = minus ? 8000 : 6000;
+                var binary = operation - offset;
+                return words[0] >= 12 && expression.Type == type
+                    && (minus ? type is 1 or 3 : type is >= 1 and <= 4)
+                    && ((binary is not (>= 57 and <= 61 or 71 or 73 or 75))
+                        || left >= 1 && right >= 1)
+                    && ValidSpan(expression.Span, nonempty: true)
+                    && TryGroupedUnaryBinarySpan(source, expression.Span,
+                        minus ? TokenKind.Minus : TokenKind.Plus, out var nestedSpan)
+                    && ValidExpression(new ScalarFrontendExpression(type, binary,
                         left, right, nestedSpan), type, parameters);
             }
             if (operation / 100 is 7 or 9
@@ -699,7 +714,7 @@ public static class ScalarFrontendHost
 
     private static bool IsComplementedIntegerBinary(int operation)
     {
-        if (operation < 4000)
+        if (operation is < 4000 or >= 6000)
         {
             return false;
         }
@@ -709,6 +724,16 @@ public static class ScalarFrontendHost
         return binary is >= 57 and <= 61 or 71 or 73 or 75
             || (binary / 100 is >= 1 and <= 5)
                 && (binary % 100 is >= 57 and <= 61 or 71 or 73 or 75);
+    }
+
+    private static bool IsSignedIntegerBinary(int operation)
+    {
+        if (operation is < 6000 or >= 10000)
+        {
+            return false;
+        }
+        var offset = operation >= 8000 ? 8000 : 6000;
+        return IsComplementedIntegerBinary(operation - offset + 4000);
     }
 
     private static bool TryGroupedUnaryBinarySpan(SourceText source, TextSpan span,
@@ -958,6 +983,23 @@ public static class ScalarFrontendHost
                 var type = Type(expression.Type);
                 return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Tilde,
                     Expression(nested), type, expression.Span));
+            }
+            if (IsSignedIntegerBinary(expression.Operation))
+            {
+                var minus = expression.Operation >= 8000;
+                var offset = minus ? 8000 : 6000;
+                if (!TryGroupedUnaryBinarySpan(source, expression.Span,
+                    minus ? TokenKind.Minus : TokenKind.Plus, out var nestedSpan))
+                {
+                    throw InvalidResult();
+                }
+                var nested = new ScalarFrontendExpression(expression.Type,
+                    expression.Operation - offset, expression.LeftParameter,
+                    expression.RightParameter, nestedSpan);
+                var type = Type(expression.Type);
+                return Binder.FoldScalarConstant(new BoundUnary(minus
+                    ? TokenKind.Minus : TokenKind.Plus, Expression(nested),
+                    type, expression.Span));
             }
             if (expression.Operation / 100 is 7 or 9
                 && expression.Operation % 100 is 65 or 66 or >= 71 and <= 75)
