@@ -823,6 +823,29 @@ rejects for that opcode. Both `Binary` and `CheckedBinary` produce an
 
 The opcode/kind pair selects behavior; operand types supply width and
 signedness, and the result descriptor must match the result type.
+`CheckedBinary` is a provisional **integer primitive** mnemonic, not a
+polymorphic call to an operator named `+` or a promise that every type
+with a numeric witness accepts the opcode. A nominal operator, including
+one selected through an explicitly declared numeric witness, is a call
+to its bound MethodDef. A witness proves only its declared signature
+and checked contracts; it does not by itself establish purity, overflow
+behavior, commutativity, associativity or a unique constant result.
+If a future intrinsic/primitive-like profile permits a user-defined
+type to use an arithmetic opcode, that profile must name the selected
+witness, exact semantics, effect/failure and ownership behavior, and
+compatibility requirements. Equal layout or a familiar operator name is
+not sufficient. A consumer may inline or fold a call only under
+independently validated callable/constant-evaluation semantics, preserving
+the selected call's effects and failure order.
+
+The symbolic spellings `Binary`, `CheckedBinary` and `ConstSigned` name
+this proposal's **opcode schemas**, not source-language operations or
+mandated display mnemonics. `CheckedIntegerAdd` and
+`ConstSignedInteger` would describe this narrow subset more precisely;
+the naming and family split should be resolved together with later
+floating, aggregate and registered numeric forms rather than silently
+extending the current integer kinds to them. Renaming these schemas
+need not change their assigned opcode bytes.
 
 The other discriminants are `Convert.policy`: `01` integer wrap,
 `02` integer saturate, `03` equal-width integer bit reinterpretation;
@@ -853,6 +876,26 @@ Its `t` is one of the four integer primitives, signed or unsigned, and
 the signed mathematical value must fit that destination. Use `ConstBits`
 for unsigned values above `int64.MaxValue`. The complete TypeSpec
 selects the width; unrepresentable or noncanonical patterns reject.
+For example, `02 04 01 03` defines `r4` as value 3 of Body-local `t1`,
+which resolves to `int32`: `03` is the **one-byte encoded signedData**
+chosen because 3 fits in one byte, not a one-byte result or an untyped
+source literal. The result has the `int32` width and value range from
+its type descriptor. `ConstBits` instead supplies a declared-width
+bit pattern, so an `int32` based literal `0xFFFF_FFFF` has four
+`FF` data bytes and means `-1`; its interpretation is not inferred
+from the number of encoded bytes.
+
+Neither operation accepts floating, aggregate or arbitrary nominal
+TypeSpecs. A future floating constant must state its exact format,
+rounding/bit encoding and NaN/signed-zero treatment rather than reuse
+signed-integer data; a constructed aggregate must preserve its typed
+field/initialization rules rather than reinterpret one scalar immediate.
+A registered user literal is parsed at compile time against its selected
+target; its eventual Body encoding must represent the validated value
+under that type's constant and ABI contracts. This proposal does not
+assign such a constant encoding. The literal does not make raw source
+spelling an IL numeric operand or grant a generic primitive opcode to
+the user type.
 
 The executable scalar set is `bool`, `char16`, `int32`, `uint32`, `int64`
 and `uint64`; integer arithmetic uses the declared width. `Binary`
