@@ -316,11 +316,75 @@ public sealed class ManagedScannerComponentTests
             int32 Main() {
                 require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
                 if (tokens.GetCount() != 2 || trivia.GetCount() != 0
-                    || integers.GetCount() != 0) { return 1; }
+                    || integers.GetCount() != 0
+                    || integers.TryFind(0, out var overflow, out var low, out var high)) {
+                    return 1;
+                }
                 return 42;
             }
             """;
         var program = await CompileAsync("alpha", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task FindsDecodedIntegerByTokenIndexAndSkipsNonIntegerNumericsAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                if (tokens.GetCount() != 4 || integers.GetCount() != 2
+                    || integers.TryFind(-1, out var negativeOverflow, out var negativeLow,
+                        out var negativeHigh)
+                    || integers.TryFind(1, out var floatingOverflow, out var floatingLow,
+                        out var floatingHigh)
+                    || integers.TryFind(3, out var eofOverflow, out var eofLow,
+                        out var eofHigh)) { return 1; }
+                require integers.TryFind(0, out var firstOverflow, out var firstLow,
+                    out var firstHigh);
+                require integers.TryFind(2, out var lastOverflow, out var lastLow,
+                    out var lastHigh);
+                if (firstOverflow || firstLow != 1 || firstHigh != 0
+                    || lastOverflow || lastLow != 42 || lastHigh != 0) { return 2; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync("1 1.5 42", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task IndexedIntegerLookupExceedsManagedChainLimitAsync(NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                if (tokens.GetCount() != 129 || integers.GetCount() != 128
+                    || integers.TryFind(128, out var missingOverflow, out var missingLow,
+                        out var missingHigh)) { return 1; }
+                require integers.TryFind(0, out var firstOverflow, out var firstLow,
+                    out var firstHigh);
+                require integers.TryFind(64, out var middleOverflow, out var middleLow,
+                    out var middleHigh);
+                require integers.TryFind(127, out var lastOverflow, out var lastLow,
+                    out var lastHigh);
+                if (firstOverflow || middleOverflow || lastOverflow
+                    || firstLow != 1 || middleLow != 1 || lastLow != 1
+                    || firstHigh != 0 || middleHigh != 0 || lastHigh != 0) { return 2; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync(string.Concat(Enumerable.Repeat("1 ", 128)),
+            Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
         Assert.Equal(42, NativeJit.Execute(program, policy));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }

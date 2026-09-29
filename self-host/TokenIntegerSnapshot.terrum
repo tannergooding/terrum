@@ -33,6 +33,35 @@ public unique struct TokenIntegerSnapshot
         return true;
     }
 
+    public bool TryFind(int32 tokenIndex, out bool overflow, out int32 low, out int32 high)
+    {
+        mut int32 first = 0;
+        mut int32 end = _count;
+        while (first < end)
+        {
+            int32 middle = first + (end - first) / 2;
+            if (_records.Read(middle * 4) < tokenIndex)
+            {
+                first = middle + 1;
+            }
+            else
+            {
+                end = middle;
+            }
+        }
+
+        if (first >= _count || _records.Read(first * 4) != tokenIndex)
+        {
+            return false;
+        }
+
+        int32 offset = first * 4;
+        overflow = _records.Read(offset + 1) == 1;
+        low = _records.Read(offset + 2);
+        high = _records.Read(offset + 3);
+        return true;
+    }
+
     public static bool TryBuild(int32 tokenCount, init ref<TokenIntegerSnapshot> result)
     {
         if (Host.Diagnostics[0] != 0 || tokenCount < 1
