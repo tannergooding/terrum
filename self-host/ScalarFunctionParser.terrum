@@ -56,11 +56,6 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     {
         return false;
     }
-    if (selected == 5 && count != 10 && count != 12)
-    {
-        return false;
-    }
-
     require tokens.TryGet(1, out var function);
     require tokens.TryGet(2, out var openParameters);
     require tokens.TryGet(3, out var closeParameters);
@@ -76,7 +71,8 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     require tokens.TryGet(first, out var initial);
     mut Token value = initial;
     bool grouped = count == 12 || count == 13;
-    bool outerSign = count == 13 && (initial.Kind == 57 || initial.Kind == 58);
+    bool outerSign = count == 13 && ((selected == 5 && initial.Kind == 62)
+        || (selected != 5 && (initial.Kind == 57 || initial.Kind == 58)));
     mut Token group = initial;
     if (outerSign)
     {
@@ -95,7 +91,8 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     }
     if (count == 11 || (count == 13 && !outerSign))
     {
-        if (value.Kind != 57 && value.Kind != 58)
+        if ((selected == 5 && value.Kind != 62)
+            || (selected != 5 && value.Kind != 57 && value.Kind != 58))
         {
             return false;
         }
@@ -149,16 +146,21 @@ bool TryEvaluateBoolScalarReturn(TokenSnapshot tokens,
     out SourceRange name, out bool result)
 {
     int32 count = tokens.GetCount();
-    if (count != 10 && count != 12)
+    if (count != 10 && count != 11 && count != 12 && count != 13)
     {
         return false;
     }
     mut int32 valueIndex = 6;
-    if (count == 12)
+    if (count == 11 || count == 12)
     {
         valueIndex = 7;
     }
+    else if (count == 13)
+    {
+        valueIndex = 8;
+    }
     require tokens.TryGet(valueIndex, out var literal);
+    bool negate = count == 11 || count == 13;
     if (!TryParseScalarReturnFunctionTyped(move tokens, out var scalarType,
             out var foundName, out var expression)
         || scalarType != 5)
@@ -168,6 +170,10 @@ bool TryEvaluateBoolScalarReturn(TokenSnapshot tokens,
 
     name = foundName;
     result = literal.Kind == 20;
+    if (negate)
+    {
+        result = !result;
+    }
     return true;
 }
 

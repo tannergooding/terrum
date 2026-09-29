@@ -460,6 +460,7 @@ public sealed class ManagedScannerComponentTests
         Assert.Equal(52, (int)TokenKind.Semicolon);
         Assert.Equal(57, (int)TokenKind.Plus);
         Assert.Equal(58, (int)TokenKind.Minus);
+        Assert.Equal(62, (int)TokenKind.Bang);
 
         var hosted = SyntaxTree.Parse(text);
         var name = hosted.Tokens[1].Span;
@@ -498,6 +499,8 @@ public sealed class ManagedScannerComponentTests
     [InlineData("uint64 Answer() { return (+42); }", 4)]
     [InlineData("bool Answer() { return true; }", 5)]
     [InlineData("bool Answer() { return (false); }", 5)]
+    [InlineData("bool Answer() { return !true; }", 5)]
+    [InlineData("bool Answer() { return !(false); }", 5)]
     [InlineData("uint64 Answer() { return +(42); }", 4)]
     [InlineData("float32 Answer() { return 42; }", 0)]
     public async Task TypedScalarParserMatchesHostedDeclarationSpansAsync(string text, int type)
@@ -539,7 +542,12 @@ public sealed class ManagedScannerComponentTests
     [InlineData("bool Value() { return false; }", true, false)]
     [InlineData("bool Value() { return (true); }", true, true)]
     [InlineData("bool Value() { return (false); }", true, false)]
-    [InlineData("bool Value() { return !true; }", false, false)]
+    [InlineData("bool Value() { return !true; }", true, false)]
+    [InlineData("bool Value() { return !false; }", true, true)]
+    [InlineData("bool Value() { return (!true); }", true, false)]
+    [InlineData("bool Value() { return !(false); }", true, true)]
+    [InlineData("bool Value() { return +true; }", false, false)]
+    [InlineData("bool Value() { return +(true); }", false, false)]
     [InlineData("int32 Value() { return 1; }", false, false)]
     public async Task BoundedNativeBoolEvaluationMatchesHostedExecutedValuesAsync(
         string text, bool evaluable, bool value)
