@@ -39,7 +39,7 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15)
+        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16)
             || words[1] is not (1 or 2))
         {
             throw InvalidResult();
@@ -368,6 +368,16 @@ public static class ScalarFrontendHost
                         minus ? TokenKind.Minus : TokenKind.Plus, out var nestedSpan)
                     && ValidExpression(new ScalarFrontendExpression(type, binary,
                         left, right, nestedSpan), type, parameters);
+            }
+            if (IsSignedIntegerBinary(operation - 16000))
+            {
+                return words[0] >= 16 && expression.Type == type
+                    && type is >= 1 and <= 4
+                    && ValidSpan(expression.Span, nonempty: true)
+                    && TryGroupedUnarySpan(source, expression.Span,
+                        TokenKind.Tilde, out var nestedSpan)
+                    && ValidExpression(new ScalarFrontendExpression(type,
+                        operation - 16000, left, right, nestedSpan), type, parameters);
             }
             if (operation is 10003 or 10057 or 10058 or 10657 or 10658)
             {
@@ -1037,6 +1047,20 @@ public static class ScalarFrontendHost
                 return Binder.FoldScalarConstant(new BoundUnary(minus
                     ? TokenKind.Minus : TokenKind.Plus, Expression(nested),
                     type, expression.Span));
+            }
+            if (IsSignedIntegerBinary(expression.Operation - 16000))
+            {
+                if (!TryGroupedUnarySpan(source, expression.Span,
+                    TokenKind.Tilde, out var nestedSpan))
+                {
+                    throw InvalidResult();
+                }
+                var type = Type(expression.Type);
+                var nested = new ScalarFrontendExpression(expression.Type,
+                    expression.Operation - 16000, expression.LeftParameter,
+                    expression.RightParameter, nestedSpan);
+                return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Tilde,
+                    Expression(nested), type, expression.Span));
             }
             if (expression.Operation is 10003 or 10057 or 10058 or 10657 or 10658)
             {
