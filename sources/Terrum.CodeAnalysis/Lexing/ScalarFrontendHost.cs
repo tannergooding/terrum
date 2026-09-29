@@ -144,6 +144,32 @@ public static class ScalarFrontendHost
             var right = expression.RightParameter;
             var leftType = left == 1 ? words[7] : words[8];
             var rightType = right == 1 ? words[7] : words[8];
+            if (operation == 3)
+            {
+                if (expression.Type != type || type is not (1 or 2 or 3 or 4 or 6)
+                    || !ValidSpan(expression.Span, nonempty: true))
+                {
+                    return false;
+                }
+                var digits = source.Text.AsSpan(expression.Span.Start, expression.Span.Length);
+                if (ScannerHost.IntegerDigitCount(digits) != digits.Length
+                    || !ScannerHost.TryParseIntegerMagnitude(digits, out var magnitude))
+                {
+                    return false;
+                }
+                var based = ScannerHost.IntegerRadix(digits) != 10;
+                ulong max = type switch {
+                    1 when based => uint.MaxValue,
+                    1 => int.MaxValue,
+                    2 => uint.MaxValue,
+                    3 when based => ulong.MaxValue,
+                    3 => long.MaxValue,
+                    4 => ulong.MaxValue,
+                    _ => ushort.MaxValue,
+                };
+                return magnitude <= max
+                    && magnitude == ((ulong)(uint)right << 32 | (uint)left);
+            }
             if (operation is 20 or 21)
             {
                 return type == 5 && expression.Type == 5 && left == 0 && right == 0
@@ -268,6 +294,14 @@ public static class ScalarFrontendHost
 
         BoundExpression Expression(ScalarFrontendExpression expression)
         {
+            if (expression.Operation == 3)
+            {
+                var value = expression.Type is 1 or 2
+                    ? expression.LeftParameter
+                    : unchecked((long)((ulong)(uint)expression.RightParameter << 32
+                        | (uint)expression.LeftParameter));
+                return new BoundConstant(value, Type(expression.Type), expression.Span);
+            }
             if (expression.Operation is 20 or 21)
             {
                 return new BoundConstant(expression.Operation == 20 ? 1 : 0,

@@ -2625,6 +2625,7 @@ public sealed class ManagedScannerComponentTests
 
     [Theory]
     [InlineData("int32 Value(int32 x) { return x; }", true, 0, 1, 0)]
+    [InlineData("int32 Value() { return 42; }", true, 0, 0, 3)]
     [InlineData("int32 Value(int32 x, int32 y) { if (x < y) { return x + y; } else { return x - y; } }", true, 0, 2, 57)]
     [InlineData("int32 Value(int32 x) { return y; }", false, 3, 0, 0)]
     public async Task ScalarFrontendProjectionPublishesValidatedTypedResultAsync(
@@ -2707,6 +2708,31 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("int32 Value() { return 42; }")]
+    [InlineData("uint64 Value() { return 18446744073709551615; }")]
+    public async Task ScalarFrontendProjectionRejectsForgedIntegerBitsAsync(string text)
+    {
+        var source = SourceText.From(text);
+        var program = await CompileAsync(text,
+            "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+            BoundRuntimePolicy.FailFast, "ScalarFrontendProjection").ConfigureAwait(true);
+        var native = NativeJit.ExecuteWithData(program, NativeRuntimePolicy.FailFast);
+        Assert.Equal(42, native.ExitCode);
+        var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+            ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
+        var original = ScalarFrontendHost.ReadResult(source, bytes);
+        Assert.Equal(3, original.WhenTrue.Operation);
+        foreach (var word in new[] { 24, 25 })
+        {
+            var offset = word * sizeof(int);
+            var value = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), value ^ 1);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), value);
+        }
+    }
+
+    [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task ScalarFrontendProjectionDoesNotPublishLexicalFailuresAsync(
@@ -2754,6 +2780,31 @@ public sealed class ManagedScannerComponentTests
             new BoundConstant(first, PrimitiveType.Int32, default),
             new BoundConstant(second, PrimitiveType.Int32, default),
         ], PrimitiveType.Int32, default);
+        var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
+            new BoundBlock([new BoundReturn(result, default)], default), default);
+        var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
+        SemanticVerifier.Verify(executable);
+        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task NativeScalarFrontendIntegerFactsExecuteWithoutHostedBindingAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string Text = "int32 Value() { return 0x2A; }";
+        var source = SourceText.From(Text);
+        var stage = await CompileAsync(Text,
+            "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+            (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
+        var native = NativeJit.ExecuteWithData(stage, policy);
+        Assert.Equal(42, native.ExitCode);
+        var library = ScalarFrontendHost.BindLibrary(source,
+            native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+                ScalarFrontendHost.WordCount * sizeof(int)), (BoundRuntimePolicy)policy);
+        var result = new BoundCall(0, [], PrimitiveType.Int32, default);
         var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
             new BoundBlock([new BoundReturn(result, default)], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };

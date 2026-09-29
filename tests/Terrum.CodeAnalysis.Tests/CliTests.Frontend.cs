@@ -23,6 +23,13 @@ public sealed partial class CliTests
     [InlineData("public bool Value() { return true; }")]
     [InlineData("public bool Value() { return false; }")]
     [InlineData("public bool Value() { if (true) { return false; } else { return true; } }")]
+    [InlineData("public int32 Value() { return 42; }")]
+    [InlineData("public int32 Value() { return 0xFFFFFFFF; }")]
+    [InlineData("public uint32 Value() { return 4294967295; }")]
+    [InlineData("public int64 Value() { return 9223372036854775807; }")]
+    [InlineData("public uint64 Value() { return 18446744073709551615; }")]
+    [InlineData("public char16 Value() { return 0xFFFF; }")]
+    [InlineData("public int32 Value() { if (true) { return 0b101010; } else { return 0; } }")]
     public async Task FrontendBuiltLibraryMatchesHostedNativeBytesAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -204,5 +211,30 @@ public sealed partial class CliTests
         Assert.False(result.GetProperty("public").GetBoolean());
         Assert.Equal(2, result.GetProperty("errorCode").GetInt32());
         Assert.Equal(30, result.GetProperty("errorSpan").GetProperty("start").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("int32", "2147483648")]
+    [InlineData("int32", "0x100000000")]
+    [InlineData("uint32", "4294967296")]
+    [InlineData("int64", "9223372036854775808")]
+    [InlineData("uint64", "18446744073709551616")]
+    [InlineData("char16", "65536")]
+    [InlineData("bool", "1")]
+    public async Task FrontendComponentRejectsOutOfRangeIntegerAsync(string type, string literal)
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        var source = $"public {type} Value() {{ return {literal}; }}";
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+            "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(1, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        var result = document.RootElement.GetProperty("result");
+        Assert.False(result.GetProperty("valid").GetBoolean());
+        Assert.Equal(2, result.GetProperty("errorCode").GetInt32());
+        Assert.Equal(source.IndexOf(literal, StringComparison.Ordinal),
+            result.GetProperty("errorSpan").GetProperty("start").GetInt32());
     }
 }

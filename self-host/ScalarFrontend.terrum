@@ -6,7 +6,9 @@ namespace Terrum.CodeAnalysis;
 // This in-process contract uses UTF-16 SourceRange values against the input source.
 // Parameter slots are 1-based (0 means absent); Operation is 0 for a parameter
 // reference or the scanner TokenKind ordinal for one binary operator or
-// true/false literal (with no parameter slots). An invalid
+// true/false literal (with no parameter slots). For a numeric literal,
+// the parameter slots carry the low/high 32-bit words of its contextual value.
+// An invalid
 // result has only ErrorCode/ErrorSpan; all other fields, including visibility,
 // are empty. A valid result is public only for an explicit public keyword. Lexical errors
 // prevent snapshot publication and remain in TokenDiagnosticSnapshot.
@@ -157,9 +159,53 @@ mut class ScalarFrontendState
         return true;
     }
 
-    private mut bool ParseExpression(out ScalarFrontendExpression expression)
+    private mut bool ParseExpression(int32 expectedType, out ScalarFrontendExpression expression)
     {
         require _tokens.TryGet(_at, out var literal);
+        if (literal.Kind == 3)
+        {
+            int32 tokenIndex = _at;
+            _at = _at + 1;
+            mut int32 first = 0;
+            mut int32 end = Host.IntegerValues[0];
+            while (first < end)
+            {
+                int32 middle = first + (end - first) / 2;
+                if (Host.IntegerValues[middle * 5 + 1] < tokenIndex)
+                {
+                    first = middle + 1;
+                }
+                else
+                {
+                    end = middle;
+                }
+            }
+            if (first >= Host.IntegerValues[0]
+                || Host.IntegerValues[first * 5 + 1] != tokenIndex
+                || Host.IntegerValues[first * 5 + 2] != 0)
+            {
+                FailAt(2, literal.Range);
+                return false;
+            }
+            int32 low = Host.IntegerValues[first * 5 + 3];
+            int32 high = Host.IntegerValues[first * 5 + 4];
+            uint64 magnitude = DecodeScannerMagnitude(low, high);
+            bool based = IsBasedInteger(literal);
+            if ((expectedType == 1 && (high != 0 || (!based && low < 0)))
+                || (expectedType == 2 && high != 0)
+                || (expectedType == 3 && !based && high < 0)
+                || (expectedType == 6 && (high != 0 || magnitude > 65535))
+                || (expectedType != 1 && expectedType != 2
+                    && expectedType != 3 && expectedType != 4 && expectedType != 6))
+            {
+                FailAt(2, literal.Range);
+                return false;
+            }
+            require ScalarFrontendExpression.TryCreate(expectedType, 3, low, high,
+                literal.Range, out var number);
+            expression = number;
+            return true;
+        }
         if (literal.Kind == 20 || literal.Kind == 21)
         {
             _at = _at + 1;
@@ -243,7 +289,7 @@ mut class ScalarFrontendState
 
     private mut bool ParseReturn(int32 returnType, out ScalarFrontendExpression expression)
     {
-        if (!Take(19, out var keyword) || !ParseExpression(out var found))
+        if (!Take(19, out var keyword) || !ParseExpression(returnType, out var found))
         {
             return false;
         }
@@ -338,7 +384,7 @@ mut class ScalarFrontendState
                 hasCondition = true;
                 _at = _at + 1;
                 if (Take(46, out var openCondition)
-                    && ParseExpression(out var predicate))
+                    && ParseExpression(5, out var predicate))
                 {
                     if (predicate.Type != 5)
                     {
@@ -395,6 +441,13 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
             empty, empty, empty, false, absent, absent, absent, out result);
     }
     if (count < 1 || !ManagedTokenChain.TryCreate(out var chain))
+    {
+        return false;
+    }
+    // Validate numeric records only when present; scalar functions without
+    // literals do not need a second owned snapshot.
+    if (Host.IntegerValues[0] != 0
+        && !TokenIntegerSnapshot.TryBuild(count, init var integers))
     {
         return false;
     }
