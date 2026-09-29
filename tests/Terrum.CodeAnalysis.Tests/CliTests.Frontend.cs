@@ -246,6 +246,9 @@ public sealed partial class CliTests
     [InlineData("public int32 Value() { return -0x80000000; }")]
     [InlineData("public int32 Value() { return -(42); }")]
     [InlineData("public int32 Value() { return -(0xFFFFFFD6); }")]
+    [InlineData("public int32 Value() { return -(0x80000000); }")]
+    [InlineData("public int64 Value() { return -(9223372036854775807); }")]
+    [InlineData("public int64 Value() { return -(0xFFFFFFFFFFFFFFD6); }")]
     [InlineData("public int64 Value() { return -9223372036854775808; }")]
     [InlineData("public int64 Value() { return -0xFFFFFFFFFFFFFFFF; }")]
     [InlineData("public int32 Value(int32 x) { return x + 5; }")]
@@ -692,6 +695,7 @@ public sealed partial class CliTests
     [InlineData("uint32 Value(uint32 x) { return x + -1; }", "1")]
     [InlineData("int32 Value(int32 x) { return x + +2147483648; }", "2147483648")]
     [InlineData("bool Value(int32 x) { return x == -(2147483648); }", "2147483648")]
+    [InlineData("int64 Value() { return -(9223372036854775808); }", "9223372036854775808")]
     [InlineData("uint32 Value() { return +(4294967296); }", "4294967296")]
     public async Task FrontendComponentRejectsOutOfRangeBinaryLiteralAsync(string source,
         string invalidLiteral)
@@ -724,6 +728,8 @@ public sealed partial class CliTests
     [InlineData("uint32 Value(uint32 x) { return -x; }")]
     [InlineData("bool Value(bool x) { return +x; }")]
     [InlineData("char16 Value() { return +42; }")]
+    [InlineData("uint32 Value() { return -(5); }")]
+    [InlineData("uint64 Value() { return -(5); }")]
     public async Task FrontendComponentRejectsUnsupportedScalarLiteralOperatorAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

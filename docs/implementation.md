@@ -910,7 +910,7 @@ emitter. It rejects other entry signatures before replacing output;
 writing a PE file, returning its raw exit code with no success envelope;
 the hosted compiler remains in parallel for general builds. This bounded
 result is a provisional component protocol, not approved TRRM metadata or a
-compiler self-build. One hundred and sixty-seven shared scalar/conditional/Boolean/integer-literal sources produce
+compiler self-build. One hundred and seventy shared scalar/conditional/Boolean/integer-literal sources produce
 byte-identical DLLs through the Terrum-authored frontend and hosted compiler
 under both runtime policies; this does not establish parity for unsupported
 source shapes, independent native emitters or a self-build. Twenty-seven bounded
