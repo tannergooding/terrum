@@ -8,7 +8,7 @@ using System.IO;
 namespace Terrum.CodeAnalysis.Modules;
 
 /// <summary>Inspects the root-free, forward-branching scalar compact-indexed subset.</summary>
-/// <remarks>Only checked integer addition, forward Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
+/// <remarks>Only unprefixed scalar constants, Copy, checked integer addition, forward Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
 public readonly ref struct TrRmCompactIndexedBodyReader
 {
     private readonly record struct Edge(int Target, int[] Arguments);
@@ -210,7 +210,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
 
             var operations = ReadCount(extent, ref cursor, width);
-            if (operations > (extent.Length - cursor) / 5)
+            if (operations > (extent.Length - cursor) / 3)
             {
                 throw InvalidBody();
             }
@@ -249,27 +249,57 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             {
                 var operationOffset = cursor;
                 useOffset = cursor;
-                if (Read(extent, ref cursor, 1) != 0x15)
-                {
-                    throw InvalidBody();
-                }
-
+                var opcode = Read(extent, ref cursor, 1);
                 var result = ReadCount(extent, ref cursor, 1);
-                var kind = Read(extent, ref cursor, 1);
-                var left = ReadCount(extent, ref cursor, 1);
-                var right = ReadCount(extent, ref cursor, 1);
                 if (result != nextResult++ || result > ValueCount || owner[result] != block
-                    || definitions[result - 1] != operationOffset || kind != 1
-                    || valueTypes[result] is not (8 or 9 or 0x0D or 0x0E)
-                    || left <= 0 || left > ValueCount || right <= 0 || right > ValueCount
-                    || valueTypes[left] != valueTypes[result]
-                    || valueTypes[right] != valueTypes[result])
+                    || definitions[result - 1] != operationOffset)
                 {
                     throw InvalidBody();
                 }
 
-                Use(left, ordinal);
-                Use(right, ordinal);
+                if (opcode is 1 or 2)
+                {
+                    var typeId = ReadCount(extent, ref cursor, 1);
+                    var bits = Read(extent, ref cursor, 1);
+                    if (typeId == 0 || typeId > typeCount
+                        || mappedTypes[typeId] != valueTypes[result]
+                        || opcode == 1 && valueTypes[result] == 1 && bits > 1
+                        || opcode == 2 && (valueTypes[result] is not (8 or 9 or 0x0D or 0x0E)
+                            || bits > 0x7F && valueTypes[result] is (0x0D or 0x0E)))
+                    {
+                        throw InvalidBody();
+                    }
+                }
+                else if (opcode == 3)
+                {
+                    var source = ReadCount(extent, ref cursor, 1);
+                    Use(source, ordinal);
+                    if (valueTypes[source] != valueTypes[result])
+                    {
+                        throw InvalidBody();
+                    }
+                }
+                else if (opcode == 0x15)
+                {
+                    var kind = Read(extent, ref cursor, 1);
+                    var left = ReadCount(extent, ref cursor, 1);
+                    var right = ReadCount(extent, ref cursor, 1);
+                    if (kind != 1 || valueTypes[result] is not (8 or 9 or 0x0D or 0x0E)
+                        || left <= 0 || left > ValueCount || right <= 0 || right > ValueCount
+                        || valueTypes[left] != valueTypes[result]
+                        || valueTypes[right] != valueTypes[result])
+                    {
+                        throw InvalidBody();
+                    }
+
+                    Use(left, ordinal);
+                    Use(right, ordinal);
+                }
+                else
+                {
+                    throw InvalidBody();
+                }
+
                 if (defined[result])
                 {
                     throw InvalidBody();

@@ -542,7 +542,53 @@ public sealed class TrRmBodyExampleTests
         Assert.Equal((1, 0), InspectIndexed(section, 0));
     }
 
-    private static (int Blocks, int Values) InspectIndexed(byte[] section, int parameterCount = 3)
+    [Fact]
+    public void CompactIndexedReaderChecksConstantAndCopyDefinitions()
+    {
+        var section = IndexedConstantCopy();
+        Assert.Equal((1, 2), InspectIndexed(section, 0));
+
+        section[35] = 2;
+        section[38] = 0xFF;
+        Assert.Equal((1, 2), InspectIndexed(section, 0));
+        Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(section, 0, secondTypeCode: 0x0D));
+    }
+
+    [Theory]
+    [InlineData(13, 0)]
+    [InlineData(23, 0)]
+    [InlineData(35, 0xF0)]
+    [InlineData(37, 0)]
+    [InlineData(41, 2)]
+    [InlineData(38, 0xFF)]
+    public void CompactIndexedReaderRejectsInvalidScalarOperations(int offset, byte value)
+    {
+        var section = IndexedConstantCopy();
+        section[offset] = value;
+        if (offset == 38)
+        {
+            section[13] = 1;
+            Assert.Throws<InvalidDataException>(() =>
+                InspectIndexed(section, 0, resultTypeSpec: 1));
+            return;
+        }
+
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
+    }
+
+    private static byte[] IndexedConstantCopy()
+        =>
+        [
+            0, 0, 0, 0, 36, 0, 0, 0,
+            0x08, 1, 2, 0, 1, 2, 0, 0, 0,
+            1, 1, 1, 1, 0, 2, 7, 11, 0, 16, 14,
+            0x10, 2, 1, 1, 2, 2, 2,
+            1, 1, 1, 42, 3, 2, 1, 0x83, 2,
+        ];
+
+    private static (int Blocks, int Values) InspectIndexed(byte[] section,
+        int parameterCount = 3, byte secondTypeCode = 8, int resultTypeSpec = 2)
     {
         var names = new TrRmStringTableReader(
             TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]), 2);
@@ -557,11 +603,11 @@ public sealed class TrRmBodyExampleTests
         byte[] typeBytes =
         [
             0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0,
-            1, 0, 1, 1, 0, 8,
+            1, 0, 1, 1, 0, secondTypeCode,
         ];
         var types = new TrRmTypeSpecTableReader(typeBytes, 2, 0, 0, 0, 0);
         var signature = new byte[24];
-        BinaryPrimitives.WriteUInt32LittleEndian(signature, 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(signature, (uint)resultTypeSpec);
         BinaryPrimitives.WriteUInt32LittleEndian(signature.AsSpan(8), parameterCount == 0 ? 0u : 1u);
         BinaryPrimitives.WriteUInt32LittleEndian(signature.AsSpan(12), (uint)parameterCount);
         var signatures = new TrRmMethodSigTableReader(signature, 1, types, parameterCount, 0);
