@@ -2916,6 +2916,9 @@ public sealed class ManagedScannerComponentTests
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return (-5) + x; }", 47, 0)]
     [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return ((x)) + ((-5)); }", 47, 0)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return x - (-5); }", 37, 0)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return x + +5; }", 37, 0)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return (+5) + x; }", 37, 0)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return x - (+5); }", 47, 0)]
     public async Task NativeScalarFrontendParameterLiteralFactsExecuteAsync(
         NativeRuntimePolicy policy, string text, int first, int second)
     {
@@ -3017,6 +3020,12 @@ public sealed class ManagedScannerComponentTests
         PrimitiveType.Int32, int.MinValue, 1365)]
     [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return x == -0xFFFFFFFF; }",
         PrimitiveType.Int32, 1L, 1365)]
+    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return x < +42; }",
+        PrimitiveType.Int32, 41L, 1767)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return (+42) < x; }",
+        PrimitiveType.Int32, 43L, 1967)]
+    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(uint64 x) { return x == +42; }",
+        PrimitiveType.UInt64, 42L, 1765)]
     [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int64 x) { return x != -9223372036854775808; }",
         PrimitiveType.Int64, 0L, 1366)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int64 x) { return -9223372036854775808 == x; }",
@@ -3038,9 +3047,9 @@ public sealed class ManagedScannerComponentTests
         {
             BinaryPrimitives.WriteInt32LittleEndian(bytes, 3);
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-            BinaryPrimitives.WriteInt32LittleEndian(bytes, 5);
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, operation >= 1600 ? 6 : 5);
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(23 * sizeof(int)),
-                operation - 1200);
+                operation - (operation >= 1600 ? 1600 : 1200));
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(23 * sizeof(int)), operation);
         }

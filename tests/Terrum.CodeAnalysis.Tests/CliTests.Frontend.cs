@@ -222,6 +222,12 @@ public sealed partial class CliTests
     [InlineData("public bool Value(int32 x) { return (-5) < x; }")]
     [InlineData("public bool Value(int32 x) { return x == -2147483648; }")]
     [InlineData("public bool Value(int32 x) { return x == -0xFFFFFFFF; }")]
+    [InlineData("public int32 Value(int32 x) { return x + +5; }")]
+    [InlineData("public int32 Value(int32 x) { return (+5) + x; }")]
+    [InlineData("public int32 Value(int32 x) { return x - (+5); }")]
+    [InlineData("public bool Value(int32 x) { return x < +42; }")]
+    [InlineData("public bool Value(int32 x) { return (+42) < x; }")]
+    [InlineData("public bool Value(uint64 x) { return x == +42; }")]
     [InlineData("public bool Value(int64 x) { return x == -9223372036854775808; }")]
     [InlineData("public uint32 Value(uint32 x) { return 0xFFFFFFFF - x; }")]
     [InlineData("public int64 Value(int64 x) { return 9223372036854775807 - x; }")]
@@ -623,6 +629,7 @@ public sealed partial class CliTests
     [InlineData("int32 Value(int32 x) { return x + -2147483649; }", "2147483649")]
     [InlineData("bool Value(int64 x) { return -9223372036854775809 < x; }", "9223372036854775809")]
     [InlineData("uint32 Value(uint32 x) { return x + -1; }", "1")]
+    [InlineData("int32 Value(int32 x) { return x + +2147483648; }", "2147483648")]
     [InlineData("uint32 Value() { return +(4294967296); }", "4294967296")]
     public async Task FrontendComponentRejectsOutOfRangeBinaryLiteralAsync(string source,
         string invalidLiteral)

@@ -13,6 +13,7 @@ namespace Terrum.CodeAnalysis;
 // for a parameter on the left, or 300/400 for one on the right (parameter 1/2).
 // The two slots hold the literal's low/high magnitude words.
 // Version-5 unary minus on that literal adds another 1200 to the operation.
+// Version-6 unary plus on that literal adds another 1600.
 // Boolean parameter/literal pairs add 700 for a parameter on the left or
 // 900 for a literal on the left; slots hold the parameter index and literal kind.
 // Boolean literal pairs add 1100; both slots hold literal kinds.
@@ -301,7 +302,7 @@ mut class ScalarFrontendState
             groups = groups + 1;
             cursor = cursor + 1;
         }
-        if (_tokens.TryGet(cursor, out var sign) && sign.Kind == 58)
+        if (_tokens.TryGet(cursor, out var sign) && (sign.Kind == 57 || sign.Kind == 58))
         {
             cursor = cursor + 1;
         }
@@ -336,6 +337,28 @@ mut class ScalarFrontendState
             cursor = cursor + 1;
         }
         return _tokens.TryGet(cursor, out var operand) && operand.Kind == kind;
+    }
+
+    private bool IsScalarBinaryOperator(int32 kind)
+    {
+        return (kind >= 57 && kind <= 61)
+            || (kind >= 65 && kind <= 70)
+            || kind == 71 || kind == 73 || kind == 75;
+    }
+
+    private bool HasBinaryAfterOperand(int32 cursor, int32 groups)
+    {
+        mut int32 at = cursor;
+        for (mut int32 index = 0; index < groups; index = index + 1)
+        {
+            if (!_tokens.TryGet(at, out var close) || close.Kind != 47)
+            {
+                return false;
+            }
+            at = at + 1;
+        }
+        return _tokens.TryGet(at, out var following)
+            && IsScalarBinaryOperator(following.Kind);
     }
 
     private mut bool ParseExpressionCore(int32 expectedType, out ScalarFrontendExpression expression)
@@ -503,7 +526,8 @@ mut class ScalarFrontendState
             return true;
         }
         if (literal.Kind == 57
-            && _tokens.TryGet(_at + 1, out var plusOperand) && plusOperand.Kind == 3)
+            && _tokens.TryGet(_at + 1, out var plusOperand) && plusOperand.Kind == 3
+            && !HasBinaryAfterOperand(_at + 2, prefixGroups))
         {
             if (expectedType < 1 || expectedType > 4)
             {
@@ -525,7 +549,8 @@ mut class ScalarFrontendState
         }
         mut Token numberToken = literal;
         bool negative = literal.Kind == 58;
-        if (negative && _tokens.TryGet(_at + 1, out var nextNumber)
+        bool positive = literal.Kind == 57;
+        if ((negative || positive) && _tokens.TryGet(_at + 1, out var nextNumber)
             && nextNumber.Kind == 3)
         {
             numberToken = nextNumber;
@@ -533,7 +558,7 @@ mut class ScalarFrontendState
         if (numberToken.Kind == 3)
         {
             mut int32 tokenIndex = _at;
-            if (negative)
+            if (negative || positive)
             {
                 tokenIndex = tokenIndex + 1;
             }
@@ -572,6 +597,10 @@ mut class ScalarFrontendState
                 if (negative)
                 {
                     signedOffset = 1200;
+                }
+                else if (positive)
+                {
+                    signedOffset = 1600;
                 }
                 require ScalarFrontendExpression.TryCreate(5,
                     following.Kind + (parameter + 2) * 100 + signedOffset,
@@ -643,6 +672,10 @@ mut class ScalarFrontendState
                 if (negative)
                 {
                     signedOffset = 1200;
+                }
+                else if (positive)
+                {
+                    signedOffset = 1600;
                 }
                 require ScalarFrontendExpression.TryCreate(expectedType,
                     next.Kind + (parameter + 2) * 100 + signedOffset,
@@ -753,12 +786,13 @@ mut class ScalarFrontendState
             _at = _at + 1;
             require BeginUnaryOperand(out var right, out var groups);
             mut Token number = right;
-            mut bool negativeRight = false;
-            if (right.Kind == 58 && _tokens.TryGet(_at + 1, out var signedNumber)
+            mut int32 unaryKind = 0;
+            if ((right.Kind == 57 || right.Kind == 58)
+                && _tokens.TryGet(_at + 1, out var signedNumber)
                 && signedNumber.Kind == 3)
             {
                 number = signedNumber;
-                negativeRight = true;
+                unaryKind = right.Kind;
             }
             if (((operation >= 71 && operation <= 75)
                     || operation == 65 || operation == 66)
@@ -786,7 +820,7 @@ mut class ScalarFrontendState
                 || operation == 71 || operation == 73 || operation == 75)
                 && number.Kind == 3)
             {
-                if (negativeRight)
+                if (unaryKind != 0)
                 {
                     _at = _at + 1;
                 }
@@ -797,7 +831,7 @@ mut class ScalarFrontendState
                     return false;
                 }
                 int32 index = _at;
-                if (!TryReadMagnitude(number, index, selected, negativeRight,
+                if (!TryReadMagnitude(number, index, selected, unaryKind == 58,
                     number.Range, out var low, out var high)
                     || !FinishUnaryOperand(number, groups, out end))
                 {
@@ -811,9 +845,13 @@ mut class ScalarFrontendState
                     resultType = 5;
                 }
                 mut int32 signedOffset = 0;
-                if (negativeRight)
+                if (unaryKind == 58)
                 {
                     signedOffset = 1200;
+                }
+                else if (unaryKind == 57)
+                {
+                    signedOffset = 1600;
                 }
                 require ScalarFrontendExpression.TryCreate(resultType,
                     operation + leftIndex * 100 + signedOffset,
