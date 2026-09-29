@@ -471,6 +471,25 @@ public sealed class TrRmBodyExampleTests
         Assert.Equal((3, 4), InspectIndexed(section));
     }
 
+    [Fact]
+    public void CompactIndexedReaderInspectsForwardMergeArguments()
+    {
+        var section = ReadExample("#### Compact indexed conditional merge");
+        Assert.Equal((4, 4), InspectIndexed(section));
+    }
+
+    [Theory]
+    [InlineData(75, 3)]
+    [InlineData(77, 1)]
+    [InlineData(89, 2)]
+    [InlineData(93, 3)]
+    public void CompactIndexedReaderRejectsInvalidMergeEdges(int offset, byte value)
+    {
+        var section = ReadExample("#### Compact indexed conditional merge");
+        section[offset] = value;
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(section));
+    }
+
     [Theory]
     [InlineData(24, 1)]
     [InlineData(36, 13)]

@@ -1228,13 +1228,13 @@ structural command remains Body-opaque. When SourceMap is present, the opt-in
 check also verifies that each instruction slot addresses the inferred sole
 block and an existing operation or its terminator; it does not verify
 source-file contents.
-A separate compact-indexed reader checks the approved conditional-sum
-example and its bounded scalar subset: root-free, fail-fast bodies without
-regions, forward `BranchIf` edges without arguments, unprefixed checked
-integer add,
+A separate compact-indexed reader checks the approved conditional-sum and
+merge examples and their bounded scalar subset:
+root-free, fail-fast bodies without regions, forward `Branch` and `BranchIf`
+edges with checked typed block arguments, unprefixed checked integer add,
 `Return` and `Fail`. It checks type/definition/use indexes, operation and
 terminator offsets and live-in/out inventories against the decoded blocks.
-It rejects other assigned indexed operations, backedges and merge arguments.
+It rejects other assigned indexed operations and backedges.
 `terrumc validate-trrm-compact-indexed <artifact> [--json]` opts into this
 subset across all owned Body rows after structural metadata checks; when
 SourceMap is present it checks block and operation/terminator ordinals.

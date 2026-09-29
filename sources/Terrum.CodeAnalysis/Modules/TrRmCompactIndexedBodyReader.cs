@@ -8,9 +8,11 @@ using System.IO;
 namespace Terrum.CodeAnalysis.Modules;
 
 /// <summary>Inspects the root-free, forward-branching scalar compact-indexed subset.</summary>
-/// <remarks>Only checked integer addition, BranchIf without edge arguments, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
+/// <remarks>Only checked integer addition, forward Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
 public readonly ref struct TrRmCompactIndexedBodyReader
 {
+    private readonly record struct Edge(int Target, int[] Arguments);
+
     private readonly int[] _operationCounts;
 
     public int BlockCount { get; }
@@ -118,7 +120,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         var blockParameters = new int[BlockCount + 1][];
         var liveIns = new int[BlockCount + 1][];
         var liveOuts = new int[BlockCount + 1][];
-        var successors = new int[BlockCount + 1][];
+        var successors = new Edge[BlockCount + 1][];
         var externalUses = new HashSet<int>[BlockCount + 1];
         for (var block = 1; block <= BlockCount; block++)
         {
@@ -189,9 +191,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 }
             }
 
-            var expectedParameters = block == 1 ? parameterCount : 0;
-            if (blockParameters[block].Length != expectedParameters
-                || block == 1 && (liveIns[block].Length != 0
+            if (block == 1 && (blockParameters[block].Length != parameterCount
+                || liveIns[block].Length != 0
                     || !ParametersMatch(blockParameters[block], parameters, types,
                         firstParameter, valueTypes)))
             {
@@ -215,7 +216,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
 
             _operationCounts[block] = operations;
-            var nextResult = (int)starts[block - 1] + expectedParameters + 1;
+            var nextResult = (int)starts[block - 1] + blockParameters[block].Length + 1;
             var observedLastUses = new Dictionary<int, int>();
             externalUses[block] = new HashSet<int>();
             var useOffset = cursor;
@@ -298,9 +299,27 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 }
 
                 Use(condition, operations);
-                var trueTarget = ReadEdge(extent, ref cursor, block, BlockCount);
-                var falseTarget = ReadEdge(extent, ref cursor, block, BlockCount);
-                successors[block] = [trueTarget, falseTarget];
+                var whenTrue = ReadEdge(extent, ref cursor, block, BlockCount, ValueCount);
+                var whenFalse = ReadEdge(extent, ref cursor, block, BlockCount, ValueCount);
+                successors[block] = [whenTrue, whenFalse];
+                foreach (var edge in successors[block])
+                {
+                    foreach (var value in edge.Arguments)
+                    {
+                        Use(value, operations);
+                    }
+                }
+
+            }
+            else if (terminator == 0x80)
+            {
+                var edge = ReadEdge(extent, ref cursor, block, BlockCount, ValueCount);
+                foreach (var value in edge.Arguments)
+                {
+                    Use(value, operations);
+                }
+
+                successors[block] = [edge];
             }
             else if (terminator == 0x83)
             {
@@ -368,18 +387,34 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 throw InvalidBody();
             }
 
-            foreach (var target in successors[block])
+            foreach (var edge in successors[block])
             {
-                reachable[target] = true;
+                reachable[edge.Target] = true;
             }
         }
 
         for (var block = BlockCount; block > 0; block--)
         {
             var neededOut = new HashSet<int>();
-            foreach (var target in successors[block])
+            foreach (var edge in successors[block])
             {
-                neededOut.UnionWith(liveIns[target]);
+                var targetParameters = blockParameters[edge.Target];
+                if (targetParameters.Length != edge.Arguments.Length)
+                {
+                    throw InvalidBody();
+                }
+
+                for (var argument = 0; argument < targetParameters.Length; argument++)
+                {
+                    if (valueTypes[targetParameters[argument]]
+                        != valueTypes[edge.Arguments[argument]])
+                    {
+                        throw InvalidBody();
+                    }
+                }
+
+                neededOut.UnionWith(liveIns[edge.Target]);
+                neededOut.UnionWith(edge.Arguments);
             }
 
             if (!neededOut.SetEquals(liveOuts[block]))
@@ -423,16 +458,24 @@ public readonly ref struct TrRmCompactIndexedBodyReader
     private static bool Contains(int[] values, int value)
         => Array.BinarySearch(values, value) >= 0;
 
-    private static int ReadEdge(ReadOnlySpan<byte> data, ref int position, int block, int count)
+    private static Edge ReadEdge(ReadOnlySpan<byte> data, ref int position,
+        int block, int count, int valueCount)
     {
         var target = ReadCount(data, ref position, 1);
         var arguments = ReadCount(data, ref position, 1);
-        if (target <= block || target > count || arguments != 0)
+        if (target <= block || target > count || arguments > valueCount
+            || arguments > data.Length - position)
         {
             throw InvalidBody();
         }
 
-        return target;
+        var values = new int[arguments];
+        for (var index = 0; index < arguments; index++)
+        {
+            values[index] = ReadCount(data, ref position, 1);
+        }
+
+        return new Edge(target, values);
     }
 
     private static int[] ReadList(ReadOnlySpan<byte> data, ref int position, int width,
