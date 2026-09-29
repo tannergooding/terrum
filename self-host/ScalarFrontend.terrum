@@ -240,6 +240,55 @@ mut class ScalarFrontendState
     private mut bool ParseExpressionCore(int32 expectedType, out ScalarFrontendExpression expression)
     {
         require _tokens.TryGet(_at, out var literal);
+        if (literal.Kind == 62)
+        {
+            _at = _at + 1;
+            require _tokens.TryGet(_at, out var operand);
+            mut int32 parameter = 0;
+            mut int32 booleanKind = 0;
+            if (operand.Kind == 20 || operand.Kind == 21)
+            {
+                booleanKind = operand.Kind;
+            }
+            else if (operand.Kind == 2)
+            {
+                if (_parameterCount > 0 && SameTokenSpelling(_first, operand))
+                {
+                    parameter = 1;
+                    if (_firstType != 5)
+                    {
+                        FailAt(2, operand.Range);
+                        return false;
+                    }
+                }
+                else if (_parameterCount > 1 && SameTokenSpelling(_second, operand))
+                {
+                    parameter = 2;
+                    if (_secondType != 5)
+                    {
+                        FailAt(2, operand.Range);
+                        return false;
+                    }
+                }
+                else
+                {
+                    FailAt(3, operand.Range);
+                    return false;
+                }
+            }
+            else
+            {
+                FailAt(1, operand.Range);
+                return false;
+            }
+            _at = _at + 1;
+            require SourceRange.TryCreate(literal.Range.Start,
+                operand.Range.End - literal.Range.Start, out var span);
+            require ScalarFrontendExpression.TryCreate(5, 62, parameter, booleanKind,
+                span, out var negated);
+            expression = negated;
+            return true;
+        }
         mut Token numberToken = literal;
         bool negative = literal.Kind == 58;
         if (negative && _tokens.TryGet(_at + 1, out var nextNumber)

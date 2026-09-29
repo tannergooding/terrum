@@ -144,6 +144,31 @@ public static class ScalarFrontendHost
             var right = expression.RightParameter;
             var leftType = left == 1 ? words[7] : words[8];
             var rightType = right == 1 ? words[7] : words[8];
+            if (operation == 62)
+            {
+                if (words[0] != 3 || expression.Type != 5 || type != 5
+                    || !ValidSpan(expression.Span, nonempty: true))
+                {
+                    return false;
+                }
+                var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
+                    expression.Span.Start, expression.Span.Length)));
+                var tokens = lexical.Tokens;
+                if (!lexical.Diagnostics.IsEmpty || tokens.Length != 3
+                    || tokens[0].Kind != TokenKind.Bang || tokens[0].Span.Start != 0
+                    || tokens[1].Span.End != expression.Span.Length)
+                {
+                    return false;
+                }
+                if (left == 0)
+                {
+                    return right is 20 or 21 && tokens[1].Kind == (TokenKind)right;
+                }
+                var name = left == 1 ? firstName : secondName;
+                return right == 0 && left >= 1 && left <= parameters && leftType == 5
+                    && tokens[1].Kind == TokenKind.Identifier
+                    && tokens[1].Text == source.Text.Substring(name.Start, name.Length);
+            }
             if (operation is 157 or 158 or 257 or 258 or 357 or 358 or 457 or 458)
             {
                 var literalFirst = operation >= 300;
@@ -347,6 +372,19 @@ public static class ScalarFrontendHost
 
         BoundExpression Expression(ScalarFrontendExpression expression)
         {
+            if (expression.Operation == 62)
+            {
+                var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
+                    expression.Span.Start, expression.Span.Length)));
+                var token = lexical.Tokens[1];
+                var operandSpan = new TextSpan(expression.Span.Start + token.Span.Start, token.Span.Length);
+                BoundExpression operand = expression.LeftParameter == 0
+                    ? new BoundConstant(expression.RightParameter == 20 ? 1 : 0,
+                        PrimitiveType.Bool, operandSpan)
+                    : new BoundRead(expression.LeftParameter - 1, PrimitiveType.Bool, operandSpan);
+                return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Bang, operand,
+                    PrimitiveType.Bool, expression.Span));
+            }
             if (expression.Operation is 157 or 158 or 257 or 258 or 357 or 358 or 457 or 458)
             {
                 var literalFirst = expression.Operation >= 300;
