@@ -6,9 +6,11 @@
 > productions below.
 
 This proposal covers source notation, candidate syntax, and selected semantic
-constraints. It is not a complete or approved language specification; exact
-grammar and several semantic contracts remain open. Examples are informative
-unless explicitly identified as accepted semantic direction.
+constraints. It inventories known gaps as well as candidate productions so
+that a tool does not mistake lexer recognition or an example for support.
+It is not an approved language specification; exact grammar and several
+semantic contracts remain open. Examples are informative unless explicitly
+identified as accepted semantic direction.
 
 The [language](../language.md), [memory model](../memory-model.md),
 [conversions](../conversions.md), [lifetimes](../lifetimes.md), and
@@ -59,14 +61,14 @@ syntax boundaries:
 
 - Source positions and token lengths count UTF-16 code units. Identifier starts/continues follow the pinned Unicode 17.0.0 XID properties plus `_`; spelling is ordinal, case-sensitive, and not normalized. Keywords are lower-case ASCII token spellings. Primitive names such as `int32` are ordinary identifiers.
 - Whitespace and comments are leading trivia; line breaks include CRLF, CR, LF, NEL, LS, PS. Line/block comments do not nest. EOF owns trailing trivia.
-- Numeric tokens are unsuffixed decimal, hexadecimal (`0x`/`0X`), or binary (`0b`/`0B`) forms with separators between digits and, for based values, immediately after the prefix. Decimal fraction/exponent spellings lex but are not executable values. Signs are separate operators except an exponent sign. Width suffixes are rejected; `10i32` is not a typed literal. `_123` is an identifier.
+- The current lexer recognizes unsuffixed decimal, hexadecimal (`0x`/`0X`), or binary (`0b`/`0B`) numbers with separators between digits and, for based values, immediately after the prefix. Decimal fraction/exponent spellings lex but are not executable values. Hexadecimal floating-point syntax below is a **proposal**, not part of that lexer contract. Signs are separate operators except an exponent sign. Width suffixes are rejected; `10i32` is not a typed literal. `_123` is an identifier.
 - Strings use `"..."` with the documented escapes; no interpolation exists. Character literals and numeric suffixes are not tokens.
 - Lexical diagnostics preserve malformed source spelling; bad characters/surrogates, invalid escapes, unterminated literals/comments, bad prefixes, separators, and attached width suffixes have distinct diagnostic codes in the lexical reference.
 
 The schematic lexical terminals used below are:
 
 ```ebnf
-Identifier       = lexer identifier token ;
+Identifier       = lexer-identifier-token ;
 Number           = DecimalNumber | HexInteger | BinaryInteger ;
 DecimalNumber    = DecimalDigits, [ ".", DecimalDigits ],
                    [ ( "e" | "E" ), [ "+" | "-" ], DecimalDigits ] ;
@@ -86,11 +88,48 @@ Null             = "null" ;
 Trivia           = whitespace | line-comment | non-nesting-block-comment ;
 ```
 
+`lexer-identifier-token` denotes the single lexical Identifier token, excluding
+keywords and the standalone reserved `_`; it is not three grammar symbols.
 `StringCharacter` excludes an unescaped quote, backslash, or line break; `\U` must decode to a Unicode scalar. Separators may repeat between digits and after a based prefix, but not at the end of a run or beside a decimal point/exponent marker/sign. The lexical reference defines malformed-token recovery and exact diagnostics.
 
 `Number` is one token: unary `-` is an operator, not part of the number.
 Numeric target selection/range and the lack of a default type are semantic
 rules (see [conversions](../conversions.md)).
+
+**PROPOSED lexical extension, not currently recognized or executable:** a hex
+float requires a binary exponent (`p`/`P`) so `0x1f` remains an integer and
+`0x1.fp+2` denotes a candidate floating token. It may have digits on either
+side of the point, but not neither. The exponent has decimal digits; `_`
+separators follow the existing between-digits rules. A leading sign is a
+separate unary operator, apart from the exponent sign.
+
+```ebnf
+HexFloat       = ( "0x" | "0X" ), ( { "_" }, HexDigits, [ ".", [ HexDigits ] ]
+               | ".", HexDigits ), ( "p" | "P" ), [ "+" | "-" ], DecimalDigits ;
+HexDigits      = HexDigit, { { "_" }, HexDigit } ;
+```
+
+The hex-float proposal does **not** extend the current `Number` production or
+override the [lexical grammar](../lexical-grammar.md); doing so requires
+coordinated token boundaries and diagnostics (including incomplete `p`
+exponents, separators and identifier tails), target-format rounding and
+literal conversion rules, and implementation tests. Neither decimal nor
+hexadecimal floating spellings have an executable value in the present
+frontend.
+
+Primitive names (`int32`, `float32`, `bool`, `char16`, etc.) are ordinary
+identifiers resolved against compiler/library types, **not** reserved lexical
+keywords; this proposal does not assume a complete built-in type inventory.
+`void` is a distinct keyword. The current lexer's keyword tokens are `using`,
+`namespace`, `public`, `internal`, `private`, `static`, `void`, `var`, `mut`,
+`ref`, `out`, `if`, `else`, `while`, `return`, `true`, `false`, `struct`,
+`class`, `interface`, `enum`, `union`, `unique`, `own`, `move`, `new`, `for`,
+`foreach`, `break`, `continue`, `switch`, `case`, `default`, `null`, `async`,
+`await`, `require`, `try`, `catch`, `finally`, `throw`, `unsafe`, `abstract`,
+`operator`, `where`, and `write`. Recognition alone does not authorize any
+source form. Candidate words such as `init`, `ensure`, `get`, `some` and `const`
+need explicit keyword-versus-contextual-token decisions before adoption;
+they are not all current keyword tokens. `_` is its own reserved token.
 
 ## 3. Candidate grammar productions (PROPOSED)
 
@@ -107,40 +146,76 @@ FileNamespace   = "namespace", DottedIdentifier, ";" ;
 DottedIdentifier = Identifier, { ".", Identifier } ;
 
 TopDeclaration = Prefix, ( StructDecl | ClassDecl | InterfaceDecl
-                            | FunctionDecl | OperatorDecl ) ;
-MemberDeclaration = Prefix, ( StructDecl | ClassDecl | InterfaceDecl
-                            | ConstructorDecl | FunctionDecl | OperatorDecl
-                            | FieldDecl ) ;
-Prefix          = { Attribute }, { Modifier | "abstract" } ;
-Attribute       = "[", Identifier, "]" ;
-Modifier        = "public" | "internal" | "private" | "static" | "mut" | "unique" ;
-
-StructDecl      = "struct", Identifier, [ ConformanceList ], "{", { MemberDeclaration }, "}" ;
-ClassDecl       = "class", Identifier, "{", { MemberDeclaration }, "}" ;
-InterfaceDecl   = "interface", Identifier, TypeParameterList,
-                  "{", { InterfaceMemberDeclaration }, "}" ;
+                           | EnumDecl | FunctionDecl ) ;
+MemberDeclaration = Prefix, ( ConstructorDecl | FunctionDecl | OperatorDecl
+                            | FieldDecl | PropertyDecl ) ;
 InterfaceMemberDeclaration = Prefix,
-                             ( StructDecl | ClassDecl | InterfaceDecl
-                             | FunctionDecl | OperatorDecl ) ;
+                             ( FunctionDecl | OperatorDecl | PropertyDecl ) ;
+Prefix          = { Attribute }, { DeclarationModifier } ;
+Attribute       = "[", Identifier, "]" ;
+DeclarationModifier = "public" | "internal" | "private" | "static"
+                    | "mut" | "unique" | "unsafe" | "abstract" ;
+
+StructDecl      = "struct", Identifier, [ TypeParameterList ],
+                  [ ConformanceList ], { ConstraintClause },
+                  "{", { MemberDeclaration }, "}" ;
+ClassDecl       = "class", Identifier, [ TypeParameterList ],
+                  [ ConformanceList ], { ConstraintClause },
+                  "{", { MemberDeclaration }, "}" ;
+InterfaceDecl   = "interface", Identifier, [ TypeParameterList ],
+                  [ InterfaceBaseList ], { ConstraintClause },
+                  "{", { InterfaceMemberDeclaration }, "}" ;
+EnumDecl        = "enum", Identifier, ":", IntegralType,
+                  "{", [ EnumMember, { ",", EnumMember }, [ "," ] ], "}" ;
+EnumMember      = Identifier, [ "=", ConstantExpression ] ;
 ConformanceList = ":", Type, { ",", Type } ;
+InterfaceBaseList = ":", Type, { ",", Type } ;
+IntegralType    = DottedIdentifier ;
+ConstantExpression = Expression ;
 ConstructorDecl = Identifier, ParameterList, Block ;
 FunctionDecl    = Type, Identifier, [ TypeParameterList ], ParameterList,
-                  { ConstraintClause }, Block ;
+                  { ConstraintClause }, ( ";" | Block ) ;
 OperatorDecl    = Type, "operator", OperatorSymbol, ParameterList, ( ";" | Block ) ;
 FieldDecl       = Type, Identifier, [ "=", Expression ], ";" ;
+PropertyDecl    = Type, Identifier, "{", GetterDecl, "}" ;
+GetterDecl      = { Attribute }, "get", ( ";" | Block ) ;
 
 TypeParameterList = "<", Identifier, { ",", Identifier }, ">" ;
 ConstraintClause  = "where", Identifier, ":",
                     ( Type | "[", Identifier, "]" ),
                     { ",", ( Type | "[", Identifier, "]" ) } ;
-OperatorSymbol    = "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^"
-                  | "==" | "!=" | "<" | "<=" | ">" | ">=" ;
+OperatorSymbol  = "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^"
+                | "==" | "!=" | "<" | "<=" | ">" | ">=" | "!" | "~"
+                | "++" | "--" | "true" | "false" ;
 ```
 
 This candidate requires a single file-scoped namespace after using directives
 and before declarations. Fields and constructors occur in class/struct bodies;
-interface members do not include fields or constructors. These are proposed
-grammar boundaries, not implementation facts.
+interface members do not include fields or constructors. Operators belong to
+the declaring nominal type or an interface contract, **not** a global
+declaration. Retroactive behavior for another type needs an explicit adapter
+or wrapper witness, not a global extension operator. `abstract` is a
+candidate modifier only for an unimplemented interface requirement (not a
+concrete type or a class method); an interface member with a body is a default
+implementation. `static abstract` describes a static interface requirement,
+not concrete inheritance. The candidate generic type parameters and
+conformance lists apply to structs **and** classes; interface base lists
+express interface composition, not implementation of an interface by itself.
+The candidate integral enum base and constant-valued members preserve unnamed
+underlying values; `[Flags]` is an optional declaration contract, not a
+different closed enum grammar. `IntegralType` and `ConstantExpression` require
+semantic restrictions beyond their syntactic approximations. Only a
+getter-only property is proposed here, with an explicit body on concrete
+types and a possible bodyless requirement in interfaces. `get` is a
+candidate contextual token; accessor effects attach to its attributes, not
+the entire property. Exactly which modifiers/attributes apply to each
+declaration and their order are **OPEN**, rather than every `Prefix` being
+legal everywhere. A semicolon body denotes an interface requirement, not a
+bodyless top-level or concrete function. Constructors must name their enclosing
+type. The lexer does not yet recognize `++` or `--` as single tokens; their
+inclusion in `OperatorSymbol` is a future source-form proposal, not executable
+syntax. Nested type declarations are deliberately excluded pending the
+decision in [§5.11](#511-nested-types-and-scoped-operators).
 
 ### 3.2 Types, parameters, and arguments
 
@@ -153,7 +228,8 @@ PassingMode     = "ref" | "out" | "mut", "ref" ;
 
 Arguments       = "(", [ Argument, { ",", Argument } ], ")" ;
 Argument        = [ Identifier, ":" ],
-                  ( "out", "var", Identifier | [ PassingMode ], Expression ) ;
+                  ( "out", "var", Identifier | [ PassingMode ], Expression
+                  | "init", Expression ) ;
 ```
 
 Repeated optional markers such as `T??` are not a proposed source form.
@@ -165,8 +241,14 @@ variance.
 
 Argument labels and passing modes are source forms only; argument reordering,
 overload resolution, and output behavior are semantic contracts. The proposed
-`Type` production does not define `init ref<T>`; `init` is a distinct argument
-mode with the accepted call-site spelling `Create(init value)`.
+`Type` production does not define `init ref<T>`; `init` is a
+distinct initialization-loan parameter mode, with the accepted call-site
+spelling `Create(init value)`. `write` qualifies access in a type (for example,
+`write ref<T>`); `mut` qualifies a binding/receiver or a `mut ref` mode.
+Neither `write` nor `init` is an unrestricted declaration modifier. Exact
+`init ref<T>` parameter grammar and legality of `write ref<T>` in `Parameter`
+remain open, and this bounded production must not be used to reject the
+accepted forms.
 
 ### 3.3 Statements and local declarations
 
@@ -245,7 +327,7 @@ Unary           = ( "+" | "-" | "!" | "~" | "move" ), Unary | Postfix ;
 Postfix         = Primary, { ( ".", Identifier | Arguments
                              | "[", Expression, "]" ) } ;
 Primary         = "(", [ Expression ], ")" | "new", Type, Arguments
-                | Number | String | Boolean | Null
+                | Number | HexFloat | String | Boolean | Null
                 | Identifier | Identifier, TypeArguments, Arguments ;
 TypeArguments   = "<", Type, { ",", Type }, ">" ;
 ```
@@ -705,6 +787,95 @@ property/accessor identity and contract rather than a magic naming convention.
 
 The exact property and accessor grammar, effect placement, and metadata
 representation remain open. This example does not claim compiler support.
+
+### 5.11 Nested types and scoped operators
+
+**Recommendation (PROPOSED):** begin with namespace-level nominal types and
+their members; do not make nested type declarations a prerequisite for the
+initial general grammar. Private nesting is genuinely useful for hiding
+implementation details, tying a helper's type parameters to its container,
+and grouping tightly related types. On the other hand, nested public types
+couple API naming and accessibility to their outer type, complicate
+qualification, generic substitution, metadata identity, source lookup and
+binary compatibility, and often read better as separate namespace types.
+Module-internal namespace types already hide a helper from external
+consumers, though not from the rest of its module. Allowing only private
+nesting later is a reasonable next step if use cases justify the added
+binding and identity rules; nesting does not imply an implicit outer
+instance or capture.
+
+**Recommendation (PROPOSED):** do not allow `OperatorDecl` in
+`TopDeclaration`. A user operator is selected from the containing type's
+declared operation or an applicable checked interface witness. Imports and
+extension lookup must not silently add an operator or a witness to a foreign
+type. A distinct explicit adapter/wrapper can implement an extension
+interface without retroactively changing the original type's witness set;
+its operator is a member of that adapter or its interface contract. Define
+any later extension-operator syntax, operand eligibility and selection
+separately rather than interpreting a global `operator` as an extension.
+These choices preserve the [accepted adapter and witness
+semantics](../language.md#interfaces-access-and-generic-properties).
+
+### 5.12 Modifiers, cleanup and finalization
+
+**Accepted semantic separation; exact grammar OPEN:** `public`/`internal`/
+`private` are visibility; `static` is member placement; `mut` controls a
+place/receiver/nominal declaration; `write` qualifies referent access in a
+type; `ref`/`out`/`init ref<T>` are distinct parameter/call-site modes.
+`unique` is an ownership form, not an access synonym. `unsafe` on a callable
+declares caller obligations while an `unsafe { ... }` block scopes operations
+inside a body. `abstract` is meaningful for an interface requirement even
+without concrete inheritance; classes and structs are not abstract bases.
+An unimplemented interface requirement and a default-implemented member
+need distinct, checked contracts. Do not infer legality from the permissive
+`Prefix` parser sketch.
+
+There is no proposed `~Type()` finalizer production. Deterministic
+`[Cleanup]` for an owning value and scope/unwind cleanup are not GC
+finalization: a GC finalizer would need a separate lifecycle, resurrection,
+threading, failure/effects and resource-safety policy. **OPEN:** whether to
+offer finalizers at all; if needed, specify their contract and syntax apart
+from `[Cleanup]`. Do not synthesize finalizers from owner cleanup or class
+declarations.
+
+### 5.13 Operators, assignments and expression gaps
+
+**Accepted semantics, source form OPEN:** user `operator +=` is a separate declared contract from
+`operator +`, using a `write ref<T>` destination; it cannot be desugared to
+read/copy/write or inferred from addition. The same question applies to
+`-=`, `*=`, `/=`, `%=`, `&=`, `|=` and `^=`: spelling, legal places, precedence,
+evaluation order, failure behavior, source tokenization and whether each
+operator is supported must be specified together. The current lexer has
+neither compound-assignment nor increment/decrement tokens, and the candidate
+`AssignmentStatement` only covers `=`. Do not treat compound assignments as
+the existing binary operators followed by `=`.
+
+Still **OPEN** for a full source grammar: nominal safe union cases and
+patterns/matching, associated-type bindings and family/adapter declarations,
+conditional/default conformance, conditional expressions, character and
+text-target fragments, general `const` declarations/expressions, `ensure`
+placement, `init ref<T>` parameters, optional access/ownership forms,
+generic defaults and constructor inference, lambdas, async/await, throw,
+typed catches, interpolation and collections. Reserved `switch`, `case`,
+`foreach`, `async`, `await`, `union`, `throw` and `own` are not implementations
+of those features. They need complete syntax, binding, effects and
+representation rules, not isolated extra alternatives in `Statement` or
+`Primary`. The candidate `Primary` includes `Number` (decimal fractions
+lexically, integer values executable) and proposed `HexFloat`; the latter
+cannot become a lexer token or an executable value without the coordinated
+lexical and numeric work above.
+
+### 5.14 Specification-to-tooling gate
+
+Before promoting this proposal to an approved grammar or using it as a
+conformance source for tools, reconcile every production with the canonical
+lexical tokens (including contextual keywords and longest-match rules),
+restrict modifiers and declaration bodies by context, define all accepted
+semantic forms that currently lack productions, specify static semantics
+for invalid combinations, and add positive/negative parser and token-boundary
+fixtures. Separate the full target language from the bounded
+[implemented syntax](../implementation.md);
+accepting a candidate spelling in an example does not claim compiler support.
 
 ## 6. Examples and conformance boundary
 
