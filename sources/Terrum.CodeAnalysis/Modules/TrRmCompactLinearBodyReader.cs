@@ -111,7 +111,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
         {
             var offset = position;
             var (opcode, referenceWidth, dataWidth) = ReadInstruction(body, ref position);
-            if (opcode is not (1 or 2 or 3 or 4 or 5 or 7 or 0x15 or 0x17)
+            if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 0x15 or 0x16 or 0x17)
                 || valueCount == maximum)
             {
                 throw InvalidBody();
@@ -168,6 +168,31 @@ public readonly ref struct TrRmCompactLinearBodyReader
             else if (opcode == 3)
             {
                 resultType = Use(body, ref position, referenceWidth, result, ordinal);
+            }
+            else if (opcode is 6 or 0x16)
+            {
+                var typeId = ReadLocal(body, ref position, referenceWidth);
+                if (typeId == 0 || typeId > typeCount)
+                {
+                    throw InvalidBody();
+                }
+
+                resultType = mappedTypes[typeId];
+                var policy = opcode == 6 ? ReadByte(body, ref position) : (byte)0;
+                var source = Use(body, ref position, referenceWidth, result, ordinal);
+                var valid = opcode == 0x16
+                    ? (IsInteger(source) || source == 3)
+                        && (IsInteger(resultType) || resultType == 3)
+                    : IsInteger(source) && IsInteger(resultType) && policy switch
+                    {
+                        1 or 2 => true,
+                        3 => BitWidth(source) == BitWidth(resultType),
+                        _ => false,
+                    };
+                if (!valid)
+                {
+                    throw InvalidBody();
+                }
             }
             else if (opcode is 4 or 0x17)
             {

@@ -1208,8 +1208,9 @@ A Body-table reader likewise exposes the validated row count and nonempty row
 bytes without decoding instructions or claiming that the Body is executable.
 A separate compact-linear reader takes the owning MethodDef, MethodSig,
 Param and TypeSpec rows and checks the fail-fast scalar subset of `ConstBits`,
-`ConstSigned`, `Copy`, `Unary`, `Binary`, `Select`, `CheckedBinary`,
-`CheckedNegate`, `Return` and `Fail`. It reconstructs parameter and operation
+`ConstSigned`, `Copy`, `Unary`, `Binary`, `Convert`, `Select`,
+`CheckedBinary`, `CheckedConvert`, `CheckedNegate`, `Return` and `Fail`.
+It reconstructs parameter and operation
 definitions, use-block counts and final uses from the one-block stream,
 including mapped Boolean comparison results, rejecting unknown operations,
 invalid IDs, types, modes, widths and trailing bytes.

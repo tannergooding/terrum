@@ -186,6 +186,35 @@ public sealed class TrRmCompactLinearBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(row, 1, secondTypeCode: 1));
     }
 
+    [Theory]
+    [InlineData(new byte[] { 6, 2, 2, 1, 1 }, (byte)8, (byte)0x0D)]
+    [InlineData(new byte[] { 6, 2, 2, 2, 1 }, (byte)9, (byte)0x0D)]
+    [InlineData(new byte[] { 6, 2, 2, 3, 1 }, (byte)8, (byte)0x0D)]
+    [InlineData(new byte[] { 0x16, 2, 2, 1 }, (byte)3, (byte)0x0D)]
+    [InlineData(new byte[] { 0x16, 2, 2, 1 }, (byte)8, (byte)3)]
+    public void NumericConversionsRetainSelectedPolicyAndTargetType(
+        byte[] operation, byte sourceType, byte destinationType)
+    {
+        var row = OneParameterMappedOperation(operation);
+        var index = Inspect(row, 1, typeCode: sourceType,
+            secondTypeCode: destinationType, resultUsesSecondType: true);
+        Assert.Equal([sourceType, destinationType], index.TypeCodes);
+        Assert.Equal([0, 1], index.LastUses);
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 6, 2, 2, 0, 1 }, (byte)8, (byte)0x0D)]
+    [InlineData(new byte[] { 6, 2, 2, 4, 1 }, (byte)8, (byte)0x0D)]
+    [InlineData(new byte[] { 6, 2, 2, 3, 1 }, (byte)8, (byte)0x0E)]
+    [InlineData(new byte[] { 6, 2, 2, 1, 1 }, (byte)3, (byte)0x0D)]
+    [InlineData(new byte[] { 0x16, 2, 2, 1 }, (byte)1, (byte)8)]
+    [InlineData(new byte[] { 0x16, 2, 3, 1 }, (byte)8, (byte)0x0D)]
+    public void RejectsInvalidConversionPolicyTypesAndTypeId(
+        byte[] operation, byte sourceType, byte destinationType)
+        => Assert.Throws<InvalidDataException>(() =>
+            Inspect(OneParameterMappedOperation(operation), 1, typeCode: sourceType,
+                secondTypeCode: destinationType, resultUsesSecondType: true));
+
     [Fact]
     public void UnusedParameterHasNoUseBlock()
     {
@@ -333,6 +362,17 @@ public sealed class TrRmCompactLinearBodyReaderTests
         operation.CopyTo(row, row.Length - operation.Length - 2);
         row[^2] = 0x83;
         row[^1] = 3;
+        return row;
+    }
+
+    private static byte[] OneParameterMappedOperation(byte[] operation)
+    {
+        var row = new byte[11 + operation.Length + 2];
+        byte[] header = [0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1];
+        header.CopyTo(row, 0);
+        operation.CopyTo(row, header.Length);
+        row[^2] = 0x83;
+        row[^1] = 2;
         return row;
     }
 }
