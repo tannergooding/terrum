@@ -299,7 +299,10 @@ public sealed class TrRmArtifactIndexTests
         var existing = new TrRmArtifactIndex(framed);
         Assert.True(existing.TryGetSection(0x8000, out var payload, out var count));
         var section = new TrRmSection(0x8000, 2, (uint)count, payload.ToArray());
-        Assert.Equal(framed, TrRmOptionalSectionSlots.InsertInArtifact(baseArtifact, section));
+        var authored = TrRmOptionalSectionSlots.Create(0x8000, 1,
+            [new TrRmReferenceSlot(0x0002, 0, 1, 0, 0)], new byte[] { 0 });
+        Assert.Equal(section.Bytes.ToArray(), authored.Bytes.ToArray());
+        Assert.Equal(framed, TrRmOptionalSectionSlots.InsertInArtifact(baseArtifact, authored));
         Assert.Equal(2u, BinaryPrimitives.ReadUInt32LittleEndian(baseArtifact.AsSpan(12)));
 
         Assert.Throws<ArgumentException>(() =>
@@ -312,6 +315,10 @@ public sealed class TrRmArtifactIndexTests
             TrRmOptionalSectionSlots.InsertInArtifact(baseArtifact, section with { Flags = 1 }));
         Assert.Throws<InvalidDataException>(() =>
             TrRmOptionalSectionSlots.InsertInArtifact(baseArtifact[..^1], section));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmOptionalSectionSlots.Create(0x7FFF, 1, [], ReadOnlyMemory<byte>.Empty));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmOptionalSectionSlots.Create(0x8000, 0, [], ReadOnlyMemory<byte>.Empty));
     }
 
     [Theory]

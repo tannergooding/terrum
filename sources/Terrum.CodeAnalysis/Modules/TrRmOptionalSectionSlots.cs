@@ -15,6 +15,26 @@ public readonly record struct TrRmReferenceSlot(
 /// that relocated Body instruction references retain their meaning.</remarks>
 public static class TrRmOptionalSectionSlots
 {
+    public static TrRmSection Create(ushort kind, uint recordCount,
+        IReadOnlyList<TrRmReferenceSlot> slots, ReadOnlyMemory<byte> payload)
+    {
+        ArgumentNullException.ThrowIfNull(slots);
+        var size = 4L + slots.Count * 16L + payload.Length;
+        if (kind < 0x8000 || recordCount is 0 or > 0xFF_FFFF || size > int.MaxValue)
+        {
+            throw InvalidSlots();
+        }
+
+        var result = new byte[(int)size];
+        BinaryPrimitives.WriteUInt32LittleEndian(result, (uint)slots.Count);
+        for (var index = 0; index < slots.Count; index++)
+        {
+            WriteSlot(result, index, slots[index]);
+        }
+        payload.Span.CopyTo(result.AsSpan(4 + slots.Count * 16));
+        return new TrRmSection(kind, 2, recordCount, result);
+    }
+
     public static byte[] InsertInArtifact(ReadOnlySpan<byte> artifact, TrRmSection extension)
     {
         if (extension.Kind < 0x8000 || extension.Flags != 2)
@@ -89,16 +109,20 @@ public static class TrRmOptionalSectionSlots
         var result = section.Bytes.ToArray();
         for (var index = 0; index < slots.Count; index++)
         {
-            var slot = slots[index];
-            var offset = 4 + index * 16;
-            BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(offset), slot.TargetKind);
-            BinaryPrimitives.WriteUInt16LittleEndian(result.AsSpan(offset + 2), slot.Selector);
-            BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(offset + 4), slot.TargetRow);
-            BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(offset + 8), slot.Block);
-            BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(offset + 12), slot.Ordinal);
+            WriteSlot(result, index, slots[index]);
         }
 
         return section with { Bytes = result };
+    }
+
+    private static void WriteSlot(byte[] bytes, int index, TrRmReferenceSlot slot)
+    {
+        var offset = 4 + index * 16;
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(offset), slot.TargetKind);
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(offset + 2), slot.Selector);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset + 4), slot.TargetRow);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset + 8), slot.Block);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset + 12), slot.Ordinal);
     }
 
     private static InvalidDataException InvalidSlots()
