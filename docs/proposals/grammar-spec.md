@@ -111,12 +111,37 @@ literal conversion rules and implementation tests. Neither decimal nor
 hexadecimal floating spellings have an executable value in the present
 frontend.
 
-Primitive names (`int32`, `float32`, `bool`, `char16`, etc.) are ordinary
-identifiers resolved against compiler/library types, **not** reserved lexical
-keywords. The proposed width-explicit integer, floating, character, vector
-and decimal families are listed in the
+Primitive spellings (`int32`, `float32`, `bool`, `char16`, etc.) remain
+ordinary identifier **tokens**, not lexical keywords. Their exact type
+bindings are reserved for compiler/runtime-owned primitives: an ordinary
+package cannot declare a type with a reserved primitive name, including in
+another namespace. This does not reserve all lowercase type names or prevent
+ordinary code from using primitive types. The proposed width-explicit integer,
+floating, character, vector and decimal families are listed in the
 [language design](../language.md#primitives-strict-arithmetic-and-text);
-their names and available targets are not inferred from this production.
+the set of reserved bindings follows the primitives actually selected by the
+language, not every candidate in this grammar. `@int32` or backtick escaping
+is not required to declare the Core type: escaping a token would not confer
+the right to define a compiler-owned binding.
+
+**Core bootstrap proposal:** A designated Core-library compilation has no
+implicit prebuilt standard-library reference and has explicit permission to
+declare the reserved primitive types using the ordinary `struct int32`
+spelling (and analogously for each supported primitive). Omitting the
+standard-library reference alone does not grant that permission. A primitive
+declaration attaches source-defined members, conformances and APIs such as
+`TryParse` and `TryFormat` to the compiler's existing primitive identity;
+calls resolve to their selected library implementations. It does not create
+a second type or redefine built-in arithmetic. Its minimal shape requires
+exactly one instance backing field of its own primitive type, with no other
+instance fields and no source-defined primitive operators. That recursive
+field is a privileged intrinsic representation: the compiler/runtime give
+the primitive its fixed storage and do not recursively lay out the field as
+an ordinary nested struct. Outside the designated Core build, the same
+declaration is an error, regardless of spelling or namespace. The option
+name, Core artifact identity, permitted member forms and enforcement across
+separate compilation remain to be specified before implementation.
+
 `void` is a distinct keyword. The current lexer's keyword tokens are `using`,
 `namespace`, `public`, `internal`, `private`, `static`, `void`, `var`, `mut`,
 `ref`, `out`, `if`, `else`, `while`, `return`, `true`, `false`, `struct`,
@@ -210,6 +235,9 @@ interface members do not include fields or constructors. The `ContextualPrefix`
 placeholder is deliberate: attributes and modifiers are checked by declaration
 context, and their exact legal combinations remain **OPEN**. It is not a
 production that permits every modifier on every declaration.
+Core's privileged primitive declaration uses `StructDecl` and `FieldDecl`
+without a separate grammar production; its binding and representation
+restrictions are semantic checks, not lexical exceptions.
 
 Top-level and concrete function/operator definitions and concrete property
 getters have bodies. Only interface function, operator, and getter declarations
@@ -1007,7 +1035,7 @@ proposal, and accepted semantics do not approve its syntax.
 
 | Surface | Coverage and status | Explicit boundary or remaining gap |
 |---|---|---|
-| Lexing, keywords, built-in names | The canonical current lexer contract is [lexical grammar](../lexical-grammar.md); §2 includes `HexFloat` in the proposed `Number` production. Primitive type names are identifiers; `void` is a keyword. | `abstract` remains a lexical token for legacy parser syntax, not a target modifier. `is` is used contextually but is not a current keyword token; `get`, `some`, `init`, `implicit`, `params`, `ensure`, and `const` need token decisions. Built-in/library APIs are declarations, not grammar productions. |
+| Lexing, keywords, built-in names | The canonical current lexer contract is [lexical grammar](../lexical-grammar.md); §2 includes `HexFloat` in the proposed `Number` production. Primitive spellings are identifier tokens with reserved type bindings; `void` is a keyword. | `abstract` remains a lexical token for legacy parser syntax, not a target modifier. `is` is used contextually but is not a current keyword token; `get`, `some`, `init`, `implicit`, `params`, `ensure`, and `const` need token decisions. Core-only primitive declarations attach APIs to compiler-owned identities; their bootstrap option and artifact contracts remain open. |
 | Files and nominal declarations | **P** §3.1 sketches using/file namespace, top-level functions, structs, classes, interfaces, and integral-base enums; interface bases differ from nominal conformances. | Exact modifier/attribute legality and enum constant restrictions remain open. No union or nested nominal declaration is proposed; recursive generic type arguments in `Type` are not excluded. |
 | Constructors, members, operators, properties | **P** §3.1 requires bodies for concrete functions/operators/getters; constructors name their owner; operators are type/interface members, not global declarations. **A** §5.7 specifies unary operator direction; §5.10 limits property direction to explicit getter-only by-value properties. | Interface `;` versus body forms are separated in §3.1. Property/accessor effects, attribute targets, and metadata remain **O**; setters, auto/ref-return properties and indexers are not adopted. `++`/`--` appear only as future operator spellings, not current lexer tokens. |
 | Interface witnesses and dispatch | **A** §5.12: bodyless members require checked implementations; bodies supply replaceable defaults, selected by declaring-member identity. **P** §3.1 sketches the corresponding `;`/body forms. Static operator witnesses need no runtime vtable. | Explicit mapping syntax, metadata/ABI, inherited-default resolution syntax, and compatible binding for older witnesses remain **O**. No physical slot layout is selected. |
