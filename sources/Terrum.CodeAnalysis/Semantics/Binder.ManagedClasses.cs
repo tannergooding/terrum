@@ -21,6 +21,11 @@ internal sealed partial class Binder
     {
         _usesManagedNode = true;
         var name = StructName(declaration);
+        if (TryPrimitiveType(name.Text, out _))
+        {
+            Report("TRM3003", $"The primitive type '{name.Text}' cannot be declared as a class.", declaration.Span);
+            return;
+        }
         var qualified = Qualify(name.Text);
         if (_classes.Count >= SemanticVerifier.MaximumVariables
             || !_classNames.TryAdd(qualified, (PrimitiveType)(ManagedClassTypes.First + _classes.Count))
@@ -129,6 +134,10 @@ internal sealed partial class Binder
 
     private PrimitiveType ResolveDeclaredType(string name)
     {
+        if (TryPrimitiveType(name, out var primitive))
+        {
+            return primitive;
+        }
         if (!name.Contains('.', StringComparison.Ordinal)
             && _structNames.TryGetValue(name, out var intrinsic) && (int)intrinsic < 100)
         {

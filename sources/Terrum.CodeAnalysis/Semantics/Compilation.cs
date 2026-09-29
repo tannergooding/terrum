@@ -517,6 +517,12 @@ public sealed class Compilation
         CancellationToken cancellationToken = default) =>
         CreateCore(trees, [], isLibrary: true, cancellationToken, runtimePolicy: runtimePolicy);
 
+    /// <summary>Binds the compiler-owned primitive declarations and APIs of a Core library without a standard-library reference.</summary>
+    public static Compilation CreateCoreLibrary(IEnumerable<SyntaxTree> trees, BoundRuntimePolicy runtimePolicy,
+        CancellationToken cancellationToken = default) =>
+        CreateCore(trees, [], isLibrary: true, cancellationToken, runtimePolicy: runtimePolicy,
+            coreLibrary: true);
+
     /// <summary>Binds multiple library source snapshots against validated external declarations.</summary>
     public static Compilation CreateLibrary(IEnumerable<SyntaxTree> trees, CompilationReference reference,
         CancellationToken cancellationToken = default)
@@ -549,7 +555,7 @@ public sealed class Compilation
     }
     private static Compilation CreateCore(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers, bool isLibrary,
         CancellationToken cancellationToken, CompilationReference? reference = null,
-        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast)
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false)
     {
         ArgumentNullException.ThrowIfNull(trees);
         cancellationToken.ThrowIfCancellationRequested();
@@ -575,7 +581,8 @@ public sealed class Compilation
             return new Compilation(snapshots[0], diagnostics.ToImmutable(), null,
                 snapshots.ToImmutable(), sourceDiagnostics.ToImmutable());
         }
-        var binder = new Binder(snapshots.ToImmutable(), buffers, cancellationToken, isLibrary, reference, runtimePolicy);
+        var binder = new Binder(snapshots.ToImmutable(), buffers, cancellationToken, isLibrary, reference,
+            runtimePolicy, coreLibrary);
         var program = binder.Bind();
         diagnostics.AddRange(binder.Diagnostics);
         sourceDiagnostics.AddRange(binder.SourceDiagnostics);

@@ -17,7 +17,7 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
-    private const string ModuleUsage = "Usage: terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--json]; "
+    private const string ModuleUsage = "Usage: terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--corelib] [--json]; "
         + "terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--json]; "
         + "terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]; "
         + "terrumc run-module <consumer.trm> <producer.trm> --runtime <fail-fast|checked-exceptions> [--json]";
@@ -43,7 +43,8 @@ internal static partial class Program
             if (count >= 6 && args[0] == "compile-module"
                 && (args[1] is "producer" or "consumer"))
             {
-                if (!TryReadModuleOptions(args, count, out var paths, out var exports, out output, out selectedPolicy))
+                if (!TryReadModuleOptions(args, count, out var paths, out var exports, out output,
+                    out selectedPolicy, out var coreLibrary))
                 {
                     WriteInputError(json, "TRM2000", ModuleUsage);
                     return 2;
@@ -59,7 +60,8 @@ internal static partial class Program
                 var reference = args[1] == "consumer" ? ReadModuleFile(args[3]) : null;
                 var declarations = reference is null ? null : ModuleCompiler.CreateReference(reference);
                 var runtimePolicy = (BoundRuntimePolicy)selectedPolicy;
-                var compilation = snapshots.Length == 1
+                var compilation = coreLibrary ? Compilation.CreateCoreLibrary(snapshots, runtimePolicy)
+                    : snapshots.Length == 1
                     ? declarations is null ? Compilation.CreateLibrary(snapshots[0], runtimePolicy)
                         : Compilation.Create(snapshots[0], declarations, runtimePolicy)
                     : declarations is null ? Compilation.CreateLibrary(snapshots, runtimePolicy)
@@ -138,23 +140,34 @@ internal static partial class Program
     }
 
     private static bool TryReadModuleOptions(string[] args, int count, out List<string> sources,
-        out List<string> exports, out string output, out NativeRuntimePolicy runtimePolicy)
+        out List<string> exports, out string output, out NativeRuntimePolicy runtimePolicy, out bool coreLibrary)
     {
         sources = [args[2]];
         var native = args[0] == "compile-native";
         exports = args[1] == "producer" && !native ? [args[3]] : [];
         output = "";
         runtimePolicy = NativeRuntimePolicy.FailFast;
+        coreLibrary = false;
         var hasOutput = false;
         var hasRuntime = false;
-        if ((count & 1) != 0)
-        {
-            return false;
-        }
         var sourcePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Path.GetFullPath(args[2]) };
         var exportNames = new HashSet<string>(exports, StringComparer.Ordinal);
-        for (var index = 4; index < count; index += 2)
+        for (var index = 4; index < count;)
         {
+            if (args[index] == "--corelib")
+            {
+                if (native || args[1] != "producer" || coreLibrary)
+                {
+                    return false;
+                }
+                coreLibrary = true;
+                index++;
+                continue;
+            }
+            if (index + 1 >= count)
+            {
+                return false;
+            }
             var value = args[index + 1];
             switch (args[index])
             {
@@ -176,6 +189,7 @@ internal static partial class Program
                 default:
                     return false;
             }
+            index += 2;
         }
         return hasOutput && (!native || (hasRuntime && (args[1] != "producer" || exports.Count != 0)));
     }

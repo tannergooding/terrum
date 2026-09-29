@@ -32,7 +32,8 @@ internal static partial class Program
         {
             if (count >= 8 && args[0] == "compile-native" && args[1] is "producer" or "consumer")
             {
-                if (!TryReadModuleOptions(args, count, out var paths, out var exports, out var output, out var runtimePolicy))
+                if (!TryReadModuleOptions(args, count, out var paths, out var exports, out var output,
+                    out var runtimePolicy, out _))
                 {
                     WriteInputError(json, "TRM2000", NativeModuleUsage);
                     return 2;

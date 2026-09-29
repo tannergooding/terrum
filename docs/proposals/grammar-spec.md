@@ -120,9 +120,13 @@ ordinary code from using primitive types. The proposed width-explicit integer,
 floating, character, vector and decimal families are listed in the
 [language design](../language.md#primitives-strict-arithmetic-and-text);
 the set of reserved bindings follows the primitives actually selected by the
-language, not every candidate in this grammar. `@int32` or backtick escaping
-is not required to declare the Core type: escaping a token would not confer
-the right to define a compiler-owned binding.
+language, not every candidate in this grammar. Neither `@identifier` nor
+backtick-delimited identifiers have a token or production in the current
+lexer or this proposal; keywords therefore cannot currently be used as
+names. A narrow `@identifier` keyword escape is a candidate for later review,
+not an adopted arbitrary-string delimiter. Core does not need an escape to
+declare `int32`: escaping a token would not confer the right to define a
+compiler-owned binding.
 
 **Core bootstrap proposal:** A designated Core-library compilation has no
 implicit prebuilt standard-library reference and has explicit permission to
@@ -138,9 +142,13 @@ instance fields and no source-defined primitive operators. That recursive
 field is a privileged intrinsic representation: the compiler/runtime give
 the primitive its fixed storage and do not recursively lay out the field as
 an ordinary nested struct. Outside the designated Core build, the same
-declaration is an error, regardless of spelling or namespace. The option
-name, Core artifact identity, permitted member forms and enforcement across
-separate compilation remain to be specified before implementation.
+declaration is an error, regardless of spelling or namespace. The current
+bounded compiler uses a provisional `--corelib` build switch for six
+implemented primitives and source-defined static/readonly instance methods;
+it does not yet implement Core primitive conformances, constructors,
+properties or a complete standard library. The Core artifact identity,
+full permitted member forms and enforcement across separate compilation
+remain open design work.
 
 `void` is a distinct keyword. The current lexer's keyword tokens are `using`,
 `namespace`, `public`, `internal`, `private`, `static`, `void`, `var`, `mut`,
@@ -1035,7 +1043,7 @@ proposal, and accepted semantics do not approve its syntax.
 
 | Surface | Coverage and status | Explicit boundary or remaining gap |
 |---|---|---|
-| Lexing, keywords, built-in names | The canonical current lexer contract is [lexical grammar](../lexical-grammar.md); §2 includes `HexFloat` in the proposed `Number` production. Primitive spellings are identifier tokens with reserved type bindings; `void` is a keyword. | `abstract` remains a lexical token for legacy parser syntax, not a target modifier. `is` is used contextually but is not a current keyword token; `get`, `some`, `init`, `implicit`, `params`, `ensure`, and `const` need token decisions. Core-only primitive declarations attach APIs to compiler-owned identities; their bootstrap option and artifact contracts remain open. |
+| Lexing, keywords, built-in names | The canonical current lexer contract is [lexical grammar](../lexical-grammar.md); §2 includes `HexFloat` in the proposed `Number` production. Primitive spellings are identifier tokens with reserved type bindings; `void` is a keyword. | `abstract` remains a lexical token for legacy parser syntax, not a target modifier. `is` is used contextually but is not a current keyword token; `get`, `some`, `init`, `implicit`, `params`, `ensure`, and `const` need token decisions. The bounded `--corelib` mode attaches APIs to six compiler-owned primitives; Core artifact identity and full member contracts remain open. |
 | Files and nominal declarations | **P** §3.1 sketches using/file namespace, top-level functions, structs, classes, interfaces, and integral-base enums; interface bases differ from nominal conformances. | Exact modifier/attribute legality and enum constant restrictions remain open. No union or nested nominal declaration is proposed; recursive generic type arguments in `Type` are not excluded. |
 | Constructors, members, operators, properties | **P** §3.1 requires bodies for concrete functions/operators/getters; constructors name their owner; operators are type/interface members, not global declarations. **A** §5.7 specifies unary operator direction; §5.10 limits property direction to explicit getter-only by-value properties. | Interface `;` versus body forms are separated in §3.1. Property/accessor effects, attribute targets, and metadata remain **O**; setters, auto/ref-return properties and indexers are not adopted. `++`/`--` appear only as future operator spellings, not current lexer tokens. |
 | Interface witnesses and dispatch | **A** §5.12: bodyless members require checked implementations; bodies supply replaceable defaults, selected by declaring-member identity. **P** §3.1 sketches the corresponding `;`/body forms. Static operator witnesses need no runtime vtable. | Explicit mapping syntax, metadata/ABI, inherited-default resolution syntax, and compatible binding for older witnesses remain **O**. No physical slot layout is selected. |

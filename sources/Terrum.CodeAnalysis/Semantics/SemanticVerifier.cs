@@ -360,14 +360,23 @@ public static class SemanticVerifier
                         break;
                     }
                 }
-                if (declaringType < 0 || !function.Name.StartsWith(declaringStruct + ".", StringComparison.Ordinal)
+                var primitiveOwner = declaringType < 0
+                    && Binder.TryPrimitiveType(declaringStruct, out var primitive)
+                    ? primitive : (PrimitiveType?)null;
+                if (declaringType < 0 && primitiveOwner is null
+                    || !function.Name.StartsWith(declaringStruct + ".", StringComparison.Ordinal)
                     || (function.IsConstructor && function.IsStatic)
+                    || primitiveOwner is not null && (function.IsConstructor
+                        || function.IsClassConstructor || function.IsCleanup
+                        || function.PropertyName is not null
+                        || !function.IsStatic && !function.Variables.IsEmpty
+                            && function.Variables[0].IsMutable)
                     || (!function.IsStatic && (function.Variables.IsEmpty
                         || function.Variables[0].Name != "this"
                         || function.Variables[0].IsOut
                         || ManagedClassTypes.Readonly(function.Variables[0].Type)
-                            != (PrimitiveType)(declaringType >= ManagedClassTypes.First
-                                ? declaringType : 100 + declaringType)
+                            != (primitiveOwner ?? (PrimitiveType)(declaringType >= ManagedClassTypes.First
+                                ? declaringType : 100 + declaringType))
                         || (declaringType >= ManagedClassTypes.First
                             && ManagedClassTypes.IsWritable(function.Variables[0].Type)
                             && !program.Classes[declaringType - ManagedClassTypes.First].IsMutable)
@@ -378,7 +387,8 @@ public static class SemanticVerifier
                     throw Invalid();
                 }
                 if (!function.IsStatic && !function.IsConstructor
-                    && declaringType < ManagedClassTypes.First && program.Structures[declaringType].IsUnique
+                    && primitiveOwner is null && declaringType < ManagedClassTypes.First
+                    && program.Structures[declaringType].IsUnique
                     && function.Variables[0].IsOut)
                 {
                     throw Invalid();

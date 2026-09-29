@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-27, semantic v36 wide classes, native-10 through native-20
+## Current boundary: syntax-27, semantic v37 Core primitive methods, native-10 through native-20
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -11,6 +11,24 @@ valid-program claim: `var x = 1;` parses but semantic analysis rejects its missi
 numeric context. General ownership/lifetime checking, general semantic IL and
 richer TRRM metadata, general managed graphs and standard-library execution
 are not implemented.
+Primitive type names in the implemented set (`bool`, `char16`, `int32`,
+`uint32`, `int64`, `uint64`) cannot be redeclared by ordinary structs or
+classes, even in another namespace. `Compilation.CreateCoreLibrary` and
+`terrumc analyze|build-library --corelib` and
+`terrumc compile-module producer --corelib` opt into a bounded Core bootstrap
+without a referenced standard library. The Core compilation may declare a
+global primitive struct with exactly one private, uninitialized field of
+its own type; the field reads as the compiler-owned primitive value without
+recursive storage. Core-defined static and readonly instance methods bind,
+export and execute through existing semantic modules and native DLLs;
+consumers resolve them to the library implementation rather than a second
+nominal type. Core primitive constructors, operators, properties,
+conformances, writable backing and a full standard-library build are not yet
+supported. Semantic module revision 37 marks primitive-owned methods in
+both producers and consumers; earlier revisions reject those declarations
+while retaining ordinary nominal layouts. The `--corelib` option is a
+provisional compiler build mode, not a verified Core artifact identity or a
+grant to ordinary dependencies.
 The current parser rejects attached numeric width suffixes with `TRM0006` and
 has no prefix-cast production. It supports context-typed decimal, hexadecimal
 and binary integer literals without a fallback type, numeric digit separators,

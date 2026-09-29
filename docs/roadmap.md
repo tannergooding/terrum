@@ -254,9 +254,9 @@ writers and verifier cases rather than relying only on same-version round trips.
 
 `TRRM` is the selected identifier for the evolving Terrum semantic-IL/module
 format; no separate `LMOD` family is planned. The repository's current
-semantic-module bytes (highest implemented revision 36) are evidence for the
+semantic-module bytes (highest implemented revision 37) are evidence for the
 working specification, not an adopted final layout. Reader support for
-historical revisions 10–36 and feature-dependent writer selection are temporary
+historical revisions 10–37 and feature-dependent writer selection are temporary
 repository implementation facts, scheduled for consolidation before v1; they
 do not create an external production compatibility obligation. The selected
 revision is a semantic artifact requirement, not an on-wire major/minor scheme

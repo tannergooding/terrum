@@ -239,6 +239,8 @@ public static class NativeEmitter
             return false;
         }
         if (function.DeclaringStruct is string owner
+            && !(Binder.TryPrimitiveType(owner, out _)
+                && !program.Structures.Any(structure => structure.Name == owner))
             && !program.Structures.Any(structure => structure.Name == owner && !structure.IsPrivate && !structure.IsInternal))
         {
             return false;

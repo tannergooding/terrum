@@ -42,6 +42,7 @@ public static partial class ModuleCompiler
     private const int ExplicitGetterVersion = 34;
     private const int TransparentLayoutVersion = 35;
     private const int WideClassFieldsVersion = 36;
+    private const int CorePrimitiveVersion = 37;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -62,6 +63,26 @@ public static partial class ModuleCompiler
 
     private static bool HasWideClassFields(Module module) =>
         module.Classes.Any(static @class => @class.Fields.Length > 16);
+
+    private static bool HasCorePrimitiveMembers(Module module)
+    {
+        foreach (var item in module.Functions)
+        {
+            var owner = item.Function?.DeclaringStruct;
+            if (owner is null && item.Import)
+            {
+                var parts = item.Contract.Split('|');
+                owner = parts.Length > 6 ? parts[5] : null;
+            }
+            if (owner is not null && Binder.TryPrimitiveType(owner, out _)
+                && !module.Structures.Any(structure => structure.Name == owner)
+                && !module.Classes.Any(@class => @class.Name == owner))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /// <summary>Reads and verifies a producer artifact, exposing only exported declarations and their value layouts to source binding.</summary>
     public static CompilationReference CreateReference(byte[] producerBytes)
@@ -735,6 +756,8 @@ public static partial class ModuleCompiler
                 producerOwned.Add(functions.Count);
                 var owner = exported.Function?.DeclaringStruct;
                 var name = exported.Function is { Intrinsic: not (BoundIntrinsic.None or BoundIntrinsic.ClassTryCreate) }
+                    || owner is not null && Binder.TryPrimitiveType(owner, out _)
+                        && !producer.Structures.Any(structure => structure.Name == owner)
                     ? exported.Name
                     : owner is not null && sharedTypes.Contains(owner)
                     ? owner + ".$producer." + exported.Name[(owner.Length + 1)..] : "$producer." + exported.Name;
@@ -779,6 +802,8 @@ public static partial class ModuleCompiler
             if (owner is not null && owner != NativeBufferIntrinsics.TypeName
                 && owner != NativeManagedNodeIntrinsics.TypeName
                 && owner != NativeManagedNodeIntrinsics.HeapName
+                && !(Binder.TryPrimitiveType(owner, out _)
+                    && !producer.Structures.Any(structure => structure.Name == owner))
                 && !sharedTypes.Contains(owner))
             {
                 owner = "$producer." + owner;
@@ -1010,14 +1035,18 @@ public static partial class ModuleCompiler
     private static string Contract(BoundFunction function, ImmutableArray<BoundStruct> structures)
     {
         var result = new StringBuilder();
+        var ownerVisibility = function.DeclaringStruct is string owner
+            ? Binder.TryPrimitiveType(owner, out _)
+                && !structures.Any(structure => structure.Name == owner) ? 'E'
+                : structures.Where(structure => structure.Name == owner)
+                    .Select(static structure => Visibility(structure)).FirstOrDefault('?')
+            : '-';
         _ = result.Append(function.Name).Append('|').Append(ContractType(function.ReturnType, structures))
             .Append('|').Append(function.IsConstructor ? 'C' : 'F')
             .Append('|').Append(function.IsPrivate ? 'P' : function.IsInternal ? 'N' : 'E')
             .Append('|').Append(function.IsStatic ? 'S' : 'I')
             .Append('|').Append(function.DeclaringStruct ?? "-")
-            .Append('|').Append(function.DeclaringStruct is string owner
-                ? structures.Where(structure => structure.Name == owner)
-                    .Select(static structure => Visibility(structure)).FirstOrDefault('?') : '-')
+            .Append('|').Append(ownerVisibility)
             .Append('|').Append(function.ParameterCount);
         for (var i = 0; i < function.ParameterCount; i++)
         {
@@ -1113,6 +1142,8 @@ public static partial class ModuleCompiler
         }
         var visited = new HashSet<(int Index, bool PublicFields)>();
         if (function.DeclaringStruct is string declaring
+            && !(Binder.TryPrimitiveType(declaring, out _)
+                && !structures.Any(structure => structure.Name == declaring))
             && !structures.Select((structure, index) => (structure, index))
                 .Any(item => item.structure.Name == declaring && PublicLayout((PrimitiveType)(100 + item.index), false)))
         {
@@ -1384,7 +1415,9 @@ public static partial class ModuleCompiler
         }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-        var version = HasWideClassFields(module)
+        var version = HasCorePrimitiveMembers(module)
+            ? CorePrimitiveVersion
+            : HasWideClassFields(module)
             ? WideClassFieldsVersion
             : HasTransparentLayout(module)
             ? TransparentLayoutVersion
@@ -1602,6 +1635,11 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Module version requires its declared layout feature.");
             }
+            if (version < CorePrimitiveVersion && HasCorePrimitiveMembers(module)
+                || version == CorePrimitiveVersion && !HasCorePrimitiveMembers(module))
+            {
+                throw new ModuleFormatException("Primitive-owned methods require the Core primitive module version.");
+            }
             if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
                 || !items.Any(static item => item.Import && item.Function is BoundFunction function
                     && !ManagedExportShape.ScalarOnly(function))))
@@ -1654,7 +1692,7 @@ public static partial class ModuleCompiler
             or MutableFieldReceiverVersion or UniqueMutableReceiverVersion or UniqueMutableFieldReceiverVersion
             or MutableBufferFieldReceiverVersion or MutableBufferFieldViewVersion or ManagedValueExportVersion
             or ManagedGraphParticipantVersion or PrivateInitReferenceVersion or ExplicitGetterVersion
-            or TransparentLayoutVersion or WideClassFieldsVersion))
+            or TransparentLayoutVersion or WideClassFieldsVersion or CorePrimitiveVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }

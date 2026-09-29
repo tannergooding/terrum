@@ -24,9 +24,11 @@ internal static partial class Program
         List<string> exports;
         string? outputPath;
         NativeRuntimePolicy runtimePolicy;
+        bool coreLibrary;
         try
         {
-            if (!TryReadCompilationOptions(args, out var paths, out exports, out outputPath, out runtimePolicy))
+            if (!TryReadCompilationOptions(args, out var paths, out exports, out outputPath,
+                out runtimePolicy, out coreLibrary))
             {
                 WriteInputError(json, "TRM2000", Usage);
 
@@ -58,18 +60,20 @@ internal static partial class Program
             return 2;
         }
 
-        return CompileTrees(args[0], snapshots, outputPath, json, [.. exports], runtimePolicy);
+        return CompileTrees(args[0], snapshots, outputPath, json, [.. exports],
+            runtimePolicy, coreLibrary);
     }
 
     private static bool TryReadCompilationOptions(string[] args, out List<string> paths, out List<string> exports,
-        out string? outputPath, out NativeRuntimePolicy runtimePolicy)
+        out string? outputPath, out NativeRuntimePolicy runtimePolicy, out bool coreLibrary)
     {
         paths = [];
         exports = [];
         outputPath = null;
         runtimePolicy = NativeRuntimePolicy.FailFast;
+        coreLibrary = false;
         var count = args.Length - (args.Length != 0 && args[^1] == "--json" ? 1 : 0);
-        if (count < 2 || args[1] == "--json" || (count & 1) != 0)
+        if (count < 2 || args[1] == "--json")
         {
             return false;
         }
@@ -82,8 +86,22 @@ internal static partial class Program
         }
         var hasRuntime = false;
         var exportNames = new HashSet<string>(StringComparer.Ordinal);
-        for (var index = 2; index < count; index += 2)
+        for (var index = 2; index < count;)
         {
+            if (args[index] == "--corelib")
+            {
+                if (coreLibrary || args[0] is not ("analyze" or "build-library"))
+                {
+                    return false;
+                }
+                coreLibrary = true;
+                index++;
+                continue;
+            }
+            if (index + 1 >= count)
+            {
+                return false;
+            }
             var value = args[index + 1];
             switch (args[index])
             {
@@ -105,6 +123,7 @@ internal static partial class Program
                 default:
                     return false;
             }
+            index += 2;
         }
 
         return args[0] == "analyze"
@@ -113,11 +132,14 @@ internal static partial class Program
     }
 
     private static int CompileTrees(string command, ImmutableArray<SyntaxTree> trees, string? outputPath, bool json,
-        ImmutableArray<string> exports = default, NativeRuntimePolicy runtimePolicy = NativeRuntimePolicy.FailFast)
+        ImmutableArray<string> exports = default, NativeRuntimePolicy runtimePolicy = NativeRuntimePolicy.FailFast,
+        bool coreLibrary = false)
     {
         var build = outputPath is not null;
-        var library = command == "build-library";
-        var compilation = library
+        var library = command == "build-library" || coreLibrary;
+        var compilation = coreLibrary
+            ? Compilation.CreateCoreLibrary(trees, (BoundRuntimePolicy)runtimePolicy)
+            : library
             ? trees.Length == 1 ? Compilation.CreateLibrary(trees[0], (BoundRuntimePolicy)runtimePolicy)
                 : Compilation.CreateLibrary(trees, (BoundRuntimePolicy)runtimePolicy)
             : trees.Length == 1 ? Compilation.Create(trees[0], (BoundRuntimePolicy)runtimePolicy)

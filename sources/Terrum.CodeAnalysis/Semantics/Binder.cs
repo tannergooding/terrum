@@ -45,6 +45,10 @@ internal sealed partial class Binder
     private int _unsafeDepth;
     private bool _hasReceiver;
     private readonly bool _isLibrary;
+    private readonly bool _coreLibrary;
+    private readonly HashSet<string> _primitiveDeclarations = new(StringComparer.Ordinal);
+    private readonly HashSet<SyntaxNode> _acceptedPrimitiveDeclarations = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<string, string> _primitiveBackingFields = new(StringComparer.Ordinal);
     private readonly CompilationReference? _reference;
     private readonly BoundRuntimePolicy _runtimePolicy;
     private bool _usesNativeBuffer;
@@ -72,13 +76,18 @@ internal sealed partial class Binder
 
     internal Binder(ImmutableArray<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers, CancellationToken cancellationToken,
         bool isLibrary = false, CompilationReference? reference = null,
-        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast)
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false)
     {
+        if (coreLibrary && (!isLibrary || reference is not null))
+        {
+            throw new ArgumentException("Core declarations require an independent library compilation.");
+        }
         _tree = trees[0];
         _trees = trees;
         _buffers = buffers;
         _cancellationToken = cancellationToken;
         _isLibrary = isLibrary;
+        _coreLibrary = coreLibrary;
         _reference = reference;
         _runtimePolicy = runtimePolicy;
     }
@@ -216,6 +225,24 @@ internal sealed partial class Binder
                 {
                     var name = StructName(structure).Text;
                     var qualified = string.IsNullOrEmpty(_namespace) ? name : _namespace + "." + name;
+                    if (TryPrimitiveType(name, out var primitive))
+                    {
+                        if (!_coreLibrary || _namespace.Length != 0)
+                        {
+                            Report("TRM3003", $"The primitive type '{name}' can only be declared by the Core library.", structure.Span);
+                        }
+                        else if (!_primitiveDeclarations.Add(name))
+                        {
+                            Report("TRM3003", $"Duplicate primitive declaration '{name}'.", structure.Span);
+                        }
+                        else
+                        {
+                            _ = _acceptedPrimitiveDeclarations.Add(structure);
+                            _structNames.Add(name, primitive);
+                            ValidatePrimitiveDeclaration(structure, name);
+                        }
+                        continue;
+                    }
                     if (qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
                         or "MutableInt32BufferView"
                         || name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName)
@@ -273,12 +300,26 @@ internal sealed partial class Binder
                 if (node.Kind is SyntaxKind.StructDeclaration or SyntaxKind.ClassDeclaration)
                 {
                     var structName = StructName(node).Text;
+                    if (TryPrimitiveType(structName, out _)
+                        && (node.Kind != SyntaxKind.StructDeclaration
+                            || !_acceptedPrimitiveDeclarations.Contains(node)))
+                    {
+                        continue;
+                    }
                     foreach (var member in node.Children)
                     {
                         if (member is SyntaxNode declaration && declaration.Kind is SyntaxKind.FunctionDeclaration
                             or SyntaxKind.ConstructorDeclaration or SyntaxKind.OperatorDeclaration
                             or SyntaxKind.PropertyDeclaration)
                         {
+                            if (TryPrimitiveType(structName, out _)
+                                && declaration.Kind is SyntaxKind.ConstructorDeclaration
+                                    or SyntaxKind.OperatorDeclaration or SyntaxKind.PropertyDeclaration)
+                            {
+                                Report("TRM3001", "Core primitive declarations cannot define constructors, operators or properties.",
+                                    declaration.Span);
+                                continue;
+                            }
                             Declare(declaration, structName);
                         }
                     }
@@ -543,6 +584,63 @@ internal sealed partial class Binder
         return builder.ToString();
     }
 
+    internal static bool TryPrimitiveType(string name, out PrimitiveType type)
+    {
+        type = name switch
+        {
+            "bool" => PrimitiveType.Bool,
+            "char16" => PrimitiveType.Char16,
+            "int32" => PrimitiveType.Int32,
+            "uint32" => PrimitiveType.UInt32,
+            "int64" => PrimitiveType.Int64,
+            "uint64" => PrimitiveType.UInt64,
+            _ => PrimitiveType.Void,
+        };
+        return type != PrimitiveType.Void;
+    }
+
+    private void ValidatePrimitiveDeclaration(SyntaxNode declaration, string name)
+    {
+        var fields = 0;
+        foreach (var member in declaration.Children)
+        {
+            if (member is SyntaxNode { Kind: SyntaxKind.FieldDeclaration } field)
+            {
+                fields++;
+                if (field.Children[^2] is SyntaxTokenElement { Token.Kind: TokenKind.Identifier } backing)
+                {
+                    _primitiveBackingFields[name] = backing.Token.Text;
+                }
+                if (field.Children[^2] is not SyntaxTokenElement { Token.Kind: TokenKind.Identifier }
+                    || NameText((SyntaxNode)field.Children[^3]) != name
+                    || field.Children.OfType<SyntaxTokenElement>().Any(static item =>
+                        item.Token.Kind is TokenKind.StaticKeyword or TokenKind.PublicKeyword
+                            or TokenKind.InternalKeyword or TokenKind.MutKeyword))
+                {
+                    Report("TRM3005", $"The Core primitive '{name}' needs a private, uninitialized backing field of its own type.",
+                        field.Span);
+                }
+            }
+            else if (member is SyntaxNode { Kind: SyntaxKind.ConformanceList })
+            {
+                Report("TRM3001", "Core primitive conformances are not yet supported by the bounded compiler.",
+                    member.Span);
+            }
+            else if (member is SyntaxNode { Kind: SyntaxKind.Attribute }
+                || member is SyntaxTokenElement { Token.Kind: TokenKind.UniqueKeyword
+                    or TokenKind.MutKeyword or TokenKind.InternalKeyword })
+            {
+                Report("TRM3001", "Core primitive declarations have compiler-owned visibility and layout.",
+                    member.Span);
+            }
+        }
+        if (fields != 1)
+        {
+            Report("TRM3005", $"The Core primitive '{name}' requires exactly one recursive backing field.",
+                declaration.Span);
+        }
+    }
+
     private void DeclareStruct(int index)
     {
         if (_laidOut.Contains(index))
@@ -790,6 +888,12 @@ internal sealed partial class Binder
         {
             Report("TRM3001", "Constructor and function modifiers conflict with their declaration kind.", declaration.Span);
         }
+        if (containingType is not null && _primitiveDeclarations.Contains(containingType)
+            && isMutable)
+        {
+            Report("TRM3001", "Core primitive methods cannot mutate their intrinsic backing value.",
+                declaration.Span);
+        }
         if (accessModifiers > 1)
         {
             Report("TRM3001", "A function can declare only one visibility modifier.", declaration.Span);
@@ -991,13 +1095,7 @@ internal sealed partial class Binder
             name = name[..^1];
         }
         var resolution = ResolveTypeName(name, out var resolved);
-        var type = name switch {
-            "int32" => PrimitiveType.Int32,
-            "uint32" => PrimitiveType.UInt32,
-            "int64" => PrimitiveType.Int64,
-            "uint64" => PrimitiveType.UInt64,
-            "char16" => PrimitiveType.Char16,
-            "bool" => PrimitiveType.Bool,
+        var type = TryPrimitiveType(name, out var primitive) ? primitive : name switch {
             "ReadonlyInt32BufferView" => PrimitiveType.ReadonlyInt32BufferView,
             "MutableInt32BufferView" => PrimitiveType.MutableInt32BufferView,
             "ManagedNode" => PrimitiveType.ManagedNode,
@@ -1860,6 +1958,12 @@ internal sealed partial class Binder
                     expression = new BoundRead(slot, _variables[slot].Type, node.Span);
                 }
                 else if (_hasReceiver && _currentStruct is not null
+                    && _primitiveBackingFields.TryGetValue(_currentStruct, out var backing)
+                    && token.Text == backing)
+                {
+                    expression = new BoundRead(0, _variables[0].Type, node.Span);
+                }
+                else if (_hasReceiver && _currentStruct is not null
                     && TryFindField(ResolveDeclaredType(_currentStruct), token.Text, out var field))
                 {
                     var structure = ResolveDeclaredType(_currentStruct);
@@ -1892,6 +1996,15 @@ internal sealed partial class Binder
                 var member = ((SyntaxTokenElement)node.Children[2]).Token.Text;
                 var receiverNode = (SyntaxNode)node.Children[0];
                 var receiverType = KnownType(receiverNode);
+                if (_currentStruct is not null
+                    && _primitiveBackingFields.TryGetValue(_currentStruct, out var backing)
+                    && member == backing
+                    && receiverType is PrimitiveType primitive
+                    && TryPrimitiveType(_currentStruct, out var owner) && owner == primitive)
+                {
+                    expression = BindExpression(receiverNode, owner);
+                    break;
+                }
                 if (receiverType is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
                     && member == "Length")
                 {
@@ -2314,6 +2427,13 @@ internal sealed partial class Binder
                 receiver = left;
                 _ = TryFindFunction(_structs[(int)structType - 100].Name + "." + member, out function);
             }
+            else if (type is PrimitiveType primitiveType
+                && TryPrimitiveType(TypeName(primitiveType), out var intrinsicType)
+                && intrinsicType == primitiveType)
+            {
+                receiver = left;
+                _ = TryFindFunction(TypeName(primitiveType) + "." + member, out function);
+            }
             else
             {
                 if (ResolveStaticMember(left, member, out var staticMember) == DeclaredTypeResolution.Ambiguous)
@@ -2706,6 +2826,12 @@ internal sealed partial class Binder
                     return _variables[slot].Type;
                 }
                 if (_hasReceiver && _currentStruct is not null
+                    && _primitiveBackingFields.TryGetValue(_currentStruct, out var backing)
+                    && name == backing && TryPrimitiveType(_currentStruct, out var primitive))
+                {
+                    return primitive;
+                }
+                if (_hasReceiver && _currentStruct is not null
                     && TryFindGetter(ResolveDeclaredType(_currentStruct), name, out var getter))
                 {
                     return _signatures[getter].ReturnType;
@@ -2769,6 +2895,8 @@ internal sealed partial class Binder
                             => NativeManagedNodeIntrinsics.TypeName + "." + member,
                         PrimitiveType type when IsClass(type) => _classes[ManagedClassTypes.ClassIndex(type)].Name + "." + member,
                         PrimitiveType type when IsStruct(type) => _structs[(int)type - 100].Name + "." + member,
+                        PrimitiveType type when TryPrimitiveType(TypeName(type), out var intrinsic)
+                            && intrinsic == type => TypeName(type) + "." + member,
                         _ => ResolveStaticMember(left, member, out var staticMember)
                             == DeclaredTypeResolution.Ambiguous ? "" : staticMember,
                     };
@@ -2789,6 +2917,13 @@ internal sealed partial class Binder
                 var receiver = (SyntaxNode)node.Children[0];
                 var member = ((SyntaxTokenElement)node.Children[2]).Token.Text;
                 var receiverType = KnownType(receiver);
+                if (_currentStruct is not null
+                    && _primitiveBackingFields.TryGetValue(_currentStruct, out var backing)
+                    && member == backing && receiverType is PrimitiveType primitive
+                    && TryPrimitiveType(_currentStruct, out var owner) && owner == primitive)
+                {
+                    return owner;
+                }
                 if (receiverType is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
                     && member == "Length")
                 {

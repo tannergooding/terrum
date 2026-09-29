@@ -18,9 +18,9 @@ namespace Terrum.Tools;
 internal static partial class Program
 {
     private const string Usage = "Usage: terrumc <check|tokens|tree> <path|-> [--json]\n"
-        + "       terrumc analyze <path|-> [--source <path>] [--runtime <fail-fast|checked-exceptions>] [--json]\n"
+        + "       terrumc analyze <path|-> [--source <path>] [--runtime <fail-fast|checked-exceptions>] [--corelib] [--json]\n"
         + "       terrumc build <path|-> [--source <path>] -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
-        + "       terrumc build-library <path|-> [--source <path>] --export <name> [--export <name>] -o <output.dll> --runtime <fail-fast|checked-exceptions> [--json]\n"
+        + "       terrumc build-library <path|-> [--source <path>] --export <name> [--export <name>] -o <output.dll> --runtime <fail-fast|checked-exceptions> [--corelib] [--json]\n"
         + "       terrumc jit <path|-> [--source <path>] --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc scan-component <scanner.terrum> <input|-> --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc build-component <scanner.terrum> <input|-> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
