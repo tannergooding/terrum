@@ -586,7 +586,8 @@ bool TryParseScalarBinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
     require tokens.TryGet(11, out var eof);
     if (function.Kind != 2 || openParameters.Kind != 46 || closeParameters.Kind != 47
         || openBody.Kind != 48 || returnKeyword.Kind != 19
-        || left.Kind != 3 || (binary.Kind != 57 && binary.Kind != 58) || right.Kind != 3
+        || left.Kind != 3 || (binary.Kind != 57 && binary.Kind != 58 && binary.Kind != 59)
+        || right.Kind != 3
         || semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0)
     {
         return false;
@@ -622,6 +623,12 @@ bool TryEvaluateInt32SubtractReturn(TokenSnapshot tokens, TokenIntegerSnapshot i
     return TryEvaluateInt32BinaryReturn(move tokens, move integers, 58, out name, out result);
 }
 
+bool TryEvaluateInt32MultiplyReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int32 result)
+{
+    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 59, out name, out result);
+}
+
 bool TryEvaluateInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     int32 expectedOperation, out SourceRange name, out int32 result)
 {
@@ -639,6 +646,10 @@ bool TryEvaluateInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     if (operation == 58)
     {
         value = int64(leftLow) - int64(rightLow);
+    }
+    if (operation == 59)
+    {
+        value = int64(leftLow) * int64(rightLow);
     }
     if (value < int64(int32.MinValue) || value > int64(int32.MaxValue))
     {
@@ -660,6 +671,12 @@ bool TryEvaluateUInt32SubtractReturn(TokenSnapshot tokens, TokenIntegerSnapshot 
     out SourceRange name, out uint32 result)
 {
     return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 58, out name, out result);
+}
+
+bool TryEvaluateUInt32MultiplyReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint32 result)
+{
+    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 59, out name, out result);
 }
 
 bool TryEvaluateUInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
@@ -686,14 +703,18 @@ bool TryEvaluateUInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
         result = uint32(left - right);
         return true;
     }
-    uint64 sum = left + right;
-    if (sum > uint64(uint32.MaxValue))
+    mut uint64 value = left + right;
+    if (operation == 59)
+    {
+        value = left * right;
+    }
+    if (value > uint64(uint32.MaxValue))
     {
         return false;
     }
 
     name = foundName;
-    result = uint32(sum);
+    result = uint32(value);
     return true;
 }
 
@@ -707,6 +728,12 @@ bool TryEvaluateInt64SubtractReturn(TokenSnapshot tokens, TokenIntegerSnapshot i
     out SourceRange name, out int64 result)
 {
     return TryEvaluateInt64BinaryReturn(move tokens, move integers, 58, out name, out result);
+}
+
+bool TryEvaluateInt64MultiplyReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int64 result)
+{
+    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 59, out name, out result);
 }
 
 bool TryEvaluateInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
@@ -725,6 +752,19 @@ bool TryEvaluateInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
         return false;
     }
 
+    if (operation == 59)
+    {
+        if ((left > 0 && ((right > 0 && left > int64.MaxValue / right)
+            || (right < 0 && right < int64.MinValue / left)))
+            || (left < 0 && ((right > 0 && left < int64.MinValue / right)
+                || (right < 0 && left < int64.MaxValue / right))))
+        {
+            return false;
+        }
+        name = foundName;
+        result = left * right;
+        return true;
+    }
     if (operation == 58)
     {
         if ((right < 0 && left > int64.MaxValue + right)
@@ -758,6 +798,12 @@ bool TryEvaluateUInt64SubtractReturn(TokenSnapshot tokens, TokenIntegerSnapshot 
     return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 58, out name, out result);
 }
 
+bool TryEvaluateUInt64MultiplyReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint64 result)
+{
+    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 59, out name, out result);
+}
+
 bool TryEvaluateUInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     int32 expectedOperation, out SourceRange name, out uint64 result)
 {
@@ -779,6 +825,16 @@ bool TryEvaluateUInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
         }
         name = foundName;
         result = left - right;
+        return true;
+    }
+    if (operation == 59)
+    {
+        if (right != 0 && left > uint64.MaxValue / right)
+        {
+            return false;
+        }
+        name = foundName;
+        result = left * right;
         return true;
     }
     if (left > uint64.MaxValue - right)
