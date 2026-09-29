@@ -196,6 +196,15 @@ public sealed partial class CliTests
     [InlineData("public uint64 Value(uint64 x) { return 7 * x; }")]
     [InlineData("public int32 Value(int32 x) { return 42 / x; }")]
     [InlineData("public uint64 Value(uint64 x) { return 18446744073709551615 % x; }")]
+    [InlineData("public int32 Value(int32 x, int32 y) { return x & y; }")]
+    [InlineData("public uint32 Value(uint32 x, uint32 y) { return x | y; }")]
+    [InlineData("public int64 Value(int64 x, int64 y) { return x ^ y; }")]
+    [InlineData("public uint64 Value(uint64 x) { return x & 0xFF; }")]
+    [InlineData("public int32 Value(int32 x) { return x | 0xFFFFFFFF; }")]
+    [InlineData("public uint64 Value(uint64 x) { return x ^ 0xFFFFFFFFFFFFFFFF; }")]
+    [InlineData("public int32 Value(int32 x) { return 0xFF & x; }")]
+    [InlineData("public uint64 Value(uint64 x) { return 18446744073709551615 | x; }")]
+    [InlineData("public uint32 Value(uint32 x) { return 0b101010 ^ x; }")]
     public async Task FrontendBuiltLibraryMatchesHostedNativeBytesAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -408,13 +417,16 @@ public sealed partial class CliTests
     }
 
     [Theory]
-    [InlineData("int32 Value(int32 x) { return x + 2147483648; }")]
-    [InlineData("int32 Value(int32 x) { return 2147483648 + x; }")]
-    [InlineData("bool Value(int32 x) { return x < 2147483648; }")]
-    [InlineData("bool Value(int32 x) { return 2147483648 < x; }")]
-    [InlineData("int32 Value(int32 x) { return x * 2147483648; }")]
-    [InlineData("int32 Value(int32 x) { return 2147483648 / x; }")]
-    public async Task FrontendComponentRejectsOutOfRangeBinaryLiteralAsync(string source)
+    [InlineData("int32 Value(int32 x) { return x + 2147483648; }", "2147483648")]
+    [InlineData("int32 Value(int32 x) { return 2147483648 + x; }", "2147483648")]
+    [InlineData("bool Value(int32 x) { return x < 2147483648; }", "2147483648")]
+    [InlineData("bool Value(int32 x) { return 2147483648 < x; }", "2147483648")]
+    [InlineData("int32 Value(int32 x) { return x * 2147483648; }", "2147483648")]
+    [InlineData("int32 Value(int32 x) { return 2147483648 / x; }", "2147483648")]
+    [InlineData("uint32 Value(uint32 x) { return x & 4294967296; }", "4294967296")]
+    [InlineData("uint32 Value(uint32 x) { return 4294967296 | x; }", "4294967296")]
+    public async Task FrontendComponentRejectsOutOfRangeBinaryLiteralAsync(string source,
+        string invalidLiteral)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", "..")), "self-host");
@@ -426,8 +438,26 @@ public sealed partial class CliTests
         var result = document.RootElement.GetProperty("result");
         Assert.False(result.GetProperty("valid").GetBoolean());
         Assert.Equal(2, result.GetProperty("errorCode").GetInt32());
-        Assert.Equal(source.IndexOf("2147483648", StringComparison.Ordinal),
+        Assert.Equal(source.IndexOf(invalidLiteral, StringComparison.Ordinal),
             result.GetProperty("errorSpan").GetProperty("start").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("char16 Value(char16 x) { return x & 42; }")]
+    [InlineData("char16 Value(char16 x) { return 42 | x; }")]
+    [InlineData("char16 Value(char16 x) { return x + 42; }")]
+    public async Task FrontendComponentRejectsUnsupportedScalarLiteralOperatorAsync(string source)
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+            "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(1, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        var result = document.RootElement.GetProperty("result");
+        Assert.False(result.GetProperty("valid").GetBoolean());
+        Assert.Equal(2, result.GetProperty("errorCode").GetInt32());
     }
 
     [Theory]

@@ -352,10 +352,15 @@ mut class ScalarFrontendState
             {
                 return false;
             }
-            if (!negative && expectedType >= 1 && expectedType <= 4
-                && _tokens.TryGet(_at, out var next)
-                && next.Kind >= 57 && next.Kind <= 61)
+            if (!negative && _tokens.TryGet(_at, out var next)
+                && ((next.Kind >= 57 && next.Kind <= 61)
+                    || next.Kind == 71 || next.Kind == 73 || next.Kind == 75))
             {
+                if (expectedType < 1 || expectedType > 4)
+                {
+                    FailAt(2, next.Range);
+                    return false;
+                }
                 _at = _at + 1;
                 if (!Take(2, out var right))
                 {
@@ -417,14 +422,22 @@ mut class ScalarFrontendState
         mut int32 end = left.Range.End;
         require _tokens.TryGet(_at, out var next);
         if ((next.Kind >= 57 && next.Kind <= 61)
-            || (next.Kind >= 65 && next.Kind <= 70))
+            || (next.Kind >= 65 && next.Kind <= 70)
+            || next.Kind == 71 || next.Kind == 73 || next.Kind == 75)
         {
             operation = next.Kind;
             _at = _at + 1;
             if (((operation >= 57 && operation <= 61)
-                || (operation >= 65 && operation <= 70))
+                || (operation >= 65 && operation <= 70)
+                || operation == 71 || operation == 73 || operation == 75)
                 && _tokens.TryGet(_at, out var literalRight) && literalRight.Kind == 3)
             {
+                if ((operation >= 65 && operation <= 70 && selected == 5)
+                    || ((operation < 65 || operation > 70) && (selected == 5 || selected == 6)))
+                {
+                    FailAt(2, next.Range);
+                    return false;
+                }
                 int32 index = _at;
                 _at = _at + 1;
                 if (!TryReadMagnitude(literalRight, index, selected, false,
@@ -435,7 +448,7 @@ mut class ScalarFrontendState
                 require SourceRange.TryCreate(left.Range.Start,
                     literalRight.Range.End - left.Range.Start, out var literalSpan);
                 mut int32 resultType = selected;
-                if (operation >= 65)
+                if (operation >= 65 && operation <= 70)
                 {
                     resultType = 5;
                 }
@@ -466,9 +479,10 @@ mut class ScalarFrontendState
             {
                 rightType = _secondType;
             }
-            if (selected != rightType || ((operation >= 57 && operation <= 61)
+            if (selected != rightType || ((operation >= 57 && operation <= 61
+                || operation == 71 || operation == 73 || operation == 75)
                 && (selected == 5 || selected == 6))
-                || (operation >= 65 && selected == 5))
+                || (operation >= 65 && operation <= 70 && selected == 5))
             {
                 FailAt(2, next.Range);
                 return false;
@@ -476,7 +490,7 @@ mut class ScalarFrontendState
             end = right.Range.End;
         }
         require SourceRange.TryCreate(left.Range.Start, end - left.Range.Start, out var span);
-        if (operation >= 65)
+        if (operation >= 65 && operation <= 70)
         {
             selected = 5;
         }

@@ -170,14 +170,14 @@ public static class ScalarFrontendHost
                     && tokens[1].Text == source.Text.Substring(name.Start, name.Length);
             }
             if (operation / 100 is >= 1 and <= 4
-                && operation % 100 is >= 57 and <= 61 or >= 65 and <= 70)
+                && operation % 100 is >= 57 and <= 61 or >= 65 and <= 70 or 71 or 73 or 75)
             {
                 var literalFirst = operation >= 300;
                 var parameter = operation / 100 - (literalFirst ? 2 : 0);
                 var numberIndex = literalFirst ? 0 : 2;
                 var nameIndex = literalFirst ? 2 : 0;
                 var parameterType = parameter == 1 ? words[7] : words[8];
-                var comparison = operation % 100 >= 65;
+                var comparison = operation % 100 is >= 65 and <= 70;
                 if (words[0] != 3 || expression.Type != type
                     || (comparison ? type != 5 || parameterType is not (1 or 2 or 3 or 4 or 6)
                         : type != parameterType || parameterType is not (1 or 2 or 3 or 4))
@@ -222,9 +222,9 @@ public static class ScalarFrontendHost
             return expression.Type == type && ValidSpan(expression.Span, nonempty: true)
                 && left >= 1 && left <= parameters
                 && (operation == 0 ? right == 0 && leftType == type
-                    : (operation is >= 57 and <= 61 or >= 65 and <= 70)
+                    : (operation is >= 57 and <= 61 or >= 65 and <= 70 or 71 or 73 or 75)
                         && right >= 1 && right <= parameters && leftType == rightType
-                        && (operation is >= 57 and <= 61
+                        && (operation is >= 57 and <= 61 or 71 or 73 or 75
                             ? type == leftType && leftType is >= 1 and <= 4
                             : type == 5 && leftType is >= 1 and <= 4 or 6))
                 && MatchesSource(expression, left, right);
@@ -255,7 +255,8 @@ public static class ScalarFrontendHost
             var spelling = expression.Operation switch {
                 57 => "+", 58 => "-", 59 => "*", 60 => "/", 61 => "%",
                 65 => "==", 66 => "!=", 67 => "<",
-                68 => "<=", 69 => ">", 70 => ">=", _ => throw InvalidResult(),
+                68 => "<=", 69 => ">", 70 => ">=", 71 => "&", 73 => "|",
+                75 => "^", _ => throw InvalidResult(),
             };
             var middle = source.Text.AsSpan(span.Start + leftName.Length, middleLength);
             if (middle.Trim().SequenceEqual(spelling.AsSpan()))
@@ -393,7 +394,8 @@ public static class ScalarFrontendHost
                     PrimitiveType.Bool, expression.Span));
             }
             if (expression.Operation / 100 is >= 1 and <= 4
-                && expression.Operation % 100 is >= 57 and <= 61 or >= 65 and <= 70)
+                && expression.Operation % 100 is >= 57 and <= 61 or >= 65 and <= 70
+                    or 71 or 73 or 75)
             {
                 var literalFirst = expression.Operation >= 300;
                 var parameter = expression.Operation / 100 - (literalFirst ? 2 : 0);

@@ -2852,6 +2852,12 @@ public sealed class ManagedScannerComponentTests
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return y / 2; }", 0, 84)]
     [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return 42 % x; }", 43, 0)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return 42 % x; }", 43, 0)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return x & 63; }", 42, 0)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return x & 63; }", 42, 0)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return y | 42; }", 0, 0)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return y | 42; }", 0, 0)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return 42 ^ x; }", 0, 0)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return 42 ^ x; }", 0, 0)]
     public async Task NativeScalarFrontendParameterLiteralFactsExecuteAsync(
         NativeRuntimePolicy policy, string text, int first, int second)
     {
