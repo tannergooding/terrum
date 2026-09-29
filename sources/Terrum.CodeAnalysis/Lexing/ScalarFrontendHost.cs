@@ -39,7 +39,7 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9)
+        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10)
             || words[1] is not (1 or 2))
         {
             throw InvalidResult();
@@ -333,7 +333,8 @@ public static class ScalarFrontendHost
             }
             if (IsNegatedBooleanBinary(operation))
             {
-                return words[0] >= (operation <= 2075 ? 8 : 9)
+                return words[0] >= (operation <= 2075 ? 8
+                        : operation is >= 2700 and < 3200 ? 9 : 10)
                     && expression.Type == 5 && type == 5
                     && ValidSpan(expression.Span, nonempty: true)
                     && TryNegatedBinarySpan(source, expression.Span, out var nestedSpan)
@@ -672,8 +673,15 @@ public static class ScalarFrontendHost
             return true;
         }
         var nested = operation - 2000;
-        return (nested / 100 is 7 or 9 or 11)
-            && (nested % 100 is 65 or 66 or >= 71 and <= 75);
+        if ((nested / 100 is 7 or 9 or 11)
+            && (nested % 100 is 65 or 66 or >= 71 and <= 75))
+        {
+            return true;
+        }
+        var comparison = nested >= 1600 ? nested - 1600
+            : nested >= 1200 ? nested - 1200 : nested;
+        return (comparison / 100 is >= 1 and <= 4)
+            && (comparison % 100 is >= 65 and <= 70);
     }
 
     private static bool TryNegatedBinarySpan(SourceText source, TextSpan span,

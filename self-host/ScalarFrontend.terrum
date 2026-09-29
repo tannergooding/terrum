@@ -17,6 +17,7 @@ namespace Terrum.CodeAnalysis;
 // Version-7 grouped unary minus on a standalone literal uses operation 658.
 // Version-8 unary not on a grouped two-parameter Boolean binary adds 2000.
 // Version-9 also admits a grouped Boolean binary with literal operands.
+// Version-10 admits grouped numeric comparisons with literal operands.
 // Boolean parameter/literal pairs add 700 for a parameter on the left or
 // 900 for a literal on the left; slots hold the parameter index and literal kind.
 // Boolean literal pairs add 1100; both slots hold literal kinds.
@@ -403,7 +404,8 @@ mut class ScalarFrontendState
             }
             if (cursor > _at && _tokens.TryGet(cursor, out var firstOperand)
                 && (firstOperand.Kind == 2 || firstOperand.Kind == 20
-                    || firstOperand.Kind == 21))
+                    || firstOperand.Kind == 21 || firstOperand.Kind == 3
+                    || firstOperand.Kind == 57 || firstOperand.Kind == 58))
             {
                 int32 start = _at;
                 if (!ParseExpression(5, out var nested))
@@ -412,6 +414,15 @@ mut class ScalarFrontendState
                 }
                 mut int32 nestedKind = nested.Operation % 100;
                 mut int32 nestedGroup = nested.Operation / 100;
+                mut int32 comparisonOperation = nested.Operation;
+                if (comparisonOperation >= 1600)
+                {
+                    comparisonOperation = comparisonOperation - 1600;
+                }
+                else if (comparisonOperation >= 1200)
+                {
+                    comparisonOperation = comparisonOperation - 1200;
+                }
                 if (nested.Type == 5
                     && ((nested.Operation >= 65 && nested.Operation <= 75
                             && nested.LeftParameter >= 1
@@ -419,7 +430,11 @@ mut class ScalarFrontendState
                         || ((nestedGroup == 7 || nestedGroup == 9
                                 || nestedGroup == 11)
                             && (nestedKind == 65 || nestedKind == 66
-                                || (nestedKind >= 71 && nestedKind <= 75)))))
+                                || (nestedKind >= 71 && nestedKind <= 75)))
+                        || (comparisonOperation / 100 >= 1
+                            && comparisonOperation / 100 <= 4
+                            && comparisonOperation % 100 >= 65
+                            && comparisonOperation % 100 <= 70)))
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
