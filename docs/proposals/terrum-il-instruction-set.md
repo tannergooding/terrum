@@ -70,7 +70,8 @@ If adopted in both metadata and Body, `typeMap` would hold complete
 typed type-reference words: either the inline form or an indexed
 TypeSpec row for other types. A map lookup of an inline word avoids the
 TypeSpec table lookup, but the Body-local `t` ID remains useful for
-repeated uses. The fixed four-byte word and the Body-local 1/2/4-byte
+repeated uses and exposes the body's type inventory without scanning its
+blocks. The fixed four-byte word and the Body-local 1/2/4-byte
 IDs address different costs; replacing all local IDs with four-byte
 words would also widen values, blocks and places. The byte listings
 below use the **currently approved**, indexed TypeSpec form until a
@@ -134,50 +135,56 @@ is asserted.
 
 ### Checked add end to end (informative)
 
-Consider `AddFive` under the fail-fast policy. Assume MethodDef row 1 owns
-the body, its MethodSig declares the one by-value `int32` parameter and
-`int32` result, and TypeSpec row 1 describes `int32`. The expected
-`int32` context types the literal `5`; `+` selects checked primitive
-addition, not a numeric fallback or user witness.
+Consider `AddThenThree` under the fail-fast policy. Assume MethodDef row
+1 owns the body, its MethodSig declares two by-value `int32` parameters
+and an `int32` result, and TypeSpec row 1 describes `int32`. The
+expected `int32` context types the literal `3`; each `+` selects
+checked primitive addition, not a numeric fallback or user witness.
 
 The notation below exposes the metadata and Body facts needed to read the
 example; it is not wire syntax or a required source rewrite. `t1` is
 Body-local type ID 1, mapped by a fixed `u32` header entry to TypeSpec
 row 1. That TypeSpec row's built-in form uses primitive code `0x08`
-for `int32`. `r1`–`r3` are one-based Body value IDs, not machine registers.
+for `int32`. `r1`–`r5` are one-based Body value IDs, not machine registers.
 The value-descriptor array declares each ID's type and kind; the block
-parameters or operations define its value. `B1` and `B2` are one-based
+parameters or operations define its value. `B1`–`B3` are one-based
 block IDs. A block's parameter list declares values received on entry,
 not all values that its operations will define.
 
 ```text
-Source:   int32 AddFive(int32 x) { return x + 5; }
+Source:   int32 AddThenThree(int32 x, int32 y) { return x + y + 3; }
 
 TypeSpec[1] = Builtin(int32)                // row payload 01 00 08
-MethodSig[1] = (parameter[0]: TypeSpec[1]) -> TypeSpec[1]  // x in source
+MethodSig[1] = (parameter[0]: TypeSpec[1], parameter[1]: TypeSpec[1])
+               -> TypeSpec[1]              // x, y in source order
 MethodDef[1] = (signature=1, bodyRow=1)
 Body: ownerMethod=1, bodyLayout=0
-      blockCount=2, valueCount=3, placeCount=0, regionCount=0, typeCount=1
+      blockCount=3, valueCount=5, placeCount=0, regionCount=0, typeCount=1
       typeMap=[t1: TypeSpec[1]]             // fixed u32 typed reference
-      valueDescriptors=[r1:(t1,value), r2:(t1,value), r3:(t1,value)]
-      blockOffsets=[0,19,30], terminatorOffsets=[13,9]
-      B1 operationCount=1, B2 operationCount=0
-      both blocks: region=0, liveIns=[], liveOuts=[], place lists=[]
+      valueDescriptors=[r1:(t1,value), r2:(t1,value), r3:(t1,value),
+                        r4:(t1,value), r5:(t1,value)]
+      blockOffsets=[0,16,35,46], terminatorOffsets=[10,13,9]
+      B1 operationCount=0, B2 operationCount=1, B3 operationCount=0
+      all blocks: region=0, liveIns=[], liveOuts=[], place lists=[]
 
-B1(r1 <- parameter[0]):                   // r1 is x, defined on entry
-    r2 = ConstSigned t1, 5
-    CheckedBinary add r1, r2 -> B2()       // no explicit edge arguments
-B2(r3 <- checked add):                    // r3 is the implicit success result
-    Return r3
+B1(r1 <- parameter[0], r2 <- parameter[1]):  // x, y defined on entry
+    CheckedBinary add r1, r2 -> B2()
+B2(r3 <- first checked add):                 // implicit success value
+    r4 = ConstSigned t1, 3
+    CheckedBinary add r3, r4 -> B3()
+B3(r5 <- second checked add):                // implicit success value
+    Return r5
 ```
 
-`ConstSigned` defines `r2` in B1 using the typed literal `5`; it is not
-a block input. The checked terminator defines no value in B1: on
-success it supplies `r3` as B2's first parameter, before the explicit
-arguments listed in `B2()` (none here). Overflow follows the module's
-failure policy, so B2 is not entered. Every value has one descriptor
+`ConstSigned` defines `r4` in B2 using the typed literal `3`; it is not
+a block input. The first checked terminator supplies `r3` as B2's
+first parameter; the second supplies `r5` as B3's first parameter.
+Neither terminator defines a value in its own block, and neither
+success edge carries an explicit argument. On first-add overflow B2
+is not entered; on second-add overflow B3 is not entered. Both
+failures follow the module policy. Every value has one descriptor
 and one definition; the descriptor alone does not create a value.
-The Body stores numeric IDs, not the source name `x` or these comments.
+The Body stores numeric IDs, not the source names or these comments.
 The TypeSpec row reference occupies four bytes in `typeMap`, as it does
 in MethodSig; repeated `t1` references are one-byte local IDs because
 this Body has one type. The equal numbers in `t1` and `TypeSpec[1]` are
@@ -188,15 +195,15 @@ That keeps `t1` one byte per use without the TypeSpec lookup; it does
 not license replacing the current `01 00 00 00` entry in this fixture
 until the metadata reference rule changes.
 
-The Body **section** uses one mapped type, three values, two blocks and
-no places or regions. Its 78-byte structure is:
+The Body **section** uses one mapped type, five values, three blocks and
+no places or regions. Its 106-byte structure is:
 
 | Region | Size and contents |
 |---|---|
-| Body-section offset index | 8 bytes: `00 00 00 00 46 00 00 00` = `[0,70]`; not an instruction |
-| Body row header | 20 bytes: `ownerMethod=1`, `bodyLayout=0`, counts `(block,value,place,region,type)=(2,3,0,0,1)`, `typeMap=[TypeSpec row 1]` and three `(t1,value)` descriptors |
-| Body row offset arrays | 20 fixed-`u32` bytes: `blockOffsets=[0,19,30]`, `terminatorOffsets=[13,9]` |
-| Block data | 30 bytes: B1 is 19 bytes; B2 is 11 bytes |
+| Body-section offset index | 8 bytes: `00 00 00 00 62 00 00 00` = `[0,98]`; not an instruction |
+| Body row header | 24 bytes: `ownerMethod=1`, `bodyLayout=0`, counts `(block,value,place,region,type)=(3,5,0,0,1)`, `typeMap=[TypeSpec row 1]` and five `(t1,value)` descriptors |
+| Body row offset arrays | 28 fixed-`u32` bytes: `blockOffsets=[0,16,35,46]`, `terminatorOffsets=[10,13,9]` |
+| Block data | 46 bytes: B1 is 16 bytes; B2 is 19 bytes; B3 is 11 bytes |
 
 Here `bodyLayout=0` selects one-byte Body-local widths. The owner,
 type-map entries and offset arrays remain fixed `u32`; instruction
@@ -205,46 +212,125 @@ Body fields and validation rules are specified in
 [Body record, direct block index and regions](#body-record-direct-block-index-and-regions).
 
 The exact section bytes are the eight-byte offset index followed by the
-70-byte Body row:
+98-byte Body row:
 
 ```text
-00 00 00 00  46 00 00 00
-01 00 00 00  00  02 03 00 00 01  01 00 00 00
-01 00  01 00  01 00
-00 00 00 00  13 00 00 00  1E 00 00 00
-0D 00 00 00  09 00 00 00
-00 01 01 00 00 00 00 00 01  02 02 01 05  84 01 01 02 02 00
-00 01 03 00 00 00 00 00 00  83 03
+00 00 00 00  62 00 00 00
+01 00 00 00  00  03 05 00 00 01  01 00 00 00
+01 00  01 00  01 00  01 00  01 00
+00 00 00 00  10 00 00 00  23 00 00 00  2E 00 00 00
+0A 00 00 00  0D 00 00 00  09 00 00 00
+00 02 01 02 00 00 00 00 00 00  84 01 01 02 02 00
+00 01 03 00 00 00 00 00 01  02 04 01 03  84 01 03 04 03 00
+00 01 05 00 00 00 00 00 00  83 05
 ```
 
 | Location | Opcode-specific schema, in byte order | Widths / layout | Encoded fields | Reading |
 |---|---|---|---|---|
-| B1 operation | `02 ConstSigned ref(rNew) ref(t) signedData(value)` | Common; ref=1, data=1 | `02` opcode · `02` rNew · `01` t · `05` signedData | Define `r2` as mapped `t1` value `5` |
-| B1 terminator | `84 CheckedBinary u8(kind) ref(rLeft) ref(rRight) edgeSuccess` | Common; ref=1, count=1; kind=`u8` | `84` opcode · `01` kind · `01` rLeft · `02` rRight · `02` targetBlock · `00` argumentCount | `kind=1` add; operands `r1` (`x`) and `r2` (literal `5`); success target B2; no explicit edge arguments |
-| B2 terminator | `83 Return ref(result)` | Common; ref=1 | `83` opcode · `03` result | Return `r3`, the implicit checked result |
+| B1 terminator | `84 CheckedBinary u8(kind) ref(rLeft) ref(rRight) edgeSuccess` | Common; ref=1, count=1; kind=`u8` | `84` opcode · `01` kind · `01` rLeft · `02` rRight · `02` targetBlock · `00` argumentCount | `kind=1` add; inputs `r1` (`x`) and `r2` (`y`); implicit result is B2's `r3` |
+| B2 operation | `02 ConstSigned ref(rNew) ref(t) signedData(value)` | Common; ref=1, data=1 | `02` opcode · `04` rNew · `01` t · `03` signedData | Define `r4` as mapped `t1` value `3` |
+| B2 terminator | `84 CheckedBinary u8(kind) ref(rLeft) ref(rRight) edgeSuccess` | Common; ref=1, count=1; kind=`u8` | `84` opcode · `01` kind · `03` rLeft · `04` rRight · `03` targetBlock · `00` argumentCount | Add `r3` and `r4`; implicit result is B3's `r5` |
+| B3 terminator | `83 Return ref(result)` | Common; ref=1 | `83` opcode · `05` result | Return `r5`, the second checked result |
 
 In the terminator schema, `edgeSuccess` expands to
 `ref(targetBlock), count(argumentCount), ref[argumentCount]`; a zero
 count means no trailing argument references. `CheckedBinary` encodes no
-destination: its success value is B2's first parameter, `r3` (descriptor
-3). `ConstSigned` carries signed data, not an add immediate. By-value `x`
-needs no place; a mutable local needs `PlaceLocal` then `Load`, with
+destination: each success value is its target's first parameter (`r3`,
+then `r5`). `ConstSigned` carries signed data, not an add immediate.
+By-value parameters need no place; an addressable mutable local needs
+`PlaceLocal` then `Load`, with
 `Assign` through that place on success. See the
 [local-place shape](#value-and-place-state-through-checked-arithmetic),
 which is decode-only in this revision.
 
-For example, targeting block 256 makes this same checked add use
+For example, if B1's checked add instead targets block 256, it uses
 `F0 01 84 01 01 00 02 00 00 01 00`: two-byte references widen both
 operands and the target, while the count stays one byte. That instruction
 prefix does not set the Body's structural widths; a real Body with 256
 blocks also needs a two-byte local width for its `blockCount`.
-`ConstSigned r3, t1, 200` instead uses
+In a separate body, `ConstSigned r3, t1, 200` instead uses
 `F0 10 02 03 01 C8 00` (one-byte references, two-byte signed data); if
 its result ID were 256, it would use
 `F0 11 02 00 01 01 00 C8 00`. The prefix changes encoded widths, not
 the opcode's semantic identity. Conformance should independently verify
 the bytes, decoded records and audited CFG/types/states; a same-writer
 round trip alone is insufficient.
+
+### Conditional merge and loop (informative shapes)
+
+The following sketches use the same MethodSig, type-map, value-
+descriptor, block-header and edge **rules**. They show composition rather
+than another required source lowering or complete byte listing; a writer
+must still encode exact block and terminator offsets.
+
+For `int32 TwiceSum(int32 x, int32 y) { int32 tmp = x + y;
+return tmp + tmp; }`, the first checked add passes its implicit
+`int32` result into B2 as `r3`. B2's second checked terminator uses
+`r3` for *both* input operands and passes its new implicit result to
+B3 for `Return`. Reuse needs no duplicate descriptor or `Copy`
+operation for this Copy scalar; a unique value could not be duplicated
+the same way.
+
+For `int32 Choose(bool flag, int32 x, int32 y) { mut int32 chosen = x;
+if (flag) { chosen = y; } return chosen; }`, MethodSig has the three
+by-value parameters in that order and an `int32` result. The Body has
+`(blockCount,valueCount,placeCount,regionCount,typeCount)=(4,4,0,0,2)`,
+`ownerMethod` pointing to its MethodDef,
+`typeMap=[t1:TypeSpec[1] (bool),t2:TypeSpec[2] (int32)]`, and descriptors
+`[r1:t1,r2:t2,r3:t2,r4:t2]`, all by-value. All blocks have region 0,
+no places and no operations. An SSA lowering needs no place for the
+unaddressed source local:
+
+```text
+B1(r1 <- flag, r2 <- x, r3 <- y): // liveOut=[r2,r3]
+    BranchIf r1, B2(), B3()
+B2():                              // liveIn=[r3], liveOut=[r3]
+    Branch B4(r3)
+B3():                              // liveIn=[r2], liveOut=[r2]
+    Branch B4(r2)
+B4(r4 <- selected value):          // no liveIn
+    Return r4
+```
+
+The two explicit incoming arguments to B4 have the same complete type,
+but `r4` is defined once by B4's parameter, not by either predecessor.
+The branch copies only Copy values; `liveOut` is the union of the
+successors' live-ins and explicit edge arguments. Source variable names
+and the apparent assignment are not stored in the Body.
+
+For `int32 CountTo(int32 n) { mut int32 i = 0; while (i < n) {
+i = i + 1; } return i; }`, MethodSig has one by-value `int32` parameter
+and an `int32` result. The Body has `(5,7,0,1,2)` for the same five
+counts, `ownerMethod` pointing to its MethodDef,
+`typeMap=[t1:TypeSpec[1] (int32),t2:TypeSpec[2] (bool)]`,
+and descriptors `r1,r2,r3,r5,r6,r7`
+of `t1` with `r4` of `t2`, all by-value. Region 1 is
+`(kind=loop,parent=0,entry=B2,exit=B5,cleanup=0)`; B2–B4 belong to
+it, while B1 and B5 are at region 0:
+
+```text
+B1(r1 <- n):                       // liveOut=[r1,r2]
+    r2 = ConstSigned t1, 0
+    Branch B2(r2)
+B2(r3 <- current i):               // liveIn=[r1], liveOut=[r1,r3]
+    r4 = Binary Less r3, r1         // t2 bool
+    BranchIf r4, B3(), B5(r3)
+B3():                              // liveIn=[r1,r3], liveOut=[r1]
+    r5 = ConstSigned t1, 1
+    CheckedBinary add r3, r5 -> B4()
+B4(r6 <- checked add):             // liveIn=[r1], liveOut=[r1,r6]
+    Branch B2(r6)
+B5(r7 <- final i):                 // no liveIn; outside loop
+    Return r7
+```
+
+The header B2 receives its initial `i` from B1 and later iterations
+from B4. `r1` is a dominating value carried across the backedge through
+live-in/out sets, not an extra header parameter. The checked result is
+B4's implicit first parameter; B4 then explicitly supplies `r6` to
+the header. The false edge supplies `r3` to the loop exit. A loop
+region and valid backedge do not make a failing add an implicit cleanup
+or catch edge.
 
 The following are operand *kinds*, not additional on-wire tags. `ref`
 means the selected reference width, `count` the selected count width,
