@@ -195,6 +195,25 @@ public static class ScalarFrontendHost
                     && tokens[1].Kind == TokenKind.Identifier
                     && tokens[1].Text == source.Text.Substring(name.Start, name.Length);
             }
+            if (operation is 57 or 58 && right == 0)
+            {
+                if (words[0] != 3 || expression.Type != type
+                    || (operation == 58 ? type is not (1 or 3) : type is < 1 or > 4)
+                    || !ValidSpan(expression.Span, nonempty: true))
+                {
+                    return false;
+                }
+                var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
+                    expression.Span.Start, expression.Span.Length)));
+                var tokens = lexical.Tokens;
+                var name = left == 1 ? firstName : secondName;
+                return lexical.Diagnostics.IsEmpty && tokens.Length == 3
+                    && tokens[0].Kind == (TokenKind)operation && tokens[0].Span.Start == 0
+                    && tokens[1].Span.End == expression.Span.Length
+                    && tokens[1].Kind == TokenKind.Identifier
+                    && right == 0 && left >= 1 && left <= parameters && leftType == type
+                    && tokens[1].Text == source.Text.Substring(name.Start, name.Length);
+            }
             if (operation / 100 is >= 1 and <= 4
                 && operation % 100 is >= 57 and <= 61 or >= 65 and <= 70 or 71 or 73 or 75)
             {
@@ -443,6 +462,17 @@ public static class ScalarFrontendHost
                 }
                 return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Tilde, operand,
                     type, expression.Span));
+            }
+            if (expression.Operation is 57 or 58 && expression.RightParameter == 0)
+            {
+                var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
+                    expression.Span.Start, expression.Span.Length)));
+                var token = lexical.Tokens[1];
+                var operandSpan = new TextSpan(expression.Span.Start + token.Span.Start, token.Span.Length);
+                var type = Type(expression.Type);
+                return new BoundUnary((TokenKind)expression.Operation,
+                    new BoundRead(expression.LeftParameter - 1, type, operandSpan),
+                    type, expression.Span);
             }
             if (expression.Operation / 100 is >= 1 and <= 4
                 && expression.Operation % 100 is >= 57 and <= 61 or >= 65 and <= 70

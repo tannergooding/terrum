@@ -3073,6 +3073,43 @@ public sealed class ManagedScannerComponentTests
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, "-", -42, 58)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "-", -42, 58)]
+    [InlineData(NativeRuntimePolicy.FailFast, "+", 42, 57)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "+", 42, 57)]
+    public async Task NativeScalarFrontendNamedUnaryIntegerExecutesAsync(
+        NativeRuntimePolicy policy, string op, int input, int operation)
+    {
+        var text = $"int32 Value(int32 x) {{ return {op}x; }}";
+        var source = SourceText.From(text);
+        var stage = await CompileAsync(text,
+            "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+            (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
+        var native = NativeJit.ExecuteWithData(stage, policy);
+        Assert.Equal(42, native.ExitCode);
+        var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+            ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
+        Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        foreach (var word in new[] { 22, 23, 24, 25 })
+        {
+            var offset = word * sizeof(int);
+            var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original ^ 1);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
+        }
+        var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
+        var call = new BoundCall(0, [new BoundConstant(input, PrimitiveType.Int32, default)],
+            PrimitiveType.Int32, default);
+        var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
+            new BoundBlock([new BoundReturn(call, default)], default), default);
+        var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
+        SemanticVerifier.Verify(executable);
+        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
+    }
+
     private static Task<BoundProgram> CompilePairParserAsync(string text, string entry, BoundRuntimePolicy policy) =>
         CompileAsync(text, entry, policy, "ScalarParameterPairParser");
 

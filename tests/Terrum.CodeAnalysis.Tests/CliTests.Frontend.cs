@@ -219,6 +219,12 @@ public sealed partial class CliTests
     [InlineData("public bool Value(bool x, bool y) { return x | y; }")]
     [InlineData("public bool Value(bool x, bool y) { return x ^ y; }")]
     [InlineData("public int32 Value(bool x, bool y) { if (x && y) { return 42; } else { return 0; } }")]
+    [InlineData("public int32 Value(int32 x) { return -x; }")]
+    [InlineData("public int64 Value(int64 x, int64 y) { return -y; }")]
+    [InlineData("public int32 Value(int32 x) { return +x; }")]
+    [InlineData("public uint32 Value(uint32 x) { return +x; }")]
+    [InlineData("public int64 Value(int64 x) { return +x; }")]
+    [InlineData("public uint64 Value(uint64 x) { return +x; }")]
     public async Task FrontendBuiltLibraryMatchesHostedNativeBytesAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -464,6 +470,8 @@ public sealed partial class CliTests
     [InlineData("char16 Value(char16 x) { return ~x; }")]
     [InlineData("char16 Value(char16 x, char16 y) { return x & y; }")]
     [InlineData("int32 Value(int32 x, int32 y) { return x && y; }")]
+    [InlineData("uint32 Value(uint32 x) { return -x; }")]
+    [InlineData("bool Value(bool x) { return +x; }")]
     public async Task FrontendComponentRejectsUnsupportedScalarLiteralOperatorAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
