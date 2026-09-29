@@ -20,4 +20,12 @@ public readonly ref struct TrRmStringTableReader
 
     public string DecodeNamespace(int row)
         => TrRmStringRowReader.DecodeNamespace(_rows.GetRow(row));
+
+    internal void ValidateShapes(int recordCount)
+    {
+        for (var row = 1; row <= recordCount; row++)
+        {
+            TrRmStringRowReader.ValidateShape(_rows.GetRow(row));
+        }
+    }
 }

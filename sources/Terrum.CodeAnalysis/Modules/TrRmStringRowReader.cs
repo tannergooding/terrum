@@ -18,40 +18,15 @@ public static class TrRmStringRowReader
     public static string DecodeNamespace(ReadOnlySpan<byte> row)
         => DecodeText(row, allowEmpty: true);
 
+    internal static void ValidateShape(ReadOnlySpan<byte> row)
+        => _ = Content(row);
+
     private static string DecodeText(ReadOnlySpan<byte> row, bool allowEmpty)
     {
-        if (row.Length < 8 || (row[0] & 0xFC) != 0)
+        var content = Content(row);
+        if (content.IsEmpty && !allowEmpty)
         {
             throw InvalidRow();
-        }
-
-        var width = row[0] switch
-        {
-            0 or 1 => 1,
-            2 => 2,
-            _ => 4,
-        };
-        var units = row[1] | (row[2] << 8) | (row[3] << 16);
-        if (units == 0 && !allowEmpty)
-        {
-            throw InvalidRow();
-        }
-
-        var contentBytes = (long)units * width;
-        var unpaddedLength = 4 + contentBytes + width;
-        var paddedLength = (unpaddedLength + 3) & ~3L;
-        if (paddedLength != row.Length)
-        {
-            throw InvalidRow();
-        }
-
-        var content = row.Slice(4, (int)contentBytes);
-        foreach (var trailing in row.Slice(4 + (int)contentBytes))
-        {
-            if (trailing != 0)
-            {
-                throw InvalidRow();
-            }
         }
 
         string name;
@@ -77,6 +52,39 @@ public static class TrRmStringRowReader
         }
 
         return name;
+    }
+
+    private static ReadOnlySpan<byte> Content(ReadOnlySpan<byte> row)
+    {
+        if (row.Length < 8 || (row[0] & 0xFC) != 0)
+        {
+            throw InvalidRow();
+        }
+
+        var width = row[0] switch
+        {
+            0 or 1 => 1,
+            2 => 2,
+            _ => 4,
+        };
+        var units = row[1] | (row[2] << 8) | (row[3] << 16);
+        var contentBytes = (long)units * width;
+        var unpaddedLength = 4 + contentBytes + width;
+        var paddedLength = (unpaddedLength + 3) & ~3L;
+        if (paddedLength != row.Length)
+        {
+            throw InvalidRow();
+        }
+
+        foreach (var trailing in row.Slice(4 + (int)contentBytes))
+        {
+            if (trailing != 0)
+            {
+                throw InvalidRow();
+            }
+        }
+
+        return row.Slice(4, (int)contentBytes);
     }
 
     private static bool IsAscii(ReadOnlySpan<byte> content)

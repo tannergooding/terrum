@@ -49,6 +49,7 @@ public static class TrRmStructuralMetadataValidator
         }
 
         var strings = new TrRmStringTableReader(stringBytes, stringCount);
+        strings.ValidateShapes(stringCount);
         var modules = new TrRmModuleTableReader(moduleBytes, moduleCount, strings,
             moduleRefCount, typeDefCount, methodDefCount, sourceFileCount);
         var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes, moduleRefCount,

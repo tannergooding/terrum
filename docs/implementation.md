@@ -1190,8 +1190,10 @@ claiming semantic import binding, target-layout validity or executable clauses.
 `terrumc validate-trrm-structure <artifact> [--json]` exposes those same
 framing and structural checks to tooling; success does not validate Body
 instructions, imported contracts or an executable module.
-It checks Blob and Body offset indexes, including empty Blob rows, and composes
-a two-module Import/Export fixture, but does not interpret Blob contents or
+It checks every String row's physical flags, count, terminator and padding,
+including unreferenced rows; name/path/key references still validate decoded
+text at their use sites. It checks Blob and Body offset indexes, including
+empty Blob rows, and composes a two-module Import/Export fixture, but does not interpret Blob contents or
 Body instructions. A Blob-table reader exposes validated, borrowed row bytes
 without interpreting them as references or requiring nonempty payloads.
 SourceMap rows check slots, spans and Body/SourceFile module

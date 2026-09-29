@@ -128,6 +128,45 @@ public sealed class TrRmArtifactIndexTests
     }
 
     [Theory]
+    [InlineData(0, 4)]
+    [InlineData(1, 0xFF)]
+    [InlineData(10, 1)]
+    [InlineData(11, 1)]
+    public void StructuralValidatorRejectsMalformedUnreferencedStringRows(int rowOffset,
+        byte replacement)
+    {
+        var strings = TrRmStringTableWriter.EncodeNames([("A", 0), ("Unused", 0)]);
+        var secondRow = 12 + (int)BinaryPrimitives.ReadUInt32LittleEndian(strings.AsSpan(4));
+        strings[secondRow + rowOffset] = replacement;
+        var artifact = TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, MinimalArtifact().AsSpan(64, 44).ToArray()),
+            new TrRmSection(0x0002, 0, 2, strings),
+        ]);
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(0x0002, out var section, out var count));
+        Assert.Equal("A", new TrRmStringTableReader(section, count).DecodeName(1));
+        Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.Validate(artifact));
+    }
+
+    [Fact]
+    public void StructuralValidatorPermitsUnreferencedStringContentWithNul()
+    {
+        var strings = TrRmStringTableWriter.EncodeNames([("A", 0), ("Unused", 0)]);
+        var secondRow = 12 + (int)BinaryPrimitives.ReadUInt32LittleEndian(strings.AsSpan(4));
+        strings[secondRow + 4] = 0;
+        var artifact = TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, MinimalArtifact().AsSpan(64, 44).ToArray()),
+            new TrRmSection(0x0002, 0, 2, strings),
+        ]);
+        TrRmStructuralMetadataValidator.Validate(artifact);
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.True(index.TryGetSection(0x0002, out var section, out var count));
+        var sectionBytes = section.ToArray();
+        Assert.Throws<InvalidDataException>(() =>
+            new TrRmStringTableReader(sectionBytes, count).DecodeName(2));
+    }
+
+    [Theory]
     [InlineData(0, 0)]
     [InlineData(4, 2)]
     [InlineData(6, 1)]
