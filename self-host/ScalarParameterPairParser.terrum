@@ -1,9 +1,9 @@
 namespace Terrum.CodeAnalysis;
 
-bool TryParseTwoParameterAddReturn(TokenSnapshot tokens,
+bool TryParseTwoParameterAddPrefix(TokenSnapshot tokens,
     out int32 scalarType, out SourceRange name)
 {
-    if (tokens.GetCount() != 17)
+    if (tokens.GetCount() != 17 && tokens.GetCount() != 19)
     {
         return false;
     }
@@ -21,9 +21,6 @@ bool TryParseTwoParameterAddReturn(TokenSnapshot tokens,
     require tokens.TryGet(11, out var firstUse);
     require tokens.TryGet(12, out var add);
     require tokens.TryGet(13, out var secondUse);
-    require tokens.TryGet(14, out var semicolon);
-    require tokens.TryGet(15, out var closeBody);
-    require tokens.TryGet(16, out var eof);
     if (!TryGetScalarType(returnType, out var selected)
         || !TryGetScalarType(firstType, out var matchingFirst)
         || !TryGetScalarType(secondType, out var matchingSecond)
@@ -32,7 +29,6 @@ bool TryParseTwoParameterAddReturn(TokenSnapshot tokens,
         || function.Kind != 2 || openParameters.Kind != 46 || comma.Kind != 53
         || closeParameters.Kind != 47 || openBody.Kind != 48
         || returnKeyword.Kind != 19 || add.Kind != 57
-        || semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0
         || !SameTokenSpelling(firstParameter, firstUse)
         || !SameTokenSpelling(secondParameter, secondUse)
         || SameTokenSpelling(firstParameter, secondParameter))
@@ -41,6 +37,82 @@ bool TryParseTwoParameterAddReturn(TokenSnapshot tokens,
     }
     scalarType = selected;
     name = function.Range;
+    return true;
+}
+
+bool TryParseTwoParameterAddReturn(TokenSnapshot tokens,
+    out int32 scalarType, out SourceRange name)
+{
+    if (tokens.GetCount() != 17)
+    {
+        return false;
+    }
+    require tokens.TryGet(14, out var semicolon);
+    require tokens.TryGet(15, out var closeBody);
+    require tokens.TryGet(16, out var eof);
+    if (semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0)
+    {
+        return false;
+    }
+    return TryParseTwoParameterAddPrefix(move tokens, out scalarType, out name);
+}
+
+bool TryParseTwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
+    TokenIntegerSnapshot integers, out SourceRange name, out uint64 magnitude,
+    out bool based)
+{
+    if (tokens.GetCount() != 19)
+    {
+        return false;
+    }
+    require tokens.TryGet(14, out var add);
+    require tokens.TryGet(15, out var literal);
+    require tokens.TryGet(16, out var semicolon);
+    require tokens.TryGet(17, out var closeBody);
+    require tokens.TryGet(18, out var eof);
+    if (add.Kind != 57 || literal.Kind != 3 || semicolon.Kind != 52
+        || closeBody.Kind != 49 || eof.Kind != 0
+        || !TryParseTwoParameterAddPrefix(move tokens, out var selected,
+            out var foundName) || selected != 1
+        || !integers.TryFind(15, out var overflow, out var low, out var high)
+        || overflow || high != 0 || (low < 0 && !IsBasedInteger(literal)))
+    {
+        return false;
+    }
+    name = foundName;
+    magnitude = DecodeScannerMagnitude(low, high);
+    based = IsBasedInteger(literal);
+    return true;
+}
+
+bool TryEvaluateInt32TwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
+    TokenIntegerSnapshot integers, int32 first, int32 second,
+    out SourceRange name, out int32 result)
+{
+    if (!TryParseTwoParameterAddAndLiteralReturn(move tokens, move integers,
+            out var foundName, out var magnitude, out var based)
+        || magnitude > uint64(uint32.MaxValue)
+        || (!based && magnitude > uint64(int32.MaxValue)))
+    {
+        return false;
+    }
+    int64 firstSum = int64(first) + int64(second);
+    if (firstSum < int64(int32.MinValue) || firstSum > int64(int32.MaxValue))
+    {
+        return false;
+    }
+    mut int64 literal = int64(magnitude);
+    if (magnitude > uint64(int32.MaxValue))
+    {
+        literal = literal - 4294967296;
+    }
+    int64 finalSum = firstSum + literal;
+    if (finalSum < int64(int32.MinValue) || finalSum > int64(int32.MaxValue))
+    {
+        return false;
+    }
+    name = foundName;
+    result = int32(finalSum);
     return true;
 }
 

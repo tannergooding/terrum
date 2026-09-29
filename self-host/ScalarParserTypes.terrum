@@ -74,3 +74,29 @@ bool SameTokenSpelling(Token first, Token second)
     }
     return true;
 }
+
+bool IsBasedInteger(Token literal)
+{
+    int32 start = literal.Range.Start;
+    return literal.Range.Length >= 2 && Host.Source[start] == char16(48)
+        && (Host.Source[start + 1] == char16(120)
+            || Host.Source[start + 1] == char16(88)
+            || Host.Source[start + 1] == char16(98)
+            || Host.Source[start + 1] == char16(66));
+}
+
+uint64 DecodeScannerMagnitude(int32 low, int32 high)
+{
+    // Restore each unsigned half before combining it at the 2^32 place value.
+    mut int64 lowBits = int64(low);
+    mut int64 highBits = int64(high);
+    if (low < 0)
+    {
+        lowBits = lowBits + 4294967296;
+    }
+    if (high < 0)
+    {
+        highBits = highBits + 4294967296;
+    }
+    return uint64(highBits) * 4294967296 + uint64(lowBits);
+}

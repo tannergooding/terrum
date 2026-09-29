@@ -930,6 +930,69 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("18", "21", "x + y + 3", true, "42")]
+    [InlineData("int32.MaxValue", "-1", "x + y + 1", true, "int32.MaxValue")]
+    [InlineData("int32.MinValue", "int32.MaxValue", "x + y + 1", true, "0")]
+    [InlineData("0", "0", "x + y + 0xFFFF_FFFF", true, "-1")]
+    [InlineData("int32.MaxValue", "1", "x + y + 0xFFFF_FFFF", false, "0")]
+    [InlineData("int32.MinValue", "-1", "x + y + 1", false, "0")]
+    [InlineData("int32.MaxValue", "0", "x + y + 1", false, "0")]
+    [InlineData("int32.MinValue", "0", "x + y + 0xFFFF_FFFF", false, "0")]
+    [InlineData("0", "0", "x + y + 2147483648", false, "0")]
+    [InlineData("0", "0", "x + y + 4294967296", false, "0")]
+    [InlineData("0", "0", "x + z + 3", false, "0")]
+    [InlineData("0", "0", "x + y + 3 + 4", false, "0")]
+    public async Task BoundedNativeTwoParameterChainedAdditionChecksEachStepAsync(
+        string first, string second, string expression, bool evaluable, string expected)
+    {
+        var text = $"int32 Value(int32 x, int32 y) {{ return {expression}; }}";
+        var assertion = evaluable
+            ? $$"""
+                require TryEvaluateInt32TwoParameterAddAndLiteralReturn(
+                    move tokens, move integers, {{first}}, {{second}},
+                    out var name, out var bound);
+                if (name.Start != 6 || name.Length != 5 || bound != {{expected}})
+                {
+                    return 1;
+                }
+                """
+            : $$"""
+                if (TryEvaluateInt32TwoParameterAddAndLiteralReturn(
+                    move tokens, move integers, {{first}}, {{second}},
+                    out var name, out var bound))
+                {
+                    return 1;
+                }
+                """;
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                {{assertion}}
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            if (evaluable)
+            {
+                var source = text + $$"""
+                     int32 Main() {
+                         if (Value({{first}}, {{second}}) == {{expected}}) { return 42; }
+                         return 1;
+                     }
+                    """;
+                var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+            }
+            var program = await CompilePairParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData("int32", "-1", "x < 0", true, true)]
     [InlineData("int32", "-1", "x == 0xFFFF_FFFF", true, true)]
     [InlineData("int32", "int32.MaxValue", "x <= 2147483647", true, true)]
