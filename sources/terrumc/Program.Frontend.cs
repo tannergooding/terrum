@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.ComponentModel;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -20,6 +21,7 @@ internal static partial class Program
     {
         var buildLibrary = args[0] == "frontend-build-library";
         var buildExecutable = args[0] == "frontend-build";
+        var runExecutable = args[0] == "frontend-run";
         var build = buildLibrary || buildExecutable;
         var count = build ? 7 : 5;
         var runtime = build ? 5 : 3;
@@ -129,20 +131,34 @@ internal static partial class Program
             var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int));
             var result = ScalarFrontendHost.ReadResult(source, bytes);
-            if (build && result.IsValid)
+            if ((build || runExecutable) && result.IsValid)
             {
                 if (buildLibrary && !result.IsPublic)
                 {
                     WriteInputError(json, "TRM4002", "A native frontend library export must be declared public.");
                     return 1;
                 }
-                if (buildExecutable && (result.ParameterCount != 0 || result.ReturnType != 1
+                if ((buildExecutable || runExecutable) && (result.ParameterCount != 0 || result.ReturnType != 1
                     || !source.Text.AsSpan(result.Name.Start, result.Name.Length).SequenceEqual("Main")))
                 {
-                    WriteInputError(json, "TRM4002", "A native frontend executable requires int32 Main() without parameters.");
+                    WriteInputError(json, "TRM4002", "A native frontend entry requires int32 Main() without parameters.");
                     return 1;
                 }
                 var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
+                if (runExecutable)
+                {
+                    try
+                    {
+                        return NativeJit.Execute(library with { EntryPoint = 0 }, policy,
+                            GraphJitRegistrarAssemblyPath());
+                    }
+                    catch (Exception exception) when (exception is NotSupportedException or IOException
+                        or Win32Exception or InvalidOperationException or TimeoutException)
+                    {
+                        WriteInputError(json, "TRM4001", exception.Message);
+                        return 1;
+                    }
+                }
                 byte[] image;
                 try
                 {

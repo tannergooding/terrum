@@ -879,6 +879,8 @@ explicitly public scalar DLL, preserving an existing output on failure;
 `frontend-build` similarly emits a Windows x64 executable for a zero-parameter
 `int32 Main()` (including a private declaration) through the hosted native
 emitter. It rejects other entry signatures before replacing output;
+`frontend-run` JIT-executes that same bounded entry in-process without
+writing a PE file, returning its raw exit code with no success envelope;
 the hosted compiler remains in parallel for general builds. This bounded
 result is a provisional component protocol, not approved TRRM metadata or a
 compiler self-build. Twenty shared scalar/conditional/Boolean/integer-literal sources produce

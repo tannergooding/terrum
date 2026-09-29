@@ -99,6 +99,10 @@ native facts into verified IR and emits a Windows x64 DLL for an explicitly
 `frontend-build self-host <input|-> -o <output.exe> --runtime <fail-fast|checked-exceptions> --json`
 command emits a Windows x64 executable from native facts for a zero-parameter
 `int32 Main()` through the hosted emitter, retaining the output on failure.
+`frontend-run self-host <input|-> --runtime <fail-fast|checked-exceptions> --json`
+JIT-executes the same bounded entry without writing an image. Like hosted
+`jit`, it returns the raw `Main` exit status and only uses JSON for diagnostics;
+supervise this in-process native command with a deadline.
 The bounded input and source directory remain required, and general source
 binding, broader libraries and compiler self-build remain outstanding.
 Twenty shared scalar/conditional/Boolean/integer-literal fixtures have byte-identical DLL output from

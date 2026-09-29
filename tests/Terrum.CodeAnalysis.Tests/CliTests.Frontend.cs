@@ -17,6 +17,47 @@ public sealed partial class CliTests
     private delegate int ScalarBinary(int left, int right);
 
     [Theory]
+    [InlineData("int32 Main() { return 42; }", 42)]
+    [InlineData("int32 Main() { return -0xFFFFFFD6; }", 42)]
+    [InlineData("int32 Main() { if (true) { return 42; } else { return 0; } }", 42)]
+    [InlineData("int32 Main() { return 0; }", 0)]
+    public async Task FrontendRunMatchesHostedJitAsync(string source, int expected)
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+        {
+            var input = Encoding.UTF8.GetBytes(source);
+            var (nativeExit, nativeOutput, nativeError) = await RunAsync(input,
+                "frontend-run", directory, "-", "--runtime", policy, "--json");
+            var (hostedExit, hostedOutput, hostedError) = await RunAsync(input,
+                "jit", "-", "--runtime", policy, "--json");
+            Assert.Equal(expected, hostedExit);
+            Assert.Equal(hostedExit, nativeExit);
+            Assert.Empty(nativeOutput);
+            Assert.Empty(hostedOutput);
+            Assert.Empty(nativeError);
+            Assert.Empty(hostedError);
+        }
+    }
+
+    [Fact]
+    public async Task FrontendRunRejectsUnsupportedEntryAsync()
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        var (exit, output, error) = await RunAsync(
+            Encoding.UTF8.GetBytes("int32 Other() { return 42; }"),
+            "frontend-run", directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(1, exit);
+        Assert.Empty(error);
+        using var result = JsonDocument.Parse(output);
+        Assert.False(result.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal("TRM4002", result.RootElement.GetProperty("diagnostics")[0]
+            .GetProperty("code").GetString());
+    }
+
+    [Theory]
     [InlineData("int32 Main() { return 42; }")]
     [InlineData("public int32 Main() { return 0x2A; }")]
     [InlineData("int32 Main() { if (true) { return 42; } else { return 0; } }")]
