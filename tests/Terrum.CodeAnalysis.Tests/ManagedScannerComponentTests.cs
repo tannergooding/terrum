@@ -3096,6 +3096,10 @@ public sealed class ManagedScannerComponentTests
         0L, 163)]
     [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return +((42)); }",
         0L, 657)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return -(0xFFFFFFD6); }",
+        0L, 658)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return -(0xFFFFFFD6); }",
+        0L, 658)]
     public async Task NativeScalarFrontendIntegerUnaryExecutesAsync(
         NativeRuntimePolicy policy, string text, long argument, int operation)
     {
@@ -3107,6 +3111,13 @@ public sealed class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
+        if (operation == 658)
+        {
+            Assert.Equal(7, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, 6);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, 7);
+        }
         Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
         foreach (var word in new[] { 22, 23, 24, 25 })
         {

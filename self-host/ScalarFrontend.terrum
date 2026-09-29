@@ -14,6 +14,7 @@ namespace Terrum.CodeAnalysis;
 // The two slots hold the literal's low/high magnitude words.
 // Version-5 unary minus on that literal adds another 1200 to the operation.
 // Version-6 unary plus on that literal adds another 1600.
+// Version-7 grouped unary minus on a standalone literal uses operation 658.
 // Boolean parameter/literal pairs add 700 for a parameter on the left or
 // 900 for a literal on the left; slots hold the parameter index and literal kind.
 // Boolean literal pairs add 1100; both slots hold literal kinds.
@@ -499,24 +500,31 @@ mut class ScalarFrontendState
         {
             _at = _at + 1;
             require BeginUnaryOperand(out var unaryOperand, out var groups);
-            if (unaryOperand.Kind == 3 && literal.Kind == 57)
+            if (unaryOperand.Kind == 3
+                && (literal.Kind == 57 || literal.Kind == 58))
             {
-                if (expectedType < 1 || expectedType > 4)
+                if (expectedType < 1 || expectedType > 4
+                    || (literal.Kind == 58 && expectedType != 1 && expectedType != 3))
                 {
                     FailAt(2, literal.Range);
                     return false;
                 }
                 if (!TryReadMagnitude(unaryOperand, _at, expectedType, false,
                     unaryOperand.Range, out var low, out var high)
-                    || !FinishUnaryOperand(unaryOperand, groups, out var plusEnd))
+                    || !FinishUnaryOperand(unaryOperand, groups, out var signedEnd))
                 {
                     return false;
                 }
                 require SourceRange.TryCreate(literal.Range.Start,
-                    plusEnd - literal.Range.Start, out var plusSpan);
-                require ScalarFrontendExpression.TryCreate(expectedType, 657,
-                    low, high, plusSpan, out var plusLiteral);
-                expression = plusLiteral;
+                    signedEnd - literal.Range.Start, out var signedSpan);
+                mut int32 operation = 657;
+                if (literal.Kind == 58)
+                {
+                    operation = 658;
+                }
+                require ScalarFrontendExpression.TryCreate(expectedType, operation,
+                    low, high, signedSpan, out var signedLiteral);
+                expression = signedLiteral;
                 return true;
             }
             if (unaryOperand.Kind != 2)

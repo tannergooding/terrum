@@ -39,7 +39,8 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6) || words[1] is not (1 or 2))
+        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6 or 7)
+            || words[1] is not (1 or 2))
         {
             throw InvalidResult();
         }
@@ -309,9 +310,12 @@ public static class ScalarFrontendHost
                     && right == 0 && left >= 1 && left <= parameters && leftType == type
                     && tokens[operandIndex].Text == source.Text.Substring(name.Start, name.Length);
             }
-            if (operation == 657)
+            if (operation is 657 or 658)
             {
-                if (words[0] < 3 || expression.Type != type || type is not (1 or 2 or 3 or 4)
+                if (words[0] < (operation == 658 ? 7 : 3)
+                    || expression.Type != type
+                    || (operation == 658 ? type is not (1 or 3)
+                        : type is not (1 or 2 or 3 or 4))
                     || !ValidSpan(expression.Span, nonempty: true))
                 {
                     return false;
@@ -320,7 +324,8 @@ public static class ScalarFrontendHost
                     expression.Span.Start, expression.Span.Length)));
                 var tokens = lexical.Tokens;
                 return lexical.Diagnostics.IsEmpty
-                    && TryUnaryOperand(tokens, TokenKind.Plus, expression.Span.Length,
+                    && TryUnaryOperand(tokens, operation == 658 ? TokenKind.Minus
+                        : TokenKind.Plus, expression.Span.Length,
                         out var operandIndex)
                     && tokens[operandIndex].Kind == TokenKind.NumericLiteral
                     && ValidMagnitude(tokens[operandIndex].Text.AsSpan(),
@@ -801,7 +806,7 @@ public static class ScalarFrontendHost
                     new BoundRead(expression.LeftParameter - 1, type, operandSpan),
                     type, expression.Span);
             }
-            if (expression.Operation == 657)
+            if (expression.Operation is 657 or 658)
             {
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
@@ -812,7 +817,8 @@ public static class ScalarFrontendHost
                     ? expression.LeftParameter
                     : unchecked((long)((ulong)(uint)expression.RightParameter << 32
                         | (uint)expression.LeftParameter));
-                return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Plus,
+                return Binder.FoldScalarConstant(new BoundUnary(expression.Operation == 658
+                    ? TokenKind.Minus : TokenKind.Plus,
                     new BoundConstant(value, type, operandSpan), type, expression.Span));
             }
             if (expression.Operation / 100 is 7 or 9
