@@ -1008,6 +1008,85 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("int32", "true", "int32.MinValue", "int32.MaxValue", "if (flag) { return x; } else { return y; }", true, "int32.MinValue")]
+    [InlineData("int32", "false", "int32.MinValue", "int32.MaxValue", "if (flag) { return x; } else { return y; }", true, "int32.MaxValue")]
+    [InlineData("uint32", "true", "uint32.MaxValue", "0", "if (flag) { return x; } else { return y; }", true, "uint32.MaxValue")]
+    [InlineData("uint32", "false", "uint32.MaxValue", "0", "if (flag) { return x; } else { return y; }", true, "0")]
+    [InlineData("int64", "true", "int64.MinValue", "int64.MaxValue", "if (flag) { return x; } else { return y; }", true, "int64.MinValue")]
+    [InlineData("int64", "false", "int64.MinValue", "int64.MaxValue", "if (flag) { return x; } else { return y; }", true, "int64.MaxValue")]
+    [InlineData("uint64", "true", "uint64.MaxValue", "0", "if (flag) { return x; } else { return y; }", true, "uint64.MaxValue")]
+    [InlineData("uint64", "false", "uint64.MaxValue", "0", "if (flag) { return x; } else { return y; }", true, "0")]
+    [InlineData("bool", "true", "false", "true", "if (flag) { return x; } else { return y; }", true, "false")]
+    [InlineData("bool", "false", "false", "true", "if (flag) { return x; } else { return y; }", true, "true")]
+    [InlineData("char16", "true", "char16(65535)", "char16(0)", "if (flag) { return x; } else { return y; }", true, "char16(65535)")]
+    [InlineData("char16", "false", "char16(65535)", "char16(0)", "if (flag) { return x; } else { return y; }", true, "char16(0)")]
+    [InlineData("int32", "true", "1", "2", "if (wrong) { return x; } else { return y; }", false, "0")]
+    [InlineData("int32", "true", "1", "2", "if (flag) { return y; } else { return x; }", false, "0")]
+    [InlineData("int32", "true", "1", "2", "if (flag) { return x; } else { return x; }", false, "0")]
+    [InlineData("int32", "true", "1", "2", "if (flag) { return x; }", false, "0")]
+    public async Task BoundedNativeConditionalReturnBindsBothBranchValuesAsync(
+        string typeName, string condition, string first, string second, string body,
+        bool evaluable, string expected)
+    {
+        var evaluator = typeName switch
+        {
+            "int32" => "TryEvaluateInt32ScalarConditionalReturn",
+            "uint32" => "TryEvaluateUInt32ScalarConditionalReturn",
+            "int64" => "TryEvaluateInt64ScalarConditionalReturn",
+            "uint64" => "TryEvaluateUInt64ScalarConditionalReturn",
+            "bool" => "TryEvaluateBoolScalarConditionalReturn",
+            "char16" => "TryEvaluateChar16ScalarConditionalReturn",
+            _ => throw new ArgumentOutOfRangeException(nameof(typeName)),
+        };
+        var text = $"{typeName} Value(bool flag, {typeName} x, {typeName} y) {{ {body} }}";
+        var assertion = evaluable
+            ? $$"""
+                require {{evaluator}}(move tokens, {{condition}}, {{first}}, {{second}},
+                    out var name, out var bound);
+                if (name.Start != {{typeName.Length + 1}} || name.Length != 5
+                    || bound != {{expected}})
+                {
+                    return 1;
+                }
+                """
+            : $$"""
+                if ({{evaluator}}(move tokens, {{condition}}, {{first}}, {{second}},
+                    out var name, out var bound))
+                {
+                    return 1;
+                }
+                """;
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                {{assertion}}
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            if (evaluable)
+            {
+                var source = text + $$"""
+                     int32 Main() {
+                         {{typeName}} actual = Value({{condition}}, {{first}}, {{second}});
+                         if (actual == {{expected}}) { return 42; }
+                         return 1;
+                     }
+                    """;
+                var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+            }
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
+                "ScalarConditionalParser").ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData("int32", "-1", "0", "x < y", true, true)]
     [InlineData("int32", "-1", "0", "x <= y", true, true)]
     [InlineData("int32", "-1", "0", "x > y", true, false)]

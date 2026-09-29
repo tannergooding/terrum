@@ -1,0 +1,187 @@
+namespace Terrum.CodeAnalysis;
+
+bool TryParseScalarConditionalReturn(TokenSnapshot tokens,
+    out int32 scalarType, out SourceRange name)
+{
+    if (tokens.GetCount() != 30)
+    {
+        return false;
+    }
+    require tokens.TryGet(0, out var returnType);
+    require tokens.TryGet(1, out var function);
+    require tokens.TryGet(2, out var openParameters);
+    require tokens.TryGet(3, out var conditionType);
+    require tokens.TryGet(4, out var conditionParameter);
+    require tokens.TryGet(5, out var firstComma);
+    require tokens.TryGet(6, out var firstType);
+    require tokens.TryGet(7, out var firstParameter);
+    require tokens.TryGet(8, out var secondComma);
+    require tokens.TryGet(9, out var secondType);
+    require tokens.TryGet(10, out var secondParameter);
+    require tokens.TryGet(11, out var closeParameters);
+    require tokens.TryGet(12, out var openBody);
+    require tokens.TryGet(13, out var branch);
+    require tokens.TryGet(14, out var openCondition);
+    require tokens.TryGet(15, out var conditionUse);
+    require tokens.TryGet(16, out var closeCondition);
+    require tokens.TryGet(17, out var openTrue);
+    require tokens.TryGet(18, out var trueReturn);
+    require tokens.TryGet(19, out var firstUse);
+    require tokens.TryGet(20, out var trueSemicolon);
+    require tokens.TryGet(21, out var closeTrue);
+    require tokens.TryGet(22, out var otherwise);
+    require tokens.TryGet(23, out var openFalse);
+    require tokens.TryGet(24, out var falseReturn);
+    require tokens.TryGet(25, out var secondUse);
+    require tokens.TryGet(26, out var falseSemicolon);
+    require tokens.TryGet(27, out var closeFalse);
+    require tokens.TryGet(28, out var closeBody);
+    require tokens.TryGet(29, out var eof);
+    if (!TryGetScalarType(returnType, out var selected)
+        || !TryGetScalarType(conditionType, out var condition) || condition != 5
+        || !TryGetScalarType(firstType, out var matchingFirst)
+        || !TryGetScalarType(secondType, out var matchingSecond)
+        || selected != matchingFirst || selected != matchingSecond
+        || function.Kind != 2 || openParameters.Kind != 46
+        || firstComma.Kind != 53 || secondComma.Kind != 53
+        || closeParameters.Kind != 47 || openBody.Kind != 48
+        || branch.Kind != 16 || openCondition.Kind != 46
+        || closeCondition.Kind != 47 || openTrue.Kind != 48
+        || trueReturn.Kind != 19 || trueSemicolon.Kind != 52
+        || closeTrue.Kind != 49 || otherwise.Kind != 17
+        || openFalse.Kind != 48 || falseReturn.Kind != 19
+        || falseSemicolon.Kind != 52 || closeFalse.Kind != 49
+        || closeBody.Kind != 49 || eof.Kind != 0
+        || !SameTokenSpelling(conditionParameter, conditionUse)
+        || !SameTokenSpelling(firstParameter, firstUse)
+        || !SameTokenSpelling(secondParameter, secondUse)
+        || SameTokenSpelling(conditionParameter, firstParameter)
+        || SameTokenSpelling(conditionParameter, secondParameter)
+        || SameTokenSpelling(firstParameter, secondParameter))
+    {
+        return false;
+    }
+    scalarType = selected;
+    name = function.Range;
+    return true;
+}
+
+bool TryEvaluateInt32ScalarConditionalReturn(TokenSnapshot tokens, bool condition,
+    int32 first, int32 second, out SourceRange name, out int32 result)
+{
+    if (!TryParseScalarConditionalReturn(move tokens, out var selected, out var foundName)
+        || selected != 1)
+    {
+        return false;
+    }
+    name = foundName;
+    if (condition)
+    {
+        result = first;
+    }
+    else
+    {
+        result = second;
+    }
+    return true;
+}
+
+bool TryEvaluateUInt32ScalarConditionalReturn(TokenSnapshot tokens, bool condition,
+    uint32 first, uint32 second, out SourceRange name, out uint32 result)
+{
+    if (!TryParseScalarConditionalReturn(move tokens, out var selected, out var foundName)
+        || selected != 2)
+    {
+        return false;
+    }
+    name = foundName;
+    if (condition)
+    {
+        result = first;
+    }
+    else
+    {
+        result = second;
+    }
+    return true;
+}
+
+bool TryEvaluateInt64ScalarConditionalReturn(TokenSnapshot tokens, bool condition,
+    int64 first, int64 second, out SourceRange name, out int64 result)
+{
+    if (!TryParseScalarConditionalReturn(move tokens, out var selected, out var foundName)
+        || selected != 3)
+    {
+        return false;
+    }
+    name = foundName;
+    if (condition)
+    {
+        result = first;
+    }
+    else
+    {
+        result = second;
+    }
+    return true;
+}
+
+bool TryEvaluateUInt64ScalarConditionalReturn(TokenSnapshot tokens, bool condition,
+    uint64 first, uint64 second, out SourceRange name, out uint64 result)
+{
+    if (!TryParseScalarConditionalReturn(move tokens, out var selected, out var foundName)
+        || selected != 4)
+    {
+        return false;
+    }
+    name = foundName;
+    if (condition)
+    {
+        result = first;
+    }
+    else
+    {
+        result = second;
+    }
+    return true;
+}
+
+bool TryEvaluateBoolScalarConditionalReturn(TokenSnapshot tokens, bool condition,
+    bool first, bool second, out SourceRange name, out bool result)
+{
+    if (!TryParseScalarConditionalReturn(move tokens, out var selected, out var foundName)
+        || selected != 5)
+    {
+        return false;
+    }
+    name = foundName;
+    if (condition)
+    {
+        result = first;
+    }
+    else
+    {
+        result = second;
+    }
+    return true;
+}
+
+bool TryEvaluateChar16ScalarConditionalReturn(TokenSnapshot tokens, bool condition,
+    char16 first, char16 second, out SourceRange name, out char16 result)
+{
+    if (!TryParseScalarConditionalReturn(move tokens, out var selected, out var foundName)
+        || selected != 6)
+    {
+        return false;
+    }
+    name = foundName;
+    if (condition)
+    {
+        result = first;
+    }
+    else
+    {
+        result = second;
+    }
+    return true;
+}
