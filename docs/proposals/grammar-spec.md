@@ -160,9 +160,13 @@ remain open design work.
 source form. `abstract` remains a reserved lexical token for the bounded
 parser's existing syntax; it is not a declaration modifier in the target
 interface grammar below. Candidate words such as `init`, `implicit`, `params`,
-`ensure`, `get`, `some`, `is` and `const` need explicit
+`ensure`, `get`, `set`, `some`, `is`, `const`, `do`, `when`, `yield`, `extern`,
+`extension`, `unchecked`, `defer`, `base`, and `pin` need explicit
 keyword-versus-contextual-token decisions before adoption; they are not all
-current keyword tokens. In particular,
+current keyword tokens. `default`, `operator`, `write`, and legacy `out`
+already have keyword tokens; `init` is the accepted target initialization-loan
+spelling, but its lexer and parameter grammar are not yet implemented.
+In particular,
 §3.4 uses `is` contextually although it is not a current keyword token. `_` is
 its own reserved token.
 
@@ -300,13 +304,13 @@ interface IAdd<T>
 Type            = [ "write" ], ( "void" | DottedIdentifier ),
                   [ "<", Type, { ",", Type }, ">" ], [ "?" ] ;
 ParameterList   = "(", [ Parameter, { ",", Parameter } ], ")" ;
-Parameter       = [ PassingMode ], Type, Identifier ;
-PassingMode     = "ref" | "out" | "mut", "ref" ;
+Parameter       = [ PassingMode ], Type, Identifier
+                | "init", "ref", "<", Type, ">", Identifier ;
+PassingMode     = "ref" | "mut", "ref" ;
 
 Arguments       = "(", [ Argument, { ",", Argument } ], ")" ;
 Argument        = [ Identifier, ":" ],
-                  ( "out", "var", Identifier | [ PassingMode ], Expression
-                  | "init", Expression ) ;
+                  ( [ PassingMode ], Expression | "init", Expression ) ;
 ```
 
 Repeated optional markers such as `T??` are not a proposed source form.
@@ -318,12 +322,14 @@ variance.
 
 Argument labels and passing modes are source forms only; argument reordering,
 overload resolution, and output behavior are semantic contracts. The proposed
-`Type` production does not define `init ref<T>`; `init` is a
-distinct initialization-loan parameter mode, with the accepted call-site
-spelling `Create(init value)`. `write` qualifies access in a type (for example,
+`init ref<T>` is a distinct initialization-loan parameter form, with the
+accepted call-site spelling `Create(init value)`. Existing `out` and
+`out var` syntax remains supported by the bounded implementation but is not
+the target form for vacant-storage initialization; migration is not settled.
+`write` qualifies access in a type (for example,
 `write ref<T>`); `mut` qualifies a binding/receiver or a `mut ref` mode.
 Neither `write` nor `init` is an unrestricted declaration modifier. Exact
-`init ref<T>` parameter grammar and legality of `write ref<T>` in `Parameter`
+`write ref<T>` legality in `Parameter` and the other target parameter forms
 remain open, and this bounded production must not be used to reject the
 accepted forms.
 
@@ -943,6 +949,36 @@ binding/dispatch for older implementations, not an assumption that an older
 binary has a newly appended slot. Exact witness-mapping syntax and metadata
 representation remain open. Do not infer legality from the permissive
 `ContextualPrefix` placeholder.
+
+**Proposed vocabulary, not current lexer support:** `do` introduces a
+post-tested loop; `set` a writable property accessor; `when` a pattern guard;
+`yield` a suspended producer; `extern` an externally implemented declaration;
+`extension` a wrapper-scoped extension declaration; `unchecked` an explicit
+arithmetic policy scope; and `defer` scope-exit cleanup. Their productions,
+restrictions and (for `yield`/`extern`/`defer`) effects and lowering remain
+open. Universal checked arithmetic needs no matching `checked` toggle.
+`default` is already a token for switch arms; use in default-interface-body
+calls would require an additional, explicit grammar and binding contract.
+`base` is a candidate only for selecting a *named interface's* default body,
+not stateful base-class inheritance or an implicit linearization. A spelling
+such as `base<I>.Member(...)` must call that default body directly, while
+ordinary calls within it still dispatch through the selected witness; access,
+effects and diamond resolution must be checked. No `override` keyword is
+proposed: an explicit conformance implementation replaces an available
+default by member identity, not by a same-named declaration. `pin` is a
+candidate for a scoped pin operation; `pinned` need not also be a keyword
+unless its distinct use in a type or declaration is established.
+
+Type-call conversions already use `T(expression)`; `cast` and `explicit`
+are not needed to invoke them. User-defined conversion *declarations*, raw
+reinterpretation, and their safety constraints still need contracts before
+selecting declaration or expression keywords. `operator` already has a token
+and is required for the proposed type/interface-scoped operator declarations.
+Do not reserve iteration or pattern words beyond `foreach`, `is`, `some`,
+`when` and `yield` merely by analogy with another language. Reflection and
+layout queries, allocation forms, and pinning need separate semantic and
+representation decisions before choosing between intrinsic names and
+keywords; `new` already covers the proposed ordinary allocation form.
 
 The current bounded parser still recognizes `static abstract` operator
 declarations. Removing that spelling from the **proposed** grammar does not
