@@ -4,6 +4,9 @@
 > Candidate coded-instruction design, not the current semantic-module writer or
 > an approved execution profile. The unencoded contracts at the end are
 > stabilization blockers, not permissions to erase their semantics.
+> `(1, 0)` below labels this proposal's candidate executable subset; it is
+> neither an on-wire profile selector nor the approved metadata design's
+> format revision `(1, 0)`. Profile negotiation remains unresolved.
 
 The [approved current metadata design](../il-metadata.md) defines the Body table,
 TypeSpec, MethodDef, contracts and artifact framing. This document specifies
@@ -15,23 +18,21 @@ metadata tokens or runtime ABI.
 ## Model and canonical form
 
 A body implements one MethodDef. A **block** has typed parameters, ordered
-operations and one terminator; an edge supplies its successor's parameters.
-A **value ID** denotes one immutable, typed definition. A **place** denotes
+operations and one terminator; each edge supplies its successor's parameters.
+A **value ID** denotes an immutable typed definition. A **place** denotes
 addressable storage with separate initialization, mutability and ownership
-state; loading a value is not the same as borrowing or moving its place. A
+state; loading a value is distinct from borrowing or moving its place. A
 **region** groups blocks for loop structure or lexical lifetime. Only the
-function region (ID 0) is implicit. Source spans are optional SourceMap rows;
-they never determine execution.
+function region (ID 0) is implicit. Optional SourceMap spans do not affect
+execution.
 
-The interchange form is already normalized enough to avoid recovering basic
-blocks from branch byte offsets, loop headers from arbitrary backedges, or
-local lifetimes from source names. It is **not** an optimizer's canonical SSA:
-block parameters replace implicit stack merges, but place writes, calls and
-failures remain ordered effects. An interpreter may execute verified blocks;
-a JIT or AOT compiler may build its own lowered IR. Neither may assume the
-encoded loop/region facts are true for untrusted input without validation.
-Trusted producers may supply these facts directly to a fast consumer;
-semantic audit remains an explicit optional mode.
+Explicit blocks and regions avoid recovering control flow from branch
+displacements or backedges, and local lifetimes from source names. This is
+not an optimizer's canonical SSA: block parameters replace implicit stack
+merges, but place writes, calls and failures remain ordered effects.
+Interpreters, JITs and AOT compilers may lower verified blocks independently.
+Untrusted loop/region facts require validation; trusted producers may supply
+them to a fast consumer, with semantic audit as an explicit option.
 
 Numeric policy (checked, wrapping, saturating, bit reinterpretation) is
 explicit; converting one into another is not a space-saving normalization.
@@ -61,47 +62,136 @@ The `layout` byte selects widths independently by operand class; bits
 | 2–3 | Count (argument, case, exit count) | 1, 2, 4 bytes; `3` invalid |
 | 4–5 | Data (signed literal or unsigned bit pattern) | 1, 2, 4, 8 bytes |
 
-All operands of a class in **one instruction** use its selected width;
-other instructions choose independently. A class unused by an instruction
-has code 0. Fixed enumerations (`kind`, `policy`, `reason`) are always `u8`,
-not references, counts or data; only their assigned values are valid.
-The reference-class list gives *possible* operand kinds, not a sequence
-included in every instruction. The registered opcode supplies the actual
-operands and their order; `layout` changes their encoded widths, never that
-schema or the meaning of an ID.
-References and counts are unsigned; data is unsigned for `bits`/`Switch`
-patterns and two's-complement signed for `ConstSigned`. Each class uses the
-smallest listed width that represents *all* its operands in the instruction.
-Unsigned data zero-extends, signed data sign-extends to 64 bits. A prefixed
-instruction with `layout=0` or a reserved bit rejects; a nonminimal
-class width is noncanonical and fails a strict audit. This makes the
-default a direct opcode dispatch and bounds all
-wider reads without a continuation loop per operand. It does not imply that
-reading or validating a variable-length stream is free.
+All operands of one class in an instruction share its selected width;
+instructions select widths independently. An unused class must use code 0;
+a nonzero code for it rejects.
+Enumerations (`kind`, `policy`, `reason`) are fixed `u8`, not width classes.
+The opcode defines which operands occur and their order; `layout` changes
+widths only. References and counts are unsigned; `bits`/`Switch` data is
+unsigned and `ConstSigned` data is two's-complement signed. Writers must
+choose the smallest width that represents all operands of each class.
+Decoding zero-extends unsigned data and sign-extends signed data to 64 bits.
+An `F0` prefix with `layout=0` or reserved bits rejects. Nonminimal widths
+are noncanonical; a strict canonicality audit rejects them, but load-time
+acceptance without that audit is not specified.
 
-Opcodes `0x01..0x7F` are operations and `0x80..0xEF` are terminators;
-`0xF0` is the width prefix, not a standalone operation. `0x00` and
-`0xF1..0xFF` reject in this revision. A prefix must be followed by its
-layout and a registered opcode *within the same block extent*. Operands
-follow in the opcode's specified order, without a per-instruction length
-header. Unknown opcodes reject semantic loading; an apparent length or
-prefix cannot authorize skipping unknown executable semantics. Counts are
-bounded against the remaining block extent before allocation or traversal;
-the known opcode layout and operation count determine the terminator start.
-This is a regular `prefix, layout, opcode, operands` escape for uncommon
-widths rather than four opcode assignments for every semantic operation.
-It preserves one-byte dispatch for the common form without multiplying
-the opcode catalog by reference/count/immediate width combinations.
-An interpreter may dispatch directly on `(opcode, layout)` or decode to
-native-width arrays; those alternatives require measured cost evidence.
-IDs `1..255` use the common form; `256..65535` need a two-byte reference,
-and only larger bodies need four-byte references. A prefixed instruction
-costs two extra bytes, but fixed widths avoid continuation decoding per
-operand. This choice prioritizes predictable dispatch and direct indexes
-for ordinary small methods over minimizing every large literal or method
-body. Explicit block transfers, place-state joins and loop headers also
-save trusted consumers from rediscovering some dataflow. No
-decode-throughput or total-size win is asserted.
+The prefix keeps common instructions to direct opcode dispatch without
+multiplying the opcode catalog by width combinations. It adds two bytes to a
+wide instruction and avoids continuation decoding per operand; no read or
+validation cost is implied.
+
+Opcodes `0x01..0x7F` are operations; `0x80..0xEF` are terminators.
+`0xF0` introduces a width layout and is not standalone; `0x00` and
+`0xF1..0xFF` reject. A wide prefix, layout and registered opcode must fit
+within one block. Operands follow the opcode schema; there is no
+per-instruction length. Unknown opcodes reject semantic loading and cannot
+be skipped using an apparent length or prefix. Bound every operand and
+counted field to the remaining block extent before use. Before allocating or
+traversing repeated items, prove their minimum encoded bytes fit that extent.
+After exactly `operationCount` operations, the indexed terminator must be
+one registered instruction that ends the block.
+
+Only opcode values assigned in the tables below are registered; other
+values in the operation and terminator bands are reserved. This stream has
+no opaque-instruction extension form. The metadata design's optional-section
+policy does not make Body opcodes optional: a present Body section carries
+required semantic content.
+Future opcode allocation and feature/revision negotiation remain unspecified.
+The policy for a trusted consumer that skips an entire unvisited block, which
+might contain an unknown opcode, also remains unresolved.
+
+An interpreter may dispatch on `(opcode, layout)` or decode native-width
+operands; either choice needs measured cost evidence. References `1..255`
+use the common form, `256..65535` use two bytes, and larger IDs use four.
+This favors predictable dispatch and direct indexes for small methods over
+minimizing every large literal or body. Explicit edges, place-state joins and
+loop headers expose dataflow to consumers; no throughput or total-size win
+is asserted.
+
+### Checked add end to end (informative)
+
+Consider `AddFive` under the fail-fast policy. Assume MethodDef row 1 owns
+the body, its MethodSig declares the one by-value `int32` parameter and
+`int32` result, and TypeSpec row `t1` denotes `int32`. The expected
+`int32` context types the literal `5`; `+` selects checked primitive
+addition, not a numeric fallback or user witness. This illustrative
+lowering is explanatory IR, not a required source rewrite or wire syntax:
+
+```text
+Source:   int32 AddFive(int32 x) { return x + 5; }
+
+B1(r1: t1):
+    r2 = ConstSigned t1, 5
+    CheckedBinary add r1, r2 -> B2()
+B2(r3: t1):
+    Return r3
+```
+
+| Source/IR item | Role in the example |
+|---|---|
+| Parameter `x` | By-value B1 value `r1` (`t1`), not a place |
+| Literal `5` | Materialized by `ConstSigned` as B1 value `r2` (`t1`) |
+| Checked result | `r3` (`t1`), B2's implicit first parameter; no destination operand appears in B1 |
+
+Overflow follows the module's failure policy; only success reaches B2.
+
+The Body **section** uses three values, two blocks and no places or
+regions. Its 73-byte structure is:
+
+| Region | Size and contents |
+|---|---|
+| Body-section offset index | 8 bytes: `00 00 00 00 41 00 00 00` = `[0,65]`; not an instruction |
+| Body row header | 15 bytes: `ownerMethod=1`, `bodyLayout=0`, counts `(block,value,place,region)=(2,3,0,0)`, and three `(t1,value)` descriptors |
+| Body row offset arrays | 20 fixed-`u32` bytes: `blockOffsets=[0,19,30]`, `terminatorOffsets=[13,9]` |
+| Block data | 30 bytes: B1 is 19 bytes; B2 is 11 bytes |
+
+Here `bodyLayout=0` selects one-byte local and metadata widths. The owner
+and offset arrays remain fixed `u32`; instruction widths are independent
+and none of these instructions has an `F0` prefix.
+Body fields and validation rules are specified in
+[Body record, direct block index and regions](#body-record-direct-block-index-and-regions).
+
+The exact section bytes are the eight-byte offset index followed by the
+65-byte Body row:
+
+```text
+00 00 00 00  41 00 00 00
+01 00 00 00  00  02 03 00 00
+01 00  01 00  01 00
+00 00 00 00  13 00 00 00  1E 00 00 00
+0D 00 00 00  09 00 00 00
+00 01 01 00 00 00 00 00 01  02 02 01 05  84 01 01 02 02 00
+00 01 03 00 00 00 00 00 00  83 03
+```
+
+| Location | Opcode-specific schema, in byte order | Widths / layout | Encoded fields | Reading |
+|---|---|---|---|---|
+| B1 operation | `02 ConstSigned ref(rNew) ref(t) signedData(value)` | Common; ref=1, data=1 | `02` opcode · `02` rNew · `01` t · `05` signedData | Define `r2` as `t1` value `5` |
+| B1 terminator | `84 CheckedBinary u8(kind) ref(rLeft) ref(rRight) edgeSuccess` | Common; ref=1, count=1; kind=`u8` | `84` opcode · `01` kind · `01` rLeft · `02` rRight · `02` targetBlock · `00` argumentCount | `kind=1` add; operands `r1` (`x`) and `r2` (literal `5`); success target B2; no explicit edge arguments |
+| B2 terminator | `83 Return ref(result)` | Common; ref=1 | `83` opcode · `03` result | Return `r3`, the implicit checked result |
+
+In the terminator schema, `edgeSuccess` expands to
+`ref(targetBlock), count(argumentCount), ref[argumentCount]`; a zero
+count means no trailing argument references. `CheckedBinary` encodes no
+destination: its success value is B2's first parameter, `r3` (descriptor
+3). `ConstSigned` carries signed data, not an add immediate. By-value `x`
+needs no place; a mutable local needs `PlaceLocal` then `Load`, with
+`Assign` through that place on success. See the
+[local-place shape](#value-and-place-state-through-checked-arithmetic),
+which is decode-only in this revision.
+
+For example, targeting block 256 makes this same checked add use
+`F0 01 84 01 01 00 02 00 00 01 00`: two-byte references widen both
+operands and the target, while the count stays one byte. That instruction
+prefix does not set the Body's structural widths; a real Body with 256
+blocks also needs a two-byte local width for its `blockCount`.
+`ConstSigned r3, t1, 200` instead uses
+`F0 10 02 03 01 C8 00` (one-byte references, two-byte signed data); if
+its result ID were 256, it would use
+`F0 11 02 00 01 01 00 C8 00`. The prefix changes encoded widths, not
+the opcode's semantic identity. Conformance should independently verify
+the bytes, decoded records and audited CFG/types/states; a same-writer
+round trip alone is insufficient.
 
 The following are operand *kinds*, not additional on-wire tags. `ref`
 means the selected reference width, `count` the selected count width,
@@ -113,9 +203,9 @@ means the selected reference width, `count` the selected count width,
 | `r?` | `ref` | Value ID or zero only when the declared result is void |
 | `rNew?` | `ref` | New value ID, or zero iff the selected callable returns void; zero defines nothing |
 | `p` | `ref` | Body-local place descriptor ID `1..placeCount` |
-| `t` | `ref` | Artifact-wide TypeSpec row ID interpreted in the body module's context, never a primitive code in place of a row ID |
+| `t` | `ref` | Artifact-wide TypeSpec row `1..TypeSpec.recordCount`, interpreted in the body module's context; never a primitive code in place of a row ID |
 | `m` | `ref`, then `u32 DefId` only when `m=0` | Nonzero: one-based MethodDef row within the body module's MethodDef range, resolved by checked `methodDefStart + m - 1`; retained imports use its bound expected MethodDef. Zero: resolved direct call to an authored MethodDef in another packed module, with an exact little-endian MethodDef `DefId` following the selected-width zero. Invalid in a single-module artifact |
-| `fieldDefRow` | `ref` | Artifact-wide FieldDef row ID for the selected owner type; a trusted merger may bind it directly to a field of a packed producer's resolved TypeDef |
+| `fieldDefRow` | `ref` | Artifact-wide FieldDef row `1..FieldDef.recordCount` owned by the selected type; a trusted merger may bind it directly to a field of a packed producer's resolved TypeDef |
 | `targetBlock`, `regionId` | `ref` | Body-local block or region ID; only explicitly specified region roots permit zero |
 | `args` | `count`, then `ref[count]` | Ordered value IDs; zero is not an argument |
 | `edge` | `ref targetBlock`, then `args` | Target's typed parameter list consumes the arguments, subject to implicit checked results |
@@ -144,24 +234,20 @@ The last condition is a writer obligation and an optional semantic audit;
 even a trusted decoder bounds its direct terminator access. The reader
 never scans for marker bytes or guesses an unregistered opcode's length.
 
-For example, the checked `add` terminator
-`CheckedBinary add r1, r2 -> B2()` follows the `CheckedBinary` schema:
-`u8(kind=1)`, reference `rLeft=1`, reference `rRight=2`, then an edge with
-reference `targetBlock=2`, count `argumentCount=0` and no explicit argument
-IDs. It uses neither a data operand nor a place, TypeSpec, method, region or
-field operand. In common form, all three references and the count fit in one
-byte, giving `84 01 01 02 02 00`. If the target were block 256 instead,
-the *same* opcode would require layout `01` (two-byte references, one-byte
-count, unused data), giving `F0 01 84 01 01 00 02 00 00 01 00`; `r1`
-and `r2` widen too because reference width is shared within this
-instruction. The separate `ConstSigned r2, t1, 5` operation has reference
-operands `r2` and `t1` **and** signed data `5`, but no edge or count. Neither
-example says anything about the widths selected by other instructions or
-the enclosing Body's structural `bodyLayout`. A *real* body with 256 blocks
-would also need a two-byte structural local width to encode its `blockCount`;
-the 73-byte body below has only two blocks and retains `bodyLayout=0`. The
-[end-to-end checked-add example](#checked-add-end-to-end-informative)
-traces those bytes back to source and the complete Body structure.
+The approved metadata design first bounds the artifact and Body-section row.
+Body decoding then uses checked arithmetic and bounds every field, index,
+operand and repeated item before lookup, allocation or traversal; a trusted
+input does not waive these checks. A consumer may omit body semantic audit
+only under its trust policy; this does not waive metadata reference or
+contract checks. Malformed forms reject decoding. Assigned but
+non-executable forms may be structurally inspected, but an executable
+consumer rejects them before execution. Diagnostic codes, error
+ordering/recovery and numeric parser or audit budgets are not assigned here.
+
+The [introductory checked-add example](#checked-add-end-to-end-informative)
+traces the common form from source through Body structure to operand bytes.
+It also shows why a wide instruction prefix and the enclosing
+`bodyLayout` select widths independently.
 
 ## Body record, direct block index and regions
 
@@ -180,61 +266,51 @@ no further row-length prefix. Its fields, in order, are:
 | `terminatorOffsets` | `u32[blockCount]` little-endian | Each relative to its own block start; points directly to its terminator opcode or width prefix |
 | `blockData` | `blockOffsets[last]` bytes | One block per consecutive offset extent |
 
-Body-layout width codes 0, 1 and 2 mean 1, 2 and 4 bytes; code 3 rejects.
-The local width applies to the four counts, structural block/region/value/
-place IDs, block parameter, place-state and operation counts, region fields
-and place region references. Metadata width applies to structural TypeSpec
-rows (places and value descriptors). Each width is the smallest capable of
-representing every field in its class throughout the **whole body**;
-unused classes select code 0. The `ownerMethod`, `blockOffsets` and
-`terminatorOffsets` remain fixed `u32`, independent of `bodyLayout`. An instruction's
-operand width is independent of the enclosing body width and is selected by
-its own prefix, not by `bodyLayout`. Readers bound all fields before use.
-Canonical minimal widths are a writer obligation; strict readers may
-additionally audit them. Unsupported
-width codes, reserved bits and truncated fields always reject.
+Body-layout codes 0, 1 and 2 mean widths of 1, 2 and 4 bytes; code 3
+rejects. Local width sizes the four counts, structural block/region/value/
+place IDs, block parameters, place-state and operation counts, region fields
+and place-region references. Metadata width sizes TypeSpec rows in place and
+value descriptors. Choose each width to represent every field in its class
+throughout the **whole body**; unused classes use code 0. `ownerMethod` and
+both offset arrays remain fixed `u32`; instruction widths come from each
+instruction's prefix, independently of `bodyLayout`. Readers bound every
+field; writers must use minimal widths. A strict canonicality audit may
+verify them, but load-time treatment of nonminimal `bodyLayout` values is
+not specified. Unsupported
+codes, reserved bits and truncated fields reject.
 
-Offsets begin at 0, increase strictly (no empty blocks), and the last is
-exactly the remaining body bytes. The body must therefore keep block data
-under 4 GiB; reader budgets can be lower. Blocks are directly addressable
-by ID without scanning operations. Offsets do not replace validation:
-each decoded block consumes its exact extent. An invalid block index,
-arithmetic overflow, overlap, trailing byte or duplicate body owner rejects.
-Each terminator offset must follow exactly the counted operations and leave
-exactly one complete terminator before its block end. A CFG reader can
-address terminators without first decoding every operation; a trusted
-consumer can use the producer's direct offset after bounded decoding,
-whereas a semantic audit compares it against the operation stream.
-Body rows follow the owning MethodDef `bodyRow` association, not a native
-code-address order. A linker may relocate metadata rows only by rewriting
-all references and revalidating the result.
+Block offsets start at 0, increase strictly, and end at the exact remaining
+body length; empty blocks are invalid. Block data is under 4 GiB, though
+read budgets may be lower. Direct indexes do not replace bounds checks:
+each block must consume its full extent. Reject invalid indexes, arithmetic
+overflow, overlap, trailing bytes and duplicate body owners. A terminator
+offset follows exactly the counted operations and points to one complete
+terminator ending the block. Trusted readers may seek there after bounded
+decoding; semantic audits compare it with the operation stream. Body rows
+follow the owning MethodDef's `bodyRow`; relocating metadata requires
+rewriting references and revalidating the body.
 
-Places are numbered `1..placeCount`. Flag `0x01` permits rebinding the place,
-`0x02` indicates unique storage and `0x04` indicates storage that starts
-vacant (including `out`); other bits reject. The complete TypeSpec determines referent access
-and representation; these flags cannot grant `write` through a readonly
-handle. Non-value parameters map to their declared places in parameter
-ordinal order, followed by locally created places. By-value parameters are
-entry-block values instead. Place descriptors name storage, not an exposed
-address or a native stack slot.
+Places are numbered `1..placeCount`. Flags `0x01`, `0x02` and `0x04` mean
+rebindable, unique storage and initially vacant (including `out`),
+respectively; other bits reject. The complete TypeSpec determines referent
+access and representation; flags cannot grant `write` through a readonly
+handle. Non-value parameters map to places in parameter order, followed by
+local places; by-value parameters are entry-block values. Place descriptors
+name storage, not an exposed address or native stack slot.
 
-Value descriptor kind `0x00` is a by-value result of its complete
-`typeSpec`; `0x01` is a place-valued handle whose `typeSpec` is its
-**referent**, not a loaded value or an encoded native pointer. Other
-kinds reject. A place-valued handle's access, owner and region still
-derive from its defining place operation; the descriptor does not grant
-access. The typed array is indexed directly for imports, interpreter
-slots, block live sets and a JIT's fast path without parsing preceding
-operations to infer types. A writer must make each descriptor agree
-with its parameter or defining instruction; an optional semantic audit
-checks the agreement. `void` has no descriptor. Ordinary by-value `r`
-operands (including numeric, `Copy`, `Select` and scalar edge arguments)
-require kind 0; operands named `rPlace`/`rBasePlace` require kind 1.
-`PlaceLocal`, `PlaceField` and the reserved `CheckedIndex` produce kind 1;
-`Load` obtains a distinct kind-0 value. Copying a Copy *referent* does
-not duplicate its place authority or extend its loan. Future callable
-parameter modes require separately assigned reference/loan operands,
-not reinterpretation of a kind-0 argument.
+Descriptor kind `0x00` is a by-value result of its complete TypeSpec;
+`0x01` is a place handle whose TypeSpec is its **referent**, not a loaded
+value or native pointer. All other descriptor kinds reject. A handle's
+access, owner and region come from its defining
+place operation; the descriptor grants no authority. The array indexes
+types directly by value ID minus one. Writers must match descriptors to
+parameters and definitions; semantic audits may verify them. `void` has no
+descriptor. Ordinary `r` operands require kind 0; `rPlace`/`rBasePlace`
+require kind 1. `PlaceLocal`, `PlaceField` and reserved `CheckedIndex`
+produce kind 1; `Load` defines a distinct kind-0 value. Copying a Copy
+referent does not duplicate place authority or extend its loan. Future
+parameter modes need explicit reference/loan operands, not a reinterpretation
+of kind 0.
 
 A region entry is `u8 kind, local(parentRegion), local(entryBlock),
 local(exitBlock), local(cleanupBlock)`. Parent is 0 (function) or a
@@ -261,75 +337,60 @@ A block extent contains these fields in order:
 | `operationCount`, `operations` | `local`, then `operationCount` coded instructions | Definitions and state transitions in source order |
 | `terminator` | One coded terminator | Explicit successor/return/failure; no fall-through |
 
-Block ID is its one-based index in `blockOffsets`; region 0 is the
-function root. Entry block is ID 1. Its by-value parameters correspond
-in order and complete type to the MethodSig's by-value parameters; a
-receiver and non-value parameters use their declared place/receiver
-contract, not a fabricated value parameter. Other blocks receive precisely
-their incoming-edge types and arity. The entry block starts each
-non-value parameter place with the state selected by its mode and
-descriptor; it has no inherited places.
+Block ID is its one-based index in `blockOffsets`; region 0 is the function
+root, and entry block ID is 1. Its by-value parameters match MethodSig
+order and types. Receivers and non-value parameters use their declared
+place/receiver contracts, not fabricated values. Other blocks match all
+incoming-edge arities and types. Entry starts each non-value parameter
+place in the state selected by its mode and descriptor; it has no
+inherited places.
 
-The `liveIns` and `liveOuts` are strictly increasing value IDs, not a
-duplicated encoding of block-parameter definitions. Each listed ID refers
-to an existing value with a type determined by its definition. `liveIns`
-must be available on **every** incoming normal edge. `liveOuts` are the
-union of successor `liveIns` and explicit edge arguments; no return or
-failure has live-outs. Every cross-block direct value use and transit
-through a block must be accounted for by these lists; values defined
-here need no `liveIn` entry. An optional audit checks use/definition,
-successor transfer, dominance and exact lists. This avoids mandatory
-parameter renaming for ordinary dominating values while keeping merge values
-and checked-operation results as block parameters typed by descriptor.
+`liveIns` and `liveOuts` are strictly increasing IDs; `liveIns` exclude
+block parameters. Each ID must identify a value with a type from its
+definition.
+`liveIns` refer to prior definitions available on every incoming normal
+edge; `liveOuts` are the union of successor `liveIns` and explicit edge
+arguments. Returns and failures have no live-outs. Account for every
+cross-block use and transit in these lists; definitions in the block need
+no `liveIn`.
+Optional audit checks definitions, transfers, dominance and exact lists.
+This permits ordinary dominating values while typing merge values and
+checked results as block parameters.
 
-All three place lists are strictly increasing by ID with no duplicates;
-`inheritedPlaces` and `startPlaces` are disjoint. Every place has one
-declaration and one lexical start block, possibly revisited at runtime in
-a loop. Only active places may be addressed. On each normal outgoing edge,
-apply the block's operations and end list to its inherited and started
-places: the resulting sorted `(placeId, state)` set **equals** the
-successor's inherited list. Starts in the successor are not inherited.
-Every predecessor must agree with that successor's list. A place ending
-while initialized is allowed only if its complete type is Copy and needs
-no cleanup; a unique owner requires an explicit `Move` or `Drop` first.
-On `Return` the resulting set is empty. This records active local storage
-and its vacancy at boundaries, rather than forcing each consumer to
-discover lifetime joins from arbitrary place operations. An implicit
-failure departure still needs its own cleanup/root rules; this place
-metadata cannot manufacture an unwind edge or make unsupported place
-operations executable.
+Place lists are strictly increasing, duplicate-free; inherited and starting
+places are disjoint. Each place has one declaration and lexical start block,
+which may execute repeatedly in a loop. Only active places may be addressed.
+For each normal edge, apply operations and end-place transitions to the
+inherited and started sets; the result must equal the successor's inherited
+set. Successor starts are not inherited, and all predecessors must agree.
+An initialized place may end only if its type is Copy and needs no cleanup;
+otherwise explicitly `Move` or `Drop` it. `Return` requires an empty set.
+These records expose local state at block boundaries. Failure still needs
+separate cleanup/root rules; place metadata cannot create an unwind edge or
+enable unsupported operations.
 
-Value IDs are unique definitions in `1..valueCount`, with no holes: block
-parameters and result-producing operations each define one. IDs are allocated
-in block-ID/operation order, including block parameters before operations.
-An implicit checked-operation success result is its target block's first
-parameter, not an extra definition at the terminator. A definition can be
-used directly in its own block or across blocks when it dominates every
-use and is declared live through all crossed normal
-edges. Distinct incoming definitions must instead become typed block
-parameters with explicit edge arguments; a value sent as an edge argument
-is live at that terminator. These boundaries avoid forcing a consumer to
-discover cross-block temporaries by a backward whole-body use scan; they
-do not certify Copy, cleanup or aliasing. A trusted consumer can use the
-declared facts; an opt-in verifier can recompute them independently.
-Block arguments to distinct
-conditional successors represent mutually exclusive transfers. Passing the
-same live unique value twice on a single edge, using it after move, or
-implicitly copying a non-Copy value rejects. In the executable subset,
-region entries are loops only. A block's `regionId`
-is its innermost region; it belongs to all ancestors. A loop's header is
-assigned directly to that loop. Its header dominates every member; outside
-edges enter only at its header, every backedge within it targets that header,
-and every edge leaving it targets its designated exit. Its exit is outside
-the loop, in the parent region or an ancestor. Each loop has a reachable
-backedge, each block is reachable from entry, and every CFG cycle is enclosed
-by a valid loop region; an edge must not enter a nested loop except at its
-header. These constraints exclude multi-exit loops and multi-level breaks
-until an explicit exit encoding is assigned. An auditing verifier builds
-the CFG and checks dominance, reachability and region nesting within its
-work budget; trusted consumers may use the
-recorded loop structure directly. It is not a cryptographic certificate.
-Irreducible cycles have no encoding in this profile.
+Value IDs are gapless unique definitions in `1..valueCount`, assigned in
+block/operation order: block parameters first, then result-producing
+operations. An implicit checked result is the target's first parameter,
+not a terminator definition. Direct
+cross-block uses require dominance and liveness on every crossed normal edge.
+Distinct incoming definitions become typed parameters with explicit edge
+arguments; edge arguments are live at the terminator. These facts do not
+certify Copy, cleanup or aliasing; trusted consumers may use them, while an
+opt-in verifier may recompute them. Conditional edges are mutually exclusive,
+but duplicating a live unique value on one edge, using it after move or
+implicitly copying a non-Copy value rejects.
+
+Executable regions are loops only. A block belongs to its innermost region
+and its ancestors; each loop header is assigned to that loop and dominates
+its members. Outside edges enter only at the header, internal backedges
+target it, and leaving edges target its designated exit in the parent or an
+ancestor. Every block is entry-reachable, every loop has a reachable
+backedge, and every CFG cycle lies in a valid loop; nested loops admit entry
+only at their header. Multi-exit loops and multi-level breaks have no
+encoding. An audit checks dominance, reachability and region nesting within
+its work budget; trusted consumers may use recorded regions, not as a
+cryptographic certificate. Irreducible cycles are unsupported.
 
 ### Logical decoder records
 
@@ -345,15 +406,12 @@ preceding fields. Names are descriptive, not a mandated host-language ABI:
 | `Instruction` | Registered opcode, three resolved widths and the opcode-specific typed operands | The wide prefix changes the byte widths only; do not store raw bytes as if they were an addressing mode |
 | `Terminator` | Registered opcode and its typed edge/result/failure payload | Directly indexed; each normal edge targets a block ID and transmits the listed arguments |
 
-The reader first bounds the Body row, its fixed fields, descriptor
-arrays and offset indexes, then may look up any block or value by ID.
-It decodes an operation using that opcode's schema and only then
-advances to the next operation; a strict audit compares this traversal
-to the terminator index and checks type/flow correspondence. A trusted
-consumer can start at an indexed terminator, follow its edges and look
-up value types without decoding unrelated block operations first.
-The byte format prescribes these facts, **not** a particular importer
-object graph, machine register assignment, optimization tier or cache.
+Bound the Body row, descriptors and indexes before lookup. Decode each
+operation by its registered schema; strict audit compares the stream with
+the terminator index and checks type/flow. A trusted consumer may start at
+an indexed terminator and follow edges without decoding unrelated blocks.
+The format does not prescribe an object graph, register assignment,
+optimization tier or cache.
 
 ## Type and definition model for operands
 
@@ -376,21 +434,15 @@ participate in integer arithmetic; `char16` is not implicitly an integer.
 | `0x06` optional | Separate presence on the fully qualified inner type; `None` cannot fabricate its payload |
 | `0x07..0x0B` ref/ptr/box/val/own, `0x0C` indexed built-in | Indexed family argument when inline atomic encoding does not apply; preserve distinct representation/capability and reject unsupported executable use |
 
-Qualifiers are part of type equality and do not disappear when moving
-through an edge. An `r` has exactly one indexed value descriptor (and,
-for a place-valued ID, referent type, access and provenance); a block
-parameter's type is looked up by ID, while an operation's result must
-agree with the descriptor according to the table below. The body place
-descriptor supplies a local
-place's referent TypeSpec; a place-valued `r` is **not** the loaded
-referent value. A field result resolves its FieldDef against the
-owner's nominal type. The by-value initial parameters derive their
-types from MethodSig, and both declared and inferred forms must agree.
-`Copy`, ownership and effects come from the declared type/call contracts,
-not from the opcode or byte size. Nominal arithmetic/operator witnesses
-remain selected MethodDefs invoked through registered call semantics,
-not primitive `Binary` or `CheckedBinary` kinds. Transparent layout
-changes ABI classification, not numeric identity.
+Qualifiers remain part of type equality across edges. Each `r` has one
+indexed descriptor; a block parameter's type comes from its ID, and every
+operation result must match its descriptor. Place descriptors supply
+referent TypeSpecs; field results resolve FieldDefs against the owner's
+nominal type. Entry values derive from MethodSig, with declared and inferred
+forms agreeing. Declared types and call contracts determine Copy, ownership
+and effects. Nominal operators remain selected MethodDefs, not primitive
+`Binary`/`CheckedBinary` kinds. Transparent layout changes ABI
+classification, not numeric identity.
 
 | Definition form | Type/state of the new value |
 |---|---|
@@ -406,18 +458,16 @@ changes ABI classification, not numeric identity.
 | `Extract` | Selected field's complete type, requiring a Copy-by-value field |
 | Checked terminator | First target parameter(s) receive typed computed results; the terminator defines no additional ID in its own block |
 
-The scalar executable profile requires each resulting type to be a
-supported primitive or supported optional form and rejects place-valued
-results. The remaining rows assign decoding and intended type relationships
-for future profiles; they do not make those profiles executable today.
+The scalar executable profile accepts supported primitives and optional
+forms, but rejects place-valued results. Other rows define decode
+relationships only; they do not make future profiles executable.
 
 ## Operation encoding and normalized effects
 
-All operand notation follows the encoding table above. Each listed
-opcode number is a byte, not a source-language operator spelling.
-The table assigns decode shapes; the executable subset is narrower,
-as specified after the opcode tables. Assigned but unsupported shapes
-can be inspected but must not be emitted as executable `(1, 0)` bodies.
+Operands follow the notation above. These tables assign decode shapes;
+the executable subset is narrower, as specified below. Assigned but
+unsupported shapes may be inspected, not emitted as executable `(1, 0)`
+bodies.
 
 | Opcode | Operation; operands in byte order | Semantics and writer/audit requirement |
 |---:|---|---|
@@ -473,13 +523,10 @@ first parameter:
 | `84` | `06` | CheckedShiftLeft | Integer left, `uint32` count right | Same left type; count outside `[0,width)` fails, bits shifted out are discarded |
 | `84` | `07` | CheckedShiftRight | Integer left, `uint32` count right | Same left type; count outside `[0,width)` fails, sign-fill for signed, zero-fill for unsigned |
 
-For the compact `int32` values `r1` and `r2`, `05 03 0A 01 02`
-defines `r3 = WrappingAdd(r1,r2)` (no failure edge), whereas
-`84 01 01 02 02 00` means `CheckedAdd(r1,r2)` with a success edge to
-B2, no explicit arguments, and its result as B2's first parameter.
-The opcode/kind pair, not an inferred signedness bit or a nearby store,
-decides whether overflow fails. Signedness and width come from the
-input value types, and the target parameter must match them.
+`Binary` defines its result with `rNew`; `CheckedBinary` has no result
+operand and supplies its result as the success target's first parameter.
+The opcode/kind pair selects behavior; operand types supply width and
+signedness, and the target parameter must match the result type.
 
 The other discriminants are `Convert.policy`: `01` integer wrap,
 `02` integer saturate, `03` equal-width integer bit reinterpretation;
@@ -491,16 +538,13 @@ source `r` and sends the result to its success edge. Wrapping converts
 the mathematical integer modulo the destination bit width; saturation
 clamps to its range. Neither is an alternate decoding of `CheckedConvert`.
 
-The paired sources of `Binary` kinds `01..05`, `0A` and `0C` and
-`CheckedBinary` kinds `01` and `03` are commutative **as already computed
-values**. Swapping their source IDs does not authorize changing the
-evaluation order of instructions that created those values. `NoThrow`
-is not purity: calls, place writes, failure terminators and cleanup
-cannot be dropped or commoned merely because their result is unused.
-A constant-folded checked operation must preserve the same success
-value or ordered failure, not convert it to wrapping arithmetic.
-There is no generic "any numeric add" opcode whose meaning changes
-silently when a new primitive or SIMD type is registered.
+`Binary` kinds `01..05`, `0A`, `0C` and `CheckedBinary` kinds `01`, `03`
+are commutative over already computed values; swapping operands does not
+reorder their producing instructions. `NoThrow` is not purity:
+unused results do not permit dropping or commoning calls, writes, failure
+or cleanup. Constant folding must preserve a checked operation's success
+value or ordered failure. No generic numeric opcode changes meaning when
+a primitive or SIMD type is added.
 
 `ConstBits` encodes the smallest unsigned width holding the declared-width
 bit pattern, not a sign-extended 64-bit container: `int32(-1)` is
@@ -514,33 +558,27 @@ the signed mathematical value must fit that destination. Use `ConstBits`
 for unsigned values above `int64.MaxValue`. The complete TypeSpec
 selects the width; unrepresentable or noncanonical patterns reject.
 
-The accepted scalar set is `bool`, `char16`, `int32`, `uint32`, `int64`,
-`uint64`; integer arithmetic works in its exact declared width. `Binary`
-comparison returns `bool`, and its operands have the same complete type;
-operator kind does not imply a user-supplied equality witness. No
-floating, vector, atomic, raw-pointer or text operation is mapped onto a
-numeric opcode. Wrapping and saturation are explicit, not consequences of
-unchecked machine code. A `Convert` bit reinterpretation requires identical
-validated representation and cannot create an invalid value or handle.
+The executable scalar set is `bool`, `char16`, `int32`, `uint32`, `int64`
+and `uint64`; integer arithmetic uses the declared width. `Binary`
+comparisons require equal complete operand types and return `bool`; their
+kind does not imply a user equality witness. `ConstBits` and `ConstSigned`
+carry explicit TypeSpec references; arithmetic reads types from value
+descriptors and must match the result descriptor. No instruction assumes
+a default integer type or implicitly narrows, promotes, loads, updates or
+swaps operands. `Load` produces a typed Copy value; `Assign` writes through
+a place only after a successful result edge. Unsupported floating, vector,
+atomic, raw-pointer and text operations have no numeric opcode.
 
-`ConstSigned` and `ConstBits` each carry an explicit TypeSpec reference; an
-arithmetic opcode instead reads its operand types from value descriptors
-and must produce the matching result descriptor. It does not
-encode another type token or assume a default integer type. A destination
-place is not an arithmetic operand: `Load` obtains a typed Copy value and
-`Assign` writes only after a successful result edge. No instruction
-implicitly narrows, promotes, loads, updates or swaps its operands.
-Integer wrapping converts the mathematical source value modulo the
-destination's bit width and interprets the resulting bits in that signedness;
-saturation clamps the mathematical value to the destination range. The
-bit-preserving policy is restricted to equal-width integer primitive types;
-Boolean, char and optional/nominal types cannot be fabricated by bitcast.
-`Unary` bitwise NOT and `Binary` bitwise/wrapping kinds apply only to the four
-integer primitives; Boolean NOT, equality and comparisons are typed
-separately. Each `Switch` pattern is the canonical `ConstBits` bit pattern
-for the selector type, with no truncated high bits or duplicate cases.
-Effectful or potentially failing operations not named above must use a
-specified failure terminator or a future feature, not `CallNoThrow`.
+`Convert` policy 1 wraps the mathematical value modulo the destination
+width and interprets those bits in the destination's signedness; policy 2
+clamps to its range. Policy 3 preserves bits only between equal-width
+integer primitives; it cannot fabricate `bool`, `char16`, optional or
+nominal values. `Unary` NOT and `Binary` bitwise/wrapping kinds apply only
+to integers; Boolean NOT, equality and comparisons have separate rules.
+`Switch` patterns must be canonical `ConstBits` patterns of the selector
+type, without truncated high bits or duplicates. Other effectful or
+potentially failing operations require a specified terminator or future
+feature, not `CallNoThrow`.
 
 `Initialize`, `Assign`, `Move`, `Drop` and `Aggregate` require complete
 flow-sensitive vacancy, ownership and cleanup verification over every
@@ -552,11 +590,10 @@ current compiler's private IR and does not weaken its executed guarantees.
 
 ## Terminators and CFG
 
-An **edge** is reference-width `targetBlock` followed by `args`. Every target exists; supplied values
-match its block parameters, in order. No fall-through or byte-relative
-branches exist. In the following table `edge` has that shape, `r?` can be
-zero only for void, and failure uses the module's declared fail-fast or
-checked-exception policy:
+An **edge** is reference-width `targetBlock` followed by `args`. Every
+target exists, and supplied values match its parameters in order. There
+are no fall-through or byte-relative branches. Here `r?` is zero only for
+void; failure uses the module's fail-fast or checked-exception policy.
 
 | Opcode | Terminator; operands in byte order | Contract |
 |---:|---|---|
@@ -575,107 +612,68 @@ checked-exception policy:
 | `8C` | `CheckedRange rBase, rStart, rCount, edgeSuccess` | Reserved: validates a contiguous range once and produces a bounded view on success; backing, access and loan rules require a future feature. |
 | `8D` | `CheckedReadIndex rBase, rIndex, edgeSuccess` | Reserved: bounds check and Copy element read form one ordered failure boundary, returning a value without publishing an intermediate place. |
 
-Failure departures never become unchecked numeric results or `None`.
-Checked operations with a potentially failing edge cannot occur in a
-`NoThrow` method unless a separately specified static-proof rule establishes
-that failure cannot occur; format `(1, 0)` makes no such exception. `Invoke`
-still checks selected method signature, effects, argument modes and return
-ownership. For an operation with an implicit success result, the target
-parameter count is `edge.argumentCount + 1` and its first type is the result
-type. The failure policy does not synthesize a catch region; if the caller
-owns something requiring cleanup on failure, this profile cannot encode
-the call. The `CheckedIndex` and `Leave` opcode assignments reserve their
-shapes but are rejected by a `(1, 0)` executable reader.
+Failure never becomes an unchecked result or `None`. A potentially failing
+terminator is forbidden in a `NoThrow` method unless a specified static
+proof rules out failure; `(1, 0)` defines no such proof. `Invoke` checks the
+selected signature, effects, argument modes and return ownership. An
+implicit result adds one first parameter to the success target, before
+explicit edge arguments. Failure policy does not create a catch or cleanup
+edge, so a caller needing cleanup on failure is unsupported. `CheckedIndex`
+and `Leave` are reserved and rejected by `(1, 0)`.
 
-For `CheckedBinary` kinds 1..5, operands share one of `int32`, `uint32`,
-`int64`, `uint64`; zero divisors fail. Signed minimum divided by `-1`
-overflows for division but has remainder zero. Shift kinds 6/7 take a
-`uint32` count regardless of the left integer's width. Signed checked
-negation fails at its minimum. Checked integer
-conversion either preserves the exact value or fails; no implicit numeric
-fallback type is involved. Explicit `Branch`/`Switch` edges and loop-region
-records allow a tool to build a CFG without discovering block starts from
-branch displacements. Block and terminator offsets give direct access
-without first scanning operation streams. A trusted consumer can use
-these offsets and the recorded live sets; an optional audit independently
-decodes counted operations and recomputes predecessors, dominance and
-liveness. Neither mode may interpret an unknown opcode as different
-known semantics.
+`CheckedBinary` kinds 1..5 use equal integer types; kinds 6/7 take a
+`uint32` right operand as the shift count. Signed negation fails at the
+minimum. Checked conversion preserves the exact value or fails, with no
+numeric fallback. Explicit edges and loop
+regions define the CFG; block and terminator offsets provide direct access.
+Trusted consumers may use those indexes and live sets; an optional audit
+decodes operations and recomputes predecessors, dominance and liveness.
+Neither may assign new meaning to an unknown opcode.
 
-`CheckedDivRem` accepts equal complete integer primitive types and checks
-zero divisor or signed minimum / `-1` once; it then supplies quotient
-and remainder of that type. Quotient truncates toward zero, and remainder
-follows the dividend. Its success target has `edge.argumentCount + 2`
-parameters.
-The remainder-only `CheckedBinary` form does **not** fail for signed
-minimum % `-1`: that remainder is zero, so it cannot be silently rewritten
-as a combined division/remainder. A producer may choose `CheckedDivRem`
-when both results are needed; a consumer may fuse distinct operations
-only when their failure order, uses and effects permit it. `CheckedRange`
-would check `start <= length && count <= length - start`, with the empty
-range at the end valid; later indexed accesses still need either a range-
-relative proof or their own check. `CheckedReadIndex` groups the often
-adjacent bounds check and Copy read so no invalid intermediate place
-escapes. Neither range nor indexed-read form is executable in this
-profile, pending backing/provenance, access and failure-order contracts.
-A future registered intrinsic would need an exact semantic identity and
-contract; a consumer must not infer these grouped semantics from a
-callable's spelling or assume an arbitrary `CallNoThrow` is an intrinsic.
+`CheckedDivRem` takes equal complete integer types. It checks a zero
+divisor or signed minimum divided by `-1` once, then returns same-typed
+quotient and remainder. Quotient truncates
+toward zero; remainder follows the dividend, and the target has
+`edge.argumentCount + 2` parameters. `CheckedBinary` remainder does not
+fail for signed minimum `% -1` (the result is zero), so it cannot be
+rewritten as combined division/remainder. A consumer may fuse distinct
+operations only when failure order, uses and effects permit it.
+
+`CheckedRange` would check
+`start <= length && count <= length - start`, allowing the empty range at
+the end; later accesses still need a proof or check. `CheckedReadIndex`
+would combine a bounds check and Copy read without exposing an invalid
+intermediate place. Both remain non-executable pending backing,
+provenance, access and failure-order rules. Future intrinsics need explicit
+identities and contracts; callable names alone do not establish them.
 
 ## Value and place state through checked arithmetic
 
-A function returning `int32` with one by-value `int32` parameter starts with
-its parameter as block value `r1`. The following is **executable** in the
-narrow fail-fast `(1, 0)` profile; `t1` is the `int32` TypeSpec:
-
-```text
-B1(r1: t1): r2 = ConstSigned t1, 5
-            CheckedBinary add r1, r2 -> B2()
-B2(r3: t1): Return r3
-```
-
-The checked result is `r3`, **not** a hidden evaluation-stack value or an
-in-place mutation of `r1`. On overflow there is no B2 edge: failure uses
-the module policy. In the exact block header above, B1 has one parameter
-ID `r1` (descriptor `(t1,value)`), zero inherited/start/end places and
-one operation; B2 has parameter ID `r3` (descriptor `(t1,value)`),
-zero inherited/start/end places and zero operations.
-`r1` and the literal temporary `r2` have their last use at B1's
-terminator; neither is live in B2. Both live-in and live-out lists are
-empty in this example. The result becomes live **as B2's
-parameter**. A reader finds its type in value descriptor 3, the checked
-arithmetic kind in B1's terminator and its source types at the two B1
-definitions. It does not infer an evaluation stack from machine code.
+The introductory [checked-add example](#checked-add-end-to-end-informative)
+shows the executable by-value case in the narrow fail-fast `(1, 0)`
+profile: `r1` is its parameter and `r3` is the implicit checked result
+in B2. The alternative below adds an addressable local place and is
+decode-only in this revision.
 
 For `local = local + 5`, instead declare a mutable, initially vacant
-`int32` place `p1` in the body place table. Its header and operations would
-have the following shape (shown to expose the tables, **not** as an
-executable `(1, 0)` body):
+`int32` place `p1` in the body place table. Its header and operations have
+this decode-only shape:
 
 | Block | Value parameters | Live-in / live-out values | Inherited places | Starts / ends | Operations and terminator |
 |---|---|---|---|---|---|
 | B1 | None | None / `r1` | None | Start `p1` vacant / end none | `r1 = PlaceLocal p1`; `r2 = ConstSigned t1, 10`; `Initialize r1, r2`; `r3 = Load r1`; `r4 = ConstSigned t1, 5`; `CheckedBinary add r3, r4 -> B2()` |
 | B2 | `r5` (descriptor `t1`, value), implicit checked result | `r1` / none | `(p1,initialized)` | Start none / end `p1` | `Assign r1, r5`; `Return r5` |
 
-The successful B1 edge carries the initialized **place state** of `p1`
-and keeps its place handle `r1` live through the edge, but does not carry
-the local's old contents as a value. `r4` has its last use in B1; it is
-not live in B2. The checked result `r5` is usable as both the assigned
-Copy value and the return. If a dominating computed temporary also had
-to survive, its ID would appear in B1's live-out and B2's live-in lists;
-if distinct incoming definitions had to merge, B2 would instead define
-a corresponding typed parameter with explicit edge arguments.
-`PlaceLocal`/`Initialize`/
-`Load`/`Assign` still lack complete place and failure-path rules, so the
-shape is **not executable**. `PlaceField` would derive
-an addressable field place from an owning place, whereas `Extract` returns
-a Copy field value from an aggregate; neither is a silent register/address
-mode of `Binary`. Folding a literal into a future add-immediate opcode
-would have to preserve the same overflow and evaluation semantics.
+The successful edge carries initialized state for `p1` and keeps its
+handle `r1` live, but not the local's old contents. `r4` dies in B1; `r5`
+is both assigned and returned. `PlaceLocal`, `Initialize`, `Load` and
+`Assign` lack complete place and failure-path rules, so this shape is not
+executable. `PlaceField` produces a place; `Extract` reads a Copy field
+from a by-value aggregate.
 
-The **decode-only** Body section for that local case, with `t1=int32`,
-is 101 bytes. Its `05` place flags mean mutable and initially vacant;
-the block offsets are `[0,33,51]`, and terminator offsets `[27,16]`:
+The encoded Body section is 101 bytes. Its `05` place flags mean mutable
+and initially vacant; block offsets are `[0,33,51]`, and terminator
+offsets are `[27,16]`:
 
 ```text
 00 00 00 00  5D 00 00 00
@@ -690,27 +688,14 @@ the block offsets are `[0,33,51]`, and terminator offsets `[27,16]`:
 0F 01 05  83 05
 ```
 
-B1's header has no incoming values or places, one outgoing live value
-`r1`, one starting place `p1`, and five operations. B2's header has
-the implicit result parameter `r5`, typed by descriptor 5, incoming live value `r1`,
-inherited initialized place `(p1,1)`, ending place `p1`, and one
-operation. A tool can read those facts before decoding either operation
-stream; the terminator index locates the checked add and return directly.
-The bytes establish a decode shape, **not** authority to execute the
-unsupported place operations.
-
-| Source operand shape | Proposed state transition before checked add |
-|---|---|
-| By-value parameter or computed temporary | Already has a typed immutable `r`; use it directly. |
-| Integer immediate | `ConstSigned` or `ConstBits` defines a typed `r`; it is not inferred from a machine immediate or a default integer type. |
-| Mutable local | `PlaceLocal` obtains its `rPlace`; `Load` defines a Copy `r`. On the successful edge, `Assign` writes the result through the place after verifying authority and state. |
-| Field of an addressable owner | `PlaceField` derives a field place and `Load` obtains its value; for a Copy aggregate held by value, `Extract` returns a field value instead. Provenance and owner lifetime are not lost. |
-
-Only the first two rows are executable in `(1, 0)`. An interpreter can
-materialize values in body-local slots and places in verified storage;
-JIT/AOT may choose registers or memory independently. The format does not
-require a distinct add opcode for every source operand combination, nor
-does it assume that a stored place is a native stack slot.
+B1 has live-out `r1`, starts vacant `p1`, and has five operations. B2 has
+parameter `r5` (descriptor 5), live-in `r1`, inherited initialized place
+`(p1,1)`, ends `p1`, and has one operation. These headers and the
+terminator index are directly readable; they do not authorize executing
+the unsupported place operations. An interpreter may use value slots and
+verified place storage; JIT/AOT may choose registers or memory. The format
+does not prescribe native stack slots or separate add opcodes by operand
+source.
 
 ## Worked bytes and illustrative size
 
@@ -727,93 +712,28 @@ zero explicit regions. The Body **section** for its single row is:
 00 00 00 00 00 00 00 01  01 01 01 2A  83 01
 ```
 
-The index holds eight bytes of block offsets and four of terminator
-offsets; it delimits a 37-byte body. The body
-contains a four-byte owner row, a zero body layout, four one-byte counts,
-one `(t1,value)` descriptor, the block-offset index `[0,14]`,
-terminator offset `12`, and a 14-byte
-block (region 0, zero parameters, empty live-in/out and place lists,
-one `ConstBits` operation, one `Return` terminator). The Body section
-occupies 45 bytes including its row offsets. With the eight populated
-metadata sections in this example, the artifact occupies **349 bytes**
-before alignment: 32-byte header + 8 * 16-byte directory + 189 bytes of
-metadata/Body sections. This is an encoded-size calculation, **not** a
-throughput measurement; wider IDs, prefixes, block counts, decode work,
-branch count, debug information and alignment still matter.
-
-### Checked add end to end (informative)
-
-Consider `int32 AddFive(int32 input) { return input + 5; }` under the
-fail-fast policy. Assume MethodDef row 1 owns the body, its MethodSig
-declares the one by-value `int32` parameter and `int32` result, and
-TypeSpec row `t1` denotes `int32`. This is an *illustrative lowering*,
-not a requirement to materialize every source temporary or to use this
-register allocation:
-
-| Layer | Meaning in this one example |
-|---|---|
-| Source binding | The expected `int32` context makes `5` an `int32` literal; `+` selects checked primitive addition. Neither a numeric fallback nor a user-defined witness is inferred. |
-| Body header | `ownerMethod=1`, `bodyLayout=0` (one-byte structural local/metadata IDs), `blockCount=2`, `valueCount=3`, `placeCount=0`, `regionCount=0`. Three value descriptors identify `r1`, `r2`, `r3` as `t1` values. `blockOffsets=[0,19,30]` and `terminatorOffsets=[13,9]` locate the blocks and their terminators without searching for opcode bytes. |
-| B1 input and operation | B1 has parameter `r1` for `input`. `ConstSigned r2, t1, 5` defines a second `int32` value; it is not an immediate operand of `add`. |
-| B1 terminator | `CheckedBinary kind=1, rLeft=1, rRight=2, edgeSuccess=B2(args=[])` consumes two values. It defines no result in B1. Overflow selects the declared failure policy; it does not take the success edge. |
-| B2 input and return | The computed result becomes B2's *implicit first* parameter `r3`, whose descriptor is also `t1`; `Return r3` returns it. No `p`, `m`, field or region operand appears in either arithmetic instruction. |
-
-The Body **section** uses three values, two blocks and no places or
-regions. Block 1 is 19 bytes; block 2 is eleven. Its exact 73 bytes are:
-
-```text
-00 00 00 00  41 00 00 00
-01 00 00 00  00  02 03 00 00
-01 00  01 00  01 00
-00 00 00 00  13 00 00 00  1E 00 00 00
-0D 00 00 00  09 00 00 00
-00 01 01 00 00 00 00 00 01  02 02 01 05  84 01 01 02 02 00
-00 01 03 00 00 00 00 00 00  83 03
-```
-
-Read that byte listing in layers: the first eight bytes are the Body
-section's offset index `[0,65]`, not an instruction. The Body header
-contains the fixed four-byte method owner, `bodyLayout`, four counts,
-three typed value descriptors, fixed-`u32` block and terminator offsets,
-then the block data. Within B1, `02 02 01 05` is the counted
-`ConstSigned r2, t1, 5` operation: opcode `02`, reference `rNew=2`,
-reference `t=1`, signed one-byte data `05`. `84 01 01 02 02 00` is its
-checked-add terminator: opcode `84`, fixed `u8 kind=01`, reference
-`rLeft=1`, reference `rRight=2`, reference `targetBlock=2`, and
-one-byte count `00` for no explicit edge arguments. B2's header declares
-`r3` as the implicit checked-result parameter; `83 03` returns it.
-There is no address mode or evaluation-stack push/pop hidden in these
-bytes. `bodyLayout=0` sized the Body's structural fields, while these
-two instructions independently use their unprefixed common operand
-envelopes.
-
-For width selection, `ConstSigned r3, t1, 200` instead
-uses `F0 10 02 03 01 C8 00` (two-byte signed data). If its result
-ID were 256, the same instruction would use
-`F0 11 02 00 01 01 00 C8 00` (two-byte references and data).
-Neither prefix changes the operation's semantic identity.
-
-An audit rejects nonminimal widths, a block-offset sentinel of 13 instead
-of 14, an inaccurate terminator offset, duplicate values or an invalid
-successor. All readers reject a truncated prefix, out-of-bounds index,
-missing terminator or unknown opcode before executing it. An independent
-decoder should round-trip the exact rows; an independent optional audit
-should agree on their CFG, types and states. Same-writer/same-reader
-round trips alone do not establish conformance.
+The block-offset array is eight bytes and the terminator-offset array
+four; the Body row is 37 bytes. It contains owner row 1, `bodyLayout=0`,
+four one-byte counts, one `(t1,value)` descriptor, block offsets `[0,14]`,
+terminator offset `12`, and a 14-byte block. That block has region 0, no
+parameters, live values or places, one `ConstBits` operation and one
+`Return`. Including the eight-byte section row index, the Body section is
+45 bytes. With eight populated metadata sections, the artifact is
+**349 bytes** before alignment: a 32-byte header, eight 16-byte directory
+entries and 189 bytes of sections. This is encoded size, not throughput;
+IDs, prefixes, blocks, decoding, branches, debug data and alignment also
+affect cost.
 
 ## Tool roles and stabilization blockers
 
-The structural reader can enumerate every defined table and body extent,
-index strings and blocks in constant time after bounds checking, preserve
-unknown **registered nonsemantic** sections as opaque bytes when rewriting,
-and report unsupported semantic opcodes without executing them. An auditing
-semantic reader additionally checks operations and flow; an
-interpreter/JIT/AOT implements only the supported feature set. A linker
-rewrites row references, body IDs and affected indexes/liveness facts,
-preserving their meaning or selecting an audit before publishing the
-rewritten body. A trimmer must retain transitive type/signature/contract,
-source-selected call, witness and cleanup dependencies, not just reachable
-body opcodes. Removing optional SourceMap cannot change execution.
+A structural reader bounds tables and Body rows, indexes strings and blocks,
+preserves unknown **registered nonsemantic** sections when rewriting, and
+reports unsupported opcodes without executing them. A semantic audit checks
+operations and flow; interpreters, JITs and AOT implement only supported
+features. Linkers rewrite row references, body IDs and affected indexes/
+liveness facts, then revalidate. Trimmers retain transitive type, signature,
+contract, selected-call, witness and cleanup dependencies. Removing
+SourceMap cannot change execution.
 
 | Consumer question | Direct format input | Remaining consumer freedom |
 |---|---|---|
@@ -823,12 +743,9 @@ body opcodes. Removing optional SourceMap cannot change execution.
 | Which calls are intrinsic candidates? | Exact selected method identities and declared contracts; future registered intrinsics require explicit semantics | Inline or lower only compatible recognized identities, never guess from names or rewrite effectful calls as pure arithmetic. |
 | Which numeric/vector operations exist? | Stable opcode semantics plus TypeSpec and required feature identity | Extend primitives and SIMD via new registered types/operations; do not silently reinterpret old scalar opcodes or assume every lane has the scalar's failure behavior. |
 
-These indexed facts target importer and time-gated JIT work such as
-discovering edges, joining local state and locating lifetimes. They
-do not encode a chosen optimization schedule or prohibit a deeper
-compiler from computing alias, memory-SSA or range facts of its own.
-Spending a few bytes per block on direct access can save repeated
-whole-body traversal; no throughput ratio is implied.
+These indexes support importer/JIT work without prescribing an optimization
+schedule or preventing deeper alias, memory-SSA or range analysis. They may
+reduce repeated traversal; no throughput ratio is asserted.
 
 ### Executable subset versus assigned decode shapes
 
@@ -869,6 +786,7 @@ contract:
 | Managed values | Root maps at safepoints, stable descriptors, write barriers, allocation/collection, optional handles and per-image heap boundaries. Root lifetime cannot be inferred solely from SSA uses. |
 | Published contracts | Full effects, ownership/transfer, correlated output states, pre/postconditions, capability and witness evidence, generic specialization/export metadata and layout/ABI compatibility. Metadata clauses must be specified together with verifier inputs. |
 | Operations | Checked indexing/backing, raw/unaligned and atomic memory order, floating/SIMD/tensor semantics, indirect calls, traits/witness dispatch, intrinsics, async state and typed failure values. Assign only operations whose exact type, failure, ordering and lifetime rules are known. |
+| Revision and reader policy | No on-wire selector or feature/revision negotiation for the candidate executable subset; nonminimal-width load policy, unknown opcodes in unvisited trusted blocks, diagnostic/recovery behavior and numeric parser/audit budgets remain open. |
 
 These are explicit blockers to declaring the proposals final, not an
 invitation to invent semantics or serialize the current private bound tree.
