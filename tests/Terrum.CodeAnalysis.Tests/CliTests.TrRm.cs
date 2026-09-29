@@ -86,7 +86,8 @@ public sealed partial class CliTests
             BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
         }
 
-        var strings = TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]);
+        var strings = TrRmStringTableWriter.EncodeNames(
+            [("Module", 0), ("Run", 0), ("src/file", 0)]);
         byte[] typeSpec = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
         var signature = new byte[24];
         BinaryPrimitives.WriteUInt32LittleEndian(signature, 1);
@@ -100,13 +101,28 @@ public sealed partial class CliTests
             0, 0, 0, 0, 13, 0, 0, 0,
             0x04, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1,
         ];
+        var sourceFile = new byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(sourceFile, 3);
+        var sourceMap = new byte[52];
+        BinaryPrimitives.WriteUInt32LittleEndian(sourceMap, 2);
+        BinaryPrimitives.WriteUInt16LittleEndian(sourceMap.AsSpan(4), 0x0020);
+        BinaryPrimitives.WriteUInt16LittleEndian(sourceMap.AsSpan(6), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(12), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(16), 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(sourceMap.AsSpan(20), 0x001F);
+        BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(24), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(36), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(40), 2);
         byte[] Encode() => TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, module),
-            new TrRmSection(0x0002, 0, 2, strings),
+            new TrRmSection(0x0002, 0, 3, strings),
             new TrRmSection(0x0011, 0, 1, typeSpec),
             new TrRmSection(0x0016, 0, 1, method),
             new TrRmSection(0x0017, 0, 1, signature),
+            new TrRmSection(0x001F, 0, 1, sourceFile),
             new TrRmSection(0x0020, 0, 1, body),
+            new TrRmSection(0x7F00, 2, 1, sourceMap),
         ]);
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-trrm-compact-{Guid.NewGuid():N}.trrm");
@@ -124,6 +140,29 @@ public sealed partial class CliTests
                     result.RootElement.GetProperty("scope").GetString());
             }
 
+            BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(16), 0);
+            await File.WriteAllBytesAsync(path, Encode());
+            var (operationExit, _, _) = await RunAsync([],
+                "validate-trrm-compact-linear", path, "--json");
+            Assert.Equal(0, operationExit);
+
+            BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(16), 2);
+            await File.WriteAllBytesAsync(path, Encode());
+            var (structuralMapExit, _, _) = await RunAsync([],
+                "validate-trrm-structure", path, "--json");
+            Assert.Equal(0, structuralMapExit);
+            var (invalidMapExit, _, _) = await RunAsync([],
+                "validate-trrm-compact-linear", path, "--json");
+            Assert.Equal(1, invalidMapExit);
+
+            BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(16), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(12), 2);
+            await File.WriteAllBytesAsync(path, Encode());
+            var (invalidBlockExit, _, _) = await RunAsync([],
+                "validate-trrm-compact-linear", path, "--json");
+            Assert.Equal(1, invalidBlockExit);
+
+            BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(12), 1);
             body[8] = 0x08;
             await File.WriteAllBytesAsync(path, Encode());
             var (structuralExit, _, _) = await RunAsync([],

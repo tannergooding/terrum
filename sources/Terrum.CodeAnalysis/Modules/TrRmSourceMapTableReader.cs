@@ -10,6 +10,8 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <remarks>Requires a Body-aware verifier to establish instruction block and ordinal validity.</remarks>
 public readonly ref struct TrRmSourceMapTableReader
 {
+    private readonly ReadOnlySpan<byte> _slots;
+
     public TrRmSourceMapTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmMethodDefTableReader methods, TrRmSourceFileTableReader files)
     {
@@ -26,6 +28,7 @@ public readonly ref struct TrRmSourceMapTableReader
         }
 
         var slots = section.Slice(4, (int)rowStart - 4);
+        _slots = slots;
         for (var slot = 0; slot < slotCount; slot++)
         {
             var data = slots.Slice((int)slot * 16, 16);
@@ -80,6 +83,23 @@ public readonly ref struct TrRmSourceMapTableReader
             }
 
             previousInstruction = instructionSlot;
+        }
+    }
+
+    internal void ValidateCompactLinearLocations(TrRmMethodDefTableReader methods,
+        ReadOnlySpan<int> operationCounts)
+    {
+        for (var offset = 0; offset < _slots.Length; offset += 16)
+        {
+            var slot = _slots.Slice(offset, 16);
+            if (ReadU16(slot, 0) == 0x0020)
+            {
+                var method = methods.GetBodyOwnerMethod((int)Read(slot, 4));
+                if (Read(slot, 8) != 1 || Read(slot, 12) > (uint)operationCounts[method])
+                {
+                    throw InvalidMap();
+                }
+            }
         }
     }
 

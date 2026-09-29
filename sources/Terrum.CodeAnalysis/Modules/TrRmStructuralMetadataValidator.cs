@@ -99,13 +99,24 @@ public static class TrRmStructuralMetadataValidator
 
         if (inspectCompactLinear)
         {
+            var operationCounts = sourceMapCount == 0 ? Array.Empty<int>()
+                : new int[methods.Count + 1];
             for (var method = 1; method <= methods.Count; method++)
             {
                 if (methods.GetBodyRow(method) != 0)
                 {
-                    _ = new TrRmCompactLinearBodyReader(bodies, method, modules,
+                    var body = new TrRmCompactLinearBodyReader(bodies, method, modules,
                         methods, signatures, parameters, typeSpecs);
+                    if (sourceMapCount != 0)
+                    {
+                        operationCounts[method] = body.OperationCount;
+                    }
                 }
+            }
+
+            if (sourceMapCount != 0)
+            {
+                sourceMaps.ValidateCompactLinearLocations(methods, operationCounts);
             }
         }
 

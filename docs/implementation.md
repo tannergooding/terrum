@@ -1223,7 +1223,9 @@ compact/general forms or make the structural CLI an executable Body verifier.
 bounded checks for Body rows referenced by local MethodDefs after the same
 framing and structural checks. Its success does not validate unreferenced
 Body rows, published effects or executable contracts; the structural command
-remains Body-opaque.
+remains Body-opaque. When SourceMap is present, the opt-in check also verifies
+that each instruction slot addresses the inferred sole block and an existing
+operation or its terminator; it does not verify source-file contents.
 SourceMap rows check slots, spans and Body/SourceFile module
 association. A bounded SourceMap writer emits those slots, reuses SourceFile slots
 and rejects duplicate instruction locations; block/ordinal existence still
