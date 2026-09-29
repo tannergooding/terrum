@@ -321,7 +321,8 @@ public static class ScalarFrontendHost
                     && tokens[1].Span.End == expression.Span.Length
                     && ValidMagnitude(tokens[1].Text.AsSpan(), type, false, left, right);
             }
-            if (operation / 100 is 7 or 9 && operation % 100 is >= 71 and <= 75)
+            if (operation / 100 is 7 or 9
+                && operation % 100 is 65 or 66 or >= 71 and <= 75)
             {
                 if (words[0] < 3 || expression.Type != 5 || type != 5
                     || left < 1 || left > parameters
@@ -347,7 +348,8 @@ public static class ScalarFrontendHost
                         == source.Text.Substring(name.Start, name.Length))
                     && tokens[2].Span.End == expression.Span.Length;
             }
-            if (operation / 100 == 11 && operation % 100 is >= 71 and <= 75)
+            if (operation / 100 == 11
+                && operation % 100 is 65 or 66 or >= 71 and <= 75)
             {
                 if (words[0] < 3 || expression.Type != 5 || type != 5
                     || left is not (20 or 21) || right is not (20 or 21)
@@ -440,7 +442,8 @@ public static class ScalarFrontendHost
                             ? type == leftType && (leftType is >= 1 and <= 4
                                 || operation is 71 or 73 or 75 && leftType == 5)
                             : type == 5 && (operation is 72 or 74
-                                ? leftType == 5 : leftType is >= 1 and <= 4 or 6)))
+                                ? leftType == 5 : leftType is >= 1 and <= 4 or 6
+                                    || (operation is 65 or 66) && leftType == 5)))
                 && MatchesSource(expression, left, right);
         }
 
@@ -660,7 +663,7 @@ public static class ScalarFrontendHost
                     new BoundConstant(value, type, operandSpan), type, expression.Span));
             }
             if (expression.Operation / 100 is 7 or 9
-                && expression.Operation % 100 is >= 71 and <= 75)
+                && expression.Operation % 100 is 65 or 66 or >= 71 and <= 75)
             {
                 var literalFirst = expression.Operation >= 900;
                 var tokens = Lexer.Lex(SourceText.From(source.Text.Substring(
@@ -678,7 +681,7 @@ public static class ScalarFrontendHost
                     PrimitiveType.Bool, expression.Span);
             }
             if (expression.Operation / 100 == 11
-                && expression.Operation % 100 is >= 71 and <= 75)
+                && expression.Operation % 100 is 65 or 66 or >= 71 and <= 75)
             {
                 var tokens = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length))).Tokens;

@@ -504,7 +504,8 @@ mut class ScalarFrontendState
         {
             _at = _at + 1;
             if (_tokens.TryGet(_at, out var booleanOperator)
-                && booleanOperator.Kind >= 71 && booleanOperator.Kind <= 75)
+                && ((booleanOperator.Kind >= 71 && booleanOperator.Kind <= 75)
+                    || booleanOperator.Kind == 65 || booleanOperator.Kind == 66))
             {
                 _at = _at + 1;
                 if (_tokens.TryGet(_at, out var booleanRight)
@@ -574,7 +575,8 @@ mut class ScalarFrontendState
         {
             operation = next.Kind;
             _at = _at + 1;
-            if (operation >= 71 && operation <= 75
+            if (((operation >= 71 && operation <= 75)
+                    || operation == 65 || operation == 66)
                 && _tokens.TryGet(_at, out var booleanRight)
                 && (booleanRight.Kind == 20 || booleanRight.Kind == 21))
             {
@@ -646,7 +648,7 @@ mut class ScalarFrontendState
             }
             if (selected != rightType || ((operation >= 57 && operation <= 61)
                 && (selected == 5 || selected == 6))
-                || (operation >= 65 && operation <= 70 && selected == 5)
+                || (operation >= 67 && operation <= 70 && selected == 5)
                 || (operation >= 71 && operation <= 75 && selected == 6)
                 || ((operation == 72 || operation == 74) && selected != 5))
             {
