@@ -1059,7 +1059,9 @@ later binding. A SourceFile-row writer checks nonempty paths and Module
 partitions without opening source files; a TypeDef-row writer checks
 names, assigned flags and owned field ranges against the supplied tables.
 A FieldDef-row writer checks TypeDef ownership, TypeSpec references,
-field names, flags and explicit layout offsets against those rows.
+field names, flags and explicit layout offsets against those rows. An indexed
+TypeSpec-row writer validates form and operands against supplied table counts;
+a TypeArg-row writer checks constructed-type ownership, ordinals and references.
 The self-host String-row
 candidate emits individual rows. These exercise approved metadata contracts in isolation,
 including a framed callable-table fixture, but do not parse executable Body

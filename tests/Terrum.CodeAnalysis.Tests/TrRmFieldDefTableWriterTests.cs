@@ -18,7 +18,7 @@ public sealed class TrRmFieldDefTableWriterTests
         var modules = new TrRmModuleTableReader(moduleBytes, 2, strings, 0, 2, 0, 0);
         var typeBytes = Types(strings, modules);
         var types = new TrRmTypeDefTableReader(typeBytes, 2, strings, modules, 1, 0, 0, 0);
-        byte[] specBytes = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
+        var specBytes = TrRmTypeSpecTableWriter.Encode([new byte[] { 1, 0, 8 }], 2, 0, 0, 0);
         var specs = new TrRmTypeSpecTableReader(specBytes, 1, 2, 0, 0, 0);
         var rows = new[] { new TrRmFieldDefRow(2, 6, 1, 0, uint.MaxValue) };
         var fieldBytes = TrRmFieldDefTableWriter.Encode(rows, strings, types, specs);
@@ -62,7 +62,7 @@ public sealed class TrRmFieldDefTableWriterTests
         var modules = new TrRmModuleTableReader(moduleBytes, 2, strings, 0, 2, 0, 0);
         var typeBytes = Types(strings, modules);
         var types = new TrRmTypeDefTableReader(typeBytes, 2, strings, modules, 1, 0, 0, 0);
-        byte[] specBytes = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
+        var specBytes = TrRmTypeSpecTableWriter.Encode([new byte[] { 1, 0, 8 }], 2, 0, 0, 0);
         var specs = new TrRmTypeSpecTableReader(specBytes, 1, 2, 0, 0, 0);
         return TrRmFieldDefTableWriter.Encode(rows, strings, types, specs);
     }
