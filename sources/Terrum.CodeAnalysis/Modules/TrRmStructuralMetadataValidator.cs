@@ -45,7 +45,7 @@ public static class TrRmStructuralMetadataValidator
 
         if (bodyCount != 0)
         {
-            _ = new TrRmVariableTableIndex(bodyBytes, bodyCount, 1, 1);
+            _ = new TrRmBodyTableReader(bodyBytes, bodyCount);
         }
 
         var strings = new TrRmStringTableReader(stringBytes, stringCount);

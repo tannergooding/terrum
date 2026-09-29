@@ -72,9 +72,32 @@ public sealed class TrRmVariableTableWriterTests
         ]);
 
         Assert.Equal(new uint[] { 0, 1, 3 }, Offsets(bytes, 2));
-        var index = new TrRmVariableTableIndex(bytes, 2, 1, 1);
-        Assert.Equal(new byte[] { 0xFF }, index.GetRow(1).ToArray());
-        Assert.Equal(new byte[] { 1, 2 }, index.GetRow(2).ToArray());
+        var reader = new TrRmBodyTableReader(bytes, 2);
+        Assert.Equal(new byte[] { 0xFF }, reader.GetRow(1).ToArray());
+        Assert.Equal(new byte[] { 1, 2 }, reader.GetRow(2).ToArray());
+        Assert.Throws<InvalidDataException>(() => ReadBody(bytes, 0, 2));
+        Assert.Throws<InvalidDataException>(() => ReadBody(bytes, 3, 2));
+    }
+
+    [Fact]
+    public void RejectsEmptyOrMalformedBodyRows()
+    {
+        byte[] section = TrRmVariableTableWriter.EncodeBodies([new byte[] { 1 },
+            new byte[] { 2, 3 }]);
+
+        var emptyRow = (byte[])section.Clone();
+        emptyRow[4] = 0;
+        Assert.Throws<InvalidDataException>(() => ReadBody(emptyRow, 1, 2));
+
+        var pastEnd = (byte[])section.Clone();
+        pastEnd[8] = 4;
+        Assert.Throws<InvalidDataException>(() => ReadBody(pastEnd, 2, 2));
+    }
+
+    private static byte[] ReadBody(byte[] section, int row, int count)
+    {
+        var reader = new TrRmBodyTableReader(section, count);
+        return reader.GetRow(row).ToArray();
     }
 
     [Fact]
