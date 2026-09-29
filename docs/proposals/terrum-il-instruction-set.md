@@ -619,8 +619,36 @@ An unknown flag requires both branches and the checked failure in B2
 remains observable. An overflow in B2 fails at the add; it neither
 returns from B3 nor requires a fourth normal block. This shape is
 executable in the candidate fail-fast scalar subset, though this
-sketch does not assign its byte offsets. It introduces normal branching;
+sketch does not require the general form. It introduces normal branching;
 the next example introduces a merge argument, and then a loop backedge.
+
+#### Compact indexed conditional sum
+
+With `TypeSpec[1]=bool`, `TypeSpec[2]=int32` and the MethodSig above,
+the three-block `MaybeAdd` row has `valueDefStarts=[0,3,4,4]`.
+The first three definition offsets are parameter sentinels and the
+fourth seeks B2's checked add at offset 12. Its value descriptors'
+use-block counts are `(1,2,1,1)` as described above. Compact block
+offsets are `[0,18,37,46]`; terminator offsets are `[12,17,7]`.
+The candidate compact-indexed Body section is 94 bytes (8-byte
+offset index plus an 86-byte row):
+
+```text
+00 00 00 00  56 00 00 00
+01 00 00 00  08 03 04 00 02  01 00 00 00  02 00 00 00
+01 01  02 02  02 01  02 01
+00 03 04 04  FF FF FF 0C
+00 12 25 2E  0C 11 07
+1A 03 01 02 03 02 02 03 01 01 00 00  81 01 02 00 03 00
+14 02 02 03 03 02 00 03 00 04 01 01  15 04 01 02 03  83 04
+14 01 02 01 02 00 00  83 02
+```
+
+B2's one checked instruction remains ordered before its Return. B3
+contains no operations; its `r2` Return is independent of B2's failure.
+The direct B2 operation offset and all three branch/return offsets
+make indexed import possible without scanning other blocks, subject
+to the producer-trust and unknown-opcode policies noted above.
 
 ### Conditional merge and loop (informative shapes)
 
@@ -1631,3 +1659,18 @@ invitation to invent semantics or serialize the current private bound tree.
 See [implementation](../implementation.md) for what the repository actually
 executes. The source-language [portable proof floor](../language-contract-review.md#4-a-reproducible-proof-and-evaluation-foundation)
 is distinct from decoder and verifier work budgets.
+
+### Compact-profile review decisions
+
+The two compact tags and their bytes above are candidate wire layouts,
+**not approved metadata or a shipping writer policy**. The following
+decisions remain tracked here for approval or revision before adoption:
+
+| Decision | Candidate and evidence still needed |
+|---|---|
+| Shape partition | Compare one-block linear, 2–3-block boundary-only, indexed small CFG and general forms on representative body distributions; choose by total bytes, cold import, allocations and selective-inlining time under trusted and audited loading, not a hard block-count cutoff. |
+| Offset width | Compare a separate compact-index width against the current coupled local width at 255/65535-byte boundaries, including wider IDs with short blocks. Validate exact fallback to the general form. |
+| Logical roots and effects | Define mandatory method/block effects and indexed safepoint root/owner/interior dependencies including cleanup/exceptional continuations. Decide inline versus required sparse sidecar by actual density; no executable managed compact form until a reader verifies these facts. |
+| Cross-method sharing | Compare independent 13–17-byte short rows with a typed, bounded shared-shape table and per-owner substitutions. Preserve unique Body ownership, contracts and source identity; measure binding and rewrite/remap costs as well as byte savings. |
+| Trusted selective import | Resolve unvisited-block unknown opcodes and feature negotiation before a reader relies on terminator/definition indexes without decoding that block; structural bounds and metadata binding never become optional. |
+| Declaration contracts | Model authored Body bytes and the separately executed pre/postcondition checks together for inlining/effect decisions. Their ability to remove explicit guard branches does not remove runtime work or failure order. |

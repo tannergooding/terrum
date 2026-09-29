@@ -385,6 +385,89 @@ public sealed class TrRmProposedBodyExampleTests
         }
     }
 
+    [Fact]
+    public void ProposedCompactIndexedConditionalAddPreservesCheckedArm()
+    {
+        var bytes = ReadExample("#### Compact indexed conditional sum");
+        Assert.Equal(94, bytes.Length);
+        var position = 0;
+        Assert.Equal(0u, ReadUInt32(bytes, ref position));
+        Assert.Equal(86u, ReadUInt32(bytes, ref position));
+        Assert.Equal(1u, ReadUInt32(bytes, ref position));
+        Assert.Equal(new byte[] { 0x08, 3, 4, 0, 2 },
+            bytes.AsSpan(position, 5).ToArray());
+        position += 5;
+        Assert.Equal(1u, ReadUInt32(bytes, ref position));
+        Assert.Equal(2u, ReadUInt32(bytes, ref position));
+        Assert.Equal(new byte[] { 1, 1, 2, 2, 2, 1, 2, 1 },
+            bytes.AsSpan(position, 8).ToArray());
+        position += 8;
+        Assert.Equal(new byte[] { 0, 3, 4, 4 },
+            bytes.AsSpan(position, 4).ToArray());
+        position += 4;
+        Assert.Equal(new byte[] { 255, 255, 255, 12 },
+            bytes.AsSpan(position, 4).ToArray());
+        position += 4;
+        int[] offsets = [0, 18, 37, 46];
+        int[] terminators = [12, 17, 7];
+        foreach (var offset in offsets)
+        {
+            Assert.Equal((byte)offset, bytes[position++]);
+        }
+        foreach (var offset in terminators)
+        {
+            Assert.Equal((byte)offset, bytes[position++]);
+        }
+        Assert.Equal(46, bytes.Length - position);
+        byte[][] parameters = [[1, 2, 3], [], []];
+        byte[][] liveIns = [[], [2, 3], [2]];
+        byte[][] liveOuts = [[2, 3], [], []];
+        byte[][] usedValues = [[1, 0], [2, 0, 3, 0, 4, 1], [2, 0]];
+        for (var blockId = 1; blockId <= 3; blockId++)
+        {
+            var block = bytes.AsSpan(position + offsets[blockId - 1],
+                offsets[blockId] - offsets[blockId - 1]);
+            var cursor = 0;
+            var flags = block[cursor++];
+            Assert.Equal((byte)(blockId == 1 ? 0x1A : 0x14), flags);
+            foreach (var (bit, values) in new[] {
+                (0x02, parameters[blockId - 1]),
+                (0x04, liveIns[blockId - 1]),
+                (0x08, liveOuts[blockId - 1]),
+            })
+            {
+                Assert.Equal(values.Length != 0, (flags & bit) != 0);
+                if (values.Length != 0)
+                {
+                    Assert.Equal((byte)values.Length, block[cursor++]);
+                    foreach (var value in values)
+                    {
+                        Assert.Equal(value, block[cursor++]);
+                    }
+                }
+            }
+            var uses = usedValues[blockId - 1];
+            Assert.Equal((byte)(uses.Length / 2), block[cursor++]);
+            foreach (var value in uses)
+            {
+                Assert.Equal(value, block[cursor++]);
+            }
+            Assert.Equal((byte)(blockId == 2 ? 1 : 0), block[cursor++]);
+            if (blockId == 2)
+            {
+                Assert.Equal(12, cursor);
+                Assert.Equal(new byte[] { 0x15, 4, 1, 2, 3 },
+                    block.Slice(cursor, 5).ToArray());
+                cursor += 5;
+            }
+            Assert.Equal(terminators[blockId - 1], cursor);
+            Assert.Equal(blockId == 1
+                ? new byte[] { 0x81, 1, 2, 0, 3, 0 }
+                : blockId == 2 ? new byte[] { 0x83, 4 }
+                : new byte[] { 0x83, 2 }, block[cursor..].ToArray());
+        }
+    }
+
     private static byte[] ReadExample(string heading)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

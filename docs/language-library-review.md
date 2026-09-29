@@ -49,7 +49,7 @@ detailed proposal wholesale.
 
 | Proposal | Review boundary |
 |---|---|
-| Coded instructions and remaining `TRRM` contracts | The [metadata design](il-metadata.md) is approved as current intent, not implemented or released. Review the separate [coded-instruction proposal](proposals/terrum-il-instruction-set.md), generic/witness and callable contracts, numerical budgets, feature negotiation and evolution rules before claiming complete interchange support. The current semantic-module revisions and historical-reader tests are implementation facts scheduled for consolidation before v1, not external production compatibility; see the [specification roadmap](roadmap.md#language-semantic-il-and-metadata-specification). |
+| Coded instructions and remaining `TRRM` contracts | The [metadata design](il-metadata.md) is approved as current intent, not implemented or released. Review the separate [coded-instruction proposal](proposals/terrum-il-instruction-set.md), including its [compact-profile decisions](proposals/terrum-il-instruction-set.md#compact-profile-review-decisions), generic/witness and callable contracts, numerical budgets, feature negotiation and evolution rules before claiming complete interchange support. The current semantic-module revisions and historical-reader tests are implementation facts scheduled for consolidation before v1, not external production compatibility; see the [specification roadmap](roadmap.md#language-semantic-il-and-metadata-specification). |
 
 ## Specification and implementation work
 
