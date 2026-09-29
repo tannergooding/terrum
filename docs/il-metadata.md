@@ -239,6 +239,50 @@ kind zero in polymorphic columns reject. Only the all-zero word is null,
 and only in columns marked `?`. Other kinds reject, including `0xFF`,
 which is reserved for a future required indirection encoding, not
 defined or accepted here.
+
+**Candidate inline built-in reference (not part of the approved encoding).**
+Reserve kind `0xFE` for typed type-reference fields, with the word
+`0xFE_qq_ff_pp`: `pp` is an assigned atomic built-in code, `ff=0` means
+the atomic type itself and an assigned one-argument family code in `ff`
+means that family over `pp`. In `qq`, bit 0 qualifies the outer type as
+`write`, bit 1 qualifies its argument as `write`; all other bits reject.
+For an atom, `ff=0` and argument `write` must be zero. Both qualifier
+bits require a type/family for which the respective authority is legal;
+unassigned codes, illegal family/argument pairs and `write` on a
+non-writable type reject. Thus `uint8` (code `0x0B`) would be
+`0xFE_00_00_0B` (`0B 00 00 FE` little-endian), `ref<uint8>` (family
+`0x8B`) would be `0xFE_00_8B_0B` (`0B 8B 00 FE`), and
+`write Span<uint8>` would be `0xFE_01_8A_0B`
+(`0B 8A 01 FE`). This reserves one of the 256 reference-kind values,
+not TypeSpec rows: TypeSpec retains its `0xFF_FFFF` row ceiling, and
+kind `0xFF` remains available for future required indirection.
+
+The inline form applies only where the schema expects a complete type
+reference, such as MethodSig results/receivers, Param, FieldDef,
+PropertyDef, Constraint and TypeArg arguments, including a candidate
+Body type-map entry. It is not a DefId, table row/range, TypeArg owner
+or a shortcut for an arbitrary generic formal. TypeSpec's own
+`innerTypeSpec`, `genericTypeSpec` and indexed-family argument remain
+earlier **row** references; a built-in row can still be needed to
+construct another TypeSpec. An inline TypeArg argument has no earlier
+row to check but must satisfy that argument's qualifier and constraint
+rules. `Span<write C>` needs a TypeSpec when `C` is nominal or formal;
+only an assigned, write-eligible atomic `pp` can use the argument-`write`
+bit without a TypeSpec lookup. Qualified and other non-inline types
+continue to use TypeSpec rows.
+
+A revised-format writer would emit the inline form for every eligible
+complete typed reference; a row naming that same built-in would be
+noncanonical in such a field. Readers would validate code membership,
+both qualifier positions and field-specific restrictions, then compare
+**resolved types**, not raw words. A merger can copy an inline word
+unchanged and remap only indexed rows; it must still validate the
+revised artifact's type contracts. A Body-local map keeps its compact
+IDs and must reject duplicate resolved types, including an inline/row
+alias. This avoids the TypeSpec dereference, not the map lookup.
+Adoption needs a format revision and updated readers/writers; current
+readers must reject these candidate words.
+
 A contiguous range is `u32 firstRow, u32 count`; its empty encoding is
 `(0, 0)`, otherwise `firstRow` is nonzero, has a zero high byte, and the
 checked last row is at most `0xFF_FFFF` and belongs to that table.

@@ -56,11 +56,25 @@ opcode variant. There are two instruction envelopes:
 As in the approved metadata design, every cross-table reference in Body
 is a fixed little-endian `u32` word with the column's typed or explicit
 kind rule. The Body header's type map holds TypeSpec references once;
-instructions and
-descriptors use compact one-based **Body-local type IDs** into that map.
+instructions and descriptors use compact one-based **Body-local type IDs**
+into that map.
 FieldDef row operands use fixed `u32` references directly. Neither a
 local type ID nor an instruction's `ref` width changes a metadata row
 number, bypasses its TypeSpec or changes its typed-reference rules.
+
+An [inline built-in type-word candidate](../il-metadata.md#table-stream-and-token-encoding)
+is under review, **not approved or implemented**: typed type-reference
+fields could use fixed `0xFE_qq_ff_pp` words for assigned built-in
+atoms/families and independently qualified outer and argument types.
+If adopted in both metadata and Body, `typeMap` would hold complete
+typed type-reference words: either the inline form or an indexed
+TypeSpec row for other types. A map lookup of an inline word avoids the
+TypeSpec table lookup, but the Body-local `t` ID remains useful for
+repeated uses. The fixed four-byte word and the Body-local 1/2/4-byte
+IDs address different costs; replacing all local IDs with four-byte
+words would also widen values, blocks and places. The byte listings
+below use the **currently approved**, indexed TypeSpec form until a
+metadata format revision adopts the candidate.
 
 The `layout` byte selects widths independently by operand class; bits
 6–7 must be zero:
@@ -168,10 +182,11 @@ The TypeSpec row reference occupies four bytes in `typeMap`, as it does
 in MethodSig; repeated `t1` references are one-byte local IDs because
 this Body has one type. The equal numbers in `t1` and `TypeSpec[1]` are
 coincidental: the map may assign a different local ID to that row.
-A primitive code such as `0x08` would also need one byte at each use,
-but would bypass the complete TypeSpec and require
-a second encoding for nonprimitive or qualified types. The local map
-retains one checked type identity for both forms without that split.
+Under the inline-word candidate, the `typeMap` entry for an unqualified
+`int32` could instead be `0xFE_00_00_08` (`08 00 00 FE` on the wire).
+That keeps `t1` one byte per use without the TypeSpec lookup; it does
+not license replacing the current `01 00 00 00` entry in this fixture
+until the metadata reference rule changes.
 
 The Body **section** uses one mapped type, three values, two blocks and
 no places or regions. Its 78-byte structure is:
@@ -241,7 +256,7 @@ means the selected reference width, `count` the selected count width,
 | `r?` | `ref` | Value ID or zero only when the declared result is void |
 | `rNew?` | `ref` | New value ID, or zero iff the selected callable returns void; zero defines nothing |
 | `p` | `ref` | Body-local place descriptor ID `1..placeCount` |
-| `t` | `ref` | Body-local type ID `1..typeCount`; `typeMap[t - 1]` is the fixed `u32` typed reference to a TypeSpec row, interpreted in this body's module context |
+| `t` | `ref` | Body-local type ID `1..typeCount`; `typeMap[t - 1]` is currently a fixed `u32` typed reference to a TypeSpec row, interpreted in this body's module context; an inline built-in word needs the matching metadata revision |
 | `m` | `ref`, then `u32 DefId` only when `m=0` | Nonzero: one-based MethodDef row within the body module's MethodDef range, resolved by checked `methodDefStart + m - 1`; retained imports use its bound expected MethodDef. Zero: resolved direct call to an authored MethodDef in another packed module, with an exact little-endian MethodDef `DefId` following the selected-width zero. Invalid in a single-module artifact |
 | `fieldDefRow` | fixed `u32` | Typed FieldDef reference, high byte zero, row `1..FieldDef.recordCount` owned by the selected type; a trusted merger may bind it directly to a field of a packed producer's resolved TypeDef |
 | `targetBlock`, `regionId` | `ref` | Body-local block or region ID; only explicitly specified region roots permit zero |
@@ -313,10 +328,13 @@ represents every field in this class throughout the **whole body**.
 `ownerMethod`, type-map entries and both offset arrays remain fixed `u32`
 typed references or offsets. Each instruction independently selects its
 Body-local operand width via its prefix; FieldDef and direct-call DefId
-operands remain fixed `u32`. Bound `typeCount` by the TypeSpec table count
-and the remaining row bytes before reading its four-byte entries. Every
-entry must be distinct and resolve to a TypeSpec valid in the owning
-module's context; duplicates reject. Writers order entries by first use
+operands remain fixed `u32`. Under the approved indexed-only rule,
+bound `typeCount` by the TypeSpec table count and the remaining row
+bytes before reading its four-byte entries. If inline built-ins are
+adopted, use the Body-local ID range and remaining bytes as the bound
+instead; a Body can have built-in types with no TypeSpec rows. Every
+entry must be distinct and resolve to a complete type valid in the
+owning module's context; duplicates reject. Writers order entries by first use
 across descriptors, then instruction streams, without unused entries;
 a strict canonicality audit may check ordering and usage. Readers bound
 every field and validate map entries
@@ -840,7 +858,7 @@ contract:
 | Published contracts | Full effects, ownership/transfer, correlated output states, pre/postconditions, capability and witness evidence, generic specialization/export metadata and layout/ABI compatibility. Metadata clauses must be specified together with verifier inputs. |
 | Operations | Checked indexing/backing, raw/unaligned and atomic memory order, floating/SIMD/tensor semantics, indirect calls, traits/witness dispatch, intrinsics, async state and typed failure values. Assign only operations whose exact type, failure, ordering and lifetime rules are known. |
 | Revision and reader policy | No on-wire selector or feature/revision negotiation for the candidate executable subset; nonminimal-width load policy, unknown opcodes in unvisited trusted blocks, diagnostic/recovery behavior and numeric parser/audit budgets remain open. |
-| Type-map conformance | A complete reader must validate each fixed-`u32` TypeSpec reference, distinct map entries, local type IDs and type agreement with MethodSig and selected definitions. No Body-local ID may be mistaken for an artifact-wide metadata reference. |
+| Type-map conformance | A complete reader must validate each fixed-`u32` typed type reference, distinct map entries, local type IDs and type agreement with MethodSig and selected definitions. The candidate inline built-in words require a metadata format revision and explicit identity checks across indexed and inline forms; no Body-local ID may be mistaken for an artifact-wide metadata reference. |
 
 These are explicit blockers to declaring the proposals final, not an
 invitation to invent semantics or serialize the current private bound tree.
