@@ -55,6 +55,16 @@ public readonly ref struct TrRmParamTableReader
         return _rows[(row - 1) * RowSize + 12];
     }
 
+    public int GetTypeSpec(int row)
+    {
+        if (row <= 0 || (long)row * RowSize > _rows.Length)
+        {
+            throw InvalidParam();
+        }
+
+        return (int)Read(_rows.Slice((row - 1) * RowSize, RowSize), 8);
+    }
+
     private static uint Read(ReadOnlySpan<byte> data, int offset)
         => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
 

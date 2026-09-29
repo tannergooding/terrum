@@ -1206,6 +1206,13 @@ the validated row count and borrowed row bytes without interpreting them as
 references or requiring nonempty payloads.
 A Body-table reader likewise exposes the validated row count and nonempty row
 bytes without decoding instructions or claiming that the Body is executable.
+A separate compact-linear reader takes the owning MethodDef, MethodSig,
+Param and TypeSpec rows and checks the fail-fast scalar subset of `ConstBits`,
+`ConstSigned`, `CheckedBinary`, `Return` and `Fail`. It reconstructs parameter
+and operation definitions and final uses from the one-block stream, rejecting
+unknown operations, invalid IDs, types, modes, widths and trailing bytes.
+This does not validate published effects, execute instructions, accept other
+compact/general forms or make the structural CLI an executable Body verifier.
 SourceMap rows check slots, spans and Body/SourceFile module
 association. A bounded SourceMap writer emits those slots, reuses SourceFile slots
 and rejects duplicate instruction locations; block/ordinal existence still
@@ -1214,7 +1221,7 @@ frames caller-supplied sections under the `(1, 0)` directory and checks that
 framing without changing the current semantic-module writer. An offset-indexed
 writer emits opaque Blob rows (including empty rows) and nonempty Body rows,
 but does not decode, generate or verify executable instructions.
-Separate test-only fixtures independently decode proposed general and compact
+Separate test-only fixtures independently decode approved general and compact
 Body examples and check their indexes against the written bytes; they are not
 an executable Body reader or an adopted metadata writer.
 Historical-revision readers and feature-dependent writer
