@@ -1,6 +1,6 @@
 namespace Terrum.CodeAnalysis;
 
-bool TryParseTwoParameterAddPrefix(TokenSnapshot tokens,
+bool TryParseTwoParameterBinaryPrefix(TokenSnapshot tokens, int32 operatorKind,
     out int32 scalarType, out SourceRange name)
 {
     if (tokens.GetCount() != 17 && tokens.GetCount() != 19)
@@ -19,7 +19,7 @@ bool TryParseTwoParameterAddPrefix(TokenSnapshot tokens,
     require tokens.TryGet(9, out var openBody);
     require tokens.TryGet(10, out var returnKeyword);
     require tokens.TryGet(11, out var firstUse);
-    require tokens.TryGet(12, out var add);
+    require tokens.TryGet(12, out var binary);
     require tokens.TryGet(13, out var secondUse);
     if (!TryGetScalarType(returnType, out var selected)
         || !TryGetScalarType(firstType, out var matchingFirst)
@@ -28,7 +28,7 @@ bool TryParseTwoParameterAddPrefix(TokenSnapshot tokens,
         || selected == 5 || selected == 6
         || function.Kind != 2 || openParameters.Kind != 46 || comma.Kind != 53
         || closeParameters.Kind != 47 || openBody.Kind != 48
-        || returnKeyword.Kind != 19 || add.Kind != 57
+        || returnKeyword.Kind != 19 || binary.Kind != operatorKind
         || !SameTokenSpelling(firstParameter, firstUse)
         || !SameTokenSpelling(secondParameter, secondUse)
         || SameTokenSpelling(firstParameter, secondParameter))
@@ -38,6 +38,12 @@ bool TryParseTwoParameterAddPrefix(TokenSnapshot tokens,
     scalarType = selected;
     name = function.Range;
     return true;
+}
+
+bool TryParseTwoParameterAddPrefix(TokenSnapshot tokens,
+    out int32 scalarType, out SourceRange name)
+{
+    return TryParseTwoParameterBinaryPrefix(move tokens, 57, out scalarType, out name);
 }
 
 bool TryParseTwoParameterAddReturn(TokenSnapshot tokens,
@@ -55,6 +61,23 @@ bool TryParseTwoParameterAddReturn(TokenSnapshot tokens,
         return false;
     }
     return TryParseTwoParameterAddPrefix(move tokens, out scalarType, out name);
+}
+
+bool TryParseTwoParameterSubtractReturn(TokenSnapshot tokens,
+    out int32 scalarType, out SourceRange name)
+{
+    if (tokens.GetCount() != 17)
+    {
+        return false;
+    }
+    require tokens.TryGet(14, out var semicolon);
+    require tokens.TryGet(15, out var closeBody);
+    require tokens.TryGet(16, out var eof);
+    if (semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0)
+    {
+        return false;
+    }
+    return TryParseTwoParameterBinaryPrefix(move tokens, 58, out scalarType, out name);
 }
 
 bool TryParseTwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
@@ -243,5 +266,64 @@ bool TryEvaluateUInt64TwoParameterAddReturn(TokenSnapshot tokens, uint64 first, 
     }
     name = foundName;
     result = first + second;
+    return true;
+}
+
+bool TryEvaluateInt32TwoParameterSubtractReturn(TokenSnapshot tokens, int32 first, int32 second,
+    out SourceRange name, out int32 result)
+{
+    if (!TryParseTwoParameterSubtractReturn(move tokens, out var selected, out var foundName)
+        || selected != 1)
+    {
+        return false;
+    }
+    int64 difference = int64(first) - int64(second);
+    if (difference < int64(int32.MinValue) || difference > int64(int32.MaxValue))
+    {
+        return false;
+    }
+    name = foundName;
+    result = int32(difference);
+    return true;
+}
+
+bool TryEvaluateUInt32TwoParameterSubtractReturn(TokenSnapshot tokens, uint32 first, uint32 second,
+    out SourceRange name, out uint32 result)
+{
+    if (!TryParseTwoParameterSubtractReturn(move tokens, out var selected, out var foundName)
+        || selected != 2 || first < second)
+    {
+        return false;
+    }
+    name = foundName;
+    result = first - second;
+    return true;
+}
+
+bool TryEvaluateInt64TwoParameterSubtractReturn(TokenSnapshot tokens, int64 first, int64 second,
+    out SourceRange name, out int64 result)
+{
+    if (!TryParseTwoParameterSubtractReturn(move tokens, out var selected, out var foundName)
+        || selected != 3
+        || (second > 0 && first < int64.MinValue + second)
+        || (second < 0 && first > int64.MaxValue + second))
+    {
+        return false;
+    }
+    name = foundName;
+    result = first - second;
+    return true;
+}
+
+bool TryEvaluateUInt64TwoParameterSubtractReturn(TokenSnapshot tokens, uint64 first, uint64 second,
+    out SourceRange name, out uint64 result)
+{
+    if (!TryParseTwoParameterSubtractReturn(move tokens, out var selected, out var foundName)
+        || selected != 4 || first < second)
+    {
+        return false;
+    }
+    name = foundName;
+    result = first - second;
     return true;
 }
