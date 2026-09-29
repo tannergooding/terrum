@@ -1,0 +1,105 @@
+namespace Terrum.CodeAnalysis;
+
+// Magnitudes retain the scanner's raw low/high uint32 bit patterns as int32 words.
+public unique struct TokenIntegerSnapshot
+{
+    private OwnedInt32Buffer _records;
+    private int32 _count;
+
+    private TokenIntegerSnapshot(OwnedInt32Buffer records, int32 count)
+    {
+        _records = move records;
+        _count = count;
+    }
+
+    public int32 GetCount()
+    {
+        return _count;
+    }
+
+    public bool TryGet(int32 index, out int32 tokenIndex,
+        out bool overflow, out int32 low, out int32 high)
+    {
+        if (index < 0 || index >= _count)
+        {
+            return false;
+        }
+
+        int32 offset = index * 4;
+        tokenIndex = _records.Read(offset);
+        overflow = _records.Read(offset + 1) == 1;
+        low = _records.Read(offset + 2);
+        high = _records.Read(offset + 3);
+        return true;
+    }
+
+    public static bool TryBuild(int32 tokenCount, init ref<TokenIntegerSnapshot> result)
+    {
+        if (Host.Diagnostics[0] != 0 || tokenCount < 1
+            || tokenCount > Host.Tokens.Length / 3
+            || Host.IntegerValues.Length < 1)
+        {
+            return false;
+        }
+
+        int32 count = Host.IntegerValues[0];
+        if (count < 0 || count >= tokenCount
+            || count > (Host.IntegerValues.Length - 1) / 5
+            || count > int32.MaxValue / 4
+            || !OwnedInt32Buffer.TryCreate(count * 4, out var created))
+        {
+            return false;
+        }
+
+        mut OwnedInt32Buffer records = move created;
+        mut int32 previousIndex = -1;
+        for (mut int32 index = 0; index < count; index = index + 1)
+        {
+            int32 offset = index * 5 + 1;
+            int32 tokenIndex = Host.IntegerValues[offset];
+            int32 status = Host.IntegerValues[offset + 1];
+            int32 low = Host.IntegerValues[offset + 2];
+            int32 high = Host.IntegerValues[offset + 3];
+            int32 tag = Host.IntegerValues[offset + 4];
+            if (tokenIndex <= previousIndex || tokenIndex >= tokenCount - 1
+                || status < 0 || status > 1 || tag != 0
+                || Host.Tokens[tokenIndex * 3] != 3
+                || (status == 1 && (low != 0 || high != 0)))
+            {
+                return false;
+            }
+
+            require records.TryAppend(tokenIndex);
+            require records.TryAppend(status);
+            require records.TryAppend(low);
+            require records.TryAppend(high);
+            previousIndex = tokenIndex;
+        }
+
+        result = new TokenIntegerSnapshot(move records, count);
+        return true;
+    }
+}
+
+bool TryBuildCompilerInput(int32 count,
+    init ref<TokenSnapshot> tokens, init ref<TokenTriviaSnapshot> trivia,
+    init ref<TokenIntegerSnapshot> integers)
+{
+    if (!TokenSnapshot.TryBuild(count, init var scanned)
+        || !TokenTriviaSnapshot.TryBuild(count, init var leading)
+        || !TokenIntegerSnapshot.TryBuild(count, init var magnitudes))
+    {
+        return false;
+    }
+
+    tokens = move scanned;
+    trivia = move leading;
+    integers = move magnitudes;
+    return true;
+}
+
+bool TryScanCompilerInput(init ref<TokenSnapshot> tokens,
+    init ref<TokenTriviaSnapshot> trivia, init ref<TokenIntegerSnapshot> integers)
+{
+    return TryBuildCompilerInput(Scan(), init tokens, init trivia, init integers);
+}

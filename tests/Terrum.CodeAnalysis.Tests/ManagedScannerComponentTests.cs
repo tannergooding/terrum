@@ -268,6 +268,111 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task OwnedIntegerRecordsRetainFullUnsignedMagnitudeAndOverflowAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                if (tokens.GetCount() != 5 || trivia.GetCount() != 3
+                    || integers.GetCount() != 4 || integers.TryGet(-1, out var negativeIndex,
+                        out var negativeOverflow, out var negativeLow, out var negativeHigh)
+                    || integers.TryGet(4, out var beyondIndex, out var beyondOverflow,
+                        out var beyondLow, out var beyondHigh)) { return 1; }
+                Host.IntegerValues[3] = 0;
+                require integers.TryGet(0, out var first, out var firstOverflow,
+                    out var firstLow, out var firstHigh);
+                require integers.TryGet(1, out var second, out var secondOverflow,
+                    out var secondLow, out var secondHigh);
+                require integers.TryGet(2, out var third, out var thirdOverflow,
+                    out var thirdLow, out var thirdHigh);
+                require integers.TryGet(3, out var fourth, out var fourthOverflow,
+                    out var fourthLow, out var fourthHigh);
+                if (first != 0 || firstOverflow || firstLow != -1 || firstHigh != -1
+                    || second != 1 || !secondOverflow || secondLow != 0 || secondHigh != 0
+                    || third != 2 || thirdOverflow || thirdLow != 2 || thirdHigh != 0
+                    || fourth != 3 || fourthOverflow || fourthLow != 42 || fourthHigh != 0) {
+                    return 2;
+                }
+                return 42;
+            }
+            """;
+        const string Text = "0xFFFF_FFFF_FFFF_FFFF 18446744073709551616 0b1_0 42";
+        var program = await CompileAsync(Text, Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task CompilerInputPermitsNoDecodedIntegersAsync(NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                if (tokens.GetCount() != 2 || trivia.GetCount() != 0
+                    || integers.GetCount() != 0) { return 1; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync("alpha", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(0, 3)]
+    [InlineData(1, -1)]
+    [InlineData(2, 2)]
+    [InlineData(5, 1)]
+    [InlineData(6, 0)]
+    public async Task InvalidIntegerRecordsDoNotPublishCompilerInputAsync(int word, int value)
+    {
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                int32 count = Scan();
+                Host.IntegerValues[{{word}}] = {{value}};
+                if (TryBuildCompilerInput(count, init var tokens, init var trivia,
+                    init var integers)) { return 1; }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync("42 3", entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task OverflowIntegerRecordRequiresZeroPayloadAsync(NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                int32 count = Scan();
+                Host.IntegerValues[2] = 1;
+                Host.IntegerValues[3] = 1;
+                if (TryBuildCompilerInput(count, init var tokens, init var trivia,
+                    init var integers)) { return 1; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync("42", Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData("int32 Answer() { return 42; }", true)]
     [InlineData("int32 Answer() { return -42; }", true)]
     [InlineData("int32 Answer() { return (42); }", false)]
@@ -558,7 +663,7 @@ public sealed class ManagedScannerComponentTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         string[] names = ["SourceRange", "Token", "ManagedTokenChain", "Scanner", "ManagedScanner",
-            "TokenSnapshot", "TokenTriviaSnapshot", "ScalarFunctionParser"];
+            "TokenSnapshot", "TokenTriviaSnapshot", "TokenIntegerSnapshot", "ScalarFunctionParser"];
         var trees = new List<SyntaxTree>(names.Length + 1);
         foreach (var name in names)
         {
