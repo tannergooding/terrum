@@ -9,10 +9,11 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
-    private static int RunTrRmStructureCommand(string[] args, bool json)
+    private static int RunTrRmValidationCommand(string[] args, bool json)
     {
         var compact = args[0] == "validate-trrm-compact-linear";
         var indexed = args[0] == "validate-trrm-compact-indexed";
+        var mixed = args[0] == "validate-trrm-compact";
         if (args.Length is not (2 or 3) || args[1] == "-"
             || (args.Length == 3 && args[2] != "--json"))
         {
@@ -34,7 +35,11 @@ internal static partial class Program
 
         try
         {
-            if (indexed)
+            if (mixed)
+            {
+                TrRmStructuralMetadataValidator.ValidateCompact(artifact);
+            }
+            else if (indexed)
             {
                 TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
             }
@@ -61,19 +66,24 @@ internal static partial class Program
             writer.WriteNumber("schema", 1);
             writer.WriteString("command", args[0]);
             writer.WriteBoolean("success", true);
-            writer.WriteString("scope", indexed
-                ? "framing-structural-metadata-and-compact-indexed-shapes"
-                : compact ? "framing-structural-metadata-and-compact-linear-shapes"
-                    : "framing-and-structural-metadata");
+            writer.WriteString("scope", args[0] switch
+            {
+                "validate-trrm-compact" => "framing-structural-metadata-and-compact-shapes",
+                "validate-trrm-compact-indexed" => "framing-structural-metadata-and-compact-indexed-shapes",
+                "validate-trrm-compact-linear" => "framing-structural-metadata-and-compact-linear-shapes",
+                _ => "framing-and-structural-metadata",
+            });
             writer.WriteEndObject();
         }
         else
         {
-            Console.Out.WriteLine(indexed
-                ? $"{args[1]}: TRRM compact-indexed Body shapes valid (effects and execution not verified)"
-                : compact
-                    ? $"{args[1]}: TRRM compact-linear Body shapes valid (effects and execution not verified)"
-                    : $"{args[1]}: TRRM framing and structural metadata valid (Body not verified)");
+            Console.Out.WriteLine(args[0] switch
+            {
+                "validate-trrm-compact" => $"{args[1]}: TRRM compact Body shapes valid (effects and execution not verified)",
+                "validate-trrm-compact-indexed" => $"{args[1]}: TRRM compact-indexed Body shapes valid (effects and execution not verified)",
+                "validate-trrm-compact-linear" => $"{args[1]}: TRRM compact-linear Body shapes valid (effects and execution not verified)",
+                _ => $"{args[1]}: TRRM framing and structural metadata valid (Body not verified)",
+            });
         }
         return 0;
     }

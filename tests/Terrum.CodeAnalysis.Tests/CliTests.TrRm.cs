@@ -230,16 +230,18 @@ public sealed partial class CliTests
         BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(24), 1);
         BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(36), 1);
         BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(40), 2);
-        byte[] Encode() => TrRmArtifactWriter.Encode([
+        byte[] Encode(byte[]? methodRows = null, int methodCount = 1,
+            byte[]? bodyRows = null, int bodyCount = 1,
+            byte[]? mapRows = null, int mapCount = 1) => TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, module),
             new TrRmSection(0x0002, 0, 3, strings),
             new TrRmSection(0x0011, 0, 2, typeSpec),
-            new TrRmSection(0x0016, 0, 1, method),
+            new TrRmSection(0x0016, 0, (uint)methodCount, methodRows ?? method),
             new TrRmSection(0x0017, 0, 1, signature),
             new TrRmSection(0x0018, 0, 3, parameters),
             new TrRmSection(0x001F, 0, 1, sourceFile),
-            new TrRmSection(0x0020, 0, 1, body),
-            new TrRmSection(0x7F00, 2, 1, sourceMap),
+            new TrRmSection(0x0020, 0, (uint)bodyCount, bodyRows ?? body),
+            new TrRmSection(0x7F00, 2, (uint)mapCount, mapRows ?? sourceMap),
         ]);
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-trrm-indexed-{Guid.NewGuid():N}.trrm");
@@ -285,6 +287,61 @@ public sealed partial class CliTests
             using var invalid = JsonDocument.Parse(invalidOutput);
             Assert.Equal("TRM5001", invalid.RootElement.GetProperty("diagnostics")[0]
                 .GetProperty("code").GetString());
+
+            body[77] = 2;
+            var methodRows = new byte[56];
+            method.CopyTo(methodRows, 0);
+            method.CopyTo(methodRows, 28);
+            BinaryPrimitives.WriteUInt32LittleEndian(methodRows.AsSpan(52), 2);
+            byte[] linearRow =
+            [
+                0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0x83, 2,
+            ];
+            var bodyRows = new byte[12 + body.Length - 8 + linearRow.Length];
+            BinaryPrimitives.WriteUInt32LittleEndian(bodyRows.AsSpan(4), (uint)(body.Length - 8));
+            BinaryPrimitives.WriteUInt32LittleEndian(bodyRows.AsSpan(8),
+                (uint)(body.Length - 8 + linearRow.Length));
+            body.AsSpan(8).CopyTo(bodyRows.AsSpan(12));
+            linearRow.CopyTo(bodyRows, 12 + body.Length - 8);
+            var mixedMap = new byte[84];
+            BinaryPrimitives.WriteUInt32LittleEndian(mixedMap, 3);
+            sourceMap.AsSpan(4, 32).CopyTo(mixedMap.AsSpan(4));
+            BinaryPrimitives.WriteUInt16LittleEndian(mixedMap.AsSpan(36), 0x0020);
+            BinaryPrimitives.WriteUInt16LittleEndian(mixedMap.AsSpan(38), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(mixedMap.AsSpan(40), 2);
+            BinaryPrimitives.WriteUInt32LittleEndian(mixedMap.AsSpan(44), 1);
+            sourceMap.AsSpan(36, 16).CopyTo(mixedMap.AsSpan(52));
+            BinaryPrimitives.WriteUInt32LittleEndian(mixedMap.AsSpan(68), 3);
+            BinaryPrimitives.WriteUInt32LittleEndian(mixedMap.AsSpan(72), 2);
+            await File.WriteAllBytesAsync(path, Encode(methodRows, 2, bodyRows, 2, mixedMap, 2));
+            var (mixedExit, mixedOutput, _) = await RunAsync([],
+                "validate-trrm-compact", path, "--json");
+            Assert.Equal(0, mixedExit);
+            using (var result = JsonDocument.Parse(mixedOutput))
+            {
+                Assert.Equal("framing-structural-metadata-and-compact-shapes",
+                    result.RootElement.GetProperty("scope").GetString());
+            }
+
+            var (indexedOnlyExit, _, _) = await RunAsync([],
+                "validate-trrm-compact-indexed", path, "--json");
+            var (linearOnlyExit, _, _) = await RunAsync([],
+                "validate-trrm-compact-linear", path, "--json");
+            Assert.Equal(1, indexedOnlyExit);
+            Assert.Equal(1, linearOnlyExit);
+
+            BinaryPrimitives.WriteUInt32LittleEndian(mixedMap.AsSpan(48), 1);
+            await File.WriteAllBytesAsync(path, Encode(methodRows, 2, bodyRows, 2, mixedMap, 2));
+            var (invalidLinearLocationExit, _, _) = await RunAsync([],
+                "validate-trrm-compact", path, "--json");
+            Assert.Equal(1, invalidLinearLocationExit);
+
+            BinaryPrimitives.WriteUInt32LittleEndian(mixedMap.AsSpan(48), 0);
+            bodyRows[12 + body.Length - 8] = 0;
+            await File.WriteAllBytesAsync(path, Encode(methodRows, 2, bodyRows, 2, mixedMap, 2));
+            var (unsupportedExit, _, _) = await RunAsync([],
+                "validate-trrm-compact", path, "--json");
+            Assert.Equal(1, unsupportedExit);
         }
         finally
         {

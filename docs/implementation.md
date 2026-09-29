@@ -1238,7 +1238,11 @@ It rejects other assigned indexed operations and backedges.
 `terrumc validate-trrm-compact-indexed <artifact> [--json]` opts into this
 subset across all owned Body rows after structural metadata checks; when
 SourceMap is present it checks block and operation/terminator ordinals.
-Neither compact command is an executable Body verifier.
+`terrumc validate-trrm-compact <artifact> [--json]` inspects mixed linear and
+indexed rows using their respective bounded readers and location checks; it
+rejects general and unsupported compact Bodies rather than assuming an
+executable interpretation.
+None of these compact commands is an executable Body verifier.
 SourceMap rows check slots, spans and Body/SourceFile module
 association. A bounded SourceMap writer emits those slots, reuses SourceFile slots
 and rejects duplicate instruction locations; block/ordinal existence still

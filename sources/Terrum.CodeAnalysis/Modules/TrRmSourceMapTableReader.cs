@@ -103,7 +103,7 @@ public readonly ref struct TrRmSourceMapTableReader
         }
     }
 
-    internal void ValidateCompactIndexedLocations(TrRmMethodDefTableReader methods,
+    internal void ValidateCompactLocations(TrRmMethodDefTableReader methods,
         int[][] operationCounts)
     {
         for (var offset = 0; offset < _slots.Length; offset += 16)

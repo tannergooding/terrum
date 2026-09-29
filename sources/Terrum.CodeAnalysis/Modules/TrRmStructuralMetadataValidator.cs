@@ -14,6 +14,7 @@ public static class TrRmStructuralMetadataValidator
         None,
         CompactLinear,
         CompactIndexed,
+        CompactMixed,
     }
 
     public static void Validate(ReadOnlySpan<byte> artifact)
@@ -24,6 +25,9 @@ public static class TrRmStructuralMetadataValidator
 
     public static void ValidateCompactIndexed(ReadOnlySpan<byte> artifact)
         => ValidateCore(artifact, BodyInspection.CompactIndexed);
+
+    public static void ValidateCompact(ReadOnlySpan<byte> artifact)
+        => ValidateCore(artifact, BodyInspection.CompactMixed);
 
     private static void ValidateCore(ReadOnlySpan<byte> artifact, BodyInspection inspection)
     {
@@ -113,19 +117,30 @@ public static class TrRmStructuralMetadataValidator
                 || inspection != BodyInspection.CompactLinear ? Array.Empty<int>()
                 : new int[methods.Count + 1];
             var indexedCounts = sourceMapCount == 0
-                || inspection != BodyInspection.CompactIndexed ? []
+                || inspection == BodyInspection.CompactLinear ? []
                 : new int[methods.Count + 1][];
             for (var method = 1; method <= methods.Count; method++)
             {
-                if (methods.GetBodyRow(method) != 0)
+                var row = methods.GetBodyRow(method);
+                if (row != 0)
                 {
-                    if (inspection == BodyInspection.CompactLinear)
+                    var linear = inspection == BodyInspection.CompactLinear
+                        || inspection == BodyInspection.CompactMixed
+                            && (bodies.GetRow(row)[0] & 0x0C) == 0x04;
+                    if (linear)
                     {
                         var body = new TrRmCompactLinearBodyReader(bodies, method, modules,
                             methods, signatures, parameters, typeSpecs);
                         if (sourceMapCount != 0)
                         {
-                            linearCounts[method] = body.OperationCount;
+                            if (inspection == BodyInspection.CompactMixed)
+                            {
+                                indexedCounts[method] = [0, body.OperationCount];
+                            }
+                            else
+                            {
+                                linearCounts[method] = body.OperationCount;
+                            }
                         }
                     }
                     else
@@ -154,7 +169,7 @@ public static class TrRmStructuralMetadataValidator
                 }
                 else
                 {
-                    sourceMaps.ValidateCompactIndexedLocations(methods, indexedCounts);
+                    sourceMaps.ValidateCompactLocations(methods, indexedCounts);
                 }
             }
         }

@@ -31,6 +31,7 @@ internal static partial class Program
         + "       terrumc validate-trrm-structure <artifact> [--json]\n"
         + "       terrumc validate-trrm-compact-linear <artifact> [--json]\n"
         + "       terrumc validate-trrm-compact-indexed <artifact> [--json]\n"
+        + "       terrumc validate-trrm-compact <artifact> [--json]\n"
         + "       terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <output.trm> [--runtime <fail-fast|checked-exceptions>] [--json]\n"
         + "       terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <output.trm> [--runtime <fail-fast|checked-exceptions>] [--json]\n"
         + "       terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
@@ -57,6 +58,7 @@ internal static partial class Program
         + "validate-trrm-structure checks provisional (1, 0) framing and structural metadata only, not Body instructions or executable contracts.\n"
         + "validate-trrm-compact-linear additionally checks the bounded scalar compact-linear Body shape, not effects or execution.\n"
         + "validate-trrm-compact-indexed checks the bounded forward-branching scalar indexed Body shape, not effects or execution.\n"
+        + "validate-trrm-compact checks both bounded compact forms per Body row, not general Bodies, effects or execution.\n"
         + "'-' reads strict UTF-8 from stdin. Exit: 0 success, 1 source/compile diagnostics, 2 usage/input/output error.";
 
     private static int Main(string[] args)
@@ -81,9 +83,10 @@ internal static partial class Program
         }
 
         if (args.Length != 0 && args[0] is "validate-trrm-structure"
-            or "validate-trrm-compact-linear" or "validate-trrm-compact-indexed")
+            or "validate-trrm-compact-linear" or "validate-trrm-compact-indexed"
+            or "validate-trrm-compact")
         {
-            return RunTrRmStructureCommand(args, json);
+            return RunTrRmValidationCommand(args, json);
         }
 
         if (args.Length != 0 && args[0] is "compile-module" or "link-module" or "run-module")
