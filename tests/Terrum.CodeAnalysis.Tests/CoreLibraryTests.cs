@@ -84,6 +84,30 @@ public sealed class CoreLibraryTests
         Assert.Empty(Assert.IsType<BoundProgram>(compilation.Program).Structures);
     }
 
+    [Theory]
+    [InlineData("bool")]
+    [InlineData("char16")]
+    [InlineData("int32")]
+    [InlineData("uint32")]
+    [InlineData("int64")]
+    [InlineData("uint64")]
+    public void ImplementedPrimitiveApisExecuteAcrossModuleBoundary(string name)
+    {
+        var source = $"public struct {name} {{ private {name} value; public static {name} Identity({name} input) {{ return input.value; }} }}";
+        var compilation = Compilation.CreateCoreLibrary([SyntaxTree.Parse(source)]);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program),
+            [$"{name}.Identity"]);
+        var body = name == "bool" ? "if (bool.Identity(true)) { return 7; } return 0;"
+            : $"return int32({name}.Identity({name}(7)));";
+        var consumer = Compilation.Create(SyntaxTree.Parse($"int32 Main() {{ {body} }}"),
+            ModuleCompiler.CreateReference(producer));
+        Assert.False(consumer.HasErrors, string.Join(Environment.NewLine, consumer.Diagnostics));
+        var consumerBytes = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumer.Program), producer);
+        Assert.Equal(7, NativeJit.Execute(ModuleCompiler.Link(consumerBytes, producer),
+            NativeRuntimePolicy.FailFast));
+    }
+
     [Fact]
     public void DistinctCorePrimitiveDeclarationsBindAcrossSources()
     {
