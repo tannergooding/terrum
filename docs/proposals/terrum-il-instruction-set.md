@@ -82,6 +82,9 @@ draft has already encoded. If these informative examples move to a
 companion document, retain this contract map and links from the
 normative rules; splitting the examples must not orphan the fast-import
 story or silently promote a pending Body schema to approved metadata.
+The [example fixture checks](../../tests/Terrum.CodeAnalysis.Tests/TrRmProposedBodyExampleTests.cs)
+independently decode the exact bytes below; they are test-only checks of
+this **proposed** schema, not an executable TRRM Body reader.
 
 ## Instruction encoding structure
 
