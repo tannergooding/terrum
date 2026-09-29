@@ -158,6 +158,16 @@ bool TryParseScalarReturnInteger(TokenSnapshot tokens, TokenIntegerSnapshot inte
     return true;
 }
 
+bool IsBasedInteger(Token literal)
+{
+    int32 start = literal.Range.Start;
+    return literal.Range.Length >= 2 && Host.Source[start] == char16(48)
+        && (Host.Source[start + 1] == char16(120)
+            || Host.Source[start + 1] == char16(88)
+            || Host.Source[start + 1] == char16(98)
+            || Host.Source[start + 1] == char16(66));
+}
+
 bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     out SourceRange name, out int32 result)
 {
@@ -181,12 +191,7 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     }
 
     bool negative = count == 11;
-    int32 start = literal.Range.Start;
-    bool based = literal.Range.Length >= 2 && Host.Source[start] == char16(48)
-        && (Host.Source[start + 1] == char16(120)
-            || Host.Source[start + 1] == char16(88)
-            || Host.Source[start + 1] == char16(98)
-            || Host.Source[start + 1] == char16(66));
+    bool based = IsBasedInteger(literal);
     // Decimal signed minimum needs unary minus; based literals first form int32 bits.
     if (low < 0)
     {
@@ -237,5 +242,98 @@ bool TryEvaluateUInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
     {
         result = uint32(low);
     }
+    return true;
+}
+
+uint64 DecodeScannerMagnitude(int32 low, int32 high)
+{
+    // Restore each unsigned half before combining it at the 2^32 place value.
+    mut int64 lowBits = int64(low);
+    mut int64 highBits = int64(high);
+    if (low < 0)
+    {
+        lowBits = lowBits + 4294967296;
+    }
+    if (high < 0)
+    {
+        highBits = highBits + 4294967296;
+    }
+    return uint64(highBits) * 4294967296 + uint64(lowBits);
+}
+
+bool TryEvaluateUInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint64 result)
+{
+    if (tokens.GetCount() != 10
+        || !TryParseScalarReturnIntegerTyped(move tokens, move integers,
+            out var scalarType, out var foundName, out var expression,
+            out var low, out var high)
+        || scalarType != 4)
+    {
+        return false;
+    }
+
+    name = foundName;
+    result = DecodeScannerMagnitude(low, high);
+    return true;
+}
+
+bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int64 result)
+{
+    int32 count = tokens.GetCount();
+    if (count != 10 && count != 11)
+    {
+        return false;
+    }
+    mut int32 valueIndex = 6;
+    if (count == 11)
+    {
+        valueIndex = 7;
+    }
+    require tokens.TryGet(valueIndex, out var literal);
+    if (!TryParseScalarReturnIntegerTyped(move tokens, move integers,
+            out var scalarType, out var foundName, out var expression,
+            out var low, out var high)
+        || scalarType != 3)
+    {
+        return false;
+    }
+
+    bool negative = count == 11;
+    uint64 magnitude = DecodeScannerMagnitude(low, high);
+    uint64 signBit = uint64(int64.MaxValue) + 1;
+    bool based = IsBasedInteger(literal);
+    if (!based && magnitude > uint64(int64.MaxValue))
+    {
+        if (!negative || magnitude != signBit)
+        {
+            return false;
+        }
+        name = foundName;
+        result = int64.MinValue;
+        return true;
+    }
+
+    mut int64 bound = 0;
+    if (based && magnitude >= signBit)
+    {
+        bound = int64(magnitude - signBit) + int64.MinValue;
+    }
+    else
+    {
+        bound = int64(magnitude);
+    }
+    if (negative)
+    {
+        if (bound == int64.MinValue)
+        {
+            return false;
+        }
+        bound = -bound;
+    }
+
+    name = foundName;
+    result = bound;
     return true;
 }
