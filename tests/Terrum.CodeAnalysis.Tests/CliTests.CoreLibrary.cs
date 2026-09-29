@@ -127,6 +127,33 @@ public sealed partial class CliTests
                 "run-native", nativeConsumer, nativeProvider, "--runtime", policy);
             Assert.Equal(7, nativeExecuted);
 
+            if (policy == "checked-exceptions")
+            {
+                await File.WriteAllTextAsync(caller, """
+                    int32 Main() {
+                        unsafe {
+                            try { return int32.AddOne(2147483647); }
+                            catch { return 42; }
+                        }
+                    }
+                    """);
+                var (checkedConsumer, checkedOutput, checkedError) = await RunAsync([],
+                    "compile-module", "consumer", caller, provider, "-o", consumer,
+                    "--runtime", policy, "--json");
+                Assert.True(checkedConsumer == 0, checkedOutput + checkedError);
+                var (checkedResult, _, _) = await RunAsync([],
+                    "run-module", consumer, provider, "--runtime", policy);
+                Assert.Equal(42, checkedResult);
+
+                var (checkedNativeConsumer, nativeCheckedOutput, nativeCheckedError) =
+                    await RunAsync([], "compile-native", "consumer", caller, nativeProvider,
+                        "-o", nativeConsumer, "--runtime", policy, "--json");
+                Assert.True(checkedNativeConsumer == 0, nativeCheckedOutput + nativeCheckedError);
+                var (nativeCheckedResult, _, _) = await RunAsync([],
+                    "run-native", nativeConsumer, nativeProvider, "--runtime", policy);
+                Assert.Equal(42, nativeCheckedResult);
+            }
+
             var (nativeConsumerSwitch, _, _) = await RunAsync([],
                 "compile-native", "consumer", caller, nativeProvider, "-o", nativeConsumer,
                 "--runtime", policy, "--corelib", "--json");

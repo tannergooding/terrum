@@ -154,6 +154,33 @@ public sealed class CoreLibraryTests
     }
 
     [Fact]
+    public void CheckedCorePrimitiveMethodFailureReachesConsumerCatch()
+    {
+        var compilation = Compilation.CreateCoreLibrary([
+            SyntaxTree.Parse(
+                "public struct int32 { private int32 value; public int32 Next() { return value + 1; } }"),
+        ], BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            Assert.IsType<BoundProgram>(compilation.Program), ["int32.Next"]);
+        var consumer = Compilation.Create(SyntaxTree.Parse(
+            """
+            int32 Main() {
+                unsafe {
+                    try { return int32(2147483647).Next(); }
+                    catch { return 42; }
+                }
+            }
+            """), ModuleCompiler.CreateReference(producer),
+            BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(consumer.HasErrors, string.Join(Environment.NewLine, consumer.Diagnostics));
+        var consumerBytes = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(consumer.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumerBytes, producer),
+            NativeRuntimePolicy.CheckedExceptions));
+    }
+
+    [Fact]
     public void PrimitiveOwnerVerificationDoesNotReinterpretHistoricalNominalLayouts()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
