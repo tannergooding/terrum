@@ -534,3 +534,56 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     result = bound;
     return true;
 }
+
+bool TryEvaluateInt32AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int32 result)
+{
+    if (tokens.GetCount() != 12)
+    {
+        return false;
+    }
+    require tokens.TryGet(0, out var type);
+    int32 start = type.Range.Start;
+    if (type.Kind != 2 || type.Range.Length != 5
+        || Host.Source[start] != char16(105) || Host.Source[start + 1] != char16(110)
+        || Host.Source[start + 2] != char16(116) || Host.Source[start + 3] != char16(51)
+        || Host.Source[start + 4] != char16(50))
+    {
+        return false;
+    }
+    require tokens.TryGet(1, out var function);
+    require tokens.TryGet(2, out var openParameters);
+    require tokens.TryGet(3, out var closeParameters);
+    require tokens.TryGet(4, out var openBody);
+    require tokens.TryGet(5, out var returnKeyword);
+    require tokens.TryGet(6, out var left);
+    require tokens.TryGet(7, out var addition);
+    require tokens.TryGet(8, out var right);
+    require tokens.TryGet(9, out var semicolon);
+    require tokens.TryGet(10, out var closeBody);
+    require tokens.TryGet(11, out var eof);
+    if (function.Kind != 2 || openParameters.Kind != 46 || closeParameters.Kind != 47
+        || openBody.Kind != 48 || returnKeyword.Kind != 19
+        || left.Kind != 3 || addition.Kind != 57 || right.Kind != 3
+        || semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0)
+    {
+        return false;
+    }
+    if (!integers.TryFind(6, out var leftOverflow, out var leftLow, out var leftHigh)
+        || !integers.TryFind(8, out var rightOverflow, out var rightLow, out var rightHigh)
+        || leftOverflow || rightOverflow || leftHigh != 0 || rightHigh != 0
+        || (leftLow < 0 && !IsBasedInteger(left))
+        || (rightLow < 0 && !IsBasedInteger(right)))
+    {
+        return false;
+    }
+    int64 sum = int64(leftLow) + int64(rightLow);
+    if (sum < int64(int32.MinValue) || sum > int64(int32.MaxValue))
+    {
+        return false;
+    }
+
+    name = function.Range;
+    result = int32(sum);
+    return true;
+}
