@@ -3183,6 +3183,10 @@ public sealed class ManagedScannerComponentTests
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "uint32 Value(uint32 x) { return +(~(5 | x)); }", 17, 30373, "uint32", 2L, 0L, 1, -8L)]
     [InlineData(NativeRuntimePolicy.FailFast, "int64 Value(int64 x, int64 y) { return -(~(x & y)); }", 17, 32071, "int64", 7L, 3L, 2, 4L)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return +(~(0xF ^ 0xA)); }", 17, 30575, "int32", 0L, 0L, 0, -6L)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return ~(~(x + y)); }", 18, 38057, "int32", 10L, 32L, 2, 42L)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int64 Value(int64 x, int64 y) { return ~(~((x) & (y))); }", 18, 38071, "int64", 7L, 3L, 2, 3L)]
+    [InlineData(NativeRuntimePolicy.FailFast, "uint64 Value(uint64 x) { return ~(~(x & 0xFFFFFFFFFFFFFFFF)); }", 18, 38171, "uint64", 15L, 0L, 1, 15L)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return ~(~(0xF ^ 0xA)); }", 18, 38575, "int32", 0L, 0L, 0, 5L)]
     public async Task NativeScalarFrontendGroupedIntegerUnaryExecutesAsync(
         NativeRuntimePolicy policy, string text, int version, int operation, string typeName,
         long first, long second, int parameterCount, long expected)
@@ -3219,7 +3223,7 @@ public sealed class ManagedScannerComponentTests
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
                 SourceText.From(text.Replace("-", "+", StringComparison.Ordinal)), bytes));
         }
-        if (operation is 12063 or 12163 or 14063 or 14163 or 30057 or 32057)
+        if (operation is 12063 or 12163 or 14063 or 14163 or 30057 or 32057 or 38057)
         {
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
                 SourceText.From(text.Replace("~", "-", StringComparison.Ordinal)), bytes));
