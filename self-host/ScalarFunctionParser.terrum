@@ -72,7 +72,8 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     mut Token value = initial;
     bool grouped = count == 12 || count == 13;
     bool outerSign = count == 13 && ((selected == 5 && initial.Kind == 62)
-        || (selected != 5 && (initial.Kind == 57 || initial.Kind == 58)));
+        || (selected != 5 && (initial.Kind == 57 || initial.Kind == 58
+            || initial.Kind == 63)));
     mut Token group = initial;
     if (outerSign)
     {
@@ -92,7 +93,8 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     if (count == 11 || (count == 13 && !outerSign))
     {
         if ((selected == 5 && value.Kind != 62)
-            || (selected != 5 && value.Kind != 57 && value.Kind != 58))
+            || (selected != 5 && value.Kind != 57 && value.Kind != 58
+                && value.Kind != 63))
         {
             return false;
         }
@@ -270,6 +272,7 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     }
     require tokens.TryGet(valueIndex, out var literal);
     mut bool negative = false;
+    mut bool invert = false;
     mut bool outerSign = false;
     if (count == 11 || count == 13)
     {
@@ -288,6 +291,7 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
         }
         require tokens.TryGet(prefixIndex, out var prefix);
         negative = prefix.Kind == 58;
+        invert = prefix.Kind == 63;
     }
     if (!TryParseScalarReturnInteger(move tokens, move integers, out var foundName,
             out var expression, out var low, out var high)
@@ -323,6 +327,10 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     {
         bound = -low;
     }
+    if (invert)
+    {
+        bound = ~bound;
+    }
     result = bound;
     return true;
 }
@@ -335,6 +343,7 @@ bool TryEvaluateUInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
     {
         return false;
     }
+    mut bool invert = false;
     if (count == 11 || count == 13)
     {
         mut int32 prefixIndex = 6;
@@ -347,10 +356,11 @@ bool TryEvaluateUInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
             }
         }
         require tokens.TryGet(prefixIndex, out var prefix);
-        if (prefix.Kind != 57)
+        if (prefix.Kind != 57 && prefix.Kind != 63)
         {
             return false;
         }
+        invert = prefix.Kind == 63;
     }
     if (!TryParseScalarReturnIntegerTyped(move tokens, move integers,
             out var scalarType, out var foundName, out var expression,
@@ -368,6 +378,10 @@ bool TryEvaluateUInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
     else
     {
         result = uint32(low);
+    }
+    if (invert)
+    {
+        result = ~result;
     }
     return true;
 }
@@ -396,6 +410,7 @@ bool TryEvaluateUInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
     {
         return false;
     }
+    mut bool invert = false;
     if (count == 11 || count == 13)
     {
         mut int32 prefixIndex = 6;
@@ -408,10 +423,11 @@ bool TryEvaluateUInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
             }
         }
         require tokens.TryGet(prefixIndex, out var prefix);
-        if (prefix.Kind != 57)
+        if (prefix.Kind != 57 && prefix.Kind != 63)
         {
             return false;
         }
+        invert = prefix.Kind == 63;
     }
     if (!TryParseScalarReturnIntegerTyped(move tokens, move integers,
             out var scalarType, out var foundName, out var expression,
@@ -423,6 +439,10 @@ bool TryEvaluateUInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
 
     name = foundName;
     result = DecodeScannerMagnitude(low, high);
+    if (invert)
+    {
+        result = ~result;
+    }
     return true;
 }
 
@@ -445,6 +465,7 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     }
     require tokens.TryGet(valueIndex, out var literal);
     mut bool negative = false;
+    mut bool invert = false;
     mut bool outerSign = false;
     if (count == 11 || count == 13)
     {
@@ -463,6 +484,7 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
         }
         require tokens.TryGet(prefixIndex, out var prefix);
         negative = prefix.Kind == 58;
+        invert = prefix.Kind == 63;
     }
     if (!TryParseScalarReturnIntegerTyped(move tokens, move integers,
             out var scalarType, out var foundName, out var expression,
@@ -502,6 +524,10 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
             return false;
         }
         bound = -bound;
+    }
+    if (invert)
+    {
+        bound = ~bound;
     }
 
     name = foundName;
