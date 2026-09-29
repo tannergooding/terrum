@@ -447,12 +447,25 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     }
 
                     var targetSignature = methods.GetSignature(target);
-                    if ((imported
-                        && !imports.IsExpectedDefinition(0x1600_0000u | (uint)target))
-                        || signatures.GetReceiverTypeSpec(targetSignature) != 0
+                    if (signatures.GetReceiverTypeSpec(targetSignature) != 0
                         || signatures.GetGenericCount(targetSignature) != 0)
                     {
                         throw InvalidBody();
+                    }
+                    if (imported)
+                    {
+                        if (!imports.TryGetExpectedRequirements(0x1600_0000u | (uint)target,
+                            out var requirements))
+                        {
+                            throw InvalidBody();
+                        }
+
+                        var (callerTarget, callerPolicy) = modules.GetRequirements(callerModule);
+                        var (targetRequirement, targetPolicy) = requirements;
+                        if (targetPolicy != callerPolicy || targetRequirement > callerTarget)
+                        {
+                            throw InvalidBody();
+                        }
                     }
 
                     var targetResult = signatures.GetResultTypeSpec(targetSignature);

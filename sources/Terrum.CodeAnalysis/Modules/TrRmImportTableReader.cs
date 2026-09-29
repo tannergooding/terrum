@@ -12,7 +12,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly ref struct TrRmImportTableReader
 {
     private const int RowSize = 12;
-    private readonly HashSet<uint> _expected;
+    private readonly Dictionary<uint, (uint TargetRequirement, uint RuntimePolicy)> _expected;
 
     public TrRmImportTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmModuleRefTableReader references,
@@ -25,7 +25,7 @@ public readonly ref struct TrRmImportTableReader
             throw InvalidImport();
         }
 
-        _expected = new HashSet<uint>();
+        _expected = new Dictionary<uint, (uint TargetRequirement, uint RuntimePolicy)>();
         for (var row = 0; row < recordCount; row++)
         {
             var data = section.Slice(row * RowSize, RowSize);
@@ -42,7 +42,7 @@ public readonly ref struct TrRmImportTableReader
                 types, methods, properties);
             if (references.GetOwnerModule((int)moduleRef) != module
                 || (expected >> 24 is 0x16 or 0x1E && body != 0)
-                || !_expected.Add(expected))
+                || !_expected.TryAdd(expected, references.GetRequirements((int)moduleRef)))
             {
                 throw InvalidImport();
             }
@@ -52,7 +52,19 @@ public readonly ref struct TrRmImportTableReader
     }
 
     public bool IsExpectedDefinition(uint reference)
-        => _expected is not null && _expected.Contains(reference);
+        => _expected is not null && _expected.ContainsKey(reference);
+
+    public bool TryGetExpectedRequirements(uint reference,
+        out (uint TargetRequirement, uint RuntimePolicy) requirements)
+    {
+        if (_expected is null)
+        {
+            requirements = default;
+            return false;
+        }
+
+        return _expected.TryGetValue(reference, out requirements);
+    }
 
     private static uint Read(ReadOnlySpan<byte> data, int offset)
         => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));

@@ -1262,8 +1262,9 @@ rejects receiver/generic calls. Packed direct MethodDef `DefId` calls require
 an authored public global target or a public static member of a public
 TypeDef in another included module with the same runtime policy and a
 target requirement no stronger than the caller's; retained imports require a
-public expected local definition and owner. It checks signatures, not producer
-binding, call effects or executable callee bodies.
+public expected local definition and owner, plus compatible declared ModuleRef
+requirements at each call. It checks signatures, not producer binding, call
+effects or executable callee bodies.
 Optional scalar values retain their presence-qualified identity through
 `MakeOptional`, `None`, `IsPresent`, `Copy` and eager `Select`; they are not
 interchangeable with the underlying scalar in operations or signatures.

@@ -68,6 +68,16 @@ public readonly ref struct TrRmModuleRefTableReader
         return ReadIdentity(row - 1);
     }
 
+    public (uint TargetRequirement, uint RuntimePolicy) GetRequirements(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidRef();
+        }
+
+        return (Read(row - 1, 4), Read(row - 1, 8));
+    }
+
     public int GetOwnerModule(int row)
     {
         if (row <= 0 || row > _recordCount)

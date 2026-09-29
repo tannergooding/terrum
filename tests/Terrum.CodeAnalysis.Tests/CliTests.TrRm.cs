@@ -373,7 +373,7 @@ public sealed partial class CliTests
         BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(12), 2);
         BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(24), 1);
         var body = TrRmBodyExampleTests.IndexedScalarOperation([0x12, 1, 1, 0], [], 2);
-        byte[] Artifact(bool withImport = false)
+        byte[] Artifact(bool withImport = false, uint importTarget = 0, uint importPolicy = 0)
         {
             var sections = new List<TrRmSection>
             {
@@ -386,6 +386,8 @@ public sealed partial class CliTests
             {
                 var moduleRef = new byte[12];
                 BinaryPrimitives.WriteUInt32LittleEndian(moduleRef, 3);
+                BinaryPrimitives.WriteUInt32LittleEndian(moduleRef.AsSpan(4), importTarget);
+                BinaryPrimitives.WriteUInt32LittleEndian(moduleRef.AsSpan(8), importPolicy);
                 sections.Add(new TrRmSection(0x0010, 0, 1, moduleRef));
             }
 
@@ -451,6 +453,20 @@ public sealed partial class CliTests
             using (var result = JsonDocument.Parse(importedOutput))
             {
                 Assert.True(result.RootElement.GetProperty("success").GetBoolean());
+            }
+
+            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(4), 0);
+            foreach (var (target, policy) in new (uint Target, uint Policy)[]
+                { (1, 0), (0, 1) })
+            {
+                await File.WriteAllBytesAsync(path,
+                    Artifact(withImport: true, importTarget: target, importPolicy: policy));
+                var (importStructure, _, _) = await RunAsync([],
+                    "validate-trrm-structure", path, "--json");
+                Assert.Equal(0, importStructure);
+                var (incompatibleImport, _, _) = await RunAsync([],
+                    "validate-trrm-compact-indexed", path, "--json");
+                Assert.Equal(1, incompatibleImport);
             }
         }
         finally
