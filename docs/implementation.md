@@ -864,7 +864,8 @@ parameter/literal arithmetic or bitwise operations for integer widths
 (including parentheses between a literal's unary sign and magnitude),
 comparison for integer widths and `char16`, and Boolean parameter/parameter,
 parameter/literal, or literal/literal equality, bitwise and short-circuit operations in either operand
-order (with grouped named or literal operands), plus two contextual 32-bit integer
+order (with grouped named or literal operands), grouped unary `!` around one
+two-parameter Boolean binary expression, plus two contextual 32-bit integer
 literals in arithmetic or bitwise operations and whole-expression grouping
 (including nested parentheses); an `if` branch returning a value may have
 either an `else` return or a subsequent fallthrough return;
@@ -883,7 +884,9 @@ version-5 operation offset distinguishes unary minus on either parameter/literal
 operand (signed integer types only), preserving contextual decimal minima;
 version 6 similarly distinguishes unary plus on integer literal operands.
 Version 7 identifies standalone grouped signed-minus literals without
-granting grouped decimal signed-minimum magnitudes. The
+granting grouped decimal signed-minimum magnitudes. Version 8 identifies
+negated, grouped two-parameter Boolean operations without a general nested
+expression tree. The
 `ScalarFrontendHost` reader bounds types, parameter indexes, operations and
 source spans, independently checks projected integer bits against source
 spelling and destination range, and checks that expressions occupy the complete
@@ -910,7 +913,7 @@ emitter. It rejects other entry signatures before replacing output;
 writing a PE file, returning its raw exit code with no success envelope;
 the hosted compiler remains in parallel for general builds. This bounded
 result is a provisional component protocol, not approved TRRM metadata or a
-compiler self-build. One hundred and seventy shared scalar/conditional/Boolean/integer-literal sources produce
+compiler self-build. One hundred and seventy-five shared scalar/conditional/Boolean/integer-literal sources produce
 byte-identical DLLs through the Terrum-authored frontend and hosted compiler
 under both runtime policies; this does not establish parity for unsupported
 source shapes, independent native emitters or a self-build. Twenty-seven bounded

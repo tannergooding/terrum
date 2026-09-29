@@ -3172,6 +3172,48 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task NativeScalarFrontendNegatedComparisonExecutesAsync(NativeRuntimePolicy policy)
+    {
+        const string text = "bool Value(int32 x, int32 y) { return !(x < y); }";
+        var source = SourceText.From(text);
+        var stage = await CompileAsync(text,
+            "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+            (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
+        var native = NativeJit.ExecuteWithData(stage, policy);
+        Assert.Equal(42, native.ExitCode);
+        var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+            ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
+        Assert.Equal(8, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.Equal(2067, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, 7);
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, 8);
+        var operationOffset = 23 * sizeof(int);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), 2068);
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), 2067);
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
+            SourceText.From("bool Value(int32 x, int32 y) { return !(y < x); }"), bytes));
+        var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
+        var call = new BoundCall(0,
+            [new BoundConstant(2, PrimitiveType.Int32, default),
+                new BoundConstant(1, PrimitiveType.Int32, default)],
+            PrimitiveType.Bool, default);
+        var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
+            new BoundBlock([new BoundIf(call,
+                new BoundBlock([new BoundReturn(new BoundConstant(42, PrimitiveType.Int32,
+                    default), default)], default),
+                new BoundBlock([new BoundReturn(new BoundConstant(0, PrimitiveType.Int32,
+                    default), default)], default), default)], default), default);
+        var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
+        SemanticVerifier.Verify(executable);
+        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData(NativeRuntimePolicy.FailFast, "&&", true, true, true)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "&&", true, false, false)]
     [InlineData(NativeRuntimePolicy.FailFast, "||", false, true, true)]

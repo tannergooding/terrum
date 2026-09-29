@@ -39,7 +39,7 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6 or 7)
+        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8)
             || words[1] is not (1 or 2))
         {
             throw InvalidResult();
@@ -330,6 +330,14 @@ public static class ScalarFrontendHost
                     && tokens[operandIndex].Kind == TokenKind.NumericLiteral
                     && ValidMagnitude(tokens[operandIndex].Text.AsSpan(),
                         type, false, left, right);
+            }
+            if (operation is >= 2065 and <= 2075)
+            {
+                return words[0] >= 8 && expression.Type == 5 && type == 5
+                    && ValidSpan(expression.Span, nonempty: true)
+                    && TryNegatedBinarySpan(source, expression.Span, out var nestedSpan)
+                    && ValidExpression(new ScalarFrontendExpression(5, operation - 2000,
+                        left, right, nestedSpan), 5, parameters);
             }
             if (operation / 100 is 7 or 9
                 && operation % 100 is 65 or 66 or >= 71 and <= 75)
@@ -656,6 +664,41 @@ public static class ScalarFrontendHost
         return true;
     }
 
+    private static bool TryNegatedBinarySpan(SourceText source, TextSpan span,
+        out TextSpan nested)
+    {
+        nested = default;
+        var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(span.Start, span.Length)));
+        var tokens = lexical.Tokens;
+        if (!lexical.Diagnostics.IsEmpty || tokens.Length < 7
+            || tokens[0].Kind != TokenKind.Bang || tokens[0].Span.Start != 0)
+        {
+            return false;
+        }
+        var at = 1;
+        while (at < tokens.Length - 1 && tokens[at].Kind == TokenKind.OpenParen)
+        {
+            at++;
+        }
+        var groups = at - 1;
+        if (groups == 0 || tokens[tokens.Length - 2].Span.End != span.Length)
+        {
+            return false;
+        }
+        var last = tokens.Length - 2;
+        for (var index = 0; index < groups; index++)
+        {
+            if (last - index <= at || tokens[last - index].Kind != TokenKind.CloseParen)
+            {
+                return false;
+            }
+        }
+        last -= groups;
+        nested = new TextSpan(span.Start + tokens[at].Span.Start,
+            tokens[last].Span.End - tokens[at].Span.Start);
+        return true;
+    }
+
     private static bool ScalarType(int type) => type is >= 1 and <= 6;
 
     private static bool ValidMagnitude(ReadOnlySpan<char> digits, int type, bool negative,
@@ -820,6 +863,17 @@ public static class ScalarFrontendHost
                 return Binder.FoldScalarConstant(new BoundUnary(expression.Operation == 658
                     ? TokenKind.Minus : TokenKind.Plus,
                     new BoundConstant(value, type, operandSpan), type, expression.Span));
+            }
+            if (expression.Operation is >= 2065 and <= 2075)
+            {
+                if (!TryNegatedBinarySpan(source, expression.Span, out var nestedSpan))
+                {
+                    throw InvalidResult();
+                }
+                var nested = new ScalarFrontendExpression(5, expression.Operation - 2000,
+                    expression.LeftParameter, expression.RightParameter, nestedSpan);
+                return new BoundUnary(TokenKind.Bang, Expression(nested),
+                    PrimitiveType.Bool, expression.Span);
             }
             if (expression.Operation / 100 is 7 or 9
                 && expression.Operation % 100 is 65 or 66 or >= 71 and <= 75)

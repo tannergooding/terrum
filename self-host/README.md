@@ -107,13 +107,14 @@ JIT-executes the same bounded entry without writing an image. Like hosted
 supervise this in-process native command with a deadline.
 The bounded input and source directory remain required, and general source
 binding, broader libraries and compiler self-build remain outstanding.
-One hundred and seventy shared scalar/conditional/Boolean/integer-literal fixtures have byte-identical DLL output from
+One hundred and seventy-five shared scalar/conditional/Boolean/integer-literal fixtures have byte-identical DLL output from
 the hosted and Terrum-authored frontend paths under both runtime policies;
 both paths still use the hosted native emitter.
 The bounded parameter/literal operands accept grouping inside or outside
 unary `+`/`-`; decimal signed minima still require the sign directly
 on the contextual literal. Standalone grouped signed-minus literals use
-provisional projection version 7. This does not extend
+provisional projection version 7; grouped `!` around a two-parameter
+Boolean binary operation uses version 8. This does not extend
 the provisional projection to arbitrary nested expressions.
 Twenty-seven bounded `int32 Main()` fixtures likewise emit byte-identical Windows
 executables and run under both policies; this does not establish an independent
