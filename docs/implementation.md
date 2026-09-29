@@ -1145,6 +1145,9 @@ including a framed callable-table fixture, but do not parse executable Body
 instructions or replace the current module writer. A provisional structural
 entry point composes the known table checks over one framed artifact without
 claiming semantic import binding, target-layout validity or executable clauses.
+`terrumc validate-trrm-structure <artifact> [--json]` exposes those same
+framing and structural checks to tooling; success does not validate Body
+instructions, imported contracts or an executable module.
 It checks Blob and Body offset indexes, including empty Blob rows, and composes
 a two-module Import/Export fixture, but does not interpret Blob contents or
 Body instructions. SourceMap rows check slots, spans and Body/SourceFile module
