@@ -468,25 +468,61 @@ public static class ScalarFrontendHost
 
             var rightName = right == 1 ? firstName : secondName;
             var middleLength = span.Length - leftName.Length - rightName.Length;
-            if (middleLength < 1 || !source.Text.AsSpan(span.End - rightName.Length, rightName.Length)
-                .SequenceEqual(source.Text.AsSpan(rightName.Start, rightName.Length)))
-            {
-                return false;
-            }
             var spelling = expression.Operation switch {
                 57 => "+", 58 => "-", 59 => "*", 60 => "/", 61 => "%",
                 65 => "==", 66 => "!=", 67 => "<",
                 68 => "<=", 69 => ">", 70 => ">=", 71 => "&", 73 => "|",
                 72 => "&&", 74 => "||", 75 => "^", _ => throw InvalidResult(),
             };
-            var middle = source.Text.AsSpan(span.Start + leftName.Length, middleLength);
-            if (middle.Trim().SequenceEqual(spelling.AsSpan()))
+            if (middleLength >= 1 && source.Text.AsSpan(span.End - rightName.Length,
+                    rightName.Length).SequenceEqual(source.Text.AsSpan(
+                        rightName.Start, rightName.Length)))
             {
-                return true;
+                var middle = source.Text.AsSpan(span.Start + leftName.Length, middleLength);
+                if (middle.Trim().SequenceEqual(spelling.AsSpan()))
+                {
+                    return true;
+                }
+                var middleTokens = Lexer.Lex(SourceText.From(middle.ToString()));
+                if (middleTokens.Diagnostics.IsEmpty && middleTokens.Tokens.Length == 2
+                    && middleTokens.Tokens[0].Kind == (TokenKind)expression.Operation)
+                {
+                    return true;
+                }
             }
-            var tokens = Lexer.Lex(SourceText.From(middle.ToString()));
-            return tokens.Diagnostics.IsEmpty && tokens.Tokens.Length == 2
-                && tokens.Tokens[0].Kind == (TokenKind)expression.Operation;
+            var lexical = Lexer.Lex(SourceText.From(
+                source.Text.Substring(span.Start, span.Length)));
+            var tokens = lexical.Tokens;
+            if (!lexical.Diagnostics.IsEmpty || tokens.Length < 6
+                || tokens[0].Kind != TokenKind.Identifier || tokens[0].Span.Start != 0
+                || tokens[0].Text != source.Text.Substring(leftName.Start, leftName.Length)
+                || tokens[1].Kind != (TokenKind)expression.Operation)
+            {
+                return false;
+            }
+            var operandIndex = 2;
+            while (operandIndex < tokens.Length - 1
+                && tokens[operandIndex].Kind == TokenKind.OpenParen)
+            {
+                operandIndex++;
+            }
+            var groups = operandIndex - 2;
+            if (tokens.Length != operandIndex + groups + 2
+                || tokens[operandIndex].Kind != TokenKind.Identifier
+                || tokens[operandIndex].Text != source.Text.Substring(
+                    rightName.Start, rightName.Length)
+                || tokens[tokens.Length - 2].Span.End != span.Length)
+            {
+                return false;
+            }
+            for (var index = 0; index < groups; index++)
+            {
+                if (tokens[operandIndex + 1 + index].Kind != TokenKind.CloseParen)
+                {
+                    return false;
+                }
+            }
+            return true;
         }
 
         bool AllZero(int first, int end)

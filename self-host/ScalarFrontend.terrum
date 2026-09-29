@@ -692,8 +692,10 @@ mut class ScalarFrontendState
                 expression = withLiteral;
                 return true;
             }
-            if (!Take(2, out var right))
+            require BeginUnaryOperand(out var right, out var groups);
+            if (right.Kind != 2)
             {
+                FailAt(1, right.Range);
                 return false;
             }
             if (_parameterCount > 0 && SameTokenSpelling(_first, right))
@@ -723,7 +725,10 @@ mut class ScalarFrontendState
                 FailAt(2, next.Range);
                 return false;
             }
-            end = right.Range.End;
+            if (!FinishUnaryOperand(right, groups, out end))
+            {
+                return false;
+            }
         }
         require SourceRange.TryCreate(left.Range.Start, end - left.Range.Start, out var span);
         if (operation >= 65 && operation <= 70)

@@ -2626,6 +2626,7 @@ public sealed class ManagedScannerComponentTests
     [Theory]
     [InlineData("int32 Value(int32 x) { return x; }", true, 0, 1, 0)]
     [InlineData("int32 Value() { return 42; }", true, 0, 0, 3)]
+    [InlineData("int32 Value(int32 x, int32 y) { return x + ((y)); }", true, 0, 2, 57)]
     [InlineData("int32 Value(int32 x, int32 y) { if (x < y) { return x + y; } else { return x - y; } }", true, 0, 2, 57)]
     [InlineData("int32 Value(int32 x) { return y; }", false, 3, 0, 0)]
     public async Task ScalarFrontendProjectionPublishesValidatedTypedResultAsync(
@@ -2820,7 +2821,7 @@ public sealed class ManagedScannerComponentTests
         NativeRuntimePolicy policy, int first, int second, bool comments)
     {
         var text = comments
-            ? "int32 Value(int32 x, int32 y) { if (x/* test */<y) { return x/* test */+y; } else { return x-y; } }"
+            ? "int32 Value(int32 x, int32 y) { if (x/* test */<(y)) { return x/* test */+((y)); } else { return x-y; } }"
             : "int32 Value(int32 x, int32 y) { if (x < y) { return x + y; } else { return x - y; } }";
         var source = SourceText.From(text);
         var stage = await CompileAsync(text,
@@ -2830,6 +2831,18 @@ public sealed class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         Assert.Equal(3, BinaryPrimitives.ReadInt32LittleEndian(
             native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex])));
+        if (comments)
+        {
+            var projected = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+                ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
+            var right = BinaryPrimitives.ReadInt32LittleEndian(projected.AsSpan(25 * sizeof(int)));
+            BinaryPrimitives.WriteInt32LittleEndian(projected.AsSpan(25 * sizeof(int)), 1);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, projected));
+            BinaryPrimitives.WriteInt32LittleEndian(projected.AsSpan(25 * sizeof(int)), right);
+            var length = BinaryPrimitives.ReadInt32LittleEndian(projected.AsSpan(27 * sizeof(int)));
+            BinaryPrimitives.WriteInt32LittleEndian(projected.AsSpan(27 * sizeof(int)), length - 1);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, projected));
+        }
         var library = ScalarFrontendHost.BindLibrary(source,
             native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int)), (BoundRuntimePolicy)policy);
