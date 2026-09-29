@@ -11,9 +11,9 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class TrRmProposedBodyExampleTests
 {
     [Theory]
-    [InlineData("GeneralCheckedAdd", 109, 5, false, 38, 36, 3)]
-    [InlineData("## Value and place state through checked arithmetic", 126, 5, true, 51, 49, 7)]
-    [InlineData("GeneralConstantReturn", 61, 1, false, 18, 16, 1)]
+    [InlineData("GeneralCheckedAdd", 105, 5, false, 38, 36, 3)]
+    [InlineData("## Value and place state through checked arithmetic", 122, 5, true, 51, 49, 7)]
+    [InlineData("GeneralConstantReturn", 57, 1, false, 18, 16, 1)]
     public void ProposedBodyExamplesHaveDirectDefinitionAndUseIndexes(
         string heading, int sectionLength, int valueCount, bool hasPlace,
         int blockLength, int terminatorOffset, int operationCount)
@@ -24,7 +24,6 @@ public sealed class TrRmProposedBodyExampleTests
         var position = 0;
         Assert.Equal(0u, ReadUInt32(bytes, ref position));
         Assert.Equal((uint)(sectionLength - 8), ReadUInt32(bytes, ref position));
-        Assert.Equal(1u, ReadUInt32(bytes, ref position));
         Assert.Equal((byte)0, bytes[position++]);
         Assert.Equal((byte)1, bytes[position++]);
         Assert.Equal((byte)valueCount, bytes[position++]);
@@ -164,11 +163,10 @@ public sealed class TrRmProposedBodyExampleTests
     public void ProposedConditionalMergeHasIndexedDefsUsesAndNormalEdges()
     {
         var bytes = ReadExample("GeneralConditionalMerge");
-        Assert.Equal(169, bytes.Length);
+        Assert.Equal(165, bytes.Length);
         var position = 0;
         Assert.Equal(0u, ReadUInt32(bytes, ref position));
-        Assert.Equal(161u, ReadUInt32(bytes, ref position));
-        Assert.Equal(1u, ReadUInt32(bytes, ref position));
+        Assert.Equal(157u, ReadUInt32(bytes, ref position));
         Assert.Equal(new byte[] { 0, 4, 4, 0, 0, 2 },
             bytes.AsSpan(position, 6).ToArray());
         position += 6;
@@ -247,9 +245,9 @@ public sealed class TrRmProposedBodyExampleTests
     }
 
     [Theory]
-    [InlineData("### Checked add end to end (informative)", 35, 3, 5, 2)]
-    [InlineData("### Compact linear constant return", 25, 1, 1, 0)]
-    [InlineData("#### Compact linear parameter return", 21, 0, 1, 1)]
+    [InlineData("### Checked add end to end (informative)", 31, 3, 5, 2)]
+    [InlineData("### Compact linear constant return", 21, 1, 1, 0)]
+    [InlineData("#### Compact linear parameter return", 17, 0, 1, 1)]
     public void ProposedCompactLinearDerivesDefinitionsAndUses(
         string heading, int sectionLength, int operationCount, int valueCount,
         int parameterCount)
@@ -259,7 +257,6 @@ public sealed class TrRmProposedBodyExampleTests
         var position = 0;
         Assert.Equal(0u, ReadUInt32(bytes, ref position));
         Assert.Equal((uint)(sectionLength - 8), ReadUInt32(bytes, ref position));
-        Assert.Equal(1u, ReadUInt32(bytes, ref position));
         Assert.Equal((byte)0x04, bytes[position++]);
         Assert.Equal((byte)1, bytes[position++]);
         Assert.Equal(1u, ReadUInt32(bytes, ref position));
@@ -294,8 +291,8 @@ public sealed class TrRmProposedBodyExampleTests
         lastUses[bytes[position++]] = operationCount;
         Assert.Equal(bytes.Length, position);
         Assert.Equal(valueCount == 5
-            ? new[] { -1, -1, -1, 19, 24, 28 }
-            : parameterCount == 1 ? new[] { -1, -1 } : new[] { -1, 19 },
+            ? new[] { -1, -1, -1, 15, 20, 24 }
+            : parameterCount == 1 ? new[] { -1, -1 } : new[] { -1, 15 },
             definitions);
         Assert.Equal(valueCount == 5
             ? new[] { -1, 0, 0, 2, 2, 3 }
@@ -306,11 +303,10 @@ public sealed class TrRmProposedBodyExampleTests
     public void ProposedCompactIndexedMergeRetainsDirectFlowFacts()
     {
         var bytes = ReadExample("#### Compact indexed conditional merge");
-        Assert.Equal(104, bytes.Length);
+        Assert.Equal(100, bytes.Length);
         var position = 0;
         Assert.Equal(0u, ReadUInt32(bytes, ref position));
-        Assert.Equal(96u, ReadUInt32(bytes, ref position));
-        Assert.Equal(1u, ReadUInt32(bytes, ref position));
+        Assert.Equal(92u, ReadUInt32(bytes, ref position));
         Assert.Equal(new byte[] { 0x08, 4, 4, 0, 2 },
             bytes.AsSpan(position, 5).ToArray());
         position += 5;
@@ -389,11 +385,10 @@ public sealed class TrRmProposedBodyExampleTests
     public void ProposedCompactIndexedConditionalAddPreservesCheckedArm()
     {
         var bytes = ReadExample("#### Compact indexed conditional sum");
-        Assert.Equal(94, bytes.Length);
+        Assert.Equal(90, bytes.Length);
         var position = 0;
         Assert.Equal(0u, ReadUInt32(bytes, ref position));
-        Assert.Equal(86u, ReadUInt32(bytes, ref position));
-        Assert.Equal(1u, ReadUInt32(bytes, ref position));
+        Assert.Equal(82u, ReadUInt32(bytes, ref position));
         Assert.Equal(new byte[] { 0x08, 3, 4, 0, 2 },
             bytes.AsSpan(position, 5).ToArray());
         position += 5;
@@ -473,8 +468,8 @@ public sealed class TrRmProposedBodyExampleTests
         var generalHex = heading switch
         {
             "GeneralCheckedAdd" => """
-                00 00 00 00 65 00 00 00
-                01 00 00 00 00 01 05 00 00 01 01 00 00 00
+                00 00 00 00 61 00 00 00
+                00 01 05 00 00 01 01 00 00 00
                 01 00 01 01 00 01 01 00 01 01 00 01 01 00 01
                 00 05
                 FF FF FF FF FF FF FF FF 16 00 00 00 1B 00 00 00 1F 00 00 00
@@ -483,16 +478,16 @@ public sealed class TrRmProposedBodyExampleTests
                 15 03 01 01 02 02 04 01 03 15 05 01 03 04 83 05
                 """,
             "GeneralConstantReturn" => """
-                00 00 00 00 35 00 00 00
-                01 00 00 00 00 01 01 00 00 01
+                00 00 00 00 31 00 00 00
+                00 01 01 00 00 01
                 01 00 00 00
                 01 00 01 00 01 0C 00 00 00
                 00 00 00 00 12 00 00 00 10 00 00 00
                 00 00 00 00 00 00 00 01 01 01 00 01 01 01 01 2A 83 01
                 """,
             "GeneralConditionalMerge" => """
-                00 00 00 00 A1 00 00 00
-                01 00 00 00 00 04 04 00 00 02 01 00 00 00 02 00 00 00
+                00 00 00 00 9D 00 00 00
+                00 04 04 00 00 02 01 00 00 00 02 00 00 00
                 01 00 01 02 00 01 02 00 01 02 00 01
                 00 03 03 03 04
                 FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF FF
