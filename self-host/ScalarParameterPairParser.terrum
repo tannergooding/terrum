@@ -236,17 +236,12 @@ bool TryEvaluateInt32TwoParameterAddReturn(TokenSnapshot tokens, int32 first, in
     out SourceRange name, out int32 result)
 {
     if (!TryParseTwoParameterAddReturn(move tokens, out var selected, out var foundName)
-        || selected != 1)
-    {
-        return false;
-    }
-    int64 sum = int64(first) + int64(second);
-    if (sum < int64(int32.MinValue) || sum > int64(int32.MaxValue))
+        || selected != 1 || !TryAddScalarInt32(first, second, out var sum))
     {
         return false;
     }
     name = foundName;
-    result = int32(sum);
+    result = sum;
     return true;
 }
 
@@ -254,17 +249,12 @@ bool TryEvaluateUInt32TwoParameterAddReturn(TokenSnapshot tokens, uint32 first, 
     out SourceRange name, out uint32 result)
 {
     if (!TryParseTwoParameterAddReturn(move tokens, out var selected, out var foundName)
-        || selected != 2)
-    {
-        return false;
-    }
-    uint64 sum = uint64(first) + uint64(second);
-    if (sum > uint64(uint32.MaxValue))
+        || selected != 2 || !TryAddScalarUInt32(first, second, out var sum))
     {
         return false;
     }
     name = foundName;
-    result = uint32(sum);
+    result = sum;
     return true;
 }
 
@@ -272,14 +262,12 @@ bool TryEvaluateInt64TwoParameterAddReturn(TokenSnapshot tokens, int64 first, in
     out SourceRange name, out int64 result)
 {
     if (!TryParseTwoParameterAddReturn(move tokens, out var selected, out var foundName)
-        || selected != 3
-        || (second > 0 && first > int64.MaxValue - second)
-        || (second < 0 && first < int64.MinValue - second))
+        || selected != 3 || !TryAddScalarInt64(first, second, out var sum))
     {
         return false;
     }
     name = foundName;
-    result = first + second;
+    result = sum;
     return true;
 }
 
@@ -287,12 +275,12 @@ bool TryEvaluateUInt64TwoParameterAddReturn(TokenSnapshot tokens, uint64 first, 
     out SourceRange name, out uint64 result)
 {
     if (!TryParseTwoParameterAddReturn(move tokens, out var selected, out var foundName)
-        || selected != 4 || first > uint64.MaxValue - second)
+        || selected != 4 || !TryAddScalarUInt64(first, second, out var sum))
     {
         return false;
     }
     name = foundName;
-    result = first + second;
+    result = sum;
     return true;
 }
 

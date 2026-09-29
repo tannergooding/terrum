@@ -1,0 +1,173 @@
+namespace Terrum.CodeAnalysis;
+
+bool TryParseScalarConditionalAddReturn(TokenSnapshot tokens,
+    out int32 scalarType, out SourceRange name)
+{
+    if (tokens.GetCount() != 32)
+    {
+        return false;
+    }
+    require tokens.TryGet(0, out var returnType);
+    require tokens.TryGet(1, out var function);
+    require tokens.TryGet(2, out var openParameters);
+    require tokens.TryGet(3, out var conditionType);
+    require tokens.TryGet(4, out var conditionParameter);
+    require tokens.TryGet(5, out var firstComma);
+    require tokens.TryGet(6, out var firstType);
+    require tokens.TryGet(7, out var firstParameter);
+    require tokens.TryGet(8, out var secondComma);
+    require tokens.TryGet(9, out var secondType);
+    require tokens.TryGet(10, out var secondParameter);
+    require tokens.TryGet(11, out var closeParameters);
+    require tokens.TryGet(12, out var openBody);
+    require tokens.TryGet(13, out var branch);
+    require tokens.TryGet(14, out var openCondition);
+    require tokens.TryGet(15, out var conditionUse);
+    require tokens.TryGet(16, out var closeCondition);
+    require tokens.TryGet(17, out var openTrue);
+    require tokens.TryGet(18, out var trueReturn);
+    require tokens.TryGet(19, out var firstUse);
+    require tokens.TryGet(20, out var add);
+    require tokens.TryGet(21, out var secondUse);
+    require tokens.TryGet(22, out var trueSemicolon);
+    require tokens.TryGet(23, out var closeTrue);
+    require tokens.TryGet(24, out var otherwise);
+    require tokens.TryGet(25, out var openFalse);
+    require tokens.TryGet(26, out var falseReturn);
+    require tokens.TryGet(27, out var fallbackUse);
+    require tokens.TryGet(28, out var falseSemicolon);
+    require tokens.TryGet(29, out var closeFalse);
+    require tokens.TryGet(30, out var closeBody);
+    require tokens.TryGet(31, out var eof);
+    if (!TryGetScalarType(returnType, out var selected)
+        || !TryGetScalarType(conditionType, out var condition) || condition != 5
+        || !TryGetScalarType(firstType, out var matchingFirst)
+        || !TryGetScalarType(secondType, out var matchingSecond)
+        || selected != matchingFirst || selected != matchingSecond || selected == 5
+        || selected == 6)
+    {
+        return false;
+    }
+    if (function.Kind != 2 || openParameters.Kind != 46
+        || firstComma.Kind != 53 || secondComma.Kind != 53
+        || closeParameters.Kind != 47 || openBody.Kind != 48
+        || branch.Kind != 16 || openCondition.Kind != 46
+        || closeCondition.Kind != 47 || openTrue.Kind != 48
+        || trueReturn.Kind != 19 || add.Kind != 57 || trueSemicolon.Kind != 52
+        || closeTrue.Kind != 49 || otherwise.Kind != 17
+        || openFalse.Kind != 48 || falseReturn.Kind != 19
+        || falseSemicolon.Kind != 52 || closeFalse.Kind != 49
+        || closeBody.Kind != 49 || eof.Kind != 0)
+    {
+        return false;
+    }
+    if (!SameTokenSpelling(conditionParameter, conditionUse)
+        || !SameTokenSpelling(firstParameter, firstUse)
+        || !SameTokenSpelling(secondParameter, secondUse)
+        || !SameTokenSpelling(firstParameter, fallbackUse)
+        || SameTokenSpelling(conditionParameter, firstParameter)
+        || SameTokenSpelling(conditionParameter, secondParameter)
+        || SameTokenSpelling(firstParameter, secondParameter))
+    {
+        return false;
+    }
+    scalarType = selected;
+    name = function.Range;
+    return true;
+}
+
+bool TryEvaluateInt32ScalarConditionalAddReturn(TokenSnapshot tokens, bool condition,
+    int32 first, int32 second, out SourceRange name, out int32 result)
+{
+    if (!TryParseScalarConditionalAddReturn(move tokens, out var selected, out var foundName)
+        || selected != 1)
+    {
+        return false;
+    }
+    if (condition)
+    {
+        if (!TryAddScalarInt32(first, second, out var sum))
+        {
+            return false;
+        }
+        result = sum;
+    }
+    else
+    {
+        result = first;
+    }
+    name = foundName;
+    return true;
+}
+
+bool TryEvaluateUInt32ScalarConditionalAddReturn(TokenSnapshot tokens, bool condition,
+    uint32 first, uint32 second, out SourceRange name, out uint32 result)
+{
+    if (!TryParseScalarConditionalAddReturn(move tokens, out var selected, out var foundName)
+        || selected != 2)
+    {
+        return false;
+    }
+    if (condition)
+    {
+        if (!TryAddScalarUInt32(first, second, out var sum))
+        {
+            return false;
+        }
+        result = sum;
+    }
+    else
+    {
+        result = first;
+    }
+    name = foundName;
+    return true;
+}
+
+bool TryEvaluateInt64ScalarConditionalAddReturn(TokenSnapshot tokens, bool condition,
+    int64 first, int64 second, out SourceRange name, out int64 result)
+{
+    if (!TryParseScalarConditionalAddReturn(move tokens, out var selected, out var foundName)
+        || selected != 3)
+    {
+        return false;
+    }
+    if (condition)
+    {
+        if (!TryAddScalarInt64(first, second, out var sum))
+        {
+            return false;
+        }
+        result = sum;
+    }
+    else
+    {
+        result = first;
+    }
+    name = foundName;
+    return true;
+}
+
+bool TryEvaluateUInt64ScalarConditionalAddReturn(TokenSnapshot tokens, bool condition,
+    uint64 first, uint64 second, out SourceRange name, out uint64 result)
+{
+    if (!TryParseScalarConditionalAddReturn(move tokens, out var selected, out var foundName)
+        || selected != 4)
+    {
+        return false;
+    }
+    if (condition)
+    {
+        if (!TryAddScalarUInt64(first, second, out var sum))
+        {
+            return false;
+        }
+        result = sum;
+    }
+    else
+    {
+        result = first;
+    }
+    name = foundName;
+    return true;
+}
