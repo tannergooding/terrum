@@ -14,6 +14,7 @@ namespace Terrum.CodeAnalysis;
 // The two slots hold the literal's low/high magnitude words.
 // Boolean parameter/literal pairs add 700 for a parameter on the left or
 // 900 for a literal on the left; slots hold the parameter index and literal kind.
+// Boolean literal pairs add 1100; both slots hold literal kinds.
 // An invalid
 // result has only ErrorCode/ErrorSpan; all other fields, including visibility,
 // are empty. A valid result is public only for an explicit public keyword. Lexical errors
@@ -506,6 +507,18 @@ mut class ScalarFrontendState
                 && booleanOperator.Kind >= 71 && booleanOperator.Kind <= 75)
             {
                 _at = _at + 1;
+                if (_tokens.TryGet(_at, out var booleanRight)
+                    && (booleanRight.Kind == 20 || booleanRight.Kind == 21))
+                {
+                    _at = _at + 1;
+                    require SourceRange.TryCreate(literal.Range.Start,
+                        booleanRight.Range.End - literal.Range.Start, out var literalSpan);
+                    require ScalarFrontendExpression.TryCreate(5,
+                        booleanOperator.Kind + 1100, literal.Kind, booleanRight.Kind,
+                        literalSpan, out var literals);
+                    expression = literals;
+                    return true;
+                }
                 if (!Take(2, out var right)
                     || !TryResolveParameter(right, out var parameter, out var parameterType))
                 {

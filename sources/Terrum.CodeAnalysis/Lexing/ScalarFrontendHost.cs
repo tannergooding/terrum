@@ -347,6 +347,23 @@ public static class ScalarFrontendHost
                         == source.Text.Substring(name.Start, name.Length))
                     && tokens[2].Span.End == expression.Span.Length;
             }
+            if (operation / 100 == 11 && operation % 100 is >= 71 and <= 75)
+            {
+                if (words[0] < 3 || expression.Type != 5 || type != 5
+                    || left is not (20 or 21) || right is not (20 or 21)
+                    || !ValidSpan(expression.Span, nonempty: true))
+                {
+                    return false;
+                }
+                var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
+                    expression.Span.Start, expression.Span.Length)));
+                var tokens = lexical.Tokens;
+                return lexical.Diagnostics.IsEmpty && tokens.Length == 4
+                    && tokens[0].Span.Start == 0 && tokens[0].Kind == (TokenKind)left
+                    && tokens[1].Kind == (TokenKind)(operation % 100)
+                    && tokens[2].Kind == (TokenKind)right
+                    && tokens[2].Span.End == expression.Span.Length;
+            }
             if (operation / 100 == 5 && operation % 100 is >= 57 and <= 61 or 71 or 73 or 75)
             {
                 if (words[0] < 3 || expression.Type != type || type is not (1 or 2)
@@ -659,6 +676,21 @@ public static class ScalarFrontendHost
                 return new BoundBinary((TokenKind)(expression.Operation % 100),
                     literalFirst ? literal : parameter, literalFirst ? parameter : literal,
                     PrimitiveType.Bool, expression.Span);
+            }
+            if (expression.Operation / 100 == 11
+                && expression.Operation % 100 is >= 71 and <= 75)
+            {
+                var tokens = Lexer.Lex(SourceText.From(source.Text.Substring(
+                    expression.Span.Start, expression.Span.Length))).Tokens;
+                var first = new BoundConstant(expression.LeftParameter == 20 ? 1 : 0,
+                    PrimitiveType.Bool, new TextSpan(expression.Span.Start + tokens[0].Span.Start,
+                        tokens[0].Span.Length));
+                var second = new BoundConstant(expression.RightParameter == 20 ? 1 : 0,
+                    PrimitiveType.Bool, new TextSpan(expression.Span.Start + tokens[2].Span.Start,
+                        tokens[2].Span.Length));
+                return Binder.FoldScalarConstant(new BoundBinary(
+                    (TokenKind)(expression.Operation % 100), first, second,
+                    PrimitiveType.Bool, expression.Span));
             }
             if (expression.Operation / 100 == 5
                 && expression.Operation % 100 is >= 57 and <= 61 or 71 or 73 or 75)

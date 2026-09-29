@@ -31,6 +31,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { if (true) { return 42; } return 0; }", 42)]
     [InlineData("int32 Main() { if (false) { return 0; } return 42; }", 42)]
     [InlineData("internal int32 Main() { return 42; }", 42)]
+    [InlineData("int32 Main() { if (true || false) { return 42; } return 0; }", 42)]
     public async Task FrontendRunMatchesHostedJitAsync(string source, int expected)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -86,6 +87,8 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { if (true) { return 42; } return 0; }")]
     [InlineData("int32 Main() { if (false) { return 0; } return 42; }")]
     [InlineData("internal int32 Main() { return 42; }")]
+    [InlineData("int32 Main() { if (true && false) { return 0; } else { return 42; } }")]
+    [InlineData("int32 Main() { if (true || false) { return 42; } return 0; }")]
     public async Task FrontendBuiltExecutableMatchesHostedAndRunsAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -246,6 +249,11 @@ public sealed partial class CliTests
     [InlineData("public bool Value(bool x) { return true | x; }")]
     [InlineData("public bool Value(bool x) { return x ^ true; }")]
     [InlineData("public bool Value(bool x) { return false ^ x; }")]
+    [InlineData("public bool Value() { return true && false; }")]
+    [InlineData("public bool Value() { return false || true; }")]
+    [InlineData("public bool Value() { return true & true; }")]
+    [InlineData("public bool Value() { return false | false; }")]
+    [InlineData("public bool Value() { return true ^ false; }")]
     [InlineData("public int32 Value(bool x) { if (x || false) { return 42; } else { return 0; } }")]
     [InlineData("public int32 Value(bool x) { if (true && x) { return 42; } return 0; }")]
     [InlineData("public int32 Value(bool x, bool y) { if (x && y) { return 42; } else { return 0; } }")]

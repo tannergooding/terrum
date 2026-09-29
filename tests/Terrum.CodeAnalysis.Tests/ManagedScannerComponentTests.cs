@@ -3160,6 +3160,30 @@ public sealed class ManagedScannerComponentTests
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
 
+    [Fact]
+    public async Task ScalarFrontendBooleanLiteralPairRejectsForgedWordsAsync()
+    {
+        const string Text = "bool Value() { return true && false; }";
+        var source = SourceText.From(Text);
+        var stage = await CompileAsync(Text,
+            "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+            BoundRuntimePolicy.FailFast, "ScalarFrontendProjection").ConfigureAwait(true);
+        var native = NativeJit.ExecuteWithData(stage, NativeRuntimePolicy.FailFast);
+        Assert.Equal(42, native.ExitCode);
+        var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+            ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
+        Assert.Equal(1172, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        foreach (var (word, value) in new[] { (0, 2), (23, 1174), (24, 22), (25, 22) })
+        {
+            var offset = word * sizeof(int);
+            var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), value);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
+        }
+        await ExecuteAotAsync(stage, NativeRuntimePolicy.FailFast).ConfigureAwait(true);
+    }
+
     [Theory]
     [InlineData(NativeRuntimePolicy.FailFast, "-", -42, 58)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "-", -42, 58)]
