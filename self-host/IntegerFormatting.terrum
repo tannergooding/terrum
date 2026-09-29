@@ -92,6 +92,18 @@ public static OwnedInt32Buffer FormatChar16(char16 value, OwnedInt32Buffer works
 
 public static OwnedInt32Buffer FormatUInt64Base(uint64 value, uint32 radix, OwnedInt32Buffer workspace)
 {
+    // Digit 10 maps to ASCII 'a' (97) or 'A' (65).
+    return FormatUInt64BaseWithAlphabet(value, radix, 87, move workspace);
+}
+
+public static OwnedInt32Buffer FormatUInt64BaseUpper(uint64 value, uint32 radix, OwnedInt32Buffer workspace)
+{
+    return FormatUInt64BaseWithAlphabet(value, radix, 55, move workspace);
+}
+
+OwnedInt32Buffer FormatUInt64BaseWithAlphabet(uint64 value, uint32 radix,
+    int32 letterOffset, OwnedInt32Buffer workspace)
+{
     require radix >= 2 && radix <= 36;
     if (radix == 10)
     {
@@ -112,7 +124,7 @@ public static OwnedInt32Buffer FormatUInt64Base(uint64 value, uint32 radix, Owne
         }
         else
         {
-            require buffer.TryAppend(digit + 87);
+            require buffer.TryAppend(digit + letterOffset);
         }
         remaining = quotient;
     }
@@ -123,7 +135,7 @@ public static OwnedInt32Buffer FormatUInt64Base(uint64 value, uint32 radix, Owne
     }
     else
     {
-        require buffer.TryAppend(lastDigit + 87);
+        require buffer.TryAppend(lastDigit + letterOffset);
     }
 
     return ReverseDigits(move buffer);
@@ -140,9 +152,25 @@ public static OwnedInt32Buffer FormatInt64Base(int64 value, uint32 radix, OwnedI
     return PrefixMinus(move buffer);
 }
 
+public static OwnedInt32Buffer FormatInt64BaseUpper(int64 value, uint32 radix, OwnedInt32Buffer workspace)
+{
+    if (value >= 0)
+    {
+        return FormatUInt64BaseUpper(uint64(value), radix, move workspace);
+    }
+
+    OwnedInt32Buffer buffer = FormatUInt64BaseUpper(FormattingMagnitude(value), radix, move workspace);
+    return PrefixMinus(move buffer);
+}
+
 public static OwnedInt32Buffer FormatUInt32Base(uint32 value, uint32 radix, OwnedInt32Buffer workspace)
 {
     return FormatUInt64Base(uint64(value), radix, move workspace);
+}
+
+public static OwnedInt32Buffer FormatUInt32BaseUpper(uint32 value, uint32 radix, OwnedInt32Buffer workspace)
+{
+    return FormatUInt64BaseUpper(uint64(value), radix, move workspace);
 }
 
 public static OwnedInt32Buffer FormatInt32Base(int32 value, uint32 radix, OwnedInt32Buffer workspace)
@@ -150,9 +178,19 @@ public static OwnedInt32Buffer FormatInt32Base(int32 value, uint32 radix, OwnedI
     return FormatInt64Base(int64(value), radix, move workspace);
 }
 
+public static OwnedInt32Buffer FormatInt32BaseUpper(int32 value, uint32 radix, OwnedInt32Buffer workspace)
+{
+    return FormatInt64BaseUpper(int64(value), radix, move workspace);
+}
+
 public static OwnedInt32Buffer FormatChar16Base(char16 value, uint32 radix, OwnedInt32Buffer workspace)
 {
     return FormatUInt32Base(uint32(value), radix, move workspace);
+}
+
+public static OwnedInt32Buffer FormatChar16BaseUpper(char16 value, uint32 radix, OwnedInt32Buffer workspace)
+{
+    return FormatUInt32BaseUpper(uint32(value), radix, move workspace);
 }
 
 public static bool TryGetUInt64BaseLength(uint64 value, uint32 radix, init ref<int32> length)

@@ -168,8 +168,13 @@ public sealed partial class JitTests
     [InlineData("-9223372036854775808", 16, true)]
     [InlineData("-1", 36, true)]
     [InlineData("-1234567890123456789", 35, true)]
+    [InlineData("18446744073709551615", 16, false, false, true)]
+    [InlineData("18446744073709551615", 36, false, false, true)]
+    [InlineData("-9223372036854775808", 36, true, false, true)]
+    [InlineData("4294967295", 16, false, true, true)]
+    [InlineData("-2147483648", 36, true, true, true)]
     public async Task IntegerBaseFormattingUsesExactWorkspaceAcrossAotAndJitAsync(
-        string value, int radix, bool signed, bool isNarrow = false)
+        string value, int radix, bool signed, bool isNarrow = false, bool uppercase = false)
     {
         var number = signed ? new BigInteger(long.Parse(value, CultureInfo.InvariantCulture))
             : new BigInteger(ulong.Parse(value, CultureInfo.InvariantCulture));
@@ -179,7 +184,9 @@ public sealed partial class JitTests
         do
         {
             magnitude = BigInteger.DivRem(magnitude, radix, out var remainder);
-            expectedDigits[--start] = "0123456789abcdefghijklmnopqrstuvwxyz"[(int)remainder];
+            expectedDigits[--start] = (uppercase
+                ? "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                : "0123456789abcdefghijklmnopqrstuvwxyz")[(int)remainder];
         }
         while (magnitude > 0);
         if (number.Sign < 0)
@@ -189,7 +196,7 @@ public sealed partial class JitTests
         var expected = new string(expectedDigits, start, expectedDigits.Length - start);
         var checks = string.Join(Environment.NewLine, expected.Select((digit, index) =>
             FormattableString.Invariant($"if (digits.Read({index}) != {(int)digit}) {{ return 2; }}")));
-        var format = FormatterName(signed, isNarrow, true);
+        var format = FormatterName(signed, isNarrow, true) + (uppercase ? "Upper" : "");
         var measure = (signed, isNarrow) switch {
             (false, false) => "TryGetUInt64BaseLength",
             (true, false) => "TryGetInt64BaseLength",
@@ -223,6 +230,8 @@ public sealed partial class JitTests
             yield return [ulong.MaxValue.ToString(CultureInfo.InvariantCulture), radix, false];
             yield return [uint.MaxValue.ToString(CultureInfo.InvariantCulture), radix, false, true];
             yield return [int.MinValue.ToString(CultureInfo.InvariantCulture), radix, true, true];
+            yield return [ulong.MaxValue.ToString(CultureInfo.InvariantCulture), radix, false, false, true];
+            yield return [int.MinValue.ToString(CultureInfo.InvariantCulture), radix, true, true, true];
         }
     }
 
@@ -231,7 +240,10 @@ public sealed partial class JitTests
     [InlineData(0, 10)]
     [InlineData(55296, 16)]
     [InlineData(65535, 2)]
-    public async Task Char16FormattingMeasuresExactCapacityAcrossAotAndJitAsync(int value, int radix)
+    [InlineData(65535, 16, true)]
+    [InlineData(65535, 36, true)]
+    public async Task Char16FormattingMeasuresExactCapacityAcrossAotAndJitAsync(
+        int value, int radix, bool uppercase = false)
     {
         var remaining = new BigInteger(value);
         var digits = new char[16];
@@ -239,7 +251,9 @@ public sealed partial class JitTests
         do
         {
             remaining = BigInteger.DivRem(remaining, radix, out var digit);
-            digits[--start] = "0123456789abcdefghijklmnopqrstuvwxyz"[(int)digit];
+            digits[--start] = (uppercase
+                ? "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                : "0123456789abcdefghijklmnopqrstuvwxyz")[(int)digit];
         }
         while (remaining > 0);
         var expected = new string(digits, start, digits.Length - start);
@@ -250,6 +264,7 @@ public sealed partial class JitTests
             FormattableString.Invariant($"if (decimalDigits.Read({index}) != {(int)digit}) {{ return 5; }}")));
         var component = await File.ReadAllTextAsync(
             Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+        var format = uppercase ? "FormatChar16BaseUpper" : "FormatChar16Base";
         var source = component + $$"""
 
             int32 Main() {
@@ -257,7 +272,7 @@ public sealed partial class JitTests
                 require TryGetChar16BaseLength(char16({{value}}), {{radix}}, init var capacity);
                 if (capacity != {{expected.Length}}) { return 1; }
                 require OwnedInt32Buffer.TryCreate(capacity, out var workspace);
-                OwnedInt32Buffer formatted = FormatChar16Base(char16({{value}}), {{radix}}, move workspace);
+                OwnedInt32Buffer formatted = {{format}}(char16({{value}}), {{radix}}, move workspace);
                 if (formatted.Count != capacity || formatted.Capacity != capacity) { return 3; }
                 {{checks}}
                 require TryGetChar16BaseLength(char16({{value}}), 10, init var decimalLength);
@@ -278,22 +293,27 @@ public sealed partial class JitTests
         for (var radix = 2; radix <= 36; radix++)
         {
             yield return [65535, radix];
+            yield return [65535, radix, true];
         }
     }
 
     [Theory]
     [InlineData(1, 16)]
+    [InlineData(1, 16, true)]
     [InlineData(37, 16)]
+    [InlineData(37, 16, true)]
     [InlineData(2, 15)]
-    public async Task Char16FormattingRejectsInvalidBaseAndInsufficientStorageAsync(int radix, int capacity)
+    public async Task Char16FormattingRejectsInvalidBaseAndInsufficientStorageAsync(
+        int radix, int capacity, bool uppercase = false)
     {
         var component = await File.ReadAllTextAsync(
             Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
+        var format = uppercase ? "FormatChar16BaseUpper" : "FormatChar16Base";
         var attempt = $$"""
 
             int32 Attempt() {
                 require OwnedInt32Buffer.TryCreate({{capacity}}, out var workspace);
-                OwnedInt32Buffer digits = FormatChar16Base(char16.MaxValue, {{radix}}, move workspace);
+                OwnedInt32Buffer digits = {{format}}(char16.MaxValue, {{radix}}, move workspace);
                 return digits.Count;
             }
             """;
@@ -311,18 +331,20 @@ public sealed partial class JitTests
 
     [Theory]
     [InlineData(1, 16, false)]
+    [InlineData(1, 16, false, false, true)]
     [InlineData(37, 16, false)]
+    [InlineData(37, 16, false, false, true)]
     [InlineData(16, 15, false)]
     [InlineData(2, 63, false)]
     [InlineData(2, 64, true)]
     [InlineData(2, 31, false, true)]
     [InlineData(2, 32, true, true)]
     public async Task IntegerBaseFormattingRejectsInvalidRadixAndInsufficientStorageAsync(
-        int radix, int capacity, bool signed, bool isNarrow = false)
+        int radix, int capacity, bool signed, bool isNarrow = false, bool uppercase = false)
     {
         var component = await File.ReadAllTextAsync(
             Path.Combine(RepositoryRoot(), "self-host", "IntegerFormatting.terrum")).ConfigureAwait(true);
-        var format = FormatterName(signed, isNarrow, true);
+        var format = FormatterName(signed, isNarrow, true) + (uppercase ? "Upper" : "");
         var value = signed
             ? isNarrow ? "int32.MinValue" : "int64.MinValue"
             : isNarrow ? "uint32.MaxValue" : "uint64.MaxValue";
