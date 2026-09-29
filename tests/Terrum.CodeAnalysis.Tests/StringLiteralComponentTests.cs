@@ -34,14 +34,20 @@ public sealed class StringLiteralComponentTests
         var utf16Units = ImmutableArray.CreateBuilder<int>();
         var utf16ByteRecords = ImmutableArray.CreateBuilder<int>();
         var utf16Bytes = ImmutableArray.CreateBuilder<int>();
+        var utf16BeRecords = ImmutableArray.CreateBuilder<int>();
+        var utf16BeBytes = ImmutableArray.CreateBuilder<int>();
         var asciiRecords = ImmutableArray.CreateBuilder<int>();
         var asciiBytes = ImmutableArray.CreateBuilder<int>();
         var latin1Records = ImmutableArray.CreateBuilder<int>();
         var latin1Bytes = ImmutableArray.CreateBuilder<int>();
         var utf32Records = ImmutableArray.CreateBuilder<int>();
         var utf32Bytes = ImmutableArray.CreateBuilder<int>();
+        var utf32BeRecords = ImmutableArray.CreateBuilder<int>();
+        var utf32BeBytes = ImmutableArray.CreateBuilder<int>();
         var utf16Encoder = new UnicodeEncoding(false, false, true);
         var utf32Encoder = new UTF32Encoding(false, false, true);
+        var utf16BeEncoder = new UnicodeEncoding(true, false, true);
+        var utf32BeEncoder = new UTF32Encoding(true, false, true);
         foreach (var fixture in Fixtures())
         {
             var lexed = Lexer.Lex(SourceText.From(fixture.Text));
@@ -59,12 +65,16 @@ public sealed class StringLiteralComponentTests
             utf16Records.Add(fixture.Scalars is null ? -1 : 0);
             utf16ByteRecords.Add(utf16Bytes.Count);
             utf16ByteRecords.Add(fixture.Scalars is null ? -1 : 0);
+            utf16BeRecords.Add(utf16BeBytes.Count);
+            utf16BeRecords.Add(fixture.Scalars is null ? -1 : 0);
             asciiRecords.Add(asciiBytes.Count);
             asciiRecords.Add(-1);
             latin1Records.Add(latin1Bytes.Count);
             latin1Records.Add(-1);
             utf32Records.Add(utf32Bytes.Count);
             utf32Records.Add(fixture.Scalars is null ? -1 : 0);
+            utf32BeRecords.Add(utf32BeBytes.Count);
+            utf32BeRecords.Add(fixture.Scalars is null ? -1 : 0);
             if (fixture.Scalars is ScalarFixture[] values)
             {
                 foreach (var value in values)
@@ -82,6 +92,9 @@ public sealed class StringLiteralComponentTests
                 var encoded16 = utf16Encoder.GetBytes(decoded);
                 utf16ByteRecords[^1] = encoded16.Length;
                 utf16Bytes.AddRange(encoded16.Select(static value => (int)value));
+                var encoded16Be = utf16BeEncoder.GetBytes(decoded);
+                utf16BeRecords[^1] = encoded16Be.Length;
+                utf16BeBytes.AddRange(encoded16Be.Select(static value => (int)value));
                 if (values.All(static value => value.Value < 128))
                 {
                     asciiRecords[^1] = values.Length;
@@ -95,6 +108,9 @@ public sealed class StringLiteralComponentTests
                 var encoded32 = utf32Encoder.GetBytes(decoded);
                 utf32Records[^1] = encoded32.Length;
                 utf32Bytes.AddRange(encoded32.Select(static value => (int)value));
+                var encoded32Be = utf32BeEncoder.GetBytes(decoded);
+                utf32BeRecords[^1] = encoded32Be.Length;
+                utf32BeBytes.AddRange(encoded32Be.Select(static value => (int)value));
             }
             _ = source.Append(fixture.Text).Append('\n');
         }
@@ -119,12 +135,16 @@ public sealed class StringLiteralComponentTests
             new HostBuffer("ExpectedUtf16Units", PrimitiveType.Int32, utf16Units.ToImmutable(), false),
             new HostBuffer("ExpectedUtf16ByteRecords", PrimitiveType.Int32, utf16ByteRecords.ToImmutable(), false),
             new HostBuffer("ExpectedUtf16Bytes", PrimitiveType.Int32, utf16Bytes.ToImmutable(), false),
+            new HostBuffer("ExpectedUtf16BeRecords", PrimitiveType.Int32, utf16BeRecords.ToImmutable(), false),
+            new HostBuffer("ExpectedUtf16BeBytes", PrimitiveType.Int32, utf16BeBytes.ToImmutable(), false),
             new HostBuffer("ExpectedAsciiRecords", PrimitiveType.Int32, asciiRecords.ToImmutable(), false),
             new HostBuffer("ExpectedAsciiBytes", PrimitiveType.Int32, asciiBytes.ToImmutable(), false),
             new HostBuffer("ExpectedLatin1Records", PrimitiveType.Int32, latin1Records.ToImmutable(), false),
             new HostBuffer("ExpectedLatin1Bytes", PrimitiveType.Int32, latin1Bytes.ToImmutable(), false),
             new HostBuffer("ExpectedUtf32Records", PrimitiveType.Int32, utf32Records.ToImmutable(), false),
             new HostBuffer("ExpectedUtf32Bytes", PrimitiveType.Int32, utf32Bytes.ToImmutable(), false),
+            new HostBuffer("ExpectedUtf32BeRecords", PrimitiveType.Int32, utf32BeRecords.ToImmutable(), false),
+            new HostBuffer("ExpectedUtf32BeBytes", PrimitiveType.Int32, utf32BeBytes.ToImmutable(), false),
         ], policy == NativeRuntimePolicy.FailFast ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
@@ -136,7 +156,9 @@ public sealed class StringLiteralComponentTests
     [InlineData("TryGetUtf8Length", "EncodeUtf8", "\"\u00E9\"", new[] { 195, 169 })]
     [InlineData("TryGetUtf16Length", "EncodeUtf16", "\"\uD83D\uDE00\"", new[] { 0xD83D, 0xDE00 })]
     [InlineData("TryGetUtf16ByteLength", "EncodeUtf16LeBytes", "\"\uD83D\uDE00\"", new[] { 0x3D, 0xD8, 0, 0xDE })]
+    [InlineData("TryGetUtf16ByteLength", "EncodeUtf16BeBytes", "\"\uD83D\uDE00\"", new[] { 0xD8, 0x3D, 0xDE, 0 })]
     [InlineData("TryGetUtf32ByteLength", "EncodeUtf32LeBytes", "\"\u00E9\"", new[] { 233, 0, 0, 0 })]
+    [InlineData("TryGetUtf32ByteLength", "EncodeUtf32BeBytes", "\"\uD83D\uDE00\"", new[] { 0, 1, 246, 0 })]
     [InlineData("TryGetLatin1Length", "EncodeLatin1", "\"\u00E9\"", new[] { 233 })]
     public async Task LiteralEncodingRejectsUndersizedStorageAndReleasesItOnCheckedFailureAsync(
         string measure, string encode, string spelling, int[] expected)

@@ -128,7 +128,7 @@ native emitter or compiler self-build.
 | [SourceLines](SourceLines.terrum) | Streaming line ranges, line extents and bidirectional UTF-16 offset/line-position mapping over an immutable source grant | AOT/JIT `out` and vacancy-only `init ref` outputs under both policies; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
 | [SourceLineIndex](SourceLineIndex.terrum) | Owned line-start table, random-access line content and including-break extents, and bidirectional UTF-16 offset/line-position lookup | Executed as AOT/JIT under both failure policies; existing `out` APIs and vacancy-only `init ref` construction/lookups, exact offset round-trips, invalid output and owner-copy rejection |
 | [SourceLineTests](SourceLineTests.terrum) | Shared line-range/position fixtures, invalid offsets and repeated queries | Executed natively with host-supplied expected records; no source normalization or default output values |
-| [StringLiteral](StringLiteral.terrum) | Validated quoted spelling and scalar decoding from the immutable UTF-16 source grant, with explicit ASCII, ISO-8859-1 (Latin-1), UTF-8, UTF-16 unit/UTF-16LE byte and UTF-32LE byte length measurement and encoding into owned storage | Executed with conditional `out` and vacancy-only `init ref` creation/reads, all supported escapes and exact source boundaries; single-byte encoders reject unrepresentable scalars rather than substitute, while UTF bytes/units agree with host encoders; Latin-1 is not a StringRow selector or default runtime representation |
+| [StringLiteral](StringLiteral.terrum) | Validated quoted spelling and scalar decoding from the immutable UTF-16 source grant, with explicit ASCII, ISO-8859-1 (Latin-1), UTF-8, UTF-16 unit/UTF-16LE and BE byte, and UTF-32LE and BE byte length measurement and encoding into owned storage | Executed with conditional `out` and vacancy-only `init ref` creation/reads, all supported escapes and exact source boundaries; single-byte encoders reject unrepresentable scalars rather than substitute, while UTF bytes/units agree with host encoders without a byte-order mark; Latin-1 is not a StringRow selector or default runtime representation |
 | [StringRow](StringRow.terrum) | Provisional tagged ASCII/UTF-8/UTF-16LE/UTF-32LE String-row measurement and emission from validated literal scalars into reusable owned byte words, with nonempty metadata-name and empty-permitted namespace paths that both reject embedded zero scalars, plus ordinal decoded-scalar name and namespace comparison | AOT/JIT fixtures check exact unit counts, encoding-width terminators, four-byte alignment, zero padding, invalid flags, rejected name/namespace text, escape-equivalent spelling, byte parity with the host String-row writer and checked undersized cleanup; not a TRRM section writer, reader, or literal-reference contract |
 | [StringLiteralTests](StringLiteralTests.terrum) | Quoted-form validation, scalar values and rejection of offsets inside escapes or surrogate pairs | Shared host-lexer/compiled fixtures under both native runtime policies; failed calls publish no output |
 | [CharacterFacts](CharacterFacts.terrum) | Shared ASCII numeric and newline decisions | Executed with `char16` comparisons, checked numeric type-call conversions and verified NoThrow classification contracts |
@@ -329,9 +329,10 @@ total time, publishing the scalar and next immutable cursor together.
 Neither form allocates an index or decoded buffer. The private construction invariant
 depends on the fixed immutable `Host.Source` grant, not on a retained pointer
 or a general text-view lifetime contract. Explicit ASCII, UTF-8, UTF-16 and
-UTF-32LE length queries measure decoded scalars without allocating; their encoders
+UTF-32 length queries measure decoded scalars without allocating; their encoders
 consume caller-provided `OwnedInt32Buffer` storage and write bytes or code
-units as integer words. The UTF-16LE byte and UTF-32LE length queries
+units as integer words. UTF-16 and UTF-32 byte encoders support both LE and BE
+without a byte-order mark. Their shared byte-length queries
 count bytes; `TryGetUtf16Length` instead counts UTF-16 code units.
 ASCII refuses non-ASCII scalars; UTF-16 supplementary scalars become surrogate
 pairs, while escaped surrogates remain invalid.

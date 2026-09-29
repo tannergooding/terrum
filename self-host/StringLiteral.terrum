@@ -223,6 +223,34 @@ public struct StringLiteral
         return move bytes;
     }
 
+    public OwnedInt32Buffer EncodeUtf16BeBytes(OwnedInt32Buffer workspace)
+    {
+        mut OwnedInt32Buffer bytes = move workspace;
+        bytes.Clear();
+        mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
+        while (cursor.TryRead(out var scalar, out var next))
+        {
+            mut int32 first = scalar;
+            if (scalar >= 65536)
+            {
+                int32 supplementary = scalar - 65536;
+                first = 55296 + supplementary / 1024;
+                int32 second = 56320 + supplementary % 1024;
+                require bytes.TryAppend(first / 256);
+                require bytes.TryAppend(first % 256);
+                require bytes.TryAppend(second / 256);
+                require bytes.TryAppend(second % 256);
+            }
+            else
+            {
+                require bytes.TryAppend(first / 256);
+                require bytes.TryAppend(first % 256);
+            }
+            cursor = next;
+        }
+        return move bytes;
+    }
+
     public bool TryGetAsciiLength(init ref<int32> byteLength)
     {
         return TryGetSingleByteLength(128, init byteLength);
@@ -302,6 +330,22 @@ public struct StringLiteral
             require bytes.TryAppend((scalar / 256) % 256);
             require bytes.TryAppend((scalar / 65536) % 256);
             require bytes.TryAppend(scalar / 16777216);
+            cursor = next;
+        }
+        return move bytes;
+    }
+
+    public OwnedInt32Buffer EncodeUtf32BeBytes(OwnedInt32Buffer workspace)
+    {
+        mut OwnedInt32Buffer bytes = move workspace;
+        bytes.Clear();
+        mut StringLiteralCursor cursor = StringLiteralCursor.Create(this);
+        while (cursor.TryRead(out var scalar, out var next))
+        {
+            require bytes.TryAppend(scalar / 16777216);
+            require bytes.TryAppend((scalar / 65536) % 256);
+            require bytes.TryAppend((scalar / 256) % 256);
+            require bytes.TryAppend(scalar % 256);
             cursor = next;
         }
         return move bytes;

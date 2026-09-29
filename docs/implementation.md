@@ -948,8 +948,11 @@ The [StringLiteral candidate](../self-host/StringLiteral.terrum) decodes
 validated quoted spelling from the immutable source grant. Its ASCII and
 ISO-8859-1 (Latin-1) length queries return false for unrepresentable scalars;
 their owned-buffer encoders fail rather than substitute, with exact-capacity
-and cleanup coverage under native execution. Latin-1 is an explicit library
-option, not a `StringRow` metadata selector or a default runtime encoding.
+and cleanup coverage under native execution. Explicit UTF-16BE and UTF-32BE
+byte encoders share the existing endian-independent length queries and emit
+no byte-order mark, with host/native parity and undersized-storage coverage.
+Latin-1 is an explicit library option, not a `StringRow` metadata selector
+or a default runtime encoding.
 
 `SourceText` owns exact input text and a diagnostic path label. All library
 offsets, line characters and lengths are UTF-16 units, not scalar/grapheme/display
