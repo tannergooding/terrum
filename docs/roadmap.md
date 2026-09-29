@@ -5,9 +5,10 @@ The [language](language.md) defines accepted semantic direction, while
 [implementation](implementation.md) records actual support and tool contracts.
 The [pending language and library index](language-library-review.md) tracks
 detailed specification work separately from this implementation sequence.
-The [approved current metadata design](il-metadata.md) is distinct
-from the still-proposed grammar, coded instructions and core-library drafts
-in the [proposal index](proposals/README.md). None is evidence of current compiler support.
+The approved current [metadata design](il-metadata.md) and bounded
+[coded instruction set](il-instruction-set.md) are distinct from the
+still-proposed grammar and core-library drafts in the
+[proposal index](proposals/README.md). None is evidence of current compiler support.
 
 | Stage | Deliverable | Exit evidence |
 |---|---|---|
@@ -181,10 +182,11 @@ requirements remain unchanged. No pre-v1 stability level is promised; any
 stability declaration is deferred until closer to v1.
 
 Substantial compiler, runtime, and library increments may proceed without
-waiting for final review of the grammar, coded instructions, or core-library
-companion drafts. The [approved current `TRRM` metadata design](il-metadata.md)
-defines specified framing and row contracts, not compiler support or a
-released byte schema. Where an increment needs still-open specifics, use
+waiting for final review of the grammar or core-library companion drafts.
+The approved current [metadata design](il-metadata.md) and
+[coded instruction set](il-instruction-set.md) define specified framing,
+row and bounded Body contracts, not compiler support or a released byte
+schema. Where an increment needs still-open specifics, use
 concrete working designs provisionally and mark implementation-dependent choices in
 the relevant design and implementation-status documentation; retrospective
 correction remains possible before v1. This is not blanket adoption of every
@@ -243,10 +245,10 @@ metadata-record relationships and identity, body/instruction/region structure,
 limits and accounting, validation, reference resolution, and unknown/reserved
 data behavior. It must distinguish source-language versions, semantic
 artifact-format revisions and physical native profiles. The approved current
-metadata design assigns a proposed `(1, 0)` wire revision and generic
-unknown-section policies, but feature negotiation, executable contracts and
-numerical resource budgets remain open; current implementation facts do not
-select or implement this schema.
+metadata and bounded coded-instruction designs specify a pre-release `(1, 0)`
+wire revision and a narrow executable subset, but feature negotiation,
+broader executable contracts and numerical resource budgets remain open;
+current implementation facts do not select or implement this schema.
 Establish conformance with independently exercised readers,
 writers and verifier cases rather than relying only on same-version round trips.
 

@@ -38,18 +38,18 @@ minimum rule/complexity and resource floor is mandatory, while sound
 beyond-floor analysis and larger budgets may vary by compiler and accept
 additional programs.
 
-## Proposals awaiting review
+## Remaining specification reviews
 
-The accepted policies are not reopened here. These entries identify proposals
-in the [call/output/contract follow-up](language-contract-review.md) that still
-need review; that document is not accepted wholesale. Exact source grammar,
-semantic IL/metadata design and core-library/runtime inventories are separate
-technical reviews; accepting their high-level direction does not adopt any
-detailed proposal wholesale.
+The accepted policies are not reopened here. The
+[call/output/contract follow-up](language-contract-review.md) still needs
+review and is not accepted wholesale. Exact source grammar, remaining
+semantic IL contracts and core-library/runtime inventories are separate
+technical reviews; the approved metadata and bounded instruction designs
+do not adopt those remaining forms.
 
-| Proposal | Review boundary |
+| Area | Review boundary |
 |---|---|
-| Coded instructions and remaining `TRRM` contracts | The [metadata design](il-metadata.md) is approved as current intent, not implemented or released. Review the separate [coded-instruction proposal](proposals/il-instruction-set.md), including its [compact-profile decisions](proposals/il-instruction-set.md#compact-profile-review-decisions), generic/witness and callable contracts, numerical budgets, feature negotiation and evolution rules before claiming complete interchange support. The current semantic-module revisions and historical-reader tests are implementation facts scheduled for consolidation before v1, not external production compatibility; see the [specification roadmap](roadmap.md#language-semantic-il-and-metadata-specification). |
+| Coded instructions and remaining `TRRM` contracts | The [metadata design](il-metadata.md) and bounded [coded instruction set](il-instruction-set.md) are approved as current intent, not implemented or released. Its [compact-profile follow-up](il-instruction-set.md#compact-profile-review-decisions), future generic/witness and callable contracts, numerical budgets, feature negotiation and evolution rules remain open before claiming complete interchange support. The current semantic-module revisions and historical-reader tests are implementation facts scheduled for consolidation before v1, not external production compatibility; see the [specification roadmap](roadmap.md#language-semantic-il-and-metadata-specification). |
 
 ## Specification and implementation work
 

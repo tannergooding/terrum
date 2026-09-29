@@ -8,7 +8,8 @@
 > explicitly open contracts require further specification before use.
 
 This document defines metadata tables and physical framing; the
-[instruction proposal](proposals/il-instruction-set.md) defines coded operations.
+[coded instruction set](il-instruction-set.md) defines bounded Body encoding
+and operations.
 The artifact can be embedded in PE or ELF but does not require either
 container.
 
@@ -69,8 +70,9 @@ The accepted language contracts remain authoritative for their semantics:
 [conversions](conversions.md), [type families](type-families.md),
 [data layout and ABI](data-layout-and-abi.md), and the
 [memory model](memory-model.md). This document defines the approved current
-binary design where specified; it does not redefine their rules or approve the
-separate coded-instruction proposal.
+binary design where specified; it does not redefine their rules. The separately
+specified [coded instruction set](il-instruction-set.md) is also approved for
+its bounded executable subset.
 
 | Role | Required checks |
 |---|---|
@@ -94,7 +96,7 @@ and target ABI/profile requirements are independent of the format pair.
 
 The following framing, table IDs and row layouts describe the approved current
 encoding. Initial opcodes and bodies are defined in the
-[instruction proposal](proposals/il-instruction-set.md).
+[coded instruction set](il-instruction-set.md).
 
 ### Header and directory
 
@@ -224,7 +226,9 @@ index avoids rescanning preceding rows for subsequent AOT, JIT, interpreter
 and tooling queries.
 
 A table reference or `DefId` uses the same four-byte `u32` word:
-`(tableKind << 24) | row`, with row in `1..0xFF_FFFF`. In a schema-typed
+`(tableKind << 24) | row`, with row in `1..0xFF_FFFF`. This is an 8-bit
+kind and 24-bit data partition of one `u32`, not a
+separate `uint24` type or a three-byte row encoding. In a schema-typed
 column such as `MethodDef.signature`, `tableKind=0` means the table named
 by that column (MethodSig here); it does **not** mean the containing
 table. This also applies to references across tables, such as
@@ -240,7 +244,10 @@ and only in columns marked `?`. Other kinds reject, including `0xFF`,
 which is reserved for a future required indirection encoding, not
 defined or accepted here.
 
-**Candidate inline built-in reference (not part of the approved encoding).**
+### Candidate inline built-in type reference (future revision)
+
+This extension is distinct from the approved 8-bit-kind/24-bit-row
+reference word. It is not part of the `(1, 0)` encoding.
 Reserve kind `0xFE` for typed type-reference fields, with the word
 `0xFE_qq_ff_pp`: `pp` is an assigned atomic built-in code, `ff=0` means
 the atomic type itself and an assigned one-argument family code in `ff`
@@ -791,7 +798,7 @@ call classification. Equal layout is not implicit conversion.
 
 Param modes are `0x00` by-value, `0x01` `out`, `0x02` `init ref`,
 `0x03` readonly `ref`, `0x04` writable `ref`. The
-[coded-body proposal](proposals/il-instruction-set.md) has local place
+[coded instruction set](il-instruction-set.md) has local place
 operations; publishing `out`/`init ref` across calls and loaning general
 references still require their specified call/exception/loan rules.
 Unimplemented modes cannot be silently treated as by-value. `MethodSig` records
@@ -870,7 +877,7 @@ visibility remain under review.
 
 ### Row-assignment example
 
-For the `return 42` [coded-body example](proposals/il-instruction-set.md#worked-bytes-and-illustrative-size),
+For the `return 42` [coded-body example](il-instruction-set.md#worked-bytes-and-illustrative-size),
 these are the relevant row references; row indexes are artifact-wide:
 
 | Table row | Payload values in column order |
@@ -882,7 +889,7 @@ these are the relevant row references; row indexes are artifact-wide:
 | MethodSig 1 | `resultTypeSpec=1, receiverTypeSpec=0, paramFirst=0, paramCount=0, genericFirst=0, genericCount=0` |
 | MethodDef 1 | `ownerTypeDef=0, name=1, signature=1, flags=2` (public), `contractFirst=0, contractCount=0, bodyRow=1` |
 | Export 1 | `localDefId=0x1600_0001, exportKey=1` |
-| Body 1 | `ownerMethod=1`, followed by the body bytes specified in the companion proposal |
+| Body 1 | Body bytes specified in the companion instruction set; ownership comes from MethodDef 1's `bodyRow`, not a Body-row owner field |
 
 For example, the TypeSpec table with its single `int32` row is exactly
 `00 00 00 00 03 00 00 00 01 00 08`: two four-byte offsets followed by the
@@ -919,7 +926,7 @@ directly to MethodDef 1 and omit the unused expected row and Import.
 
 Each Body row is the variable table's offset-indexed extent and carries
 exactly the coded bytes defined in the
-[instruction-set proposal](proposals/il-instruction-set.md#body-record-direct-block-index-and-regions).
+[coded instruction set](il-instruction-set.md#body-record-direct-block-index-and-regions).
 Its one-based row is referenced by the MethodDef `bodyRow` that owns it. Every Body row
 must be owned by exactly one local MethodDef, and an imported declaration has
 no body. Body-to-method identity and type references use the metadata tables
@@ -950,7 +957,7 @@ prelude and lookup cost and is not specified without representative
 size and decode measurements.
 Bodies cannot redefine a published signature, effect or result contract.
 
-The instruction proposal assigns a narrow scalar executable subset with exact
+The coded instruction set assigns a narrow scalar executable subset with exact
 record layout, opcodes and edge payloads. The other assigned opcode shapes
 are structurally inspectable but not executable. Exception regions, general
 loans, owner cleanup, rooted managed values, witness calls and correlated
@@ -1068,7 +1075,7 @@ row 1 (`DefId=0x1600_0001`), then clause `0x0002`, flags zero, parameter
 ordinal 3 and states `(1, 0, 0)` for true,
 false, and exceptional departure. A consumer can compare this declared
 promise with a producer without reading the output to discover whether it
-was initialized. The [coded instruction proposal](proposals/il-instruction-set.md)
+was initialized. The [coded instruction set](il-instruction-set.md)
 does **not** yet encode the output place and publication operations, so this
 metadata row alone does not make such a body executable.
 
@@ -1081,6 +1088,6 @@ following byte-level contracts:
 |---|---|
 | Encoding and revisions | Future version/feature policy and reader compatibility rules. The approved current `(1, 0)` design accepts only its registered semantic forms but is not a released schema. |
 | Declarations | Resource references, generic/witness exportability, further type/field/layout flags, richer qualifier/contract clauses and their validation. Module identity and export-key equality are specified; assigning a stable key to a source declaration is a writer policy. |
-| Executable bodies | Beyond the [narrow executable subset and other assigned decode shapes](proposals/il-instruction-set.md#executable-subset-versus-assigned-decode-shapes): output places, exceptional handlers/cleanup, loans, roots, witness bindings and their precise verifier rules. |
+| Executable bodies | Beyond the [narrow executable subset and other assigned decode shapes](il-instruction-set.md#executable-subset-versus-assigned-decode-shapes): output places, exceptional handlers/cleanup, loans, roots, witness bindings and their precise verifier rules. |
 | Limits | Per-record and per-artifact sizes, nesting and work budgets, allocation limits and canonical encoding requirements. |
 | Unknown data | Kind-specific extension schemas, reserved values and feature negotiation; generic skip, remap and discard policies are assigned above. |

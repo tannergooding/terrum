@@ -1,14 +1,15 @@
-# Terrum coded instruction proposal
+# Terrum coded instruction set
 
 > [!IMPORTANT]
-> Candidate coded-instruction design, not the current semantic-module writer or
-> an approved execution profile. The unencoded contracts at the end are
-> stabilization blockers, not permissions to erase their semantics.
-> `(1, 0)` below labels this proposal's candidate executable subset; it is
-> neither an on-wire profile selector nor the approved metadata design's
-> format revision `(1, 0)`. Profile negotiation remains unresolved.
+> Approved current design for the specified Body encoding and bounded
+> executable subset, not the current semantic-module writer or a released
+> interchange format. Unsupported operations and unencoded contracts do not
+> become executable by appearing in the opcode registry.
+> `(1, 0)` below identifies the bounded subset of the approved metadata
+> design's format revision `(1, 0)`, not a separate on-wire profile selector.
+> Profile negotiation for future revisions remains open.
 
-The [approved current metadata design](../il-metadata.md) defines the Body table,
+The [approved current metadata design](il-metadata.md) defines the Body table,
 TypeSpec, MethodDef, contracts and artifact framing. This document specifies
 the Body payload and operation stream separately, following only the
 *organizational* distinction between ECMA-335 Partitions II and III. It does
@@ -17,9 +18,9 @@ metadata tokens or runtime ABI.
 
 ## Model and canonical form
 
-A Body encodes an implementation referenced by one or more compatible
-MethodDefs in the same module. A **block** has typed parameters, ordered
-operations and one terminator; each normal edge supplies its successor's
+A Body encodes an implementation owned by exactly one MethodDef in its
+module. A **block** has typed parameters, ordered operations and one
+terminator; each normal edge supplies its successor's
 parameters. Checked operations and potentially failing calls do not end a
 block merely because they can fail. They define their result at their
 operation site on success; failure terminates or unwinds under the selected
@@ -66,13 +67,13 @@ from CIL or CLR behavior.
 
 ### Architecture-critical indexes and contracts
 
-This proposal's worked examples are part of the design explanation, not
+The worked examples are part of the design explanation, not
 replaceable opcode trivia. The intended fast path crosses two documents:
 
 | Input | What a consumer can learn without rediscovering it from instructions |
 |---|---|
-| [Approved metadata tables](../il-metadata.md#section-kinds-and-row-layouts) | Selected declaration and complete type/signature; retained imports bind against published contracts without re-proving dependency bodies |
-| [Contract clauses](../il-metadata.md#semantic-contracts-and-stable-binding) | Assigned effects such as `NoThrow`/`DoesNotReturn` and reserved output, transfer, dependency and cleanup shapes; only Effects is executable in this narrow Body subset, so readers must not assume the other contracts are already usable |
+| [Approved metadata tables](il-metadata.md#section-kinds-and-row-layouts) | Selected declaration and complete type/signature; retained imports bind against published contracts without re-proving dependency bodies |
+| [Contract clauses](il-metadata.md#semantic-contracts-and-stable-binding) | Assigned effects such as `NoThrow`/`DoesNotReturn` and reserved output, transfer, dependency and cleanup shapes; only Effects is executable in this narrow Body subset, so readers must not assume the other contracts are already usable |
 | [Body index](#body-record-direct-block-index-and-regions) | Type/value/place inventories, exact definition locations, direct block/terminator addresses, normal boundary liveness and per-block final uses |
 | [Compact Body forms](#compact-body-forms) | One-block linear encoding derives indexes on a scan; compact indexed retains direct seeks for small CFGs; neither omits required semantics or enables unassigned roots |
 | [Conditional add](#adding-a-conditional-to-the-sum), [merge and loop](#conditional-merge-and-loop-informative-shapes) | How a single checked block grows normal branches and a backedge; which values merely transit a block, which ones are actually used there, and how pruning a dead arm updates surviving use-block counts |
@@ -84,16 +85,16 @@ unreachable blocks using their use inventories. It still decodes retained
 operations and respects effects, ownership and selected contracts;
 indexes are producer facts under the specified trust/audit policy, not
 an independent proof of safety. Method-level effect/call summaries
-and per-safepoint logical roots remain [stabilization
-blockers](#tool-roles-and-stabilization-blockers), not capabilities this
-draft has already encoded. If these informative examples move to a
+and per-safepoint logical roots remain
+[future work](#tool-roles-and-future-executable-contracts), not capabilities this
+bounded subset has already encoded. If these informative examples move to a
 companion document, retain this contract map and links from the
 normative rules; splitting the examples must not orphan the fast-import
-story or silently promote a pending Body schema to approved metadata.
-The [example fixture checks](../../tests/Terrum.CodeAnalysis.Tests/TrRmProposedBodyExampleTests.cs)
+story or silently promote unsupported Body shapes to executable status.
+The [example fixture checks](../tests/Terrum.CodeAnalysis.Tests/TrRmBodyExampleTests.cs)
 independently decode the compact bytes below and general-form bytes kept
-in the tests; they are test-only checks of
-this **proposed** schema, not an executable TRRM Body reader.
+in the tests; they are test-only checks of the approved bytes, not an
+executable TRRM Body reader.
 
 The examples progress from a checked scalar sum in one block to a
 conditional sum and repeated additions around a loop header. A separate
@@ -102,7 +103,7 @@ local illustrates why place state differs from values. A later
 [exception sketch](#why-a-catch-is-not-another-normal-edge) describes a
 missing contract, not a usable handler encoding. The source snippets are
 illustrative; the recorded Body facts, not the spelling of a source local,
-define the proposed interchange.
+define the bounded Body design.
 
 ## Instruction encoding structure
 
@@ -125,20 +126,15 @@ FieldDef row operands use fixed `u32` references directly. Neither a
 local type ID nor an instruction's `ref` width changes a metadata row
 number, bypasses its TypeSpec or changes its typed-reference rules.
 
-An [inline built-in type-word candidate](../il-metadata.md#table-stream-and-token-encoding)
-is under review, **not approved or implemented**: typed type-reference
-fields could use fixed `0xFE_qq_ff_pp` words for assigned built-in
-atoms/families and independently qualified outer and argument types.
-If adopted in both metadata and Body, `typeMap` would hold complete
-typed type-reference words: either the inline form or an indexed
-TypeSpec row for other types. A map lookup of an inline word avoids the
-TypeSpec table lookup, but the Body-local `t` ID remains useful for
-repeated uses and exposes the body's type inventory without scanning its
-blocks. The fixed four-byte word and the Body-local 1/2/4-byte
-IDs address different costs; replacing all local IDs with four-byte
-words would also widen values, blocks and places. The byte listings
-below use the **currently approved**, indexed TypeSpec form until a
-metadata format revision adopts the candidate.
+The [approved reference word](il-metadata.md#metadata-logical-tables-and-row-semantics)
+is a fixed `u32` split into an 8-bit kind and 24-bit row data; no separate
+`uint24` storage type is required. The present `typeMap` holds indexed
+TypeSpec references. The separately described
+[inline built-in extension](il-metadata.md#candidate-inline-built-in-type-reference-future-revision)
+would assign kind `0xFE` to complete built-in type words and requires a
+future metadata revision and reader/writer support; the approved `u32`
+split alone does not adopt that additional kind. Body-local `t` IDs
+remain one/two/four bytes and are distinct from artifact-wide references.
 
 The `layout` byte selects widths independently by operand class; bits
 6–7 must be zero:
@@ -187,10 +183,9 @@ each row; compare row payloads and shared index overhead separately.
 
 ### Compact Body forms
 
-The candidate Body row begins with `bodyLayout` (`u8`), not a MethodDef
-owner. A MethodDef's `bodyRow` selects it; multiple compatible local
-MethodDefs may select the same row. This differs from the currently approved
-unique-owner metadata boundary and requires its revision before adoption.
+The Body row begins with `bodyLayout` (`u8`), not a MethodDef
+owner. Exactly one MethodDef selects each Body row, as required by the
+approved metadata ownership rule.
 Bits 0–1 choose the Body-local width as in the general form;
 bits 2–3 choose the form, with `0` general, `1` compact linear
 (`bodyLayout=0x04` at one-byte width), `2` compact indexed
@@ -202,30 +197,15 @@ keeps its own common or `F0` wide layout. Every form must reconstruct
 the same Body-local IDs, types, ordered effects, boundaries and uses;
 decoding a different form never licenses weaker safety checks.
 
-For this candidate, every Body row must be referenced by at least one
-locally authored MethodDef. All referencing MethodDefs must belong to
-the same module, select the same MethodSig row and have the same
-`ownerTypeDef` (including zero). A MethodSig with MethodDef-owned generic
-formals cannot be shared by distinct MethodDefs under the approved
-signature-range rule. The common signature supplies entry parameters
-and result types; the module supplies the context for local `m` call
-operands and contextual TypeSpec/import references. A reader can build
-the Body-to-module mapping while validating MethodDef references,
-without scanning for an owner on every Body lookup. Each declaration
-retains its own identity, contracts and checks: verify the shared
-implementation against **each** MethodDef's preconditions, postconditions
-and effects, and key contract-aware import or compiled-code caches by
-MethodDef as well as Body. Sharing bytes does not establish contract
-compatibility or permit one declaration's checks to be skipped.
-Executable pre/postcondition clauses are not yet assigned in this
-proposal; their future encoding and verification cannot be inferred
-from the shared Body row.
-Body-indexed SourceMap entries identify the shared instruction bytes,
-not distinct source locations for each MethodDef; preserve distinct
-locations by retaining separate Body rows or defining a separate
-per-declaration mapping. Cross-module Body sharing needs an explicit
-resolution context or relocation of module-relative references and is
-not part of this candidate.
+Every Body row must be referenced by exactly one locally authored
+MethodDef. Its MethodSig supplies entry parameters and result types;
+its module supplies the context for local `m` call operands and
+contextual TypeSpec/import references. A reader builds the Body-to-owner
+mapping while validating MethodDef references, without scanning for
+an owner on every Body lookup. Each declaration retains its identity,
+contracts and checks. Any future Body-sharing feature must define
+signature, contract, SourceMap and module-relative-reference rules
+before changing this ownership invariant.
 
 **Compact linear** is for exactly one root-region block with only
 by-value parameters and results, no places and no normal successor.
@@ -355,7 +335,7 @@ representable. The common one-block target includes such methods when
 their selected calls, access paths, roots and effects have a complete
 compact contract, not by dropping any of those facts.
 
-These two specified encodings are *candidates*, not a mandatory or
+These two approved encodings are alternatives, not a mandatory or
 measured canonical writer choice. Prefer compact linear as the initial
 space-saving choice for eligible one-block bodies: their absent state
 is implied and their value facts are derived on the single import
@@ -374,10 +354,10 @@ but a few large blocks may favor full indexes even when one-block
 linear is smaller. Compare instruction volume, direct-seek usefulness,
 region complexity and real bytes rather than imposing a block-count
 cutoff. Widening compact-indexed offsets past 255 bytes currently
-widens **all** its local fields; independently sized offsets should
-be compared before fixing the encoding. All forms use minimal field
-widths where selected; a reader can accept a valid general form for
-a compact-eligible body. Measure bytes, cold import, allocation,
+widens **all** its local fields; independently sized offsets may be
+considered in a future revision if measurements justify them. All forms
+use minimal field widths where selected; a reader can accept a valid
+general form for a compact-eligible body. Measure bytes, cold import, allocation,
 selective inlining and interpreter/tool overhead, with trusted and
 audited inputs separately, before prescribing canonical form selection.
 Declaration pre/postconditions can eliminate authored guard blocks
@@ -387,8 +367,8 @@ does not claim pre/postcondition encoding is already executable or free.
 
 | Method shape | Candidate importer tradeoff | Present status |
 |---|---|---|
-| Root-free one block, no normal edges | Compact linear has the least metadata; decode instructions to derive uses and definitions once per uncached consumer | Assigned candidate bytes: checked add 31, `return 42` 21, `return x` 17 section bytes |
-| Small root-free normal CFG | Compare boundary-only scanning with compact indexed's direct definition/use and terminator seeks; 2 or 3 blocks alone do not determine the winner | Indexed candidate assigned; lighter alternative and import measurements open |
+| Root-free one block, no normal edges | Compact linear has the least metadata; decode instructions to derive uses and definitions once per uncached consumer | Assigned bytes: checked add 31, `return 42` 21, `return x` 17 section bytes |
+| Small root-free normal CFG | Compare future boundary-only scanning with compact indexed's direct definition/use and terminator seeks; 2 or 3 blocks alone do not determine the winner | Compact indexed is assigned; lighter alternative and import measurements open |
 | More blocks, loops or many uses | Indexed summaries may avoid reconstructing CFG/use data and allow selective import, but local-width offset cliffs and large inventories can change the result | Four-block indexed merge 100 versus general 165 section bytes; no general performance claim |
 | Places, owners, handlers, roots | Required state, effects, cleanup and safepoint facts dominate; choose sparse sidecars or compact headers by actual density without changing meaning | General structural form for current decode shapes; executable root/exception contract unassigned |
 
@@ -402,8 +382,8 @@ Body ownership and reference remapping. The approved optional-section
 skip policy does not make required Body semantics dispensable. Native
 post-allocation GC maps remain JIT/AOT products, not reusable Body
 metadata. Shape interning across bodies likewise requires a separate
-validated template reference: sharing an *identical* Body row among
-compatible MethodDefs does not make `return 42` and `return x` the
+validated template reference: storing separate Body rows with *identical*
+bytes for compatible MethodDefs does not make `return 42` and `return x` the
 same implementation. Compare template binding, remapping and lookup
 cost against storing short rows plus the amortized section index before
 introducing a shared-shape table.
@@ -420,14 +400,16 @@ After exactly `operationCount` operations, the terminator must be
 one registered instruction that ends the block. General and compact
 indexed forms also verify their stored terminator offset.
 
-Only opcode values assigned in the tables below are registered; other
-values in the operation and terminator bands are reserved. This stream has
+Only opcode values with an assigned operand schema in the tables below are
+registered; explicitly reserved entries also reject. This stream has
 no opaque-instruction extension form. The metadata design's optional-section
 policy does not make Body opcodes optional: a present Body section carries
 required semantic content.
 Future opcode allocation and feature/revision negotiation remain unspecified.
-The policy for a trusted consumer that skips an entire unvisited block, which
-might contain an unknown opcode, also remains unresolved.
+An executable reader of this revision validates opcode membership in every
+block before selectively importing its operations, including blocks it
+will not compile. A trusted body's optional semantic audit does not waive
+this mandatory structural/feature check.
 
 An interpreter may dispatch on `(opcode, layout)` or decode native-width
 operands; either choice needs measured cost evidence. Body-local IDs `1..255` use the common form, `256..65535` use two bytes,
@@ -613,20 +595,8 @@ selects Body row 1. The Body section's offset index is separate from its
 row: offsets `0,23` bound that one 23-byte row. TypeSpec and MethodSig
 (with its Param rows) are structural data available to other
 declarations; contracts, names and visibility belong to each MethodDef,
-not to the Body. For example, a distinct MethodDef row can select the
-same artifact-wide signature and Body row:
-
-```text
-MethodDef (0x0016), row[2]: // illustrative references; no bytes shown
-    signature: MethodSig[1]
-    bodyRow: Body[1]
-```
-
-It could have different pre/postconditions, provided this implementation
-satisfies both declarations' contracts once those clauses are defined.
-The Body bytes remain one shared row, not one copy per declaration. This
-candidate sharing is **not** permitted by the currently approved
-metadata ownership rule.
+not to the Body. A distinct MethodDef may reuse the MethodSig, but
+must own a distinct Body row even if its instruction bytes are identical.
 
 The encoded Body section is 31 bytes: an 8-byte shared row index, a
 7-byte row header and 16 instruction bytes. The sequence below encodes
@@ -775,7 +745,7 @@ are unreachable and may be pruned; if known true, B3 is unreachable.
 An unknown flag requires both branches and the checked failure in B2
 remains observable. An overflow in B2 fails at the add; it neither
 returns from B3 nor requires a fourth normal block. This shape is
-executable in the candidate fail-fast scalar subset, though this
+executable in the approved fail-fast scalar subset, though this
 sketch does not require the general form. It introduces normal branching;
 the next example introduces a merge argument, and then a loop backedge.
 
@@ -785,7 +755,7 @@ See [compact-form information accounting](#compact-form-information-accounting)
 for the implicit-versus-encoded fields in this form.
 
 This fixture uses the same artifact-wide metadata context and Body-local
-type map shown above. Its exact bytes encode only the candidate
+type map shown above. Its exact bytes encode only the bounded
 compact-indexed Body (0x0020) section: 90 bytes (8-byte offset index plus an
 82-byte row). The three-block `MaybeAdd` row has
 `valueDefStarts=[0,3,4,4]`: the first three definition offsets are
@@ -1211,7 +1181,7 @@ namespaces. Prefixes affect width, not namespace. A decoder selects a
 registered opcode, reads its listed operands **left to right**, and uses
 each decoded count to read the following repeated items in the specified
 order. For `Switch`, this is selector, case count, that many `(pattern,
-edge)` pairs, then default edge. For `CallNoThrow`, it is result ID, method
+edge)` pairs, then default edge. For `Call`, it is result ID, method
 row, argument count, then argument IDs. Validate each read against its
 block extent before advancing; a count is not an allocation size until
 its minimum encoded byte requirement fits that extent. After exactly
@@ -1469,7 +1439,7 @@ optimization tier or cache.
 
 `t` indexes a Body-local type-map entry holding a fixed `u32` reference
 to a complete row in the metadata design's
-[TypeSpec table](../il-metadata.md#metadata-logical-tables-and-row-semantics),
+[TypeSpec table](il-metadata.md#metadata-logical-tables-and-row-semantics),
 not to a byte-sized primitive code embedded in an instruction. Entry
 types and instruction type operands use the same map; their IDs have
 Body-local scope, while the referenced TypeSpec retains its approved
@@ -1510,11 +1480,10 @@ classification, not numeric identity.
 | `Select` | Identical complete type of its two eager alternatives |
 | `MakeOptional` | Exact `tOptional`, whose inner type equals the payload's complete type |
 | `PlaceLocal`, `PlaceField` | Place-valued ID with referent, access, owner and region from the place/field declaration |
-| `CallNoThrow` | Selected MethodSig result type, or no definition when `rNew?=0` |
+| `Call` | Selected MethodSig result type, or no definition when `rNew?=0` |
 | `Extract` | Selected field's complete type, requiring a Copy-by-value field |
 | `CheckedBinary`, `CheckedNegate`, `CheckedDivRem` | Result ID(s) defined in the same block on success; their failure is an ordered effect, not a normal edge |
 | `CheckedConvert` | Exact `tDest` at its result ID on success |
-| `CallMayFail` | Selected MethodSig result type, or no definition when `rNew?=0` |
 
 The scalar executable profile accepts supported primitives and optional
 forms, but rejects place-valued results. Other rows define decode
@@ -1546,14 +1515,14 @@ bodies.
 | `0F` | `Assign rPlace, rValue` | Requires writable initialized storage; old owning value needs its explicit cleanup path before replacement. |
 | `10` | `Move rNew, rPlace` | Consumes an initialized unique place into a unique value and leaves it vacant. |
 | `11` | `Drop rPlace` | Drops one initialized unique place using its declared NoThrow cleanup; leaves it vacant. |
-| `12` | `CallNoThrow rNew?, m, args` | Exact selected callable; accepts only matching modes/contracts and a declared NoThrow effect. `rNew=0` iff result is void. Does not drop observable effects. |
+| `12` | `Call rNew?, m, args` | Exact selected callable; accepts matching signature, modes and contracts, regardless of whether it declares `NoThrow`. `rNew=0` iff result is void. A failure follows the selected runtime policy or an authored handler when its exceptional contract is supported; it is not a normal CFG edge. |
 | `13` | `Aggregate rNew, t, args` | Fully constructs ordered fields in declaration order, with checked Copy/unique transfer and validity; no implicit zero-fill or padding observation. |
 | `14` | `Extract rNew, rAggregate, fieldDefRow` | Copy-only by-value field; unique fields require an authorized place and Move. |
 | `15` | `CheckedBinary rNew, u8(kind), rLeft, rRight` | Kinds 1..5 checked add/subtract/multiply/divide/remainder; 6/7 checked-count left/right shift. Failure at this operation follows the selected policy; no result is defined on failure. |
 | `16` | `CheckedConvert rNew, tDest, rSource` | Checked numeric range conversion; `rNew` has `tDest` on success. |
 | `17` | `CheckedNegate rNew, rOperand` | Checked signed negation; fails at the minimum. |
 | `18` | `CheckedDivRem rQuotient, rRemainder, rLeft, rRight` | Single checked failure decision; two distinct same-typed results on success. |
-| `19` | `CallMayFail rNew?, m, args` | Potentially failing exact selected call; `rNew=0` iff void. Failure follows runtime policy, and authored handlers need a future exception-region contract. |
+| `19` | Reserved (reject) | No separate throwing-call opcode or effect inferred from the call site. |
 | `1A` | `CheckedIndex rNew, rBase, rIndex` | Reserved: checked indexed place result; backing and authority rules are not executable yet. |
 | `1B` | `CheckedRange rNew, rBase, rStart, rCount` | Reserved: checked bounded view; backing, access and loan rules are not executable yet. |
 | `1C` | `CheckedReadIndex rNew, rBase, rIndex` | Reserved: checked Copy element read without an intermediate place. |
@@ -1627,7 +1596,7 @@ encoding choice, **not** a claim that opt-in numeric types must remain
 opaque or can never participate in constant folding.
 
 The symbolic spellings `Binary`, `CheckedBinary` and `ConstSigned` name
-this proposal's **opcode schemas**, not source-language operations or
+these **opcode schemas**, not source-language operations or
 mandated display mnemonics. `CheckedIntegerAdd` and
 `ConstSignedInteger` would describe this narrow subset more precisely;
 the naming and family split should be resolved together with later
@@ -1680,7 +1649,7 @@ signed-integer data; a constructed aggregate must preserve its typed
 field/initialization rules rather than reinterpret one scalar immediate.
 A registered user literal is parsed at compile time against its selected
 target; its eventual Body encoding must represent the validated value
-under that type's constant and ABI contracts. This proposal does not
+under that type's constant and ABI contracts. This design does not
 assign such a constant encoding. The literal does not make raw source
 spelling an IL numeric operand or grant a generic primitive opcode to
 the user type.
@@ -1705,7 +1674,16 @@ to integers; Boolean NOT, equality and comparisons have separate rules.
 `Switch` patterns must be canonical `ConstBits` patterns of the selector
 type, without truncated high bits or duplicates. Other effectful or
 potentially failing operations require a specified operation or future
-feature, not `CallNoThrow`.
+feature, not an invented call target.
+
+`Call` does not encode a no-throw assertion. The selected declaration's
+optional `NoThrow` guarantee is a separate published effect, not part of
+ordinary call identity; it still requires proof and compatible binding
+when declared. A call without that guarantee may fail, including through
+native interop. A later exceptional-region contract can direct such a
+failure to an explicitly authored unsafe `try`/`catch`; this initial
+scalar executable subset does not yet encode handlers. Failure cannot
+be erased or silently converted into a normal return.
 
 `Initialize`, `Assign`, `Move`, `Drop` and `Aggregate` require complete
 flow-sensitive vacancy, ownership and cleanup verification over every
@@ -1732,11 +1710,13 @@ void; failure uses the module's fail-fast or checked-exception policy.
 | `8A` | `Leave count(exitCount), regionId[exitCount], edge` | Reserved for explicit scope/cleanup exit; not executable until its unwind contract is assigned. |
 
 Failure never becomes an unchecked result or `None`. A potentially failing
-operation or `Fail` terminator is forbidden in a `NoThrow` method unless a
-specified static proof rules out failure; `(1, 0)` defines no such proof.
-`CallMayFail` checks the selected signature, effects, argument modes and
-return ownership. Failure policy does not create a normal CFG edge or
-automatic cleanup, so a caller needing cleanup on failure is unsupported.
+operation or `Fail` terminator is forbidden in a declared `NoThrow` method
+unless a specified static proof rules out failure; `(1, 0)` defines no
+such proof. `Call` checks the selected signature, declared effects,
+argument modes and return ownership. Without a declared `NoThrow`
+guarantee, failure policy does not create a normal CFG edge or automatic
+cleanup, so a caller needing cleanup on failure is unsupported by this
+initial executable subset.
 `CheckedIndex` and `Leave` are reserved and rejected by `(1, 0)`.
 
 `CheckedBinary` kinds 1..5 use equal integer types; kinds 6/7 take a
@@ -1926,7 +1906,7 @@ source.
 
 ## Worked bytes and illustrative size
 
-For [metadata example](../il-metadata.md#row-assignment-example),
+For [metadata example](il-metadata.md#row-assignment-example),
 the artifact-wide metadata context, separate from the Body section, is:
 
 ```text
@@ -2087,14 +2067,16 @@ This is a 17-byte Body section (8-byte row index and 9-byte row):
 
 `Identity` has the same one-block *shape* as `return 42` but a different
 definition/use graph. There is no second type-independent opcode or
-license to share an executable Body across different MethodSigs.
+license to share an executable Body across MethodDefs under the current
+unique-owner rule, regardless of signature.
 Interning a reusable shape across methods would require a new
 bounded template/reference contract with type, operand, effect and
 binding substitutions; cross-body template lookup could cost more
-than these short rows and is not assigned in this draft. Exact Body
-sharing among compatible MethodDefs needs no template.
+than these short rows and is not assigned in this design. Exact Body
+sharing among compatible MethodDefs also requires a future metadata
+ownership revision; it is not an implicit optimization.
 
-## Tool roles and stabilization blockers
+## Tool roles and future executable contracts
 
 A structural reader bounds tables and Body rows, indexes strings and blocks,
 preserves unknown **registered nonsemantic** sections when rewriting, and
@@ -2135,8 +2117,9 @@ checked-exception dispatch requires a specified exceptional edge, payload
 and cleanup protocol. All live values in this subset are Copy values, so a
 failure cannot strand a unique cleanup obligation.
 
-`0B..14`, `19..1C`, `8A`, and nonzero place counts are **assigned
-decode shapes, not executable forms**. They require place authority,
+`0B..14`, `1A..1C`, `8A`, and nonzero place counts are **assigned
+decode shapes, not executable forms**; `19` is reserved and rejects.
+The assigned shapes require place authority,
 ownership, cleanup, call failure, backing or region rules that this revision
 does not encode completely. The `02` lexical and `03..07` region kinds are
 likewise reserved for execution. A structural inspector can identify each
@@ -2159,26 +2142,28 @@ contract:
 | Logical root inventory | Specify producer-recorded, directly indexed safepoint locations and live logical root/owner/interior-place dependencies (including exceptional continuation and cleanup), with precise lifetime and verification rules. The format should avoid making each interpreter/JIT reconstruct logical GC liveness from every use; it must not prescribe post-allocation native register/stack maps or assume that ordinary value liveness covers roots. |
 | Published contracts | Full effects, ownership/transfer, correlated output states, pre/postconditions, capability and witness evidence, generic specialization/export metadata and layout/ABI compatibility. Metadata clauses must be specified together with verifier inputs. |
 | Operations | Checked indexing/backing, raw/unaligned and atomic memory order, floating/SIMD/tensor semantics, indirect calls, traits/witness dispatch, intrinsics, async state and typed failure values. Assign only operations whose exact type, failure, ordering and lifetime rules are known. |
-| Revision and reader policy | No on-wire selector or feature/revision negotiation for the candidate executable subset; nonminimal-width load policy, unknown opcodes in unvisited trusted blocks, diagnostic/recovery behavior and numeric parser/audit budgets remain open. |
-| Type-map conformance | A complete reader must validate each fixed-`u32` typed type reference, distinct map entries, local type IDs and type agreement with MethodSig and selected definitions. The candidate inline built-in words require a metadata format revision and explicit identity checks across indexed and inline forms; no Body-local ID may be mistaken for an artifact-wide metadata reference. |
+| Revision and reader policy | Future on-wire feature/revision negotiation, nonminimal-width load policy, diagnostic/recovery behavior and numeric parser/audit budgets remain open. Readers of this subset validate every block's registered opcodes before selective import. |
+| Type-map conformance | A complete reader must validate each fixed-`u32` indexed TypeSpec reference, distinct map entries, local type IDs and type agreement with MethodSig and selected definitions. The separate inline built-in extension requires a metadata format revision and explicit identity checks across indexed and inline forms; no Body-local ID may be mistaken for an artifact-wide metadata reference. |
 
-These are explicit blockers to declaring the proposals final, not an
-invitation to invent semantics or serialize the current private bound tree.
-See [implementation](../implementation.md) for what the repository actually
-executes. The source-language [portable proof floor](../language-contract-review.md#4-a-reproducible-proof-and-evaluation-foundation)
+These are requirements for future broader executable profiles and complete
+interchange, not permissions to invent semantics or serialize the current
+private bound tree. The bounded subset specified above is approved; forms
+missing the stated contracts remain non-executable.
+See [implementation](implementation.md) for what the repository actually
+executes. The source-language [portable proof floor](language-contract-review.md#4-a-reproducible-proof-and-evaluation-foundation)
 is distinct from decoder and verifier work budgets.
 
 ### Compact-profile review decisions
 
-The two compact tags and their bytes above are candidate wire layouts,
-**not approved metadata or a shipping writer policy**. The following
-decisions remain tracked here for approval or revision before adoption:
+The two compact tags and their bytes above are approved for the bounded
+subset, but no canonical writer policy or measured performance claim is
+established. The following are future design and implementation decisions:
 
 | Decision | Candidate and evidence still needed |
 |---|---|
 | Shape partition | Compare one-block linear, 2–3-block boundary-only, indexed small CFG and general forms on representative body distributions; choose by total bytes, cold import, allocations and selective-inlining time under trusted and audited loading, not a hard block-count cutoff. |
 | Offset width | Compare a separate compact-index width against the current coupled local width at 255/65535-byte boundaries, including wider IDs with short blocks. Validate exact fallback to the general form. |
 | Logical roots and effects | Define mandatory method/block effects and indexed safepoint root/owner/interior dependencies including cleanup/exceptional continuations. Decide inline versus required sparse sidecar by actual density; no executable managed compact form until a reader verifies these facts. |
-| Cross-method sharing | Validate exact Body-row sharing within one module against every referencing MethodDef's signature and contracts. Compare remaining independent short rows with a typed, bounded shared-shape table and substitutions; preserve source identity and measure binding and rewrite/remap costs as well as byte savings. |
+| Cross-method sharing | A future ownership revision would need to validate exact Body-row sharing within one module against every referencing MethodDef's signature and contracts. Compare remaining independent short rows with a typed, bounded shared-shape table and substitutions; preserve source identity and measure binding and rewrite/remap costs as well as byte savings. |
 | Trusted selective import | Resolve unvisited-block unknown opcodes and feature negotiation before a reader relies on terminator/definition indexes without decoding that block; structural bounds and metadata binding never become optional. |
 | Declaration contracts | Model authored Body bytes and the separately executed pre/postcondition checks together for inlining/effect decisions. Their ability to remove explicit guard branches does not remove runtime work or failure order. |

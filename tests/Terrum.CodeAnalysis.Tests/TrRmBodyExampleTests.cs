@@ -8,13 +8,13 @@ using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
 
-public sealed class TrRmProposedBodyExampleTests
+public sealed class TrRmBodyExampleTests
 {
     [Theory]
     [InlineData("GeneralCheckedAdd", 105, 5, false, 38, 36, 3)]
     [InlineData("## Value and place state through checked arithmetic", 122, 5, true, 51, 49, 7)]
     [InlineData("GeneralConstantReturn", 57, 1, false, 18, 16, 1)]
-    public void ProposedBodyExamplesHaveDirectDefinitionAndUseIndexes(
+    public void BodyExamplesHaveDirectDefinitionAndUseIndexes(
         string heading, int sectionLength, int valueCount, bool hasPlace,
         int blockLength, int terminatorOffset, int operationCount)
     {
@@ -160,7 +160,7 @@ public sealed class TrRmProposedBodyExampleTests
     }
 
     [Fact]
-    public void ProposedConditionalMergeHasIndexedDefsUsesAndNormalEdges()
+    public void ConditionalMergeHasIndexedDefsUsesAndNormalEdges()
     {
         var bytes = ReadExample("GeneralConditionalMerge");
         Assert.Equal(165, bytes.Length);
@@ -248,7 +248,7 @@ public sealed class TrRmProposedBodyExampleTests
     [InlineData("### Checked add end to end (informative)", 31, 3, 5, 2)]
     [InlineData("### Compact linear constant return", 21, 1, 1, 0)]
     [InlineData("#### Compact linear parameter return", 17, 0, 1, 1)]
-    public void ProposedCompactLinearDerivesDefinitionsAndUses(
+    public void CompactLinearDerivesDefinitionsAndUses(
         string heading, int sectionLength, int operationCount, int valueCount,
         int parameterCount)
     {
@@ -300,7 +300,7 @@ public sealed class TrRmProposedBodyExampleTests
     }
 
     [Fact]
-    public void ProposedCompactIndexedMergeRetainsDirectFlowFacts()
+    public void CompactIndexedMergeRetainsDirectFlowFacts()
     {
         var bytes = ReadExample("#### Compact indexed conditional merge");
         Assert.Equal(100, bytes.Length);
@@ -382,7 +382,7 @@ public sealed class TrRmProposedBodyExampleTests
     }
 
     [Fact]
-    public void ProposedCompactIndexedConditionalAddPreservesCheckedArm()
+    public void CompactIndexedConditionalAddPreservesCheckedArm()
     {
         var bytes = ReadExample("#### Compact indexed conditional sum");
         Assert.Equal(90, bytes.Length);
@@ -513,7 +513,7 @@ public sealed class TrRmProposedBodyExampleTests
 
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
-        var document = File.ReadAllText(Path.Combine(root, "docs", "proposals",
+        var document = File.ReadAllText(Path.Combine(root, "docs",
             "il-instruction-set.md"));
         var start = document.IndexOf(heading, StringComparison.Ordinal);
         Assert.True(start >= 0);
