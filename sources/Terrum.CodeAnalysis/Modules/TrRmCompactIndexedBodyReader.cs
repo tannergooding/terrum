@@ -101,6 +101,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         }
 
         var regions = new LoopRegion[regionCount + 1];
+        var regionDepths = new int[regionCount + 1];
         for (var region = 1; region <= regionCount; region++)
         {
             if (Read(body, ref position, 1) != 1)
@@ -119,6 +120,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
 
             regions[region] = new LoopRegion(parent, header, exit);
+            regionDepths[region] = regionDepths[parent] + 1;
         }
 
         var valueTypes = new ushort[ValueCount + 1];
@@ -763,8 +765,9 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         for (var region = 1; region <= regionCount; region++)
         {
             if (blockRegions[regions[region].Header] != region
-                || !ContainsRegion(regions, regions[region].Parent,
-                    blockRegions[regions[region].Exit]))
+                || CommonRegion(regions, regionDepths, regions[region].Parent,
+                    blockRegions[regions[region].Exit])
+                    != blockRegions[regions[region].Exit])
             {
                 throw InvalidBody();
             }
@@ -779,8 +782,10 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             {
                 var sourceRegion = blockRegions[block];
                 var targetRegion = blockRegions[edge.Target];
+                var commonRegion = CommonRegion(regions, regionDepths,
+                    sourceRegion, targetRegion);
                 for (var entered = targetRegion;
-                    entered != 0 && !ContainsRegion(regions, sourceRegion, entered);
+                    entered != commonRegion;
                     entered = regions[entered].Parent)
                 {
                     if (edge.Target != regions[entered].Header)
@@ -790,7 +795,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 }
 
                 for (var exited = sourceRegion;
-                    exited != 0 && !ContainsRegion(regions, targetRegion, exited);
+                    exited != commonRegion;
                     exited = regions[exited].Parent)
                 {
                     if (edge.Target != regions[exited].Exit)
@@ -801,7 +806,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
 
                 if (edge.Target <= block
                     && (targetRegion == 0
-                        || !ContainsRegion(regions, sourceRegion, targetRegion)
+                        || commonRegion != targetRegion
                         || edge.Target != regions[targetRegion].Header))
                 {
                     throw InvalidBody();
@@ -950,17 +955,26 @@ public readonly ref struct TrRmCompactIndexedBodyReader
     private static bool Contains(int[] values, int value)
         => Array.BinarySearch(values, value) >= 0;
 
-    private static bool ContainsRegion(LoopRegion[] regions, int descendant, int ancestor)
+    private static int CommonRegion(LoopRegion[] regions, int[] depths,
+        int first, int second)
     {
-        for (var region = descendant; region != 0; region = regions[region].Parent)
+        while (depths[first] > depths[second])
         {
-            if (region == ancestor)
-            {
-                return true;
-            }
+            first = regions[first].Parent;
         }
 
-        return ancestor == 0;
+        while (depths[second] > depths[first])
+        {
+            second = regions[second].Parent;
+        }
+
+        while (first != second)
+        {
+            first = regions[first].Parent;
+            second = regions[second].Parent;
+        }
+
+        return first;
     }
 
     private static bool IsInteger(ushort type)
