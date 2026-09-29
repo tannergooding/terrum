@@ -150,7 +150,8 @@ loop headers expose dataflow to consumers; no throughput or total-size win
 is asserted.
 
 The Body's upfront type, place and value inventories, block/terminator
-offsets, and per-block live sets are intended as **shared importer inputs**:
+offsets, direct value-definition locations, and per-block use/last-use
+inventories are intended as **shared importer inputs**:
 each consumer can obtain typed ID bounds, normal CFG targets and boundary
 liveness without rediscovering them by scanning the operation stream.
 Inlining profitability, register allocation and whether a particular
@@ -165,10 +166,11 @@ must not authorize omitting safety checks or dropping operations.
 
 ### Direct-index requirements for pruning and inlining
 
-The existing block/terminator offsets, typed value descriptors and
-boundary liveness are necessary but **not sufficient** for a fast inliner.
-They do not say where a branch predicate was defined, which block owns
-each result, or which blocks use a value or place. An inliner specializing
+Block/terminator offsets, typed value descriptors and boundary liveness
+alone are **not sufficient** for a fast inliner. The definition index and
+per-block use inventories below additionally identify where a branch
+predicate was defined, which block owns each result, and which blocks
+use a value or place. An inliner specializing
 an argument should be able to find the predicate definition from its
 value ID, inspect only the predicate's needed dependencies, select a
 known branch, and discard its unreachable block subtree without decoding
@@ -176,19 +178,28 @@ unvisited operation streams. That does not imply that arbitrary predicates
 are constant: effects, calls and unsupported expressions require the
 normal importer path.
 
-Before stabilizing this Body layout, specify a compact, directly indexed
-definition location for each value (block and byte offset of the defining
-operation, or an equivalent direct seek), plus
-per-block summaries of values used, places read/written/initialized/ended,
-normal successors, operation/effect counts and safepoints. Define how edge
-arguments, block parameters, loop backedges, region exits and future
-exceptional continuations participate in those summaries. For each value
-or place, the index must let a consumer determine whether *all* uses and
-obligations lie in discarded blocks; a sparse per-block use inventory
-with counts can support decrementing surviving uses as blocks are pruned.
+Each `valueDefStarts` range gives the defining block, and
+`valueDefinitionOffsets` seeks directly to its defining operation (or marks
+a block parameter). Per-value/place use-block counts and sorted per-block
+last-use inventories let an inliner decrement surviving use-block counts
+when pruning blocks without decoding their operations. A use includes
+instruction operands and terminator operands, including edge arguments;
+mere transit through `liveIns`/`liveOuts` does not count. Place activation,
+inherited state and end transitions count as place uses, even without an
+explicit `PlaceLocal`. A definition with zero remaining uses is not itself
+proof that its defining instruction can be discarded.
 Effectful instructions must not disappear just because their result is
 unused. Block and value identity stays stable during import; native register
 allocation and target-dependent profitability are not wire facts.
+
+The direct indexes do **not** yet summarize a block's precise effect classes,
+call count, or normal successors without inspecting its terminator, nor
+does a sorted final-use position encode every intermediate read. A method
+effect synopsis and any finer per-block instruction inventory still need
+defined bounds, cost and consistency rules; retained blocks are decoded
+when imported. In particular, an inliner can prune a trivially dead arm
+quickly, but cannot claim arbitrary conditional predicates are constant
+or drop operations in a retained arm without examining their semantics.
 
 Ordinary value liveness, place/ownership state and logical GC-root
 continuity are distinct but related summaries. The producer should record
@@ -197,9 +208,9 @@ indexed safepoints, including roots needed by cleanup or exceptional
 continuations. An inliner can then remove a dead block's root obligations
 without scanning its instructions, but must preserve roots at retained
 safepoints and let its backend build the final physical GC maps. The
-binary placement, compression, worst-case cost and audit rules for these
-indexes remain a stabilization decision; the currently encoded Body
-examples **do not yet contain** them.
+binary placement, compression, worst-case cost and audit rules for the
+logical-root/safepoint inventory remain a stabilization decision; the
+currently encoded Body examples **do not yet contain** GC roots.
 
 ### Checked add end to end (informative)
 
@@ -217,7 +228,9 @@ for `int32`. `r1`–`r5` are one-based Body value IDs, not machine registers.
 The value-descriptor array declares each ID's type and kind; the block
 parameters or operations define its value. `B1` is a one-based
 block ID. A block's parameter list declares values received on entry,
-not all values that its operations will define.
+not all values that its operations will define. The definition index gives
+`r1` and `r2` the B1 parameter sentinel, then points `r3`, `r4` and
+`r5` to B1 operations at byte offsets 22, 27 and 31, respectively.
 
 ```text
 Source:   int32 AddThenThree(int32 x, int32 y) { return x + y + 3; }
@@ -229,10 +242,15 @@ MethodDef[1] = (signature=1, bodyRow=1)
 Body: ownerMethod=1, bodyLayout=0
       blockCount=1, valueCount=5, placeCount=0, regionCount=0, typeCount=1
       typeMap=[t1: TypeSpec[1]]             // fixed u32 typed reference
-      valueDescriptors=[r1:(t1,value), r2:(t1,value), r3:(t1,value),
-                        r4:(t1,value), r5:(t1,value)]
-      blockOffsets=[0,26], terminatorOffsets=[24]
+      valueDescriptors=[r1:(t1,value,useBlocks=1), r2:(t1,value,useBlocks=1),
+                        r3:(t1,value,useBlocks=1), r4:(t1,value,useBlocks=1),
+                        r5:(t1,value,useBlocks=1)]
+      valueDefStarts=[0,5]
+      valueDefinitionOffsets=[parameter,parameter,22,27,31]
+      blockOffsets=[0,38], terminatorOffsets=[36]
       B1 operationCount=3, region=0, liveIns=[], liveOuts=[], place lists=[]
+      B1 valueLastUses=[(r1,op0),(r2,op0),(r3,op2),(r4,op2),
+                        (r5,terminator3)]
 
 B1(r1 <- parameter[0], r2 <- parameter[1]):  // x, y defined on entry
     r3 = CheckedBinary add r1, r2
@@ -247,6 +265,16 @@ operations do not run; on second-add overflow the return does not run.
 Both failures follow the module policy without manufacturing normal CFG
 edges or block parameters. Every value has one descriptor
 and one definition; the descriptor alone does not create a value.
+`r1` and `r2` become available at block entry and are last read by
+operation 0. Their parameter sentinel is not a machine slot or an
+instruction that needs executing.
+`r3` becomes available after operation 0 and is last read by operation 2;
+`r4` becomes available after operation 1 and is also last read by
+operation 2. `r5` becomes available after operation 2 and is last read
+by the return terminator (ordinal 3). Neither value lives across a block
+boundary; the five `useBlocks=1` counts are corroborated by B1's five
+last-use entries. This describes ordinary operand uses, not a GC-root
+lifetime or an instruction's permission to be deleted.
 The Body stores numeric IDs, not the source names or these comments.
 The TypeSpec row reference occupies four bytes in `typeMap`, as it does
 in MethodSig; repeated `t1` references are one-byte local IDs because
@@ -259,14 +287,14 @@ not license replacing the current `01 00 00 00` entry in this fixture
 until the metadata reference rule changes.
 
 The Body **section** uses one mapped type, five values, one block and
-no places or regions. Its 70-byte structure is:
+no places or regions. Its 109-byte structure is:
 
 | Region | Size and contents |
 |---|---|
-| Body-section offset index | 8 bytes: `00 00 00 00 3E 00 00 00` = `[0,62]`; not an instruction |
-| Body row header | 24 bytes: `ownerMethod=1`, `bodyLayout=0`, counts `(block,value,place,region,type)=(1,5,0,0,1)`, `typeMap=[TypeSpec row 1]` and five `(t1,value)` descriptors |
-| Body row offset arrays | 12 fixed-`u32` bytes: `blockOffsets=[0,26]`, `terminatorOffsets=[24]` |
-| Block data | 26 bytes: B1 has three operations and one return |
+| Body-section offset index | 8 bytes: `00 00 00 00 65 00 00 00` = `[0,101]`; not an instruction |
+| Body row header and definition index | 51 bytes: `ownerMethod=1`, `bodyLayout=0`, counts `(block,value,place,region,type)=(1,5,0,0,1)`, `typeMap=[TypeSpec row 1]`, five `(t1,value,useBlockCount=1)` descriptors, `valueDefStarts=[0,5]`, and five fixed-`u32` definition offsets |
+| Body row offset arrays | 12 fixed-`u32` bytes: `blockOffsets=[0,38]`, `terminatorOffsets=[36]` |
+| Block data | 38 bytes: B1 has five last-use entries, three operations and one return |
 
 Here `bodyLayout=0` selects one-byte Body-local widths. The owner,
 type-map entries and offset arrays remain fixed `u32`; instruction
@@ -275,14 +303,16 @@ Body fields and validation rules are specified in
 [Body record, direct block index and regions](#body-record-direct-block-index-and-regions).
 
 The exact section bytes are the eight-byte offset index followed by the
-62-byte Body row:
+101-byte Body row:
 
 ```text
-00 00 00 00  3E 00 00 00
+00 00 00 00  65 00 00 00
 01 00 00 00  00  01 05 00 00 01  01 00 00 00
-01 00  01 00  01 00  01 00  01 00
-00 00 00 00  1A 00 00 00  18 00 00 00
-00 02 01 02 00 00 00 00 00 03
+01 00 01  01 00 01  01 00 01  01 00 01  01 00 01
+00 05
+FF FF FF FF  FF FF FF FF  16 00 00 00  1B 00 00 00  1F 00 00 00
+00 00 00 00  26 00 00 00  24 00 00 00
+00 02 01 02 00 00 00 00 00  05 01 00 02 00 03 02 04 02 05 03  00 03
 15 03 01 01 02  02 04 01 03  15 05 01 03 04  83 05
 ```
 
@@ -354,6 +384,15 @@ but `r4` is defined once by B4's parameter, not by either predecessor.
 The branch copies only Copy values; `liveOut` is the union of the
 successors' live-ins and explicit edge arguments. Source variable names
 and the apparent assignment are not stored in the Body.
+If an inliner knows `flag` is true, B1's indexed terminator identifies
+B2 as the only normal successor. B3 can be removed; its use inventory
+lists `r2`, so removing B3 decrements `r2`'s remaining use-block count
+to zero without decoding B3's operations. B1's resulting live-out no
+longer includes `r2`. B2 still supplies `r3` to B4, whose `r4`
+parameter remains a valid merge definition unless the inliner chooses
+to substitute it. This is a Copy-scalar example; dropping a unique
+argument or cleanup obligation requires its separate ownership/exit
+contract, not just a zero ordinary-use count.
 
 For `int32 CountTo(int32 n) { mut int32 i = 0; while (i < n) {
 i = i + 1; } return i; }`, MethodSig has one by-value `int32` parameter
@@ -455,9 +494,11 @@ no further row-length prefix. Its fields, in order, are:
 | `bodyLayout` | `u8` | Bits 0–1 Body-local width; bits 2–7 zero |
 | `blockCount`, `valueCount`, `placeCount`, `regionCount`, `typeCount` | five local-width unsigned integers | Body-local counts; blockCount is positive; typeCount is zero iff no local type ID is used |
 | `typeMap` | `u32[typeCount]` little-endian | Distinct nonzero typed TypeSpec references, indexed by one-based Body-local type ID |
-| `places` | `placeCount` entries | local-width `typeId`, local-width `regionId`, `u8 flags` each |
+| `places` | `placeCount` entries | local-width `typeId`, local-width `regionId`, `u8 flags`, local-width `useBlockCount` each |
 | `regions` | `regionCount` entries | Described below, IDs `1..regionCount` |
-| `valueDescriptors` | `valueCount` entries | local-width `typeId`, `u8 kind` each, indexed by `valueId - 1` |
+| `valueDescriptors` | `valueCount` entries | local-width `typeId`, `u8 kind`, local-width `useBlockCount` each, indexed by `valueId - 1` |
+| `valueDefStarts` | local-width `[blockCount + 1]` | Zero-based descriptor indexes: starts at 0, nondecreasing by the number of definitions in each block, ends at `valueCount`; blocks without definitions may have empty intervals |
+| `valueDefinitionOffsets` | fixed `u32[valueCount]` little-endian | Relative to the defining block's start; `0xFFFF_FFFF` for a block parameter, otherwise points directly to its defining operation opcode or width prefix |
 | `blockOffsets` | `u32[blockCount + 1]` little-endian | Relative to the following block-data start |
 | `terminatorOffsets` | `u32[blockCount]` little-endian | Each relative to its own block start; points directly to its terminator opcode or width prefix |
 | `blockData` | `blockOffsets[last]` bytes | One block per consecutive offset extent |
@@ -465,10 +506,12 @@ no further row-length prefix. Its fields, in order, are:
 Body-layout codes 0, 1 and 2 mean local widths of 1, 2 and 4 bytes; code 3
 rejects. This width sizes all five counts, structural block/region/value/
 place/type IDs, block parameters, place-state and operation counts, region
-fields and place-region references. Choose the smallest width that
+fields, per-descriptor use-block counts, definition starts, last-use
+ordinals and place-region references. Choose the smallest width that
 represents every field in this class throughout the **whole body**.
-`ownerMethod`, type-map entries and both offset arrays remain fixed `u32`
-typed references or offsets. Each instruction independently selects its
+`ownerMethod`, type-map entries, definition offsets and both block
+offset arrays remain fixed `u32` typed references or offsets. Each
+instruction independently selects its
 Body-local operand width via its prefix; FieldDef and direct-call DefId
 operands remain fixed `u32`. Under the approved indexed-only rule,
 bound `typeCount` by the TypeSpec table count and the remaining row
@@ -484,6 +527,26 @@ before dereferencing local type IDs; out-of-range IDs reject. Writers
 must use minimal widths. A strict canonicality audit may verify them,
 but load-time treatment of nonminimal `bodyLayout` values is not
 specified. Unsupported codes, reserved bits and truncated fields reject.
+
+For value ID `r`, locate its descriptor at `r - 1` and the unique
+`valueDefStarts` interval containing that index; the interval identifies
+its defining block without decoding preceding blocks. The first
+`parameterCount` IDs of a block's interval are its listed block parameters
+and have sentinel definition offsets. Each later ID has an in-range offset
+to the result-producing operation in that block. Multiple results from
+one operation may share its offset but have distinct IDs; the verifier
+matches operand/result order and the descriptor. Every definition is
+accounted for once, and no offset may point into a header, operand or
+terminator. A direct reader bounds the target before decoding it;
+the writer guarantees the index agrees with the instruction stream.
+`useBlockCount` counts distinct blocks with a corresponding use entry
+below, not occurrences or transit-only liveness. It is at most
+`blockCount`. A semantic audit checks all definition and use indexes,
+including zero-use values, against the decoded operations and edges.
+An untrusted executable reader must perform that audit before relying
+on the indexes to discard code; only an explicit producer trust policy
+can permit their use without the semantic audit. Bounded offsets alone
+do not make asserted deadness true.
 
 Block offsets start at 0, increase strictly, and end at the exact remaining
 body length; empty blocks are invalid. Block data is under 4 GiB, though
@@ -541,6 +604,8 @@ A block extent contains these fields in order:
 | `inheritedPlaceCount`, `inheritedPlaces` | `local`, then `(local placeId, u8 state)[inheritedPlaceCount]` | Places continuing from predecessors; state 0 vacant, 1 initialized |
 | `startPlaceCount`, `startPlaces` | `local`, then `local placeId[startPlaceCount]` | Places becoming active at entry with the descriptor's initial state |
 | `endPlaceCount`, `endPlaces` | `local`, then `local placeId[endPlaceCount]` | Places ending after this block's operations, before normal successor transfer or return |
+| `valueUseCount`, `valueLastUses` | `local`, then `(local valueId, local lastUseOrdinal)[valueUseCount]` | Distinct used values in strictly increasing ID order; last occurrence in this block |
+| `placeUseCount`, `placeLastUses` | `local`, then `(local placeId, local lastUseOrdinal)[placeUseCount]` | Distinct places mentioned in the block's state lists or operations, in increasing ID order |
 | `operationCount`, `operations` | `local`, then `operationCount` coded instructions | Definitions and state transitions in source order |
 | `terminator` | One coded terminator | Explicit normal successor/return/failure; no fall-through |
 
@@ -564,7 +629,17 @@ Optional audit checks definitions, transfers, dominance and exact lists.
 This permits ordinary dominating values while typing merge values as
 block parameters; checked operations define results within their block.
 These block-boundary lists are not a per-instruction live-range table and
-cannot determine when a reference ceases to be a logical GC root. Root
+cannot determine when a reference ceases to be a logical GC root. The
+per-block last-use inventories give ordinary operand last uses without
+making an SSA last use into a GC root end. The first operation has ordinal
+0, the terminator has ordinal `operationCount`, and an end-place transition
+also has ordinal `operationCount`. Every listed last-use ordinal must
+refer to an actual use of that value or place at that position; absence
+means no use in this block. The maximum ordinal must fit the Body-local
+width, and the total number of distinct blocks listing an ID equals
+its descriptor's `useBlockCount`. Bound `valueUseCount` and
+`placeUseCount` by the respective descriptor counts before allocating
+or traversing entries. Root
 lifetime can extend beyond the last ordinary use, especially for owning
 storage, interior references, cleanup and exceptional continuations.
 
@@ -609,10 +684,10 @@ preceding fields. Names are descriptive, not a mandated host-language ABI:
 
 | Record | Required data | Index/identity invariant |
 |---|---|---|
-| `BodyIndex` | `ownerMethod`, body layout, five counts, fixed-`u32` TypeSpec map, place descriptors, region records, value descriptors, block/terminator offsets | Local IDs and offsets remain relative to this one body; `ownerMethod` is a metadata row |
+| `BodyIndex` | `ownerMethod`, body layout, five counts, fixed-`u32` TypeSpec map, place/value descriptors, value-definition starts/offsets, block/terminator offsets | Local IDs and offsets remain relative to this one body; `ownerMethod` is a metadata row |
 | `ValueDescriptor` | Body-local type ID and value/place kind | Entry `i` describes `r(i+1)`; resolve its type through the validated map without decoding the defining operation |
 | `BlockLocation` | Block-data start + `blockOffsets[i-1]`, next block offset, relative terminator offset | Entry `i-1` addresses block ID `i`; terminator lies inside this block's extent |
-| `BlockHeader` | Region, parameter IDs, live-in/out IDs, inherited/starting/ending place states, operation count | Parameters define values; live sets refer to prior definitions, not machine registers |
+| `BlockHeader` | Region, parameter IDs, live-in/out IDs, inherited/starting/ending place states, sorted last uses, operation count | Parameters define values; live sets refer to cross-block transfers, not native registers |
 | `Instruction` | Registered opcode, three resolved widths and the opcode-specific typed operands | The wide prefix changes the byte widths only; do not store raw bytes as if they were an addressing mode |
 | `Terminator` | Registered opcode and its typed edge/return/failure payload | Directly indexed; each normal edge targets a block ID and transmits the listed arguments |
 
@@ -880,22 +955,30 @@ this decode-only shape:
 executable. `PlaceField` produces a place; `Extract` reads a Copy field
 from a by-value aggregate.
 
-The encoded Body section is 84 bytes. Its `05` place flags mean mutable
-and initially vacant; block offsets are `[0,37]`, and the terminator
-offset is `[35]`:
+The encoded Body section is 126 bytes. Its `05` place flags mean mutable
+and initially vacant; block offsets are `[0,51]`, and the terminator
+offset is `[49]`. `p1` occurs in one block; B1's last-use inventory records
+its end transition at ordinal 7. The five value definitions occur at
+B1 byte offsets `[24,27,34,37,41]`:
 
 ```text
-00 00 00 00  4C 00 00 00
-01 00 00 00  00  01 05 01 00 01  01 00 00 00  01 00 05
-01 01  01 00  01 00  01 00  01 00
-00 00 00 00  25 00 00 00  23 00 00 00
-00 00 00 00 00 01 01 01 01 07
+00 00 00 00  76 00 00 00
+01 00 00 00  00  01 05 01 00 01  01 00 00 00  01 00 05 01
+01 01 01  01 00 01  01 00 01  01 00 01  01 00 01
+00 05
+18 00 00 00  1B 00 00 00  22 00 00 00  25 00 00 00  29 00 00 00
+00 00 00 00  33 00 00 00  31 00 00 00
+00 00 00 00 00 01 01 01 01
+05 01 06 02 02 03 05 04 05 05 07  01 01 07  07
 0B 01 01  02 02 01 0A  0E 01 02  0D 03 01  02 04 01 05
 15 05 01 03 04  0F 01 05  83 05
 ```
 
 B1 starts vacant `p1`, ends `p1` after seven operations, and has no
-cross-block live values or inherited places. Its header and the terminator
+cross-block live values or inherited places. Its use entries give
+`r1` last use at Assign (ordinal 6), `r2` at Initialize (2), `r3`
+and `r4` at the checked add (5), and `r5` at Return (7).
+Its header and the terminator
 index are directly readable; they do not authorize executing
 the unsupported place operations. An interpreter may use value slots and
 verified place storage; JIT/AOT may choose registers or memory. The format
@@ -910,24 +993,28 @@ MethodDef row 1 returns `int32` with no arguments; TypeSpec row 1 is
 zero explicit regions. The Body **section** for its single row is:
 
 ```text
-00 00 00 00  2A 00 00 00
+00 00 00 00  35 00 00 00
 01 00 00 00  00  01 01 00 00 01
 01 00 00 00
-01 00
-00 00 00 00  0E 00 00 00  0C 00 00 00
-00 00 00 00 00 00 00 01  01 01 01 2A  83 01
+01 00 01  00 01  0C 00 00 00
+00 00 00 00  12 00 00 00  10 00 00 00
+00 00 00 00 00 00 00  01 01 01  00 01  01 01 01 2A  83 01
 ```
 
 The block-offset array is eight bytes and the terminator-offset array
-four; the Body row is 42 bytes. It contains owner row 1, `bodyLayout=0`,
+four; the Body row is 53 bytes. It contains owner row 1, `bodyLayout=0`,
 five one-byte counts, a fixed `u32` map entry for TypeSpec row 1,
-one `(t1,value)` descriptor, block offsets `[0,14]`,
-terminator offset `12`, and a 14-byte block. That block has region 0, no
-parameters, live values or places, one `ConstBits` operation and one
-`Return`. Including the eight-byte section row index, the Body section is
-50 bytes. With eight populated metadata sections, the artifact is
-**354 bytes** before alignment: a 32-byte header, eight 16-byte directory
-entries and 194 bytes of sections. This is encoded size, not throughput;
+one `(t1,value,useBlockCount=1)` descriptor, definition starts `[0,1]`,
+the `ConstBits` definition offset 12, block offsets `[0,18]`,
+terminator offset `16`, and an 18-byte block. That block has region 0, no
+parameters, live values or places, a last use of `r1` at its return,
+one `ConstBits` operation and one `Return`. Including the eight-byte
+section row index, the Body section is 61 bytes. With eight populated
+metadata sections, the artifact is **365 bytes** before alignment: a
+32-byte header, eight 16-byte directory entries and 205 bytes of sections.
+The direct definition/use indexes increase this tiny Body section from
+the former 50 bytes to 61 bytes; their cost on representative bodies
+still needs measurement before approval. This is encoded size, not throughput;
 IDs, prefixes, blocks, decoding, branches, debug data and alignment also
 affect cost.
 
@@ -945,7 +1032,7 @@ SourceMap cannot change execution.
 | Consumer question | Direct format input | Remaining consumer freedom |
 |---|---|---|
 | Where is a block and its branch? | Block and terminator offsets, explicit target IDs | Choose hot/cold layout and machine branch forms without bytecode displacement fixups. |
-| What crosses a block boundary? | Typed merge parameters, sorted live-in/out value IDs, active place/state joins | Fast tier can avoid rebuilding boundary liveness; optimizing tier may rebuild SSA/liveness or choose a different register allocation. Native stack slots are not prescribed. |
+| What crosses a block boundary? | Typed merge parameters, sorted live-in/out value IDs, active place/state joins; indexed definitions and last uses identify in-block lifetimes | Fast tier can avoid rebuilding ordinary boundary and last-use facts; optimizing tier may rebuild SSA/liveness or choose a different register allocation. Native stack slots are not prescribed. |
 | What must be rooted at a safepoint? | Typed values, place descriptors and boundary liveness identify candidates, but no per-safepoint root/lifetime index is assigned | A backend must currently establish logical root continuity and emit its own register/stack GC maps; boundary liveness alone cannot supply them. |
 | Which loops and failures are present? | Region headers/exits; checked operations carry ordered failure effects; explicit `Fail` terminators | Lower failure/cleanup and optimize loops without treating hints as a prescribed machine CFG. Locating failures inside blocks still needs an operation scan until an effect summary is assigned. |
 | Which calls are intrinsic candidates? | Exact selected method identities and declared contracts; future registered intrinsics require explicit semantics | Inline or lower only compatible recognized identities, never guess from names or rewrite effectful calls as pure arithmetic. |
@@ -990,7 +1077,7 @@ contract:
 | Surface | Missing binary and verification contract |
 |---|---|
 | Exception and cleanup | Authored catch/finally, cleanup on normal/exceptional exit, fault replacement, operation-site failure state (including calls) and required roots through cleanup. A potentially failing call without a local handler is insufficient. |
-| Fast method facts | Define the mandatory method-level operation/effect summary and indexed value-definition, per-block use/effect and safepoint/root inventories, with bounds and consistency audits. Specialized branch reachability and per-consumer profitability are computed at the call site, not serialized as authoritative facts. |
+| Fast method facts | The Body now assigns direct value definitions, per-block last-use inventories and per-value/place use-block counts. Still define the mandatory method-level operation/effect summary, finer per-block effects and safepoint/root inventory, with bounds and consistency audits. Specialized branch reachability and per-consumer profitability are computed at the call site, not serialized as authoritative facts. |
 | Loans and views | Place provenance, region escape/alias checks, retained backing and owner dependencies, interior references, `mut` versus `write`, suspension/capture and explicit begin/end loan forms. |
 | Managed values | Root maps at safepoints, stable descriptors, write barriers, allocation/collection, optional handles and per-image heap boundaries. Root lifetime cannot be inferred solely from SSA uses. |
 | Logical root inventory | Specify producer-recorded, directly indexed safepoint locations and live logical root/owner/interior-place dependencies (including exceptional continuation and cleanup), with precise lifetime and verification rules. The format should avoid making each interpreter/JIT reconstruct logical GC liveness from every use; it must not prescribe post-allocation native register/stack maps or assume that ordinary value liveness covers roots. |
