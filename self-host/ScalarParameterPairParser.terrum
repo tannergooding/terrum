@@ -58,8 +58,8 @@ bool TryParseTwoParameterAddReturn(TokenSnapshot tokens,
 }
 
 bool TryParseTwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
-    TokenIntegerSnapshot integers, out SourceRange name, out uint64 magnitude,
-    out bool based)
+    TokenIntegerSnapshot integers, out int32 scalarType, out SourceRange name,
+    out uint64 magnitude, out bool based)
 {
     if (tokens.GetCount() != 19)
     {
@@ -73,12 +73,13 @@ bool TryParseTwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
     if (add.Kind != 57 || literal.Kind != 3 || semicolon.Kind != 52
         || closeBody.Kind != 49 || eof.Kind != 0
         || !TryParseTwoParameterAddPrefix(move tokens, out var selected,
-            out var foundName) || selected != 1
+            out var foundName)
         || !integers.TryFind(15, out var overflow, out var low, out var high)
-        || overflow || high != 0 || (low < 0 && !IsBasedInteger(literal)))
+        || overflow)
     {
         return false;
     }
+    scalarType = selected;
     name = foundName;
     magnitude = DecodeScannerMagnitude(low, high);
     based = IsBasedInteger(literal);
@@ -90,7 +91,8 @@ bool TryEvaluateInt32TwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
     out SourceRange name, out int32 result)
 {
     if (!TryParseTwoParameterAddAndLiteralReturn(move tokens, move integers,
-            out var foundName, out var magnitude, out var based)
+            out var selected, out var foundName, out var magnitude, out var based)
+        || selected != 1
         || magnitude > uint64(uint32.MaxValue)
         || (!based && magnitude > uint64(int32.MaxValue)))
     {
@@ -113,6 +115,70 @@ bool TryEvaluateInt32TwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
     }
     name = foundName;
     result = int32(finalSum);
+    return true;
+}
+
+bool TryEvaluateUInt32TwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
+    TokenIntegerSnapshot integers, uint32 first, uint32 second,
+    out SourceRange name, out uint32 result)
+{
+    if (!TryParseTwoParameterAddAndLiteralReturn(move tokens, move integers,
+            out var selected, out var foundName, out var magnitude, out var based)
+        || selected != 2 || magnitude > uint64(uint32.MaxValue))
+    {
+        return false;
+    }
+    uint64 firstSum = uint64(first) + uint64(second);
+    uint64 finalSum = firstSum + magnitude;
+    if (firstSum > uint64(uint32.MaxValue) || finalSum > uint64(uint32.MaxValue))
+    {
+        return false;
+    }
+    name = foundName;
+    result = uint32(finalSum);
+    return true;
+}
+
+bool TryEvaluateInt64TwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
+    TokenIntegerSnapshot integers, int64 first, int64 second,
+    out SourceRange name, out int64 result)
+{
+    if (!TryParseTwoParameterAddAndLiteralReturn(move tokens, move integers,
+            out var selected, out var foundName, out var magnitude, out var based)
+        || selected != 3 || !TryDecodeSigned64Scalar(magnitude, based, out var literal)
+        || (second > 0 && first > int64.MaxValue - second)
+        || (second < 0 && first < int64.MinValue - second))
+    {
+        return false;
+    }
+    int64 firstSum = first + second;
+    if ((literal > 0 && firstSum > int64.MaxValue - literal)
+        || (literal < 0 && firstSum < int64.MinValue - literal))
+    {
+        return false;
+    }
+    name = foundName;
+    result = firstSum + literal;
+    return true;
+}
+
+bool TryEvaluateUInt64TwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
+    TokenIntegerSnapshot integers, uint64 first, uint64 second,
+    out SourceRange name, out uint64 result)
+{
+    if (!TryParseTwoParameterAddAndLiteralReturn(move tokens, move integers,
+            out var selected, out var foundName, out var magnitude, out var based)
+        || selected != 4 || first > uint64.MaxValue - second)
+    {
+        return false;
+    }
+    uint64 firstSum = first + second;
+    if (firstSum > uint64.MaxValue - magnitude)
+    {
+        return false;
+    }
+    name = foundName;
+    result = firstSum + magnitude;
     return true;
 }
 

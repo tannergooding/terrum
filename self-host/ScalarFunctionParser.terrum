@@ -336,24 +336,6 @@ bool TryEvaluateUInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
     return true;
 }
 
-bool TryDecodeSigned64Scalar(uint64 magnitude, bool based, out int64 value)
-{
-    uint64 signBit = uint64(int64.MaxValue) + 1;
-    if (!based && magnitude > uint64(int64.MaxValue))
-    {
-        return false;
-    }
-    if (magnitude >= signBit)
-    {
-        value = int64(magnitude - signBit) + int64.MinValue;
-    }
-    else
-    {
-        value = int64(magnitude);
-    }
-    return true;
-}
-
 bool TryEvaluateUInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     out SourceRange name, out uint64 result)
 {

@@ -100,3 +100,21 @@ uint64 DecodeScannerMagnitude(int32 low, int32 high)
     }
     return uint64(highBits) * 4294967296 + uint64(lowBits);
 }
+
+bool TryDecodeSigned64Scalar(uint64 magnitude, bool based, out int64 value)
+{
+    uint64 signBit = uint64(int64.MaxValue) + 1;
+    if (!based && magnitude > uint64(int64.MaxValue))
+    {
+        return false;
+    }
+    if (magnitude >= signBit)
+    {
+        value = int64(magnitude - signBit) + int64.MinValue;
+    }
+    else
+    {
+        value = int64(magnitude);
+    }
+    return true;
+}

@@ -930,34 +930,60 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
-    [InlineData("18", "21", "x + y + 3", true, "42")]
-    [InlineData("int32.MaxValue", "-1", "x + y + 1", true, "int32.MaxValue")]
-    [InlineData("int32.MinValue", "int32.MaxValue", "x + y + 1", true, "0")]
-    [InlineData("0", "0", "x + y + 0xFFFF_FFFF", true, "-1")]
-    [InlineData("int32.MaxValue", "1", "x + y + 0xFFFF_FFFF", false, "0")]
-    [InlineData("int32.MinValue", "-1", "x + y + 1", false, "0")]
-    [InlineData("int32.MaxValue", "0", "x + y + 1", false, "0")]
-    [InlineData("int32.MinValue", "0", "x + y + 0xFFFF_FFFF", false, "0")]
-    [InlineData("0", "0", "x + y + 2147483648", false, "0")]
-    [InlineData("0", "0", "x + y + 4294967296", false, "0")]
-    [InlineData("0", "0", "x + z + 3", false, "0")]
-    [InlineData("0", "0", "x + y + 3 + 4", false, "0")]
+    [InlineData("int32", "18", "21", "x + y + 3", true, "42")]
+    [InlineData("int32", "int32.MaxValue", "-1", "x + y + 1", true, "int32.MaxValue")]
+    [InlineData("int32", "int32.MinValue", "int32.MaxValue", "x + y + 1", true, "0")]
+    [InlineData("int32", "0", "0", "x + y + 0xFFFF_FFFF", true, "-1")]
+    [InlineData("int32", "int32.MaxValue", "1", "x + y + 0xFFFF_FFFF", false, "0")]
+    [InlineData("int32", "int32.MinValue", "-1", "x + y + 1", false, "0")]
+    [InlineData("int32", "int32.MaxValue", "0", "x + y + 1", false, "0")]
+    [InlineData("int32", "int32.MinValue", "0", "x + y + 0xFFFF_FFFF", false, "0")]
+    [InlineData("int32", "0", "0", "x + y + 2147483648", false, "0")]
+    [InlineData("int32", "0", "0", "x + y + 4294967296", false, "0")]
+    [InlineData("int32", "0", "0", "x + z + 3", false, "0")]
+    [InlineData("int32", "0", "0", "x + y + 3 + 4", false, "0")]
+    [InlineData("uint32", "uint32.MaxValue", "0", "x + y + 0", true, "uint32.MaxValue")]
+    [InlineData("uint32", "0", "0", "x + y + 0xFFFF_FFFF", true, "uint32.MaxValue")]
+    [InlineData("uint32", "uint32.MaxValue", "1", "x + y + 0xFFFF_FFFF", false, "0")]
+    [InlineData("uint32", "uint32.MaxValue", "0", "x + y + 1", false, "0")]
+    [InlineData("uint32", "0", "0", "x + y + 4294967296", false, "0")]
+    [InlineData("int64", "int64.MinValue", "int64.MaxValue", "x + y + 1", true, "0")]
+    [InlineData("int64", "int64.MaxValue", "0", "x + y + 0xFFFF_FFFF_FFFF_FFFF", true, "int64.MaxValue - 1")]
+    [InlineData("int64", "int64.MaxValue", "1", "x + y + 0xFFFF_FFFF_FFFF_FFFF", false, "0")]
+    [InlineData("int64", "int64.MinValue", "0", "x + y + 0xFFFF_FFFF_FFFF_FFFF", false, "0")]
+    [InlineData("int64", "int64.MaxValue", "0", "x + y + 1", false, "0")]
+    [InlineData("int64", "0", "0", "x + y + 9223372036854775808", false, "0")]
+    [InlineData("uint64", "uint64.MaxValue", "0", "x + y + 0", true, "uint64.MaxValue")]
+    [InlineData("uint64", "0", "0", "x + y + 18446744073709551615", true, "uint64.MaxValue")]
+    [InlineData("uint64", "uint64.MaxValue", "1", "x + y + 0", false, "0")]
+    [InlineData("uint64", "uint64.MaxValue", "0", "x + y + 1", false, "0")]
+    [InlineData("uint64", "0", "0", "x + y + 18446744073709551616", false, "0")]
     public async Task BoundedNativeTwoParameterChainedAdditionChecksEachStepAsync(
-        string first, string second, string expression, bool evaluable, string expected)
+        string typeName, string first, string second, string expression,
+        bool evaluable, string expected)
     {
-        var text = $"int32 Value(int32 x, int32 y) {{ return {expression}; }}";
+        var evaluator = typeName switch
+        {
+            "int32" => "TryEvaluateInt32TwoParameterAddAndLiteralReturn",
+            "uint32" => "TryEvaluateUInt32TwoParameterAddAndLiteralReturn",
+            "int64" => "TryEvaluateInt64TwoParameterAddAndLiteralReturn",
+            "uint64" => "TryEvaluateUInt64TwoParameterAddAndLiteralReturn",
+            _ => throw new ArgumentOutOfRangeException(nameof(typeName)),
+        };
+        var text = $"{typeName} Value({typeName} x, {typeName} y) {{ return {expression}; }}";
         var assertion = evaluable
             ? $$"""
-                require TryEvaluateInt32TwoParameterAddAndLiteralReturn(
+                require {{evaluator}}(
                     move tokens, move integers, {{first}}, {{second}},
                     out var name, out var bound);
-                if (name.Start != 6 || name.Length != 5 || bound != {{expected}})
+                if (name.Start != {{typeName.Length + 1}} || name.Length != 5
+                    || bound != {{expected}})
                 {
                     return 1;
                 }
                 """
             : $$"""
-                if (TryEvaluateInt32TwoParameterAddAndLiteralReturn(
+                if ({{evaluator}}(
                     move tokens, move integers, {{first}}, {{second}},
                     out var name, out var bound))
                 {
@@ -978,7 +1004,8 @@ public sealed class ManagedScannerComponentTests
             {
                 var source = text + $$"""
                      int32 Main() {
-                         if (Value({{first}}, {{second}}) == {{expected}}) { return 42; }
+                         {{typeName}} actual = Value({{first}}, {{second}});
+                         if (actual == {{expected}}) { return 42; }
                          return 1;
                      }
                     """;
