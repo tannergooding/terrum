@@ -677,6 +677,37 @@ public sealed class TrRmBodyExampleTests
                 runtimePolicy: 1));
     }
 
+    [Fact]
+    public void CompactIndexedReaderIndexesTwoResultsFromOneCheckedOperation()
+    {
+        Assert.Equal((1, 4), InspectIndexed(IndexedDivRem(), 2,
+            parameterTypeIds: [2, 2]));
+    }
+
+    [Theory]
+    [InlineData(26, 1)]
+    [InlineData(34, 13)]
+    [InlineData(52, 3)]
+    [InlineData(53, 3)]
+    public void CompactIndexedReaderRejectsMalformedDualResults(int offset, byte value)
+    {
+        var section = IndexedDivRem();
+        section[offset] = value;
+        Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(section, 2, parameterTypeIds: [2, 2]));
+    }
+
+    private static byte[] IndexedDivRem()
+        =>
+        [
+            0, 0, 0, 0, 49, 0, 0, 0,
+            0x08, 1, 4, 0, 2, 1, 0, 0, 0, 2, 0, 0, 0,
+            2, 1, 2, 1, 2, 0, 2, 1,
+            0, 4, 0xFF, 0xFF, 12, 12, 0, 19, 17,
+            0x12, 2, 1, 2, 3, 1, 0, 2, 0, 4, 1, 1,
+            0x18, 3, 4, 1, 2, 0x83, 4,
+        ];
+
     private static byte[] IndexedScalarOperation(byte[] operation, byte[] parameters,
         byte resultType)
     {

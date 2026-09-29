@@ -257,6 +257,18 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     throw InvalidBody();
                 }
 
+                var secondResult = 0;
+                if (opcode == 0x18)
+                {
+                    secondResult = ReadCount(extent, ref cursor, referenceWidth);
+                    if (secondResult != nextResult++ || secondResult > ValueCount
+                        || owner[secondResult] != block
+                        || definitions[secondResult - 1] != operationOffset)
+                    {
+                        throw InvalidBody();
+                    }
+                }
+
                 if (opcode is 1 or 2)
                 {
                     var typeId = ReadCount(extent, ref cursor, referenceWidth);
@@ -361,6 +373,22 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         throw InvalidBody();
                     }
                 }
+                else if (opcode == 0x18)
+                {
+                    var left = ReadCount(extent, ref cursor, referenceWidth);
+                    var right = ReadCount(extent, ref cursor, referenceWidth);
+                    if (left <= 0 || left > ValueCount || right <= 0 || right > ValueCount
+                        || !IsInteger(valueTypes[result])
+                        || valueTypes[left] != valueTypes[result]
+                        || valueTypes[right] != valueTypes[result]
+                        || valueTypes[secondResult] != valueTypes[result])
+                    {
+                        throw InvalidBody();
+                    }
+
+                    Use(left, ordinal);
+                    Use(right, ordinal);
+                }
                 else
                 {
                     throw InvalidBody();
@@ -372,6 +400,10 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 }
 
                 defined[result] = true;
+                if (secondResult != 0)
+                {
+                    defined[secondResult] = true;
+                }
             }
 
             if (cursor != terminators[block - 1])

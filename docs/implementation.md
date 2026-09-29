@@ -1234,7 +1234,7 @@ root-free, fail-fast bodies without regions, forward `Branch` and `BranchIf`
 edges with checked typed block arguments, scalar `ConstBits`,
 `ConstSigned`, `Copy`, scalar `Unary`, `Binary`, eager `Select` and checked
 integer arithmetic/shifts, integer `CheckedConvert`, signed `CheckedNegate`,
-`Return` and `Fail`.
+dual-result `CheckedDivRem`, `Return` and `Fail`.
 The indexed reader also accepts valid `F0` reference/data widths on those
 operations independently of the Body-local width; terminators remain
 unprefixed in this bounded subset.
