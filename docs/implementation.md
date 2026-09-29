@@ -860,7 +860,8 @@ operands),
 context-typed unsuffixed integer literals (including signed unary minus and
 decimal signed minima) in return expressions, and
 at most one binary operation per expression, including either order of
-parameter/literal arithmetic or bitwise operations for integer widths,
+parameter/literal arithmetic or bitwise operations for integer widths
+(including parentheses between a literal's unary sign and magnitude),
 comparison for integer widths and `char16`, and Boolean parameter/parameter,
 parameter/literal, or literal/literal equality, bitwise and short-circuit operations in either operand
 order (with grouped named or literal operands), plus two contextual 32-bit integer
@@ -905,7 +906,7 @@ emitter. It rejects other entry signatures before replacing output;
 writing a PE file, returning its raw exit code with no success envelope;
 the hosted compiler remains in parallel for general builds. This bounded
 result is a provisional component protocol, not approved TRRM metadata or a
-compiler self-build. One hundred and fifty-six shared scalar/conditional/Boolean/integer-literal sources produce
+compiler self-build. One hundred and sixty-five shared scalar/conditional/Boolean/integer-literal sources produce
 byte-identical DLLs through the Terrum-authored frontend and hosted compiler
 under both runtime policies; this does not establish parity for unsupported
 source shapes, independent native emitters or a self-build. Twenty-six bounded

@@ -595,20 +595,27 @@ public static class ScalarFrontendHost
         {
             operand = -1;
             var groups = 0;
-            while (at < tokens.Length - 1 && tokens[at].Kind == TokenKind.OpenParen)
+            var foundSign = false;
+            while (at < tokens.Length - 1)
             {
-                at++;
-                groups++;
+                if (tokens[at].Kind == TokenKind.OpenParen)
+                {
+                    at++;
+                    groups++;
+                }
+                else if (!foundSign && sign != TokenKind.EndOfFile
+                    && tokens[at].Kind == sign)
+                {
+                    at++;
+                    foundSign = true;
+                }
+                else
+                {
+                    break;
+                }
             }
-            if (at >= tokens.Length - 1)
-            {
-                return false;
-            }
-            if (sign != TokenKind.EndOfFile && tokens[at++].Kind != sign)
-            {
-                return false;
-            }
-            if (at >= tokens.Length - 1)
+            if (at >= tokens.Length - 1
+                || (sign != TokenKind.EndOfFile && !foundSign))
             {
                 return false;
             }
