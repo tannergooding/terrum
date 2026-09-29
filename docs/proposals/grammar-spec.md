@@ -119,7 +119,10 @@ frontend.
 
 Primitive names (`int32`, `float32`, `bool`, `char16`, etc.) are ordinary
 identifiers resolved against compiler/library types, **not** reserved lexical
-keywords; this proposal does not assume a complete built-in type inventory.
+keywords. The proposed width-explicit integer, floating, character, vector
+and decimal families are listed in the
+[language design](../language.md#primitives-strict-arithmetic-and-text);
+their names and available targets are not inferred from this production.
 `void` is a distinct keyword. The current lexer's keyword tokens are `using`,
 `namespace`, `public`, `internal`, `private`, `static`, `void`, `var`, `mut`,
 `ref`, `out`, `if`, `else`, `while`, `return`, `true`, `false`, `struct`,
@@ -849,6 +852,19 @@ operator is supported must be specified together. The current lexer has
 neither compound-assignment nor increment/decrement tokens, and the candidate
 `AssignmentStatement` only covers `=`. Do not treat compound assignments as
 the existing binary operators followed by `=`.
+
+```ebnf
+(* PROPOSED extension only; not part of section 3's current token set. *)
+CompoundAssignmentStatement = Place, CompoundAssignmentOperator, Expression, ";" ;
+CompoundAssignmentOperator = "+=" | "-=" | "*=" | "/=" | "%="
+                           | "&=" | "|=" | "^=" ;
+Place = Expression ;
+```
+
+`Place` requires a separately specified assignability check; an arbitrary
+expression is not a writable destination. A concrete declaration production
+for each compound operator and source/metadata binding must be designed before
+this shorthand becomes a legal statement.
 
 Still **OPEN** for a full source grammar: nominal safe union cases and
 patterns/matching, associated-type bindings and family/adapter declarations,
