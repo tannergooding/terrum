@@ -39,7 +39,7 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16)
+        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or 17)
             || words[1] is not (1 or 2))
         {
             throw InvalidResult();
@@ -400,6 +400,19 @@ public static class ScalarFrontendHost
                         minus ? TokenKind.Minus : TokenKind.Plus, out var nestedSpan)
                     && ValidExpression(new ScalarFrontendExpression(type, nestedOperation,
                         left, right, nestedSpan), type, parameters);
+            }
+            if (operation is >= 30000 and < 34000)
+            {
+                var minus = operation >= 32000;
+                var nestedOperation = operation - (minus ? 28000 : 26000);
+                return words[0] >= 17 && expression.Type == type
+                    && (minus ? type is 1 or 3 : type is >= 1 and <= 4)
+                    && IsComplementedIntegerBinary(nestedOperation)
+                    && ValidSpan(expression.Span, nonempty: true)
+                    && TryGroupedUnarySpan(source, expression.Span,
+                        minus ? TokenKind.Minus : TokenKind.Plus, out var nestedSpan)
+                    && ValidExpression(new ScalarFrontendExpression(type,
+                        nestedOperation, left, right, nestedSpan), type, parameters);
             }
             if (operation == 16062 || operation is >= 18000 and < 20000
                 && IsNegatedBooleanBinary(operation - 16000))
@@ -1091,6 +1104,22 @@ public static class ScalarFrontendHost
                 return Binder.FoldScalarConstant(new BoundUnary(minus
                     ? TokenKind.Minus : TokenKind.Plus,
                     Expression(nested), type, expression.Span));
+            }
+            if (expression.Operation is >= 30000 and < 34000)
+            {
+                var minus = expression.Operation >= 32000;
+                if (!TryGroupedUnarySpan(source, expression.Span,
+                    minus ? TokenKind.Minus : TokenKind.Plus, out var nestedSpan))
+                {
+                    throw InvalidResult();
+                }
+                var type = Type(expression.Type);
+                var nested = new ScalarFrontendExpression(expression.Type,
+                    expression.Operation - (minus ? 28000 : 26000),
+                    expression.LeftParameter, expression.RightParameter, nestedSpan);
+                return Binder.FoldScalarConstant(new BoundUnary(minus
+                    ? TokenKind.Minus : TokenKind.Plus, Expression(nested),
+                    type, expression.Span));
             }
             if (expression.Operation == 16062
                 || expression.Operation is >= 18000 and < 20000
