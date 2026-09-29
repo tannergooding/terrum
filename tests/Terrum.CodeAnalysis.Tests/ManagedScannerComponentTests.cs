@@ -697,6 +697,67 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("int32(1) == int32(1)", true, true)]
+    [InlineData("int32(1) != int32(2)", true, true)]
+    [InlineData("int32(0xFFFF_FFFF) < int32(0)", true, true)]
+    [InlineData("int32(1) <= int32(1)", true, true)]
+    [InlineData("uint32(4294967295) > uint32(1)", true, true)]
+    [InlineData("uint32(1) >= uint32(2)", true, false)]
+    [InlineData("int64(0x8000_0000_0000_0000) < int64(0)", true, true)]
+    [InlineData("uint64(18446744073709551615) > uint64(0)", true, true)]
+    [InlineData("int64(0xFFFF_FFFF_FFFF_FFFF) == int64(0)", true, false)]
+    [InlineData("int32(2147483648) == int32(0)", false, false)]
+    [InlineData("uint32(4294967296) == uint32(0)", false, false)]
+    [InlineData("int64(9223372036854775808) < int64(0)", false, false)]
+    [InlineData("uint64(18446744073709551616) > uint64(0)", false, false)]
+    [InlineData("int32(1) < int64(2)", false, false)]
+    [InlineData("int32(1) + int32(2)", false, false)]
+    public async Task BoundedNativeTypedIntegerComparisonUsesOwnedRecordsAsync(
+        string expression, bool evaluable, bool expected)
+    {
+        var text = $"bool Value() {{ return {expression}; }}";
+        var assertion = evaluable
+            ? $$"""
+                require TryEvaluateTypedIntegerComparisonReturn(move tokens, move integers,
+                    out var name, out var bound);
+                if (name.Start != 5 || name.Length != 5 || bound != {{(expected ? "true" : "false")}})
+                {
+                    return 1;
+                }
+                """
+            : """
+                if (TryEvaluateTypedIntegerComparisonReturn(move tokens, move integers,
+                    out var name, out var bound))
+                {
+                    return 1;
+                }
+                """;
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                {{assertion}}
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            if (evaluable)
+            {
+                var hosted = Compilation.Create(SyntaxTree.Parse(
+                    text + " int32 Main() { if (Value() == true) { return 42; } return 1; }"),
+                    (BoundRuntimePolicy)policy);
+                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.Equal(expected ? 42 : 1,
+                    NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+            }
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData("int32 Main() { return 1 + 2; }", true, 3)]
     [InlineData("int32 Main() { return 2147483647 + 0; }", true, int.MaxValue)]
     [InlineData("int32 Main() { return 2147483647 + 1; }", false, 0)]

@@ -612,6 +612,93 @@ bool TryParseScalarBinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
     return true;
 }
 
+bool TryEvaluateTypedIntegerComparisonReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out bool result)
+{
+    if (tokens.GetCount() != 18)
+    {
+        return false;
+    }
+    require tokens.TryGet(0, out var returnType);
+    require tokens.TryGet(1, out var function);
+    require tokens.TryGet(2, out var openParameters);
+    require tokens.TryGet(3, out var closeParameters);
+    require tokens.TryGet(4, out var openBody);
+    require tokens.TryGet(5, out var returnKeyword);
+    require tokens.TryGet(6, out var leftType);
+    require tokens.TryGet(7, out var leftOpen);
+    require tokens.TryGet(8, out var leftLiteral);
+    require tokens.TryGet(9, out var leftClose);
+    require tokens.TryGet(10, out var comparison);
+    require tokens.TryGet(11, out var rightType);
+    require tokens.TryGet(12, out var rightOpen);
+    require tokens.TryGet(13, out var rightLiteral);
+    require tokens.TryGet(14, out var rightClose);
+    require tokens.TryGet(15, out var semicolon);
+    require tokens.TryGet(16, out var closeBody);
+    require tokens.TryGet(17, out var eof);
+    if (!TryGetScalarType(returnType, out var selectedReturn) || selectedReturn != 5
+        || !TryGetScalarType(leftType, out var selected)
+        || !TryGetScalarType(rightType, out var matching) || selected != matching
+        || selected == 5 || function.Kind != 2
+        || openParameters.Kind != 46 || closeParameters.Kind != 47
+        || openBody.Kind != 48 || returnKeyword.Kind != 19
+        || leftOpen.Kind != 46 || leftLiteral.Kind != 3 || leftClose.Kind != 47
+        || comparison.Kind < 65 || comparison.Kind > 70
+        || rightOpen.Kind != 46 || rightLiteral.Kind != 3 || rightClose.Kind != 47
+        || semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0)
+    {
+        return false;
+    }
+    if (!integers.TryFind(8, out var leftOverflow, out var leftLow, out var leftHigh)
+        || !integers.TryFind(13, out var rightOverflow, out var rightLow, out var rightHigh)
+        || leftOverflow || rightOverflow)
+    {
+        return false;
+    }
+    uint64 left = DecodeScannerMagnitude(leftLow, leftHigh);
+    uint64 right = DecodeScannerMagnitude(rightLow, rightHigh);
+    mut bool less = left < right;
+    mut bool greater = left > right;
+    if (selected == 1)
+    {
+        if (leftHigh != 0 || rightHigh != 0
+            || (leftLow < 0 && !IsBasedInteger(leftLiteral))
+            || (rightLow < 0 && !IsBasedInteger(rightLiteral)))
+        {
+            return false;
+        }
+        less = leftLow < rightLow;
+        greater = leftLow > rightLow;
+    }
+    else if (selected == 2)
+    {
+        if (leftHigh != 0 || rightHigh != 0)
+        {
+            return false;
+        }
+    }
+    else if (selected == 3)
+    {
+        if (!TryDecodeSigned64Scalar(left, IsBasedInteger(leftLiteral), out var signedLeft)
+            || !TryDecodeSigned64Scalar(right, IsBasedInteger(rightLiteral), out var signedRight))
+        {
+            return false;
+        }
+        less = signedLeft < signedRight;
+        greater = signedLeft > signedRight;
+    }
+
+    name = function.Range;
+    result = comparison.Kind == 65 && left == right
+        || comparison.Kind == 66 && left != right
+        || comparison.Kind == 67 && less
+        || comparison.Kind == 68 && !greater
+        || comparison.Kind == 69 && greater
+        || comparison.Kind == 70 && !less;
+    return true;
+}
+
 bool TryEvaluateInt32AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     out SourceRange name, out int32 result)
 {
