@@ -20,6 +20,7 @@ namespace Terrum.CodeAnalysis;
 // Version-10 admits grouped numeric comparisons with literal operands.
 // Version-11 admits grouped integer binaries under unary complement.
 // Version-12 admits grouped integer binaries under unary plus or minus.
+// Version-13 admits unary complement over grouped unary-signed parameters.
 // Boolean parameter/literal pairs add 700 for a parameter on the left or
 // 900 for a literal on the left; slots hold the parameter index and literal kind.
 // Boolean literal pairs add 1100; both slots hold literal kinds.
@@ -545,6 +546,19 @@ mut class ScalarFrontendState
                         nested.Operation + 4000, nested.LeftParameter,
                         nested.RightParameter, binarySpan, out var complemented);
                     expression = complemented;
+                    return true;
+                }
+                if (nested.Type == expectedType
+                    && (nested.Operation == 57 || nested.Operation == 58)
+                    && nested.LeftParameter >= 1 && nested.RightParameter == 0)
+                {
+                    require _tokens.TryGet(_at - 1, out var close);
+                    require SourceRange.TryCreate(literal.Range.Start,
+                        close.Range.End - literal.Range.Start, out var composedSpan);
+                    require ScalarFrontendExpression.TryCreate(expectedType,
+                        nested.Operation + 10000, nested.LeftParameter, 0,
+                        composedSpan, out var composed);
+                    expression = composed;
                     return true;
                 }
                 _at = start;
