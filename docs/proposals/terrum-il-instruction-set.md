@@ -217,6 +217,9 @@ implementation against **each** MethodDef's preconditions, postconditions
 and effects, and key contract-aware import or compiled-code caches by
 MethodDef as well as Body. Sharing bytes does not establish contract
 compatibility or permit one declaration's checks to be skipped.
+Executable pre/postcondition clauses are not yet assigned in this
+proposal; their future encoding and verification cannot be inferred
+from the shared Body row.
 Body-indexed SourceMap entries identify the shared instruction bytes,
 not distinct source locations for each MethodDef; preserve distinct
 locations by retaining separate Body rows or defining a separate
@@ -475,7 +478,8 @@ TRRM artifact directory (one entry per present section kind):
     TypeSpec (0x0011)   -> TypeSpec section, row 1: Builtin(int32)
     MethodSig (0x0017)  -> MethodSig section, row 1:
                           (resultTypeSpec=1, receiverTypeSpec=0,
-                           paramFirst=1, paramCount=2)
+                           paramFirst=1, paramCount=2,
+                           genericFirst=0, genericCount=0)
     Param (0x0018)      -> Param section, row 1:
                           (ownerMethodSig=1, ordinal=0, typeSpec=1, mode=0)
                           Param section, row 2:
@@ -504,7 +508,8 @@ are structural data available to other declarations; contracts, names
 and visibility belong to each MethodDef, not to the Body. For example,
 a distinct `MethodDef[2]` with `signature=1` and `bodyRow=1` could have
 different pre/postconditions, provided this implementation satisfies
-both declarations' contracts. The Body bytes remain one shared row, not
+both declarations' contracts once those clauses are defined. The Body
+bytes remain one shared row, not
 one copy per declaration. This candidate sharing is **not** permitted
 by the currently approved metadata ownership rule.
 
