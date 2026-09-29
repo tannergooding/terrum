@@ -157,7 +157,11 @@ and `r2` widen too because reference width is shared within this
 instruction. The separate `ConstSigned r2, t1, 5` operation has reference
 operands `r2` and `t1` **and** signed data `5`, but no edge or count. Neither
 example says anything about the widths selected by other instructions or
-the enclosing Body's structural `bodyLayout`.
+the enclosing Body's structural `bodyLayout`. A *real* body with 256 blocks
+would also need a two-byte structural local width to encode its `blockCount`;
+the 73-byte body below has only two blocks and retains `bodyLayout=0`. The
+[end-to-end checked-add example](#checked-add-end-to-end-informative)
+traces those bytes back to source and the complete Body structure.
 
 ## Body record, direct block index and regions
 
@@ -737,8 +741,24 @@ metadata/Body sections. This is an encoded-size calculation, **not** a
 throughput measurement; wider IDs, prefixes, block counts, decode work,
 branch count, debug information and alignment still matter.
 
-For the preceding by-value checked-add function (assuming the stated MethodSig
-and `t1`), the Body **section** uses three values, two blocks and no places or
+### Checked add end to end (informative)
+
+Consider `int32 AddFive(int32 input) { return input + 5; }` under the
+fail-fast policy. Assume MethodDef row 1 owns the body, its MethodSig
+declares the one by-value `int32` parameter and `int32` result, and
+TypeSpec row `t1` denotes `int32`. This is an *illustrative lowering*,
+not a requirement to materialize every source temporary or to use this
+register allocation:
+
+| Layer | Meaning in this one example |
+|---|---|
+| Source binding | The expected `int32` context makes `5` an `int32` literal; `+` selects checked primitive addition. Neither a numeric fallback nor a user-defined witness is inferred. |
+| Body header | `ownerMethod=1`, `bodyLayout=0` (one-byte structural local/metadata IDs), `blockCount=2`, `valueCount=3`, `placeCount=0`, `regionCount=0`. Three value descriptors identify `r1`, `r2`, `r3` as `t1` values. `blockOffsets=[0,19,30]` and `terminatorOffsets=[13,9]` locate the blocks and their terminators without searching for opcode bytes. |
+| B1 input and operation | B1 has parameter `r1` for `input`. `ConstSigned r2, t1, 5` defines a second `int32` value; it is not an immediate operand of `add`. |
+| B1 terminator | `CheckedBinary kind=1, rLeft=1, rRight=2, edgeSuccess=B2(args=[])` consumes two values. It defines no result in B1. Overflow selects the declared failure policy; it does not take the success edge. |
+| B2 input and return | The computed result becomes B2's *implicit first* parameter `r3`, whose descriptor is also `t1`; `Return r3` returns it. No `p`, `m`, field or region operand appears in either arithmetic instruction. |
+
+The Body **section** uses three values, two blocks and no places or
 regions. Block 1 is 19 bytes; block 2 is eleven. Its exact 73 bytes are:
 
 ```text
@@ -751,10 +771,23 @@ regions. Block 1 is 19 bytes; block 2 is eleven. Its exact 73 bytes are:
 00 01 03 00 00 00 00 00 00  83 03
 ```
 
-The counted operation is `02 02 01 05` (`ConstSigned r2, t1, 5`);
-`84 01 01 02 02 00` is checked add of `r1` and `r2` with a
-zero-explicit-argument edge to B2. B2's first parameter `r3` receives the
-implicit result. For width selection, `ConstSigned r3, t1, 200` instead
+Read that byte listing in layers: the first eight bytes are the Body
+section's offset index `[0,65]`, not an instruction. The Body header
+contains the fixed four-byte method owner, `bodyLayout`, four counts,
+three typed value descriptors, fixed-`u32` block and terminator offsets,
+then the block data. Within B1, `02 02 01 05` is the counted
+`ConstSigned r2, t1, 5` operation: opcode `02`, reference `rNew=2`,
+reference `t=1`, signed one-byte data `05`. `84 01 01 02 02 00` is its
+checked-add terminator: opcode `84`, fixed `u8 kind=01`, reference
+`rLeft=1`, reference `rRight=2`, reference `targetBlock=2`, and
+one-byte count `00` for no explicit edge arguments. B2's header declares
+`r3` as the implicit checked-result parameter; `83 03` returns it.
+There is no address mode or evaluation-stack push/pop hidden in these
+bytes. `bodyLayout=0` sized the Body's structural fields, while these
+two instructions independently use their unprefixed common operand
+envelopes.
+
+For width selection, `ConstSigned r3, t1, 200` instead
 uses `F0 10 02 03 01 C8 00` (two-byte signed data). If its result
 ID were 256, the same instruction would use
 `F0 11 02 00 01 01 00 C8 00` (two-byte references and data).
