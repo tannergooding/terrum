@@ -71,8 +71,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
 
             var type = TrRmCompactLinearBodyReader.ResolveType(types, (int)row);
-            if ((type & 0xFF) == 3
-                || Array.IndexOf(mappedTypes, type, 1, typeId - 1) >= 0)
+            if (Array.IndexOf(mappedTypes, type, 1, typeId - 1) >= 0)
             {
                 throw InvalidBody();
             }
@@ -149,11 +148,6 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             && resultRow[1] == 0 && resultRow[2] == 0;
         var resultType = voidResult ? (ushort)0
             : TrRmCompactLinearBodyReader.ResolveType(types, resultTypeSpec);
-        if ((resultType & 0xFF) == 3)
-        {
-            throw InvalidBody();
-        }
-
         for (var block = 1; block <= BlockCount; block++)
         {
             var extent = blockData[(int)offsets[block - 1]..(int)offsets[block]];
@@ -277,6 +271,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         || mappedTypes[typeId] != valueTypes[result]
                         || valueTypes[result] > byte.MaxValue
                         || opcode == 1 && (valueTypes[result] == 1 && bits > 1
+                            || valueTypes[result] == 3 && bits > ushort.MaxValue
                             || valueTypes[result] is (8 or 0x0D) && bits > uint.MaxValue)
                         || opcode == 2 && (valueTypes[result] is not (8 or 9 or 0x0D or 0x0E)
                             || !FitsSignedConstant(valueTypes[result], bits, dataWidth)))
@@ -344,7 +339,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     var type = valueTypes[left];
                     var comparison = kind is >= 4 and <= 9;
                     if (kind is < 1 or > 12 || type != valueTypes[right]
-                        || (!IsInteger(type) && !(kind is 4 or 5 && type == 1))
+                        || (!IsInteger(type) && !(kind is 4 or 5 && type is 1 or 3))
                         || valueTypes[result] != (comparison ? 1 : type))
                     {
                         throw InvalidBody();

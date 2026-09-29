@@ -1239,6 +1239,9 @@ dual-result `CheckedDivRem`, `Return` and `Fail`.
 Optional scalar values retain their presence-qualified identity through
 `MakeOptional`, `None`, `IsPresent`, `Copy` and eager `Select`; they are not
 interchangeable with the underlying scalar in operations or signatures.
+`char16` and optional `char16` retain their code-unit identity; only canonical
+`ConstBits`, `Copy`, equality, `Select` and optional presence operations apply,
+not integer arithmetic, ordering or conversions.
 The indexed reader also accepts valid `F0` reference/data widths on those
 operations and reference/count widths on supported `Branch`, `BranchIf`
 and `Return` terminators, independently of the Body-local width.

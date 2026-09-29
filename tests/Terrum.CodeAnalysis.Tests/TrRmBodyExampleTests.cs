@@ -744,6 +744,42 @@ public sealed class TrRmBodyExampleTests
                 parameters.Length, resultTypeSpec: resultType,
                 parameterTypeIds: parameters, thirdTypeOptional: true));
 
+    [Theory]
+    [InlineData(new byte[] { 1, 1, 3, 42 }, new byte[] { }, (byte)3, false)]
+    [InlineData(new byte[] { 0xF0, 0x10, 1, 1, 3, 0xFF, 0xFF },
+        new byte[] { }, (byte)3, false)]
+    [InlineData(new byte[] { 3, 2, 1 }, new byte[] { 3 }, (byte)3, false)]
+    [InlineData(new byte[] { 5, 3, 4, 1, 2 }, new byte[] { 3, 3 }, (byte)1, false)]
+    [InlineData(new byte[] { 5, 3, 5, 1, 2 }, new byte[] { 3, 3 }, (byte)1, false)]
+    [InlineData(new byte[] { 8, 2, 3, 1 }, new byte[] { 2 }, (byte)3, true)]
+    [InlineData(new byte[] { 9, 1, 3 }, new byte[] { }, (byte)3, true)]
+    [InlineData(new byte[] { 0x0A, 2, 1 }, new byte[] { 3 }, (byte)1, true)]
+    public void CompactIndexedReaderPreservesChar16CodeUnits(
+        byte[] operation, byte[] parameters, byte resultType, bool optional)
+    {
+        Assert.Equal((1, parameters.Length + 1),
+            InspectIndexed(IndexedScalarOperation(operation, parameters, resultType),
+                parameters.Length, secondTypeCode: optional ? (byte)3 : (byte)8,
+                resultTypeSpec: resultType,
+                parameterTypeIds: parameters, thirdTypeCode: optional ? null : (byte)3,
+                thirdTypeOptional: optional));
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0xF0, 0x20, 1, 1, 3, 0, 0, 1, 0 },
+        new byte[] { }, (byte)3)]
+    [InlineData(new byte[] { 2, 1, 3, 42 }, new byte[] { }, (byte)3)]
+    [InlineData(new byte[] { 4, 2, 2, 1 }, new byte[] { 3 }, (byte)3)]
+    [InlineData(new byte[] { 5, 3, 6, 1, 2 }, new byte[] { 3, 3 }, (byte)1)]
+    [InlineData(new byte[] { 5, 3, 10, 1, 2 }, new byte[] { 3, 3 }, (byte)3)]
+    [InlineData(new byte[] { 6, 2, 3, 1, 1 }, new byte[] { 3 }, (byte)3)]
+    public void CompactIndexedReaderRejectsIntegerOperationsOnChar16(
+        byte[] operation, byte[] parameters, byte resultType)
+        => Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(IndexedScalarOperation(operation, parameters, resultType),
+                parameters.Length, resultTypeSpec: resultType,
+                parameterTypeIds: parameters, thirdTypeCode: 3));
+
     [Fact]
     public void CompactIndexedReaderRejectsUnsignedCheckedNegate()
     {
