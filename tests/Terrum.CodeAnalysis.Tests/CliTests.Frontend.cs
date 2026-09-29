@@ -20,6 +20,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return 42; }", 42)]
     [InlineData("int32 Main() { return -0xFFFFFFD6; }", 42)]
     [InlineData("int32 Main() { if (true) { return 42; } else { return 0; } }", 42)]
+    [InlineData("int32 Main() { return ((42)); }", 42)]
     [InlineData("int32 Main() { return 0; }", 0)]
     public async Task FrontendRunMatchesHostedJitAsync(string source, int expected)
     {
@@ -62,6 +63,7 @@ public sealed partial class CliTests
     [InlineData("public int32 Main() { return 0x2A; }")]
     [InlineData("int32 Main() { if (true) { return 42; } else { return 0; } }")]
     [InlineData("int32 Main() { return -0xFFFFFFD6; }")]
+    [InlineData("int32 Main() { return ((42)); }")]
     public async Task FrontendBuiltExecutableMatchesHostedAndRunsAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -171,6 +173,8 @@ public sealed partial class CliTests
     [InlineData("public int64 Value(int64 x) { return 9223372036854775807 - x; }")]
     [InlineData("public uint64 Value(uint64 x) { return 18446744073709551615 - x; }")]
     [InlineData("public int32 Value(int32 x, int32 y) { return 47 - /* gap */ y; }")]
+    [InlineData("public int32 Value(int32 x) { return ((x + 5)); }")]
+    [InlineData("public bool Value() { if (((true))) { return (false); } else { return true; } }")]
     public async Task FrontendBuiltLibraryMatchesHostedNativeBytesAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -398,6 +402,27 @@ public sealed partial class CliTests
         Assert.False(result.GetProperty("valid").GetBoolean());
         Assert.Equal(2, result.GetProperty("errorCode").GetInt32());
         Assert.Equal(source.IndexOf("2147483648", StringComparison.Ordinal),
+            result.GetProperty("errorSpan").GetProperty("start").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("int32 Main() { return (42; }", ";")]
+    [InlineData("int32 Main() { return ((42); }", ";")]
+    [InlineData("int32 Main() { return (42)); }", ")")]
+    public async Task FrontendComponentRejectsUnbalancedExpressionGroupAsync(
+        string source, string offending)
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+            "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(1, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        var result = document.RootElement.GetProperty("result");
+        Assert.False(result.GetProperty("valid").GetBoolean());
+        Assert.Equal(1, result.GetProperty("errorCode").GetInt32());
+        Assert.Equal(source.LastIndexOf(offending, StringComparison.Ordinal),
             result.GetProperty("errorSpan").GetProperty("start").GetInt32());
     }
 }

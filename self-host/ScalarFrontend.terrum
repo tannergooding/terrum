@@ -212,6 +212,33 @@ mut class ScalarFrontendState
 
     private mut bool ParseExpression(int32 expectedType, out ScalarFrontendExpression expression)
     {
+        mut int32 depth = 0;
+        require _tokens.TryGet(_at, out var first);
+        mut Token next = first;
+        while (next.Kind == 46)
+        {
+            _at = _at + 1;
+            depth = depth + 1;
+            require _tokens.TryGet(_at, out var afterOpen);
+            next = afterOpen;
+        }
+        if (!ParseExpressionCore(expectedType, out var inner))
+        {
+            return false;
+        }
+        for (mut int32 index = 0; index < depth; index = index + 1)
+        {
+            if (!Take(47, out var close))
+            {
+                return false;
+            }
+        }
+        expression = inner;
+        return true;
+    }
+
+    private mut bool ParseExpressionCore(int32 expectedType, out ScalarFrontendExpression expression)
+    {
         require _tokens.TryGet(_at, out var literal);
         mut Token numberToken = literal;
         bool negative = literal.Kind == 58;
