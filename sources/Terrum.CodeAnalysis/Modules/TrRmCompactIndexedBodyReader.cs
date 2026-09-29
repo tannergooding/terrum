@@ -414,9 +414,16 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         var definition = Read(extent, ref cursor, 4);
                         target = (int)(definition & 0xFF_FFFF);
                         if (definition >> 24 != 0x16 || modules.Count < 2
-                            || target == 0 || target > methods.Count
-                            || methods.GetOwnerModule(target) == callerModule
-                            || methods.GetBodyRow(target) == 0)
+                            || target == 0 || target > methods.Count)
+                        {
+                            throw InvalidBody();
+                        }
+
+                        var targetModule = methods.GetOwnerModule(target);
+                        var (callerTarget, callerPolicy) = modules.GetRequirements(callerModule);
+                        var (targetRequirement, targetPolicy) = modules.GetRequirements(targetModule);
+                        if (targetModule == callerModule || methods.GetBodyRow(target) == 0
+                            || targetPolicy != callerPolicy || targetRequirement > callerTarget)
                         {
                             throw InvalidBody();
                         }

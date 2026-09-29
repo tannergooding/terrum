@@ -535,6 +535,20 @@ public sealed partial class CliTests
             Assert.Equal(1, privateCall);
             BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(40), 2);
 
+            BinaryPrimitives.WriteUInt32LittleEndian(modules.AsSpan(4), 0);
+            await File.WriteAllBytesAsync(path, Artifact());
+            var (targetStructural, _, _) = await RunAsync([],
+                "validate-trrm-structure", path, "--json");
+            Assert.Equal(0, targetStructural);
+            var (targetMismatch, _, _) = await RunAsync([],
+                "validate-trrm-compact-indexed", path, "--json");
+            Assert.Equal(1, targetMismatch);
+            BinaryPrimitives.WriteUInt32LittleEndian(modules.AsSpan(4), 1);
+            await File.WriteAllBytesAsync(path, Artifact());
+            var (compatibleTarget, _, _) = await RunAsync([],
+                "validate-trrm-compact-indexed", path, "--json");
+            Assert.Equal(0, compatibleTarget);
+
             byte[] encodedCall = [0x12, 2, 0, 2, 0, 0, 0x16, 1, 1];
             var call = body.AsSpan().IndexOf(encodedCall);
             Assert.True(call >= 0);

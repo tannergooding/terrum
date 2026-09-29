@@ -960,6 +960,18 @@ public sealed class TrRmBodyExampleTests
             parameterTypeIds: [2], secondMethod: true, packedTarget: true));
         Assert.Equal((1, 2), InspectIndexed(body, parameterCount: 1,
             parameterTypeIds: [2], secondMethod: true, packedTarget: true,
+            callerTargetRequirement: 1));
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(body,
+            parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
+            packedTarget: true, packedTargetRuntimePolicy: 1));
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(body,
+            parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
+            packedTarget: true, packedTargetRequirement: 1));
+        Assert.Equal((1, 2), InspectIndexed(body, parameterCount: 1,
+            parameterTypeIds: [2], secondMethod: true, packedTarget: true,
+            callerTargetRequirement: 1, packedTargetRequirement: 1));
+        Assert.Equal((1, 2), InspectIndexed(body, parameterCount: 1,
+            parameterTypeIds: [2], secondMethod: true, packedTarget: true,
             ownedTarget: true));
         Assert.Throws<InvalidDataException>(() => InspectIndexed(body,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
@@ -1131,7 +1143,8 @@ public sealed class TrRmBodyExampleTests
         byte firstTypeCode = 1, bool secondMethod = false,
         bool importedTarget = false, bool expectedTarget = false,
         bool ownedTarget = false, bool packedTarget = false,
-        bool privateOwner = false)
+        bool privateOwner = false, byte callerTargetRequirement = 0,
+        byte packedTargetRequirement = 0, byte packedTargetRuntimePolicy = 0)
     {
         var names = new TrRmStringTableReader(
             TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]), 2);
@@ -1148,8 +1161,11 @@ public sealed class TrRmBodyExampleTests
                 BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
             }
             BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(44), 2);
+            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(48), packedTargetRequirement);
+            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(52), packedTargetRuntimePolicy);
             BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(80), 2);
         }
+        BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(4), callerTargetRequirement);
         BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(8), runtimePolicy);
         var modules = new TrRmModuleTableReader(module, packedTarget ? 2 : 1,
             names, expectedTarget ? 1 : 0,
