@@ -2445,6 +2445,183 @@ public sealed class ManagedScannerComponentTests
     private static Task<BoundProgram> CompileParserAsync(string text, string entry, BoundRuntimePolicy policy) =>
         CompileAsync(text, entry, policy, "ScalarFunctionParser");
 
+    [Theory]
+    [InlineData("int32 Value(int32 x) { return x; }", "Value(42)", "42", 1, 1, 0, 1, 0, false)]
+    [InlineData("uint64 Value(uint64 x, uint64 y) { return x + y; }", "Value(uint64(40), uint64(2))", "uint64(42)", 4, 2, 57, 1, 2, false)]
+    [InlineData("int32 Value(int32 x, int32 y) { return x - y; }", "Value(50, 8)", "42", 1, 2, 58, 1, 2, false)]
+    [InlineData("int32 Value(int32 x, int32 y) { return y - x; }", "Value(8, 50)", "42", 1, 2, 58, 2, 1, false)]
+    [InlineData("int32 Value(int32 x, int32 y) { return x + y; }", "Value(int32.MaxValue - 1, 1)", "int32.MaxValue", 1, 2, 57, 1, 2, false)]
+    [InlineData("bool Value(int32 x, int32 y) { return x < y; }", "Value(1, 2)", "true", 5, 2, 67, 1, 2, false)]
+    [InlineData("int32 Value(int32 x, int32 y) { if (x < y) { return x + y; } else { return x - y; } }", "Value(20, 22)", "42", 1, 2, 57, 1, 2, true)]
+    [InlineData("int32 Value(int32 x, int32 y) { if (x >= y) { return x; } else { return y; } }", "Value(42, 3)", "42", 1, 2, 0, 1, 0, true)]
+    [InlineData("uint32 Value(uint32 x) { return x - x; }", "Value(uint32.MaxValue)", "uint32(0)", 2, 1, 58, 1, 1, false)]
+    [InlineData("bool Value(bool x) { return x; }", "Value(true)", "true", 5, 1, 0, 1, 0, false)]
+    [InlineData("char16 Value(char16 x, char16 y) { if (x != y) { return y; } else { return x; } }", "Value(char16(1), char16(42))", "char16(42)", 6, 2, 0, 2, 0, true)]
+    public async Task ScannerOwnedScalarFrontendPublishesTypedShapesAsync(
+        string text, string call, string expected, int returnType, int count,
+        int operation, int left, int right, bool conditional)
+    {
+        var syntax = SyntaxTree.Parse(text);
+        Assert.Empty(syntax.Diagnostics);
+        var functionName = syntax.Tokens[1].Span;
+        var valueStart = text.IndexOf("return ", StringComparison.Ordinal) + "return ".Length;
+        var valueLength = text.IndexOf(';', valueStart) - valueStart;
+        var conditionOperation = conditional
+            ? text.Contains(" < ", StringComparison.Ordinal) ? 67
+                : text.Contains(" >= ", StringComparison.Ordinal) ? 70 : 66
+            : 0;
+        var conditionStart = conditional ? text.IndexOf("if (", StringComparison.Ordinal) + 4 : 0;
+        var conditionLength = conditional ? text.IndexOf(')', conditionStart) - conditionStart : 0;
+        var secondReturnStart = conditional
+            ? text.IndexOf("return ", valueStart, StringComparison.Ordinal) + "return ".Length : 0;
+        var secondReturnLength = conditional ? text.IndexOf(';', secondReturnStart) - secondReturnStart : 0;
+        var firstParameter = syntax.Tokens[4].Span;
+        var secondParameter = count == 2 ? syntax.Tokens[7].Span : default;
+        var firstTypeText = text.Substring(syntax.Tokens[3].Span.Start, syntax.Tokens[3].Span.Length);
+        var firstType = firstTypeText switch
+        {
+            "int32" => 1, "uint32" => 2, "int64" => 3, "uint64" => 4,
+            "bool" => 5, "char16" => 6,
+            _ => throw new InvalidOperationException(firstTypeText),
+        };
+        var assertion = $$"""
+            require TryScanScalarFrontend(out var result);
+            if (!result.IsValid || result.ErrorCode != 0
+                || result.ReturnType != {{returnType}} || result.ParameterCount != {{count}}
+                || result.Name.Start != {{functionName.Start}}
+                || result.Name.Length != {{functionName.Length}}
+                || result.FirstType != {{firstType}}
+                || result.SecondType != {{(count == 2 ? firstType : 0)}}
+                || result.FirstName.Start != {{firstParameter.Start}}
+                || result.FirstName.Length != {{firstParameter.Length}}
+                || result.SecondName.Start != {{secondParameter.Start}}
+                || result.SecondName.Length != {{secondParameter.Length}}
+                || result.WhenTrue.Operation != {{operation}}
+                || result.WhenTrue.Type != {{returnType}}
+                || result.WhenTrue.LeftParameter != {{left}}
+                || result.WhenTrue.RightParameter != {{right}}
+                || result.WhenTrue.Span.Start != {{valueStart}}
+                || result.WhenTrue.Span.Length != {{valueLength}}
+                || result.HasCondition != {{conditional.ToString().ToLowerInvariant()}}
+                || result.Condition.Operation != {{conditionOperation}}
+                || result.Condition.Type != {{(conditional ? 5 : 0)}}
+                || result.Condition.Span.Start != {{conditionStart}}
+                || result.Condition.Span.Length != {{conditionLength}}
+                || result.WhenFalse.Type != {{(conditional ? returnType : 0)}}
+                || result.WhenFalse.Span.Start != {{secondReturnStart}}
+                || result.WhenFalse.Span.Length != {{secondReturnLength}})
+            {
+                return 1;
+            }
+            return 42;
+            """;
+        var entry = "using Terrum.CodeAnalysis; int32 Main() { " + assertion + " }";
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var hostedSource = text + $" int32 Main() {{ if (ValueResult()) {{ return 42; }} return 1; }} bool ValueResult() {{ return {call} == {expected}; }}";
+            var hosted = Compilation.Create(SyntaxTree.Parse(hostedSource), (BoundRuntimePolicy)policy);
+            Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
+            Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
+                "ScalarFrontend").ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData("int32 Value(int32 x, int32 x) { return x; }", 4, "x)")]
+    [InlineData("int32 Value(int32 x) { return y; }", 3, "y;")]
+    [InlineData("int32 Value(uint32 x) { return x; }", 2, "x;")]
+    [InlineData("int32 Value(int32 x, uint32 y) { return x + y; }", 2, "+ y")]
+    [InlineData("bool Value(bool x, bool y) { return x < y; }", 2, "< y")]
+    [InlineData("int32 Value(int32 x) { return x + unknown; }", 3, "unknown")]
+    [InlineData("int32 Value(int32 x) { return x }", 1, "}")]
+    [InlineData("int32 Value(int32 x, int32 y) { return x + y + x; }", 1, "+ x")]
+    [InlineData("int32 Value(int32 x) { if (x) { return x; } else { return x; } }", 2, "x) { return x")]
+    [InlineData("int32 Value(int32 x) { return x; } int32 Other() { return x; }", 1, "int32 Other")]
+    public async Task ScannerOwnedScalarFrontendRejectsInvalidOrUnsupportedShapesAsync(
+        string text, int code, string offending)
+    {
+        var expectedStart = text.IndexOf(offending, StringComparison.Ordinal);
+        Assert.True(expectedStart >= 0);
+        var expectedLength = SyntaxTree.Parse(text).Tokens
+            .Single(token => token.Span.Start == expectedStart).Span.Length;
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                require TryParseScalarFrontend(move tokens, out var result);
+                if (result.IsValid || result.ErrorCode != {{code}}
+                    || result.ErrorSpan.Start != {{expectedStart}}
+                    || result.ErrorSpan.Length != {{expectedLength}}
+                    || result.ReturnType != 0 || result.ParameterCount != 0)
+                {
+                    return 1;
+                }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
+                "ScalarFrontend").ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task ScannerOwnedScalarFrontendBoundsTokenStorageAsync(NativeRuntimePolicy policy)
+    {
+        var text = "int32 Value(int32 x) { return x; } " + string.Join(' ', Enumerable.Repeat("extra", 65));
+        var excess = SyntaxTree.Parse(text).Tokens[64].Span;
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                require TryParseScalarFrontend(move tokens, out var result);
+                if (result.IsValid || result.ErrorCode != 1
+                    || result.ErrorSpan.Start != {{excess.Start}}
+                    || result.ErrorSpan.Length != {{excess.Length}}
+                    || result.ReturnType != 0 || result.ParameterCount != 0)
+                {
+                    return 1;
+                }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
+            "ScalarFrontend").ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task ScannerOwnedScalarFrontendLeavesLexicalErrorsWithScannerAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                if (TryScanScalarFrontend(out var result)) { return 1; }
+                require TokenDiagnosticSnapshot.TryBuild(init var diagnostics);
+                if (diagnostics.GetCount() != 1) { return 2; }
+                require diagnostics.TryGet(0, out var code, out var span);
+                if (code == 0 || span.Start != 0 || span.Length != 1) { return 3; }
+                return 42;
+            }
+            """;
+        var program = await CompileAsync("\uD800", Entry, (BoundRuntimePolicy)policy,
+            "ScalarFrontend").ConfigureAwait(true);
+        Assert.Equal(42, NativeJit.Execute(program, policy));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
     private static Task<BoundProgram> CompilePairParserAsync(string text, string entry, BoundRuntimePolicy policy) =>
         CompileAsync(text, entry, policy, "ScalarParameterPairParser");
 

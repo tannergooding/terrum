@@ -1,0 +1,401 @@
+namespace Terrum.CodeAnalysis;
+
+// Scanner-5 token ordinals. Invalid results publish no partial artifact:
+// 1 = unsupported syntax/bound, 2 = type, 3 = unresolved name, 4 = duplicate name.
+// Expressions preserve operator identities; later lowering must retain checked arithmetic.
+// This in-process contract uses UTF-16 SourceRange values against the input source.
+// Parameter slots are 1-based (0 means absent); Operation is 0 for a parameter
+// reference or the scanner TokenKind ordinal for one binary operator. An invalid
+// result has only ErrorCode/ErrorSpan; all other fields are empty. Lexical errors
+// prevent snapshot publication and remain in TokenDiagnosticSnapshot.
+public class ScalarFrontendExpression
+{
+    public int32 Type;
+    public int32 Operation;
+    public int32 LeftParameter;
+    public int32 RightParameter;
+    public SourceRange Span;
+
+    public ScalarFrontendExpression(int32 type, int32 operation, int32 left,
+        int32 right, SourceRange span)
+    {
+        Type = type;
+        Operation = operation;
+        LeftParameter = left;
+        RightParameter = right;
+        Span = span;
+    }
+}
+
+public class ScalarFrontendResult
+{
+    public bool IsValid;
+    public int32 ErrorCode;
+    public SourceRange ErrorSpan;
+    public int32 ReturnType;
+    public int32 ParameterCount;
+    public int32 FirstType;
+    public int32 SecondType;
+    public SourceRange Name;
+    public SourceRange FirstName;
+    public SourceRange SecondName;
+    public bool HasCondition;
+    public ScalarFrontendExpression Condition;
+    public ScalarFrontendExpression WhenTrue;
+    public ScalarFrontendExpression WhenFalse;
+
+    public ScalarFrontendResult(bool valid, int32 errorCode, SourceRange errorSpan,
+        int32 returnType, int32 parameterCount, int32 firstType, int32 secondType,
+        SourceRange name, SourceRange firstName, SourceRange secondName,
+        bool hasCondition, ScalarFrontendExpression condition,
+        ScalarFrontendExpression whenTrue, ScalarFrontendExpression whenFalse)
+    {
+        IsValid = valid;
+        ErrorCode = errorCode;
+        ErrorSpan = errorSpan;
+        ReturnType = returnType;
+        ParameterCount = parameterCount;
+        FirstType = firstType;
+        SecondType = secondType;
+        Name = name;
+        FirstName = firstName;
+        SecondName = secondName;
+        HasCondition = hasCondition;
+        Condition = condition;
+        WhenTrue = whenTrue;
+        WhenFalse = whenFalse;
+    }
+}
+
+mut class ScalarFrontendState
+{
+    private ManagedTokenChain _tokens;
+    private mut int32 _at;
+    private mut int32 _error;
+    private mut SourceRange _errorSpan;
+    private mut Token _first;
+    private mut Token _second;
+    private mut int32 _firstType;
+    private mut int32 _secondType;
+    private mut int32 _parameterCount;
+
+    public ScalarFrontendState(ManagedTokenChain tokens, SourceRange empty)
+    {
+        _tokens = tokens;
+        _at = 0;
+        _error = 0;
+        _errorSpan = empty;
+        _first = new Token(2, empty);
+        _second = new Token(2, empty);
+        _firstType = 0;
+        _secondType = 0;
+        _parameterCount = 0;
+    }
+
+    private mut void FailAt(int32 code, SourceRange span)
+    {
+        if (_error == 0)
+        {
+            _error = code;
+            _errorSpan = span;
+        }
+    }
+
+    private mut void Fail(int32 code)
+    {
+        if (_tokens.TryGet(_at, out var token))
+        {
+            FailAt(code, token.Range);
+        }
+        else
+        {
+            require SourceRange.TryCreate(Host.Source.Length, 0, out var end);
+            FailAt(code, end);
+        }
+    }
+
+    private mut bool Take(int32 kind, out Token token)
+    {
+        if (!_tokens.TryGet(_at, out var current) || current.Kind != kind)
+        {
+            Fail(1);
+            return false;
+        }
+        _at = _at + 1;
+        token = current;
+        return true;
+    }
+
+    private mut bool ParseParameter(out int32 type, out Token name)
+    {
+        if (!Take(2, out var typeToken))
+        {
+            return false;
+        }
+        if (!TryGetScalarType(typeToken, out var selected))
+        {
+            FailAt(2, typeToken.Range);
+            return false;
+        }
+        if (!Take(2, out var parameter))
+        {
+            return false;
+        }
+        if (_parameterCount > 0 && SameTokenSpelling(_first, parameter))
+        {
+            FailAt(4, parameter.Range);
+            return false;
+        }
+        type = selected;
+        name = parameter;
+        return true;
+    }
+
+    private mut bool ParseExpression(out ScalarFrontendExpression expression)
+    {
+        if (!Take(2, out var left))
+        {
+            return false;
+        }
+        mut int32 leftIndex = 0;
+        mut int32 selected = 0;
+        if (_parameterCount > 0 && SameTokenSpelling(_first, left))
+        {
+            leftIndex = 1;
+            selected = _firstType;
+        }
+        else if (_parameterCount > 1 && SameTokenSpelling(_second, left))
+        {
+            leftIndex = 2;
+            selected = _secondType;
+        }
+        if (selected == 0)
+        {
+            FailAt(3, left.Range);
+            return false;
+        }
+
+        mut int32 operation = 0;
+        mut int32 rightIndex = 0;
+        mut int32 end = left.Range.End;
+        require _tokens.TryGet(_at, out var next);
+        if (next.Kind == 57 || next.Kind == 58
+            || (next.Kind >= 65 && next.Kind <= 70))
+        {
+            operation = next.Kind;
+            _at = _at + 1;
+            if (!Take(2, out var right))
+            {
+                return false;
+            }
+            if (_parameterCount > 0 && SameTokenSpelling(_first, right))
+            {
+                rightIndex = 1;
+            }
+            else if (_parameterCount > 1 && SameTokenSpelling(_second, right))
+            {
+                rightIndex = 2;
+            }
+            if (rightIndex == 0)
+            {
+                FailAt(3, right.Range);
+                return false;
+            }
+            mut int32 rightType = _firstType;
+            if (rightIndex == 2)
+            {
+                rightType = _secondType;
+            }
+            if (selected != rightType || ((operation == 57 || operation == 58)
+                && (selected == 5 || selected == 6))
+                || (operation >= 65 && selected == 5))
+            {
+                FailAt(2, next.Range);
+                return false;
+            }
+            end = right.Range.End;
+        }
+        require SourceRange.TryCreate(left.Range.Start, end - left.Range.Start, out var span);
+        if (operation >= 65)
+        {
+            selected = 5;
+        }
+        require ScalarFrontendExpression.TryCreate(selected, operation, leftIndex,
+            rightIndex, span, out var created);
+        expression = created;
+        return true;
+    }
+
+    private mut bool ParseReturn(int32 returnType, out ScalarFrontendExpression expression)
+    {
+        if (!Take(19, out var keyword) || !ParseExpression(out var found))
+        {
+            return false;
+        }
+        if (found.Type != returnType)
+        {
+            FailAt(2, found.Span);
+            return false;
+        }
+        if (!Take(52, out var semicolon))
+        {
+            return false;
+        }
+        expression = found;
+        return true;
+    }
+
+    private mut bool ParseHeader(out int32 returnType, out SourceRange name)
+    {
+        if (!Take(2, out var typeToken))
+        {
+            return false;
+        }
+        if (!TryGetScalarType(typeToken, out var selected))
+        {
+            FailAt(2, typeToken.Range);
+            return false;
+        }
+        if (!Take(2, out var function) || !Take(46, out var openParameters))
+        {
+            return false;
+        }
+        require _tokens.TryGet(_at, out var next);
+        if (next.Kind != 47)
+        {
+            if (!ParseParameter(out var firstType, out var first))
+            {
+                return false;
+            }
+            _firstType = firstType;
+            _first = first;
+            _parameterCount = 1;
+            require _tokens.TryGet(_at, out var comma);
+            if (comma.Kind == 53)
+            {
+                _at = _at + 1;
+                if (!ParseParameter(out var secondType, out var second))
+                {
+                    return false;
+                }
+                _secondType = secondType;
+                _second = second;
+                _parameterCount = 2;
+            }
+        }
+        if (!Take(47, out var closeParameters) || !Take(48, out var openBody))
+        {
+            return false;
+        }
+        returnType = selected;
+        name = function.Range;
+        return true;
+    }
+
+    public mut bool TryParse(out ScalarFrontendResult result)
+    {
+        require SourceRange.TryCreate(0, 0, out var empty);
+        require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
+        mut SourceRange name = empty;
+        mut int32 returnType = 0;
+        mut bool hasCondition = false;
+        mut ScalarFrontendExpression condition = absent;
+        mut ScalarFrontendExpression whenTrue = absent;
+        mut ScalarFrontendExpression whenFalse = absent;
+
+        if (_tokens.GetCount() > 64)
+        {
+            Fail(1);
+        }
+        else if (ParseHeader(out var selectedReturnType, out var foundName))
+        {
+            returnType = selectedReturnType;
+            name = foundName;
+            require _tokens.TryGet(_at, out var bodyNext);
+            if (bodyNext.Kind == 16)
+            {
+                hasCondition = true;
+                _at = _at + 1;
+                if (Take(46, out var openCondition)
+                    && ParseExpression(out var predicate))
+                {
+                    if (predicate.Type != 5)
+                    {
+                        FailAt(2, predicate.Span);
+                    }
+                    else
+                    {
+                        condition = predicate;
+                    }
+                }
+                if (_error == 0 && Take(47, out var closeCondition)
+                    && Take(48, out var openTrue)
+                    && ParseReturn(returnType, out var firstReturn)
+                    && Take(49, out var closeTrue)
+                    && Take(17, out var otherwise)
+                    && Take(48, out var openFalse)
+                    && ParseReturn(returnType, out var secondReturn)
+                    && Take(49, out var closeFalse))
+                {
+                    whenTrue = firstReturn;
+                    whenFalse = secondReturn;
+                }
+            }
+            else if (ParseReturn(returnType, out var found))
+            {
+                whenTrue = found;
+            }
+            if (_error == 0 && Take(49, out var closeBody)
+                && Take(0, out var eof) && _at != _tokens.GetCount())
+            {
+                Fail(1);
+            }
+        }
+        if (_error != 0)
+        {
+            return ScalarFrontendResult.TryCreate(false, _error, _errorSpan, 0, 0,
+                0, 0, empty, empty, empty, false, absent, absent, absent, out result);
+        }
+        return ScalarFrontendResult.TryCreate(true, 0, empty, returnType, _parameterCount,
+            _firstType, _secondType, name, _first.Range, _second.Range,
+            hasCondition, condition, whenTrue, whenFalse, out result);
+    }
+}
+
+bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult result)
+{
+    require SourceRange.TryCreate(0, 0, out var empty);
+    int32 count = tokens.GetCount();
+    if (count > 64)
+    {
+        require tokens.TryGet(64, out var excess);
+        require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
+        return ScalarFrontendResult.TryCreate(false, 1, excess.Range, 0, 0, 0, 0,
+            empty, empty, empty, false, absent, absent, absent, out result);
+    }
+    if (count < 1 || !ManagedTokenChain.TryCreate(out var chain))
+    {
+        return false;
+    }
+    // Managed classes cannot own a unique snapshot; copy only validated token values
+    // into the existing bounded chain, without rescanning source or integer text.
+    for (mut int32 at = 0; at < count; at = at + 1)
+    {
+        require tokens.TryGet(at, out var token);
+        require chain.TryAppend(token.Kind, token.Range.Start, token.Range.Length);
+    }
+    if (!ScalarFrontendState.TryCreate(chain, empty, out var state))
+    {
+        return false;
+    }
+    return state.TryParse(out result);
+}
+
+bool TryScanScalarFrontend(out ScalarFrontendResult result)
+{
+    if (!TokenSnapshot.TryScan(init var tokens))
+    {
+        return false;
+    }
+    return TryParseScalarFrontend(move tokens, out result);
+}

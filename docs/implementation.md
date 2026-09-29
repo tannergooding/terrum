@@ -846,6 +846,21 @@ publication beside their existing `out` forms. Failed indexes, end-of-chain
 and invalidated cursors leave the destination vacant; copied tokens remain
 valid after their source links are collected.
 
+The bounded [Terrum-authored scalar frontend](../self-host/ScalarFrontend.terrum)
+consumes one successful scanner token snapshot and publishes an in-process
+typed result: parameter types and names, expression operators and parameter
+references, optional conditional branches, and UTF-16 spans. It accepts one
+function with at most two scalar parameters and one operation per expression;
+unsupported or invalid shapes return a code and span without a partial
+artifact. Lexical failures remain scanner diagnostics. AOT/JIT execute this
+phase with the host source buffers, but `build-component` still passes
+scanner records to the hosted parser and binder. Connecting the native phase
+requires a validated native-to-host projection of its typed result at that
+handoff; the phase is not a standalone compiler or a persisted native
+bootstrap artifact. The native compiler-primitives DLL does not include it
+because its token and `Host.Source` dependencies lack a standalone host
+adapter.
+
 The separate [integer-parsing candidate](../self-host/IntegerParsing.terrum)
 uses the immutable host source grant and checked wide-radix accumulation to
 parse strict ASCII slices into signed or unsigned 32- and 64-bit outputs.
