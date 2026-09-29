@@ -12,6 +12,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly ref struct TrRmCompactIndexedBodyReader
 {
     private readonly record struct Edge(int Target, int[] Arguments);
+    private readonly record struct LoopRegion(int Header, int Exit);
 
     private readonly int[] _operationCounts;
 
@@ -74,7 +75,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         var typeCount = ReadCount(body, ref position, width);
         if (BlockCount == 0 || BlockCount > (body.Length - position) / (3 * width + 1)
             || ValueCount > (body.Length - position) / (3 * width)
-            || regionCount > 1 || typeCount > (body.Length - position) / 4)
+            || regionCount > BlockCount || typeCount > (body.Length - position) / 4
+            || regionCount > (body.Length - position - 4 * typeCount) / (1 + 4 * width))
         {
             throw InvalidBody();
         }
@@ -98,24 +100,25 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             mappedTypes[typeId] = type;
         }
 
-        var loopHeader = 0;
-        var loopExit = 0;
-        if (regionCount != 0)
+        var regions = new LoopRegion[regionCount + 1];
+        for (var region = 1; region <= regionCount; region++)
         {
-            if (body.Length - position < 1 + 4 * width || Read(body, ref position, 1) != 1
+            if (Read(body, ref position, 1) != 1
                 || ReadCount(body, ref position, width) != 0)
             {
                 throw InvalidBody();
             }
 
-            loopHeader = ReadCount(body, ref position, width);
-            loopExit = ReadCount(body, ref position, width);
-            if (loopHeader == 0 || loopHeader > BlockCount
-                || loopExit == loopHeader || loopExit < 1 || loopExit > BlockCount
+            var header = ReadCount(body, ref position, width);
+            var exit = ReadCount(body, ref position, width);
+            if (header == 0 || header > BlockCount
+                || exit == header || exit < 1 || exit > BlockCount
                 || ReadCount(body, ref position, width) != 0)
             {
                 throw InvalidBody();
             }
+
+            regions[region] = new LoopRegion(header, exit);
         }
 
         var valueTypes = new ushort[ValueCount + 1];
@@ -204,7 +207,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             blockRegions[block] = (presence & 1) != 0
                 ? ReadCount(extent, ref cursor, width) : 0;
             if (blockRegions[block] > regionCount
-                || block == 1 && blockRegions[block] != (loopHeader == 1 ? 1 : 0))
+                || block == 1 && blockRegions[block] != 0
+                    && regions[blockRegions[block]].Header != 1)
             {
                 throw InvalidBody();
             }
@@ -755,36 +759,49 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
         }
 
-        if (loopHeader != 0 && (blockRegions[loopHeader] != 1
-            || blockRegions[loopExit] != 0))
+        for (var region = 1; region <= regionCount; region++)
         {
-            throw InvalidBody();
+            if (blockRegions[regions[region].Header] != region
+                || blockRegions[regions[region].Exit] != 0)
+            {
+                throw InvalidBody();
+            }
         }
 
-        var backedge = false;
+        var backedges = new bool[regionCount + 1];
         var reachable = new bool[BlockCount + 1];
         reachable[1] = true;
         for (var block = 1; block <= BlockCount; block++)
         {
             foreach (var edge in successors[block])
             {
-                if (blockRegions[block] != blockRegions[edge.Target]
-                    && edge.Target != (blockRegions[block] == 0 ? loopHeader : loopExit)
+                var sourceRegion = blockRegions[block];
+                var targetRegion = blockRegions[edge.Target];
+                if (sourceRegion != targetRegion
+                    && (sourceRegion != 0 && edge.Target != regions[sourceRegion].Exit
+                        || targetRegion != 0 && edge.Target != regions[targetRegion].Header)
                     || edge.Target <= block
-                        && (blockRegions[block] != 1 || edge.Target != loopHeader))
+                        && (sourceRegion == 0 || sourceRegion != targetRegion
+                            || edge.Target != regions[sourceRegion].Header))
                 {
                     throw InvalidBody();
                 }
 
-                backedge |= edge.Target <= block;
+                if (edge.Target <= block)
+                {
+                    backedges[sourceRegion] = true;
+                }
             }
         }
-        if (loopHeader != 0 && !backedge)
+        for (var region = 1; region <= regionCount; region++)
         {
-            throw InvalidBody();
+            if (!backedges[region])
+            {
+                throw InvalidBody();
+            }
         }
 
-        if (loopHeader == 0)
+        if (regionCount == 0)
         {
             for (var block = 1; block <= BlockCount; block++)
             {
@@ -872,7 +889,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 changed |= neededIn.Count != before;
             }
 
-            if (loopHeader == 0)
+            if (regionCount == 0)
             {
                 changed = false;
             }

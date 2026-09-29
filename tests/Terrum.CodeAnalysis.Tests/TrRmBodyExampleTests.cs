@@ -1038,6 +1038,8 @@ public sealed class TrRmBodyExampleTests
             resultTypeSpec: 2, parameterTypeIds: [2]));
         Assert.Equal((4, 7), InspectIndexed(IndexedScalarLoop(entryHeader: true),
             parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
+        Assert.Equal((7, 13), InspectIndexed(IndexedScalarLoop(siblingLoop: true),
+            parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
 
         var region = body.AsSpan().IndexOf(new byte[] { 1, 0, 2, 4, 0 });
         Assert.True(region >= 0);
@@ -1065,11 +1067,36 @@ public sealed class TrRmBodyExampleTests
             resultTypeSpec: 2, parameterTypeIds: [2]));
     }
 
+    [Fact]
+    public void CompactIndexedReaderRejectsMalformedSiblingLoopRegions()
+    {
+        var body = IndexedScalarLoop(siblingLoop: true);
+        var region = body.AsSpan().IndexOf(new byte[] { 1, 0, 5, 7, 0 });
+        Assert.True(region >= 0);
+        foreach (var (offset, replacement) in new[]
+            { (1, (byte)1), (2, (byte)2), (3, (byte)4) })
+        {
+            var invalid = (byte[])body.Clone();
+            invalid[region + offset] = replacement;
+            Assert.Throws<InvalidDataException>(() => InspectIndexed(invalid,
+                parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
+        }
+
+        var backedge = body.AsSpan().LastIndexOf(new byte[] { 0x80, 5, 1, 12 });
+        Assert.True(backedge >= 0);
+        var noSecondBackedge = (byte[])body.Clone();
+        noSecondBackedge[backedge + 1] = 7;
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(noSecondBackedge,
+            parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
+    }
+
     internal static byte[] IndexedScalarLoop(bool ghostLiveness = false,
-        bool entryHeader = false)
+        bool entryHeader = false, bool siblingLoop = false)
     {
         var blocks = new List<byte[]>();
-        var definitions = new byte[] { 0xFF, 0, 0xFF, 0, 0, 0, 0xFF };
+        var definitions = siblingLoop
+            ? new byte[] { 0xFF, 0, 0xFF, 0, 0, 0, 0xFF, 0xFF, 0, 0, 0, 0, 0xFF }
+            : new byte[] { 0xFF, 0, 0xFF, 0, 0, 0, 0xFF };
         var terminators = new List<byte>();
         void AddBlock(byte[] header, byte[][] operations, byte[] terminator, params int[] results)
         {
@@ -1106,20 +1133,44 @@ public sealed class TrRmBodyExampleTests
                 : [0x1D, 1, 2, 1, 3, 2, 1, 6, 3, 3, 1, 5, 1, 6, 2, 2],
             [[2, 5, 1, 1], [0x15, 6, 1, 3, 5]],
             [0x80, (byte)(entryHeader ? 1 : 2), 1, 6], 5, 6);
-        AddBlock([0x12, 1, 7, 1, 7, 0, 0],
-            [], [0x83, 7]);
+        AddBlock(siblingLoop
+            ? [0x1A, 1, 7, 1, 7, 1, 7, 0, 0]
+            : [0x12, 1, 7, 1, 7, 0, 0],
+            [], siblingLoop ? [0x80, 5, 1, 7] : [0x83, 7]);
+        if (siblingLoop)
+        {
+            AddBlock([0x1B, 2, 1, 8, 1, 8, 3, 8, 2, 9, 1, 10, 2, 2],
+                [[2, 9, 1, 0], [5, 10, 6, 8, 9]],
+                [0x81, 10, 6, 0, 7, 1, 8], 9, 10);
+            AddBlock([0x1D, 2, 1, 8, 1, 12, 3, 8, 1, 11, 1, 12, 2, 2],
+                [[2, 11, 1, 1], [0x15, 12, 1, 8, 11]],
+                [0x80, 5, 1, 12], 11, 12);
+            AddBlock([0x12, 1, 13, 1, 13, 0, 0],
+                [], [0x83, 13]);
+        }
 
-        var row = new List<byte> { 0x08, 4, 7, 1, 2,
+        var row = new List<byte> { 0x08, (byte)blocks.Count,
+            (byte)definitions.Length, (byte)(siblingLoop ? 2 : 1), 2,
             2, 0, 0, 0, 1, 0, 0, 0,
             1, 0, (byte)(entryHeader ? 1 : 2), 4, 0 };
-        var types = new byte[] { 1, 1, 1, 2, 1, 1, 1 };
-        var uses = new byte[] { 1, 1, 2, 1, 1, 1, 1 };
+        if (siblingLoop)
+        {
+            row.AddRange([1, 0, 5, 7, 0]);
+        }
+        var types = siblingLoop
+            ? new byte[] { 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 1, 1 }
+            : new byte[] { 1, 1, 1, 2, 1, 1, 1 };
+        var uses = siblingLoop
+            ? new byte[] { 1, 1, 2, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1 }
+            : new byte[] { 1, 1, 2, 1, 1, 1, 1 };
         for (var value = 0; value < types.Length; value++)
         {
             row.Add(types[value]);
             row.Add(uses[value]);
         }
-        row.AddRange([0, 2, 4, 6, 7]);
+        row.AddRange(siblingLoop
+            ? [0, 2, 4, 6, 7, 10, 12, 13]
+            : [0, 2, 4, 6, 7]);
         row.AddRange(definitions);
         var offset = 0;
         row.Add(0);

@@ -1250,8 +1250,8 @@ block and an existing operation or its terminator; it does not verify
 source-file contents.
 A separate compact-indexed reader checks the approved conditional-sum, merge
 and bounded loop examples and their scalar subset:
-root-free, fail-fast bodies with at most one flat loop region, including an
-entry-block header, with a declared exit and reachable backedge;
+root-free, fail-fast bodies with flat sibling loop regions, including an
+entry-block header, each with a declared exit and reachable backedge;
 `Branch` and `BranchIf` edges have checked typed block arguments. It accepts
 scalar `ConstBits`,
 `ConstSigned`, `Copy`, scalar `Unary`, `Binary`, integer `Convert`
@@ -1280,8 +1280,8 @@ patterns additionally have an independent data width. These widths are
 independent of the Body-local width.
 It checks type/definition/use indexes, operation and
 terminator offsets and live-in/out inventories against the decoded blocks,
-including the least live-value solution around a loop. Non-loop backedges,
-nested or multiple regions and other assigned indexed operations reject.
+including the least live-value solution around loops. Non-loop backedges,
+nested regions and other assigned indexed operations reject.
 `terrumc validate-trrm-compact-indexed <artifact> [--json]` opts into this
 subset across all owned Body rows after structural metadata checks; when
 SourceMap is present it checks block and operation/terminator ordinals.

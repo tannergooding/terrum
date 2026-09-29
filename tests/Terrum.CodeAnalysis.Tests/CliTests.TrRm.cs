@@ -583,8 +583,10 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
-    public async Task ValidateTrRmCompactIndexedChecksPersistedLoopRegionAsync()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ValidateTrRmCompactIndexedChecksPersistedLoopRegionAsync(bool siblingLoop)
     {
         var module = new byte[44];
         foreach (var offset in new[] { 0, 4, 28, 32, 36, 40 })
@@ -610,7 +612,7 @@ public sealed partial class CliTests
         var parameter = new byte[16];
         BinaryPrimitives.WriteUInt32LittleEndian(parameter, 1);
         BinaryPrimitives.WriteUInt32LittleEndian(parameter.AsSpan(8), 2);
-        var body = TrRmBodyExampleTests.IndexedScalarLoop();
+        var body = TrRmBodyExampleTests.IndexedScalarLoop(siblingLoop: siblingLoop);
         byte[] Artifact() => TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, module),
             new TrRmSection(0x0002, 0, 2, strings),
