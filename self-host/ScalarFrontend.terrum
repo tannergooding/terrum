@@ -375,6 +375,27 @@ mut class ScalarFrontendState
             expression = unary;
             return true;
         }
+        if (literal.Kind == 57
+            && _tokens.TryGet(_at + 1, out var plusOperand) && plusOperand.Kind == 3)
+        {
+            if (expectedType < 1 || expectedType > 4)
+            {
+                FailAt(2, literal.Range);
+                return false;
+            }
+            if (!TryReadMagnitude(plusOperand, _at + 1, expectedType, false,
+                plusOperand.Range, out var plusLow, out var plusHigh))
+            {
+                return false;
+            }
+            _at = _at + 2;
+            require SourceRange.TryCreate(literal.Range.Start,
+                plusOperand.Range.End - literal.Range.Start, out var plusSpan);
+            require ScalarFrontendExpression.TryCreate(expectedType, 657,
+                plusLow, plusHigh, plusSpan, out var plusLiteral);
+            expression = plusLiteral;
+            return true;
+        }
         mut Token numberToken = literal;
         bool negative = literal.Kind == 58;
         if (negative && _tokens.TryGet(_at + 1, out var nextNumber)

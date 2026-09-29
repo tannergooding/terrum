@@ -2990,7 +2990,11 @@ public sealed class ManagedScannerComponentTests
         0L, 163)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return ~0xFFFFFFD5; }",
         0L, 163)]
-    public async Task NativeScalarFrontendIntegerComplementExecutesAsync(
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return +42; }",
+        0L, 657)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return +42; }",
+        0L, 657)]
+    public async Task NativeScalarFrontendIntegerUnaryExecutesAsync(
         NativeRuntimePolicy policy, string text, long argument, int operation)
     {
         var source = SourceText.From(text);

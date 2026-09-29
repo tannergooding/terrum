@@ -214,6 +214,22 @@ public static class ScalarFrontendHost
                     && right == 0 && left >= 1 && left <= parameters && leftType == type
                     && tokens[1].Text == source.Text.Substring(name.Start, name.Length);
             }
+            if (operation == 657)
+            {
+                if (words[0] != 3 || expression.Type != type || type is not (1 or 2 or 3 or 4)
+                    || !ValidSpan(expression.Span, nonempty: true))
+                {
+                    return false;
+                }
+                var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
+                    expression.Span.Start, expression.Span.Length)));
+                var tokens = lexical.Tokens;
+                return lexical.Diagnostics.IsEmpty && tokens.Length == 3
+                    && tokens[0].Kind == TokenKind.Plus && tokens[0].Span.Start == 0
+                    && tokens[1].Kind == TokenKind.NumericLiteral
+                    && tokens[1].Span.End == expression.Span.Length
+                    && ValidMagnitude(tokens[1].Text.AsSpan(), type, false, left, right);
+            }
             if (operation / 100 == 5 && operation % 100 is >= 57 and <= 61 or 71 or 73 or 75)
             {
                 if (words[0] != 3 || expression.Type != type || type is not (1 or 2)
@@ -490,6 +506,20 @@ public static class ScalarFrontendHost
                 return new BoundUnary((TokenKind)expression.Operation,
                     new BoundRead(expression.LeftParameter - 1, type, operandSpan),
                     type, expression.Span);
+            }
+            if (expression.Operation == 657)
+            {
+                var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
+                    expression.Span.Start, expression.Span.Length)));
+                var token = lexical.Tokens[1];
+                var operandSpan = new TextSpan(expression.Span.Start + token.Span.Start, token.Span.Length);
+                var type = Type(expression.Type);
+                var value = expression.Type is 1 or 2
+                    ? expression.LeftParameter
+                    : unchecked((long)((ulong)(uint)expression.RightParameter << 32
+                        | (uint)expression.LeftParameter));
+                return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Plus,
+                    new BoundConstant(value, type, operandSpan), type, expression.Span));
             }
             if (expression.Operation / 100 == 5
                 && expression.Operation % 100 is >= 57 and <= 61 or 71 or 73 or 75)
