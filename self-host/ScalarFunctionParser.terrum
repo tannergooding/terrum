@@ -715,6 +715,131 @@ bool TryEvaluateTypedScalarComparisonReturn(TokenSnapshot tokens, TokenIntegerSn
     return true;
 }
 
+bool TryParseParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out int32 scalarType, out SourceRange name, out uint64 magnitude, out bool based)
+{
+    if (tokens.GetCount() != 14)
+    {
+        return false;
+    }
+    require tokens.TryGet(0, out var returnType);
+    require tokens.TryGet(1, out var function);
+    require tokens.TryGet(2, out var openParameters);
+    require tokens.TryGet(3, out var parameterType);
+    require tokens.TryGet(4, out var parameter);
+    require tokens.TryGet(5, out var closeParameters);
+    require tokens.TryGet(6, out var openBody);
+    require tokens.TryGet(7, out var returnKeyword);
+    require tokens.TryGet(8, out var parameterUse);
+    require tokens.TryGet(9, out var add);
+    require tokens.TryGet(10, out var literal);
+    require tokens.TryGet(11, out var semicolon);
+    require tokens.TryGet(12, out var closeBody);
+    require tokens.TryGet(13, out var eof);
+    if (!TryGetScalarType(returnType, out var selected)
+        || !TryGetScalarType(parameterType, out var matching) || selected != matching
+        || selected == 5 || selected == 6 || function.Kind != 2
+        || openParameters.Kind != 46 || parameter.Kind != 2 || closeParameters.Kind != 47
+        || openBody.Kind != 48 || returnKeyword.Kind != 19
+        || parameterUse.Kind != 2 || add.Kind != 57 || literal.Kind != 3
+        || semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0
+        || parameter.Range.Length != parameterUse.Range.Length)
+    {
+        return false;
+    }
+    for (mut int32 index = 0; index < parameter.Range.Length; index = index + 1)
+    {
+        if (Host.Source[parameter.Range.Start + index]
+            != Host.Source[parameterUse.Range.Start + index])
+        {
+            return false;
+        }
+    }
+    if (!integers.TryFind(10, out var overflow, out var low, out var high) || overflow)
+    {
+        return false;
+    }
+
+    scalarType = selected;
+    name = function.Range;
+    magnitude = DecodeScannerMagnitude(low, high);
+    based = IsBasedInteger(literal);
+    return true;
+}
+
+bool TryEvaluateInt32ParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    int32 parameter, out SourceRange name, out int32 result)
+{
+    if (!TryParseParameterAddReturn(move tokens, move integers,
+            out var selected, out var foundName, out var magnitude, out var based)
+        || selected != 1 || magnitude > uint64(uint32.MaxValue)
+        || (!based && magnitude > uint64(int32.MaxValue)))
+    {
+        return false;
+    }
+    mut int64 literal = int64(magnitude);
+    if (magnitude > uint64(int32.MaxValue))
+    {
+        literal = literal - 4294967296;
+    }
+    int64 sum = int64(parameter) + literal;
+    if (sum < int64(int32.MinValue) || sum > int64(int32.MaxValue))
+    {
+        return false;
+    }
+    name = foundName;
+    result = int32(sum);
+    return true;
+}
+
+bool TryEvaluateUInt32ParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    uint32 parameter, out SourceRange name, out uint32 result)
+{
+    if (!TryParseParameterAddReturn(move tokens, move integers,
+            out var selected, out var foundName, out var magnitude, out var based)
+        || selected != 2 || magnitude > uint64(uint32.MaxValue)
+        || uint64(parameter) + magnitude > uint64(uint32.MaxValue))
+    {
+        return false;
+    }
+    name = foundName;
+    result = uint32(uint64(parameter) + magnitude);
+    return true;
+}
+
+bool TryEvaluateInt64ParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    int64 parameter, out SourceRange name, out int64 result)
+{
+    if (!TryParseParameterAddReturn(move tokens, move integers,
+            out var selected, out var foundName, out var magnitude, out var based)
+        || selected != 3 || !TryDecodeSigned64Scalar(magnitude, based, out var literal))
+    {
+        return false;
+    }
+    if ((literal > 0 && parameter > int64.MaxValue - literal)
+        || (literal < 0 && parameter < int64.MinValue - literal))
+    {
+        return false;
+    }
+    name = foundName;
+    result = parameter + literal;
+    return true;
+}
+
+bool TryEvaluateUInt64ParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    uint64 parameter, out SourceRange name, out uint64 result)
+{
+    if (!TryParseParameterAddReturn(move tokens, move integers,
+            out var selected, out var foundName, out var magnitude, out var based)
+        || selected != 4 || parameter > uint64.MaxValue - magnitude)
+    {
+        return false;
+    }
+    name = foundName;
+    result = parameter + magnitude;
+    return true;
+}
+
 bool TryEvaluateInt32AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     out SourceRange name, out int32 result)
 {
