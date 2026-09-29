@@ -82,7 +82,8 @@ public static class ScalarFrontendHost
             || (words[15] == 0
                 ? !AllZero(16, 22) || !AllZero(28, WordCount)
                 : !ValidExpression(condition, 5, count)
-                    || !ValidExpression(whenFalse, words[5], count)))
+                    || !ValidExpression(whenFalse, words[5], count))
+            || !ValidBody())
         {
             throw InvalidResult();
         }
@@ -138,6 +139,93 @@ public static class ScalarFrontendHost
                     && tokens[offset + 7].Kind == TokenKind.Identifier
                     && tokens[offset + 7].Span == secondName
                     && tokens[offset + 4].Text != tokens[offset + 7].Text))));
+        }
+
+        bool ValidBody()
+        {
+            var headerEnd = count switch { 0 => name.End, 1 => firstName.End, _ => secondName.End };
+            var lexical = Lexer.Lex(SourceText.From(source.Text[headerEnd..]));
+            var tokens = lexical.Tokens;
+            var at = 0;
+            if (!lexical.Diagnostics.IsEmpty
+                || !Take(count == 0 ? TokenKind.OpenParen : TokenKind.CloseParen)
+                || (count == 0 && !Take(TokenKind.CloseParen))
+                || !Take(TokenKind.OpenBrace))
+            {
+                return false;
+            }
+
+            if (words[15] != 0
+                && (!Take(TokenKind.IfKeyword) || !Take(TokenKind.OpenParen)
+                    || !TakeExpression(condition) || !Take(TokenKind.CloseParen)
+                    || !Take(TokenKind.OpenBrace)))
+            {
+                return false;
+            }
+            if (!TakeReturn(whenTrue))
+            {
+                return false;
+            }
+            if (words[15] != 0)
+            {
+                if (!Take(TokenKind.CloseBrace)
+                    || (words[15] == 1 && (!Take(TokenKind.ElseKeyword)
+                        || !Take(TokenKind.OpenBrace)))
+                    || !TakeReturn(whenFalse)
+                    || (words[15] == 1 && !Take(TokenKind.CloseBrace)))
+                {
+                    return false;
+                }
+            }
+            return Take(TokenKind.CloseBrace) && Take(TokenKind.EndOfFile)
+                && at == tokens.Length;
+
+            bool Take(TokenKind kind)
+            {
+                if (at >= tokens.Length || tokens[at].Kind != kind)
+                {
+                    return false;
+                }
+                at++;
+                return true;
+            }
+
+            bool TakeReturn(ScalarFrontendExpression expression)
+                => Take(TokenKind.ReturnKeyword) && TakeExpression(expression)
+                    && Take(TokenKind.Semicolon);
+
+            bool TakeExpression(ScalarFrontendExpression expression)
+            {
+                var groups = 0;
+                while (at < tokens.Length && tokens[at].Kind == TokenKind.OpenParen
+                    && headerEnd + tokens[at].Span.Start < expression.Span.Start)
+                {
+                    at++;
+                    groups++;
+                }
+                if (at >= tokens.Length
+                    || headerEnd + tokens[at].Span.Start != expression.Span.Start)
+                {
+                    return false;
+                }
+                while (at < tokens.Length && tokens[at].Kind != TokenKind.EndOfFile
+                    && headerEnd + tokens[at].Span.End <= expression.Span.End)
+                {
+                    at++;
+                }
+                if (at == 0 || headerEnd + tokens[at - 1].Span.End != expression.Span.End)
+                {
+                    return false;
+                }
+                while (groups-- > 0)
+                {
+                    if (!Take(TokenKind.CloseParen))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }
         }
 
         bool ValidExpression(ScalarFrontendExpression expression, int type, int parameters)

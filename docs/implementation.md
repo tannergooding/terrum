@@ -877,7 +877,9 @@ and carries both literal magnitude words in the operand slots; two-literal
 fallthrough return from an `else` return without changing the buffer size. The
 `ScalarFrontendHost` reader bounds types, parameter indexes, operations and
 source spans, independently checks projected integer bits against source
-spelling and destination range, and rejects unpublished or malformed output. Its bounded
+spelling and destination range, and checks that expressions occupy the complete
+declared return/conditional body without unaccounted statements. It rejects
+unpublished or malformed output. Its bounded
 `BindLibrary` path lowers validated native facts directly to a
 verifier-checked `BoundProgram` without invoking the hosted parser or binder
 pass; signed unary literals reuse the scalar constant-folding helper;

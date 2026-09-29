@@ -2711,6 +2711,38 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("int32 Value(int32 x) { return x; return x; }")]
+    [InlineData("int32 Value(int32 x) { return x + x; }")]
+    [InlineData("int32 Value(int32 x) { if (true) { return x; } }")]
+    [InlineData("int32 Value(int32 x) { return x; } int32 Other() { return 1; }")]
+    public void ScalarFrontendProjectionRejectsForgedBodyShape(string text)
+    {
+        var words = new int[ScalarFrontendHost.WordCount];
+        words[0] = 3;
+        words[1] = 1;
+        words[5] = 1;
+        words[6] = 1;
+        words[7] = 1;
+        words[9] = 6;
+        words[10] = 5;
+        words[11] = 18;
+        words[12] = 1;
+        words[22] = 1;
+        words[24] = 1;
+        words[26] = 30;
+        words[27] = 1;
+        var bytes = new byte[words.Length * sizeof(int)];
+        for (var at = 0; at < words.Length; at++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(at * sizeof(int)), words[at]);
+        }
+        Assert.True(ScalarFrontendHost.ReadResult(
+            SourceText.From("int32 Value(int32 x) { return x; }"), bytes).IsValid);
+        Assert.Throws<ArgumentException>(() =>
+            ScalarFrontendHost.ReadResult(SourceText.From(text), bytes));
+    }
+
+    [Theory]
     [InlineData("int32 Value() { return 42; }")]
     [InlineData("uint64 Value() { return 18446744073709551615; }")]
     public async Task ScalarFrontendProjectionRejectsForgedIntegerBitsAsync(string text)
@@ -3180,6 +3212,11 @@ public sealed class ManagedScannerComponentTests
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
         }
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, 3);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(15 * sizeof(int)), 1);
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, 4);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(15 * sizeof(int)), 2);
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
         var call = new BoundCall(0, [new BoundConstant(input ? 1 : 0, PrimitiveType.Bool, default)],
             PrimitiveType.Int32, default);
