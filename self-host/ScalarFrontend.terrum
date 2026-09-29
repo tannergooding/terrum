@@ -307,6 +307,52 @@ mut class ScalarFrontendState
             expression = negated;
             return true;
         }
+        if (literal.Kind == 63)
+        {
+            _at = _at + 1;
+            require _tokens.TryGet(_at, out var operand);
+            if (expectedType < 1 || expectedType > 4)
+            {
+                FailAt(2, literal.Range);
+                return false;
+            }
+            mut int32 operation = 63;
+            mut int32 left = 0;
+            mut int32 right = 0;
+            if (operand.Kind == 3)
+            {
+                if (!TryReadMagnitude(operand, _at, expectedType, false,
+                    operand.Range, out left, out right))
+                {
+                    return false;
+                }
+                operation = 163;
+            }
+            else if (operand.Kind == 2)
+            {
+                if (!TryResolveParameter(operand, out left, out var parameterType))
+                {
+                    return false;
+                }
+                if (parameterType != expectedType)
+                {
+                    FailAt(2, operand.Range);
+                    return false;
+                }
+            }
+            else
+            {
+                FailAt(1, operand.Range);
+                return false;
+            }
+            _at = _at + 1;
+            require SourceRange.TryCreate(literal.Range.Start,
+                operand.Range.End - literal.Range.Start, out var span);
+            require ScalarFrontendExpression.TryCreate(expectedType, operation, left, right,
+                span, out var inverted);
+            expression = inverted;
+            return true;
+        }
         mut Token numberToken = literal;
         bool negative = literal.Kind == 58;
         if (negative && _tokens.TryGet(_at + 1, out var nextNumber)

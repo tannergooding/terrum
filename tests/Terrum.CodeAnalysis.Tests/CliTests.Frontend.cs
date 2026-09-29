@@ -205,6 +205,14 @@ public sealed partial class CliTests
     [InlineData("public int32 Value(int32 x) { return 0xFF & x; }")]
     [InlineData("public uint64 Value(uint64 x) { return 18446744073709551615 | x; }")]
     [InlineData("public uint32 Value(uint32 x) { return 0b101010 ^ x; }")]
+    [InlineData("public int32 Value(int32 x) { return ~x; }")]
+    [InlineData("public uint32 Value(uint32 x, uint32 y) { return ~y; }")]
+    [InlineData("public int64 Value(int64 x) { return ~x; }")]
+    [InlineData("public uint64 Value(uint64 x) { return ~x; }")]
+    [InlineData("public int32 Value() { return ~0xFFFFFFD5; }")]
+    [InlineData("public uint32 Value() { return ~4294967295; }")]
+    [InlineData("public int64 Value() { return ~0xFFFFFFFFFFFFFFFF; }")]
+    [InlineData("public uint64 Value() { return ~0xFFFFFFFFFFFFFFFF; }")]
     public async Task FrontendBuiltLibraryMatchesHostedNativeBytesAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -425,6 +433,7 @@ public sealed partial class CliTests
     [InlineData("int32 Value(int32 x) { return 2147483648 / x; }", "2147483648")]
     [InlineData("uint32 Value(uint32 x) { return x & 4294967296; }", "4294967296")]
     [InlineData("uint32 Value(uint32 x) { return 4294967296 | x; }", "4294967296")]
+    [InlineData("int32 Value() { return ~2147483648; }", "2147483648")]
     public async Task FrontendComponentRejectsOutOfRangeBinaryLiteralAsync(string source,
         string invalidLiteral)
     {
@@ -446,6 +455,7 @@ public sealed partial class CliTests
     [InlineData("char16 Value(char16 x) { return x & 42; }")]
     [InlineData("char16 Value(char16 x) { return 42 | x; }")]
     [InlineData("char16 Value(char16 x) { return x + 42; }")]
+    [InlineData("char16 Value(char16 x) { return ~x; }")]
     public async Task FrontendComponentRejectsUnsupportedScalarLiteralOperatorAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
