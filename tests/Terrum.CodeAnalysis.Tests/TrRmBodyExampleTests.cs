@@ -577,6 +577,64 @@ public sealed class TrRmBodyExampleTests
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
     }
 
+    [Fact]
+    public void CompactIndexedReaderBoundsWideBitPatternsAndSignedValues()
+    {
+        var section = WideIndexedConstant();
+        Assert.Equal((1, 2), InspectIndexed(section, 0, secondTypeCode: 9));
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
+
+        section[37] = 2;
+        BinaryPrimitives.WriteUInt64LittleEndian(section.AsSpan(40), 1UL << 63);
+        Assert.Equal((1, 2), InspectIndexed(section, 0, secondTypeCode: 9));
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
+        Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(section, 0, secondTypeCode: 0x0E));
+
+        section[36] = 0x3C;
+        Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(section, 0, secondTypeCode: 9));
+    }
+
+    [Fact]
+    public void CompactIndexedReaderAllowsWideReferenceOperandsIndependentlyOfBodyLayout()
+    {
+        var original = IndexedConstantCopy();
+        var section = new byte[original.Length + 4];
+        original.AsSpan(0, 39).CopyTo(section);
+        original.AsSpan(42).CopyTo(section.AsSpan(46));
+        section[4] = 40;
+        section[26] = 20;
+        section[27] = 18;
+        byte[] copy = [0xF0, 1, 3, 2, 0, 1, 0];
+        copy.CopyTo(section, 39);
+        Assert.Equal((1, 2), InspectIndexed(section, 0));
+
+        section[40] = 3;
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
+        section[40] = 0x31;
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
+    }
+
+    private static byte[] WideIndexedConstant()
+    {
+        var original = IndexedConstantCopy();
+        var section = new byte[original.Length + 9];
+        original.AsSpan(0, 35).CopyTo(section);
+        original.AsSpan(39).CopyTo(section.AsSpan(48));
+        section[4] = 45;
+        section[24] = 20;
+        section[26] = 25;
+        section[27] = 23;
+        section[35] = 0xF0;
+        section[36] = 0x30;
+        section[37] = 1;
+        section[38] = 1;
+        section[39] = 1;
+        BinaryPrimitives.WriteUInt64LittleEndian(section.AsSpan(40), ulong.MaxValue);
+        return section;
+    }
+
     private static byte[] IndexedConstantCopy()
         =>
         [

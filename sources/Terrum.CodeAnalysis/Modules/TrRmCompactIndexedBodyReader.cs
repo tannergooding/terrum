@@ -8,7 +8,7 @@ using System.IO;
 namespace Terrum.CodeAnalysis.Modules;
 
 /// <summary>Inspects the root-free, forward-branching scalar compact-indexed subset.</summary>
-/// <remarks>Only unprefixed scalar constants, Copy, checked integer addition, forward Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
+/// <remarks>Only scalar constants, Copy, checked integer addition, forward Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
 public readonly ref struct TrRmCompactIndexedBodyReader
 {
     private readonly record struct Edge(int Target, int[] Arguments);
@@ -249,8 +249,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             {
                 var operationOffset = cursor;
                 useOffset = cursor;
-                var opcode = Read(extent, ref cursor, 1);
-                var result = ReadCount(extent, ref cursor, 1);
+                var (opcode, referenceWidth, dataWidth) = ReadOperation(extent, ref cursor);
+                var result = ReadCount(extent, ref cursor, referenceWidth);
                 if (result != nextResult++ || result > ValueCount || owner[result] != block
                     || definitions[result - 1] != operationOffset)
                 {
@@ -259,20 +259,21 @@ public readonly ref struct TrRmCompactIndexedBodyReader
 
                 if (opcode is 1 or 2)
                 {
-                    var typeId = ReadCount(extent, ref cursor, 1);
-                    var bits = Read(extent, ref cursor, 1);
+                    var typeId = ReadCount(extent, ref cursor, referenceWidth);
+                    var bits = ReadData(extent, ref cursor, dataWidth);
                     if (typeId == 0 || typeId > typeCount
                         || mappedTypes[typeId] != valueTypes[result]
-                        || opcode == 1 && valueTypes[result] == 1 && bits > 1
+                        || opcode == 1 && (valueTypes[result] == 1 && bits > 1
+                            || valueTypes[result] is (8 or 0x0D) && bits > uint.MaxValue)
                         || opcode == 2 && (valueTypes[result] is not (8 or 9 or 0x0D or 0x0E)
-                            || bits > 0x7F && valueTypes[result] is (0x0D or 0x0E)))
+                            || !FitsSignedConstant(valueTypes[result], bits, dataWidth)))
                     {
                         throw InvalidBody();
                     }
                 }
                 else if (opcode == 3)
                 {
-                    var source = ReadCount(extent, ref cursor, 1);
+                    var source = ReadCount(extent, ref cursor, referenceWidth);
                     Use(source, ordinal);
                     if (valueTypes[source] != valueTypes[result])
                     {
@@ -282,8 +283,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 else if (opcode == 0x15)
                 {
                     var kind = Read(extent, ref cursor, 1);
-                    var left = ReadCount(extent, ref cursor, 1);
-                    var right = ReadCount(extent, ref cursor, 1);
+                    var left = ReadCount(extent, ref cursor, referenceWidth);
+                    var right = ReadCount(extent, ref cursor, referenceWidth);
                     if (kind != 1 || valueTypes[result] is not (8 or 9 or 0x0D or 0x0E)
                         || left <= 0 || left > ValueCount || right <= 0 || right > ValueCount
                         || valueTypes[left] != valueTypes[result]
@@ -487,6 +488,58 @@ public readonly ref struct TrRmCompactIndexedBodyReader
 
     private static bool Contains(int[] values, int value)
         => Array.BinarySearch(values, value) >= 0;
+
+    private static (uint Opcode, int ReferenceWidth, int DataWidth) ReadOperation(
+        ReadOnlySpan<byte> data, ref int position)
+    {
+        var opcode = Read(data, ref position, 1);
+        if (opcode != 0xF0)
+        {
+            return (opcode, 1, opcode is 1 or 2 ? 1 : 0);
+        }
+
+        var layout = Read(data, ref position, 1);
+        opcode = Read(data, ref position, 1);
+        if (layout == 0 || (layout & 0xCC) != 0 || (layout & 3) == 3
+            || opcode is not (1 or 2) && (layout & 0x30) != 0)
+        {
+            throw InvalidBody();
+        }
+
+        var referenceWidth = (layout & 3) switch { 0 => 1, 1 => 2, _ => 4 };
+        var dataWidth = opcode is 1 or 2 ? 1 << ((int)(layout >> 4) & 3) : 0;
+        return (opcode, referenceWidth, dataWidth);
+    }
+
+    private static ulong ReadData(ReadOnlySpan<byte> data, ref int position, int width)
+    {
+        if (width != 8)
+        {
+            return Read(data, ref position, width);
+        }
+
+        if (position > data.Length - width)
+        {
+            throw InvalidBody();
+        }
+
+        var bits = BinaryPrimitives.ReadUInt64LittleEndian(data[position..]);
+        position += width;
+        return bits;
+    }
+
+    private static bool FitsSignedConstant(byte type, ulong bits, int dataWidth)
+    {
+        var shift = 64 - dataWidth * 8;
+        var value = unchecked((long)(bits << shift)) >> shift;
+        return type switch
+        {
+            8 => value is >= int.MinValue and <= int.MaxValue,
+            9 => true,
+            0x0D => value is >= 0 and <= uint.MaxValue,
+            _ => value >= 0,
+        };
+    }
 
     private static Edge ReadEdge(ReadOnlySpan<byte> data, ref int position,
         int block, int count, int valueCount)
