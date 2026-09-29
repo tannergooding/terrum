@@ -53,22 +53,21 @@ opcode variant. There are two instruction envelopes:
 | Common | `opcode operands` | Reference, count and data operands each occupy one byte |
 | Wide | `F0 layout opcode operands` | `layout` selects the widths for this instruction alone; its `opcode` has exactly the common form's meaning |
 
-The approved metadata design encodes table references as fixed `u32`
-words, including TypeSpec references in MethodSig. This proposal instead
-uses selected widths for TypeSpec and FieldDef row references *inside
-Body*, as well as for body-local IDs. That cross-table exception is
-**not approved**. Before this draft can become an executable format,
-either Body cross-table references must use the approved `u32` encoding,
-or the metadata design must explicitly authorize compact Body-local
-encodings of those row numbers. The examples below show the current
-candidate, not a third encoding that can silently bypass that decision.
+As in the approved metadata design, every cross-table reference in Body
+is a fixed little-endian `u32` word with the column's typed or explicit
+kind rule. The Body header's type map holds TypeSpec references once;
+instructions and
+descriptors use compact one-based **Body-local type IDs** into that map.
+FieldDef row operands use fixed `u32` references directly. Neither a
+local type ID nor an instruction's `ref` width changes a metadata row
+number, bypasses its TypeSpec or changes its typed-reference rules.
 
 The `layout` byte selects widths independently by operand class; bits
 6–7 must be zero:
 
 | Bits | Operand class | Codes `0`, `1`, `2`, `3` |
 |---|---|---|
-| 0–1 | Reference (`r`, `p`, `t`, `m`, block, region, field row) | 1, 2, 4 bytes; `3` invalid (IDs are at most `u32`) |
+| 0–1 | Body-local reference (`r`, `p`, `t`, `m`, block, region) | 1, 2, 4 bytes; `3` invalid |
 | 2–3 | Count (argument, case, exit count) | 1, 2, 4 bytes; `3` invalid |
 | 4–5 | Data (signed literal or unsigned bit pattern) | 1, 2, 4, 8 bytes |
 
@@ -111,8 +110,9 @@ The policy for a trusted consumer that skips an entire unvisited block, which
 might contain an unknown opcode, also remains unresolved.
 
 An interpreter may dispatch on `(opcode, layout)` or decode native-width
-operands; either choice needs measured cost evidence. References `1..255`
-use the common form, `256..65535` use two bytes, and larger IDs use four.
+operands; either choice needs measured cost evidence. Body-local IDs `1..255` use the common form, `256..65535` use two bytes,
+and larger IDs use four. Fixed metadata `u32` operands do not widen with
+the instruction layout.
 This favors predictable dispatch and direct indexes for small methods over
 minimizing every large literal or body. Explicit edges, place-state joins and
 loop headers expose dataflow to consumers; no throughput or total-size win
@@ -128,8 +128,9 @@ addition, not a numeric fallback or user witness.
 
 The notation below exposes the metadata and Body facts needed to read the
 example; it is not wire syntax or a required source rewrite. `t1` is
-TypeSpec row 1, whose built-in form uses primitive code `0x08` for
-`int32`. `r1`–`r3` are one-based Body value IDs, not machine registers.
+Body-local type ID 1, mapped by a fixed `u32` header entry to TypeSpec
+row 1. That TypeSpec row's built-in form uses primitive code `0x08`
+for `int32`. `r1`–`r3` are one-based Body value IDs, not machine registers.
 The value-descriptor array declares each ID's type and kind; the block
 parameters or operations define its value. `B1` and `B2` are one-based
 block IDs. A block's parameter list declares values received on entry,
@@ -138,11 +139,12 @@ not all values that its operations will define.
 ```text
 Source:   int32 AddFive(int32 x) { return x + 5; }
 
-TypeSpec[1] = Builtin(int32)                // t1, row payload 01 00 08
-MethodSig[1] = (parameter[0]: t1) -> t1     // source parameter[0] is x
+TypeSpec[1] = Builtin(int32)                // row payload 01 00 08
+MethodSig[1] = (parameter[0]: TypeSpec[1]) -> TypeSpec[1]  // x in source
 MethodDef[1] = (signature=1, bodyRow=1)
 Body: ownerMethod=1, bodyLayout=0
-      blockCount=2, valueCount=3, placeCount=0, regionCount=0
+      blockCount=2, valueCount=3, placeCount=0, regionCount=0, typeCount=1
+      typeMap=[t1: TypeSpec[1]]             // fixed u32 typed reference
       valueDescriptors=[r1:(t1,value), r2:(t1,value), r3:(t1,value)]
       blockOffsets=[0,19,30], terminatorOffsets=[13,9]
       B1 operationCount=1, B2 operationCount=0
@@ -162,36 +164,37 @@ arguments listed in `B2()` (none here). Overflow follows the module's
 failure policy, so B2 is not entered. Every value has one descriptor
 and one definition; the descriptor alone does not create a value.
 The Body stores numeric IDs, not the source name `x` or these comments.
-Under this candidate Body encoding, each `t1` reference occupies one byte,
-as would primitive code `0x08`; the approved MethodSig reference still
-occupies four bytes. The unresolved cross-table width decision above
-therefore changes these Body bytes if fixed `u32` is selected. Encoding
-direct primitive codes in Body descriptors would require an unambiguous
-discriminator from row IDs; it could save bytes or a lookup when row
-references are wide, but is not an assigned alternative here.
+The TypeSpec row reference occupies four bytes in `typeMap`, as it does
+in MethodSig; repeated `t1` references are one-byte local IDs because
+this Body has one type. The equal numbers in `t1` and `TypeSpec[1]` are
+coincidental: the map may assign a different local ID to that row.
+A primitive code such as `0x08` would also need one byte at each use,
+but would bypass the complete TypeSpec and require
+a second encoding for nonprimitive or qualified types. The local map
+retains one checked type identity for both forms without that split.
 
-The Body **section** uses three values, two blocks and no places or
-regions. Its 73-byte structure is:
+The Body **section** uses one mapped type, three values, two blocks and
+no places or regions. Its 78-byte structure is:
 
 | Region | Size and contents |
 |---|---|
-| Body-section offset index | 8 bytes: `00 00 00 00 41 00 00 00` = `[0,65]`; not an instruction |
-| Body row header | 15 bytes: `ownerMethod=1`, `bodyLayout=0`, counts `(block,value,place,region)=(2,3,0,0)`, and three `(t1,value)` descriptors |
+| Body-section offset index | 8 bytes: `00 00 00 00 46 00 00 00` = `[0,70]`; not an instruction |
+| Body row header | 20 bytes: `ownerMethod=1`, `bodyLayout=0`, counts `(block,value,place,region,type)=(2,3,0,0,1)`, `typeMap=[TypeSpec row 1]` and three `(t1,value)` descriptors |
 | Body row offset arrays | 20 fixed-`u32` bytes: `blockOffsets=[0,19,30]`, `terminatorOffsets=[13,9]` |
 | Block data | 30 bytes: B1 is 19 bytes; B2 is 11 bytes |
 
-Here `bodyLayout=0` selects one-byte local and metadata widths. The owner
-and offset arrays remain fixed `u32`; instruction widths are independent
-and none of these instructions has an `F0` prefix.
+Here `bodyLayout=0` selects one-byte Body-local widths. The owner,
+type-map entries and offset arrays remain fixed `u32`; instruction
+widths are independent, and none here has an `F0` prefix.
 Body fields and validation rules are specified in
 [Body record, direct block index and regions](#body-record-direct-block-index-and-regions).
 
 The exact section bytes are the eight-byte offset index followed by the
-65-byte Body row:
+70-byte Body row:
 
 ```text
-00 00 00 00  41 00 00 00
-01 00 00 00  00  02 03 00 00
+00 00 00 00  46 00 00 00
+01 00 00 00  00  02 03 00 00 01  01 00 00 00
 01 00  01 00  01 00
 00 00 00 00  13 00 00 00  1E 00 00 00
 0D 00 00 00  09 00 00 00
@@ -201,7 +204,7 @@ The exact section bytes are the eight-byte offset index followed by the
 
 | Location | Opcode-specific schema, in byte order | Widths / layout | Encoded fields | Reading |
 |---|---|---|---|---|
-| B1 operation | `02 ConstSigned ref(rNew) ref(t) signedData(value)` | Common; ref=1, data=1 | `02` opcode · `02` rNew · `01` t · `05` signedData | Define `r2` as `t1` value `5` |
+| B1 operation | `02 ConstSigned ref(rNew) ref(t) signedData(value)` | Common; ref=1, data=1 | `02` opcode · `02` rNew · `01` t · `05` signedData | Define `r2` as mapped `t1` value `5` |
 | B1 terminator | `84 CheckedBinary u8(kind) ref(rLeft) ref(rRight) edgeSuccess` | Common; ref=1, count=1; kind=`u8` | `84` opcode · `01` kind · `01` rLeft · `02` rRight · `02` targetBlock · `00` argumentCount | `kind=1` add; operands `r1` (`x`) and `r2` (literal `5`); success target B2; no explicit edge arguments |
 | B2 terminator | `83 Return ref(result)` | Common; ref=1 | `83` opcode · `03` result | Return `r3`, the implicit checked result |
 
@@ -238,9 +241,9 @@ means the selected reference width, `count` the selected count width,
 | `r?` | `ref` | Value ID or zero only when the declared result is void |
 | `rNew?` | `ref` | New value ID, or zero iff the selected callable returns void; zero defines nothing |
 | `p` | `ref` | Body-local place descriptor ID `1..placeCount` |
-| `t` | `ref` | Artifact-wide TypeSpec row `1..TypeSpec.recordCount`, interpreted in the body module's context; never a primitive code in place of a row ID |
+| `t` | `ref` | Body-local type ID `1..typeCount`; `typeMap[t - 1]` is the fixed `u32` typed reference to a TypeSpec row, interpreted in this body's module context |
 | `m` | `ref`, then `u32 DefId` only when `m=0` | Nonzero: one-based MethodDef row within the body module's MethodDef range, resolved by checked `methodDefStart + m - 1`; retained imports use its bound expected MethodDef. Zero: resolved direct call to an authored MethodDef in another packed module, with an exact little-endian MethodDef `DefId` following the selected-width zero. Invalid in a single-module artifact |
-| `fieldDefRow` | `ref` | Artifact-wide FieldDef row `1..FieldDef.recordCount` owned by the selected type; a trusted merger may bind it directly to a field of a packed producer's resolved TypeDef |
+| `fieldDefRow` | fixed `u32` | Typed FieldDef reference, high byte zero, row `1..FieldDef.recordCount` owned by the selected type; a trusted merger may bind it directly to a field of a packed producer's resolved TypeDef |
 | `targetBlock`, `regionId` | `ref` | Body-local block or region ID; only explicitly specified region roots permit zero |
 | `args` | `count`, then `ref[count]` | Ordered value IDs; zero is not an argument |
 | `edge` | `ref targetBlock`, then `args` | Target's typed parameter list consumes the arguments, subject to implicit checked results |
@@ -291,28 +294,36 @@ no further row-length prefix. Its fields, in order, are:
 
 | Field | Encoding | Constraint |
 |---|---|---|
-| `ownerMethod` | `u32` little-endian | Local MethodDef row whose `bodyRow` points here |
-| `bodyLayout` | `u8` | Bits 0–1 local width; bits 2–3 metadata width; bits 4–7 zero |
-| `blockCount`, `valueCount`, `placeCount`, `regionCount` | four local-width unsigned integers | Body-local counts; blockCount is positive |
-| `places` | `placeCount` entries | metadata-width `typeSpec`, local-width `regionId`, `u8 flags` each |
+| `ownerMethod` | typed `u32` little-endian | Nonzero local MethodDef row with zero high byte, whose `bodyRow` points here |
+| `bodyLayout` | `u8` | Bits 0–1 Body-local width; bits 2–7 zero |
+| `blockCount`, `valueCount`, `placeCount`, `regionCount`, `typeCount` | five local-width unsigned integers | Body-local counts; blockCount is positive; typeCount is zero iff no local type ID is used |
+| `typeMap` | `u32[typeCount]` little-endian | Distinct nonzero typed TypeSpec references, indexed by one-based Body-local type ID |
+| `places` | `placeCount` entries | local-width `typeId`, local-width `regionId`, `u8 flags` each |
 | `regions` | `regionCount` entries | Described below, IDs `1..regionCount` |
-| `valueDescriptors` | `valueCount` entries | metadata-width `typeSpec`, `u8 kind` each, indexed by `valueId - 1` |
+| `valueDescriptors` | `valueCount` entries | local-width `typeId`, `u8 kind` each, indexed by `valueId - 1` |
 | `blockOffsets` | `u32[blockCount + 1]` little-endian | Relative to the following block-data start |
 | `terminatorOffsets` | `u32[blockCount]` little-endian | Each relative to its own block start; points directly to its terminator opcode or width prefix |
 | `blockData` | `blockOffsets[last]` bytes | One block per consecutive offset extent |
 
-Body-layout codes 0, 1 and 2 mean widths of 1, 2 and 4 bytes; code 3
-rejects. Local width sizes the four counts, structural block/region/value/
-place IDs, block parameters, place-state and operation counts, region fields
-and place-region references. Metadata width sizes TypeSpec rows in place and
-value descriptors. Choose each width to represent every field in its class
-throughout the **whole body**; unused classes use code 0. `ownerMethod` and
-both offset arrays remain fixed `u32`; instruction widths come from each
-instruction's prefix, independently of `bodyLayout`. Readers bound every
-field; writers must use minimal widths. A strict canonicality audit may
-verify them, but load-time treatment of nonminimal `bodyLayout` values is
-not specified. Unsupported
-codes, reserved bits and truncated fields reject.
+Body-layout codes 0, 1 and 2 mean local widths of 1, 2 and 4 bytes; code 3
+rejects. This width sizes all five counts, structural block/region/value/
+place/type IDs, block parameters, place-state and operation counts, region
+fields and place-region references. Choose the smallest width that
+represents every field in this class throughout the **whole body**.
+`ownerMethod`, type-map entries and both offset arrays remain fixed `u32`
+typed references or offsets. Each instruction independently selects its
+Body-local operand width via its prefix; FieldDef and direct-call DefId
+operands remain fixed `u32`. Bound `typeCount` by the TypeSpec table count
+and the remaining row bytes before reading its four-byte entries. Every
+entry must be distinct and resolve to a TypeSpec valid in the owning
+module's context; duplicates reject. Writers order entries by first use
+across descriptors, then instruction streams, without unused entries;
+a strict canonicality audit may check ordering and usage. Readers bound
+every field and validate map entries
+before dereferencing local type IDs; out-of-range IDs reject. Writers
+must use minimal widths. A strict canonicality audit may verify them,
+but load-time treatment of nonminimal `bodyLayout` values is not
+specified. Unsupported codes, reserved bits and truncated fields reject.
 
 Block offsets start at 0, increase strictly, and end at the exact remaining
 body length; empty blocks are invalid. Block data is under 4 GiB, though
@@ -325,7 +336,8 @@ decoding; semantic audits compare it with the operation stream. Body rows
 follow the owning MethodDef's `bodyRow`; relocating metadata requires
 rewriting references and revalidating the body.
 
-Places are numbered `1..placeCount`. Flags `0x01`, `0x02` and `0x04` mean
+Places are numbered `1..placeCount`. Their `typeId` resolves through the
+type map to the referent's complete TypeSpec. Flags `0x01`, `0x02` and `0x04` mean
 rebindable, unique storage and initially vacant (including `out`),
 respectively; other bits reject. The complete TypeSpec determines referent
 access and representation; flags cannot grant `write` through a readonly
@@ -333,8 +345,8 @@ handle. Non-value parameters map to places in parameter order, followed by
 local places; by-value parameters are entry-block values. Place descriptors
 name storage, not an exposed address or native stack slot.
 
-Descriptor kind `0x00` is a by-value result of its complete TypeSpec;
-`0x01` is a place handle whose TypeSpec is its **referent**, not a loaded
+Descriptor kind `0x00` is a by-value result of its mapped complete TypeSpec;
+`0x01` is a place handle whose mapped TypeSpec is its **referent**, not a loaded
 value or native pointer. All other descriptor kinds reject. A handle's
 access, owner and region come from its defining
 place operation; the descriptor grants no authority. The array indexes
@@ -434,8 +446,8 @@ preceding fields. Names are descriptive, not a mandated host-language ABI:
 
 | Record | Required data | Index/identity invariant |
 |---|---|---|
-| `BodyIndex` | `ownerMethod`, body layout, four counts, place descriptors, region records, value descriptors, block/terminator offsets | IDs and offsets remain relative to this one body; `ownerMethod` is a metadata row |
-| `ValueDescriptor` | TypeSpec row and value/place kind | Entry `i` describes `r(i+1)`; type and kind are accessible without decoding its defining operation |
+| `BodyIndex` | `ownerMethod`, body layout, five counts, fixed-`u32` TypeSpec map, place descriptors, region records, value descriptors, block/terminator offsets | Local IDs and offsets remain relative to this one body; `ownerMethod` is a metadata row |
+| `ValueDescriptor` | Body-local type ID and value/place kind | Entry `i` describes `r(i+1)`; resolve its type through the validated map without decoding the defining operation |
 | `BlockLocation` | Block-data start + `blockOffsets[i-1]`, next block offset, relative terminator offset | Entry `i-1` addresses block ID `i`; terminator lies inside this block's extent |
 | `BlockHeader` | Region, parameter IDs, live-in/out IDs, inherited/starting/ending place states, operation count | Parameters define values; live sets refer to prior definitions, not machine registers |
 | `Instruction` | Registered opcode, three resolved widths and the opcode-specific typed operands | The wide prefix changes the byte widths only; do not store raw bytes as if they were an addressing mode |
@@ -450,9 +462,13 @@ optimization tier or cache.
 
 ## Type and definition model for operands
 
-`t` refers to a complete row in the metadata design's
+`t` indexes a Body-local type-map entry holding a fixed `u32` reference
+to a complete row in the metadata design's
 [TypeSpec table](../il-metadata.md#metadata-logical-tables-and-row-semantics),
-not to a byte-sized `PrimitiveType` embedded in an instruction.
+not to a byte-sized primitive code embedded in an instruction. Entry
+types and instruction type operands use the same map; their IDs have
+Body-local scope, while the referenced TypeSpec retains its approved
+artifact-wide identity and qualification.
 The narrow executable profile uses the metadata registry codes `0x00 void`,
 `0x01 bool`, `0x03 char16`, `0x08 int32`, `0x0D uint32`, `0x09 int64`,
 `0x0E uint64`. Their logical bit widths are respectively none, 1, 16,
@@ -597,7 +613,7 @@ The executable scalar set is `bool`, `char16`, `int32`, `uint32`, `int64`
 and `uint64`; integer arithmetic uses the declared width. `Binary`
 comparisons require equal complete operand types and return `bool`; their
 kind does not imply a user equality witness. `ConstBits` and `ConstSigned`
-carry explicit TypeSpec references; arithmetic reads types from value
+carry explicit Body-local type IDs resolving to TypeSpec; arithmetic reads types from value
 descriptors and must match the result descriptor. No instruction assumes
 a default integer type or implicitly narrows, promotes, loads, updates or
 swaps operands. `Load` produces a typed Copy value; `Assign` writes through
@@ -706,13 +722,13 @@ is both assigned and returned. `PlaceLocal`, `Initialize`, `Load` and
 executable. `PlaceField` produces a place; `Extract` reads a Copy field
 from a by-value aggregate.
 
-The encoded Body section is 101 bytes. Its `05` place flags mean mutable
+The encoded Body section is 106 bytes. Its `05` place flags mean mutable
 and initially vacant; block offsets are `[0,33,51]`, and terminator
 offsets are `[27,16]`:
 
 ```text
-00 00 00 00  5D 00 00 00
-01 00 00 00  00  02 05 01 00  01 00 05
+00 00 00 00  62 00 00 00
+01 00 00 00  00  02 05 01 00 01  01 00 00 00  01 00 05
 01 01  01 00  01 00  01 00  01 00
 00 00 00 00  21 00 00 00  33 00 00 00
 1B 00 00 00  10 00 00 00
@@ -740,22 +756,24 @@ MethodDef row 1 returns `int32` with no arguments; TypeSpec row 1 is
 zero explicit regions. The Body **section** for its single row is:
 
 ```text
-00 00 00 00  25 00 00 00
-01 00 00 00  00  01 01 00 00
+00 00 00 00  2A 00 00 00
+01 00 00 00  00  01 01 00 00 01
+01 00 00 00
 01 00
 00 00 00 00  0E 00 00 00  0C 00 00 00
 00 00 00 00 00 00 00 01  01 01 01 2A  83 01
 ```
 
 The block-offset array is eight bytes and the terminator-offset array
-four; the Body row is 37 bytes. It contains owner row 1, `bodyLayout=0`,
-four one-byte counts, one `(t1,value)` descriptor, block offsets `[0,14]`,
+four; the Body row is 42 bytes. It contains owner row 1, `bodyLayout=0`,
+five one-byte counts, a fixed `u32` map entry for TypeSpec row 1,
+one `(t1,value)` descriptor, block offsets `[0,14]`,
 terminator offset `12`, and a 14-byte block. That block has region 0, no
 parameters, live values or places, one `ConstBits` operation and one
 `Return`. Including the eight-byte section row index, the Body section is
-45 bytes. With eight populated metadata sections, the artifact is
-**349 bytes** before alignment: a 32-byte header, eight 16-byte directory
-entries and 189 bytes of sections. This is encoded size, not throughput;
+50 bytes. With eight populated metadata sections, the artifact is
+**354 bytes** before alignment: a 32-byte header, eight 16-byte directory
+entries and 194 bytes of sections. This is encoded size, not throughput;
 IDs, prefixes, blocks, decoding, branches, debug data and alignment also
 affect cost.
 
@@ -822,7 +840,7 @@ contract:
 | Published contracts | Full effects, ownership/transfer, correlated output states, pre/postconditions, capability and witness evidence, generic specialization/export metadata and layout/ABI compatibility. Metadata clauses must be specified together with verifier inputs. |
 | Operations | Checked indexing/backing, raw/unaligned and atomic memory order, floating/SIMD/tensor semantics, indirect calls, traits/witness dispatch, intrinsics, async state and typed failure values. Assign only operations whose exact type, failure, ordering and lifetime rules are known. |
 | Revision and reader policy | No on-wire selector or feature/revision negotiation for the candidate executable subset; nonminimal-width load policy, unknown opcodes in unvisited trusted blocks, diagnostic/recovery behavior and numeric parser/audit budgets remain open. |
-| Metadata reference width | The approved metadata rule uses fixed `u32` table references, while this draft uses compact TypeSpec/FieldDef row references in Body. Choose fixed-width Body references or explicitly approve a compact Body exception, then update all Body widths, examples and decoding rules together. |
+| Type-map conformance | A complete reader must validate each fixed-`u32` TypeSpec reference, distinct map entries, local type IDs and type agreement with MethodSig and selected definitions. No Body-local ID may be mistaken for an artifact-wide metadata reference. |
 
 These are explicit blockers to declaring the proposals final, not an
 invitation to invent semantics or serialize the current private bound tree.
