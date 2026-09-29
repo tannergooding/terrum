@@ -30,6 +30,7 @@ internal static partial class Program
         + "       terrumc frontend-run <self-host-directory> <input|-> --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc validate-trrm-structure <artifact> [--json]\n"
         + "       terrumc validate-trrm-compact-linear <artifact> [--json]\n"
+        + "       terrumc validate-trrm-compact-indexed <artifact> [--json]\n"
         + "       terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <output.trm> [--runtime <fail-fast|checked-exceptions>] [--json]\n"
         + "       terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <output.trm> [--runtime <fail-fast|checked-exceptions>] [--json]\n"
         + "       terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
@@ -55,6 +56,7 @@ internal static partial class Program
         + "frontend-run returns Main's raw exit status without a success envelope; --json applies to diagnostics only.\n"
         + "validate-trrm-structure checks provisional (1, 0) framing and structural metadata only, not Body instructions or executable contracts.\n"
         + "validate-trrm-compact-linear additionally checks the bounded scalar compact-linear Body shape, not effects or execution.\n"
+        + "validate-trrm-compact-indexed checks the bounded forward-branching scalar indexed Body shape, not effects or execution.\n"
         + "'-' reads strict UTF-8 from stdin. Exit: 0 success, 1 source/compile diagnostics, 2 usage/input/output error.";
 
     private static int Main(string[] args)
@@ -78,7 +80,8 @@ internal static partial class Program
             return RunFrontendComponent(args, json);
         }
 
-        if (args.Length != 0 && args[0] is "validate-trrm-structure" or "validate-trrm-compact-linear")
+        if (args.Length != 0 && args[0] is "validate-trrm-structure"
+            or "validate-trrm-compact-linear" or "validate-trrm-compact-indexed")
         {
             return RunTrRmStructureCommand(args, json);
         }

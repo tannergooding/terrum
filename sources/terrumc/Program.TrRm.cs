@@ -12,6 +12,7 @@ internal static partial class Program
     private static int RunTrRmStructureCommand(string[] args, bool json)
     {
         var compact = args[0] == "validate-trrm-compact-linear";
+        var indexed = args[0] == "validate-trrm-compact-indexed";
         if (args.Length is not (2 or 3) || args[1] == "-"
             || (args.Length == 3 && args[2] != "--json"))
         {
@@ -33,7 +34,11 @@ internal static partial class Program
 
         try
         {
-            if (compact)
+            if (indexed)
+            {
+                TrRmStructuralMetadataValidator.ValidateCompactIndexed(artifact);
+            }
+            else if (compact)
             {
                 TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
             }
@@ -56,16 +61,19 @@ internal static partial class Program
             writer.WriteNumber("schema", 1);
             writer.WriteString("command", args[0]);
             writer.WriteBoolean("success", true);
-            writer.WriteString("scope", compact
-                ? "framing-structural-metadata-and-compact-linear-shapes"
-                : "framing-and-structural-metadata");
+            writer.WriteString("scope", indexed
+                ? "framing-structural-metadata-and-compact-indexed-shapes"
+                : compact ? "framing-structural-metadata-and-compact-linear-shapes"
+                    : "framing-and-structural-metadata");
             writer.WriteEndObject();
         }
         else
         {
-            Console.Out.WriteLine(compact
-                ? $"{args[1]}: TRRM compact-linear Body shapes valid (effects and execution not verified)"
-                : $"{args[1]}: TRRM framing and structural metadata valid (Body not verified)");
+            Console.Out.WriteLine(indexed
+                ? $"{args[1]}: TRRM compact-indexed Body shapes valid (effects and execution not verified)"
+                : compact
+                    ? $"{args[1]}: TRRM compact-linear Body shapes valid (effects and execution not verified)"
+                    : $"{args[1]}: TRRM framing and structural metadata valid (Body not verified)");
         }
         return 0;
     }

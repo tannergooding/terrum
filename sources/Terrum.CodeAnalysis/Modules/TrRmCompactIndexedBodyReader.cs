@@ -11,8 +11,13 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <remarks>Only checked integer addition, BranchIf without edge arguments, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
 public readonly ref struct TrRmCompactIndexedBodyReader
 {
+    private readonly int[] _operationCounts;
+
     public int BlockCount { get; }
     public int ValueCount { get; }
+
+    public int GetOperationCount(int block)
+        => block > 0 && block <= BlockCount ? _operationCounts[block] : throw InvalidBody();
 
     public TrRmCompactIndexedBodyReader(TrRmBodyTableReader bodies, int methodRow,
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
@@ -53,6 +58,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             throw InvalidBody();
         }
 
+        _operationCounts = new int[BlockCount + 1];
         var mappedTypes = new byte[typeCount + 1];
         for (var typeId = 1; typeId <= typeCount; typeId++)
         {
@@ -208,6 +214,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 throw InvalidBody();
             }
 
+            _operationCounts[block] = operations;
             var nextResult = (int)starts[block - 1] + expectedParameters + 1;
             var observedLastUses = new Dictionary<int, int>();
             externalUses[block] = new HashSet<int>();

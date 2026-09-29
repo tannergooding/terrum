@@ -103,6 +103,25 @@ public readonly ref struct TrRmSourceMapTableReader
         }
     }
 
+    internal void ValidateCompactIndexedLocations(TrRmMethodDefTableReader methods,
+        int[][] operationCounts)
+    {
+        for (var offset = 0; offset < _slots.Length; offset += 16)
+        {
+            var slot = _slots.Slice(offset, 16);
+            if (ReadU16(slot, 0) == 0x0020)
+            {
+                var method = methods.GetBodyOwnerMethod((int)Read(slot, 4));
+                var block = Read(slot, 8);
+                var counts = operationCounts[method];
+                if (block == 0 || block >= counts.Length || Read(slot, 12) > (uint)counts[block])
+                {
+                    throw InvalidMap();
+                }
+            }
+        }
+    }
+
     private static ushort ReadU16(ReadOnlySpan<byte> data, int offset)
         => BinaryPrimitives.ReadUInt16LittleEndian(data.Slice(offset, sizeof(ushort)));
 

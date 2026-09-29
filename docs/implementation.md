@@ -1234,8 +1234,11 @@ regions, forward `BranchIf` edges without arguments, unprefixed checked
 integer add,
 `Return` and `Fail`. It checks type/definition/use indexes, operation and
 terminator offsets and live-in/out inventories against the decoded blocks.
-It rejects other assigned indexed operations, backedges and merge arguments;
-it is not yet part of either CLI validator or an executable Body verifier.
+It rejects other assigned indexed operations, backedges and merge arguments.
+`terrumc validate-trrm-compact-indexed <artifact> [--json]` opts into this
+subset across all owned Body rows after structural metadata checks; when
+SourceMap is present it checks block and operation/terminator ordinals.
+Neither compact command is an executable Body verifier.
 SourceMap rows check slots, spans and Body/SourceFile module
 association. A bounded SourceMap writer emits those slots, reuses SourceFile slots
 and rejects duplicate instruction locations; block/ordinal existence still

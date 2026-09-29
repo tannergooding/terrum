@@ -9,13 +9,23 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <remarks>Does not verify executable Body instructions, target ABI layouts, executable contracts or import binding.</remarks>
 public static class TrRmStructuralMetadataValidator
 {
+    private enum BodyInspection
+    {
+        None,
+        CompactLinear,
+        CompactIndexed,
+    }
+
     public static void Validate(ReadOnlySpan<byte> artifact)
-        => ValidateCore(artifact, false);
+        => ValidateCore(artifact, BodyInspection.None);
 
     public static void ValidateCompactLinear(ReadOnlySpan<byte> artifact)
-        => ValidateCore(artifact, true);
+        => ValidateCore(artifact, BodyInspection.CompactLinear);
 
-    private static void ValidateCore(ReadOnlySpan<byte> artifact, bool inspectCompactLinear)
+    public static void ValidateCompactIndexed(ReadOnlySpan<byte> artifact)
+        => ValidateCore(artifact, BodyInspection.CompactIndexed);
+
+    private static void ValidateCore(ReadOnlySpan<byte> artifact, BodyInspection inspection)
     {
         var index = new TrRmArtifactIndex(artifact);
         if (!index.TryGetSection(0x0001, out var moduleBytes, out var moduleCount)
@@ -97,26 +107,55 @@ public static class TrRmStructuralMetadataValidator
             : new TrRmSourceMapTableReader(sourceMapBytes, sourceMapCount,
                 methods, sourceFiles);
 
-        if (inspectCompactLinear)
+        if (inspection != BodyInspection.None)
         {
-            var operationCounts = sourceMapCount == 0 ? Array.Empty<int>()
+            var linearCounts = sourceMapCount == 0
+                || inspection != BodyInspection.CompactLinear ? Array.Empty<int>()
                 : new int[methods.Count + 1];
+            var indexedCounts = sourceMapCount == 0
+                || inspection != BodyInspection.CompactIndexed ? []
+                : new int[methods.Count + 1][];
             for (var method = 1; method <= methods.Count; method++)
             {
                 if (methods.GetBodyRow(method) != 0)
                 {
-                    var body = new TrRmCompactLinearBodyReader(bodies, method, modules,
-                        methods, signatures, parameters, typeSpecs);
-                    if (sourceMapCount != 0)
+                    if (inspection == BodyInspection.CompactLinear)
                     {
-                        operationCounts[method] = body.OperationCount;
+                        var body = new TrRmCompactLinearBodyReader(bodies, method, modules,
+                            methods, signatures, parameters, typeSpecs);
+                        if (sourceMapCount != 0)
+                        {
+                            linearCounts[method] = body.OperationCount;
+                        }
+                    }
+                    else
+                    {
+                        var body = new TrRmCompactIndexedBodyReader(bodies, method, modules,
+                            methods, signatures, parameters, typeSpecs);
+                        if (sourceMapCount != 0)
+                        {
+                            var counts = new int[body.BlockCount + 1];
+                            for (var block = 1; block <= body.BlockCount; block++)
+                            {
+                                counts[block] = body.GetOperationCount(block);
+                            }
+
+                            indexedCounts[method] = counts;
+                        }
                     }
                 }
             }
 
             if (sourceMapCount != 0)
             {
-                sourceMaps.ValidateCompactLinearLocations(methods, operationCounts);
+                if (inspection == BodyInspection.CompactLinear)
+                {
+                    sourceMaps.ValidateCompactLinearLocations(methods, linearCounts);
+                }
+                else
+                {
+                    sourceMaps.ValidateCompactIndexedLocations(methods, indexedCounts);
+                }
             }
         }
 

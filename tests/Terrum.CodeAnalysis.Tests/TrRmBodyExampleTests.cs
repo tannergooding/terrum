@@ -570,7 +570,7 @@ public sealed class TrRmBodyExampleTests
         return (reader.BlockCount, reader.ValueCount);
     }
 
-    private static byte[] ReadExample(string heading)
+    internal static byte[] ReadExample(string heading)
     {
         var generalHex = heading switch
         {
