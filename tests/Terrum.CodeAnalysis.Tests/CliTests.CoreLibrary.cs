@@ -51,8 +51,10 @@ public sealed partial class CliTests
         }
     }
 
-    [Fact]
-    public async Task CoreLibraryModuleSwitchPersistsPrimitiveApiAcrossSeparateCompilationAsync()
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task CoreLibraryModuleSwitchPersistsPrimitiveApiAcrossSeparateCompilationAsync(string policy)
     {
         var directory = Directory.CreateTempSubdirectory("terrum-core-module-").FullName;
         var source = Path.Combine(directory, "core.terrum");
@@ -80,15 +82,17 @@ public sealed partial class CliTests
 
             var (produced, producerOutput, producerError) = await RunAsync([],
                 "compile-module", "producer", source, "int32.AddOne",
-                "--export", "int32.Read", "-o", provider, "--corelib", "--json");
+                "--export", "int32.Read", "-o", provider, "--runtime", policy,
+                "--corelib", "--json");
             Assert.True(produced == 0, producerOutput + producerError);
 
             var (consumed, consumerOutput, consumerError) = await RunAsync([],
-                "compile-module", "consumer", caller, provider, "-o", consumer, "--json");
+                "compile-module", "consumer", caller, provider, "-o", consumer,
+                "--runtime", policy, "--json");
             Assert.True(consumed == 0, consumerOutput + consumerError);
 
             var (executed, _, _) = await RunAsync([],
-                "run-module", consumer, provider, "--runtime", "fail-fast");
+                "run-module", consumer, provider, "--runtime", policy);
             Assert.Equal(6, executed);
 
             var (consumerSwitch, _, _) = await RunAsync([],
@@ -98,12 +102,12 @@ public sealed partial class CliTests
             var (nativeProduced, nativeOutput, nativeError) = await RunAsync([],
                 "compile-native", "producer", source, "CorePrimitive",
                 "--export", "int32.AddOne", "--export", "int32.Read",
-                "-o", nativeProvider, "--runtime", "fail-fast", "--corelib", "--json");
+                "-o", nativeProvider, "--runtime", policy, "--corelib", "--json");
             Assert.True(nativeProduced == 0, nativeOutput + nativeError);
 
             var (nativeConsumed, nativeConsumerOutput, nativeConsumerError) = await RunAsync([],
                 "compile-native", "consumer", caller, nativeProvider, "-o", nativeConsumer,
-                "--runtime", "fail-fast", "--json");
+                "--runtime", policy, "--json");
             Assert.True(nativeConsumed == 0, nativeConsumerOutput + nativeConsumerError);
 
             var (validated, validationOutput, validationError) = await RunAsync([],
@@ -111,12 +115,12 @@ public sealed partial class CliTests
             Assert.True(validated == 0, validationOutput + validationError);
 
             var (nativeExecuted, _, _) = await RunAsync([],
-                "run-native", nativeConsumer, nativeProvider, "--runtime", "fail-fast");
+                "run-native", nativeConsumer, nativeProvider, "--runtime", policy);
             Assert.Equal(6, nativeExecuted);
 
             var (nativeConsumerSwitch, _, _) = await RunAsync([],
                 "compile-native", "consumer", caller, nativeProvider, "-o", nativeConsumer,
-                "--runtime", "fail-fast", "--corelib", "--json");
+                "--runtime", policy, "--corelib", "--json");
             Assert.Equal(2, nativeConsumerSwitch);
         }
         finally
