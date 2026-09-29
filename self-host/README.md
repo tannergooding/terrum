@@ -107,7 +107,7 @@ JIT-executes the same bounded entry without writing an image. Like hosted
 supervise this in-process native command with a deadline.
 The bounded input and source directory remain required, and general source
 binding, broader libraries and compiler self-build remain outstanding.
-Two hundred and eighteen shared scalar/conditional/Boolean/integer-literal fixtures have byte-identical DLL output from
+Two hundred and twenty-three shared scalar/conditional/Boolean/integer-literal fixtures have byte-identical DLL output from
 the hosted and Terrum-authored frontend paths under both runtime policies;
 both paths still use the hosted native emitter.
 The bounded parameter/literal operands accept grouping inside or outside
@@ -119,7 +119,8 @@ Boolean binary operation with Boolean literal operands uses version 9;
 numeric comparisons with literal operands use version 10; version 11
 admits grouped integer binaries under unary `~`; version 12 admits the same
 bounded integer binaries under unary `+` or checked `-`; version 13
-admits unary `~` over a grouped unary `+` or checked `-` parameter.
+admits unary `~` over a grouped unary `+` or checked `-` parameter
+or contextual integer literal.
 Version 14 admits unary `+` or checked `-` over a grouped `~` parameter
 or contextual integer literal.
 Version 15 admits unary `!` over a grouped `!` parameter/literal or a

@@ -369,12 +369,13 @@ public static class ScalarFrontendHost
                     && ValidExpression(new ScalarFrontendExpression(type, binary,
                         left, right, nestedSpan), type, parameters);
             }
-            if (operation is 10057 or 10058)
+            if (operation is 10003 or 10057 or 10058 or 10657 or 10658)
             {
                 return words[0] >= 13 && expression.Type == type
                     && type is >= 1 and <= 4 && ValidSpan(expression.Span, nonempty: true)
                     && TryGroupedUnarySpan(source, expression.Span,
                         TokenKind.Tilde, out var nestedSpan)
+                    && (operation != 10003 || source.Text[nestedSpan.Start] == '-')
                     && ValidExpression(new ScalarFrontendExpression(type,
                         operation - 10000, left, right, nestedSpan), type, parameters);
             }
@@ -1037,7 +1038,7 @@ public static class ScalarFrontendHost
                     ? TokenKind.Minus : TokenKind.Plus, Expression(nested),
                     type, expression.Span));
             }
-            if (expression.Operation is 10057 or 10058)
+            if (expression.Operation is 10003 or 10057 or 10058 or 10657 or 10658)
             {
                 if (!TryGroupedUnarySpan(source, expression.Span,
                     TokenKind.Tilde, out var nestedSpan))

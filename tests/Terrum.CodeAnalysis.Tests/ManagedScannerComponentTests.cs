@@ -3162,6 +3162,11 @@ public sealed class ManagedScannerComponentTests
     [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x) { return ~(-x); }", 13, 10058, "int32", 42L, 0L, 1, 41L)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "uint32 Value(uint32 x) { return ~(+((x))); }", 13, 10057, "uint32", 0L, 0L, 1, -1L)]
     [InlineData(NativeRuntimePolicy.FailFast, "int64 Value(int64 x) { return ~(-(x)); }", 13, 10058, "int64", -1L, 0L, 1, -2L)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return ~(-2147483648); }", 13, 10003, "int32", 0L, 0L, 0, 2147483647L)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int64 Value() { return ~(-9223372036854775808); }", 13, 10003, "int64", 0L, 0L, 0, 9223372036854775807L)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return ~(-0xFFFFFFFF); }", 13, 10003, "int32", 0L, 0L, 0, -2L)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return ~(-(42)); }", 13, 10658, "int32", 0L, 0L, 0, 41L)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return ~(+((42))); }", 13, 10657, "int32", 0L, 0L, 0, -43L)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x) { return -(~x); }", 14, 14063, "int32", 42L, 0L, 1, 43L)]
     [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x) { return +((~x)); }", 14, 12063, "int32", 42L, 0L, 1, -43L)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "uint64 Value(uint64 x) { return +(~(x)); }", 14, 12063, "uint64", 0L, 0L, 1, -1L)]
@@ -3199,7 +3204,7 @@ public sealed class ManagedScannerComponentTests
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
                 SourceText.From(text.Replace("x + y", "x - y", StringComparison.Ordinal)), bytes));
         }
-        if (operation == 10058)
+        if (operation is 10003 or 10058 or 10658)
         {
             Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
                 SourceText.From(text.Replace("-", "+", StringComparison.Ordinal)), bytes));
