@@ -455,15 +455,16 @@ public static class ScalarFrontendHost
         {
             var leftName = left == 1 ? firstName : secondName;
             var span = expression.Span;
+            var groupedLeft = source.Text[span.Start] == '(';
             if (span.Length < leftName.Length
-                || !source.Text.AsSpan(span.Start, leftName.Length)
-                    .SequenceEqual(source.Text.AsSpan(leftName.Start, leftName.Length)))
+                || (!groupedLeft && !source.Text.AsSpan(span.Start, leftName.Length)
+                    .SequenceEqual(source.Text.AsSpan(leftName.Start, leftName.Length))))
             {
                 return false;
             }
             if (expression.Operation == 0)
             {
-                return span.Length == leftName.Length;
+                return !groupedLeft && span.Length == leftName.Length;
             }
 
             var rightName = right == 1 ? firstName : secondName;
@@ -474,7 +475,7 @@ public static class ScalarFrontendHost
                 68 => "<=", 69 => ">", 70 => ">=", 71 => "&", 73 => "|",
                 72 => "&&", 74 => "||", 75 => "^", _ => throw InvalidResult(),
             };
-            if (middleLength >= 1 && source.Text.AsSpan(span.End - rightName.Length,
+            if (!groupedLeft && middleLength >= 1 && source.Text.AsSpan(span.End - rightName.Length,
                     rightName.Length).SequenceEqual(source.Text.AsSpan(
                         rightName.Start, rightName.Length)))
             {
@@ -493,20 +494,41 @@ public static class ScalarFrontendHost
             var lexical = Lexer.Lex(SourceText.From(
                 source.Text.Substring(span.Start, span.Length)));
             var tokens = lexical.Tokens;
-            if (!lexical.Diagnostics.IsEmpty || tokens.Length < 6
-                || tokens[0].Kind != TokenKind.Identifier || tokens[0].Span.Start != 0
-                || tokens[0].Text != source.Text.Substring(leftName.Start, leftName.Length)
-                || tokens[1].Kind != (TokenKind)expression.Operation)
+            if (!lexical.Diagnostics.IsEmpty || tokens.Length < 4
+                || tokens[0].Span.Start != 0)
             {
                 return false;
             }
-            var operandIndex = 2;
+            var leftIndex = 0;
+            while (leftIndex < tokens.Length - 1
+                && tokens[leftIndex].Kind == TokenKind.OpenParen)
+            {
+                leftIndex++;
+            }
+            var leftGroups = leftIndex;
+            var operationIndex = leftIndex + leftGroups + 1;
+            if (operationIndex >= tokens.Length - 1
+                || tokens[leftIndex].Kind != TokenKind.Identifier
+                || tokens[leftIndex].Text != source.Text.Substring(
+                    leftName.Start, leftName.Length)
+                || tokens[operationIndex].Kind != (TokenKind)expression.Operation)
+            {
+                return false;
+            }
+            for (var index = 0; index < leftGroups; index++)
+            {
+                if (tokens[leftIndex + 1 + index].Kind != TokenKind.CloseParen)
+                {
+                    return false;
+                }
+            }
+            var operandIndex = operationIndex + 1;
             while (operandIndex < tokens.Length - 1
                 && tokens[operandIndex].Kind == TokenKind.OpenParen)
             {
                 operandIndex++;
             }
-            var groups = operandIndex - 2;
+            var groups = operandIndex - operationIndex - 1;
             if (tokens.Length != operandIndex + groups + 2
                 || tokens[operandIndex].Kind != TokenKind.Identifier
                 || tokens[operandIndex].Text != source.Text.Substring(

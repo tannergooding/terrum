@@ -269,7 +269,7 @@ mut class ScalarFrontendState
         mut int32 depth = 0;
         require _tokens.TryGet(_at, out var first);
         mut Token next = first;
-        while (next.Kind == 46)
+        while (next.Kind == 46 && !StartsGroupedParameterBinary())
         {
             _at = _at + 1;
             depth = depth + 1;
@@ -289,6 +289,36 @@ mut class ScalarFrontendState
         }
         expression = inner;
         return true;
+    }
+
+    private bool StartsGroupedParameterBinary()
+    {
+        mut int32 cursor = _at;
+        mut int32 groups = 0;
+        while (_tokens.TryGet(cursor, out var open) && open.Kind == 46)
+        {
+            groups = groups + 1;
+            cursor = cursor + 1;
+        }
+        if (!_tokens.TryGet(cursor, out var name) || name.Kind != 2)
+        {
+            return false;
+        }
+        cursor = cursor + 1;
+        for (mut int32 index = 0; index < groups; index = index + 1)
+        {
+            if (!_tokens.TryGet(cursor, out var close) || close.Kind != 47)
+            {
+                return false;
+            }
+            cursor = cursor + 1;
+        }
+        if (!_tokens.TryGet(cursor, out var operation))
+        {
+            return false;
+        }
+        return (operation.Kind >= 57 && operation.Kind <= 61)
+            || (operation.Kind >= 65 && operation.Kind <= 75);
     }
 
     private mut bool ParseExpressionCore(int32 expectedType, out ScalarFrontendExpression expression)
@@ -611,7 +641,13 @@ mut class ScalarFrontendState
             expression = found;
             return true;
         }
-        if (!Take(2, out var left))
+        require BeginUnaryOperand(out var left, out var leftGroups);
+        if (left.Kind != 2)
+        {
+            FailAt(1, left.Range);
+            return false;
+        }
+        if (!FinishUnaryOperand(left, leftGroups, out var leftEnd))
         {
             return false;
         }
@@ -635,7 +671,7 @@ mut class ScalarFrontendState
 
         mut int32 operation = 0;
         mut int32 rightIndex = 0;
-        mut int32 end = left.Range.End;
+        mut int32 end = leftEnd;
         require _tokens.TryGet(_at, out var next);
         if ((next.Kind >= 57 && next.Kind <= 61)
             || (next.Kind >= 65 && next.Kind <= 70)
@@ -730,7 +766,7 @@ mut class ScalarFrontendState
                 return false;
             }
         }
-        require SourceRange.TryCreate(left.Range.Start, end - left.Range.Start, out var span);
+        require SourceRange.TryCreate(literal.Range.Start, end - literal.Range.Start, out var span);
         if (operation >= 65 && operation <= 70)
         {
             selected = 5;
