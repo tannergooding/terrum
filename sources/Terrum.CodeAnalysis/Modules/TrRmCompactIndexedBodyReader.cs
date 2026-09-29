@@ -328,16 +328,38 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     var kind = Read(extent, ref cursor, 1);
                     var left = ReadCount(extent, ref cursor, referenceWidth);
                     var right = ReadCount(extent, ref cursor, referenceWidth);
-                    if (kind != 1 || valueTypes[result] is not (8 or 9 or 0x0D or 0x0E)
+                    if (kind is < 1 or > 7 || !IsInteger(valueTypes[result])
                         || left <= 0 || left > ValueCount || right <= 0 || right > ValueCount
                         || valueTypes[left] != valueTypes[result]
-                        || valueTypes[right] != valueTypes[result])
+                        || valueTypes[right] != (kind is 6 or 7 ? 0x0D : valueTypes[result]))
                     {
                         throw InvalidBody();
                     }
 
                     Use(left, ordinal);
                     Use(right, ordinal);
+                }
+                else if (opcode == 0x16)
+                {
+                    var typeId = ReadCount(extent, ref cursor, referenceWidth);
+                    var source = ReadCount(extent, ref cursor, referenceWidth);
+                    Use(source, ordinal);
+                    if (typeId == 0 || typeId > typeCount
+                        || mappedTypes[typeId] != valueTypes[result]
+                        || !IsInteger(valueTypes[source]) || !IsInteger(valueTypes[result]))
+                    {
+                        throw InvalidBody();
+                    }
+                }
+                else if (opcode == 0x17)
+                {
+                    var source = ReadCount(extent, ref cursor, referenceWidth);
+                    Use(source, ordinal);
+                    if (valueTypes[source] is not (8 or 9)
+                        || valueTypes[result] != valueTypes[source])
+                    {
+                        throw InvalidBody();
+                    }
                 }
                 else
                 {

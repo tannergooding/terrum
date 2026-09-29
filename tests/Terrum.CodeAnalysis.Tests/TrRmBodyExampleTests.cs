@@ -499,7 +499,7 @@ public sealed class TrRmBodyExampleTests
     [InlineData(58, 1)]
     [InlineData(60, 2)]
     [InlineData(77, 4)]
-    [InlineData(76, 2)]
+    [InlineData(76, 8)]
     public void CompactIndexedReaderRejectsInvalidIndexesAndEdges(int offset, byte value)
     {
         var section = ReadExample("#### Compact indexed conditional sum");
@@ -625,13 +625,22 @@ public sealed class TrRmBodyExampleTests
     [InlineData(new byte[] { 5, 3, 4, 1, 2 }, new byte[] { 1, 1 }, (byte)1)]
     [InlineData(new byte[] { 7, 4, 1, 2, 3 }, new byte[] { 1, 2, 2 }, (byte)2)]
     [InlineData(new byte[] { 4, 2, 1, 1 }, new byte[] { 1 }, (byte)1)]
+    [InlineData(new byte[] { 0x15, 3, 2, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
+    [InlineData(new byte[] { 0x15, 3, 3, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
+    [InlineData(new byte[] { 0x15, 3, 4, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
+    [InlineData(new byte[] { 0x15, 3, 5, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
+    [InlineData(new byte[] { 0x15, 3, 6, 1, 2 }, new byte[] { 2, 3 }, (byte)2)]
+    [InlineData(new byte[] { 0x15, 3, 7, 1, 2 }, new byte[] { 2, 3 }, (byte)2)]
+    [InlineData(new byte[] { 0x16, 2, 3, 1 }, new byte[] { 2 }, (byte)3)]
+    [InlineData(new byte[] { 0x16, 2, 2, 1 }, new byte[] { 3 }, (byte)2)]
+    [InlineData(new byte[] { 0x17, 2, 1 }, new byte[] { 2 }, (byte)2)]
     public void CompactIndexedReaderChecksScalarOperatorResults(
         byte[] operation, byte[] parameters, byte resultType)
     {
         var section = IndexedScalarOperation(operation, parameters, resultType);
         Assert.Equal((1, parameters.Length + 1),
             InspectIndexed(section, parameters.Length, resultTypeSpec: resultType,
-                parameterTypeIds: parameters));
+                parameterTypeIds: parameters, thirdTypeCode: 0x0D));
     }
 
     [Theory]
@@ -640,18 +649,47 @@ public sealed class TrRmBodyExampleTests
     [InlineData(new byte[] { 5, 3, 4, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
     [InlineData(new byte[] { 7, 4, 2, 1, 3 }, new byte[] { 1, 2, 2 }, (byte)2)]
     [InlineData(new byte[] { 5, 3, 1, 1, 2 }, new byte[] { 1, 1 }, (byte)1)]
+    [InlineData(new byte[] { 0x15, 3, 6, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
+    [InlineData(new byte[] { 0x15, 3, 8, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
+    [InlineData(new byte[] { 0x16, 2, 1, 1 }, new byte[] { 2 }, (byte)2)]
     public void CompactIndexedReaderRejectsInvalidScalarOperatorResults(
         byte[] operation, byte[] parameters, byte resultType)
         => Assert.Throws<InvalidDataException>(() =>
             InspectIndexed(IndexedScalarOperation(operation, parameters, resultType),
                 parameters.Length, resultTypeSpec: resultType,
-                parameterTypeIds: parameters));
+                parameterTypeIds: parameters, thirdTypeCode: 0x0D));
+
+    [Fact]
+    public void CompactIndexedReaderRejectsUnsignedCheckedNegate()
+    {
+        var section = IndexedScalarOperation([0x17, 2, 1], [2], 2);
+        Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(section, 1, secondTypeCode: 0x0D,
+                parameterTypeIds: [2]));
+    }
+
+    [Fact]
+    public void CompactIndexedReaderRejectsCheckedExceptionPolicy()
+    {
+        var section = IndexedScalarOperation([0x15, 3, 1, 1, 2], [2, 2], 2);
+        Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(section, 2, parameterTypeIds: [2, 2],
+                runtimePolicy: 1));
+    }
 
     private static byte[] IndexedScalarOperation(byte[] operation, byte[] parameters,
         byte resultType)
     {
         var count = parameters.Length + 1;
-        var row = new List<byte> { 0x08, 1, (byte)count, 0, 2, 1, 0, 0, 0, 2, 0, 0, 0 };
+        var mappedCount = parameters.Contains((byte)3) || resultType == 3 ? 3 : 2;
+        var row = new List<byte> { 0x08, 1, (byte)count, 0, (byte)mappedCount };
+        for (var typeId = 1; typeId <= mappedCount; typeId++)
+        {
+            row.Add((byte)typeId);
+            row.Add(0);
+            row.Add(0);
+            row.Add(0);
+        }
         foreach (var type in parameters)
         {
             row.Add(type);
@@ -733,7 +771,8 @@ public sealed class TrRmBodyExampleTests
 
     private static (int Blocks, int Values) InspectIndexed(byte[] section,
         int parameterCount = 3, byte secondTypeCode = 8, int resultTypeSpec = 2,
-        byte[]? parameterTypeIds = null)
+        byte[]? parameterTypeIds = null, byte? thirdTypeCode = null,
+        byte runtimePolicy = 0)
     {
         var names = new TrRmStringTableReader(
             TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]), 2);
@@ -743,14 +782,16 @@ public sealed class TrRmBodyExampleTests
             BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
         }
 
+        BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(8), runtimePolicy);
         var modules = new TrRmModuleTableReader(module, 1, names, 0, 0, 1, 0);
         var defs = new TrRmTypeDefTableReader([], 0, names, modules, 0, 0, 0, 0);
-        byte[] typeBytes =
-        [
-            0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0,
-            1, 0, 1, 1, 0, secondTypeCode,
-        ];
-        var types = new TrRmTypeSpecTableReader(typeBytes, 2, 0, 0, 0, 0);
+        byte[] typeBytes = thirdTypeCode is byte third
+            ? [0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0, 9, 0, 0, 0,
+                1, 0, 1, 1, 0, secondTypeCode, 1, 0, third]
+            : [0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0,
+                1, 0, 1, 1, 0, secondTypeCode];
+        var types = new TrRmTypeSpecTableReader(typeBytes,
+            thirdTypeCode is null ? 2 : 3, 0, 0, 0, 0);
         var signature = new byte[24];
         BinaryPrimitives.WriteUInt32LittleEndian(signature, (uint)resultTypeSpec);
         BinaryPrimitives.WriteUInt32LittleEndian(signature.AsSpan(8), parameterCount == 0 ? 0u : 1u);
