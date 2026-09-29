@@ -402,9 +402,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
 
                     var target = localMethodStart + method - 1;
                     var targetSignature = methods.GetSignature(target);
-                    if (methods.GetOwnerType(target) != 0
-                        || methods.GetBodyRow(target) == 0
-                            && !imports.IsExpectedDefinition(0x1600_0000u | (uint)target)
+                    if ((methods.GetBodyRow(target) == 0
+                        && !imports.IsExpectedDefinition(0x1600_0000u | (uint)target))
                         || signatures.GetReceiverTypeSpec(targetSignature) != 0
                         || signatures.GetGenericCount(targetSignature) != 0)
                     {

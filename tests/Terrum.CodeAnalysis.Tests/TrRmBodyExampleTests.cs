@@ -931,12 +931,17 @@ public sealed class TrRmBodyExampleTests
         var section = IndexedScalarOperation([0x12, 2, 2, 1, 1], [2], 2);
         Assert.Equal((1, 2), InspectIndexed(section, parameterCount: 1,
             parameterTypeIds: [2], secondMethod: true));
+        Assert.Equal((1, 2), InspectIndexed(section, parameterCount: 1,
+            parameterTypeIds: [2], secondMethod: true, ownedTarget: true));
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
             importedTarget: true));
         Assert.Equal((1, 2), InspectIndexed(section, parameterCount: 1,
             parameterTypeIds: [2], secondMethod: true,
             importedTarget: true, expectedTarget: true));
+        Assert.Equal((1, 2), InspectIndexed(section, parameterCount: 1,
+            parameterTypeIds: [2], secondMethod: true,
+            importedTarget: true, expectedTarget: true, ownedTarget: true));
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section,
             parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
             expectedTarget: true));
@@ -1082,7 +1087,8 @@ public sealed class TrRmBodyExampleTests
         byte[]? parameterTypeIds = null, byte? thirdTypeCode = null,
         byte runtimePolicy = 0, bool thirdTypeOptional = false,
         byte firstTypeCode = 1, bool secondMethod = false,
-        bool importedTarget = false, bool expectedTarget = false)
+        bool importedTarget = false, bool expectedTarget = false,
+        bool ownedTarget = false)
     {
         var names = new TrRmStringTableReader(
             TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]), 2);
@@ -1093,13 +1099,19 @@ public sealed class TrRmBodyExampleTests
         }
 
         BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(8), runtimePolicy);
-        var modules = new TrRmModuleTableReader(module, 1, names, expectedTarget ? 1 : 0, 0,
+        var modules = new TrRmModuleTableReader(module, 1, names, expectedTarget ? 1 : 0,
+            ownedTarget ? 1 : 0,
             secondMethod ? 2 : 1, 0);
         byte[] reference = new byte[12];
         BinaryPrimitives.WriteUInt32LittleEndian(reference, 2);
         var references = new TrRmModuleRefTableReader(expectedTarget ? reference : [],
             expectedTarget ? 1 : 0, names, modules);
-        var defs = new TrRmTypeDefTableReader([], 0, names, modules, 0, 0, 0, 0);
+        byte[] typeDef = new byte[40];
+        BinaryPrimitives.WriteUInt32LittleEndian(typeDef, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(typeDef.AsSpan(4), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(typeDef.AsSpan(8), 4);
+        var defs = new TrRmTypeDefTableReader(ownedTarget ? typeDef : [],
+            ownedTarget ? 1 : 0, names, modules, 0, 0, 0, 0);
         byte[] typeBytes = (thirdTypeOptional, thirdTypeCode) switch
         {
             (true, _) => [0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0, 12, 0, 0, 0,
@@ -1137,6 +1149,8 @@ public sealed class TrRmBodyExampleTests
         {
             method.CopyTo(methodRows, 0);
             method.CopyTo(methodRows, 28);
+            BinaryPrimitives.WriteUInt32LittleEndian(methodRows.AsSpan(28),
+                ownedTarget ? 1u : 0u);
             BinaryPrimitives.WriteUInt32LittleEndian(methodRows.AsSpan(52),
                 importedTarget ? 0u : 2u);
         }

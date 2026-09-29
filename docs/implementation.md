@@ -1254,10 +1254,10 @@ edges with checked typed block arguments, scalar `ConstBits`,
 `ConstSigned`, `Copy`, scalar `Unary`, `Binary`, integer `Convert`
 (wrapping, saturating and equal-width bit reinterpretation), eager `Select`,
 checked integer arithmetic/shifts, integer `CheckedConvert`, signed `CheckedNegate`,
-dual-result `CheckedDivRem`, static `Call` to local or retained imported
-MethodDefs with scalar/optional parameters and result (including void),
-`Switch`, `Return` and `Fail`. The bounded call inspection rejects
-receiver/generic calls and packed cross-module DefIds; it checks the expected
+dual-result `CheckedDivRem`, static `Call` to global or type-owned local or
+retained imported MethodDefs with scalar/optional parameters and result
+(including void), `Switch`, `Return` and `Fail`. The bounded call inspection
+rejects receiver/generic calls and packed cross-module DefIds; it checks the expected
 import definition and signature, not producer binding, call effects or
 executable callee bodies.
 Optional scalar values retain their presence-qualified identity through
