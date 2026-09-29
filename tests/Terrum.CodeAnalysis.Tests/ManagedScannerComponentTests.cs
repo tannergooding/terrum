@@ -151,6 +151,43 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData(0, 3, 3, 0, true)]
+    [InlineData(1, 3, 3, 0, false)]
+    [InlineData(0, 4, 3, 1, true)]
+    [InlineData(1, 4, 3, 1, false)]
+    [InlineData(0, 5, 4, 1, true)]
+    [InlineData(0, 6, 5, 1, true)]
+    [InlineData(715827881, int.MaxValue, 3, 0, true)]
+    [InlineData(715827882, int.MaxValue, 3, 0, false)]
+    [InlineData(536870910, int.MaxValue, 4, 1, true)]
+    [InlineData(536870911, int.MaxValue, 4, 1, false)]
+    [InlineData(429496728, int.MaxValue, 5, 1, true)]
+    [InlineData(429496729, int.MaxValue, 5, 1, false)]
+    [InlineData(-1, int.MaxValue, 3, 0, false)]
+    [InlineData(0, 0, 3, 1, false)]
+    public async Task ScannerRecordCapacityChecksCannotOverflowAsync(
+        int count, int capacity, int width, int prefix, bool expected)
+    {
+        var result = expected ? "true" : "false";
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                if (CanAppendRecord({{count}}, {{capacity}}, {{width}}, {{prefix}}) != {{result}})
+                {
+                    return 1;
+                }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync("", entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task OwnedTokenSnapshotSupportsIndexedReadsBeyondManagedChainLimitAsync(

@@ -129,10 +129,16 @@ bool IsNewline(int32 unit)
     return unit == 10 || unit == 13 || unit == 133 || unit == 8232 || unit == 8233;
 }
 
+bool CanAppendRecord(int32 count, int32 capacity, int32 width, int32 prefix)
+{
+    // Bound the count before computing an index near the maximum host-buffer length.
+    return count >= 0 && capacity >= prefix && count < (capacity - prefix) / width;
+}
+
 void Report(int32 code, int32 start, int32 length)
 {
     int32 count = Host.Diagnostics[0];
-    require count * 3 + 4 <= Host.Diagnostics.Length;
+    require CanAppendRecord(count, Host.Diagnostics.Length, 3, 1);
     Host.Diagnostics[count * 3 + 1] = code;
     Host.Diagnostics[count * 3 + 2] = start;
     Host.Diagnostics[count * 3 + 3] = length;
@@ -150,7 +156,7 @@ void AdvanceCommentScalar(int32 at)
 void PublishTrivia(int32 kind, int32 start, int32 end, int32 owner)
 {
     int32 count = Host.Trivia[0];
-    require count * 4 + 5 <= Host.Trivia.Length;
+    require CanAppendRecord(count, Host.Trivia.Length, 4, 1);
     Host.Trivia[count * 4 + 1] = kind;
     Host.Trivia[count * 4 + 2] = start;
     Host.Trivia[count * 4 + 3] = end - start;
@@ -363,7 +369,7 @@ int32 EncodeWord(uint32 word)
 void PublishInteger(int32 tokenIndex, bool overflow, uint64 magnitude, int32 tag)
 {
     int32 count = Host.IntegerValues[0];
-    require count * 5 + 6 <= Host.IntegerValues.Length;
+    require CanAppendRecord(count, Host.IntegerValues.Length, 5, 1);
     mut uint64 payload = magnitude;
     if (overflow)
     {
@@ -796,7 +802,7 @@ int32 Scan()
                 }
             }
 
-            require count * 3 + 3 <= Host.Tokens.Length;
+            require CanAppendRecord(count, Host.Tokens.Length, 3, 0);
             Host.Tokens[count * 3] = kind;
             Host.Tokens[count * 3 + 1] = start;
             Host.Tokens[count * 3 + 2] = position - start;
@@ -804,7 +810,7 @@ int32 Scan()
         }
     }
 
-    require count * 3 + 3 <= Host.Tokens.Length;
+    require CanAppendRecord(count, Host.Tokens.Length, 3, 0);
     Host.Tokens[count * 3] = 0;
     Host.Tokens[count * 3 + 1] = position;
     Host.Tokens[count * 3 + 2] = 0;
