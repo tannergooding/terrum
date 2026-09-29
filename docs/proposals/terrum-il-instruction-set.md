@@ -57,6 +57,32 @@ selects one MethodDef before encoding; no reader reruns overload resolution.
 Operations absent from the assigned tables reject rather than being guessed
 from CIL or CLR behavior.
 
+### Architecture-critical indexes and contracts
+
+This proposal's worked examples are part of the design explanation, not
+replaceable opcode trivia. The intended fast path crosses two documents:
+
+| Input | What a consumer can learn without rediscovering it from instructions |
+|---|---|
+| [Approved metadata tables](../il-metadata.md#section-kinds-and-row-layouts) | Selected declaration and complete type/signature; retained imports bind against published contracts without re-proving dependency bodies |
+| [Contract clauses](../il-metadata.md#semantic-contracts-and-stable-binding) | Assigned effects such as `NoThrow`/`DoesNotReturn` and reserved output, transfer, dependency and cleanup shapes; only Effects is executable in this narrow Body subset, so readers must not assume the other contracts are already usable |
+| [Body index](#body-record-direct-block-index-and-regions) | Type/value/place inventories, exact definition locations, direct block/terminator addresses, normal boundary liveness and per-block final uses |
+| [Conditional and loop examples](#conditional-merge-and-loop-informative-shapes) | Which values merely transit a block, which ones are actually used there, and how pruning a dead arm updates surviving use-block counts |
+| [Checked-add bytes](#checked-add-end-to-end-informative) and [place example](#value-and-place-state-through-checked-arithmetic) | Ordered failures without artificial CFG edges; separate immutable values, addressable storage and their last-use/state transitions |
+
+A specializing inliner can seek a predicate's definition, inspect the
+relevant dependency instructions, follow indexed terminators and discard
+unreachable blocks using their use inventories. It still decodes retained
+operations and respects effects, ownership and selected contracts;
+indexes are producer facts under the specified trust/audit policy, not
+an independent proof of safety. Method-level effect/call summaries
+and per-safepoint logical roots remain [stabilization
+blockers](#tool-roles-and-stabilization-blockers), not capabilities this
+draft has already encoded. If these informative examples move to a
+companion document, retain this contract map and links from the
+normative rules; splitting the examples must not orphan the fast-import
+story or silently promote a pending Body schema to approved metadata.
+
 ## Instruction encoding structure
 
 The stream is byte-addressed, not a bitfield ISA. Every multi-byte integer
