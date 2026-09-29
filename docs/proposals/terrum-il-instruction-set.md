@@ -497,9 +497,13 @@ TRRM artifact directory (one entry per present section kind):
                           Return r5
 ```
 
-The directory entries select artifact-wide tables; `[1]` means the
-one-based row in that table, not a byte offset, local instruction ID or
-per-method subtable. The Body section's offset index locates Body row 1.
+The header's `directoryOffset` locates the directory. Each entry above
+stores its section kind, policy flags, record count, artifact-relative
+section offset and section byte length; the arrows are explanatory, not additional
+wire fields. `[1]` means the one-based row in that artifact-wide table,
+not a byte offset, local instruction ID or per-method subtable. The
+Body entry has `recordCount=1`; its section starts with offsets `0,23`
+(the first eight bytes below), bounding one 23-byte Body row.
 `MethodDef[1].signature` selects the separate MethodSig row, whose
 parameter range selects the two Param rows; its `bodyRow` selects
 the Body row. All section entries and row numbers here are artifact-wide,
