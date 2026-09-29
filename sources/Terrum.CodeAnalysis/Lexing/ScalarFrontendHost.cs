@@ -39,7 +39,7 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] is not (1 or 2) || words[1] is not (1 or 2))
+        if (words[0] is not (1 or 2 or 3) || words[1] is not (1 or 2))
         {
             throw InvalidResult();
         }
@@ -60,7 +60,7 @@ public static class ScalarFrontendHost
         var firstName = Span(11);
         var secondName = Span(13);
         var count = words[6];
-        var isPublic = words[0] == 2 && words[2] == 1;
+        var isPublic = words[0] >= 2 && words[2] == 1;
         if ((words[0] == 1 ? words[2] != 0 : words[2] is not (0 or 1))
             || !AllZero(3, 5) || !ScalarType(words[5]) || count is < 0 or > 2
             || (count == 0 ? words[7] != 0 : !ScalarType(words[7]))
@@ -144,6 +144,27 @@ public static class ScalarFrontendHost
             var right = expression.RightParameter;
             var leftType = left == 1 ? words[7] : words[8];
             var rightType = right == 1 ? words[7] : words[8];
+            if (operation is 157 or 158 or 257 or 258)
+            {
+                var parameter = operation / 100;
+                if (words[0] != 3 || expression.Type != type || type is not (1 or 2 or 3 or 4)
+                    || parameter > parameters || (parameter == 1 ? words[7] : words[8]) != type
+                    || !ValidSpan(expression.Span, nonempty: true))
+                {
+                    return false;
+                }
+                var text = source.Text.Substring(expression.Span.Start, expression.Span.Length);
+                var lexical = Lexer.Lex(SourceText.From(text));
+                var tokens = lexical.Tokens;
+                var name = parameter == 1 ? firstName : secondName;
+                return lexical.Diagnostics.IsEmpty && tokens.Length == 4
+                    && tokens[0].Kind == TokenKind.Identifier && tokens[0].Span.Start == 0
+                    && tokens[0].Text == source.Text.Substring(name.Start, name.Length)
+                    && tokens[1].Kind == (TokenKind)(operation - parameter * 100)
+                    && tokens[2].Kind == TokenKind.NumericLiteral
+                    && tokens[2].Span.End == text.Length
+                    && ValidMagnitude(tokens[2].Text.AsSpan(), type, false, left, right);
+            }
             if (operation == 3)
             {
                 if (expression.Type != type || type is not (1 or 2 or 3 or 4 or 6)
@@ -152,31 +173,9 @@ public static class ScalarFrontendHost
                     return false;
                 }
                 var negative = source.Text[expression.Span.Start] == '-';
-                if (negative && type is not (1 or 3))
-                {
-                    return false;
-                }
                 var numberSpan = NumericSpan(source, expression.Span);
                 var digits = source.Text.AsSpan(numberSpan.Start, numberSpan.Length);
-                if (ScannerHost.IntegerDigitCount(digits) != digits.Length
-                    || !ScannerHost.TryParseIntegerMagnitude(digits, out var magnitude))
-                {
-                    return false;
-                }
-                var based = ScannerHost.IntegerRadix(digits) != 10;
-                ulong max = type switch {
-                    1 when based => uint.MaxValue,
-                    1 when negative => (ulong)int.MaxValue + 1,
-                    1 => int.MaxValue,
-                    2 => uint.MaxValue,
-                    3 when based => ulong.MaxValue,
-                    3 when negative => (ulong)long.MaxValue + 1,
-                    3 => long.MaxValue,
-                    4 => ulong.MaxValue,
-                    _ => ushort.MaxValue,
-                };
-                return magnitude <= max
-                    && magnitude == ((ulong)(uint)right << 32 | (uint)left);
+                return ValidMagnitude(digits, type, negative, left, right);
             }
             if (operation is 20 or 21)
             {
@@ -246,6 +245,31 @@ public static class ScalarFrontendHost
     }
 
     private static bool ScalarType(int type) => type is >= 1 and <= 6;
+
+    private static bool ValidMagnitude(ReadOnlySpan<char> digits, int type, bool negative,
+        int low, int high)
+    {
+        if (digits.IsEmpty || type is not (1 or 2 or 3 or 4 or 6)
+            || (negative && type is not (1 or 3))
+            || ScannerHost.IntegerDigitCount(digits) != digits.Length
+            || !ScannerHost.TryParseIntegerMagnitude(digits, out var magnitude))
+        {
+            return false;
+        }
+        var based = ScannerHost.IntegerRadix(digits) != 10;
+        ulong max = type switch {
+            1 when based => uint.MaxValue,
+            1 when negative => (ulong)int.MaxValue + 1,
+            1 => int.MaxValue,
+            2 => uint.MaxValue,
+            3 when based => ulong.MaxValue,
+            3 when negative => (ulong)long.MaxValue + 1,
+            3 => long.MaxValue,
+            4 => ulong.MaxValue,
+            _ => ushort.MaxValue,
+        };
+        return magnitude <= max && magnitude == ((ulong)(uint)high << 32 | (uint)low);
+    }
 
     private static TextSpan NumericSpan(SourceText source, TextSpan expression)
     {
@@ -319,6 +343,23 @@ public static class ScalarFrontendHost
 
         BoundExpression Expression(ScalarFrontendExpression expression)
         {
+            if (expression.Operation is 157 or 158 or 257 or 258)
+            {
+                var parameter = expression.Operation / 100;
+                var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
+                    expression.Span.Start, expression.Span.Length)));
+                var tokens = lexical.Tokens;
+                var value = expression.Type is 1 or 2
+                    ? expression.LeftParameter
+                    : unchecked((long)((ulong)(uint)expression.RightParameter << 32
+                        | (uint)expression.LeftParameter));
+                var leftOperand = new BoundRead(parameter - 1, types[parameter - 1].Type,
+                    new TextSpan(expression.Span.Start + tokens[0].Span.Start, tokens[0].Span.Length));
+                var literal = new BoundConstant(value, Type(expression.Type),
+                    new TextSpan(expression.Span.Start + tokens[2].Span.Start, tokens[2].Span.Length));
+                return new BoundBinary((TokenKind)(expression.Operation - parameter * 100),
+                    leftOperand, literal, Type(expression.Type), expression.Span);
+            }
             if (expression.Operation == 3)
             {
                 var negative = source.Text[expression.Span.Start] == '-';

@@ -160,6 +160,12 @@ public sealed partial class CliTests
     [InlineData("public int32 Value() { return -0x80000000; }")]
     [InlineData("public int64 Value() { return -9223372036854775808; }")]
     [InlineData("public int64 Value() { return -0xFFFFFFFFFFFFFFFF; }")]
+    [InlineData("public int32 Value(int32 x) { return x + 5; }")]
+    [InlineData("public uint32 Value(uint32 x) { return x - 0xFFFFFFFF; }")]
+    [InlineData("public int64 Value(int64 x) { return x + 9223372036854775807; }")]
+    [InlineData("public uint64 Value(uint64 x) { return x + 18446744073709551615; }")]
+    [InlineData("public int32 Value(int32 x, int32 y) { return y - /* gap */ 0b101; }")]
+    [InlineData("public int32 Value(int32 x) { if (x < x) { return x + 42; } else { return x - 5; } }")]
     public async Task FrontendBuiltLibraryMatchesHostedNativeBytesAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -368,6 +374,24 @@ public sealed partial class CliTests
         Assert.False(result.GetProperty("valid").GetBoolean());
         Assert.Equal(2, result.GetProperty("errorCode").GetInt32());
         Assert.Equal(source.IndexOf(literal, StringComparison.Ordinal),
+            result.GetProperty("errorSpan").GetProperty("start").GetInt32());
+    }
+
+    [Fact]
+    public async Task FrontendComponentRejectsOutOfRangeBinaryLiteralAsync()
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        const string Source = "int32 Value(int32 x) { return x + 2147483648; }";
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(Source),
+            "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(1, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        var result = document.RootElement.GetProperty("result");
+        Assert.False(result.GetProperty("valid").GetBoolean());
+        Assert.Equal(2, result.GetProperty("errorCode").GetInt32());
+        Assert.Equal(Source.IndexOf("2147483648", StringComparison.Ordinal),
             result.GetProperty("errorSpan").GetProperty("start").GetInt32());
     }
 }
