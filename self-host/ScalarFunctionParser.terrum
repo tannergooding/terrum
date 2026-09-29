@@ -586,7 +586,7 @@ bool TryParseScalarBinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
     require tokens.TryGet(11, out var eof);
     if (function.Kind != 2 || openParameters.Kind != 46 || closeParameters.Kind != 47
         || openBody.Kind != 48 || returnKeyword.Kind != 19
-        || left.Kind != 3 || (binary.Kind != 57 && binary.Kind != 58 && binary.Kind != 59)
+        || left.Kind != 3 || (binary.Kind < 57 || binary.Kind > 61)
         || right.Kind != 3
         || semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0)
     {
@@ -629,6 +629,18 @@ bool TryEvaluateInt32MultiplyReturn(TokenSnapshot tokens, TokenIntegerSnapshot i
     return TryEvaluateInt32BinaryReturn(move tokens, move integers, 59, out name, out result);
 }
 
+bool TryEvaluateInt32DivideReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int32 result)
+{
+    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 60, out name, out result);
+}
+
+bool TryEvaluateInt32RemainderReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int32 result)
+{
+    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 61, out name, out result);
+}
+
 bool TryEvaluateInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     int32 expectedOperation, out SourceRange name, out int32 result)
 {
@@ -650,6 +662,21 @@ bool TryEvaluateInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     if (operation == 59)
     {
         value = int64(leftLow) * int64(rightLow);
+    }
+    if (operation == 60 || operation == 61)
+    {
+        if (rightLow == 0 || (leftLow == int32.MinValue && rightLow == -1))
+        {
+            return false;
+        }
+        if (operation == 60)
+        {
+            value = int64(leftLow) / int64(rightLow);
+        }
+        else
+        {
+            value = int64(leftLow) % int64(rightLow);
+        }
     }
     if (value < int64(int32.MinValue) || value > int64(int32.MaxValue))
     {
@@ -679,6 +706,18 @@ bool TryEvaluateUInt32MultiplyReturn(TokenSnapshot tokens, TokenIntegerSnapshot 
     return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 59, out name, out result);
 }
 
+bool TryEvaluateUInt32DivideReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint32 result)
+{
+    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 60, out name, out result);
+}
+
+bool TryEvaluateUInt32RemainderReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint32 result)
+{
+    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 61, out name, out result);
+}
+
 bool TryEvaluateUInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     int32 expectedOperation, out SourceRange name, out uint32 result)
 {
@@ -693,6 +732,23 @@ bool TryEvaluateUInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
     }
     uint64 left = DecodeScannerMagnitude(leftLow, leftHigh);
     uint64 right = DecodeScannerMagnitude(rightLow, rightHigh);
+    if (operation == 60 || operation == 61)
+    {
+        if (right == 0)
+        {
+            return false;
+        }
+        name = foundName;
+        if (operation == 60)
+        {
+            result = uint32(left / right);
+        }
+        else
+        {
+            result = uint32(left % right);
+        }
+        return true;
+    }
     if (operation == 58)
     {
         if (left < right)
@@ -736,6 +792,18 @@ bool TryEvaluateInt64MultiplyReturn(TokenSnapshot tokens, TokenIntegerSnapshot i
     return TryEvaluateInt64BinaryReturn(move tokens, move integers, 59, out name, out result);
 }
 
+bool TryEvaluateInt64DivideReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int64 result)
+{
+    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 60, out name, out result);
+}
+
+bool TryEvaluateInt64RemainderReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int64 result)
+{
+    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 61, out name, out result);
+}
+
 bool TryEvaluateInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     int32 expectedOperation, out SourceRange name, out int64 result)
 {
@@ -752,6 +820,23 @@ bool TryEvaluateInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
         return false;
     }
 
+    if (operation == 60 || operation == 61)
+    {
+        if (right == 0 || (left == int64.MinValue && right == -1))
+        {
+            return false;
+        }
+        name = foundName;
+        if (operation == 60)
+        {
+            result = left / right;
+        }
+        else
+        {
+            result = left % right;
+        }
+        return true;
+    }
     if (operation == 59)
     {
         if ((left > 0 && ((right > 0 && left > int64.MaxValue / right)
@@ -804,6 +889,18 @@ bool TryEvaluateUInt64MultiplyReturn(TokenSnapshot tokens, TokenIntegerSnapshot 
     return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 59, out name, out result);
 }
 
+bool TryEvaluateUInt64DivideReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint64 result)
+{
+    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 60, out name, out result);
+}
+
+bool TryEvaluateUInt64RemainderReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint64 result)
+{
+    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 61, out name, out result);
+}
+
 bool TryEvaluateUInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     int32 expectedOperation, out SourceRange name, out uint64 result)
 {
@@ -817,6 +914,23 @@ bool TryEvaluateUInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
     }
     uint64 left = DecodeScannerMagnitude(leftLow, leftHigh);
     uint64 right = DecodeScannerMagnitude(rightLow, rightHigh);
+    if (operation == 60 || operation == 61)
+    {
+        if (right == 0)
+        {
+            return false;
+        }
+        name = foundName;
+        if (operation == 60)
+        {
+            result = left / right;
+        }
+        else
+        {
+            result = left % right;
+        }
+        return true;
+    }
     if (operation == 58)
     {
         if (left < right)

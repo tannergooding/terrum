@@ -978,6 +978,77 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("int32", "7 / 2", true, "3")]
+    [InlineData("int32", "0xFFFF_FFFF / 2", true, "0")]
+    [InlineData("int32", "7 % 2", true, "1")]
+    [InlineData("int32", "0xFFFF_FFFF % 2", true, "-1")]
+    [InlineData("int32", "0x8000_0000 / 0xFFFF_FFFF", false, "0")]
+    [InlineData("int32", "0x8000_0000 % 0xFFFF_FFFF", false, "0")]
+    [InlineData("uint32", "4294967295 / 2", true, "2147483647")]
+    [InlineData("uint32", "4294967295 % 2", true, "1")]
+    [InlineData("uint32", "7 / 0", false, "0")]
+    [InlineData("int64", "0x8000_0000_0000_0000 / 2", true, "-4611686018427387904")]
+    [InlineData("int64", "0xFFFF_FFFF_FFFF_FFFF % 2", true, "-1")]
+    [InlineData("int64", "0x8000_0000_0000_0000 / 0xFFFF_FFFF_FFFF_FFFF", false, "0")]
+    [InlineData("int64", "0x8000_0000_0000_0000 % 0xFFFF_FFFF_FFFF_FFFF", false, "0")]
+    [InlineData("uint64", "18446744073709551615 / 2", true, "9223372036854775807")]
+    [InlineData("uint64", "18446744073709551615 % 2", true, "1")]
+    [InlineData("uint64", "18446744073709551616 / 2", false, "0")]
+    [InlineData("uint64", "7 % 0", false, "0")]
+    public async Task BoundedNativeDivisionAndRemainderUseOwnedIntegerRecordsAsync(
+        string typeName, string expression, bool evaluable, string expected)
+    {
+        var width = typeName switch
+        {
+            "int32" => "Int32",
+            "uint32" => "UInt32",
+            "int64" => "Int64",
+            "uint64" => "UInt64",
+            _ => throw new ArgumentOutOfRangeException(nameof(typeName)),
+        };
+        var operation = expression.Contains('/') ? "Divide" : "Remainder";
+        var evaluator = $"TryEvaluate{width}{operation}Return";
+        var text = $"{typeName} Value() {{ return {expression}; }}";
+        var assertion = evaluable
+            ? $$"""
+                require {{evaluator}}(move tokens, move integers, out var name, out var bound);
+                if (name.Start != {{typeName.Length + 1}} || name.Length != 5
+                    || bound != {{expected}}) { return 1; }
+                """
+            : $$"""
+                if ({{evaluator}}(move tokens, move integers,
+                    out var name, out var bound)) { return 1; }
+                """;
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                {{assertion}}
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            if (evaluable)
+            {
+                var source = text + $$"""
+                     int32 Main() {
+                         {{typeName}} actual = Value();
+                         if (actual == {{expected}}) { return 42; }
+                         return 1;
+                     }
+                    """;
+                var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+            }
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData("int32 Answer() { return 42; }", true, 42, 0)]
     [InlineData("int32 Answer() { return -42; }", true, 42, 0)]
     [InlineData("int32 Answer() { return +42; }", true, 42, 0)]
