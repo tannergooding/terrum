@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -2622,6 +2623,101 @@ public sealed class ManagedScannerComponentTests
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
     }
 
+    [Theory]
+    [InlineData("int32 Value(int32 x) { return x; }", true, 0, 1, 0)]
+    [InlineData("int32 Value(int32 x, int32 y) { if (x < y) { return x + y; } else { return x - y; } }", true, 0, 2, 57)]
+    [InlineData("int32 Value(int32 x) { return y; }", false, 3, 0, 0)]
+    public async Task ScalarFrontendProjectionPublishesValidatedTypedResultAsync(
+        string source, bool valid, int error, int parameters, int operation)
+    {
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(source,
+                "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+                (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
+            var native = NativeJit.ExecuteWithData(program, policy);
+            Assert.Equal(42, native.ExitCode);
+            var projected = ScalarFrontendHost.ReadResult(SourceText.From(source),
+                native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+                    ScalarFrontendHost.WordCount * sizeof(int)));
+            Assert.Equal(valid, projected.IsValid);
+            Assert.Equal(error, projected.ErrorCode);
+            Assert.Equal(parameters, projected.ParameterCount);
+            Assert.Equal(operation, projected.WhenTrue.Operation);
+            if (valid)
+            {
+                Assert.Equal("Value", source.Substring(projected.Name.Start, projected.Name.Length));
+                Assert.Equal(source.Contains("if (", StringComparison.Ordinal), projected.HasCondition);
+                if (projected.HasCondition)
+                {
+                    Assert.Equal(67, projected.Condition.Operation);
+                    Assert.Equal(1, projected.Condition.LeftParameter);
+                    Assert.Equal(2, projected.Condition.RightParameter);
+                    Assert.Equal(58, projected.WhenFalse.Operation);
+                }
+            }
+            else
+            {
+                Assert.Equal(default, projected.Name);
+                Assert.Equal(source.IndexOf("y;", StringComparison.Ordinal), projected.ErrorSpan.Start);
+                Assert.Equal(1, projected.ErrorSpan.Length);
+            }
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(0, 2)]
+    [InlineData(1, 0)]
+    [InlineData(3, -1)]
+    [InlineData(6, 3)]
+    [InlineData(22, 7)]
+    [InlineData(27, int.MaxValue)]
+    public void ScalarFrontendProjectionRejectsMalformedHostWords(int index, int value)
+    {
+        var source = SourceText.From("int32 Value(int32 x) { return x; }");
+        var words = new int[ScalarFrontendHost.WordCount];
+        words[0] = 1;
+        words[1] = 1;
+        words[5] = 1;
+        words[6] = 1;
+        words[7] = 1;
+        words[9] = 6;
+        words[10] = 5;
+        words[11] = 18;
+        words[12] = 1;
+        words[22] = 1;
+        words[24] = 1;
+        words[26] = 30;
+        words[27] = 1;
+        var bytes = new byte[words.Length * sizeof(int)];
+        for (var at = 0; at < words.Length; at++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(at * 4), words[at]);
+        }
+        Assert.True(ScalarFrontendHost.ReadResult(source, bytes).IsValid);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(index * 4), value);
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task ScalarFrontendProjectionDoesNotPublishLexicalFailuresAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string Source = "\uD800";
+        var program = await CompileAsync(Source,
+            "using Terrum.CodeAnalysis; int32 Main() { if (TryPublishScalarFrontend()) { return 1; } return 42; }",
+            (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
+        var native = NativeJit.ExecuteWithData(program, policy);
+        Assert.Equal(42, native.ExitCode);
+        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(Source),
+            native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+                ScalarFrontendHost.WordCount * sizeof(int))));
+        await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
     private static Task<BoundProgram> CompilePairParserAsync(string text, string entry, BoundRuntimePolicy policy) =>
         CompileAsync(text, entry, policy, "ScalarParameterPairParser");
 
@@ -2634,7 +2730,9 @@ public sealed class ManagedScannerComponentTests
             "TokenDiagnosticSnapshot"];
         if (parserName is not null)
         {
-            names = [.. names, "ScalarParserTypes", parserName];
+            names = parserName == "ScalarFrontendProjection"
+                ? [.. names, "ScalarParserTypes", "ScalarFrontend", parserName]
+                : [.. names, "ScalarParserTypes", parserName];
         }
         var trees = new List<SyntaxTree>(names.Length + 1);
         foreach (var name in names)
@@ -2643,7 +2741,10 @@ public sealed class ManagedScannerComponentTests
             trees.Add(SyntaxTree.Parse(await File.ReadAllTextAsync(path).ConfigureAwait(true), path));
         }
         trees.Add(SyntaxTree.Parse(entry, "managed-scanner-entry.terrum"));
-        var compilation = Compilation.Create(trees, ScannerHost.CreateBuffers(SourceText.From(text)), policy);
+        var buffers = parserName == "ScalarFrontendProjection"
+            ? ScalarFrontendHost.CreateBuffers(SourceText.From(text))
+            : ScannerHost.CreateBuffers(SourceText.From(text));
+        var compilation = Compilation.Create(trees, buffers, policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         return Assert.IsType<BoundProgram>(compilation.Program);
     }

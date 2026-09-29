@@ -855,10 +855,14 @@ unsupported or invalid shapes return a code and span without a partial
 artifact. Lexical failures remain scanner diagnostics. AOT/JIT execute this
 phase with the host source buffers, but `build-component` still passes
 scanner records to the hosted parser and binder. Connecting the native phase
-requires a validated native-to-host projection of its typed result at that
-handoff; the phase is not a standalone compiler or a persisted native
-bootstrap artifact. The native compiler-primitives DLL does not include it
-because its token and `Host.Source` dependencies lack a standalone host
+to that compilation handoff remains open. A separate
+[`ScalarFrontendProjection`](../self-host/ScalarFrontendProjection.terrum)
+can publish its typed result through a fixed 34-word host buffer; the
+`ScalarFrontendHost` reader bounds types, parameter indexes, operations and
+source spans, and rejects unpublished or malformed output. This is an
+in-process bridge, not a standalone compiler or persisted native bootstrap
+artifact. The native compiler-primitives DLL does not include the frontend
+because its token and `Host.Source` dependencies still require a source
 adapter.
 
 The separate [integer-parsing candidate](../self-host/IntegerParsing.terrum)
