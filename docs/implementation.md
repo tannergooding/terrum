@@ -862,7 +862,8 @@ parameter/literal arithmetic or bitwise operations for integer widths,
 comparison for integer widths and `char16`, and two-parameter Boolean
 bitwise or short-circuit operations, plus two contextual 32-bit integer
 literals in arithmetic or bitwise operations and whole-expression grouping
-(including nested parentheses);
+(including nested parentheses); an `if` branch returning a value may have
+either an `else` return or a subsequent fallthrough return;
 unsupported or invalid shapes return a code and span without a partial
 artifact. Lexical failures remain scanner diagnostics. AOT/JIT execute this
 phase with the host source buffers, but `build-component` still passes
@@ -872,7 +873,8 @@ to that compilation handoff remains open. A separate
 can publish its typed result through a fixed 34-word host buffer; version 3
 encodes a parameter index and operand order in parameter/literal operations
 and carries both literal magnitude words in the operand slots; two-literal
-32-bit operations use one slot per magnitude. The
+32-bit operations use one slot per magnitude. Version 4 distinguishes a
+fallthrough return from an `else` return without changing the buffer size. The
 `ScalarFrontendHost` reader bounds types, parameter indexes, operations and
 source spans, independently checks projected integer bits against source
 spelling and destination range, and rejects unpublished or malformed output. Its bounded
@@ -895,10 +897,10 @@ emitter. It rejects other entry signatures before replacing output;
 writing a PE file, returning its raw exit code with no success envelope;
 the hosted compiler remains in parallel for general builds. This bounded
 result is a provisional component protocol, not approved TRRM metadata or a
-compiler self-build. Ninety shared scalar/conditional/Boolean/integer-literal sources produce
+compiler self-build. Ninety-two shared scalar/conditional/Boolean/integer-literal sources produce
 byte-identical DLLs through the Terrum-authored frontend and hosted compiler
 under both runtime policies; this does not establish parity for unsupported
-source shapes, independent native emitters or a self-build. Fifteen bounded
+source shapes, independent native emitters or a self-build. Seventeen bounded
 zero-parameter `Main` shapes also produce byte-identical, executable images
 through the same hosted emitter under both policies.
 

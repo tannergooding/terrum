@@ -28,6 +28,8 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return 0x2A & 0x3F; }", 42)]
     [InlineData("int32 Main() { return 40 ^ 2; }", 42)]
     [InlineData("int32 Main() { return +42; }", 42)]
+    [InlineData("int32 Main() { if (true) { return 42; } return 0; }", 42)]
+    [InlineData("int32 Main() { if (false) { return 0; } return 42; }", 42)]
     public async Task FrontendRunMatchesHostedJitAsync(string source, int expected)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -80,6 +82,8 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return 40 ^ 2; }")]
     [InlineData("int32 Main() { return 50 - 8; }")]
     [InlineData("int32 Main() { return +0x2A; }")]
+    [InlineData("int32 Main() { if (true) { return 42; } return 0; }")]
+    [InlineData("int32 Main() { if (false) { return 0; } return 42; }")]
     public async Task FrontendBuiltExecutableMatchesHostedAndRunsAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -248,6 +252,8 @@ public sealed partial class CliTests
     [InlineData("public uint32 Value() { return +4294967295; }")]
     [InlineData("public int64 Value() { return +9223372036854775807; }")]
     [InlineData("public uint64 Value() { return +18446744073709551615; }")]
+    [InlineData("public int32 Value(bool x) { if (x) { return 42; } return 0; }")]
+    [InlineData("public int32 Value(int32 x) { if (x < 42) { return x; } return 42; }")]
     public async Task FrontendBuiltLibraryMatchesHostedNativeBytesAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -364,6 +370,7 @@ public sealed partial class CliTests
             Assert.Equal("frontend-component", result.GetProperty("command").GetString());
             Assert.True(result.GetProperty("success").GetBoolean());
             Assert.Equal(2, result.GetProperty("result").GetProperty("parameterCount").GetInt32());
+            Assert.False(result.GetProperty("result").TryGetProperty("hasFallthrough", out _));
             Assert.Equal(67, result.GetProperty("result").GetProperty("condition")
                 .GetProperty("operation").GetInt32());
             Assert.Equal(57, result.GetProperty("result").GetProperty("whenTrue")
@@ -399,6 +406,45 @@ public sealed partial class CliTests
             Assert.False(result.TryGetProperty("result", out _));
             Assert.Equal("TRM0001", result.GetProperty("diagnostics")[0].GetProperty("code").GetString());
         }
+    }
+
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task FrontendComponentPublishesTrailingReturnShapeAsync(string policy)
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        var (exit, output, error) = await RunAsync(
+            Encoding.UTF8.GetBytes("int32 Value(bool x) { if (x) { return 42; } return 0; }"),
+            "frontend-component", directory, "-", "--runtime", policy, "--json");
+        Assert.Equal(0, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        var result = document.RootElement.GetProperty("result");
+        Assert.True(result.GetProperty("hasCondition").GetBoolean());
+        Assert.True(result.GetProperty("hasFallthrough").GetBoolean());
+        Assert.Equal(0, result.GetProperty("condition").GetProperty("operation").GetInt32());
+        Assert.Equal(3, result.GetProperty("whenTrue").GetProperty("operation").GetInt32());
+        Assert.Equal(3, result.GetProperty("whenFalse").GetProperty("operation").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task FrontendComponentRejectsConditionalWithoutFallbackAsync(string policy)
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        var (exit, output, error) = await RunAsync(
+            Encoding.UTF8.GetBytes("int32 Value(bool x) { if (x) { return 42; } }"),
+            "frontend-component", directory, "-", "--runtime", policy, "--json");
+        Assert.Equal(1, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        var result = document.RootElement.GetProperty("result");
+        Assert.False(result.GetProperty("valid").GetBoolean());
+        Assert.Equal(1, result.GetProperty("errorCode").GetInt32());
     }
 
     [Fact]

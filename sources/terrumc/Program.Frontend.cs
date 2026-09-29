@@ -231,6 +231,10 @@ internal static partial class Program
                     WriteFrontendSpan(writer, "firstName", frontend.FirstName);
                     WriteFrontendSpan(writer, "secondName", frontend.SecondName);
                     writer.WriteBoolean("hasCondition", frontend.HasCondition);
+                    if (frontend.HasFallthrough)
+                    {
+                        writer.WriteBoolean("hasFallthrough", true);
+                    }
                     if (frontend.HasCondition)
                     {
                         WriteFrontendExpression(writer, "condition", frontend.Condition);

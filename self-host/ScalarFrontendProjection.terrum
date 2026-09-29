@@ -43,7 +43,15 @@ bool TryPublishScalarFrontend()
     Host.Frontend[14] = result.SecondName.Length;
     if (result.HasCondition)
     {
-        Host.Frontend[15] = 1;
+        if (result.HasFallthrough)
+        {
+            Host.Frontend[0] = 4;
+            Host.Frontend[15] = 2;
+        }
+        else
+        {
+            Host.Frontend[15] = 1;
+        }
         WriteScalarFrontendExpression(16, result.Condition);
         WriteScalarFrontendExpression(28, result.WhenFalse);
     }

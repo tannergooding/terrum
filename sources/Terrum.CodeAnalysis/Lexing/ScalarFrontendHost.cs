@@ -39,7 +39,7 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] is not (1 or 2 or 3) || words[1] is not (1 or 2))
+        if (words[0] is not (1 or 2 or 3 or 4) || words[1] is not (1 or 2))
         {
             throw InvalidResult();
         }
@@ -53,7 +53,7 @@ public static class ScalarFrontendHost
                 throw InvalidResult();
             }
             return new ScalarFrontendResult(false, false, words[2], errorSpan,
-                0, 0, 0, 0, default, default, default, false, default, default, default);
+                0, 0, 0, 0, default, default, default, false, false, default, default, default);
         }
 
         var name = Span(9);
@@ -69,7 +69,8 @@ public static class ScalarFrontendHost
             || (count == 0 ? firstName != default : !ValidSpan(firstName, nonempty: true))
             || (count < 2 ? secondName != default : !ValidSpan(secondName, nonempty: true))
             || !ValidHeader()
-            || words[15] is not (0 or 1))
+            || words[15] is not (0 or 1 or 2)
+            || (words[0] == 4) != (words[15] == 2))
         {
             throw InvalidResult();
         }
@@ -88,7 +89,7 @@ public static class ScalarFrontendHost
 
         return new ScalarFrontendResult(true, isPublic, 0, default, words[5], count,
             words[7], words[8], name, firstName, secondName,
-            words[15] == 1, condition, whenTrue, whenFalse);
+            words[15] != 0, words[15] == 2, condition, whenTrue, whenFalse);
 
         TextSpan Span(int offset)
         {
@@ -146,7 +147,7 @@ public static class ScalarFrontendHost
             var rightType = right == 1 ? words[7] : words[8];
             if (operation == 62)
             {
-                if (words[0] != 3 || expression.Type != 5 || type != 5
+                if (words[0] < 3 || expression.Type != 5 || type != 5
                     || !ValidSpan(expression.Span, nonempty: true))
                 {
                     return false;
@@ -171,7 +172,7 @@ public static class ScalarFrontendHost
             }
             if (operation is 63 or 163)
             {
-                if (words[0] != 3 || expression.Type != type || type is not (1 or 2 or 3 or 4)
+                if (words[0] < 3 || expression.Type != type || type is not (1 or 2 or 3 or 4)
                     || !ValidSpan(expression.Span, nonempty: true))
                 {
                     return false;
@@ -197,7 +198,7 @@ public static class ScalarFrontendHost
             }
             if (operation is 57 or 58 && right == 0)
             {
-                if (words[0] != 3 || expression.Type != type
+                if (words[0] < 3 || expression.Type != type
                     || (operation == 58 ? type is not (1 or 3) : type is < 1 or > 4)
                     || !ValidSpan(expression.Span, nonempty: true))
                 {
@@ -216,7 +217,7 @@ public static class ScalarFrontendHost
             }
             if (operation == 657)
             {
-                if (words[0] != 3 || expression.Type != type || type is not (1 or 2 or 3 or 4)
+                if (words[0] < 3 || expression.Type != type || type is not (1 or 2 or 3 or 4)
                     || !ValidSpan(expression.Span, nonempty: true))
                 {
                     return false;
@@ -232,7 +233,7 @@ public static class ScalarFrontendHost
             }
             if (operation / 100 == 5 && operation % 100 is >= 57 and <= 61 or 71 or 73 or 75)
             {
-                if (words[0] != 3 || expression.Type != type || type is not (1 or 2)
+                if (words[0] < 3 || expression.Type != type || type is not (1 or 2)
                     || !ValidSpan(expression.Span, nonempty: true))
                 {
                     return false;
@@ -256,7 +257,7 @@ public static class ScalarFrontendHost
                 var nameIndex = literalFirst ? 2 : 0;
                 var parameterType = parameter == 1 ? words[7] : words[8];
                 var comparison = operation % 100 is >= 65 and <= 70;
-                if (words[0] != 3 || expression.Type != type
+                if (words[0] < 3 || expression.Type != type
                     || (comparison ? type != 5 || parameterType is not (1 or 2 or 3 or 4 or 6)
                         : type != parameterType || parameterType is not (1 or 2 or 3 or 4))
                     || parameter > parameters
@@ -433,22 +434,26 @@ public static class ScalarFrontendHost
         var types = variables.ToImmutable();
         var methodSpan = new TextSpan(0, source.Length);
         var returnType = Type(result.ReturnType);
-        BoundStatement body;
+        ImmutableArray<BoundStatement> statements;
         if (result.HasCondition)
         {
-            body = new BoundIf(Expression(result.Condition),
+            var conditional = new BoundIf(Expression(result.Condition),
                 new BoundBlock([Return(result.WhenTrue)], result.WhenTrue.Span),
-                new BoundBlock([Return(result.WhenFalse)], result.WhenFalse.Span),
+                result.HasFallthrough ? null
+                    : new BoundBlock([Return(result.WhenFalse)], result.WhenFalse.Span),
                 new TextSpan(result.Condition.Span.Start,
-                    result.WhenFalse.Span.End - result.Condition.Span.Start));
+                    (result.HasFallthrough ? result.WhenTrue.Span.End : result.WhenFalse.Span.End)
+                        - result.Condition.Span.Start));
+            statements = result.HasFallthrough
+                ? [conditional, Return(result.WhenFalse)] : [conditional];
         }
         else
         {
-            body = Return(result.WhenTrue);
+            statements = [Return(result.WhenTrue)];
         }
 
         var function = new BoundFunction(Name(result.Name), returnType, types, types.Length,
-            new BoundBlock([body], methodSpan), methodSpan) { IsInternal = !result.IsPublic };
+            new BoundBlock(statements, methodSpan), methodSpan) { IsInternal = !result.IsPublic };
         var program = new BoundProgram([function], -1) { RuntimePolicy = policy };
         SemanticVerifier.VerifyLibrary(program);
         return program;
@@ -626,5 +631,5 @@ public readonly record struct ScalarFrontendExpression(
 public readonly record struct ScalarFrontendResult(
     bool IsValid, bool IsPublic, int ErrorCode, TextSpan ErrorSpan, int ReturnType, int ParameterCount,
     int FirstType, int SecondType, TextSpan Name, TextSpan FirstName, TextSpan SecondName,
-    bool HasCondition, ScalarFrontendExpression Condition, ScalarFrontendExpression WhenTrue,
+    bool HasCondition, bool HasFallthrough, ScalarFrontendExpression Condition, ScalarFrontendExpression WhenTrue,
     ScalarFrontendExpression WhenFalse);

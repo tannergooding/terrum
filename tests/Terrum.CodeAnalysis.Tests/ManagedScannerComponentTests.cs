@@ -2796,6 +2796,8 @@ public sealed class ManagedScannerComponentTests
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
         Assert.Equal(42, native.ExitCode);
+        Assert.Equal(3, BinaryPrimitives.ReadInt32LittleEndian(
+            native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex])));
         var library = ScalarFrontendHost.BindLibrary(source,
             native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int)), (BoundRuntimePolicy)policy);
@@ -3143,6 +3145,54 @@ public sealed class ManagedScannerComponentTests
         var call = new BoundCall(0, [], PrimitiveType.Int32, default);
         var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
             new BoundBlock([new BoundReturn(call, default)], default), default);
+        var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
+        SemanticVerifier.Verify(executable);
+        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, true)]
+    [InlineData(NativeRuntimePolicy.FailFast, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, true)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, false)]
+    public async Task NativeScalarFrontendTrailingReturnExecutesAsync(
+        NativeRuntimePolicy policy, bool input)
+    {
+        const string Text = "int32 Value(bool x) { if (x) { return 42; } return 0; }";
+        var source = SourceText.From(Text);
+        var stage = await CompileAsync(Text,
+            "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+            (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
+        var native = NativeJit.ExecuteWithData(stage, policy);
+        Assert.Equal(42, native.ExitCode);
+        var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+            ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
+        var result = ScalarFrontendHost.ReadResult(source, bytes);
+        Assert.True(result.HasCondition);
+        Assert.True(result.HasFallthrough);
+        Assert.Equal(4, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        foreach (var (word, value) in new[] { (0, 3), (15, 0), (15, 1) })
+        {
+            var offset = word * sizeof(int);
+            var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), value);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
+        }
+        var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
+        var call = new BoundCall(0, [new BoundConstant(input ? 1 : 0, PrimitiveType.Bool, default)],
+            PrimitiveType.Int32, default);
+        var matches = new BoundBinary(TokenKind.EqualsEquals, call,
+            new BoundConstant(input ? 42 : 0, PrimitiveType.Int32, default),
+            PrimitiveType.Bool, default);
+        var branch = new BoundIf(matches,
+            new BoundBlock([new BoundReturn(new BoundConstant(42, PrimitiveType.Int32, default),
+                default)], default),
+            new BoundBlock([new BoundReturn(new BoundConstant(0, PrimitiveType.Int32, default),
+                default)], default), default);
+        var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
+            new BoundBlock([branch], default), default);
         var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
         SemanticVerifier.Verify(executable);
         Assert.Equal(42, NativeJit.Execute(executable, policy));

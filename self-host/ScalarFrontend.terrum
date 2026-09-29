@@ -49,6 +49,7 @@ public class ScalarFrontendResult
     public SourceRange FirstName;
     public SourceRange SecondName;
     public bool HasCondition;
+    public bool HasFallthrough;
     public ScalarFrontendExpression Condition;
     public ScalarFrontendExpression WhenTrue;
     public ScalarFrontendExpression WhenFalse;
@@ -56,7 +57,7 @@ public class ScalarFrontendResult
     public ScalarFrontendResult(bool valid, bool isPublic, int32 errorCode, SourceRange errorSpan,
         int32 returnType, int32 parameterCount, int32 firstType, int32 secondType,
         SourceRange name, SourceRange firstName, SourceRange secondName,
-        bool hasCondition, ScalarFrontendExpression condition,
+        bool hasCondition, bool hasFallthrough, ScalarFrontendExpression condition,
         ScalarFrontendExpression whenTrue, ScalarFrontendExpression whenFalse)
     {
         IsValid = valid;
@@ -71,6 +72,7 @@ public class ScalarFrontendResult
         FirstName = firstName;
         SecondName = secondName;
         HasCondition = hasCondition;
+        HasFallthrough = hasFallthrough;
         Condition = condition;
         WhenTrue = whenTrue;
         WhenFalse = whenFalse;
@@ -688,6 +690,7 @@ mut class ScalarFrontendState
         mut SourceRange name = empty;
         mut int32 returnType = 0;
         mut bool hasCondition = false;
+        mut bool hasFallthrough = false;
         mut ScalarFrontendExpression condition = absent;
         mut ScalarFrontendExpression whenTrue = absent;
         mut ScalarFrontendExpression whenFalse = absent;
@@ -720,14 +723,25 @@ mut class ScalarFrontendState
                 if (_error == 0 && Take(47, out var closeCondition)
                     && Take(48, out var openTrue)
                     && ParseReturn(returnType, out var firstReturn)
-                    && Take(49, out var closeTrue)
-                    && Take(17, out var otherwise)
-                    && Take(48, out var openFalse)
-                    && ParseReturn(returnType, out var secondReturn)
-                    && Take(49, out var closeFalse))
+                    && Take(49, out var closeTrue))
                 {
                     whenTrue = firstReturn;
-                    whenFalse = secondReturn;
+                    require _tokens.TryGet(_at, out var followingTrue);
+                    if (followingTrue.Kind == 17)
+                    {
+                        _at = _at + 1;
+                        if (Take(48, out var openFalse)
+                            && ParseReturn(returnType, out var secondReturn)
+                            && Take(49, out var closeFalse))
+                        {
+                            whenFalse = secondReturn;
+                        }
+                    }
+                    else if (ParseReturn(returnType, out var trailingReturn))
+                    {
+                        whenFalse = trailingReturn;
+                        hasFallthrough = true;
+                    }
                 }
             }
             else if (ParseReturn(returnType, out var found))
@@ -743,11 +757,11 @@ mut class ScalarFrontendState
         if (_error != 0)
         {
             return ScalarFrontendResult.TryCreate(false, false, _error, _errorSpan, 0, 0,
-                0, 0, empty, empty, empty, false, absent, absent, absent, out result);
+                0, 0, empty, empty, empty, false, false, absent, absent, absent, out result);
         }
         return ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty, returnType, _parameterCount,
             _firstType, _secondType, name, _first.Range, _second.Range,
-            hasCondition, condition, whenTrue, whenFalse, out result);
+            hasCondition, hasFallthrough, condition, whenTrue, whenFalse, out result);
     }
 }
 
@@ -760,7 +774,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
         require tokens.TryGet(64, out var excess);
         require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
         return ScalarFrontendResult.TryCreate(false, false, 1, excess.Range, 0, 0, 0, 0,
-            empty, empty, empty, false, absent, absent, absent, out result);
+            empty, empty, empty, false, false, absent, absent, absent, out result);
     }
     if (count < 1 || !ManagedTokenChain.TryCreate(out var chain))
     {
