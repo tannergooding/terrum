@@ -93,13 +93,13 @@ public sealed class CoreLibraryTests
     [InlineData("uint64")]
     public void ImplementedPrimitiveApisExecuteAcrossModuleBoundary(string name)
     {
-        var source = $"public struct {name} {{ private {name} value; public static {name} Identity({name} input) {{ return input.value; }} }}";
+        var source = $"public struct {name} {{ private {name} value; public static {name} Identity({name} input) {{ return input.value; }} public {name} Read() {{ return value; }} }}";
         var compilation = Compilation.CreateCoreLibrary([SyntaxTree.Parse(source)]);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program),
-            [$"{name}.Identity"]);
-        var body = name == "bool" ? "if (bool.Identity(true)) { return 7; } return 0;"
-            : $"return int32({name}.Identity({name}(7)));";
+            [$"{name}.Identity", $"{name}.Read"]);
+        var body = name == "bool" ? "if (bool.Identity(true).Read()) { return 7; } return 0;"
+            : $"return int32({name}.Identity({name}(7)).Read());";
         var consumer = Compilation.Create(SyntaxTree.Parse($"int32 Main() {{ {body} }}"),
             ModuleCompiler.CreateReference(producer));
         Assert.False(consumer.HasErrors, string.Join(Environment.NewLine, consumer.Diagnostics));
