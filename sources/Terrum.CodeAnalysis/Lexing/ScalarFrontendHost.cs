@@ -321,6 +321,32 @@ public static class ScalarFrontendHost
                     && tokens[1].Span.End == expression.Span.Length
                     && ValidMagnitude(tokens[1].Text.AsSpan(), type, false, left, right);
             }
+            if (operation / 100 is 7 or 9 && operation % 100 is >= 71 and <= 75)
+            {
+                if (words[0] < 3 || expression.Type != 5 || type != 5
+                    || left < 1 || left > parameters
+                    || (left == 1 ? words[7] : words[8]) != 5
+                    || right is not (20 or 21)
+                    || !ValidSpan(expression.Span, nonempty: true))
+                {
+                    return false;
+                }
+                var literalFirst = operation >= 900;
+                var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
+                    expression.Span.Start, expression.Span.Length)));
+                var tokens = lexical.Tokens;
+                var name = left == 1 ? firstName : secondName;
+                return lexical.Diagnostics.IsEmpty && tokens.Length == 4
+                    && tokens[0].Span.Start == 0
+                    && tokens[0].Kind == (literalFirst ? (TokenKind)right : TokenKind.Identifier)
+                    && (literalFirst || tokens[0].Text
+                        == source.Text.Substring(name.Start, name.Length))
+                    && tokens[1].Kind == (TokenKind)(operation % 100)
+                    && tokens[2].Kind == (literalFirst ? TokenKind.Identifier : (TokenKind)right)
+                    && (!literalFirst || tokens[2].Text
+                        == source.Text.Substring(name.Start, name.Length))
+                    && tokens[2].Span.End == expression.Span.Length;
+            }
             if (operation / 100 == 5 && operation % 100 is >= 57 and <= 61 or 71 or 73 or 75)
             {
                 if (words[0] < 3 || expression.Type != type || type is not (1 or 2)
@@ -615,6 +641,24 @@ public static class ScalarFrontendHost
                         | (uint)expression.LeftParameter));
                 return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Plus,
                     new BoundConstant(value, type, operandSpan), type, expression.Span));
+            }
+            if (expression.Operation / 100 is 7 or 9
+                && expression.Operation % 100 is >= 71 and <= 75)
+            {
+                var literalFirst = expression.Operation >= 900;
+                var tokens = Lexer.Lex(SourceText.From(source.Text.Substring(
+                    expression.Span.Start, expression.Span.Length))).Tokens;
+                var first = new TextSpan(expression.Span.Start + tokens[0].Span.Start,
+                    tokens[0].Span.Length);
+                var second = new TextSpan(expression.Span.Start + tokens[2].Span.Start,
+                    tokens[2].Span.Length);
+                var parameter = new BoundRead(expression.LeftParameter - 1,
+                    PrimitiveType.Bool, literalFirst ? second : first);
+                var literal = new BoundConstant(expression.RightParameter == 20 ? 1 : 0,
+                    PrimitiveType.Bool, literalFirst ? first : second);
+                return new BoundBinary((TokenKind)(expression.Operation % 100),
+                    literalFirst ? literal : parameter, literalFirst ? parameter : literal,
+                    PrimitiveType.Bool, expression.Span);
             }
             if (expression.Operation / 100 == 5
                 && expression.Operation % 100 is >= 57 and <= 61 or 71 or 73 or 75)

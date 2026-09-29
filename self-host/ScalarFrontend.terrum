@@ -12,6 +12,8 @@ namespace Terrum.CodeAnalysis;
 // Version-3 binary parameter/literal expressions add 100/200 to the operator
 // for a parameter on the left, or 300/400 for one on the right (parameter 1/2).
 // The two slots hold the literal's low/high magnitude words.
+// Boolean parameter/literal pairs add 700 for a parameter on the left or
+// 900 for a literal on the left; slots hold the parameter index and literal kind.
 // An invalid
 // result has only ErrorCode/ErrorSpan; all other fields, including visibility,
 // are empty. A valid result is public only for an explicit public keyword. Lexical errors
@@ -500,6 +502,28 @@ mut class ScalarFrontendState
         if (literal.Kind == 20 || literal.Kind == 21)
         {
             _at = _at + 1;
+            if (_tokens.TryGet(_at, out var booleanOperator)
+                && booleanOperator.Kind >= 71 && booleanOperator.Kind <= 75)
+            {
+                _at = _at + 1;
+                if (!Take(2, out var right)
+                    || !TryResolveParameter(right, out var parameter, out var parameterType))
+                {
+                    return false;
+                }
+                if (parameterType != 5)
+                {
+                    FailAt(2, right.Range);
+                    return false;
+                }
+                require SourceRange.TryCreate(literal.Range.Start,
+                    right.Range.End - literal.Range.Start, out var span);
+                require ScalarFrontendExpression.TryCreate(5,
+                    booleanOperator.Kind + 900, parameter, literal.Kind,
+                    span, out var withLiteral);
+                expression = withLiteral;
+                return true;
+            }
             require ScalarFrontendExpression.TryCreate(5, literal.Kind, 0, 0,
                 literal.Range, out var found);
             expression = found;
@@ -537,6 +561,24 @@ mut class ScalarFrontendState
         {
             operation = next.Kind;
             _at = _at + 1;
+            if (operation >= 71 && operation <= 75
+                && _tokens.TryGet(_at, out var booleanRight)
+                && (booleanRight.Kind == 20 || booleanRight.Kind == 21))
+            {
+                if (selected != 5)
+                {
+                    FailAt(2, next.Range);
+                    return false;
+                }
+                _at = _at + 1;
+                require SourceRange.TryCreate(left.Range.Start,
+                    booleanRight.Range.End - left.Range.Start, out var span);
+                require ScalarFrontendExpression.TryCreate(5,
+                    operation + 700, leftIndex, booleanRight.Kind,
+                    span, out var withLiteral);
+                expression = withLiteral;
+                return true;
+            }
             if (((operation >= 57 && operation <= 61)
                 || (operation >= 65 && operation <= 70)
                 || operation == 71 || operation == 73 || operation == 75)

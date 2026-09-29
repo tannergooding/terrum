@@ -3112,6 +3112,55 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, "x && true", true, true, 772)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "false && x", true, false, 972)]
+    [InlineData(NativeRuntimePolicy.FailFast, "x || false", false, false, 774)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "true || x", false, true, 974)]
+    [InlineData(NativeRuntimePolicy.FailFast, "x & false", true, false, 771)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "true | x", false, true, 973)]
+    [InlineData(NativeRuntimePolicy.FailFast, "x ^ true", true, false, 775)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "false ^ x", true, true, 975)]
+    public async Task NativeScalarFrontendBooleanLiteralPairExecutesAsync(
+        NativeRuntimePolicy policy, string expression, bool input, bool expected, int operation)
+    {
+        var text = $"bool Value(bool x) {{ return {expression}; }}";
+        var source = SourceText.From(text);
+        var stage = await CompileAsync(text,
+            "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+            (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
+        var native = NativeJit.ExecuteWithData(stage, policy);
+        Assert.Equal(42, native.ExitCode);
+        var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+            ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
+        Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        foreach (var (word, value) in new[] { (0, 2), (24, 2), (25, 22) })
+        {
+            var offset = word * sizeof(int);
+            var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), value);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
+        }
+        var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
+        var call = new BoundCall(0,
+            [new BoundConstant(input ? 1 : 0, PrimitiveType.Bool, default)],
+            PrimitiveType.Bool, default);
+        var matches = new BoundBinary(TokenKind.EqualsEquals, call,
+            new BoundConstant(expected ? 1 : 0, PrimitiveType.Bool, default),
+            PrimitiveType.Bool, default);
+        var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
+            new BoundBlock([new BoundIf(matches,
+                new BoundBlock([new BoundReturn(new BoundConstant(42, PrimitiveType.Int32,
+                    default), default)], default),
+                new BoundBlock([new BoundReturn(new BoundConstant(0, PrimitiveType.Int32,
+                    default), default)], default), default)], default), default);
+        var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
+        SemanticVerifier.Verify(executable);
+        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
     [InlineData(NativeRuntimePolicy.FailFast, "-", -42, 58)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "-", -42, 58)]
     [InlineData(NativeRuntimePolicy.FailFast, "+", 42, 57)]
