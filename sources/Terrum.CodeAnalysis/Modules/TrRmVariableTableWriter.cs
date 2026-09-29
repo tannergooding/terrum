@@ -6,7 +6,7 @@ using System.Collections.Generic;
 
 namespace Terrum.CodeAnalysis.Modules;
 
-/// <summary>Writes offset-indexed opaque Blob or Body rows without interpreting their contents.</summary>
+/// <summary>Writes offset-indexed variable rows; clause and instruction semantics are validated separately.</summary>
 public static class TrRmVariableTableWriter
 {
     public static byte[] EncodeBlobs(IReadOnlyList<ReadOnlyMemory<byte>> rows)
@@ -14,6 +14,9 @@ public static class TrRmVariableTableWriter
 
     public static byte[] EncodeBodies(IReadOnlyList<ReadOnlyMemory<byte>> rows)
         => Encode(rows, 1);
+
+    internal static byte[] EncodeContracts(IReadOnlyList<ReadOnlyMemory<byte>> rows)
+        => Encode(rows, 8);
 
     private static byte[] Encode(IReadOnlyList<ReadOnlyMemory<byte>> rows, int minimumRowBytes)
     {
@@ -29,7 +32,7 @@ public static class TrRmVariableTableWriter
         {
             if (row.Length < minimumRowBytes)
             {
-                throw new ArgumentException("A TRRM Body row must be nonempty.", nameof(rows));
+                throw new ArgumentException("A TRRM variable row is shorter than its minimum size.", nameof(rows));
             }
 
             dataBytes += row.Length;

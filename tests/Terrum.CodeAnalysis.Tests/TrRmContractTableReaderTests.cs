@@ -125,12 +125,32 @@ public sealed class TrRmContractTableReaderTests
             hasOutputParam: true));
     }
 
+    [Fact]
+    public void WrittenClausesComposeAcrossTypeAndMethodInFramedArtifact()
+    {
+        Create(Section(Cleanup(), Effects()), writeRows: true, frameArtifact: true);
+        var missingNoThrow = Effects();
+        missingNoThrow[8] = 2;
+        Assert.Throws<InvalidDataException>(() =>
+            Create(Section(Cleanup(), missingNoThrow), writeRows: true));
+        var invalidKind = Effects();
+        invalidKind[4] = 6;
+        Assert.Throws<InvalidDataException>(() =>
+            Create(Section(Cleanup(), invalidKind), writeRows: true));
+        Assert.Throws<InvalidDataException>(() =>
+            Create(Section(Effects(), Effects()),
+                typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
+                writeRows: true));
+    }
+
     private static void Create(byte[] section, int recordCount = 2, int declaredCount = 2,
         uint typeFirst = 1, uint typeCount = 1, uint methodFirst = 2, uint methodCount = 1,
-        bool hasOutputParam = false, byte paramMode = 1, bool nonBooleanResult = false)
+        bool hasOutputParam = false, byte paramMode = 1, bool nonBooleanResult = false,
+        bool writeRows = false, bool frameArtifact = false)
     {
-        var names = new TrRmStringTableReader(TrRmStringTableWriter.EncodeTextRows(
-            [("", 0), ("Module", 0), ("Widget", 0), ("Run", 0)]), 4);
+        var nameBytes = TrRmStringTableWriter.EncodeTextRows(
+            [("", 0), ("Module", 0), ("Widget", 0), ("Run", 0)]);
+        var names = new TrRmStringTableReader(nameBytes, 4);
         var module = new byte[44];
         Write(module, 0, 2);
         Write(module, 4, 1);
@@ -182,8 +202,39 @@ public sealed class TrRmContractTableReaderTests
         Write(method, 20, methodCount);
         var methods = new TrRmMethodDefTableReader(method, 1, names, modules,
             types, signatures, declaredCount, 0);
+        if (writeRows)
+        {
+            var index = new TrRmVariableTableIndex(section, recordCount, 8, 1);
+            var rows = new TrRmContractRow[recordCount];
+            for (var row = 1; row <= recordCount; row++)
+            {
+                var data = index.GetRow(row);
+                rows[row - 1] = new TrRmContractRow(
+                    BinaryPrimitives.ReadUInt32LittleEndian(data),
+                    BinaryPrimitives.ReadUInt16LittleEndian(data[4..]),
+                    data[8..].ToArray());
+            }
+
+            var emitted = TrRmContractTableWriter.Encode(
+                rows, types, methods, signatures, parameters, typeSpecs);
+            Assert.Equal(section, emitted);
+            section = emitted;
+        }
         _ = new TrRmContractTableReader(section, recordCount,
             types, methods, signatures, parameters, typeSpecs);
+        if (frameArtifact)
+        {
+            var artifact = TrRmArtifactWriter.Encode([
+                new TrRmSection(0x0001, 0, 1, module),
+                new TrRmSection(0x0002, 0, 4, nameBytes),
+                new TrRmSection(0x0011, 0, 1, spec),
+                new TrRmSection(0x0013, 0, 1, type),
+                new TrRmSection(0x0016, 0, 1, method),
+                new TrRmSection(0x0017, 0, 1, signature),
+                new TrRmSection(0x001B, 0, (uint)recordCount, section),
+            ]);
+            TrRmStructuralMetadataValidator.Validate(artifact);
+        }
     }
 
     private static byte[] Cleanup()

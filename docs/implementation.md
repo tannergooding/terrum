@@ -1077,6 +1077,9 @@ witness references remain structurally opaque, not executable contracts.
 Import-row and Export-row writers check retained expected definitions and
 public producer keys against local structural tables; they do not resolve a
 producer or prove contract compatibility.
+An offset-indexed Contract-row writer checks assigned clause shapes and
+cross-table ownership, including cleanup's declared `NoThrow` target; it does
+not prove effects or encode general executable contracts.
 The self-host String-row
 candidate emits individual rows. These exercise approved metadata contracts in isolation,
 including a framed callable-table fixture, but do not parse executable Body
