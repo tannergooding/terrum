@@ -92,6 +92,28 @@ int32 CheckStringLiterals()
             {
                 return 28;
             }
+            int32 expectedLatin1Start = Host.ExpectedLatin1Records[fixture * 2];
+            int32 expectedLatin1Length = Host.ExpectedLatin1Records[fixture * 2 + 1];
+            if (literal.TryGetLatin1Length(init var latin1Length))
+            {
+                if (expectedLatin1Length < 0 || latin1Length != expectedLatin1Length) { return 37; }
+                require OwnedInt32Buffer.TryCreate(latin1Length, out var latin1Workspace);
+                mut OwnedInt32Buffer latin1 = literal.EncodeLatin1(move latin1Workspace);
+                if (latin1.Count != latin1Length || latin1.Capacity != latin1Length) { return 38; }
+                for (mut int32 index = 0; index < latin1Length; index = index + 1)
+                {
+                    if (latin1.Read(index) != Host.ExpectedLatin1Bytes[expectedLatin1Start + index])
+                    {
+                        return 39;
+                    }
+                }
+                latin1 = literal.EncodeLatin1(move latin1);
+                if (latin1.Count != latin1Length || latin1.Capacity != latin1Length) { return 40; }
+            }
+            else if (expectedLatin1Length >= 0)
+            {
+                return 41;
+            }
             require literal.TryGetUtf32ByteLength(init var utf32Length);
             int32 expectedUtf32Start = Host.ExpectedUtf32Records[fixture * 2];
             int32 expectedUtf32Length = Host.ExpectedUtf32Records[fixture * 2 + 1];

@@ -36,6 +36,8 @@ public sealed class StringLiteralComponentTests
         var utf16Bytes = ImmutableArray.CreateBuilder<int>();
         var asciiRecords = ImmutableArray.CreateBuilder<int>();
         var asciiBytes = ImmutableArray.CreateBuilder<int>();
+        var latin1Records = ImmutableArray.CreateBuilder<int>();
+        var latin1Bytes = ImmutableArray.CreateBuilder<int>();
         var utf32Records = ImmutableArray.CreateBuilder<int>();
         var utf32Bytes = ImmutableArray.CreateBuilder<int>();
         var utf16Encoder = new UnicodeEncoding(false, false, true);
@@ -59,6 +61,8 @@ public sealed class StringLiteralComponentTests
             utf16ByteRecords.Add(fixture.Scalars is null ? -1 : 0);
             asciiRecords.Add(asciiBytes.Count);
             asciiRecords.Add(-1);
+            latin1Records.Add(latin1Bytes.Count);
+            latin1Records.Add(-1);
             utf32Records.Add(utf32Bytes.Count);
             utf32Records.Add(fixture.Scalars is null ? -1 : 0);
             if (fixture.Scalars is ScalarFixture[] values)
@@ -82,6 +86,11 @@ public sealed class StringLiteralComponentTests
                 {
                     asciiRecords[^1] = values.Length;
                     asciiBytes.AddRange(values.Select(static value => value.Value));
+                }
+                if (values.All(static value => value.Value < 256))
+                {
+                    latin1Records[^1] = values.Length;
+                    latin1Bytes.AddRange(values.Select(static value => value.Value));
                 }
                 var encoded32 = utf32Encoder.GetBytes(decoded);
                 utf32Records[^1] = encoded32.Length;
@@ -112,6 +121,8 @@ public sealed class StringLiteralComponentTests
             new HostBuffer("ExpectedUtf16Bytes", PrimitiveType.Int32, utf16Bytes.ToImmutable(), false),
             new HostBuffer("ExpectedAsciiRecords", PrimitiveType.Int32, asciiRecords.ToImmutable(), false),
             new HostBuffer("ExpectedAsciiBytes", PrimitiveType.Int32, asciiBytes.ToImmutable(), false),
+            new HostBuffer("ExpectedLatin1Records", PrimitiveType.Int32, latin1Records.ToImmutable(), false),
+            new HostBuffer("ExpectedLatin1Bytes", PrimitiveType.Int32, latin1Bytes.ToImmutable(), false),
             new HostBuffer("ExpectedUtf32Records", PrimitiveType.Int32, utf32Records.ToImmutable(), false),
             new HostBuffer("ExpectedUtf32Bytes", PrimitiveType.Int32, utf32Bytes.ToImmutable(), false),
         ], policy == NativeRuntimePolicy.FailFast ? BoundRuntimePolicy.FailFast : BoundRuntimePolicy.CheckedExceptions);
@@ -126,6 +137,7 @@ public sealed class StringLiteralComponentTests
     [InlineData("TryGetUtf16Length", "EncodeUtf16", "\"\uD83D\uDE00\"", new[] { 0xD83D, 0xDE00 })]
     [InlineData("TryGetUtf16ByteLength", "EncodeUtf16LeBytes", "\"\uD83D\uDE00\"", new[] { 0x3D, 0xD8, 0, 0xDE })]
     [InlineData("TryGetUtf32ByteLength", "EncodeUtf32LeBytes", "\"\u00E9\"", new[] { 233, 0, 0, 0 })]
+    [InlineData("TryGetLatin1Length", "EncodeLatin1", "\"\u00E9\"", new[] { 233 })]
     public async Task LiteralEncodingRejectsUndersizedStorageAndReleasesItOnCheckedFailureAsync(
         string measure, string encode, string spelling, int[] expected)
     {
@@ -163,20 +175,24 @@ public sealed class StringLiteralComponentTests
         Assert.Equal(0, await ExecuteAotAsync(program, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
     }
 
-    [Fact]
-    public async Task AsciiEncodingRejectsNonAsciiWithoutPublishingPartialOutputAsync()
+    [Theory]
+    [InlineData("TryGetAsciiLength", "EncodeAscii", 233)]
+    [InlineData("TryGetLatin1Length", "EncodeLatin1", 256)]
+    [InlineData("TryGetLatin1Length", "EncodeLatin1", 0x1F600)]
+    public async Task SingleByteEncodingRejectsUnrepresentableScalarWithoutPublishingPartialOutputAsync(
+        string measure, string encode, int scalar)
     {
         var trees = await ReadComponentsAsync(includeTests: false).ConfigureAwait(true);
-        var entry = SyntaxTree.Parse("""
+        var entry = SyntaxTree.Parse($$"""
             namespace Terrum.CodeAnalysis;
             int32 Main() {
                 require SourceRange.TryCreate(0, Host.Source.Length, out var spelling);
                 require StringLiteral.TryCreate(spelling, out var literal);
-                if (literal.TryGetAsciiLength(init var length)) { return 1; }
+                if (literal.{{measure}}(init var length)) { return 1; }
                 require OwnedInt32Buffer.TryCreate(2, out var workspace);
                 unsafe {
                     try {
-                        OwnedInt32Buffer invalid = literal.EncodeAscii(move workspace);
+                        OwnedInt32Buffer invalid = literal.{{encode}}(move workspace);
                         return 2;
                     } catch {
                         require OwnedInt32Buffer.TryCreate(1, out var created);
@@ -186,9 +202,10 @@ public sealed class StringLiteralComponentTests
                     }
                 }
             }
-            """, "ascii-nonascii-entry.terrum");
+            """, "single-byte-unrepresentable-entry.terrum");
         var compilation = Compilation.Create(trees.Add(entry),
-            [new HostBuffer("Source", PrimitiveType.Char16, [34, 65, 233, 34], false)],
+            [new HostBuffer("Source", PrimitiveType.Char16,
+                [34, 65, .. char.ConvertFromUtf32(scalar).Select(unit => (int)unit), 34], false)],
             BoundRuntimePolicy.CheckedExceptions);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
@@ -671,6 +688,8 @@ public sealed class StringLiteralComponentTests
         yield return Valid(("\t", 9), ("\v", 11), ("\f", 12), ("\u001C", 28), ("\u0661", 1633));
         yield return Valid(("\\n", 10), ("\\r", 13), ("\\t", 9), ("\\\\", 92), ("\\\"", 34), ("\\0", 0));
         yield return Valid(("e", 101), ("\u0301", 769), ("\u00E9", 233));
+        yield return Valid(("\\u00FF", 255), ("\u00E9", 233), ("\\U00000080", 128));
+        yield return Valid(("\\u0100", 256));
         yield return Valid(("\uD7FF", 0xD7FF), ("\uE000", 0xE000), ("\uFFFF", 0xFFFF));
         yield return Valid(("\uD800\uDC00", 0x10000), ("\uDBFF\uDFFF", 0x10FFFF));
         yield return Valid(("\u007F", 0x7F), ("\u0080", 0x80), ("\u07FF", 0x7FF),

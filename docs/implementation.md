@@ -944,6 +944,13 @@ semantics. AOT/JIT compare against host bit-pattern results under both
 policies, including an independent compiled-module consumer. This does not
 introduce `unchecked` source syntax or change existing type-call conversion.
 
+The [StringLiteral candidate](../self-host/StringLiteral.terrum) decodes
+validated quoted spelling from the immutable source grant. Its ASCII and
+ISO-8859-1 (Latin-1) length queries return false for unrepresentable scalars;
+their owned-buffer encoders fail rather than substitute, with exact-capacity
+and cleanup coverage under native execution. Latin-1 is an explicit library
+option, not a `StringRow` metadata selector or a default runtime encoding.
+
 `SourceText` owns exact input text and a diagnostic path label. All library
 offsets, line characters and lengths are UTF-16 units, not scalar/grapheme/display
 columns; ranges are half-open. Lines and characters are zero-based. Only human
