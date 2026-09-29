@@ -1034,7 +1034,11 @@ PE file. The [approved current metadata design](il-metadata.md)
 specifies candidate `(1, 0)` framing and rows; it is not the implemented
 semantic-module encoding. Implemented semantic revisions are pre-1.0
 development revisions, not a stable 1.0 specification. Host-side candidate
-readers validate `(1, 0)` header and directory framing, then String
+readers validate `(1, 0)` header and directory framing. The index enumerates
+validated directory entries with their
+policy flags and borrowed payloads, allowing tools to preserve optional
+nonsemantic sections without guessing kinds or dropping reference-slot policy.
+Table readers validate String
 offsets and name rows, fixed Module rows and their partition cursors,
 ModuleRef identities and co-located producer requirements, optional SourceFile
 paths, nominal TypeDef ranges and FieldDef ownership, unique Layout row

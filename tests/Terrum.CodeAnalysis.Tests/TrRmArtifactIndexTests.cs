@@ -206,6 +206,39 @@ public sealed class TrRmArtifactIndexTests
 
     [Theory]
     [InlineData((ushort)1)]
+    [InlineData((ushort)2)]
+    [InlineData((ushort)3)]
+    public void EnumeratesOrderedSectionsIncludingOptionalExtensionPolicies(ushort policy)
+    {
+        var artifact = WithReferenceSlottedExtension();
+        WriteU16(artifact, 66, policy);
+        var index = new TrRmArtifactIndex(artifact);
+        Assert.Equal(3, index.SectionCount);
+        var preserved = new TrRmSection[index.SectionCount];
+        for (var entry = 0; entry < index.SectionCount; entry++)
+        {
+            index.GetSection(entry, out var kind, out var flags, out var payload, out var count);
+            preserved[entry] = new TrRmSection(kind, flags, (uint)count, payload.ToArray());
+        }
+
+        Assert.Equal((ushort)0x8000, preserved[2].Kind);
+        Assert.Equal(policy, preserved[2].Flags);
+        Assert.Equal(artifact, TrRmArtifactWriter.Encode(preserved));
+        var sectionCount = index.SectionCount;
+        Assert.Throws<InvalidDataException>(() =>
+            GetIndexedSection(artifact, -1));
+        Assert.Throws<InvalidDataException>(() =>
+            GetIndexedSection(artifact, sectionCount));
+    }
+
+    private static void GetIndexedSection(byte[] artifact, int entry)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        index.GetSection(entry, out _, out _, out _, out _);
+    }
+
+    [Theory]
+    [InlineData((ushort)1)]
     [InlineData((ushort)3)]
     public void SkipsNonsemanticExtensionsUnderTheirRegisteredPolicy(ushort policy)
     {
