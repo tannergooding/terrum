@@ -52,7 +52,7 @@ public readonly ref struct TrRmImportTableReader
     }
 
     public bool IsExpectedDefinition(uint reference)
-        => _expected.Contains(reference);
+        => _expected is not null && _expected.Contains(reference);
 
     private static uint Read(ReadOnlySpan<byte> data, int offset)
         => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));

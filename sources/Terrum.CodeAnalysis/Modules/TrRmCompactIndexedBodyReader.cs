@@ -8,7 +8,7 @@ using System.IO;
 namespace Terrum.CodeAnalysis.Modules;
 
 /// <summary>Inspects the root-free, forward-branching scalar compact-indexed subset.</summary>
-/// <remarks>Only scalar constants, operators, integer conversions, optional values, Copy, Select, local scalar calls, forward Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
+/// <remarks>Only scalar constants, operators, integer conversions, optional values, Copy, Select, local and expected-import scalar calls, forward Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
 public readonly ref struct TrRmCompactIndexedBodyReader
 {
     private readonly record struct Edge(int Target, int[] Arguments);
@@ -25,6 +25,14 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types)
+        : this(bodies, methodRow, modules, methods, signatures, parameters, types, default)
+    {
+    }
+
+    public TrRmCompactIndexedBodyReader(TrRmBodyTableReader bodies, int methodRow,
+        TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader types, TrRmImportTableReader imports)
     {
         var bodyRow = methods.GetBodyRow(methodRow);
         if (bodyRow == 0
@@ -394,7 +402,9 @@ public readonly ref struct TrRmCompactIndexedBodyReader
 
                     var target = localMethodStart + method - 1;
                     var targetSignature = methods.GetSignature(target);
-                    if (methods.GetOwnerType(target) != 0 || methods.GetBodyRow(target) == 0
+                    if (methods.GetOwnerType(target) != 0
+                        || methods.GetBodyRow(target) == 0
+                            && !imports.IsExpectedDefinition(0x1600_0000u | (uint)target)
                         || signatures.GetReceiverTypeSpec(targetSignature) != 0
                         || signatures.GetGenericCount(targetSignature) != 0)
                     {

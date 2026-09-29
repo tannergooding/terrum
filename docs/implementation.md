@@ -1254,11 +1254,12 @@ edges with checked typed block arguments, scalar `ConstBits`,
 `ConstSigned`, `Copy`, scalar `Unary`, `Binary`, integer `Convert`
 (wrapping, saturating and equal-width bit reinterpretation), eager `Select`,
 checked integer arithmetic/shifts, integer `CheckedConvert`, signed `CheckedNegate`,
-dual-result `CheckedDivRem`, local static `Call` with scalar/optional parameters
-and result (including void), `Switch`, `Return` and `Fail`. The bounded
-call inspection rejects receiver/generic calls, imports and packed
-cross-module DefIds; it checks signatures, not call effects or executable
-callee bodies.
+dual-result `CheckedDivRem`, static `Call` to local or retained imported
+MethodDefs with scalar/optional parameters and result (including void),
+`Switch`, `Return` and `Fail`. The bounded call inspection rejects
+receiver/generic calls and packed cross-module DefIds; it checks the expected
+import definition and signature, not producer binding, call effects or
+executable callee bodies.
 Optional scalar values retain their presence-qualified identity through
 `MakeOptional`, `None`, `IsPresent`, `Copy` and eager `Select`; they are not
 interchangeable with the underlying scalar in operations or signatures.
@@ -1267,7 +1268,7 @@ interchangeable with the underlying scalar in operations or signatures.
 not integer arithmetic, ordering or conversions.
 The indexed reader also accepts valid `F0` reference/data widths on those
 operations and reference/count widths on supported `Branch`, `BranchIf`,
-`Switch` and `Return` terminators and local `Call` operations; `Switch`
+`Switch` and `Return` terminators and supported `Call` operations; `Switch`
 patterns additionally have an independent data width. These widths are
 independent of the Body-local width.
 It checks type/definition/use indexes, operation and
