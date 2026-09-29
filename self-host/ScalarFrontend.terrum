@@ -12,6 +12,7 @@ namespace Terrum.CodeAnalysis;
 // Version-3 binary parameter/literal expressions add 100/200 to the operator
 // for a parameter on the left, or 300/400 for one on the right (parameter 1/2).
 // The two slots hold the literal's low/high magnitude words.
+// Version-5 unary minus on that literal adds another 1200 to the operation.
 // Boolean parameter/literal pairs add 700 for a parameter on the left or
 // 900 for a literal on the left; slots hold the parameter index and literal kind.
 // Boolean literal pairs add 1100; both slots hold literal kinds.
@@ -300,6 +301,10 @@ mut class ScalarFrontendState
             groups = groups + 1;
             cursor = cursor + 1;
         }
+        if (_tokens.TryGet(cursor, out var sign) && sign.Kind == 58)
+        {
+            cursor = cursor + 1;
+        }
         if (!_tokens.TryGet(cursor, out var atom)
             || (atom.Kind != 2 && atom.Kind != 3
                 && atom.Kind != 20 && atom.Kind != 21))
@@ -538,7 +543,7 @@ mut class ScalarFrontendState
                 return false;
             }
             require _tokens.TryGet(_at, out var following);
-            if (!negative && expectedType == 5
+            if (expectedType == 5
                 && following.Kind >= 65 && following.Kind <= 70)
             {
                 _at = _at + 1;
@@ -552,7 +557,7 @@ mut class ScalarFrontendState
                 {
                     return false;
                 }
-                if (!TryReadMagnitude(numberToken, tokenIndex, parameterType, false,
+                if (!TryReadMagnitude(numberToken, tokenIndex, parameterType, negative,
                     numberToken.Range, out var low, out var high))
                 {
                     return false;
@@ -563,8 +568,14 @@ mut class ScalarFrontendState
                 }
                 require SourceRange.TryCreate(first.Range.Start,
                     end - first.Range.Start, out var comparisonSpan);
+                mut int32 signedOffset = 0;
+                if (negative)
+                {
+                    signedOffset = 1200;
+                }
                 require ScalarFrontendExpression.TryCreate(5,
-                    following.Kind + (parameter + 2) * 100, low, high,
+                    following.Kind + (parameter + 2) * 100 + signedOffset,
+                    low, high,
                     comparisonSpan, out var comparison);
                 expression = comparison;
                 return true;
@@ -597,7 +608,7 @@ mut class ScalarFrontendState
                 expression = foldedPair;
                 return true;
             }
-            if (!negative && _tokens.TryGet(_at, out var next)
+            if (_tokens.TryGet(_at, out var next)
                 && ((next.Kind >= 57 && next.Kind <= 61)
                     || next.Kind == 71 || next.Kind == 73 || next.Kind == 75))
             {
@@ -628,8 +639,14 @@ mut class ScalarFrontendState
                 }
                 require SourceRange.TryCreate(first.Range.Start,
                     end - first.Range.Start, out var binarySpan);
+                mut int32 signedOffset = 0;
+                if (negative)
+                {
+                    signedOffset = 1200;
+                }
                 require ScalarFrontendExpression.TryCreate(expectedType,
-                    next.Kind + (parameter + 2) * 100, low, high, binarySpan, out var binary);
+                    next.Kind + (parameter + 2) * 100 + signedOffset,
+                    low, high, binarySpan, out var binary);
                 expression = binary;
                 return true;
             }
@@ -735,6 +752,14 @@ mut class ScalarFrontendState
             operation = next.Kind;
             _at = _at + 1;
             require BeginUnaryOperand(out var right, out var groups);
+            mut Token number = right;
+            mut bool negativeRight = false;
+            if (right.Kind == 58 && _tokens.TryGet(_at + 1, out var signedNumber)
+                && signedNumber.Kind == 3)
+            {
+                number = signedNumber;
+                negativeRight = true;
+            }
             if (((operation >= 71 && operation <= 75)
                     || operation == 65 || operation == 66)
                 && (right.Kind == 20 || right.Kind == 21))
@@ -759,8 +784,12 @@ mut class ScalarFrontendState
             if (((operation >= 57 && operation <= 61)
                 || (operation >= 65 && operation <= 70)
                 || operation == 71 || operation == 73 || operation == 75)
-                && right.Kind == 3)
+                && number.Kind == 3)
             {
+                if (negativeRight)
+                {
+                    _at = _at + 1;
+                }
                 if ((operation >= 65 && operation <= 70 && selected == 5)
                     || ((operation < 65 || operation > 70) && (selected == 5 || selected == 6)))
                 {
@@ -768,9 +797,9 @@ mut class ScalarFrontendState
                     return false;
                 }
                 int32 index = _at;
-                if (!TryReadMagnitude(right, index, selected, false,
-                    right.Range, out var low, out var high)
-                    || !FinishUnaryOperand(right, groups, out end))
+                if (!TryReadMagnitude(number, index, selected, negativeRight,
+                    number.Range, out var low, out var high)
+                    || !FinishUnaryOperand(number, groups, out end))
                 {
                     return false;
                 }
@@ -781,8 +810,14 @@ mut class ScalarFrontendState
                 {
                     resultType = 5;
                 }
+                mut int32 signedOffset = 0;
+                if (negativeRight)
+                {
+                    signedOffset = 1200;
+                }
                 require ScalarFrontendExpression.TryCreate(resultType,
-                    operation + leftIndex * 100, low, high, literalSpan, out var withLiteral);
+                    operation + leftIndex * 100 + signedOffset,
+                    low, high, literalSpan, out var withLiteral);
                 expression = withLiteral;
                 return true;
             }

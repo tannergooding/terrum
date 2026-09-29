@@ -2912,6 +2912,10 @@ public sealed class ManagedScannerComponentTests
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return 42 ^ x; }", 0, 0)]
     [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return ((x)) + ((5)); }", 37, 0)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return ((47)) - (x); }", 5, 0)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return x + -5; }", 47, 0)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return (-5) + x; }", 47, 0)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return ((x)) + ((-5)); }", 47, 0)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return x - (-5); }", 37, 0)]
     public async Task NativeScalarFrontendParameterLiteralFactsExecuteAsync(
         NativeRuntimePolicy policy, string text, int first, int second)
     {
@@ -3005,6 +3009,18 @@ public sealed class ManagedScannerComponentTests
         PrimitiveType.Int32, 42L, 170)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return (42) < ((x)); }",
         PrimitiveType.Int32, 43L, 367)]
+    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return x < -5; }",
+        PrimitiveType.Int32, -6L, 1367)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return (-5) < x; }",
+        PrimitiveType.Int32, 42L, 1567)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return x == -2147483648; }",
+        PrimitiveType.Int32, int.MinValue, 1365)]
+    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return x == -0xFFFFFFFF; }",
+        PrimitiveType.Int32, 1L, 1365)]
+    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int64 x) { return x != -9223372036854775808; }",
+        PrimitiveType.Int64, 0L, 1366)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int64 x) { return -9223372036854775808 == x; }",
+        PrimitiveType.Int64, long.MinValue, 1565)]
     public async Task NativeScalarFrontendLiteralComparisonExecutesAsync(
         NativeRuntimePolicy policy, string text, PrimitiveType parameterType, long argument,
         int operation)
@@ -3018,6 +3034,16 @@ public sealed class ManagedScannerComponentTests
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
         Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        if (operation >= 1200)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, 3);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, 5);
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(23 * sizeof(int)),
+                operation - 1200);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(23 * sizeof(int)), operation);
+        }
         foreach (var word in new[] { 22, 23, 24, 25 })
         {
             var offset = word * sizeof(int);

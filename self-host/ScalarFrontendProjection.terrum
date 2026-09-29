@@ -56,6 +56,12 @@ bool TryPublishScalarFrontend()
         WriteScalarFrontendExpression(28, result.WhenFalse);
     }
     WriteScalarFrontendExpression(22, result.WhenTrue);
+    if (result.WhenTrue.Operation >= 1200
+        || (result.HasCondition && (result.Condition.Operation >= 1200
+            || result.WhenFalse.Operation >= 1200)))
+    {
+        Host.Frontend[0] = 5;
+    }
     Host.Frontend[1] = 1;
     return true;
 }

@@ -39,7 +39,7 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] is not (1 or 2 or 3 or 4) || words[1] is not (1 or 2))
+        if (words[0] is not (1 or 2 or 3 or 4 or 5) || words[1] is not (1 or 2))
         {
             throw InvalidResult();
         }
@@ -70,7 +70,8 @@ public static class ScalarFrontendHost
             || (count < 2 ? secondName != default : !ValidSpan(secondName, nonempty: true))
             || !ValidHeader()
             || words[15] is not (0 or 1 or 2)
-            || (words[0] == 4) != (words[15] == 2))
+            || (words[0] < 4 && words[15] == 2)
+            || (words[0] == 4 && words[15] != 2))
         {
             throw InvalidResult();
         }
@@ -386,17 +387,19 @@ public static class ScalarFrontendHost
                     && ValidMagnitude(tokens[first].Text.AsSpan(), type, false, left, 0)
                     && ValidMagnitude(tokens[second].Text.AsSpan(), type, false, right, 0);
             }
-            if (operation / 100 is >= 1 and <= 4
-                && operation % 100 is >= 57 and <= 61 or >= 65 and <= 70 or 71 or 73 or 75)
+            var negativeLiteral = operation >= 1200;
+            var binaryOperation = negativeLiteral ? operation - 1200 : operation;
+            if (binaryOperation / 100 is >= 1 and <= 4
+                && binaryOperation % 100 is >= 57 and <= 61 or >= 65 and <= 70 or 71 or 73 or 75)
             {
-                var literalFirst = operation >= 300;
-                var parameter = operation / 100 - (literalFirst ? 2 : 0);
+                var literalFirst = binaryOperation >= 300;
+                var parameter = binaryOperation / 100 - (literalFirst ? 2 : 0);
                 var parameterType = parameter == 1 ? words[7] : words[8];
-                var comparison = operation % 100 is >= 65 and <= 70;
-                if (words[0] < 3 || expression.Type != type
+                var comparison = binaryOperation % 100 is >= 65 and <= 70;
+                if (words[0] < (negativeLiteral ? 5 : 3) || expression.Type != type
                     || (comparison ? type != 5 || parameterType is not (1 or 2 or 3 or 4 or 6)
                         : type != parameterType || parameterType is not (1 or 2 or 3 or 4))
-                    || parameter > parameters
+                    || parameter > parameters || negativeLiteral && parameterType is not (1 or 3)
                     || !ValidSpan(expression.Span, nonempty: true))
                 {
                     return false;
@@ -406,14 +409,14 @@ public static class ScalarFrontendHost
                 var tokens = lexical.Tokens;
                 var name = parameter == 1 ? firstName : secondName;
                 return lexical.Diagnostics.IsEmpty
-                    && TryBinaryOperandTokens(tokens, (TokenKind)(operation % 100),
-                        text.Length, out var first, out var second)
+                    && TryBinaryOperandTokens(tokens, (TokenKind)(binaryOperation % 100),
+                        text.Length, out var first, out var second, literalFirst, negativeLiteral)
                     && tokens[literalFirst ? second : first].Kind == TokenKind.Identifier
                     && tokens[literalFirst ? second : first].Text
                         == source.Text.Substring(name.Start, name.Length)
                     && tokens[literalFirst ? first : second].Kind == TokenKind.NumericLiteral
                     && ValidMagnitude(tokens[literalFirst ? first : second].Text.AsSpan(),
-                        parameterType, false, left, right);
+                        parameterType, negativeLiteral, left, right);
             }
             if (operation == 3)
             {
@@ -568,20 +571,22 @@ public static class ScalarFrontendHost
     }
 
     private static bool TryBinaryOperandTokens(ImmutableArray<SyntaxToken> tokens,
-        TokenKind operation, int length, out int left, out int right)
+        TokenKind operation, int length, out int left, out int right,
+        bool literalFirst = false, bool negativeLiteral = false)
     {
         var at = 0;
         left = -1;
         right = -1;
         if (tokens.Length < 4 || tokens[0].Span.Start != 0
-            || !TakeOperand(out left) || at >= tokens.Length - 1
-            || tokens[at++].Kind != operation || !TakeOperand(out right))
+            || !TakeOperand(negativeLiteral && literalFirst, out left) || at >= tokens.Length - 1
+            || tokens[at++].Kind != operation
+            || !TakeOperand(negativeLiteral && !literalFirst, out right))
         {
             return false;
         }
         return at == tokens.Length - 1 && tokens[at - 1].Span.End == length;
 
-        bool TakeOperand(out int operand)
+        bool TakeOperand(bool negative, out int operand)
         {
             operand = -1;
             var groups = 0;
@@ -589,6 +594,14 @@ public static class ScalarFrontendHost
             {
                 at++;
                 groups++;
+            }
+            if (at >= tokens.Length - 1)
+            {
+                return false;
+            }
+            if (negative && tokens[at++].Kind != TokenKind.Minus)
+            {
+                return false;
             }
             if (at >= tokens.Length - 1)
             {
@@ -838,17 +851,24 @@ public static class ScalarFrontendHost
                     (TokenKind)(expression.Operation % 100), first, second, type,
                     expression.Span));
             }
-            if (expression.Operation / 100 is >= 1 and <= 4
-                && expression.Operation % 100 is >= 57 and <= 61 or >= 65 and <= 70
+            var negativeLiteral = expression.Operation >= 1200;
+            var binaryOperation = negativeLiteral ? expression.Operation - 1200 : expression.Operation;
+            if (binaryOperation / 100 is >= 1 and <= 4
+                && binaryOperation % 100 is >= 57 and <= 61 or >= 65 and <= 70
                     or 71 or 73 or 75)
             {
-                var literalFirst = expression.Operation >= 300;
-                var parameter = expression.Operation / 100 - (literalFirst ? 2 : 0);
-                var numberIndex = literalFirst ? 0 : 2;
-                var nameIndex = literalFirst ? 2 : 0;
+                var literalFirst = binaryOperation >= 300;
+                var parameter = binaryOperation / 100 - (literalFirst ? 2 : 0);
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
                 var tokens = lexical.Tokens;
+                if (!TryBinaryOperandTokens(tokens, (TokenKind)(binaryOperation % 100),
+                    expression.Span.Length, out var first, out var second, literalFirst, negativeLiteral))
+                {
+                    throw InvalidResult();
+                }
+                var numberIndex = literalFirst ? first : second;
+                var nameIndex = literalFirst ? second : first;
                 var parameterType = types[parameter - 1].Type;
                 var value = parameterType is PrimitiveType.Int32 or PrimitiveType.UInt32
                     ? expression.LeftParameter
@@ -856,10 +876,25 @@ public static class ScalarFrontendHost
                         | (uint)expression.LeftParameter));
                 var leftOperand = new BoundRead(parameter - 1, parameterType,
                     new TextSpan(expression.Span.Start + tokens[nameIndex].Span.Start, tokens[nameIndex].Span.Length));
-                var literal = new BoundConstant(value, parameterType,
-                    new TextSpan(expression.Span.Start + tokens[numberIndex].Span.Start,
-                        tokens[numberIndex].Span.Length));
-                return new BoundBinary((TokenKind)(expression.Operation % 100),
+                var numberSpan = new TextSpan(expression.Span.Start + tokens[numberIndex].Span.Start,
+                    tokens[numberIndex].Span.Length);
+                BoundExpression literal = new BoundConstant(value, parameterType, numberSpan);
+                if (negativeLiteral)
+                {
+                    var signedSpan = new TextSpan(expression.Span.Start + tokens[numberIndex - 1].Span.Start,
+                        tokens[numberIndex].Span.End - tokens[numberIndex - 1].Span.Start);
+                    var magnitude = (ulong)(uint)expression.RightParameter << 32
+                        | (uint)expression.LeftParameter;
+                    var minimum = parameterType == PrimitiveType.Int32
+                        ? (ulong)int.MaxValue + 1 : (ulong)long.MaxValue + 1;
+                    literal = ScannerHost.IntegerRadix(tokens[numberIndex].Text.AsSpan()) == 10
+                        && magnitude == minimum
+                        ? new BoundConstant(parameterType == PrimitiveType.Int32
+                            ? int.MinValue : long.MinValue, parameterType, signedSpan)
+                        : Binder.FoldScalarConstant(new BoundUnary(TokenKind.Minus, literal,
+                            parameterType, signedSpan));
+                }
+                return new BoundBinary((TokenKind)(binaryOperation % 100),
                     literalFirst ? literal : leftOperand, literalFirst ? leftOperand : literal,
                     Type(expression.Type), expression.Span);
             }
