@@ -1,6 +1,6 @@
 # Terrum language design
 
-Terrum (TAIR-um), from TerraFX, is a proposed C#-shaped language for applications through systems code. This document specifies accepted semantic direction; source spellings in design samples remain provisional. Actual compiler and runtime support is documented in [implementation](implementation.md), its staging in [roadmap](roadmap.md), runnable examples in [samples](samples.md), and the proposed API inventory in [libraries](libraries.md).
+Terrum (TAIR-um), from TerraFX, is a proposed C#-shaped language for applications through systems code. This document specifies accepted semantic direction; source spellings in design samples remain provisional. Detailed call, output and checking contracts are in [language contracts](language-contracts.md). Actual compiler and runtime support is documented in [implementation](implementation.md), its staging in [roadmap](roadmap.md), runnable examples in [samples](samples.md), accepted library direction in [libraries](libraries.md), and candidate API declarations in the [core-library proposal](proposals/core-library-reference.md).
 
 ## Definitions and notation
 
@@ -351,6 +351,23 @@ properties permit them, not categorically prohibited by the narrower initial
 managed `List<T>`. Sizeless scalable vectors can satisfy behavior without
 satisfying `[Sized]`.
 
+An interface member without a body requires an implementation; one with a
+body supplies a default. Neither needs an `abstract` source modifier in the
+target grammar. A checked conformance maps each member's declaring-interface
+identity to an explicit implementation if the type provides one, otherwise
+to its available default. An explicit implementation may replace a default
+without changing that identity or weakening its published signature, effects,
+access, ownership or lifetime guarantees. Calls through the interface,
+including calls made by a default body to another interface member, dispatch
+through the selected witness. A same-named extension is not an override.
+Static operator witnesses are selected without a runtime vtable; erased
+instance dispatch may use a table/slot or equivalent, without prescribing a
+physical slot for every default. Diamond conflicts require explicit
+resolution, and compatible interface evolution requires a dispatch mechanism
+that can bind older witnesses to a newly supplied default. Exact witness
+mapping syntax, metadata and ABI remain to specify; current bounded
+`static abstract` parser support is documented in [implementation](implementation.md).
+
 There is no `dyn` keyword or implicit stored interface handle. Bare `I` names
 the behavior/abstract payload type, not a storable local or field. `T : I`
 is nominal conformance; `where T : I` as a generic constraint keeps `T`
@@ -600,6 +617,17 @@ heterogeneous storage with a fixed closed shape, not a parameter pack or
 implicit function-argument ABI. Their copy, uniqueness, borrow, and access
 rules follow every complete element type.
 
+Precedence builds the expression tree; it does not reorder evaluation.
+Ordinary eager operators evaluate their left operand before their right
+operand, then apply the operator; short-circuit and conditional operators
+evaluate only selected operands. Evaluate a callable/receiver before its
+arguments and stage the arguments in source order, regardless of labels.
+Place formation evaluates receivers, indices and checks once at its position.
+If a later argument fails before invocation, the caller cleans completed
+staged owners on defined unwinding; moved sources do not become live again.
+Ownership transfers at the invocation boundary, and an output destination is
+not cleared while earlier arguments are still being evaluated.
+
 `fnptr` uses the Terrum callable convention by default, analogous to a C#
 managed function-pointer contract but not CLR execution. Foreign conventions
 are explicit checked type-use attributes on the callable entry, retained
@@ -682,6 +710,15 @@ The language-versioned boolean-success default initializes the output on
 `init ref<T>` output must be initialized on every normal return unless an
 explicit declaration postcondition states a conditional relationship. These
 defaults do not infer success from method names.
+Status, initialization and nullability are independent: an initialized null
+is a live optional value, while vacant storage cannot be tested even for null.
+The caller retains a checked correlation between one call's saved
+discriminator and its outputs; reassignment of that status, replacement or
+movement of the destination, and relevant aliasing effects invalidate
+dependent facts. Domain statuses use declared predicates, not the zero
+enumerator or a name guessed from the API. The implementation must completely
+initialize every promised live output; a declaration cannot create a value
+merely by asserting its existence.
 
 `require predicate;` is a safe user-facing checked boolean requirement: evaluate
 the predicate once, continue on true, and raise the selected requirement failure
@@ -762,6 +799,16 @@ postconditions. On successful return, no user-observable ownership cleanup is
 deferred to the mechanical epilogue. Postconditions can inspect surviving
 values and retained results, but not moved or destroyed values through their
 former sources. Exceptional departure has no normal-return postcondition.
+By-value owned arguments already belong to the callee when its preconditions
+execute. If one fails, defined unwinding cleans those arguments without
+restoring moved caller variables; an unentered body `finally` does not run.
+A return expression is evaluated once and its result retained through body
+cleanup. A copied handle or returned reference may observe a backing change
+made by a `finally` before its postcondition is checked. A postcondition that
+fails or throws starts ordinary failure handling at that phase; completed
+body cleanup and `finally` do not run twice, and no body effects are rolled
+back. Async postconditions apply before successful completion is published,
+not merely when a task handle is returned.
 Entry snapshots and arbitrary state-history contracts are deliberately absent
 from the initial model, with no promise to add them later. Postconditions may
 state observable boundary facts about initialization, nullability, ranges and
@@ -819,6 +866,42 @@ mutation preserves the owner's cleanup obligation. Actual native-profile
 coverage and failure policies are documented in [implementation](implementation.md)
 and [native](native.md).
 
+### Documentation comments
+
+Declaration-attached `///` before attributes/modifiers and `/** ... */`
+comments use GFM-compatible prose. Leading prose before the first recognized
+metadata heading is the implicit summary, with optional `# summary`.
+Top-level `# remarks`, `# param name`, `# typeparam name`, `# returns`,
+`# value`, `# throws Type`, `# safety` and `# example` headings introduce
+structured sections; lower-level headings remain prose. Blank lines remain
+within the current section, including the implicit summary; each structured
+section continues to the next recognized metadata heading. Recognize headings
+from parsed Markdown after removing comment decoration and common indentation,
+never from raw-line prefixes inside code, quotes or lists.
+
+Declaration-scoped `@value`, `@T` and `@Type.Member` mentions resolve to
+checked references, not inside code, URLs or email addresses; `\@` escapes a
+literal at-sign. Ordinary inline and reference-style Markdown links retain
+their navigation meaning, not implicit symbol-reference meaning; explicit
+`xref:` links address qualified/custom references. Backticks denote code
+rather than implicit links. Explicit XML `<see cref="..."/>` and
+`<paramref name="..."/>` remain available as structured references, with
+ordinary XML attribute escaping such as `&lt;` and `&gt;` for generic
+arguments.
+Documentation compiles to a separate structured XML artifact; changing
+prose alone does not alter executable ABI. It cannot create access, effect,
+output, lifetime or failure contracts: those derive from checked
+declarations, which generated API documentation should expose. A `# safety`
+section on an `unsafe` callable is informative and cannot replace its checked
+contract or caller obligations. Inherited prose cannot strengthen an
+implementation's checked guarantees. Extraction is deterministic and does not
+execute examples, fetch remote content or expose private declarations just to
+resolve a link; a separately configured documentation build may opt into
+example checks. Exact tokenization and escaping, unknown-heading behavior,
+attachment and inheritance details, member identities, schema, diagnostics
+and packaging remain specification work in the
+[grammar proposal](proposals/grammar-spec.md).
+
 ### Storage, concurrency, entry and boundaries
 
 Tracing GC handles aliased/cyclic application graphs; ownership handles deterministic native storage and resources. A unique owner may still refer to GC storage; a GC root does not keep a logically disposed native allocation valid. Distinguish storage acquisition, initialization, close, value destruction, storage release and eventual reclamation. Vacant/partially initialized/live/retired states, reverse-order partial cleanup, no-throw/non-suspending scope cleanup, direct destination construction and stable-address requirements must be checked. Replacing a live value builds the replacement before dropping the old one; explicit reconstruct-in-place may leave vacancy on failure. Pool leases revoke access on return; deferred dead-storage retirement differs from deferred live-value cleanup, with one retirement owner after commitment and explicit completion endpoints.
@@ -850,6 +933,8 @@ it actually suspends. Awaiting an already-completed operation continues inline;
 awaiting an incomplete operation suspends and resumes according to the
 operation/runtime scheduling policy, without implicitly capturing the caller's
 executor or requiring a worker-pool hop.
+Async declaration postconditions are checked before successful task completion
+is published, not merely when a task handle is returned.
 The accepted terminology keeps three properties separate: asynchronous work
 can happen independently of the main program flow, and may or may not be
 concurrent; concurrency means a system can execute multiple flows of code, and

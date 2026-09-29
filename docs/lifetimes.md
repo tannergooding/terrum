@@ -92,6 +92,13 @@ in the same lexical scope when its ordinary declared dependencies permit it;
 it cannot outlive that local or extend the lifetime of an existing place or
 backing value. This is the accepted temporary-scope rule, not a new lifetime
 system for implicit arguments.
+An eligible local, parameter, field or indexed element is borrowed as an
+existing place. A reference-returning access supplies its declared place and
+dependencies; a value-returning call, property, operator or conversion instead
+initializes the hidden local exactly once. Source spelling resembling a field
+does not turn a value-returning property into a loan of its backing storage.
+If borrowing the existing place conflicts with its access or owner contract,
+the call diagnoses rather than silently copying the value to evade the conflict.
 The loan restricts access to the outer slot only. The complete qualified `T`
 retains any write authority, backing, roots, ownership and dependency contracts
 already carried by its value; a Copy descriptor copied out of the slot keeps
@@ -115,6 +122,15 @@ attribute. Results remain `T` or an explicit `ref<T>` with declared lifetime
 metadata; no adaptive generic value-or-loan result family is selected. This
 contract is accepted direction; current compiler support is documented in
 [implementation](implementation.md).
+
+The receiver/callable and then named or positional arguments are evaluated
+in source order. Form a place by evaluating its receiver, indices and checks
+once at that argument's position, and form the loan at the same point as the
+equivalent explicit readonly reference. A later argument may change the
+referent if ordinary alias rules permit it; a callee read is not a snapshot
+of the earlier argument's value. If the change violates an owner or loan
+constraint, both explicit and implicit spellings are invalid. Convenience
+syntax neither delays the reference nor invents a distinct loan lifetime.
 
 ## Erased interface storage is explicit
 

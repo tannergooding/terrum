@@ -1,43 +1,17 @@
-# Calls, conditional outputs, and executable contracts
+# Language contracts: calls, outputs and checks
 
-**Proposal for review, not implementation authorization.** This document follows
-the accepted directions in [language](language.md) and [lifetimes](lifetimes.md).
-It records the clarified intent and proposes the remaining rules needed to make
-that intent consistent across source, verification, separate compilation, and
-execution. Proposed syntax is illustrative unless already accepted elsewhere.
-[Implementation](implementation.md) remains the executable support boundary.
-Concurrency follows the separately [accepted memory model](memory-model.md).
-The [pending-decision index](language-library-review.md) collects the remaining
-approvals across documents. Confirmed direction below is not awaiting approval
-again; the proposed refinements and their [status checklist](#6-approval-and-conformance-checklist)
-identify the remaining decisions.
-
-The central recommendation is one semantic model: implicit arguments expand to
-ordinary operations, conditional outputs carry ordinary checked state facts,
-and contracts participate in ordinary evaluation and cleanup. There should not
-be a second lifetime system for convenience syntax or a second arithmetic
-system for the prover.
-
-## Direction and decisions
-
-| Area | Confirmed direction | Recommendation requiring review |
-|---|---|---|
-| Calls | `implicit ref<T>` is an ordinary readonly `ref<T>`; existing places are borrowed; value arguments initialize a hidden local at the original argument-evaluation point in the current enclosing lexical scope; evaluation is left-to-right within expression structure | Specify place formation and general reference/loan metadata; do not introduce a special reservation/activation rule or lifetime-only scope for implicit arguments |
-| Conditional outputs | Postconditions use `ensure <expr>` with ordinary Boolean expressions, patterns and short-circuit behavior; initialized, uninitialized and initialized-null states are distinct and correlated with the declared discriminator. Legal value predicates imply initialization, subject to checked legal reads. | Specify exact clause placement/grammar and metadata for the accepted state relationships; never read vacant storage to discover a false predicate |
-| Contract timing | Prologue, preconditions, method body (including local/output initialization, authored execution, `finally`, local cleanup and untransferred owned-parameter cleanup), postconditions, epilogue; preconditions/postconditions are public declaration contracts outside the body; exceptional departure has no normal-return postcondition | Keep public facts within effective accessibility and ordinary contract-expression rules; formalize exact `ensure` placement and metadata |
-| Proofs and evaluation | Required static obligations are compile-time-only; ordinary runtime contracts and required constant evaluation remain distinct | Specify the exact mandatory proof-floor rules/complexity and minimum resources, plus separate constant-evaluator operations/accounting/limits |
-| Memory | Explicit checked opt-in for sharing, not an assumption that arbitrary aliasable objects are thread-safe | Accepted separately; see the [memory model](memory-model.md) for its specification deliverables and target-profile work |
-| Documentation comments | Declaration-attached GFM-compatible docs use parsed top-level headings for structured sections, leading prose for the implicit summary, and declaration-scoped `@value`/`@T`/`@Type.Member` mentions; docs emit a separate structured XML artifact and do not define executable contracts | Formalize tokenizer/escaping and complex reference rules, XML schema/member IDs, inheritance, diagnostics and packaging; ordinary Markdown links remain navigation and explicit `xref:` links cover custom/qualified references |
-
-The accepted implicit-loan rule in [language](language.md) and
-[lifetimes](lifetimes.md#parameter-only-implicit-readonly-loans) is ordinary
-readonly-reference equivalence, including declared result dependencies.
-Materialized arguments use an ordinary local in the current enclosing lexical
-scope, initialized at the argument's evaluation point; they add no
-lifetime-only region, unconditional call-scoped/noescape restriction, or
-permission to widen existing dependencies. General reference/loan syntax,
-metadata and implementation remain scheduled. The other proposed contract and
-proof mechanisms below remain under review.
+This document records accepted execution and checking contracts that refine
+[language](language.md) and [lifetimes](lifetimes.md). It does not approve
+candidate syntax, a proof budget or a new semantic-IL representation.
+Unresolved source forms are in the [grammar proposal](proposals/grammar-spec.md)
+and the remaining proof rules and budgets in the
+[proof proposal](proposals/static-proof-and-constant-evaluation.md).
+[Implementation](implementation.md) remains the executable support boundary;
+concurrency follows the separately [accepted memory model](memory-model.md).
+Implicit arguments expand to ordinary operations, conditional outputs carry
+checked state facts, and executable contracts participate in ordinary
+evaluation and cleanup. Convenience syntax does not create a second lifetime
+system or a second arithmetic system for the prover.
 
 ## 1. One call and reference model
 
@@ -150,10 +124,10 @@ the mutation, the call is invalid in both spellings. The compiler must not
 silently substitute a copy, delay the reference, or invent a special two-phase
 loan to make the implicit spelling succeed.
 
-**Recommendation:** no distinct loan reservation/activation mechanism in this
-increment. If a future ordinary reference or mutating-receiver contract needs
-one, specify its observable timing, conflicts, reentrancy, and equivalent
-explicit operations first. Syntactic convenience must not select it implicitly.
+Whether ordinary references eventually need reservation/activation remains
+an [open grammar and loan question](proposals/grammar-spec.md).
+Implicit convenience syntax cannot silently change the ordinary loan
+contract.
 
 Completed owning value arguments are staged in evaluation order. If a later
 argument fails before invocation, the caller cleans the staged owners on
@@ -278,7 +252,7 @@ instruction sequence. Inlining, tail calls, AOT, and JIT must preserve it.
 The assembly epilogue cannot hide user-observable destruction or callbacks
 after a postcondition that callers are meant to rely on.
 
-| Phase | Proposed obligations |
+| Phase | Contract obligations |
 |---|---|
 | Argument staging | Evaluate once in source order; establish explicit references, staged values, and ordinary temporary lifetimes |
 | Prologue | Establish frame/root/ownership responsibility and parameter storage before executing user contracts |
@@ -385,20 +359,10 @@ It proves all such paths; it is not registered only on paths that execute its
 source location. A body `static require` remains a point obligation. Neither
 automatically becomes a published declaration guarantee.
 
-Accepted async execution starts a call eagerly and inline through its first
-actual suspension. Completed awaits continue inline; incomplete awaits do not
-implicitly capture the caller's executor or mandate a worker hop. An
-affinity-bound function or callback retains its declared placement through
-suspension, cleanup and unwinding; an unbound helper does not inherit affinity
-from its caller. Explicit scheduling of an initial invocation and explicit
-placement of the awaiting continuation are distinct operations; scheduling the
-initial invocation does not bind every helper continuation or guarantee that
-the caller suspends. Async declaration postconditions, when specified, apply
-before publishing successful completion, not merely when returning a task
-handle. The exact awaiter/API and affinity syntax, async ABI, task lifecycle,
-coroutine lowering and implementation remain scheduled specification/runtime
-work. Stack loans remain governed by checked backing lifetime and transfer
-rules, not by async syntax alone.
+For an asynchronous declaration, the same normal-completion contract applies
+before successful completion is published; [asynchronous scheduling and
+lifetimes](language.md#storage-concurrency-entry-and-boundaries) retain their
+separate rules.
 
 ## 4. A reproducible proof and evaluation foundation
 
@@ -449,35 +413,6 @@ not established by that compiler's supported analysis is a compile error, not
 a runtime fallback. Diagnostics distinguish false from not established
 (including complexity or analysis-limit failure where appropriate).
 
-The guaranteed budget is structural/work-based, not wall-clock time. Its
-catalog should keep common proofs cheap and simple, avoid exponential or
-excessive linear work, and define explicit ways to simplify hard cases where
-runtime behavior is legal. A bounded tree-depth rule is one possible kind of
-limit; a value such as 64 is only an example, not an accepted threshold.
-Exact structural limits, work accounting and any additional escape syntax
-remain specification work. A compiler may establish a proof beyond the floor
-with stronger sound analysis; if its supported analysis does not establish a
-required proof, it rejects that requirement as not established rather than
-silently weakening or demoting it.
-
-**Candidate rule areas for specification, not an adopted baseline:**
-
-| Component | Candidate rules to evaluate |
-|---|---|
-| Values | Target-width scalar constants, immutable value identities, booleans, optional presence, initialization/vacancy, and ownership state |
-| Numeric facts | Closed intervals; exact target operations on constants; conservative interval transfer only where defined; explicit checks retain their overflow/failure edges |
-| Branches | Refine supported built-in comparisons on their true/false edges; use interval hull and intersection of must-facts at joins |
-| Loops | Before analyzing a cyclic region, forget numeric/alias facts for values and storage that region may change; preserve unaffected facts and refine again on branch edges |
-| Calls | Use the selected declaration's checked pre/postconditions and effect footprint, not arbitrary inspection of a replaceable implementation |
-| Aliases | Invalidate facts for potentially affected places before relying on later loads; preserve captured values, not mutable-storage observations |
-| Unsupported reasoning | Report not established; do not assume a predicate or rely on an unsound/nondeterministic result |
-
-One possible initial floor is intentionally conservative: no implicit
-induction, guessed invariant, or machine-speed-dependent unrolling. Richer
-loop-invariant syntax and proofs may be sound implementation extensions or
-later floor additions. Public checked facts may still let a caller prove a
-result without seeing the loop.
-
 Comparisons must use actual language arithmetic. Rewriting an overflow-prone
 integer expression as an unbounded mathematical expression is not proof of
 its executable safety. Float predicates cannot borrow integer identities:
@@ -485,38 +420,20 @@ NaNs, signed zero, rounding, and the prohibition on implicit reassociation/FMA
 still apply. Start with exact constant floating evaluation only when its
 target evaluator is specified; otherwise classify such proof requests unknown.
 
-The floor still needs a machine-checkable transfer-rule catalog and
-conformance vectors, including canonical proof inputs, arithmetic boundaries,
-joins, cycle handling, and the minimum complexity/resource guarantee. The
-catalog defines the portable floor, not a ceiling on sound implementation
-analysis. Compilers may fill beyond-floor cases with additional sound rules;
-they must distinguish a disproved obligation from one not established within
-their supported analysis. Optimizers may perform stronger sound analysis when
-it preserves source semantics and required evaluation/effects.
-
-Version the portable floor independently from its eventual wire encoding.
-No proof-certificate format, metadata carrier, ABI, or particular solver is
-selected here; a stronger implementation extension need not imply a new floor
-version.
+The minimum catalog and conformance vectors are still to specify; the
+[proof proposal](proposals/static-proof-and-constant-evaluation.md#portable-proof-floor)
+collects candidates, not a required floor. Sound beyond-floor analysis does
+not change the versioned minimum or source semantics. No proof-certificate
+format, metadata carrier, ABI or solver is selected.
 
 ### 4.3 Effects and stable observations
 
-Published predicate evaluation needs more than an attribute called `Pure`.
-The checker needs a declared effect/dependency footprint covering reads,
-writes, captures, allocation, failure, blocking, suspension, synchronization,
-and lifetime/ownership changes. The spelling of that footprint remains open.
-
-The initial contract/proof subset should admit scalar operations and checked
-readonly observations with valid stable access. It should exclude I/O, ambient
-state, volatile/atomic observations, synchronization, suspension, and
-user-visible mutation. A readonly member can still observe mutable storage;
-readonly alone does not prove repeatability or stability.
-
-Opaque imported calls can publish checked facts through validated declarations.
-They cannot be constant-executed without an eligible implementation or a
-specified trusted intrinsic. An unannotated call conservatively invalidates
-facts about storage it might affect; it is not a magic clobber of independent
-copied scalar values.
+Published predicate evaluation needs checked effect and dependency contracts;
+readonly access alone does not prove an observation stable or repeatable.
+Opaque imports can publish checked facts without exposing bodies, but their
+constant execution requires an eligible body or separately specified trusted
+intrinsic. Exact effect footprints and the initial admissible predicate subset
+remain [proposed](proposals/static-proof-and-constant-evaluation.md#effect-footprints-and-observations).
 
 If a predicate can fault, retain that failure behavior unless it too is proven
 absent. Eliminating a known-true check is not permission to remove argument
@@ -534,31 +451,14 @@ same value or diagnostic regardless of AOT/JIT choice or optimization level.
 
 Private mutation of evaluator-owned temporary storage is compatible with
 determinism. It does not authorize ambient writes or escaping a pointer into
-the evaluator. The first serializable results should use defined value encodings;
-general managed graphs, native resources, or identity-bearing host objects
-need separate representation contracts, not an automatic fallback.
+the evaluator. General managed graphs, native resources, and
+identity-bearing host objects need separate representation contracts; none
+acquires an automatic constant-evaluation fallback.
 
-Required execution has explicit, deterministic resource accounting:
-
-| Resource | Proposed unit / initial candidate ceiling |
-|---|---|
-| Evaluation work | 1,048,576 semantic steps; charge each defined scalar operation, branch, call entry, and element/code-unit operation |
-| Call depth | 256 active evaluator frames |
-| Temporary storage | 16 MiB of live abstract payload storage, measured without host allocator overhead |
-| Serialized result | 1 MiB in the target-defined value encoding |
-
-These are review candidates, not measured limits or existing compiler behavior.
-Validate them against representative literal parsers before accepting defaults.
-A build can explicitly request a different supported budget; it becomes a
-recorded input, not an undocumented compiler setting.
-
-Aggregate/bulk intrinsics need a profile-defined expansion or exact cost
-function; treating an arbitrarily expensive native helper as one scalar step
-would defeat the budget. Allocation accounting must include the model's
-defined payload/state rather than accidentally depending on a host GC.
-Memoization may avoid work physically, but must preserve the specified budget
-outcome and diagnostics. Wall-clock timeout is a tool cancellation/resource
-failure, not an alternative language proof result.
+The exact work units and resource ceilings are not approved. The
+[evaluator proposal](proposals/static-proof-and-constant-evaluation.md#deterministic-evaluator-and-proposed-budgets)
+records candidate budgets and accounting; no implementation may treat a
+candidate number as the language limit.
 
 Budget exhaustion is unproven/unevaluated and diagnoses at the requesting static
 or constant context. It does not authorize runtime fallback, a guessed value,
@@ -603,111 +503,8 @@ the current floor may accept additional programs without changing the floor
 version or consumer contracts. Neither may silently reinterpret an unchanged
 consumer's publication, lifetime, or arithmetic contract.
 
-## 5. Documentation comments
+## 5. Conformance coverage
 
-**Accepted source-documentation direction; exact grammar and schema remain
-open.** Attach `///` documentation before declaration attributes/modifiers,
-with `/** ... */` as an equivalent block form. Use GFM-compatible prose;
-leading prose before the first recognized metadata heading is the implicit summary, with optional
-`# summary`. Top-level `# remarks`, `# param name`, `# typeparam name`,
-`# returns`, `# value`, `# throws Type`, `# safety`, and `# example` headings
-introduce structured sections; ordinary lower-level headings remain prose.
-Blank lines separate paragraphs within the current section, including the
-implicit summary; they do not switch the summary to remarks. Each structured
-section continues until the next recognized metadata heading.
-Metadata recognition follows parsed Markdown structure, not raw-line prefix
-scanning: remove comment decoration and common indentation before parsing,
-and do not recognize headings inside code, block quotes or lists as metadata.
-Heading-name case sensitivity and unknown-heading handling remain to specify.
-Documentation compiles to a separate XML artifact, and references
-resolve against declarations into structured links rather than unvalidated
-text.
-
-Semantic mentions such as `@value`, `@T`, and `@Type.Member` resolve
-declaration-scoped references and may be post-processed into structured XML
-links. They are not interpreted inside code, URLs, or email addresses; `\@`
-escapes a literal at-sign. Ordinary Markdown links remain for section/document
-navigation (`[label](#anchor)`, `[label](relative.md)`); explicit
-`[custom label](xref:Type.Member)` links are available for qualified/custom
-references. Markdown reference-style links retain their ordinary meaning;
-they are not implicit symbol references. Backticks denote code, not implicit
-symbol references. Explicit XML references such as `<see cref="..."/>` and
-`<paramref name="..."/>` remain available and normalize to structured XML
-references; XML attribute values use ordinary escaping, including `&lt;`
-and `&gt;` for generic angle brackets. Declaration identity and parameter
-names bind to declarations rather than being defined by documentation text. Exact
-mention tokenization, complex generic/overload reference grammar, and escaping
-edge cases remain to formalize. This does not adopt GitHub app-specific
-postprocessing as a compiler feature.
-
-| Topic | Remaining specification work |
-|---|---|
-| Delimiters and attachment | Formalize the accepted `///` and `/** ... */` forms and attachment across attributes, blank lines, multiple declarations, and generated/partial declarations |
-| Friendly markup and normalization | Formalize the accepted GFM-compatible prose and structured top-level headings; define heading recognition/name details, section continuation, supported XML/HTML-style tags, and normalization without freezing a broader HTML runtime |
-| XML artifact schema | Define element structure, schema versioning, member IDs, source location and overload/generic identity, and compatibility/evolution rules |
-| Structured references | Formalize declaration-scoped `@value`/`@T`/`@Type.Member` mentions and literal escaping; keep ordinary Markdown links for navigation and explicit `xref:` links for custom/qualified references. Define overloads, qualified types, and complex generic member targets without guessing from display text |
-| Declared contracts | Generate access, ownership, lifetime, publication, effects, pre/postconditions, and selected failure behavior from checked declaration metadata; prose explains intent, costs, and usage |
-| Inheritance and forwarding | Define documentation inheritance for interface members, aliases, and compatibility forwarders; select a declaration explicitly rather than by arbitrary name match |
-| Diagnostics | Specify malformed markup, unresolved/ambiguous references, stale parameter names, and unknown-heading handling; decide separately how optional documentation-coverage lint/policy works without making prose a mandatory language contract |
-| Examples | Define how explicitly marked examples declare language/target context and distinguish complete programs, fragments, and design-only pseudocode; execution is opt-in, not a side effect of extraction or rendering |
-| Distribution and tooling | Specify stable symbol identities, source versus compiled-package documentation, visibility/trimming, and IDE/site rendering; keep the XML documentation artifact separate from executable ABI/runtime data |
-
-The key boundary is **declared semantics versus explanation**. A comment saying
-"non-null on true" must not grant initialization or nullability facts.
-Likewise, an exception description cannot authorize catching, change a
-requirement's failure selection, or imply cleanup after fail-fast. The
-corresponding language contracts remain authoritative. Generated API
-documentation should expose those contracts so authors do not have to maintain
-an independent annotation system inside comments.
-
-For callable declarations marked `unsafe`, encourage a `# safety` section
-describing caller responsibilities in human terms. That prose is informative;
-it is not a compiler-enforced proof and cannot replace the checked declaration
-contract or caller obligations.
-
-If documentation inheritance is provided, it must preserve that boundary:
-inheriting an interface's prose does not import extra effects or strengthen
-an implementation's guarantees. An implementation-specific note can explain
-behavior only within the checked contract it actually publishes. Automatically
-generated sections and authored prose need a defined presentation order and
-conflict policy.
-
-Normal documentation extraction should be deterministic and must not execute
-embedded code, fetch remote includes, or expose private declarations merely to
-resolve a link. Explicit documentation builds may enable separately configured
-example checks or dependencies. Changing prose alone should not invalidate
-executable ABI compatibility or change optimization decisions; the XML
-documentation artifact can have its own content identity.
-
-Before implementation, settle the source grammar, reference resolution and XML
-schema, attachment/inheritance rules, and package representation together.
-Conformance coverage should include exact comment preservation, declaration
-attachment, renamed parameters, overloaded/generic links, inherited
-documentation, unavailable dependencies, visibility filtering, deterministic
-XML output, and reproducible opt-in example validation.
-
-## 6. Approval and conformance checklist
-
-| Decision | Status | Contract or recommended choice |
-|---|---|---|
-| Reference adaptation | Accepted baseline | Ordinary readonly-reference semantics; no implicit-only escape prohibition |
-| Materialized temporary endpoint | Accepted design | Hidden local belongs to the current enclosing lexical scope and is initialized at the argument-evaluation point; no lifetime-only scope, hoisting, or widening of existing dependencies |
-| Loan timing | Accepted equivalence | Same as explicitly written reference operations; convenience syntax does not introduce a second loan model |
-| Conditional output state | Accepted semantics | Live, complete initialization is distinct from uninitialized storage and initialized null; callers retain a checked relationship to the declared discriminator and cannot access or clean up a vacant arm |
-| Conditional output authoring | Accepted direction; exact grammar remains work | Postconditions are the normal authoring route; ordinary patterns/expressions compose initialization, status and value facts. Do not add equivalent routine output attributes as a parallel mechanism |
-| Undiscriminated maybe-live owner | Not permitted | A possibly live owner must remain correlated with a checked discriminator; a caller cannot receive, access or clean up a maybe-live owner without that relationship |
-| Language-versioned output defaults | Accepted | Boolean-success output initializes on `true` and remains uninitialized on `false`; other result types initialize on every normal return unless a declaration postcondition specifies a conditional relationship |
-| Output contract syntax and metadata | Specification work, not policy review | Formalize `ensure <expr>` clause placement/grammar and encode correlated initialization facts; preserve the current bounded bool/out behavior until coordinated migration |
-| Normal-return ownership endpoint | Accepted | Body includes body-local initialization/execution, `finally`, local cleanup and untransferred owned-parameter cleanup before postconditions; no successful-return ownership cleanup is deferred to the epilogue |
-| Consumed parameter observations | Accepted boundary; snapshots deliberately deferred | Moved/consumed/destroyed values are unavailable through their former source; surviving values and retained results remain available to applicable checks |
-| Entry snapshots and state history | Accepted deferral | No snapshot/history facility in the initial contract model and no promise to add one; reconsider narrow explicit captures only if concrete APIs justify their cost |
-| Postcondition failure semantics | Accepted phase behavior | False predicates and thrown evaluation follow ordinary failure/unwinding; completed body `finally` blocks are not rerun and body effects are not rolled back. No separate output-publication transaction is implied |
-| Static-proof floor | Accepted policy; specification work remains | Versioned minimum rules/complexity and guaranteed resource floor; sound extensions may accept more, without identical acceptance or a fixed compiler maximum. Exact rule catalog, accounting units and numeric minimum remain to specify |
-| Constant-evaluation semantics and budget | Semantics accepted; specification work remains | Successful evaluation has exact target semantics and no runtime fallback. Evaluator operation set, resource accounting and limits remain separate from optional proof extensions and need specification |
-| Documentation comments | Source-documentation direction accepted; specification work remains | `///` and `/** ... */`; GFM-compatible prose; implicit leading summary and structured top-level headings; declaration-scoped `@` mentions; ordinary Markdown navigation and explicit custom `xref:` links. Specify exact tokenization/escaping, complex reference grammar, XML schema/member IDs, inheritance, diagnostics and packaging. Normal extraction does not execute embedded code or fetch remote includes |
-
-Approval of a remaining recommendation should be followed by canonical documentation changes and
-scheduled implementation, not immediate execution of the illustrative grammar.
 The minimum conformance corpus should cover:
 
 - Explicit/implicit reference-equivalent calls; value versus reference-returning

@@ -130,15 +130,23 @@ their names and available targets are not inferred from this production.
 `foreach`, `break`, `continue`, `switch`, `case`, `default`, `null`, `async`,
 `await`, `require`, `try`, `catch`, `finally`, `throw`, `unsafe`, `abstract`,
 `operator`, `where`, and `write`. Recognition alone does not authorize any
-source form. Candidate words such as `init`, `ensure`, `get`, `some` and `const`
-need explicit keyword-versus-contextual-token decisions before adoption;
-they are not all current keyword tokens. `_` is its own reserved token.
+source form. `abstract` remains a reserved lexical token for the bounded
+parser's existing syntax; it is not a declaration modifier in the target
+interface grammar below. Candidate words such as `init`, `implicit`, `params`,
+`ensure`, `get`, `some`, `is` and `const` need explicit
+keyword-versus-contextual-token decisions before adoption; they are not all
+current keyword tokens. In particular,
+§3.4 uses `is` contextually although it is not a current keyword token. `_` is
+its own reserved token.
 
 ## 3. Candidate grammar productions (PROPOSED)
 
 The productions below are candidates, not an adopted grammar. `Identifier`
 means one lexical identifier token; dotted names are written explicitly.
 Semantic constraints are stated separately.
+The prefix names below are metasyntactic placeholders, not productions: each
+stands for only the attributes/modifiers valid in its declaration context.
+Their exact sets and combinations remain **OPEN**.
 
 ### 3.1 Source-file structure and declarations
 
@@ -148,16 +156,20 @@ UsingDirective  = "using", DottedIdentifier, ";" ;
 FileNamespace   = "namespace", DottedIdentifier, ";" ;
 DottedIdentifier = Identifier, { ".", Identifier } ;
 
-TopDeclaration = Prefix, ( StructDecl | ClassDecl | InterfaceDecl
-                           | EnumDecl | FunctionDecl ) ;
-MemberDeclaration = Prefix, ( ConstructorDecl | FunctionDecl | OperatorDecl
-                            | FieldDecl | PropertyDecl ) ;
-InterfaceMemberDeclaration = Prefix,
-                             ( FunctionDecl | OperatorDecl | PropertyDecl ) ;
-Prefix          = { Attribute }, { DeclarationModifier } ;
+TopDeclaration = TopPrefix, ( StructDecl | ClassDecl | InterfaceDecl
+                              | EnumDecl | FunctionDefinition ) ;
+MemberDeclaration = MemberPrefix,
+                    ( ConstructorDecl | FunctionDefinition | OperatorDefinition
+                    | FieldDecl | PropertyDefinition ) ;
+InterfaceMemberDeclaration = InterfaceMemberPrefix,
+                             ( InterfaceFunction | InterfaceOperator
+                             | InterfaceProperty ) ;
+TopPrefix       = ContextualPrefix ;
+MemberPrefix    = ContextualPrefix ;
+InterfaceMemberPrefix = ContextualPrefix ;
 Attribute       = "[", Identifier, "]" ;
 DeclarationModifier = "public" | "internal" | "private" | "static"
-                    | "mut" | "unique" | "unsafe" | "abstract" ;
+                    | "mut" | "unique" | "unsafe" ;
 
 StructDecl      = "struct", Identifier, [ TypeParameterList ],
                   [ ConformanceList ], { ConstraintClause },
@@ -176,12 +188,18 @@ InterfaceBaseList = ":", Type, { ",", Type } ;
 IntegralType    = DottedIdentifier ;
 ConstantExpression = Expression ;
 ConstructorDecl = Identifier, ParameterList, Block ;
-FunctionDecl    = Type, Identifier, [ TypeParameterList ], ParameterList,
-                  { ConstraintClause }, ( ";" | Block ) ;
-OperatorDecl    = Type, "operator", OperatorSymbol, ParameterList, ( ";" | Block ) ;
+FunctionDefinition = Type, Identifier, [ TypeParameterList ], ParameterList,
+                     { ConstraintClause }, Block ;
+InterfaceFunction = Type, Identifier, [ TypeParameterList ], ParameterList,
+                    { ConstraintClause }, ( ";" | Block ) ;
+OperatorDefinition = Type, "operator", OperatorSymbol, ParameterList, Block ;
+InterfaceOperator = Type, "operator", OperatorSymbol, ParameterList,
+                    ( ";" | Block ) ;
 FieldDecl       = Type, Identifier, [ "=", Expression ], ";" ;
-PropertyDecl    = Type, Identifier, "{", GetterDecl, "}" ;
-GetterDecl      = { Attribute }, "get", ( ";" | Block ) ;
+PropertyDefinition = Type, Identifier, "{", GetterDefinition, "}" ;
+GetterDefinition = { Attribute }, "get", Block ;
+InterfaceProperty = Type, Identifier, "{", InterfaceGetter, "}" ;
+InterfaceGetter = { Attribute }, "get", ( ";" | Block ) ;
 
 TypeParameterList = "<", Identifier, { ",", Identifier }, ">" ;
 ConstraintClause  = "where", Identifier, ":",
@@ -194,31 +212,57 @@ OperatorSymbol  = "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^"
 
 This candidate requires a single file-scoped namespace after using directives
 and before declarations. Fields and constructors occur in class/struct bodies;
-interface members do not include fields or constructors. Operators belong to
-the declaring nominal type or an interface contract, **not** a global
-declaration. Retroactive behavior for another type needs an explicit adapter
-or wrapper witness, not a global extension operator. `abstract` is a
-candidate modifier only for an unimplemented interface requirement (not a
-concrete type or a class method); an interface member with a body is a default
-implementation. `static abstract` describes a static interface requirement,
-not concrete inheritance. The candidate generic type parameters and
-conformance lists apply to structs **and** classes; interface base lists
-express interface composition, not implementation of an interface by itself.
+interface members do not include fields or constructors. The `ContextualPrefix`
+placeholder is deliberate: attributes and modifiers are checked by declaration
+context, and their exact legal combinations remain **OPEN**. It is not a
+production that permits every modifier on every declaration.
+
+Top-level and concrete function/operator definitions and concrete property
+getters have bodies. Only interface function, operator, and getter declarations
+may end in `;`; that form requires a conformance implementation. A body on an
+interface member supplies a default. For each inherited interface member, a
+checked nominal conformance maps its declaring-interface member identity to a
+compatible explicit implementation when present, otherwise to its default
+body; if neither exists, the conformance is incomplete. An explicit
+implementation may replace a default without changing the member identity or
+weakening its published contract. Same-named extensions do not satisfy or
+replace a witness.
+These are interface contract and witness rules, not concrete inheritance (see
+[§5.12](#512-modifiers-cleanup-and-finalization)).
+
+Operators belong to the declaring nominal type or an interface contract,
+**not** a global declaration. Retroactive behavior for another type needs an
+explicit adapter or wrapper witness, not a global extension operator. A
+bodyless static interface operator is a required compile-time witness; a
+bodyful one supplies a default. Static operator witness selection needs no
+runtime vtable. The candidate generic type parameters and conformance lists
+apply to structs **and** classes; interface base lists express interface
+composition, not implementation of an interface by itself.
 The candidate integral enum base and constant-valued members preserve unnamed
 underlying values; `[Flags]` is an optional declaration contract, not a
 different closed enum grammar. `IntegralType` and `ConstantExpression` require
 semantic restrictions beyond their syntactic approximations. Only a
-getter-only property is proposed here, with an explicit body on concrete
-types and a possible bodyless requirement in interfaces. `get` is a
-candidate contextual token; accessor effects attach to its attributes, not
-the entire property. Exactly which modifiers/attributes apply to each
-declaration and their order are **OPEN**, rather than every `Prefix` being
-legal everywhere. A semicolon body denotes an interface requirement, not a
-bodyless top-level or concrete function. Constructors must name their enclosing
-type. The lexer does not yet recognize `++` or `--` as single tokens; their
-inclusion in `OperatorSymbol` is a future source-form proposal, not executable
-syntax. Nested type declarations are deliberately excluded pending the
-decision in [§5.11](#511-nested-types-and-scoped-operators).
+named getter-only property is proposed here; neither property production is an
+indexer or `this[...]` form. `get` is a candidate contextual token;
+accessor effects attach to its attributes, not the entire property. The exact
+property/accessor grammar, attribute targets, modifier applicability and
+ordering remain **OPEN**. Constructors must name their enclosing type. The
+lexer does not yet recognize `++` or `--` as single tokens; their inclusion in
+`OperatorSymbol` is a future source-form proposal, not executable syntax.
+Nested type declarations are deliberately excluded from this candidate
+grammar; this is a proposed scope boundary, not a claim that nested type
+arguments in `Type` are excluded. See [§5.11](#511-nested-types-and-scoped-operators).
+
+```terrum
+// Design-only target sketch; not executable syntax. The present bounded
+// parser still requires "static abstract".
+interface IAdd<T>
+{
+    static T operator +(T left, T right);
+    int32 Size();
+    int32 DefaultSize() { return 0; }
+}
+```
 
 ### 3.2 Types, parameters, and arguments
 
@@ -260,7 +304,8 @@ Block           = "{", { Statement }, "}" ;
 Statement       = Block | IfStatement | WhileStatement | ForStatement
                 | RequireStatement | TryStatement | UnsafeStatement
                 | ReturnStatement | LoopTransfer | LocalDecl
-                | AssignmentStatement | ExpressionStatement | ";" ;
+                | DiscardStatement | AssignmentStatement
+                | ExpressionStatement | ";" ;
 IfStatement     = "if", "(", Expression, ")", Block,
                   [ "else", ( Block | IfStatement ) ] ;
 WhileStatement  = "while", "(", Expression, ")", Block ;
@@ -276,6 +321,7 @@ ReturnStatement = "return", [ Expression ], ";" ;
 LoopTransfer    = ( "break" | "continue" ), ";" ;
 LocalDecl       = [ "mut" ], ( "var" | Type ), Identifier, "=", Expression, ";" ;
 LocalDeclNoSemi = [ "mut" ], ( "var" | Type ), Identifier, "=", Expression ;
+DiscardStatement = "_", "=", Expression, ";" ;
 AssignmentStatement = Expression, "=", Expression, ";" ;
 ExpressionStatement = Expression, ";" ;
 ExpressionStatementNoSemi = Expression, [ "=", Expression ] ;
@@ -286,8 +332,11 @@ may be an expression or one `=` assignment. Local declarations require an
 initializer. Blocks are required after `if`, `while`, `for`, `try`, `catch`,
 `finally`, and `unsafe`; a single unbraced statement is not part of this
 candidate. `catch` has no exception type or binding syntax. Assignment is a
-statement-level form, not a general right-associative expression. Recovery
-forms are not alternate accepted syntax.
+statement-level form, not a general right-associative expression; its left
+expression must pass a writable-place check, which this syntactic
+approximation does not define. `DiscardStatement` is only the standalone
+discard form: `_` is not an identifier, pattern wildcard, or omitted lambda
+parameter. Recovery forms are not alternate accepted syntax.
 
 ### 3.4 Expressions and precedence
 
@@ -330,10 +379,14 @@ Unary           = ( "+" | "-" | "!" | "~" | "move" ), Unary | Postfix ;
 Postfix         = Primary, { ( ".", Identifier | Arguments
                              | "[", Expression, "]" ) } ;
 Primary         = "(", [ Expression ], ")" | "new", Type, Arguments
-                | Number | HexFloat | String | Boolean | Null
+                | Number | String | Boolean | Null
                 | Identifier | Identifier, TypeArguments, Arguments ;
 TypeArguments   = "<", Type, { ",", Type }, ">" ;
 ```
+
+`HexFloat` is not in this baseline `Primary`: §2 proposes it as a separate
+lexical extension, not as an executable literal or part of the current
+`Number` token.
 
 The generic-call alternative is explicit function-call syntax, not a general
 expression type-application operator. It does not express partial holes (`_`),
@@ -357,7 +410,7 @@ or claim an implementation.
   upgrade to writable access. `implicit ref<T>` follows the [parameter-only
   loan contract](../lifetimes.md#parameter-only-implicit-readonly-loans); it
   adds no noescape rule or permission to widen declared dependencies.
-  Conditional outputs follow [declaration postconditions](../language-contract-review.md#2-outcome-initialization-and-nullability-are-separate):
+  Conditional outputs follow [declaration postconditions](../language-contracts.md#2-outcome-initialization-and-nullability-are-separate):
   `ensure` is an ordinary Boolean postcondition, live/nullable-live/vacant
   states remain distinct, and vacant storage is never read. Exact `ensure`
   placement and metadata remain open (see [§5.8](#58-postcondition-syntax-for-conditional-output-state)).
@@ -592,7 +645,14 @@ recommendation for variadic type parameters is made here.
 
 ### 5.5 Accepted temporary scope for `implicit ref<T>`
 
-For `Foo(5).Bar(); Baz();`, materialization is shorthand for initializing an ordinary hidden local at the argument's original evaluation point in the current enclosing lexical scope, then passing its readonly reference. The local is not hoisted to scope entry and does not create a shorter lifetime-only scope. If conditional or short-circuit control flow skips the argument, no local is initialized and there is no owner to clean up. Scope exit follows ordinary initialized/moved-state cleanup. A valid returned reference may be used by later statements in that scope, subject to ordinary declared dependencies; existing place/backing lifetimes are not widened and capture/suspension/escape permissions do not change. See the canonical [reference contract](../language-contract-review.md#1-one-call-and-reference-model) and [implicit-loan lifetime rules](../lifetimes.md#parameter-only-implicit-readonly-loans). General source/loan metadata remain open.
+For `Foo(5).Bar(); Baz();`, materialization is shorthand for initializing an ordinary hidden local at the argument's original evaluation point in the current enclosing lexical scope, then passing its readonly reference. The local is not hoisted to scope entry and does not create a shorter lifetime-only scope. If conditional or short-circuit control flow skips the argument, no local is initialized and there is no owner to clean up. Scope exit follows ordinary initialized/moved-state cleanup. A valid returned reference may be used by later statements in that scope, subject to ordinary declared dependencies; existing place/backing lifetimes are not widened and capture/suspension/escape permissions do not change. See the canonical [reference contract](../language-contracts.md#1-one-call-and-reference-model) and [implicit-loan lifetime rules](../lifetimes.md#parameter-only-implicit-readonly-loans). General source/loan metadata remain open.
+
+**Open recommendation:** implicit borrowing introduces no special two-phase
+reservation/activation mechanism. Form the reference when the equivalent
+explicit loan forms it; if a future ordinary reference or mutating-receiver
+contract needs reservation, specify its aliasing, reentrancy and timing
+semantics for both spellings first. Convenience syntax must not silently
+select a distinct mechanism.
 
 ### 5.6 Reserved underscore and discard statement
 
@@ -706,7 +766,7 @@ publication transaction.
 source-to-metadata mapping for correlated initialization facts. There is no
 special conditional postcondition block grammar. A `bool`/`out` form remains
 distinct from an `init ref<T>` contract. See the canonical
-[conditional output contract](../language-contract-review.md#2-outcome-initialization-and-nullability-are-separate).
+[conditional output contract](../language-contracts.md#2-outcome-initialization-and-nullability-are-separate).
 
 ### 5.9 Static-proof floor and constant evaluation
 
@@ -746,9 +806,15 @@ to explicit getter-only, by-value properties on compact `Copy` structs and
 source classes. It does not adopt setters, auto-properties, ref-returning
 properties, or general property/accessor behavior.
 
-The examples elsewhere use `{ get; }` sketches but do not say how a getter body
-is authored or where `[NoThrow]` attaches. An explicit body should make the
-getter an ordinary checked read-only callable member:
+Interface properties are separate contract members: a bodyless interface
+getter requires a conformance implementation, while a getter body supplies a
+default under §5.12. This does not broaden the accepted concrete-property
+direction above. Indexers (including the core-library `this[...]` sketches)
+have no production here and remain design-only.
+
+An explicit concrete getter body should make the getter an ordinary checked
+read-only callable member; `{ get; }` on a concrete type is not a body form.
+Accessor attributes such as `[NoThrow]` attach to the getter:
 
 ```terrum
 // Candidate property form illustrating the accepted direction:
@@ -807,7 +873,7 @@ nesting later is a reasonable next step if use cases justify the added
 binding and identity rules; nesting does not imply an implicit outer
 instance or capture.
 
-**Recommendation (PROPOSED):** do not allow `OperatorDecl` in
+**Recommendation (PROPOSED):** do not allow operator declarations in
 `TopDeclaration`. A user operator is selected from the containing type's
 declared operation or an applicable checked interface witness. Imports and
 extension lookup must not silently add an operator or a witness to a foreign
@@ -827,11 +893,33 @@ place/receiver/nominal declaration; `write` qualifies referent access in a
 type; `ref`/`out`/`init ref<T>` are distinct parameter/call-site modes.
 `unique` is an ownership form, not an access synonym. `unsafe` on a callable
 declares caller obligations while an `unsafe { ... }` block scopes operations
-inside a body. `abstract` is meaningful for an interface requirement even
-without concrete inheritance; classes and structs are not abstract bases.
-An unimplemented interface requirement and a default-implemented member
-need distinct, checked contracts. Do not infer legality from the permissive
-`Prefix` parser sketch.
+inside a body. Interface requirements need no `abstract` modifier: a
+bodyless declaration requires a witness implementation, while a body supplies
+a default that a conforming type may explicitly replace. Both have the
+interface's declared member identity and contract. Each selected nominal
+conformance maps that identity to its checked explicit implementation, or to
+the default when no explicit implementation is supplied. Conforming implementations must
+preserve the published signature, effects, access, ownership and lifetime
+guarantees; an unrelated same-named extension is not an override. Calls
+through an interface receiver use the selected witness, including calls from
+a default body to another interface member; a default is not a statically
+hardwired bypass around an implementation. Runtime dispatch may use a slot,
+table entry or equivalent representation, but neither a default nor a
+bodyless requirement mandates a particular physical vtable layout. Static
+operator requirements use checked compile-time witness selection and need no
+runtime vtable. Conflicting inherited defaults need an explicit resolution;
+no inheritance-order tie-break or implicit linearization selects one.
+Adding a default to an existing interface remains subject to compatible
+binding/dispatch for older implementations, not an assumption that an older
+binary has a newly appended slot. Exact witness-mapping syntax and metadata
+representation remain open. Do not infer legality from the permissive
+`ContextualPrefix` placeholder.
+
+The current bounded parser still recognizes `static abstract` operator
+declarations. Removing that spelling from the **proposed** grammar does not
+silently migrate existing sources or alter the implemented syntax; coordinated
+parser, binder, diagnostic and fixture migration is a separate implementation
+step.
 
 There is no proposed `~Type()` finalizer production. Deterministic
 `[Cleanup]` for an owning value and scope/unwind cleanup are not GC
@@ -876,12 +964,36 @@ typed catches, interpolation and collections. Reserved `switch`, `case`,
 `foreach`, `async`, `await`, `union`, `throw` and `own` are not implementations
 of those features. They need complete syntax, binding, effects and
 representation rules, not isolated extra alternatives in `Statement` or
-`Primary`. The candidate `Primary` includes `Number` (decimal fractions
-lexically, integer values executable) and proposed `HexFloat`; the latter
-cannot become a lexer token or an executable value without the coordinated
-lexical and numeric work above.
+`Primary`. The baseline `Primary` includes `Number` (decimal fractions
+lexically, integer values executable); `HexFloat` is a separate proposed
+lexical extension, not a baseline grammar alternative, and cannot become a
+lexer token or executable value without the coordinated lexical and numeric
+work above.
 
-### 5.14 Specification-to-tooling gate
+### 5.14 Documentation-comment grammar and tooling
+
+The accepted attachment, markup and contract boundary is in
+[language](../language.md#documentation-comments). The following details are
+**open specification work**, not parser or XML-schema approval:
+
+| Surface | What remains to specify |
+|---|---|
+| Attachment | Exact `///` and `/** ... */` attachment across blank lines, attributes, multiple declarations and generated/partial declarations |
+| Markdown | Supported GFM normalization and XML/HTML-style tags; metadata-heading recognition, heading-name case and unknown-heading behavior without treating headings inside code, lists or quotes as metadata |
+| Mentions | Escaping and boundaries for `@value`, `@T`, `@Type.Member`, generic and overloaded targets; ordinary Markdown navigation versus explicit custom/qualified `xref:` links |
+| XML artifact | Schema/version, stable member IDs, parameter names, location, overload/generic identity and compatibility across evolution |
+| Inheritance | Explicit selection of documentation from interface members, aliases and forwarders, not arbitrary name matching; precedence for generated sections and authored prose |
+| Diagnostics | Malformed markup, unresolved/ambiguous references, renamed/stale parameters and optional documentation-coverage lint |
+| Examples | Explicit source/profile context for complete examples, fragments or design-only pseudocode; checking is opt-in, never executed during extraction |
+| Distribution | Package representation, visibility/trimming, dependency availability, deterministic output and IDE/site rendering, separate from executable ABI |
+
+The compiler derives effects, ownership, lifetimes, initialization, output and
+failure guarantees from checked declarations. Documentation, including
+inherited prose and `# safety` explanations, cannot change those contracts.
+Normal extraction is deterministic and does not run embedded code, fetch
+remote includes or reveal private declarations merely to resolve a link.
+
+### 5.15 Specification-to-tooling gate
 
 Before promoting this proposal to an approved grammar or using it as a
 conformance source for tools, reconcile every production with the canonical
@@ -893,23 +1005,28 @@ fixtures. Separate the full target language from the bounded
 [implemented syntax](../implementation.md);
 accepting a candidate spelling in an example does not claim compiler support.
 
-## 6. Examples and conformance boundary
+## 6. Coverage and conformance boundary
 
-Examples illustrate status and semantic rules; none independently defines
-grammar or establishes implementation support.
+This map is an index, not an additional grammar or approval. **A** means
+accepted semantic direction, **P** a candidate source form only, **O** an
+unresolved choice, and **I** support documented by the implementation
+reference. These statuses can coexist; implementation does not approve a
+proposal, and accepted semantics do not approve its syntax.
 
-| Status | Example | Rule illustrated |
+| Surface | Coverage and status | Explicit boundary or remaining gap |
 |---|---|---|
-| Accepted direction | `Create(init value);` | `init` denotes vacant-storage initialization and is distinct from `out` or writable access. Exact source grammar and publication contracts remain open. |
-| Accepted direction | `int32 Parse(int32 x) { return x; }` and `uint32 Parse(uint32 x) { return x; }` | Same-name declarations are source-time overload candidates. `Parse(42)` is ambiguous when neither candidate is better; return type is not a tie-breaker. |
-| Accepted direction | `F(value)` with by-value `T` and `implicit ref<T>` candidates | The by-value match wins when both apply. |
-| Accepted direction | `_ = MakeOwner();` | Evaluate once, discard the result, and apply ordinary ownership and cleanup. |
-| Not a proposed form | `T??` | Repeated optional markers are not source syntax; optional normalization is a separate semantic rule. |
-| Open | `operator +(T operand) -> R;` | Illustrative operation contract; protocol names and declaration syntax are unresolved. |
+| Lexing, keywords, built-in names | The canonical lexer contract is [lexical grammar](../lexical-grammar.md); §2 summarizes it and separately proposes `HexFloat`. Primitive type names are identifiers; `void` is a keyword. | `abstract` remains a lexical token for legacy parser syntax, not a target modifier. `is` is used contextually but is not a current keyword token; `get`, `some`, `init`, `implicit`, `params`, `ensure`, and `const` need token decisions. Built-in/library APIs are declarations, not grammar productions. |
+| Files and nominal declarations | **P** §3.1 sketches using/file namespace, top-level functions, structs, classes, interfaces, and integral-base enums; interface bases differ from nominal conformances. | Exact modifier/attribute legality and enum constant restrictions remain open. No union or nested nominal declaration is proposed; recursive generic type arguments in `Type` are not excluded. |
+| Constructors, members, operators, properties | **P** §3.1 requires bodies for concrete functions/operators/getters; constructors name their owner; operators are type/interface members, not global declarations. **A** §5.7 specifies unary operator direction; §5.10 limits property direction to explicit getter-only by-value properties. | Interface `;` versus body forms are separated in §3.1. Property/accessor effects, attribute targets, and metadata remain **O**; setters, auto/ref-return properties and indexers are not adopted. `++`/`--` appear only as future operator spellings, not current lexer tokens. |
+| Interface witnesses and dispatch | **A** §5.12: bodyless members require checked implementations; bodies supply replaceable defaults, selected by declaring-member identity. **P** §3.1 sketches the corresponding `;`/body forms. Static operator witnesses need no runtime vtable. | Explicit mapping syntax, metadata/ABI, inherited-default resolution syntax, and compatible binding for older witnesses remain **O**. No physical slot layout is selected. |
+| Types, parameters, arguments, modifiers | **P** §3.2 sketches recursive type arguments, one optional marker, `ref`/`out`/`mut ref`, labels, and `init` arguments. `mut`, `unique`, `unsafe`, visibility and `static` are candidate modifier vocabulary. | `init ref<T>`, `implicit ref<T>`, `write` parameter legality, `params`, generic defaults/inference, associated types, `ensure` contracts and exact modifier combinations remain **O**. Prefix names are context-valid placeholders; `abstract` is deliberately absent from target modifiers. |
+| Statements and expressions | **P** §§3.3–3.4 sketch blocks, control flow, locals, calls, assignments, precedence, `is null`/`is some`, and `T(expression)`. **A** §5.6 gives standalone discard semantics; §3.3 records its distinct `_ = expression;` form. | Assignment's left side needs a writable-place check; catch typing/binding, constant-evaluation/static-proof syntax, and omitted constructs (including lambdas, patterns, `throw`, `await`, conditional expressions and general assignment expressions) remain outside this grammar. `is`/`some` token treatment remains open. |
+| Literals and compound operations | **I** lexical numbers/strings and target-typed integer direction are described in §§2, 4 and the implementation reference. **A** §5.13 separates compound-operation semantics from `+`. | `HexFloat` is a separate proposed lexical extension, not a baseline `Primary` or executable literal. Compound-assignment spelling, tokens, places and evaluation rules are **O**; `+=`…`^=` shorthand in §5.13 is not legal grammar. |
+| Cleanup and finalizers | **A** deterministic `[Cleanup]` is distinct from GC finalization; **I** support is listed by the implementation reference. | Attribute placement is still governed by open contextual-prefix rules. No finalizer production is proposed; whether to support one and its lifecycle/ABI contract remain **O** (§5.12). |
+| Implemented boundary | **I** is defined only by [implementation](../implementation.md), not by this proposal's examples or productions. | The bounded parser's existing `static abstract` syntax is unchanged. Nothing else marked **P** is thereby implemented or source-compatible. |
 
 An implementation conforms only to an adopted language specification and its
 specified lexical, grammatical, and static-semantic rules. A recovery tree or
-an example accepted in isolation is not evidence of conformance. Actual
-implementation and historical support details are maintained in the
-[implementation reference](../implementation.md); the lexical contract is in
-the [lexical grammar](../lexical-grammar.md).
+an example accepted in isolation is not evidence of conformance. The
+implementation boundary is in [implementation](../implementation.md); the
+lexical contract is in [lexical grammar](../lexical-grammar.md).

@@ -3,8 +3,8 @@
 The current milestone is a small checked native compiler, not the entire language.
 The [language](language.md) defines accepted semantic direction, while
 [implementation](implementation.md) records actual support and tool contracts.
-The [pending language and library index](language-library-review.md) tracks
-detailed specification work separately from this implementation sequence.
+The [proposal index](proposals/README.md) separates pending designs from
+the accepted contracts and this implementation sequence.
 The approved current [metadata design](il-metadata.md) and bounded
 [coded instruction set](il-instruction-set.md) are distinct from the
 still-proposed grammar and core-library drafts in the
@@ -147,8 +147,8 @@ opt-in operations alongside primitive built-ins, not universal root methods or
 an obligation to make every value stringifiable. No universal root is
 introduced merely to provide these operations.
 
-The [pending-decision index](language-library-review.md) distinguishes review
-items from accepted contracts and specification work. Detailed boundaries live
+The [proposal index](proposals/README.md) distinguishes unapproved forms
+from accepted contracts and scheduled implementation. Detailed boundaries live
 in [language](language.md), [lifetimes](lifetimes.md), [type families](type-families.md),
 [conversions](conversions.md) and [libraries](libraries.md). They include
 generic member-contract refinement, stored-view ABI, inline class eligibility,

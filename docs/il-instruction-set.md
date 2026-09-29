@@ -130,7 +130,7 @@ The [approved reference word](il-metadata.md#metadata-logical-tables-and-row-sem
 is a fixed `u32` split into an 8-bit kind and 24-bit row data; no separate
 `uint24` storage type is required. The present `typeMap` holds indexed
 TypeSpec references. The separately described
-[inline built-in extension](il-metadata.md#candidate-inline-built-in-type-reference-future-revision)
+[inline built-in extension](proposals/il-extensions.md#inline-built-in-type-reference)
 would assign kind `0xFE` to complete built-in type words and requires a
 future metadata revision and reader/writer support; the approved `u32`
 split alone does not adopt that additional kind. Body-local `t` IDs
@@ -2150,20 +2150,9 @@ interchange, not permissions to invent semantics or serialize the current
 private bound tree. The bounded subset specified above is approved; forms
 missing the stated contracts remain non-executable.
 See [implementation](implementation.md) for what the repository actually
-executes. The source-language [portable proof floor](language-contract-review.md#4-a-reproducible-proof-and-evaluation-foundation)
+executes. The source-language [portable proof floor](language-contracts.md#4-a-reproducible-proof-and-evaluation-foundation)
 is distinct from decoder and verifier work budgets.
 
-### Compact-profile review decisions
-
-The two compact tags and their bytes above are approved for the bounded
-subset, but no canonical writer policy or measured performance claim is
-established. The following are future design and implementation decisions:
-
-| Decision | Candidate and evidence still needed |
-|---|---|
-| Shape partition | Compare one-block linear, 2–3-block boundary-only, indexed small CFG and general forms on representative body distributions; choose by total bytes, cold import, allocations and selective-inlining time under trusted and audited loading, not a hard block-count cutoff. |
-| Offset width | Compare a separate compact-index width against the current coupled local width at 255/65535-byte boundaries, including wider IDs with short blocks. Validate exact fallback to the general form. |
-| Logical roots and effects | Define mandatory method/block effects and indexed safepoint root/owner/interior dependencies including cleanup/exceptional continuations. Decide inline versus required sparse sidecar by actual density; no executable managed compact form until a reader verifies these facts. |
-| Cross-method sharing | A future ownership revision would need to validate exact Body-row sharing within one module against every referencing MethodDef's signature and contracts. Compare remaining independent short rows with a typed, bounded shared-shape table and substitutions; preserve source identity and measure binding and rewrite/remap costs as well as byte savings. |
-| Trusted selective import | Resolve unvisited-block unknown opcodes and feature negotiation before a reader relies on terminator/definition indexes without decoding that block; structural bounds and metadata binding never become optional. |
-| Declaration contracts | Model authored Body bytes and the separately executed pre/postcondition checks together for inlining/effect decisions. Their ability to remove explicit guard branches does not remove runtime work or failure order. |
+The compact tags and their bytes are approved for the bounded subset;
+writer-selection policy and other unapproved performance extensions remain
+in the [IL extension proposal](proposals/il-extensions.md#compact-profile-selection-and-follow-up).

@@ -1,4 +1,6 @@
 // DESIGN ONLY: target API contracts with selected implementations. Primitive representation omitted.
+// Bodyless interface members denote required witnesses in the proposed grammar;
+// the implemented bounded operator parser still requires `static abstract`.
 // The executable profile currently uses legacy bool/out publication; this
 // inventory shows its planned init ref<T> destination form. Call-site spelling
 // and coordinated migration are not yet implemented.
@@ -13,7 +15,7 @@ public interface IParsable<TSelf>
 {
     // Malformed input is an expected false result; an assertion caller may
     // lift the declared conditional output with `require`.
-    static abstract bool TryParse(TextSpan text, init ref<TSelf> value);
+    static bool TryParse(TextSpan text, init ref<TSelf> value);
 }
 
 public interface IFormattable
@@ -28,19 +30,19 @@ public interface IFormattable
 public interface IAdditionOperators<TSelf, TOther, TResult>
     where TSelf : IAdditionOperators<TSelf, TOther, TResult>
 {
-    static abstract TResult operator +(TSelf left, TOther right);
+    static TResult operator +(TSelf left, TOther right);
 }
 
 public interface IMultiplyOperators<TSelf, TOther, TResult>
     where TSelf : IMultiplyOperators<TSelf, TOther, TResult>
 {
-    static abstract TResult operator *(TSelf left, TOther right);
+    static TResult operator *(TSelf left, TOther right);
 }
 
 public interface IAdditiveIdentity<TSelf, TResult>
     where TSelf : IAdditiveIdentity<TSelf, TResult>
 {
-    static abstract TResult Zero { get; }
+    static TResult Zero { get; }
 }
 
 // Optional composite conveniences; scalar classification and IEEE behavior
@@ -56,9 +58,9 @@ public interface IScalarNumber<TSelf>
 public interface IScalarIeee754<TSelf> : IScalarNumber<TSelf>
     where TSelf : IScalarIeee754<TSelf>
 {
-    static abstract bool IsNaN(TSelf value);
-    static abstract bool IsFinite(TSelf value);
-    static abstract TSelf FusedMultiplyAdd(TSelf left, TSelf right, TSelf addend);
+    static bool IsNaN(TSelf value);
+    static bool IsFinite(TSelf value);
+    static TSelf FusedMultiplyAdd(TSelf left, TSelf right, TSelf addend);
 }
 
 // PROVISIONAL protocols: implement only supported source/destination policy pairs.
@@ -66,13 +68,13 @@ public interface IScalarIeee754<TSelf> : IScalarNumber<TSelf>
 public interface ICheckedConversion<TSelf, TSource>
     where TSelf : ICheckedConversion<TSelf, TSource>
 {
-    static abstract TSelf ConvertChecked(TSource value);
+    static TSelf ConvertChecked(TSource value);
 }
 
 public interface ISaturatingConversion<TSelf, TSource>
     where TSelf : ISaturatingConversion<TSelf, TSource>
 {
-    static abstract TSelf ConvertSaturating(TSource value);
+    static TSelf ConvertSaturating(TSource value);
 }
 
 public interface ITruncatingConversion<TSelf, TSource>
@@ -81,7 +83,7 @@ public interface ITruncatingConversion<TSelf, TSource>
     // Built-in integer -> integer unchecked conversion wraps to destination
     // width. Float -> integer truncates toward zero, then saturates; NaN maps
     // to zero. Checked conversion is the distinct ConvertChecked policy.
-    static abstract TSelf ConvertTruncating(TSource value);
+    static TSelf ConvertTruncating(TSource value);
 }
 
 public struct int32

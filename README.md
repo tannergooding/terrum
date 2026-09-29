@@ -176,11 +176,12 @@ into `-fast`; the packaging leg should run with full analysis.
 | `samples/design`, `library` | Broader language/API sketches, not implemented libraries |
 | `self-host` | Candidate Terrum compiler components with explicit execution gates |
 
-Read the [language design](docs/language.md), [lifetime contracts](docs/lifetimes.md),
-[standard-library design](docs/libraries.md), [sample catalog](docs/samples.md),
+Read the [language design](docs/language.md), [language contracts](docs/language-contracts.md),
+[lifetime contracts](docs/lifetimes.md), [standard-library design](docs/libraries.md),
+[sample catalog](docs/samples.md),
 [syntax API and support matrix](docs/implementation.md), and [roadmap](docs/roadmap.md).
 The repository is the canonical design/development location.
-The [pending language and library decisions](docs/language-library-review.md)
+The [pending language and library proposals](docs/proposals/README.md)
 identify unresolved choices; accepted rules live in the design documents above.
 Pending alternatives are not additions to the current implementation scope.
 

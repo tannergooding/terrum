@@ -5,9 +5,10 @@
 > grammar, or claim that Terrum currently supports concurrent access.
 > Examples are pseudocode, not implemented Terrum syntax or library APIs.
 
-Accepted call and lifetime rules live in [language](language.md) and
-[lifetimes](lifetimes.md); remaining call, output and proof decisions are
-identified in the companion [contract review](language-contract-review.md).
+Accepted call and lifetime rules live in [language](language.md),
+[lifetimes](lifetimes.md) and [language contracts](language-contracts.md);
+remaining grammar and proof rules are in the
+[proposals](proposals/README.md).
 [Data layout and ABI contracts](data-layout-and-abi.md) separates required
 primitive guarantees from physical layout, interchange and procedure calls.
 [Implementation](implementation.md) remains the executable support boundary;
@@ -1051,7 +1052,7 @@ The policy choices above are accepted. The work below makes them precise and
 implements them; it is not a list of open policy alternatives.
 This acceptance does not settle the separate
 [layout/ABI open questions](data-layout-and-abi.md#open-questions)
-or [call-contract recommendations](language-contract-review.md#6-approval-and-conformance-checklist).
+or [remaining call-contract syntax](proposals/grammar-spec.md).
 
 | Area | Remaining work |
 |---|---|

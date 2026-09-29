@@ -1,12 +1,22 @@
 # Standard-library design
 
-This is the proposed Terrum library contract, not the installed .NET library or an implemented Terrum runtime. The `.api.terrum` inventories in [`library`](../library) and the [numerics/tensors example](../samples/design/numerics-and-tensors.terrum) are **DESIGN ONLY**. Current compiler support for any part of this contract is tracked in [implementation](implementation.md), not restated here. [Language](language.md) defines the broader value/effect rules; [lifetimes](lifetimes.md) defines the access and dependency model. In signatures, `mut` grants place rebinding or a writable receiver, while `write` grants reference/view access; the two are not interchangeable. Generic parameters preserve their full caller qualification, and mutable storage is invariant.
+This document records accepted library behavior and dependency constraints,
+not an implemented Terrum runtime. The exact layered API inventory remains
+the [core-library proposal](proposals/core-library-reference.md); the
+`.api.terrum` files in [`library`](../library) and
+[numerics/tensors example](../samples/design/numerics-and-tensors.terrum)
+are **DESIGN ONLY**. Current compiler support is tracked in
+[implementation](implementation.md). [Language](language.md) defines
+broader value/effect rules and [lifetimes](lifetimes.md) access and
+dependencies. In signatures, `mut` grants place rebinding or a writable
+receiver, while `write` grants reference/view access; generic parameters
+preserve their full qualification and mutable storage is invariant.
 
 ## Definitions
 
 | Term | Meaning |
 |---|---|
-| Dependency layer (Core/Foundation/Application/Platform leaves) | A cumulative package-boundary grouping, described in [dependency layers](#dependency-layers-and-package-boundaries): each layer may depend only on the layers listed before it and its declared substrate. |
+| Dependency layer (Core/Foundation/Application/Platform leaves) | A candidate cumulative package-boundary grouping, described in the [core-library proposal](proposals/core-library-reference.md#dependency-layers); each layer may depend only on preceding layers and its declared substrate. |
 | Storage-and-release lease | A per-allocation handle that grants access to allocated storage and the obligation to release it; distinct from an owned allocator context. |
 | Allocator context | A retained handle to an allocator, used to obtain leases; owned by a container such as a growing vector, not per-allocation. |
 | Family, member, witness | Defined in [type families](type-families.md); a family is a declared set of related types (members), and conformance to a behavioral contract is established by an explicit witness. |
@@ -23,16 +33,11 @@ support. Current compiler and runtime support is tracked in
 
 ## Dependency layers and package boundaries
 
-| Cumulative layer | Representative surface | Required substrate |
-|---|---|---|
-| **Core** | Numeric primitives and protocols, `void`/options, `Span<T>`, immutable code-unit/text views, static eager algorithms, shape/view and SIMD contracts | Checked value execution, bounds/access and cleanup/failure services; no ordinary-path allocation or OS facility |
-| **Foundation** | Explicitly owned buffers/vectors/maps, allocators/arenas/pools, owning native `Text`, persistent tensor-shape metadata and storage leases | Core and a caller/host-supplied allocator; no mandatory tracing collector |
-| **Application** | Managed list/linked list/dictionary/set/queue, ordinary managed `Text`, tasks, streams/terminal, files/network, globalization and serialization | Foundation plus tracing and appropriate host services |
-| **Platform leaves** | COM/Windows/DirectX and other native bindings | Only layers their adapters actually use; no reverse dependency on platform APIs |
-
-These are draft cumulative **library dependency layers**, not language-conformance
-or target-runtime profiles. The Core library tier is broader than the genuinely
-minimal language requirements and is not a mandatory API baseline; `ref<T>`,
+The candidate cumulative **Core/Foundation/Application/Platform**
+[dependency layers](proposals/core-library-reference.md#dependency-layers)
+are not language-conformance or target-runtime profiles. The Core
+library tier is broader than the genuinely minimal language requirements
+and is not a mandatory API baseline; `ref<T>`,
 `ptr<T>` and `int32` are illustrative foundational forms, not an exhaustive
 type list. Core/Foundation/Application are existing organizational labels, not
 newly standardized profile names or a feature-profile matrix for each allocator,

@@ -47,6 +47,13 @@ fallback. This direction allows embedded/kernel environments in principle; it do
 require every environment to support every feature. Exact baseline/API mapping
 and feature-to-runtime support remain open.
 
+| Candidate cumulative layer | Representative surface | Required substrate |
+|---|---|---|
+| **Core** | Numeric primitives and protocols, `void`/options, `Span<T>`, immutable code-unit/text views, static eager algorithms, shape/view and SIMD contracts | Checked value execution, bounds/access and cleanup/failure services; no ordinary-path allocation or OS facility |
+| **Foundation** | Explicitly owned buffers/vectors/maps, allocators/arenas/pools, owning native `Text`, persistent tensor-shape metadata and storage leases | Core and a caller/host-supplied allocator; no mandatory tracing collector |
+| **Application** | Managed list/linked list/dictionary/set/queue, ordinary managed `Text`, tasks, streams/terminal, files/network, globalization and serialization | Foundation plus tracing and appropriate host services |
+| **Platform leaves** | COM/Windows/DirectX and other native bindings | Only layers their adapters actually use; no reverse dependency on platform APIs |
+
 ## Reading declarations
 
 - `mut` grants a writable place or receiver; `write` qualifies authority through a reference/view. They are not interchangeable. Readonly is the declaration default.
@@ -81,7 +88,12 @@ Expected domain alternatives should be represented by a status/union/result cont
 
 ## 2. Explicit equality, keying and formatting witnesses
 
-These are opt-in behavior contracts, not automatic primitive or root conformance. Equality intended for a map key must be paired with a hash that agrees on equivalent values.
+These are opt-in behavior contracts, not automatic primitive or root
+conformance. Bodyless interface members require a checked witness; a body
+would supply an overridable default. The sketches use the proposed grammar,
+not the bounded parser's current `static abstract` spelling. Equality
+intended for a map key must be paired with a hash that agrees on equivalent
+values.
 
 ```terrum
 public interface IEqualityComparer<T>
@@ -95,7 +107,7 @@ public interface IKeyComparer<T> : IEqualityComparer<T>
 public interface IParsable<TSelf>
     where TSelf : IParsable<TSelf>
 {
-    static abstract bool TryParse(TextSpan text, init ref<TSelf> value);
+    static bool TryParse(TextSpan text, init ref<TSelf> value);
 }
 public interface IFormattable
 {
@@ -503,44 +515,46 @@ The numerics source is representative, not a complete primitive matrix:
 public interface IAdditionOperators<TSelf, TOther, TResult>
     where TSelf : IAdditionOperators<TSelf, TOther, TResult>
 {
-    static abstract TResult operator +(TSelf left, TOther right);
+    static TResult operator +(TSelf left, TOther right);
 }
 public interface IMultiplyOperators<TSelf, TOther, TResult>
     where TSelf : IMultiplyOperators<TSelf, TOther, TResult>
 {
-    static abstract TResult operator *(TSelf left, TOther right);
+    static TResult operator *(TSelf left, TOther right);
 }
 public interface IAdditiveIdentity<TSelf, TResult>
     where TSelf : IAdditiveIdentity<TSelf, TResult>
 {
-    static abstract TResult Zero { get; }
+    static TResult Zero { get; }
 }
 public interface IScalarNumber<TSelf>
     : IAdditionOperators<TSelf, TSelf, TSelf>,
       IMultiplyOperators<TSelf, TSelf, TSelf>,
       IAdditiveIdentity<TSelf, TSelf>
-    where TSelf : IScalarNumber<TSelf>;
+    where TSelf : IScalarNumber<TSelf>
+{
+}
 public interface IScalarIeee754<TSelf> : IScalarNumber<TSelf>
     where TSelf : IScalarIeee754<TSelf>
 {
-    static abstract bool IsNaN(TSelf value);
-    static abstract bool IsFinite(TSelf value);
-    static abstract TSelf FusedMultiplyAdd(TSelf left, TSelf right, TSelf addend);
+    static bool IsNaN(TSelf value);
+    static bool IsFinite(TSelf value);
+    static TSelf FusedMultiplyAdd(TSelf left, TSelf right, TSelf addend);
 }
 public interface ICheckedConversion<TDestination, TSource>
     where TDestination : ICheckedConversion<TDestination, TSource>
 {
-    static abstract TDestination ConvertChecked(TSource value);
+    static TDestination ConvertChecked(TSource value);
 }
 public interface ISaturatingConversion<TDestination, TSource>
     where TDestination : ISaturatingConversion<TDestination, TSource>
 {
-    static abstract TDestination ConvertSaturating(TSource value);
+    static TDestination ConvertSaturating(TSource value);
 }
 public interface ITruncatingConversion<TDestination, TSource>
     where TDestination : ITruncatingConversion<TDestination, TSource>
 {
-    static abstract TDestination ConvertTruncating(TSource value);
+    static TDestination ConvertTruncating(TSource value);
 }
 public struct int32 : IParsable<int32>, IFormattable, IScalarNumber<int32>
 {

@@ -30,8 +30,9 @@ restated here.
 Unimplemented does not mean unapproved. Completing a table from an already
 selected target contract does not reopen the language policy; choosing a new
 observable representation or independently replaceable public boundary does.
-The cross-document [pending-decision index](language-library-review.md)
-tracks those review items without making the accepted core provisional.
+The [proposal index](proposals/README.md) and
+[roadmap](roadmap.md) track pending designs and implementation without making
+the accepted core provisional.
 
 A `Blittable` or `Transparent` commitment is a compatibility promise: changes
 that violate it are breaking, but neither promise a universal byte encoding
