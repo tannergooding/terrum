@@ -83,18 +83,8 @@ internal static partial class Program
             (BoundRuntimePolicy)policy);
         if (compilation.HasErrors)
         {
-            if (json)
-            {
-                WriteCompilationJson(args[0], trees[0], compilation.Diagnostics, false,
-                    null, null, policy, compilation.NativeProfileVersion ?? Profile(policy));
-            }
-            else
-            {
-                foreach (var diagnostic in compilation.Diagnostics)
-                {
-                    Console.Error.WriteLine($"{diagnostic.Code}: {diagnostic.Message}");
-                }
-            }
+            WriteCompilationResult(args[0], compilation, compilation.SourceDiagnostics,
+                false, null, null, json, policy);
             return 1;
         }
 

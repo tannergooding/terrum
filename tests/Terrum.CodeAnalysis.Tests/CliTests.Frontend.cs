@@ -72,6 +72,54 @@ public sealed partial class CliTests
             .GetProperty("code").GetString());
     }
 
+    [Fact]
+    public async Task FrontendComponentReportsBundledSourceDiagnosticsAsync()
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", ".."));
+        var sourceDirectory = Path.Combine(root, "self-host");
+        var directory = Path.Combine(Path.GetTempPath(), $"terrum-frontend-sources-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            foreach (var file in Directory.GetFiles(sourceDirectory, "*.terrum"))
+            {
+                File.Copy(file, Path.Combine(directory, Path.GetFileName(file)));
+            }
+            var frontend = Path.Combine(directory, "ScalarFrontend.terrum");
+            File.AppendAllText(frontend, "\nint32 Broken() { return missing; }\n");
+            var (exit, output, error) = await RunAsync(
+                Encoding.UTF8.GetBytes("int32 Main() { return 42; }"),
+                "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
+            Assert.Equal(1, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            var result = document.RootElement;
+            Assert.Equal(2, result.GetProperty("schemaVersion").GetInt32());
+            Assert.False(result.GetProperty("success").GetBoolean());
+            var diagnostics = result.GetProperty("diagnostics");
+            Assert.NotEmpty(diagnostics.EnumerateArray());
+            var diagnostic = diagnostics[0];
+            var index = diagnostic.GetProperty("sourceIndex").GetInt32();
+            var source = result.GetProperty("sources")[index];
+            Assert.Equal(frontend, source.GetProperty("path").GetString());
+            Assert.True(diagnostic.GetProperty("span").GetProperty("start").GetInt32()
+                > File.ReadAllText(Path.Combine(directory, "SourceRange.terrum")).Length);
+            Assert.True(diagnostic.GetProperty("range").GetProperty("start")
+                .GetProperty("line").GetInt32() > 0);
+            var (plainExit, plainOutput, plainError) = await RunAsync(
+                Encoding.UTF8.GetBytes("int32 Main() { return 42; }"),
+                "frontend-component", directory, "-", "--runtime", "fail-fast");
+            Assert.Equal(1, plainExit);
+            Assert.Empty(plainOutput);
+            Assert.Contains(frontend, plainError, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("int32 Main() { return 42; }")]
     [InlineData("public int32 Main() { return 0x2A; }")]

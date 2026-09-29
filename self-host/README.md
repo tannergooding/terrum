@@ -92,6 +92,8 @@ projects its typed result for inspection. Invalid shapes produce a code and
 source span; lexical failures retain scanner diagnostics and publish no typed
 result. This command does not use the typed result to bind or emit a program;
 it needs supervision like the other in-process component commands.
+Compilation errors in the bundled frontend sources report their own source
+locations (including source indexes in the multi-source JSON schema).
 `frontend-build-library self-host <input|-> -o <output.dll> --runtime <fail-fast|checked-exceptions> --json`
 instead lowers the same validated
 native facts into verified IR and emits a Windows x64 DLL for an explicitly

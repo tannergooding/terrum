@@ -898,7 +898,9 @@ in-process bridge, not a standalone compiler or persisted native bootstrap
 artifact. The native compiler-primitives DLL does not include the frontend
 because its token and `Host.Source` dependencies still require a source
 adapter. `terrumc frontend-component self-host <input|-> --runtime fail-fast --json`
-projects typed facts or scanner/shape errors for inspection.
+projects typed facts or scanner/shape errors for inspection. Compilation
+errors in the bundled frontend sources use source-located multi-file
+diagnostics rather than being attributed to the input or first component.
 `frontend-build-library` uses those native facts to bind and emit an
 explicitly public scalar DLL, preserving an existing output on failure;
 `frontend-build` similarly emits a Windows x64 executable for a zero-parameter
