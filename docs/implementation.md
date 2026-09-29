@@ -1071,6 +1071,9 @@ within the published size. Target-specific alignment, packing and ABI validity
 remain outside structural validation.
 A PropertyDef-row writer checks that its getter belongs to the owning TypeDef
 and returns the declared TypeSpec, without inferring identity from its name.
+GenericParam-row and Constraint-row writers check formal ownership, ordinals,
+complete constraint ranges and required type references; unassigned kinds and
+witness references remain structurally opaque, not executable contracts.
 The self-host String-row
 candidate emits individual rows. These exercise approved metadata contracts in isolation,
 including a framed callable-table fixture, but do not parse executable Body

@@ -105,6 +105,12 @@ public readonly ref struct TrRmGenericParamTableReader
 
     private static void Fill(uint[] owners, int start, int count, uint owner)
     {
+        if (count < 0 || (count != 0 && start <= 0)
+            || start < 0 || (long)start + count > owners.Length)
+        {
+            throw InvalidFormal();
+        }
+
         for (var row = start; row < start + count; row++)
         {
             if (owners[row] != 0)
