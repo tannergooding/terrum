@@ -116,7 +116,9 @@ public static class ScalarFrontendHost
             var end = count switch { 0 => name.End, 1 => firstName.End, _ => secondName.End };
             var lexical = Lexer.Lex(SourceText.From(source.Text[..end]));
             var tokens = lexical.Tokens;
-            var offset = isPublic ? 1 : 0;
+            var isInternal = !isPublic && words[0] >= 3
+                && tokens[0].Kind == TokenKind.InternalKeyword;
+            var offset = isPublic || isInternal ? 1 : 0;
             return lexical.Diagnostics.IsEmpty && tokens.Length == (count switch {
                 0 => 3, 1 => 6, _ => 9,
             }) + offset

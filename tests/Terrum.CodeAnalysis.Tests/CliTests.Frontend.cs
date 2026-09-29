@@ -30,6 +30,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return +42; }", 42)]
     [InlineData("int32 Main() { if (true) { return 42; } return 0; }", 42)]
     [InlineData("int32 Main() { if (false) { return 0; } return 42; }", 42)]
+    [InlineData("internal int32 Main() { return 42; }", 42)]
     public async Task FrontendRunMatchesHostedJitAsync(string source, int expected)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -84,6 +85,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return +0x2A; }")]
     [InlineData("int32 Main() { if (true) { return 42; } return 0; }")]
     [InlineData("int32 Main() { if (false) { return 0; } return 42; }")]
+    [InlineData("internal int32 Main() { return 42; }")]
     public async Task FrontendBuiltExecutableMatchesHostedAndRunsAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -331,6 +333,19 @@ public sealed partial class CliTests
             }
             Assert.Equal(image, await File.ReadAllBytesAsync(outputPath));
 
+            var (internalExit, internalOutput, internalError) = await RunAsync(
+                Encoding.UTF8.GetBytes("internal int32 Value(int32 x, int32 y) { return x + y; }"),
+                "frontend-build-library", directory, "-", "-o", outputPath, "--runtime", policy, "--json");
+            Assert.Equal(1, internalExit);
+            Assert.Empty(internalError);
+            using (var document = JsonDocument.Parse(internalOutput))
+            {
+                Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+                Assert.Equal("TRM4002", document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString());
+            }
+            Assert.Equal(image, await File.ReadAllBytesAsync(outputPath));
+
             var (lexExit, lexOutput, lexError) = await RunAsync(
                 Encoding.UTF8.GetBytes("public int32 Value(int32 x) { return @; }"),
                 "frontend-build-library", directory, "-", "-o", outputPath, "--runtime", policy, "--json");
@@ -427,6 +442,24 @@ public sealed partial class CliTests
         Assert.Equal(0, result.GetProperty("condition").GetProperty("operation").GetInt32());
         Assert.Equal(3, result.GetProperty("whenTrue").GetProperty("operation").GetInt32());
         Assert.Equal(3, result.GetProperty("whenFalse").GetProperty("operation").GetInt32());
+    }
+
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task FrontendComponentReportsExplicitInternalVisibilityAsync(string policy)
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        var (exit, output, error) = await RunAsync(
+            Encoding.UTF8.GetBytes("internal bool Value(bool x) { return x; }"),
+            "frontend-component", directory, "-", "--runtime", policy, "--json");
+        Assert.Equal(0, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        var result = document.RootElement.GetProperty("result");
+        Assert.True(result.GetProperty("valid").GetBoolean());
+        Assert.False(result.GetProperty("public").GetBoolean());
     }
 
     [Theory]

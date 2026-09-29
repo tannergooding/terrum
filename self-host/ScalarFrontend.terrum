@@ -638,6 +638,10 @@ mut class ScalarFrontendState
             _isPublic = true;
             _at = _at + 1;
         }
+        else if (visibility.Kind == 8)
+        {
+            _at = _at + 1;
+        }
         if (!Take(2, out var typeToken))
         {
             return false;

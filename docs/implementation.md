@@ -849,7 +849,7 @@ valid after their source links are collected.
 The bounded [Terrum-authored scalar frontend](../self-host/ScalarFrontend.terrum)
 consumes one successful scanner token snapshot and publishes an in-process
 typed result: parameter types and names, expression operators and parameter
-references, optional conditional branches, explicit public visibility, and UTF-16 spans. It accepts one
+references, optional conditional branches, declared `public`/`internal` visibility, and UTF-16 spans. It accepts one
 function with zero to two scalar parameters, parameter references, Boolean
 literals, unary `!` over a Boolean literal or named parameter, unary `~`
 over a contextual integer literal or named integer parameter, and unary
@@ -881,7 +881,7 @@ spelling and destination range, and rejects unpublished or malformed output. Its
 `BindLibrary` path lowers validated native facts directly to a
 verifier-checked `BoundProgram` without invoking the hosted parser or binder
 pass; signed unary literals reuse the scalar constant-folding helper;
-visibility remains private unless declared `public`. Native AOT/JIT execute
+visibility remains private unless declared `public` (including explicit `internal`). Native AOT/JIT execute
 the program with test-local callers under both failure policies. This is an
 in-process bridge, not a standalone compiler or persisted native bootstrap
 artifact. The native compiler-primitives DLL does not include the frontend
@@ -900,7 +900,7 @@ result is a provisional component protocol, not approved TRRM metadata or a
 compiler self-build. Ninety-two shared scalar/conditional/Boolean/integer-literal sources produce
 byte-identical DLLs through the Terrum-authored frontend and hosted compiler
 under both runtime policies; this does not establish parity for unsupported
-source shapes, independent native emitters or a self-build. Seventeen bounded
+source shapes, independent native emitters or a self-build. Eighteen bounded
 zero-parameter `Main` shapes also produce byte-identical, executable images
 through the same hosted emitter under both policies.
 
