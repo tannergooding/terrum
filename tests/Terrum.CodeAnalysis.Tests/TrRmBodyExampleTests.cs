@@ -1036,6 +1036,8 @@ public sealed class TrRmBodyExampleTests
         var body = IndexedScalarLoop();
         Assert.Equal((4, 7), InspectIndexed(body, parameterCount: 1,
             resultTypeSpec: 2, parameterTypeIds: [2]));
+        Assert.Equal((4, 7), InspectIndexed(IndexedScalarLoop(entryHeader: true),
+            parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
 
         var region = body.AsSpan().IndexOf(new byte[] { 1, 0, 2, 4, 0 });
         Assert.True(region >= 0);
@@ -1063,7 +1065,8 @@ public sealed class TrRmBodyExampleTests
             resultTypeSpec: 2, parameterTypeIds: [2]));
     }
 
-    internal static byte[] IndexedScalarLoop(bool ghostLiveness = false)
+    internal static byte[] IndexedScalarLoop(bool ghostLiveness = false,
+        bool entryHeader = false)
     {
         var blocks = new List<byte[]>();
         var definitions = new byte[] { 0xFF, 0, 0xFF, 0, 0, 0, 0xFF };
@@ -1086,22 +1089,29 @@ public sealed class TrRmBodyExampleTests
             blocks.Add([.. block]);
         }
 
-        AddBlock([0x1A, 1, 1, 2, 1, 2, 1, 2, 1, 1],
+        AddBlock(entryHeader
+            ? [0x1B, 1, 1, 1, 2, 1, 2, 1, 2, 1, 1]
+            : [0x1A, 1, 1, 2, 1, 2, 1, 2, 1, 1],
             [[2, 2, 1, 0]], [0x80, 2, 1, 2], 2);
         AddBlock(ghostLiveness
             ? [0x1F, 1, 1, 3, 2, 1, 2, 3, 1, 2, 3, 3, 1, 0, 3, 1, 4, 1, 1]
-            : [0x1F, 1, 1, 3, 1, 1, 2, 1, 3, 3, 1, 0, 3, 1, 4, 1, 1],
+            : entryHeader
+                ? [0x1F, 1, 1, 3, 1, 1, 1, 3, 3, 1, 0, 3, 1, 4, 1, 1]
+                : [0x1F, 1, 1, 3, 1, 1, 2, 1, 3, 3, 1, 0, 3, 1, 4, 1, 1],
             [[5, 4, 6, 3, 1]], [0x81, 4, 3, 0, 4, 1, 3], 4);
         AddBlock(ghostLiveness
             ? [0x1D, 1, 3, 1, 2, 3, 3, 1, 2, 6, 3, 3, 1, 5, 1, 6, 2, 2]
-            : [0x1D, 1, 2, 1, 3, 2, 1, 6, 3, 3, 1, 5, 1, 6, 2, 2],
-            [[2, 5, 1, 1], [0x15, 6, 1, 3, 5]], [0x80, 2, 1, 6], 5, 6);
+            : entryHeader
+                ? [0x1D, 1, 1, 3, 1, 6, 3, 3, 1, 5, 1, 6, 2, 2]
+                : [0x1D, 1, 2, 1, 3, 2, 1, 6, 3, 3, 1, 5, 1, 6, 2, 2],
+            [[2, 5, 1, 1], [0x15, 6, 1, 3, 5]],
+            [0x80, (byte)(entryHeader ? 1 : 2), 1, 6], 5, 6);
         AddBlock([0x12, 1, 7, 1, 7, 0, 0],
             [], [0x83, 7]);
 
         var row = new List<byte> { 0x08, 4, 7, 1, 2,
             2, 0, 0, 0, 1, 0, 0, 0,
-            1, 0, 2, 4, 0 };
+            1, 0, (byte)(entryHeader ? 1 : 2), 4, 0 };
         var types = new byte[] { 1, 1, 1, 2, 1, 1, 1 };
         var uses = new byte[] { 1, 1, 2, 1, 1, 1, 1 };
         for (var value = 0; value < types.Length; value++)

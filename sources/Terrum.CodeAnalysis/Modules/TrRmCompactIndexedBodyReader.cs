@@ -110,7 +110,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
 
             loopHeader = ReadCount(body, ref position, width);
             loopExit = ReadCount(body, ref position, width);
-            if (loopHeader <= 1 || loopHeader > BlockCount
+            if (loopHeader == 0 || loopHeader > BlockCount
                 || loopExit == loopHeader || loopExit < 1 || loopExit > BlockCount
                 || ReadCount(body, ref position, width) != 0)
             {
@@ -203,7 +203,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
 
             blockRegions[block] = (presence & 1) != 0
                 ? ReadCount(extent, ref cursor, width) : 0;
-            if (blockRegions[block] > regionCount || block == 1 && blockRegions[block] != 0)
+            if (blockRegions[block] > regionCount
+                || block == 1 && blockRegions[block] != (loopHeader == 1 ? 1 : 0))
             {
                 throw InvalidBody();
             }

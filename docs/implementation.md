@@ -1250,8 +1250,8 @@ block and an existing operation or its terminator; it does not verify
 source-file contents.
 A separate compact-indexed reader checks the approved conditional-sum, merge
 and bounded loop examples and their scalar subset:
-root-free, fail-fast bodies with at most one flat loop region entered after
-the root block, with a declared header, exit and reachable backedge;
+root-free, fail-fast bodies with at most one flat loop region, including an
+entry-block header, with a declared exit and reachable backedge;
 `Branch` and `BranchIf` edges have checked typed block arguments. It accepts
 scalar `ConstBits`,
 `ConstSigned`, `Copy`, scalar `Unary`, `Binary`, integer `Convert`
