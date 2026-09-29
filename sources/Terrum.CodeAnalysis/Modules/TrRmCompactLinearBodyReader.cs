@@ -18,7 +18,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
 
     private struct ValueInfo
     {
-        public byte TypeCode;
+        public ushort TypeKey;
         public int DefinitionOffset;
         public int LastUseOrdinal;
         public bool Used;
@@ -57,7 +57,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
             throw InvalidBody();
         }
 
-        var mappedTypes = new byte[typeCount + 1];
+        var mappedTypes = new ushort[typeCount + 1];
         for (var index = 1; index <= typeCount; index++)
         {
             var reference = Read(body, ref position, 4);
@@ -66,22 +66,17 @@ public readonly ref struct TrRmCompactLinearBodyReader
                 throw InvalidBody();
             }
 
-            var type = types.GetRow((int)reference);
-            if (type.Length != 3 || type[0] != 1 || type[1] != 0
-                || type[2] is not (1 or 3 or 8 or 9 or 0x0D or 0x0E))
-            {
-                throw InvalidBody();
-            }
+            var type = ResolveType(types, (int)reference);
 
             for (var previous = 1; previous < index; previous++)
             {
-                if (mappedTypes[previous] == type[2])
+                if (mappedTypes[previous] == type)
                 {
                     throw InvalidBody();
                 }
             }
 
-            mappedTypes[index] = type[2];
+            mappedTypes[index] = type;
         }
 
         var (first, parameterCount) = signatures.GetParamRange(signature);
@@ -103,7 +98,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
                 throw InvalidBody();
             }
 
-            _values[index].TypeCode = MatchType(types, mappedTypes,
+            _values[index].TypeKey = MatchType(types, mappedTypes,
                 parameters.GetTypeSpec(first + index - 1));
             _values[index].DefinitionOffset = -1;
         }
@@ -113,7 +108,8 @@ public readonly ref struct TrRmCompactLinearBodyReader
         {
             var offset = position;
             var (opcode, referenceWidth, dataWidth) = ReadInstruction(body, ref position);
-            if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 0x15 or 0x16 or 0x17 or 0x18)
+            if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 0x0A
+                or 0x15 or 0x16 or 0x17 or 0x18)
                 || valueCount == maximum)
             {
                 throw InvalidBody();
@@ -147,7 +143,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
                 }
             }
 
-            byte resultType;
+            ushort resultType;
             if (opcode is 1 or 2)
             {
                 var typeId = ReadLocal(body, ref position, referenceWidth);
@@ -157,6 +153,11 @@ public readonly ref struct TrRmCompactLinearBodyReader
                 }
 
                 resultType = mappedTypes[typeId];
+                if (resultType > byte.MaxValue)
+                {
+                    throw InvalidBody();
+                }
+
                 var bits = Read(body, ref position, dataWidth);
                 if (opcode == 1)
                 {
@@ -192,6 +193,32 @@ public readonly ref struct TrRmCompactLinearBodyReader
             else if (opcode == 3)
             {
                 resultType = Use(body, ref position, referenceWidth, result, ordinal);
+            }
+            else if (opcode is 8 or 9)
+            {
+                var typeId = ReadLocal(body, ref position, referenceWidth);
+                if (typeId == 0 || typeId > typeCount || mappedTypes[typeId] < 0x100)
+                {
+                    throw InvalidBody();
+                }
+
+                resultType = mappedTypes[typeId];
+                if (opcode == 8
+                    && Use(body, ref position, referenceWidth, result, ordinal)
+                        != (resultType & 0xFF))
+                {
+                    throw InvalidBody();
+                }
+            }
+            else if (opcode == 0x0A)
+            {
+                var source = Use(body, ref position, referenceWidth, result, ordinal);
+                if (source < 0x100)
+                {
+                    throw InvalidBody();
+                }
+
+                resultType = 1;
             }
             else if (opcode is 6 or 0x16)
             {
@@ -275,14 +302,14 @@ public readonly ref struct TrRmCompactLinearBodyReader
                     : left != right
                         || kind switch
                         {
-                            4 or 5 when opcode == 5 => false,
+                            4 or 5 when opcode == 5 && left <= byte.MaxValue => false,
                             _ => !IsInteger(left),
                         })
                 {
                     throw InvalidBody();
                 }
 
-                resultType = opcode == 5 && kind is >= 4 and <= 9 ? (byte)1 : left;
+                resultType = opcode == 5 && kind is >= 4 and <= 9 ? (ushort)1 : left;
             }
 
             if ((opcode is not (1 or 2) && dataWidth != 0)
@@ -291,11 +318,11 @@ public readonly ref struct TrRmCompactLinearBodyReader
                 throw InvalidBody();
             }
 
-            _values[result].TypeCode = resultType;
+            _values[result].TypeKey = resultType;
             _values[result].DefinitionOffset = offset;
             if (secondResult != 0)
             {
-                _values[secondResult].TypeCode = resultType;
+                _values[secondResult].TypeKey = resultType;
                 _values[secondResult].DefinitionOffset = offset;
             }
         }
@@ -312,7 +339,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
             var result = ReadLocal(body, ref position, terminatorWidth);
             var expected = MatchType(types, mappedTypes,
                 signatures.GetResultTypeSpec(signature));
-            if (result == 0 || result > valueCount || _values[result].TypeCode != expected)
+            if (result == 0 || result > valueCount || _values[result].TypeKey != expected)
             {
                 throw InvalidBody();
             }
@@ -349,13 +376,45 @@ public readonly ref struct TrRmCompactLinearBodyReader
         => value > 0 && value <= ValueCount ? (_values[value].Used ? 1 : 0) : throw InvalidBody();
 
     public byte GetTypeCode(int value)
-        => value > 0 && value <= ValueCount ? _values[value].TypeCode : throw InvalidBody();
+        => value > 0 && value <= ValueCount ? (byte)(_values[value].TypeKey & 0xFF) : throw InvalidBody();
 
-    private static byte MatchType(TrRmTypeSpecTableReader types, byte[] mappedTypes, int row)
+    public bool IsOptional(int value)
+        => value > 0 && value <= ValueCount ? _values[value].TypeKey >= 0x100 : throw InvalidBody();
+
+    private static ushort MatchType(TrRmTypeSpecTableReader types, ushort[] mappedTypes, int row)
+    {
+        var type = ResolveType(types, row);
+        if (Array.IndexOf(mappedTypes, type, 1) < 0)
+        {
+            throw InvalidBody();
+        }
+
+        return type;
+    }
+
+    private static ushort ResolveType(TrRmTypeSpecTableReader types, int row)
     {
         var type = types.GetRow(row);
+        if (type.Length == 6 && type[0] == 6 && type[1] == 0)
+        {
+            var innerRow = BinaryPrimitives.ReadUInt32LittleEndian(type[2..]);
+            if (innerRow == 0 || innerRow > (uint)types.Count)
+            {
+                throw InvalidBody();
+            }
+
+            var inner = types.GetRow((int)innerRow);
+            if (inner.Length != 3 || inner[0] != 1 || inner[1] != 0
+                || !IsSupportedAtom(inner[2]))
+            {
+                throw InvalidBody();
+            }
+
+            return (ushort)(0x100 | inner[2]);
+        }
+
         if (type.Length != 3 || type[0] != 1 || type[1] != 0
-            || Array.IndexOf(mappedTypes, type[2], 1) < 0)
+            || !IsSupportedAtom(type[2]))
         {
             throw InvalidBody();
         }
@@ -363,7 +422,10 @@ public readonly ref struct TrRmCompactLinearBodyReader
         return type[2];
     }
 
-    private byte Use(ReadOnlySpan<byte> body, ref int position, int width, int result, int ordinal)
+    private static bool IsSupportedAtom(byte type)
+        => type is 1 or 3 or 8 or 9 or 0x0D or 0x0E;
+
+    private ushort Use(ReadOnlySpan<byte> body, ref int position, int width, int result, int ordinal)
     {
         var source = ReadLocal(body, ref position, width);
         if (source == 0 || source >= result)
@@ -373,7 +435,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
 
         _values[source].Used = true;
         _values[source].LastUseOrdinal = ordinal;
-        return _values[source].TypeCode;
+        return _values[source].TypeKey;
     }
 
     private static byte ReadByte(ReadOnlySpan<byte> body, ref int position)
@@ -450,10 +512,10 @@ public readonly ref struct TrRmCompactLinearBodyReader
         };
     }
 
-    private static int BitWidth(byte type)
+    private static int BitWidth(ushort type)
         => type switch { 1 => 1, 3 => 16, 8 or 0x0D => 32, _ => 64 };
 
-    private static bool IsInteger(byte type)
+    private static bool IsInteger(ushort type)
         => type is 8 or 9 or 0x0D or 0x0E;
 
     private static InvalidDataException InvalidBody()

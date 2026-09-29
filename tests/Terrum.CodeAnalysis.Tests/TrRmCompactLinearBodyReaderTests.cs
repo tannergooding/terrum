@@ -90,6 +90,81 @@ public sealed class TrRmCompactLinearBodyReaderTests
         Assert.Empty(index.Definitions);
     }
 
+    [Fact]
+    public void OptionalPresenceRetainsCompleteValueTypes()
+    {
+        byte[] make =
+        [
+            0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1,
+            8, 2, 2, 1, 0x83, 2,
+        ];
+        var wrapped = Inspect(make, 1, secondTypeCode: 1, secondTypeOptional: true,
+            resultUsesSecondType: true, typeCode: 1);
+        Assert.Equal([false, true], wrapped.Optional);
+        Assert.Equal([1, 1], wrapped.TypeCodes);
+        Assert.Equal([0, 1], wrapped.LastUses);
+
+        byte[] none = [0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1, 9, 1, 2, 0x83, 1];
+        Assert.Equal([true], Inspect(none, 0, typeCode: 1, secondTypeCode: 1,
+            secondTypeOptional: true, resultUsesSecondType: true).Optional);
+
+        byte[] present = [0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0x0A, 2, 1, 0x83, 2];
+        var checkedPresence = Inspect(present, 1, typeCode: 1, secondTypeCode: 1,
+            secondTypeOptional: true, parameterUsesSecondType: true);
+        Assert.Equal([true, false], checkedPresence.Optional);
+        Assert.Equal([0, 1], checkedPresence.LastUses);
+    }
+
+    [Fact]
+    public void OptionalCopyAndSelectKeepPresenceQualified()
+    {
+        byte[] copied = [0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1, 3, 2, 1, 0x83, 2];
+        var copy = Inspect(copied, 1, typeCode: 8, secondTypeCode: 8,
+            secondTypeOptional: true, parameterUsesSecondType: true, resultUsesSecondType: true);
+        Assert.Equal([true, true], copy.Optional);
+        Assert.Equal([8, 8], copy.TypeCodes);
+
+        byte[] selected =
+        [
+            0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 4,
+            1, 1, 1, 1,
+            9, 2, 2,
+            9, 3, 2,
+            7, 4, 1, 2, 3,
+            0x83, 4,
+        ];
+        var choice = Inspect(selected, 0, typeCode: 1, secondTypeCode: 1,
+            secondTypeOptional: true, resultUsesSecondType: true);
+        Assert.Equal([false, true, true, true], choice.Optional);
+        Assert.Equal([3, 3, 3, 4], choice.LastUses);
+    }
+
+    [Fact]
+    public void RejectsOptionalUseAsScalarOrUnmappedOptionalType()
+    {
+        byte[] header = [0x04, 2, 1, 0, 0, 0, 2, 0, 0, 0, 1];
+        byte[] invalidNone = [.. header, 9, 1, 1, 0x83, 1];
+        Assert.Throws<InvalidDataException>(() => Inspect(invalidNone, 0, typeCode: 1,
+            secondTypeCode: 1, secondTypeOptional: true));
+
+        byte[] invalidPresent = [.. header, 0x0A, 2, 1, 0x83, 2];
+        Assert.Throws<InvalidDataException>(() => Inspect(invalidPresent, 1, typeCode: 1,
+            secondTypeCode: 1, secondTypeOptional: true));
+
+        byte[] invalidConstant = [.. header, 1, 1, 2, 1, 0x83, 1];
+        Assert.Throws<InvalidDataException>(() => Inspect(invalidConstant, 0, typeCode: 1,
+            secondTypeCode: 1, secondTypeOptional: true, resultUsesSecondType: true));
+
+        byte[] nested = [.. header, 8, 2, 2, 1, 0x83, 2];
+        Assert.Throws<InvalidDataException>(() => Inspect(nested, 1, typeCode: 1,
+            secondTypeCode: 1, secondTypeOptional: true, parameterUsesSecondType: true,
+            resultUsesSecondType: true));
+
+        byte[] comparison = [.. header, 5, 3, 4, 1, 2, 0x83, 3];
+        Assert.Throws<InvalidDataException>(() => Inspect(comparison, 2, typeCode: 1,
+            secondTypeCode: 1, secondTypeOptional: true, parameterUsesSecondType: true));
+    }
+
     [Theory]
     [InlineData(new byte[] { 3, 2, 1 }, (byte)8)]
     [InlineData(new byte[] { 4, 2, 1, 1 }, (byte)1)]
@@ -296,10 +371,11 @@ public sealed class TrRmCompactLinearBodyReaderTests
     }
 
     private static (int Operations, int ValueCount, int[] Definitions, int[] LastUses,
-        int[] UseBlocks, byte[] TypeCodes) Inspect(
+        int[] UseBlocks, byte[] TypeCodes, bool[] Optional) Inspect(
         byte[] row, int parameterCount, byte runtimePolicy = 0, byte parameterMode = 0,
         bool duplicateSignatureType = false, byte typeCode = 8,
-        byte? secondTypeCode = null, bool resultUsesSecondType = false)
+        byte? secondTypeCode = null, bool resultUsesSecondType = false,
+        bool secondTypeOptional = false, bool parameterUsesSecondType = false)
     {
         var names = new TrRmStringTableReader(
             TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]), 2);
@@ -314,7 +390,10 @@ public sealed class TrRmCompactLinearBodyReaderTests
         var modules = new TrRmModuleTableReader(moduleBytes, 1, names, 0, 0, 1, 0);
         var typeDefs = new TrRmTypeDefTableReader([], 0, names, modules, 0, 0, 0, 0);
         var second = duplicateSignatureType ? typeCode : secondTypeCode;
-        byte[] typeBytes = second is byte secondCode
+        byte[] typeBytes = secondTypeOptional
+            ? [0, 0, 0, 0, 3, 0, 0, 0, 9, 0, 0, 0, 1, 0, typeCode,
+                6, 0, 1, 0, 0, 0]
+            : second is byte secondCode
             ? [0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0, 1, 0, typeCode, 1, 0, secondCode]
             : [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, typeCode];
         var types = new TrRmTypeSpecTableReader(typeBytes, second is null ? 1 : 2,
@@ -325,7 +404,7 @@ public sealed class TrRmCompactLinearBodyReaderTests
         Write(signatureBytes, 8, parameterCount == 0 ? 0u : 1u);
         Write(signatureBytes, 12, (uint)parameterCount);
         var signatures = new TrRmMethodSigTableReader(signatureBytes, 1, types, parameterCount, 0);
-        var parameterType = duplicateSignatureType ? 2u : 1u;
+        var parameterType = duplicateSignatureType || parameterUsesSecondType ? 2u : 1u;
         var paramBytes = new byte[parameterCount * 16];
         for (var index = 0; index < parameterCount; index++)
         {
@@ -354,15 +433,18 @@ public sealed class TrRmCompactLinearBodyReaderTests
         var lastUses = new int[reader.ValueCount];
         var useBlocks = new int[reader.ValueCount];
         var typeCodes = new byte[reader.ValueCount];
+        var optional = new bool[reader.ValueCount];
         for (var index = 0; index < reader.ValueCount; index++)
         {
             definitions[index] = reader.GetDefinitionOffset(index + 1);
             lastUses[index] = reader.GetLastUseOrdinal(index + 1);
             useBlocks[index] = reader.GetUseBlockCount(index + 1);
             typeCodes[index] = reader.GetTypeCode(index + 1);
+            optional[index] = reader.IsOptional(index + 1);
         }
 
-        return (reader.OperationCount, reader.ValueCount, definitions, lastUses, useBlocks, typeCodes);
+        return (reader.OperationCount, reader.ValueCount, definitions, lastUses, useBlocks,
+            typeCodes, optional);
     }
 
     private static void Write(byte[] bytes, int offset, uint value)

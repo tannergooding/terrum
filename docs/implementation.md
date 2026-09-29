@@ -1209,8 +1209,9 @@ bytes without decoding instructions or claiming that the Body is executable.
 A separate compact-linear reader takes the owning MethodDef, MethodSig,
 Param and TypeSpec rows and checks the fail-fast scalar subset of `ConstBits`,
 `ConstSigned`, `Copy`, `Unary`, `Binary`, `Convert`, `Select`,
-`CheckedBinary`, `CheckedConvert`, `CheckedNegate`, `CheckedDivRem`,
-`Return` and `Fail`.
+`MakeOptional`, `None`, `IsPresent`, `CheckedBinary`, `CheckedConvert`,
+`CheckedNegate`, `CheckedDivRem`, `Return` and `Fail`. Optional scalar
+types retain their presence separately from their underlying atomic type.
 It reconstructs parameter and operation
 definitions, use-block counts and final uses from the one-block stream,
 including mapped Boolean comparison results, rejecting unknown operations,
