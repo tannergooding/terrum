@@ -2661,6 +2661,10 @@ public sealed class ManagedScannerComponentTests
                 Assert.Equal(default, projected.Name);
                 Assert.Equal(source.IndexOf("y;", StringComparison.Ordinal), projected.ErrorSpan.Start);
                 Assert.Equal(1, projected.ErrorSpan.Length);
+                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.BindLibrary(
+                    SourceText.From(source),
+                    native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+                        ScalarFrontendHost.WordCount * sizeof(int)), (BoundRuntimePolicy)policy));
             }
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -2671,6 +2675,7 @@ public sealed class ManagedScannerComponentTests
     [InlineData(1, 0)]
     [InlineData(3, -1)]
     [InlineData(6, 3)]
+    [InlineData(9, 0)]
     [InlineData(22, 7)]
     [InlineData(27, int.MaxValue)]
     public void ScalarFrontendProjectionRejectsMalformedHostWords(int index, int value)
@@ -2716,6 +2721,44 @@ public sealed class ManagedScannerComponentTests
             native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int))));
         await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, 20, 22, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, 50, 8, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 20, 22, false)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, 50, 8, false)]
+    [InlineData(NativeRuntimePolicy.FailFast, 20, 22, true)]
+    public async Task NativeScalarFrontendFactsBindAndExecuteWithoutHostedParsingAsync(
+        NativeRuntimePolicy policy, int first, int second, bool comments)
+    {
+        var text = comments
+            ? "int32 Value(int32 x, int32 y) { if (x/* test */<y) { return x/* test */+y; } else { return x-y; } }"
+            : "int32 Value(int32 x, int32 y) { if (x < y) { return x + y; } else { return x - y; } }";
+        var source = SourceText.From(text);
+        var stage = await CompileAsync(text,
+            "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+            (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
+        var native = NativeJit.ExecuteWithData(stage, policy);
+        Assert.Equal(42, native.ExitCode);
+        var library = ScalarFrontendHost.BindLibrary(source,
+            native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+                ScalarFrontendHost.WordCount * sizeof(int)), (BoundRuntimePolicy)policy);
+        Assert.Single(library.Functions);
+        Assert.True(library.Functions[0].IsInternal);
+        Assert.Empty(library.Buffers);
+        Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(library, ["Value"], policy));
+
+        var result = new BoundCall(0, [
+            new BoundConstant(first, PrimitiveType.Int32, default),
+            new BoundConstant(second, PrimitiveType.Int32, default),
+        ], PrimitiveType.Int32, default);
+        var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
+            new BoundBlock([new BoundReturn(result, default)], default), default);
+        var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
+        SemanticVerifier.Verify(executable);
+        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
 
     private static Task<BoundProgram> CompilePairParserAsync(string text, string entry, BoundRuntimePolicy policy) =>

@@ -859,8 +859,11 @@ to that compilation handoff remains open. A separate
 [`ScalarFrontendProjection`](../self-host/ScalarFrontendProjection.terrum)
 can publish its typed result through a fixed 34-word host buffer; the
 `ScalarFrontendHost` reader bounds types, parameter indexes, operations and
-source spans, and rejects unpublished or malformed output. This is an
-in-process bridge, not a standalone compiler or persisted native bootstrap
+source spans, and rejects unpublished or malformed output. Its bounded
+`BindLibrary` path lowers validated native facts directly to a private,
+verifier-checked `BoundProgram` without invoking the hosted parser or binder;
+native AOT/JIT execute that program with test-local callers under both failure
+policies. This is an in-process bridge, not a standalone compiler or persisted native bootstrap
 artifact. The native compiler-primitives DLL does not include the frontend
 because its token and `Host.Source` dependencies still require a source
 adapter. `terrumc frontend-component self-host <input|-> --runtime fail-fast --json`

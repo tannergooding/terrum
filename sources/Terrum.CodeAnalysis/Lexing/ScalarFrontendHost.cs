@@ -64,6 +64,7 @@ public static class ScalarFrontendHost
             || !ScalarType(words[7]) || (count == 1 ? words[8] != 0 : !ScalarType(words[8]))
             || !ValidSpan(name, nonempty: true) || !ValidSpan(firstName, nonempty: true)
             || (count == 1 ? secondName != default : !ValidSpan(secondName, nonempty: true))
+            || !ValidHeader()
             || words[15] is not (0 or 1))
         {
             throw InvalidResult();
@@ -105,6 +106,26 @@ public static class ScalarFrontendHost
             => span.Start >= 0 && span.Start <= source.Length && span.Length >= (nonempty ? 1 : 0)
                 && span.Length <= source.Length - span.Start;
 
+        bool ValidHeader()
+        {
+            var end = count == 1 ? firstName.End : secondName.End;
+            var lexical = Lexer.Lex(SourceText.From(source.Text[..end]));
+            var tokens = lexical.Tokens;
+            return lexical.Diagnostics.IsEmpty && tokens.Length == (count == 1 ? 6 : 9)
+                && tokens[0].Kind == TokenKind.Identifier
+                && tokens[0].Text == TypeName(words[5])
+                && tokens[1].Kind == TokenKind.Identifier && tokens[1].Span == name
+                && tokens[2].Kind == TokenKind.OpenParen
+                && tokens[3].Kind == TokenKind.Identifier
+                && tokens[3].Text == TypeName(words[7])
+                && tokens[4].Kind == TokenKind.Identifier && tokens[4].Span == firstName
+                && (count == 1 || (tokens[5].Kind == TokenKind.Comma
+                    && tokens[6].Kind == TokenKind.Identifier
+                    && tokens[6].Text == TypeName(words[8])
+                    && tokens[7].Kind == TokenKind.Identifier && tokens[7].Span == secondName
+                    && tokens[4].Text != tokens[7].Text));
+        }
+
         bool ValidExpression(ScalarFrontendExpression expression, int type, int parameters)
         {
             var operation = expression.Operation;
@@ -119,7 +140,44 @@ public static class ScalarFrontendHost
                         && right >= 1 && right <= parameters && leftType == rightType
                         && (operation is 57 or 58
                             ? type == leftType && leftType is >= 1 and <= 4
-                            : type == 5 && leftType is >= 1 and <= 4 or 6));
+                            : type == 5 && leftType is >= 1 and <= 4 or 6))
+                && MatchesSource(expression, left, right);
+        }
+
+        bool MatchesSource(ScalarFrontendExpression expression, int left, int right)
+        {
+            var leftName = left == 1 ? firstName : secondName;
+            var span = expression.Span;
+            if (span.Length < leftName.Length
+                || !source.Text.AsSpan(span.Start, leftName.Length)
+                    .SequenceEqual(source.Text.AsSpan(leftName.Start, leftName.Length)))
+            {
+                return false;
+            }
+            if (expression.Operation == 0)
+            {
+                return span.Length == leftName.Length;
+            }
+
+            var rightName = right == 1 ? firstName : secondName;
+            var middleLength = span.Length - leftName.Length - rightName.Length;
+            if (middleLength < 1 || !source.Text.AsSpan(span.End - rightName.Length, rightName.Length)
+                .SequenceEqual(source.Text.AsSpan(rightName.Start, rightName.Length)))
+            {
+                return false;
+            }
+            var spelling = expression.Operation switch {
+                57 => "+", 58 => "-", 65 => "==", 66 => "!=", 67 => "<",
+                68 => "<=", 69 => ">", 70 => ">=", _ => throw InvalidResult(),
+            };
+            var middle = source.Text.AsSpan(span.Start + leftName.Length, middleLength);
+            if (middle.Trim().SequenceEqual(spelling.AsSpan()))
+            {
+                return true;
+            }
+            var tokens = Lexer.Lex(SourceText.From(middle.ToString()));
+            return tokens.Diagnostics.IsEmpty && tokens.Tokens.Length == 2
+                && tokens.Tokens[0].Kind == (TokenKind)expression.Operation;
         }
 
         bool AllZero(int first, int end)
@@ -136,6 +194,82 @@ public static class ScalarFrontendHost
     }
 
     private static bool ScalarType(int type) => type is >= 1 and <= 6;
+
+    private static string TypeName(int code) => code switch {
+        1 => "int32", 2 => "uint32", 3 => "int64", 4 => "uint64",
+        5 => "bool", 6 => "char16", _ => throw InvalidResult(),
+    };
+
+    /// <summary>Builds an independently verified private scalar library from native frontend facts.</summary>
+    public static BoundProgram BindLibrary(SourceText source, ReadOnlySpan<byte> bytes,
+        BoundRuntimePolicy policy)
+    {
+        var result = ReadResult(source, bytes);
+        if (!result.IsValid)
+        {
+            throw InvalidResult();
+        }
+        var firstType = Type(result.FirstType);
+        var variables = ImmutableArray.CreateBuilder<BoundVariable>(result.ParameterCount);
+        variables.Add(new BoundVariable(Name(result.FirstName), firstType, false, result.FirstName));
+        if (result.ParameterCount == 2)
+        {
+            variables.Add(new BoundVariable(Name(result.SecondName), Type(result.SecondType),
+                false, result.SecondName));
+        }
+        var types = variables.ToImmutable();
+        var methodSpan = new TextSpan(0, source.Length);
+        var returnType = Type(result.ReturnType);
+        BoundStatement body;
+        if (result.HasCondition)
+        {
+            body = new BoundIf(Expression(result.Condition),
+                new BoundBlock([Return(result.WhenTrue)], result.WhenTrue.Span),
+                new BoundBlock([Return(result.WhenFalse)], result.WhenFalse.Span),
+                new TextSpan(result.Condition.Span.Start,
+                    result.WhenFalse.Span.End - result.Condition.Span.Start));
+        }
+        else
+        {
+            body = Return(result.WhenTrue);
+        }
+
+        var function = new BoundFunction(Name(result.Name), returnType, types, types.Length,
+            new BoundBlock([body], methodSpan), methodSpan) { IsInternal = true };
+        var program = new BoundProgram([function], -1) { RuntimePolicy = policy };
+        SemanticVerifier.VerifyLibrary(program);
+        return program;
+
+        string Name(TextSpan span) => source.Text.Substring(span.Start, span.Length);
+
+        BoundReturn Return(ScalarFrontendExpression expression)
+            => new(Expression(expression), expression.Span);
+
+        BoundExpression Expression(ScalarFrontendExpression expression)
+        {
+            var leftName = expression.LeftParameter == 1 ? result.FirstName : result.SecondName;
+            var left = new BoundRead(expression.LeftParameter - 1,
+                types[expression.LeftParameter - 1].Type,
+                new TextSpan(expression.Span.Start, leftName.Length));
+            if (expression.Operation == 0)
+            {
+                return left;
+            }
+            var rightName = expression.RightParameter == 1 ? result.FirstName : result.SecondName;
+            var right = new BoundRead(expression.RightParameter - 1,
+                types[expression.RightParameter - 1].Type,
+                new TextSpan(expression.Span.End - rightName.Length, rightName.Length));
+            return new BoundBinary((TokenKind)expression.Operation, left, right,
+                Type(expression.Type), expression.Span);
+        }
+    }
+
+    private static PrimitiveType Type(int code) => code switch {
+        1 => PrimitiveType.Int32, 2 => PrimitiveType.UInt32,
+        3 => PrimitiveType.Int64, 4 => PrimitiveType.UInt64,
+        5 => PrimitiveType.Bool, 6 => PrimitiveType.Char16,
+        _ => throw InvalidResult(),
+    };
 
     private static ArgumentException InvalidResult()
         => new("Invalid scalar frontend projection.");
