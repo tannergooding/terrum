@@ -95,12 +95,18 @@ it needs supervision like the other in-process component commands.
 `frontend-build-library self-host <input|-> -o <output.dll> --runtime <fail-fast|checked-exceptions> --json`
 instead lowers the same validated
 native facts into verified IR and emits a Windows x64 DLL for an explicitly
-`public` scalar function. The output is replaced only on success. The
-bounded input and source directory remain required, and general source
+`public` scalar function. The output is replaced only on success.
+`frontend-build self-host <input|-> -o <output.exe> --runtime <fail-fast|checked-exceptions> --json`
+command emits a Windows x64 executable from native facts for a zero-parameter
+`int32 Main()` through the hosted emitter, retaining the output on failure.
+The bounded input and source directory remain required, and general source
 binding, broader libraries and compiler self-build remain outstanding.
-Seven shared scalar/conditional/Boolean-literal fixtures have byte-identical DLL output from
+Fourteen shared scalar/conditional/Boolean/integer-literal fixtures have byte-identical DLL output from
 the hosted and Terrum-authored frontend paths under both runtime policies;
 both paths still use the hosted native emitter.
+Three bounded `int32 Main()` fixtures likewise emit byte-identical Windows
+executables and run under both policies; this does not establish an independent
+native emitter or compiler self-build.
 
 | Candidate | Purpose | Gates before execution |
 |---|---|---|

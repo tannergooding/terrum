@@ -26,6 +26,7 @@ internal static partial class Program
         + "       terrumc build-component <scanner.terrum> <input|-> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc frontend-component <self-host-directory> <input|-> --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc frontend-build-library <self-host-directory> <input|-> -o <output.dll> --runtime <fail-fast|checked-exceptions> [--json]\n"
+        + "       terrumc frontend-build <self-host-directory> <input|-> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <output.trm> [--runtime <fail-fast|checked-exceptions>] [--json]\n"
         + "       terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <output.trm> [--runtime <fail-fast|checked-exceptions>] [--json]\n"
         + "       terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
@@ -47,7 +48,7 @@ internal static partial class Program
         + "fail-fast explicitly selects process termination for runtime failures, not catchable exceptions.\n"
         + "checked-exceptions enables recovery and unwinding for four compiler-generated failure reasons.\n"
         + "jit/run-module execute in this process and return the program's status; supervise them with a deadline.\n"
-        + "scan-component/build-component/frontend-component/frontend-build-library execute native components in this process; supervise them with a deadline.\n"
+        + "scan-component/build-component/frontend-component/frontend-build-library/frontend-build execute native components in this process; supervise them with a deadline.\n"
         + "'-' reads strict UTF-8 from stdin. Exit: 0 success, 1 source/compile diagnostics, 2 usage/input/output error.";
 
     private static int Main(string[] args)
@@ -66,7 +67,7 @@ internal static partial class Program
             return RunScannerComponent(args, json);
         }
 
-        if (args.Length != 0 && args[0] is "frontend-component" or "frontend-build-library")
+        if (args.Length != 0 && args[0] is "frontend-component" or "frontend-build-library" or "frontend-build")
         {
             return RunFrontendComponent(args, json);
         }

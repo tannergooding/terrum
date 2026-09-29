@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -14,6 +15,87 @@ public sealed partial class CliTests
 {
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int ScalarBinary(int left, int right);
+
+    [Theory]
+    [InlineData("int32 Main() { return 42; }")]
+    [InlineData("public int32 Main() { return 0x2A; }")]
+    [InlineData("int32 Main() { if (true) { return 42; } else { return 0; } }")]
+    public async Task FrontendBuiltExecutableMatchesHostedAndRunsAsync(string source)
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-native-executable-{Guid.NewGuid():N}");
+        var nativePath = prefix + ".native.exe";
+        var hostedPath = prefix + ".hosted.exe";
+        try
+        {
+            foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var input = Encoding.UTF8.GetBytes(source);
+                var (nativeExit, nativeOutput, nativeError) = await RunAsync(input, "frontend-build",
+                    directory, "-", "-o", nativePath, "--runtime", policy, "--json");
+                var (hostedExit, _, hostedError) = await RunAsync(input, "build",
+                    "-", "-o", hostedPath, "--runtime", policy, "--json");
+                Assert.Equal(0, nativeExit);
+                Assert.Equal(0, hostedExit);
+                Assert.Empty(nativeError);
+                Assert.Empty(hostedError);
+                using (var document = JsonDocument.Parse(nativeOutput))
+                {
+                    Assert.Equal("frontend-build", document.RootElement.GetProperty("command").GetString());
+                    Assert.Equal(nativePath, document.RootElement.GetProperty("output").GetString());
+                }
+                Assert.Equal(await File.ReadAllBytesAsync(hostedPath),
+                    await File.ReadAllBytesAsync(nativePath));
+                using var process = Process.Start(new ProcessStartInfo(nativePath) {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                }) ?? throw new InvalidOperationException("Could not start native frontend executable.");
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+                Assert.Equal(42, process.ExitCode);
+            }
+        }
+        finally
+        {
+            File.Delete(nativePath);
+            File.Delete(hostedPath);
+        }
+    }
+
+    [Theory]
+    [InlineData("int32 Other() { return 42; }")]
+    [InlineData("int32 Main(int32 x) { return x; }")]
+    [InlineData("uint32 Main() { return 42; }")]
+    public async Task FrontendExecutableRejectsUnsupportedEntryWithoutReplacingOutputAsync(
+        string source)
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-frontend-entry-{Guid.NewGuid():N}.exe");
+        try
+        {
+            var (initial, _, initialError) = await RunAsync(
+                Encoding.UTF8.GetBytes("int32 Main() { return 42; }"),
+                "frontend-build", directory, "-", "-o", outputPath, "--runtime", "fail-fast", "--json");
+            Assert.Equal(0, initial);
+            Assert.Empty(initialError);
+            var image = await File.ReadAllBytesAsync(outputPath);
+
+            var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                "frontend-build", directory, "-", "-o", outputPath, "--runtime", "fail-fast", "--json");
+            Assert.Equal(1, exit);
+            Assert.Empty(error);
+            using var document = JsonDocument.Parse(output);
+            Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+            Assert.Equal("TRM4002", document.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString());
+            Assert.Equal(image, await File.ReadAllBytesAsync(outputPath));
+        }
+        finally
+        {
+            File.Delete(outputPath);
+        }
+    }
 
     [Theory]
     [InlineData("public int32 Value(int32 x, int32 y) { return x + y; }")]
