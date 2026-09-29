@@ -85,27 +85,35 @@ public sealed class CoreLibraryTests
     }
 
     [Theory]
-    [InlineData("bool")]
-    [InlineData("char16")]
-    [InlineData("int32")]
-    [InlineData("uint32")]
-    [InlineData("int64")]
-    [InlineData("uint64")]
-    public void ImplementedPrimitiveApisExecuteAcrossModuleBoundary(string name)
+    [InlineData("bool", BoundRuntimePolicy.FailFast)]
+    [InlineData("bool", BoundRuntimePolicy.CheckedExceptions)]
+    [InlineData("char16", BoundRuntimePolicy.FailFast)]
+    [InlineData("char16", BoundRuntimePolicy.CheckedExceptions)]
+    [InlineData("int32", BoundRuntimePolicy.FailFast)]
+    [InlineData("int32", BoundRuntimePolicy.CheckedExceptions)]
+    [InlineData("uint32", BoundRuntimePolicy.FailFast)]
+    [InlineData("uint32", BoundRuntimePolicy.CheckedExceptions)]
+    [InlineData("int64", BoundRuntimePolicy.FailFast)]
+    [InlineData("int64", BoundRuntimePolicy.CheckedExceptions)]
+    [InlineData("uint64", BoundRuntimePolicy.FailFast)]
+    [InlineData("uint64", BoundRuntimePolicy.CheckedExceptions)]
+    public void ImplementedPrimitiveApisExecuteAcrossModuleBoundary(string name,
+        BoundRuntimePolicy runtimePolicy)
     {
         var source = $"public struct {name} {{ private {name} value; public static {name} Identity({name} input) {{ return input.value; }} public {name} Read() {{ return value; }} }}";
-        var compilation = Compilation.CreateCoreLibrary([SyntaxTree.Parse(source)]);
+        var compilation = Compilation.CreateCoreLibrary([SyntaxTree.Parse(source)], runtimePolicy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program),
             [$"{name}.Identity", $"{name}.Read"]);
         var body = name == "bool" ? "if (bool.Identity(true).Read()) { return 7; } return 0;"
             : $"return int32({name}.Identity({name}(7)).Read());";
         var consumer = Compilation.Create(SyntaxTree.Parse($"int32 Main() {{ {body} }}"),
-            ModuleCompiler.CreateReference(producer));
+            ModuleCompiler.CreateReference(producer), runtimePolicy);
         Assert.False(consumer.HasErrors, string.Join(Environment.NewLine, consumer.Diagnostics));
         var consumerBytes = ModuleCompiler.CreateConsumer(Assert.IsType<BoundProgram>(consumer.Program), producer);
         Assert.Equal(7, NativeJit.Execute(ModuleCompiler.Link(consumerBytes, producer),
-            NativeRuntimePolicy.FailFast));
+            runtimePolicy == BoundRuntimePolicy.FailFast
+                ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions));
     }
 
     [Fact]
