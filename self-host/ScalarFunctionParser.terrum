@@ -66,7 +66,7 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     mut Token value = initial;
     if (count == 11)
     {
-        if (value.Kind != 58)
+        if (value.Kind != 57 && value.Kind != 58)
         {
             return false;
         }
@@ -89,8 +89,8 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     mut int32 start = value.Range.Start;
     if (count == 11)
     {
-        require tokens.TryGet(6, out var minus);
-        start = minus.Range.Start;
+        require tokens.TryGet(6, out var prefix);
+        start = prefix.Range.Start;
     }
     require SourceRange.TryCreate(start, value.Range.End - start, out var scalar);
     scalarType = selected;
@@ -183,6 +183,12 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
         valueIndex = 7;
     }
     require tokens.TryGet(valueIndex, out var literal);
+    mut bool negative = false;
+    if (count == 11)
+    {
+        require tokens.TryGet(6, out var prefix);
+        negative = prefix.Kind == 58;
+    }
     if (!TryParseScalarReturnInteger(move tokens, move integers, out var foundName,
             out var expression, out var low, out var high)
         || high != 0)
@@ -190,7 +196,6 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
         return false;
     }
 
-    bool negative = count == 11;
     bool based = IsBasedInteger(literal);
     // Decimal signed minimum needs unary minus; based literals first form int32 bits.
     if (low < 0)
@@ -224,8 +229,20 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
 bool TryEvaluateUInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     out SourceRange name, out uint32 result)
 {
-    if (tokens.GetCount() != 10
-        || !TryParseScalarReturnIntegerTyped(move tokens, move integers,
+    int32 count = tokens.GetCount();
+    if (count != 10 && count != 11)
+    {
+        return false;
+    }
+    if (count == 11)
+    {
+        require tokens.TryGet(6, out var prefix);
+        if (prefix.Kind != 57)
+        {
+            return false;
+        }
+    }
+    if (!TryParseScalarReturnIntegerTyped(move tokens, move integers,
             out var scalarType, out var foundName, out var expression,
             out var low, out var high)
         || scalarType != 2 || high != 0)
@@ -264,8 +281,20 @@ uint64 DecodeScannerMagnitude(int32 low, int32 high)
 bool TryEvaluateUInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     out SourceRange name, out uint64 result)
 {
-    if (tokens.GetCount() != 10
-        || !TryParseScalarReturnIntegerTyped(move tokens, move integers,
+    int32 count = tokens.GetCount();
+    if (count != 10 && count != 11)
+    {
+        return false;
+    }
+    if (count == 11)
+    {
+        require tokens.TryGet(6, out var prefix);
+        if (prefix.Kind != 57)
+        {
+            return false;
+        }
+    }
+    if (!TryParseScalarReturnIntegerTyped(move tokens, move integers,
             out var scalarType, out var foundName, out var expression,
             out var low, out var high)
         || scalarType != 4)
@@ -292,6 +321,12 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
         valueIndex = 7;
     }
     require tokens.TryGet(valueIndex, out var literal);
+    mut bool negative = false;
+    if (count == 11)
+    {
+        require tokens.TryGet(6, out var prefix);
+        negative = prefix.Kind == 58;
+    }
     if (!TryParseScalarReturnIntegerTyped(move tokens, move integers,
             out var scalarType, out var foundName, out var expression,
             out var low, out var high)
@@ -300,7 +335,6 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
         return false;
     }
 
-    bool negative = count == 11;
     uint64 magnitude = DecodeScannerMagnitude(low, high);
     uint64 signBit = uint64(int64.MaxValue) + 1;
     bool based = IsBasedInteger(literal);
