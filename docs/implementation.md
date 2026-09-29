@@ -1039,8 +1039,10 @@ validated directory entries with their
 policy flags and borrowed payloads, allowing tools to preserve optional
 nonsemantic sections without guessing kinds or dropping reference-slot policy.
 For optional policy-2 sections, a bounded slot rewriter preserves opaque
-payload bytes while replacing the complete slot array; a recomposed artifact
-must still pass target-row validation, and a tool must establish Body
+payload bytes while replacing the complete slot array. Its artifact-level
+operation validates both the original and recomposed framing and target rows
+before returning new bytes; section-only rewriting requires that validation
+at composition. A tool must establish Body
 instruction identity separately before remapping its locations.
 Table readers validate String
 offsets and name rows, fixed Module rows and their partition cursors,

@@ -15,6 +15,38 @@ public readonly record struct TrRmReferenceSlot(
 /// that relocated Body instruction references retain their meaning.</remarks>
 public static class TrRmOptionalSectionSlots
 {
+    public static byte[] ReplaceInArtifact(ReadOnlySpan<byte> artifact, ushort kind,
+        IReadOnlyList<TrRmReferenceSlot> slots)
+    {
+        ArgumentNullException.ThrowIfNull(slots);
+        if (kind < 0x8000)
+        {
+            throw InvalidSlots();
+        }
+
+        var index = new TrRmArtifactIndex(artifact);
+        var sections = new TrRmSection[index.SectionCount];
+        var found = false;
+        for (var entry = 0; entry < sections.Length; entry++)
+        {
+            index.GetSection(entry, out var currentKind, out var flags, out var bytes, out var count);
+            var section = new TrRmSection(currentKind, flags, (uint)count, bytes.ToArray());
+            if (currentKind == kind)
+            {
+                section = Replace(section, slots);
+                found = true;
+            }
+            sections[entry] = section;
+        }
+
+        if (!found)
+        {
+            throw InvalidSlots();
+        }
+
+        return TrRmArtifactWriter.Encode(sections);
+    }
+
     public static TrRmSection Replace(TrRmSection section, IReadOnlyList<TrRmReferenceSlot> slots)
     {
         ArgumentNullException.ThrowIfNull(slots);

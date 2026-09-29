@@ -268,6 +268,27 @@ public sealed class TrRmArtifactIndexTests
         Assert.Throws<InvalidDataException>(() =>
             TrRmOptionalSectionSlots.Replace(extension with { Flags = 1 },
                 [new TrRmReferenceSlot(0x0001, 0, 1, 0, 0)]));
+
+        var atomic = TrRmOptionalSectionSlots.ReplaceInArtifact(original, 0x8000,
+            [new TrRmReferenceSlot(0x0001, 0, 1, 0, 0)]);
+        Assert.Equal((ushort)0x0002,
+            BinaryPrimitives.ReadUInt16LittleEndian(original.AsSpan(144)));
+        Assert.Equal((ushort)0x0001,
+            BinaryPrimitives.ReadUInt16LittleEndian(atomic.AsSpan(144)));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmOptionalSectionSlots.ReplaceInArtifact(original, 0x8000,
+                [new TrRmReferenceSlot(0x0001, 0, 2, 0, 0)]));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmOptionalSectionSlots.ReplaceInArtifact(original, 0x8001,
+                [new TrRmReferenceSlot(0x0001, 0, 1, 0, 0)]));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmOptionalSectionSlots.ReplaceInArtifact(original[..^1], 0x8000,
+                [new TrRmReferenceSlot(0x0001, 0, 1, 0, 0)]));
+        var opaquePolicy = (byte[])original.Clone();
+        WriteU16(opaquePolicy, 66, 3);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmOptionalSectionSlots.ReplaceInArtifact(opaquePolicy, 0x8000,
+                [new TrRmReferenceSlot(0x0001, 0, 1, 0, 0)]));
     }
 
     [Theory]
