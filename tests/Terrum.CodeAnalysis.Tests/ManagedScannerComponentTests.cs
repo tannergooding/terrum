@@ -439,6 +439,7 @@ public sealed class ManagedScannerComponentTests
     [Theory]
     [InlineData("int32 Answer() { return 42; }", true)]
     [InlineData("int32 Answer() { return -42; }", true)]
+    [InlineData("uint32 Answer() { return 42; }", false)]
     [InlineData("int32 Answer() { return (42); }", false)]
     [InlineData("int32 Answer() { return true; }", false)]
     [InlineData("int32 Answer() { return 42 }", false)]
@@ -467,6 +468,46 @@ public sealed class ManagedScannerComponentTests
                     || value.Start != {{expression.Start}} || value.Length != {{expression.Length}}) { return 1; }
                 """)
             : "if (TryParseScalarReturnFunction(move tokens, out var name, out var value)) { return 1; }";
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                {{assertion}}
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData("int32 Answer() { return 42; }", 1)]
+    [InlineData("uint32 Answer() { return 42; }", 2)]
+    [InlineData("int64 Answer() { return -42; }", 3)]
+    [InlineData("uint64 Answer() { return 42; }", 4)]
+    [InlineData("float32 Answer() { return 42; }", 0)]
+    public async Task TypedScalarParserMatchesHostedDeclarationSpansAsync(string text, int type)
+    {
+        var hosted = SyntaxTree.Parse(text);
+        var name = hosted.Tokens[1].Span;
+        var result = hosted.Root.DescendantNodes().Single(node => node.Kind == SyntaxKind.ReturnStatement);
+        var expression = ((SyntaxNode)result.Children[1]).Span;
+        var assertion = type != 0
+            ? FormattableString.Invariant($$"""
+                require TryParseScalarReturnFunctionTyped(move tokens, out var kind,
+                    out var name, out var expression);
+                if (kind != {{type}} || name.Start != {{name.Start}} || name.Length != {{name.Length}}
+                    || expression.Start != {{expression.Start}}
+                    || expression.Length != {{expression.Length}}) { return 1; }
+                """)
+            : """
+                if (TryParseScalarReturnFunctionTyped(move tokens, out var kind,
+                    out var name, out var expression)) { return 1; }
+                """;
         var entry = $$"""
             using Terrum.CodeAnalysis;
             int32 Main() {

@@ -2,8 +2,9 @@ namespace Terrum.CodeAnalysis;
 
 // This bounded syntax-27 probe uses scanner-5 TokenKind ordinals, not source characters
 // to classify punctuation; the host parser's recovery remains a separate phase.
-bool TryParseScalarReturnFunction(TokenSnapshot tokens,
-    out SourceRange name, out SourceRange expression)
+// Scalar type codes: 1=int32, 2=uint32, 3=int64, 4=uint64.
+bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
+    out int32 scalarType, out SourceRange name, out SourceRange expression)
 {
     int32 count = tokens.GetCount();
     if (count != 10 && count != 11)
@@ -12,10 +13,39 @@ bool TryParseScalarReturnFunction(TokenSnapshot tokens,
     }
 
     require tokens.TryGet(0, out var type);
-    if (type.Kind != 2 || type.Range.Length != 5
-        || Host.Source[type.Range.Start] != 105 || Host.Source[type.Range.Start + 1] != 110
-        || Host.Source[type.Range.Start + 2] != 116 || Host.Source[type.Range.Start + 3] != 51
-        || Host.Source[type.Range.Start + 4] != 50)
+    if (type.Kind != 2)
+    {
+        return false;
+    }
+
+    int32 at = type.Range.Start;
+    mut int32 selected = 0;
+    if (type.Range.Length == 5 && Host.Source[at] == char16(105)
+        && Host.Source[at + 1] == char16(110) && Host.Source[at + 2] == char16(116))
+    {
+        if (Host.Source[at + 3] == char16(51) && Host.Source[at + 4] == char16(50))
+        {
+            selected = 1;
+        }
+        else if (Host.Source[at + 3] == char16(54) && Host.Source[at + 4] == char16(52))
+        {
+            selected = 3;
+        }
+    }
+    else if (type.Range.Length == 6 && Host.Source[at] == char16(117)
+        && Host.Source[at + 1] == char16(105) && Host.Source[at + 2] == char16(110)
+        && Host.Source[at + 3] == char16(116))
+    {
+        if (Host.Source[at + 4] == char16(51) && Host.Source[at + 5] == char16(50))
+        {
+            selected = 2;
+        }
+        else if (Host.Source[at + 4] == char16(54) && Host.Source[at + 5] == char16(52))
+        {
+            selected = 4;
+        }
+    }
+    if (selected == 0)
     {
         return false;
     }
@@ -63,8 +93,24 @@ bool TryParseScalarReturnFunction(TokenSnapshot tokens,
         start = minus.Range.Start;
     }
     require SourceRange.TryCreate(start, value.Range.End - start, out var scalar);
+    scalarType = selected;
     name = function.Range;
     expression = scalar;
+    return true;
+}
+
+bool TryParseScalarReturnFunction(TokenSnapshot tokens,
+    out SourceRange name, out SourceRange expression)
+{
+    if (!TryParseScalarReturnFunctionTyped(move tokens, out var scalarType,
+            out var foundName, out var foundExpression)
+        || scalarType != 1)
+    {
+        return false;
+    }
+
+    name = foundName;
+    expression = foundExpression;
     return true;
 }
 
