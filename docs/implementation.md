@@ -12,8 +12,9 @@ numeric context. General ownership/lifetime checking, general semantic IL and
 richer TRRM metadata, general managed graphs and standard-library execution
 are not implemented.
 Primitive type names in the implemented set (`bool`, `char16`, `int32`,
-`uint32`, `int64`, `uint64`) cannot be redeclared by ordinary structs or
-classes, even in another namespace. `Compilation.CreateCoreLibrary` and
+`uint32`, `int64`, `uint64`) cannot be redeclared by ordinary structs,
+classes, static operator interfaces or generic type parameters, even in
+another namespace. `Compilation.CreateCoreLibrary` and
 `terrumc analyze|build-library --corelib` and
 `terrumc compile-module producer --corelib` and
 `terrumc compile-native producer --corelib` opt into a bounded Core bootstrap

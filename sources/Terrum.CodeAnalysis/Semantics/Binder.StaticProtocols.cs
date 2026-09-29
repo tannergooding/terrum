@@ -264,12 +264,23 @@ internal sealed partial class Binder
                 }
                 var name = ((SyntaxTokenElement)node.Children.First(element =>
                     element is SyntaxTokenElement { Token.Kind: TokenKind.Identifier })).Token.Text;
+                if (TryPrimitiveType(name, out _))
+                {
+                    Report("TRM3003", $"The primitive type '{name}' cannot be declared as an interface.", node.Span);
+                    continue;
+                }
                 var qualified = Qualify(name);
                 var parameters = node.Children.OfType<SyntaxNode>()
                     .FirstOrDefault(static child => child.Kind == SyntaxKind.TypeParameterList);
                 var variables = parameters?.Children.OfType<SyntaxTokenElement>()
                     .Where(static child => child.Token.Kind == TokenKind.Identifier)
                     .Select(static child => child.Token.Text).ToArray() ?? [];
+                if (variables.Any(static variable => TryPrimitiveType(variable, out _)))
+                {
+                    Report("TRM3003", "Primitive type names cannot be used as interface type parameters.",
+                        node.Span);
+                    continue;
+                }
                 if (variables.Length is not (2 or 3)
                     || variables.Distinct(StringComparer.Ordinal).Count() != variables.Length
                     || node.Children.OfType<SyntaxTokenElement>().Any(static child =>
@@ -423,6 +434,12 @@ internal sealed partial class Binder
         var typeNames = typeParameters.Children.OfType<SyntaxTokenElement>()
             .Where(static child => child.Token.Kind == TokenKind.Identifier)
             .Select(static child => child.Token.Text).ToArray();
+        if (typeNames.Any(static name => TryPrimitiveType(name, out _)))
+        {
+            Report("TRM3003", "Primitive type names cannot be used as type parameters.",
+                typeParameters.Span);
+            return;
+        }
         var returnType = children.FirstOrDefault(static child => child.Kind == SyntaxKind.TypeName);
         var returnName = returnType is null ? "" : NameText(returnType);
         var scalarReturn = GenericScalarType(returnName);

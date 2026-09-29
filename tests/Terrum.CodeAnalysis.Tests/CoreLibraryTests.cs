@@ -165,6 +165,10 @@ public sealed class CoreLibraryTests
     [InlineData("namespace Example; struct int32 { private int32 value; }")]
     [InlineData("class int32 { public int32 value; }")]
     [InlineData("struct bool { private bool value; }")]
+    [InlineData("interface int32<T, R> { static abstract R operator +(T left); }")]
+    [InlineData("namespace Example; interface bool<T, R> { static abstract R operator +(T left); }")]
+    [InlineData("interface Numeric<int32, R> { static abstract R operator +(int32 left); }")]
+    [InlineData("int32 Identity<int32>(int32 input) { return input; }")]
     public void OrdinaryPackagesCannotDeclarePrimitiveBindings(string source)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
@@ -184,6 +188,7 @@ public sealed class CoreLibraryTests
     [InlineData("struct int32 { private int32 value; public mut int32 Update() { return value; } }")]
     [InlineData("struct int32 { private int32 value; } struct int32 { private int32 value; }")]
     [InlineData("namespace Example; struct int32 { private int32 value; }")]
+    [InlineData("interface int32<T, R> { static abstract R operator +(T left); }")]
     public void CorePrimitiveShapesAreRestricted(string source)
     {
         var compilation = Compilation.CreateCoreLibrary([SyntaxTree.Parse(source)],
