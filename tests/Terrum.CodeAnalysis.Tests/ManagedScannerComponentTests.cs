@@ -589,7 +589,7 @@ public sealed class ManagedScannerComponentTests
             """;
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -638,7 +638,7 @@ public sealed class ManagedScannerComponentTests
             """;
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -690,7 +690,7 @@ public sealed class ManagedScannerComponentTests
                 Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
                 Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
             }
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -756,7 +756,7 @@ public sealed class ManagedScannerComponentTests
                 Assert.Equal(expected ? 42 : 1,
                     NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
             }
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -826,7 +826,81 @@ public sealed class ManagedScannerComponentTests
                 Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
                 Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
             }
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData("int32", "-1", "x < 0", true, true)]
+    [InlineData("int32", "-1", "x == 0xFFFF_FFFF", true, true)]
+    [InlineData("int32", "int32.MaxValue", "x <= 2147483647", true, true)]
+    [InlineData("int32", "0", "x < 2147483648", false, false)]
+    [InlineData("uint32", "uint32.MaxValue", "x >= 0xFFFF_FFFF", true, true)]
+    [InlineData("uint32", "0", "x < 4294967296", false, false)]
+    [InlineData("int64", "int64.MinValue", "x < 0", true, true)]
+    [InlineData("int64", "-1", "x == 0xFFFF_FFFF_FFFF_FFFF", true, true)]
+    [InlineData("int64", "0", "x < 9223372036854775808", false, false)]
+    [InlineData("uint64", "uint64.MaxValue", "x > 18446744073709551614", true, true)]
+    [InlineData("uint64", "0", "x > 18446744073709551616", false, false)]
+    [InlineData("char16", "char16(65535)", "x >= 65535", true, true)]
+    [InlineData("char16", "char16(0)", "x != 0", true, false)]
+    [InlineData("char16", "char16(0)", "x != 65536", false, false)]
+    [InlineData("int32", "1", "y == 1", false, false)]
+    public async Task BoundedNativeNamedParameterComparisonUsesOwnedRecordsAsync(
+        string typeName, string parameter, string expression, bool evaluable, bool expected)
+    {
+        var evaluator = typeName switch
+        {
+            "int32" => "TryEvaluateInt32ParameterComparisonReturn",
+            "uint32" => "TryEvaluateUInt32ParameterComparisonReturn",
+            "int64" => "TryEvaluateInt64ParameterComparisonReturn",
+            "uint64" => "TryEvaluateUInt64ParameterComparisonReturn",
+            "char16" => "TryEvaluateChar16ParameterComparisonReturn",
+            _ => throw new ArgumentOutOfRangeException(nameof(typeName)),
+        };
+        var text = $"bool Value({typeName} x) {{ return {expression}; }}";
+        var expectedValue = expected ? "true" : "false";
+        var assertion = evaluable
+            ? $$"""
+                require {{evaluator}}(move tokens, move integers, {{parameter}},
+                    out var name, out var bound);
+                if (name.Start != 5 || name.Length != 5 || bound != {{expectedValue}})
+                {
+                    return 1;
+                }
+                """
+            : $$"""
+                if ({{evaluator}}(move tokens, move integers, {{parameter}},
+                    out var name, out var bound))
+                {
+                    return 1;
+                }
+                """;
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                {{assertion}}
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            if (evaluable)
+            {
+                var source = text + $$"""
+                     int32 Main() {
+                         if (Value({{parameter}}) == {{expectedValue}}) { return 42; }
+                         return 1;
+                     }
+                    """;
+                var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+            }
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -869,7 +943,7 @@ public sealed class ManagedScannerComponentTests
                 Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
                 Assert.Equal(value, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
             }
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -912,7 +986,7 @@ public sealed class ManagedScannerComponentTests
                 Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
                 Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
             }
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -963,7 +1037,7 @@ public sealed class ManagedScannerComponentTests
                 Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
                 Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
             }
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -1005,7 +1079,7 @@ public sealed class ManagedScannerComponentTests
                 Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
                 Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
             }
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -1076,7 +1150,7 @@ public sealed class ManagedScannerComponentTests
                 Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
                 Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
             }
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -1144,7 +1218,7 @@ public sealed class ManagedScannerComponentTests
                 Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
                 Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
             }
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -1215,7 +1289,7 @@ public sealed class ManagedScannerComponentTests
                 Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
                 Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
             }
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -1271,7 +1345,7 @@ public sealed class ManagedScannerComponentTests
             var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
             Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
             Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -1317,7 +1391,7 @@ public sealed class ManagedScannerComponentTests
             """;
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -1373,7 +1447,7 @@ public sealed class ManagedScannerComponentTests
                 Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
                 Assert.Equal(value, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
             }
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -1426,7 +1500,7 @@ public sealed class ManagedScannerComponentTests
                 Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
                 Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
             }
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -1478,7 +1552,7 @@ public sealed class ManagedScannerComponentTests
                 Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
                 Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
             }
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -1544,7 +1618,7 @@ public sealed class ManagedScannerComponentTests
                 Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
                 Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
             }
-            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            var program = await CompileParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);
         }
@@ -1790,12 +1864,20 @@ public sealed class ManagedScannerComponentTests
         }
     }
 
-    private static async Task<BoundProgram> CompileAsync(string text, string entry, BoundRuntimePolicy policy)
+    private static Task<BoundProgram> CompileParserAsync(string text, string entry, BoundRuntimePolicy policy) =>
+        CompileAsync(text, entry, policy, includeScalarParser: true);
+
+    private static async Task<BoundProgram> CompileAsync(string text, string entry,
+        BoundRuntimePolicy policy, bool includeScalarParser = false)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         string[] names = ["SourceRange", "Token", "ManagedTokenChain", "Scanner", "ManagedScanner",
             "TokenSnapshot", "TokenTriviaSnapshot", "TokenIntegerSnapshot",
-            "TokenDiagnosticSnapshot", "ScalarFunctionParser"];
+            "TokenDiagnosticSnapshot"];
+        if (includeScalarParser)
+        {
+            names = [.. names, "ScalarFunctionParser"];
+        }
         var trees = new List<SyntaxTree>(names.Length + 1);
         foreach (var name in names)
         {

@@ -706,12 +706,159 @@ bool TryEvaluateTypedScalarComparisonReturn(TokenSnapshot tokens, TokenIntegerSn
     }
 
     name = function.Range;
-    result = comparison.Kind == 65 && left == right
-        || comparison.Kind == 66 && left != right
-        || comparison.Kind == 67 && less
-        || comparison.Kind == 68 && !greater
-        || comparison.Kind == 69 && greater
-        || comparison.Kind == 70 && !less;
+    result = EvaluateScalarComparison(comparison.Kind, left == right, less, greater);
+    return true;
+}
+
+bool EvaluateScalarComparison(int32 operation, bool equal, bool less, bool greater)
+{
+    return operation == 65 && equal
+        || operation == 66 && !equal
+        || operation == 67 && less
+        || operation == 68 && !greater
+        || operation == 69 && greater
+        || operation == 70 && !less;
+}
+
+bool TryParseParameterComparisonReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out int32 scalarType, out int32 operation, out SourceRange name,
+    out uint64 magnitude, out bool based)
+{
+    if (tokens.GetCount() != 14)
+    {
+        return false;
+    }
+    require tokens.TryGet(0, out var returnType);
+    require tokens.TryGet(1, out var function);
+    require tokens.TryGet(2, out var openParameters);
+    require tokens.TryGet(3, out var parameterType);
+    require tokens.TryGet(4, out var parameter);
+    require tokens.TryGet(5, out var closeParameters);
+    require tokens.TryGet(6, out var openBody);
+    require tokens.TryGet(7, out var returnKeyword);
+    require tokens.TryGet(8, out var parameterUse);
+    require tokens.TryGet(9, out var comparison);
+    require tokens.TryGet(10, out var literal);
+    require tokens.TryGet(11, out var semicolon);
+    require tokens.TryGet(12, out var closeBody);
+    require tokens.TryGet(13, out var eof);
+    if (!TryGetScalarType(returnType, out var selectedReturn) || selectedReturn != 5
+        || !TryGetScalarType(parameterType, out var selected) || selected == 5
+        || function.Kind != 2 || openParameters.Kind != 46 || parameter.Kind != 2
+        || closeParameters.Kind != 47 || openBody.Kind != 48
+        || returnKeyword.Kind != 19 || parameterUse.Kind != 2
+        || comparison.Kind < 65 || comparison.Kind > 70 || literal.Kind != 3
+        || semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0
+        || parameter.Range.Length != parameterUse.Range.Length)
+    {
+        return false;
+    }
+    for (mut int32 index = 0; index < parameter.Range.Length; index = index + 1)
+    {
+        if (Host.Source[parameter.Range.Start + index]
+            != Host.Source[parameterUse.Range.Start + index])
+        {
+            return false;
+        }
+    }
+    if (!integers.TryFind(10, out var overflow, out var low, out var high) || overflow)
+    {
+        return false;
+    }
+
+    scalarType = selected;
+    operation = comparison.Kind;
+    name = function.Range;
+    magnitude = DecodeScannerMagnitude(low, high);
+    based = IsBasedInteger(literal);
+    return true;
+}
+
+bool TryEvaluateInt32ParameterComparisonReturn(TokenSnapshot tokens,
+    TokenIntegerSnapshot integers, int32 parameter, out SourceRange name, out bool result)
+{
+    if (!TryParseParameterComparisonReturn(move tokens, move integers,
+            out var selected, out var operation, out var foundName, out var magnitude,
+            out var based)
+        || selected != 1 || magnitude > uint64(uint32.MaxValue)
+        || (!based && magnitude > uint64(int32.MaxValue)))
+    {
+        return false;
+    }
+    mut int64 literal = int64(magnitude);
+    if (magnitude > uint64(int32.MaxValue))
+    {
+        literal = literal - 4294967296;
+    }
+    name = foundName;
+    result = EvaluateScalarComparison(operation, int64(parameter) == literal,
+        int64(parameter) < literal, int64(parameter) > literal);
+    return true;
+}
+
+bool TryEvaluateUInt32ParameterComparisonReturn(TokenSnapshot tokens,
+    TokenIntegerSnapshot integers, uint32 parameter, out SourceRange name, out bool result)
+{
+    if (!TryParseParameterComparisonReturn(move tokens, move integers,
+            out var selected, out var operation, out var foundName, out var magnitude,
+            out var based)
+        || selected != 2 || magnitude > uint64(uint32.MaxValue))
+    {
+        return false;
+    }
+    uint64 value = uint64(parameter);
+    name = foundName;
+    result = EvaluateScalarComparison(operation, value == magnitude,
+        value < magnitude, value > magnitude);
+    return true;
+}
+
+bool TryEvaluateInt64ParameterComparisonReturn(TokenSnapshot tokens,
+    TokenIntegerSnapshot integers, int64 parameter, out SourceRange name, out bool result)
+{
+    if (!TryParseParameterComparisonReturn(move tokens, move integers,
+            out var selected, out var operation, out var foundName, out var magnitude,
+            out var based)
+        || selected != 3 || !TryDecodeSigned64Scalar(magnitude, based, out var literal))
+    {
+        return false;
+    }
+    name = foundName;
+    result = EvaluateScalarComparison(operation, parameter == literal,
+        parameter < literal, parameter > literal);
+    return true;
+}
+
+bool TryEvaluateUInt64ParameterComparisonReturn(TokenSnapshot tokens,
+    TokenIntegerSnapshot integers, uint64 parameter, out SourceRange name, out bool result)
+{
+    if (!TryParseParameterComparisonReturn(move tokens, move integers,
+            out var selected, out var operation, out var foundName, out var magnitude,
+            out var based)
+        || selected != 4)
+    {
+        return false;
+    }
+    name = foundName;
+    result = EvaluateScalarComparison(operation, parameter == magnitude,
+        parameter < magnitude, parameter > magnitude);
+    return true;
+}
+
+bool TryEvaluateChar16ParameterComparisonReturn(TokenSnapshot tokens,
+    TokenIntegerSnapshot integers, char16 parameter, out SourceRange name, out bool result)
+{
+    if (!TryParseParameterComparisonReturn(move tokens, move integers,
+            out var selected, out var operation, out var foundName, out var magnitude,
+            out var based)
+        || selected != 6 || magnitude > 65535)
+    {
+        return false;
+    }
+    uint64 value = uint64(uint32(parameter));
+    name = foundName;
+    result = EvaluateScalarComparison(operation, value == magnitude,
+        value < magnitude, value > magnitude);
     return true;
 }
 
