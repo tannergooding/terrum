@@ -146,7 +146,7 @@ public static class TrRmStructuralMetadataValidator
                     else
                     {
                         var body = new TrRmCompactIndexedBodyReader(bodies, method, modules,
-                            methods, signatures, parameters, typeSpecs, imports);
+                            methods, signatures, parameters, typeSpecs, types, imports);
                         if (sourceMapCount != 0)
                         {
                             var counts = new int[body.BlockCount + 1];

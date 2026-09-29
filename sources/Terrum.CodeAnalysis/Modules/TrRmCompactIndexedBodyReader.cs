@@ -25,7 +25,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types)
-        : this(bodies, methodRow, modules, methods, signatures, parameters, types, default)
+        : this(bodies, methodRow, modules, methods, signatures, parameters, types,
+            default, default)
     {
     }
 
@@ -33,6 +34,16 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, TrRmImportTableReader imports)
+        : this(bodies, methodRow, modules, methods, signatures, parameters, types,
+            default, imports)
+    {
+    }
+
+    public TrRmCompactIndexedBodyReader(TrRmBodyTableReader bodies, int methodRow,
+        TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader types, TrRmTypeDefTableReader nominalTypes,
+        TrRmImportTableReader imports)
     {
         var bodyRow = methods.GetBodyRow(methodRow);
         if (bodyRow == 0
@@ -405,8 +416,6 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         if (definition >> 24 != 0x16 || modules.Count < 2
                             || target == 0 || target > methods.Count
                             || methods.GetOwnerModule(target) == callerModule
-                            || methods.GetFlags(target) != 2
-                            || methods.GetOwnerType(target) != 0
                             || methods.GetBodyRow(target) == 0)
                         {
                             throw InvalidBody();
@@ -420,8 +429,18 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     {
                         target = localMethodStart + method - 1;
                     }
+                    var imported = methods.GetBodyRow(target) == 0;
+                    var targetOwner = methods.GetOwnerType(target);
+                    if ((method == 0 || imported)
+                        && (methods.GetFlags(target) != 2
+                            || targetOwner != 0 && (targetOwner > nominalTypes.Count
+                                || (nominalTypes.GetFlags(targetOwner) & 3) != 2)))
+                    {
+                        throw InvalidBody();
+                    }
+
                     var targetSignature = methods.GetSignature(target);
-                    if ((methods.GetBodyRow(target) == 0
+                    if ((imported
                         && !imports.IsExpectedDefinition(0x1600_0000u | (uint)target))
                         || signatures.GetReceiverTypeSpec(targetSignature) != 0
                         || signatures.GetGenericCount(targetSignature) != 0)

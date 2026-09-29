@@ -1258,8 +1258,9 @@ dual-result `CheckedDivRem`, static `Call` to global or type-owned local or
 retained imported MethodDefs with scalar/optional parameters and result
 (including void), `Switch`, `Return` and `Fail`. The bounded call inspection
 rejects receiver/generic calls. Packed direct MethodDef `DefId` calls require
-an authored public global target in another included module; retained imports
-require their expected local definition. It checks signatures, not producer
+an authored public global target or a public static member of a public
+TypeDef in another included module; retained imports require a public
+expected local definition and owner. It checks signatures, not producer
 binding, call effects or executable callee bodies.
 Optional scalar values retain their presence-qualified identity through
 `MakeOptional`, `None`, `IsPresent`, `Copy` and eager `Select`; they are not
