@@ -2,6 +2,7 @@
 
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -11,6 +12,110 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class CliTests
 {
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int ScalarBinary(int left, int right);
+
+    [Theory]
+    [InlineData("public int32 Value(int32 x, int32 y) { return x + y; }")]
+    [InlineData("public int32 Value(int32 x, int32 y) { if (x < y) { return x + y; } else { return x - y; } }")]
+    [InlineData("public bool Value(int32 x, int32 y) { return x >= y; }")]
+    [InlineData("public char16 Value(char16 x, char16 y) { if (x != y) { return y; } else { return x; } }")]
+    public async Task FrontendBuiltLibraryMatchesHostedNativeBytesAsync(string source)
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        var prefix = Path.Combine(Path.GetTempPath(), $"terrum-native-parity-{Guid.NewGuid():N}");
+        var nativePath = prefix + ".native.dll";
+        var hostedPath = prefix + ".hosted.dll";
+        try
+        {
+            foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var input = Encoding.UTF8.GetBytes(source);
+                var (nativeExit, _, nativeError) = await RunAsync(input, "frontend-build-library",
+                    directory, "-", "-o", nativePath, "--runtime", policy, "--json");
+                var (hostedExit, _, hostedError) = await RunAsync(input, "build-library",
+                    "-", "--export", "Value", "-o", hostedPath, "--runtime", policy, "--json");
+                Assert.Equal(0, nativeExit);
+                Assert.Equal(0, hostedExit);
+                Assert.Empty(nativeError);
+                Assert.Empty(hostedError);
+                Assert.Equal(await File.ReadAllBytesAsync(hostedPath),
+                    await File.ReadAllBytesAsync(nativePath));
+            }
+        }
+        finally
+        {
+            File.Delete(nativePath);
+            File.Delete(hostedPath);
+        }
+    }
+
+    [Theory]
+    [InlineData("fail-fast")]
+    [InlineData("checked-exceptions")]
+    public async Task FrontendBuiltLibraryExportsPublicScalarAndPreservesOutputOnFailureAsync(
+        string policy)
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        var outputPath = Path.Combine(Path.GetTempPath(), $"terrum-native-frontend-{Guid.NewGuid():N}.dll");
+        try
+        {
+            var (exit, output, error) = await RunAsync(
+                Encoding.UTF8.GetBytes("public int32 Value(int32 x, int32 y) { return x + y; }"),
+                "frontend-build-library", directory, "-", "-o", outputPath, "--runtime", policy, "--json");
+            Assert.Equal(0, exit);
+            Assert.Empty(error);
+            using (var document = JsonDocument.Parse(output))
+            {
+                Assert.True(document.RootElement.GetProperty("success").GetBoolean());
+                Assert.True(document.RootElement.GetProperty("result").GetProperty("public").GetBoolean());
+                Assert.Equal(outputPath, document.RootElement.GetProperty("output").GetString());
+            }
+            var image = await File.ReadAllBytesAsync(outputPath);
+            var module = NativeLibrary.Load(outputPath);
+            try
+            {
+                var function = Marshal.GetDelegateForFunctionPointer<ScalarBinary>(
+                    NativeLibrary.GetExport(module, "Value"));
+                Assert.Equal(42, function(20, 22));
+            }
+            finally
+            {
+                NativeLibrary.Free(module);
+            }
+
+            var (privateExit, privateOutput, privateError) = await RunAsync(
+                Encoding.UTF8.GetBytes("int32 Value(int32 x, int32 y) { return x + y; }"),
+                "frontend-build-library", directory, "-", "-o", outputPath, "--runtime", policy, "--json");
+            Assert.Equal(1, privateExit);
+            Assert.Empty(privateError);
+            using (var document = JsonDocument.Parse(privateOutput))
+            {
+                Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+            }
+            Assert.Equal(image, await File.ReadAllBytesAsync(outputPath));
+
+            var (lexExit, lexOutput, lexError) = await RunAsync(
+                Encoding.UTF8.GetBytes("public int32 Value(int32 x) { return @; }"),
+                "frontend-build-library", directory, "-", "-o", outputPath, "--runtime", policy, "--json");
+            Assert.Equal(1, lexExit);
+            Assert.Empty(lexError);
+            using (var document = JsonDocument.Parse(lexOutput))
+            {
+                Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+                Assert.Equal("TRM0001", document.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString());
+            }
+            Assert.Equal(image, await File.ReadAllBytesAsync(outputPath));
+        }
+        finally
+        {
+            File.Delete(outputPath);
+        }
+    }
+
     [Theory]
     [InlineData("fail-fast")]
     [InlineData("checked-exceptions")]

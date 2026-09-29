@@ -17,7 +17,7 @@ bool TryPublishScalarFrontend()
         return false;
     }
 
-    Host.Frontend[0] = 1;
+    Host.Frontend[0] = 2;
     if (!result.IsValid)
     {
         Host.Frontend[2] = result.ErrorCode;
@@ -28,6 +28,10 @@ bool TryPublishScalarFrontend()
     }
 
     Host.Frontend[5] = result.ReturnType;
+    if (result.IsPublic)
+    {
+        Host.Frontend[2] = 1;
+    }
     Host.Frontend[6] = result.ParameterCount;
     Host.Frontend[7] = result.FirstType;
     Host.Frontend[8] = result.SecondType;

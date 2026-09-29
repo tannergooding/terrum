@@ -18,15 +18,20 @@ internal static partial class Program
 {
     private static int RunFrontendComponent(string[] args, bool json)
     {
-        if (args.Length is not (5 or 6) || args[1] == "-" || args[3] != "--runtime"
-            || args[4] is not ("fail-fast" or "checked-exceptions")
-            || (args.Length == 6 && args[5] != "--json"))
+        var build = args[0] == "frontend-build-library";
+        var count = build ? 7 : 5;
+        var runtime = build ? 5 : 3;
+        if ((args.Length != count && args.Length != count + 1) || args[1] == "-"
+            || (build && args[3] != "-o") || args[runtime] != "--runtime"
+            || args[runtime + 1] is not ("fail-fast" or "checked-exceptions")
+            || (args.Length == count + 1 && args[count] != "--json"))
         {
             WriteInputError(json, "TRM2000", Usage);
             return 2;
         }
 
         SourceText source;
+        string? outputPath = null;
         List<SyntaxTree> trees = new();
         string[] names = ["SourceRange", "Token", "ManagedTokenChain", "Scanner",
             "ManagedScanner", "TokenSnapshot", "TokenTriviaSnapshot",
@@ -34,6 +39,17 @@ internal static partial class Program
             "ScalarFrontend", "ScalarFrontendProjection"];
         try
         {
+            if (build)
+            {
+                outputPath = Path.GetFullPath(args[4]);
+                if (!string.Equals(Path.GetExtension(outputPath), ".dll", StringComparison.OrdinalIgnoreCase)
+                    || (args[2] != "-" && string.Equals(outputPath, Path.GetFullPath(args[2]),
+                        StringComparison.OrdinalIgnoreCase)))
+                {
+                    WriteInputError(json, "TRM2002", "Output must be a distinct .dll path, not the input source.");
+                    return 2;
+                }
+            }
             source = SourceText.From(ReadSource(args[2]), args[2] == "-" ? "<stdin>" : args[2]);
             if (source.Length > ScannerHost.MaximumSourceLength)
             {
@@ -56,7 +72,7 @@ internal static partial class Program
         trees.Add(SyntaxTree.Parse(
             "using Terrum.CodeAnalysis; int32 Main() { if (!TryPublishScalarFrontend()) { return 1; } return 0; }",
             "<frontend-component>"));
-        var policy = args[4] == "fail-fast"
+        var policy = args[runtime + 1] == "fail-fast"
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
         var compilation = Compilation.Create(trees, ScalarFrontendHost.CreateBuffers(source),
             (BoundRuntimePolicy)policy);
@@ -104,13 +120,48 @@ internal static partial class Program
                 {
                     throw new ArgumentException("The frontend failed without lexical diagnostics.");
                 }
-                WriteFrontendOutput(json, false, null, diagnostics);
+                WriteFrontendOutput(json, false, null, diagnostics, outputPath);
                 return 1;
             }
             var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int));
             var result = ScalarFrontendHost.ReadResult(source, bytes);
-            WriteFrontendOutput(json, result.IsValid, result, []);
+            if (build && result.IsValid)
+            {
+                if (!result.IsPublic)
+                {
+                    WriteInputError(json, "TRM4002", "A native frontend library export must be declared public.");
+                    return 1;
+                }
+                var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
+                byte[] image;
+                try
+                {
+                    image = NativeEmitter.EmitLibrary(library,
+                        [source.Text.Substring(result.Name.Start, result.Name.Length)], policy);
+                }
+                catch (NotSupportedException exception)
+                {
+                    WriteInputError(json, "TRM4001", exception.Message);
+                    return 1;
+                }
+                catch (ArgumentException exception)
+                {
+                    WriteInputError(json, "TRM4002", exception.Message);
+                    return 1;
+                }
+                try
+                {
+                    WriteArtifact(outputPath ?? throw new InvalidOperationException("Missing library output path."), image);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
+                    or ArgumentException or NotSupportedException)
+                {
+                    WriteInputError(json, "TRM2002", exception.Message);
+                    return 2;
+                }
+            }
+            WriteFrontendOutput(json, result.IsValid, result, [], build ? outputPath : null);
             return result.IsValid ? 0 : 1;
         }
         catch (ArgumentException exception)
@@ -121,7 +172,8 @@ internal static partial class Program
     }
 
     private static void WriteFrontendOutput(bool json, bool success,
-        ScalarFrontendResult? result, ImmutableArray<ScannerDiagnostic> diagnostics)
+        ScalarFrontendResult? result, ImmutableArray<ScannerDiagnostic> diagnostics,
+        string? outputPath = null)
     {
         if (json)
         {
@@ -129,12 +181,17 @@ internal static partial class Program
                 new JsonWriterOptions { Indented = true });
             writer.WriteStartObject();
             writer.WriteNumber("schema", 1);
-            writer.WriteString("command", "frontend-component");
+            writer.WriteString("command", outputPath is null ? "frontend-component" : "frontend-build-library");
             writer.WriteBoolean("success", success);
+            if (outputPath is not null && success)
+            {
+                writer.WriteString("output", outputPath);
+            }
             if (result is ScalarFrontendResult frontend)
             {
                 writer.WriteStartObject("result");
                 writer.WriteBoolean("valid", frontend.IsValid);
+                writer.WriteBoolean("public", frontend.IsPublic);
                 writer.WriteNumber("errorCode", frontend.ErrorCode);
                 WriteFrontendSpan(writer, "errorSpan", frontend.ErrorSpan);
                 if (frontend.IsValid)
@@ -171,7 +228,9 @@ internal static partial class Program
         {
             if (frontend.IsValid)
             {
-                Console.Out.WriteLine($"Scalar function at [{frontend.Name.Start}..{frontend.Name.End}), {frontend.ParameterCount} parameters.");
+                Console.Out.WriteLine(outputPath is null
+                    ? $"Scalar function at [{frontend.Name.Start}..{frontend.Name.End}), {frontend.ParameterCount} parameters."
+                    : $"{outputPath}: native scalar library");
             }
             else
             {

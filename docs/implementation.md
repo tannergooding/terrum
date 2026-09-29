@@ -849,7 +849,7 @@ valid after their source links are collected.
 The bounded [Terrum-authored scalar frontend](../self-host/ScalarFrontend.terrum)
 consumes one successful scanner token snapshot and publishes an in-process
 typed result: parameter types and names, expression operators and parameter
-references, optional conditional branches, and UTF-16 spans. It accepts one
+references, optional conditional branches, explicit public visibility, and UTF-16 spans. It accepts one
 function with at most two scalar parameters and one operation per expression;
 unsupported or invalid shapes return a code and span without a partial
 artifact. Lexical failures remain scanner diagnostics. AOT/JIT execute this
@@ -860,17 +860,23 @@ to that compilation handoff remains open. A separate
 can publish its typed result through a fixed 34-word host buffer; the
 `ScalarFrontendHost` reader bounds types, parameter indexes, operations and
 source spans, and rejects unpublished or malformed output. Its bounded
-`BindLibrary` path lowers validated native facts directly to a private,
+`BindLibrary` path lowers validated native facts directly to a
 verifier-checked `BoundProgram` without invoking the hosted parser or binder;
-native AOT/JIT execute that program with test-local callers under both failure
-policies. This is an in-process bridge, not a standalone compiler or persisted native bootstrap
+visibility remains private unless declared `public`. Native AOT/JIT execute
+the program with test-local callers under both failure policies. This is an
+in-process bridge, not a standalone compiler or persisted native bootstrap
 artifact. The native compiler-primitives DLL does not include the frontend
 because its token and `Host.Source` dependencies still require a source
 adapter. `terrumc frontend-component self-host <input|-> --runtime fail-fast --json`
-executes the native phase and projects typed facts or scanner/shape errors
-through that bridge for inspection; binding and emission still use
-the hosted compiler. Its bounded result is a provisional component protocol,
-not approved TRRM metadata.
+projects typed facts or scanner/shape errors for inspection.
+`frontend-build-library` uses those native facts to bind and emit an
+explicitly public scalar DLL, preserving an existing output on failure;
+the hosted compiler remains in parallel for general builds. This bounded
+result is a provisional component protocol, not approved TRRM metadata or a
+compiler self-build. Four shared scalar/conditional sources produce
+byte-identical DLLs through the Terrum-authored frontend and hosted compiler
+under both runtime policies; this does not establish parity for unsupported
+source shapes, independent native emitters or a self-build.
 
 The separate [integer-parsing candidate](../self-host/IntegerParsing.terrum)
 uses the immutable host source grant and checked wide-radix accumulation to

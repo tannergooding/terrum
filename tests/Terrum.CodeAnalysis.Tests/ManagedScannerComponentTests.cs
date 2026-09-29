@@ -2671,8 +2671,9 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
-    [InlineData(0, 2)]
+    [InlineData(0, 3)]
     [InlineData(1, 0)]
+    [InlineData(2, 1)]
     [InlineData(3, -1)]
     [InlineData(6, 3)]
     [InlineData(9, 0)]

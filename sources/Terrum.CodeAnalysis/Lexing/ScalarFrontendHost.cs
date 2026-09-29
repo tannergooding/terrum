@@ -39,7 +39,7 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] != 1 || words[1] is not (1 or 2))
+        if (words[0] is not (1 or 2) || words[1] is not (1 or 2))
         {
             throw InvalidResult();
         }
@@ -52,7 +52,7 @@ public static class ScalarFrontendHost
             {
                 throw InvalidResult();
             }
-            return new ScalarFrontendResult(false, words[2], errorSpan,
+            return new ScalarFrontendResult(false, false, words[2], errorSpan,
                 0, 0, 0, 0, default, default, default, false, default, default, default);
         }
 
@@ -60,7 +60,9 @@ public static class ScalarFrontendHost
         var firstName = Span(11);
         var secondName = Span(13);
         var count = words[6];
-        if (!AllZero(2, 5) || !ScalarType(words[5]) || count is < 1 or > 2
+        var isPublic = words[0] == 2 && words[2] == 1;
+        if ((words[0] == 1 ? words[2] != 0 : words[2] is not (0 or 1))
+            || !AllZero(3, 5) || !ScalarType(words[5]) || count is < 1 or > 2
             || !ScalarType(words[7]) || (count == 1 ? words[8] != 0 : !ScalarType(words[8]))
             || !ValidSpan(name, nonempty: true) || !ValidSpan(firstName, nonempty: true)
             || (count == 1 ? secondName != default : !ValidSpan(secondName, nonempty: true))
@@ -82,7 +84,7 @@ public static class ScalarFrontendHost
             throw InvalidResult();
         }
 
-        return new ScalarFrontendResult(true, 0, default, words[5], count,
+        return new ScalarFrontendResult(true, isPublic, 0, default, words[5], count,
             words[7], words[8], name, firstName, secondName,
             words[15] == 1, condition, whenTrue, whenFalse);
 
@@ -111,19 +113,24 @@ public static class ScalarFrontendHost
             var end = count == 1 ? firstName.End : secondName.End;
             var lexical = Lexer.Lex(SourceText.From(source.Text[..end]));
             var tokens = lexical.Tokens;
-            return lexical.Diagnostics.IsEmpty && tokens.Length == (count == 1 ? 6 : 9)
-                && tokens[0].Kind == TokenKind.Identifier
-                && tokens[0].Text == TypeName(words[5])
-                && tokens[1].Kind == TokenKind.Identifier && tokens[1].Span == name
-                && tokens[2].Kind == TokenKind.OpenParen
-                && tokens[3].Kind == TokenKind.Identifier
-                && tokens[3].Text == TypeName(words[7])
-                && tokens[4].Kind == TokenKind.Identifier && tokens[4].Span == firstName
-                && (count == 1 || (tokens[5].Kind == TokenKind.Comma
-                    && tokens[6].Kind == TokenKind.Identifier
-                    && tokens[6].Text == TypeName(words[8])
-                    && tokens[7].Kind == TokenKind.Identifier && tokens[7].Span == secondName
-                    && tokens[4].Text != tokens[7].Text));
+            var offset = isPublic ? 1 : 0;
+            return lexical.Diagnostics.IsEmpty && tokens.Length == (count == 1 ? 6 : 9) + offset
+                && (!isPublic || tokens[0].Kind == TokenKind.PublicKeyword)
+                && tokens[offset].Kind == TokenKind.Identifier
+                && tokens[offset].Text == TypeName(words[5])
+                && tokens[offset + 1].Kind == TokenKind.Identifier
+                && tokens[offset + 1].Span == name
+                && tokens[offset + 2].Kind == TokenKind.OpenParen
+                && tokens[offset + 3].Kind == TokenKind.Identifier
+                && tokens[offset + 3].Text == TypeName(words[7])
+                && tokens[offset + 4].Kind == TokenKind.Identifier
+                && tokens[offset + 4].Span == firstName
+                && (count == 1 || (tokens[offset + 5].Kind == TokenKind.Comma
+                    && tokens[offset + 6].Kind == TokenKind.Identifier
+                    && tokens[offset + 6].Text == TypeName(words[8])
+                    && tokens[offset + 7].Kind == TokenKind.Identifier
+                    && tokens[offset + 7].Span == secondName
+                    && tokens[offset + 4].Text != tokens[offset + 7].Text));
         }
 
         bool ValidExpression(ScalarFrontendExpression expression, int type, int parameters)
@@ -200,7 +207,7 @@ public static class ScalarFrontendHost
         5 => "bool", 6 => "char16", _ => throw InvalidResult(),
     };
 
-    /// <summary>Builds an independently verified private scalar library from native frontend facts.</summary>
+    /// <summary>Builds a verifier-checked scalar library with source-declared visibility from native frontend facts.</summary>
     public static BoundProgram BindLibrary(SourceText source, ReadOnlySpan<byte> bytes,
         BoundRuntimePolicy policy)
     {
@@ -235,7 +242,7 @@ public static class ScalarFrontendHost
         }
 
         var function = new BoundFunction(Name(result.Name), returnType, types, types.Length,
-            new BoundBlock([body], methodSpan), methodSpan) { IsInternal = true };
+            new BoundBlock([body], methodSpan), methodSpan) { IsInternal = !result.IsPublic };
         var program = new BoundProgram([function], -1) { RuntimePolicy = policy };
         SemanticVerifier.VerifyLibrary(program);
         return program;
@@ -279,7 +286,7 @@ public readonly record struct ScalarFrontendExpression(
     int Type, int Operation, int LeftParameter, int RightParameter, TextSpan Span);
 
 public readonly record struct ScalarFrontendResult(
-    bool IsValid, int ErrorCode, TextSpan ErrorSpan, int ReturnType, int ParameterCount,
+    bool IsValid, bool IsPublic, int ErrorCode, TextSpan ErrorSpan, int ReturnType, int ParameterCount,
     int FirstType, int SecondType, TextSpan Name, TextSpan FirstName, TextSpan SecondName,
     bool HasCondition, ScalarFrontendExpression Condition, ScalarFrontendExpression WhenTrue,
     ScalarFrontendExpression WhenFalse);

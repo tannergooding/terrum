@@ -6,7 +6,8 @@ namespace Terrum.CodeAnalysis;
 // This in-process contract uses UTF-16 SourceRange values against the input source.
 // Parameter slots are 1-based (0 means absent); Operation is 0 for a parameter
 // reference or the scanner TokenKind ordinal for one binary operator. An invalid
-// result has only ErrorCode/ErrorSpan; all other fields are empty. Lexical errors
+// result has only ErrorCode/ErrorSpan; all other fields, including visibility,
+// are empty. A valid result is public only for an explicit public keyword. Lexical errors
 // prevent snapshot publication and remain in TokenDiagnosticSnapshot.
 public class ScalarFrontendExpression
 {
@@ -30,6 +31,7 @@ public class ScalarFrontendExpression
 public class ScalarFrontendResult
 {
     public bool IsValid;
+    public bool IsPublic;
     public int32 ErrorCode;
     public SourceRange ErrorSpan;
     public int32 ReturnType;
@@ -44,13 +46,14 @@ public class ScalarFrontendResult
     public ScalarFrontendExpression WhenTrue;
     public ScalarFrontendExpression WhenFalse;
 
-    public ScalarFrontendResult(bool valid, int32 errorCode, SourceRange errorSpan,
+    public ScalarFrontendResult(bool valid, bool isPublic, int32 errorCode, SourceRange errorSpan,
         int32 returnType, int32 parameterCount, int32 firstType, int32 secondType,
         SourceRange name, SourceRange firstName, SourceRange secondName,
         bool hasCondition, ScalarFrontendExpression condition,
         ScalarFrontendExpression whenTrue, ScalarFrontendExpression whenFalse)
     {
         IsValid = valid;
+        IsPublic = isPublic;
         ErrorCode = errorCode;
         ErrorSpan = errorSpan;
         ReturnType = returnType;
@@ -78,6 +81,7 @@ mut class ScalarFrontendState
     private mut int32 _firstType;
     private mut int32 _secondType;
     private mut int32 _parameterCount;
+    private mut bool _isPublic;
 
     public ScalarFrontendState(ManagedTokenChain tokens, SourceRange empty)
     {
@@ -90,6 +94,7 @@ mut class ScalarFrontendState
         _firstType = 0;
         _secondType = 0;
         _parameterCount = 0;
+        _isPublic = false;
     }
 
     private mut void FailAt(int32 code, SourceRange span)
@@ -247,6 +252,12 @@ mut class ScalarFrontendState
 
     private mut bool ParseHeader(out int32 returnType, out SourceRange name)
     {
+        require _tokens.TryGet(_at, out var visibility);
+        if (visibility.Kind == 7)
+        {
+            _isPublic = true;
+            _at = _at + 1;
+        }
         if (!Take(2, out var typeToken))
         {
             return false;
@@ -353,10 +364,10 @@ mut class ScalarFrontendState
         }
         if (_error != 0)
         {
-            return ScalarFrontendResult.TryCreate(false, _error, _errorSpan, 0, 0,
+            return ScalarFrontendResult.TryCreate(false, false, _error, _errorSpan, 0, 0,
                 0, 0, empty, empty, empty, false, absent, absent, absent, out result);
         }
-        return ScalarFrontendResult.TryCreate(true, 0, empty, returnType, _parameterCount,
+        return ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty, returnType, _parameterCount,
             _firstType, _secondType, name, _first.Range, _second.Range,
             hasCondition, condition, whenTrue, whenFalse, out result);
     }
@@ -370,7 +381,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     {
         require tokens.TryGet(64, out var excess);
         require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
-        return ScalarFrontendResult.TryCreate(false, 1, excess.Range, 0, 0, 0, 0,
+        return ScalarFrontendResult.TryCreate(false, false, 1, excess.Range, 0, 0, 0, 0,
             empty, empty, empty, false, absent, absent, absent, out result);
     }
     if (count < 1 || !ManagedTokenChain.TryCreate(out var chain))
