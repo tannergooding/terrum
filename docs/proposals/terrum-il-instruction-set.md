@@ -21,9 +21,9 @@ A body implements one MethodDef. A **block** has typed parameters, ordered
 operations and one terminator; each normal edge supplies its successor's
 parameters. Checked operations and potentially failing calls do not end a
 block merely because they can fail. They define their result at their
-operation site on success; failure leaves normal control flow under the
-selected runtime policy. Explicit branches, returns, failures and region
-exits determine normal CFG boundaries.
+operation site on success; failure terminates or unwinds under the selected
+runtime policy, without a normal edge. Explicit branches, returns, failures
+and region exits determine normal CFG boundaries.
 A **value ID** denotes an immutable typed definition. A **place** denotes
 addressable storage with separate initialization, mutability and ownership
 state; loading a value is distinct from borrowing or moving its place. A
@@ -42,13 +42,15 @@ them to a fast consumer, with semantic audit as an explicit option.
 Value IDs and block parameters form an SSA-like value graph, while mutable
 places and ordered effects remain explicit rather than pretending all storage
 is in SSA. The Body records value types and cross-block liveness for ordinary
-values; consumers need not infer those solely from instruction uses. It does
-not yet encode the *intra-block* last uses, per-safepoint logical roots or
-the native locations required by a GC. Those are separate concerns: a
-producer can publish logical root identity, lexical lifetime, ownership and
-interior-reference dependencies, but only the backend knows which registers
-or stack slots hold them after lowering. Do not treat source-local counts or
-ordinary SSA last-use as a complete GC root map.
+values; consumers need not infer those solely from instruction uses. It
+also indexes each value's defining operation and its final operand use in
+each using block, but not every intermediate use. It does not yet encode
+per-safepoint logical roots or the native locations required by a GC.
+Those are separate concerns: a future producer-recorded root inventory
+can identify logical roots, ownership and interior-reference dependencies,
+but only the backend knows which registers or stack slots hold them after
+lowering. Do not treat source-local counts or ordinary SSA last-use as a
+complete GC root map.
 
 Numeric policy (checked, wrapping, saturating, bit reinterpretation) is
 explicit; converting one into another is not a space-saving normalization.
@@ -67,7 +69,7 @@ replaceable opcode trivia. The intended fast path crosses two documents:
 | [Approved metadata tables](../il-metadata.md#section-kinds-and-row-layouts) | Selected declaration and complete type/signature; retained imports bind against published contracts without re-proving dependency bodies |
 | [Contract clauses](../il-metadata.md#semantic-contracts-and-stable-binding) | Assigned effects such as `NoThrow`/`DoesNotReturn` and reserved output, transfer, dependency and cleanup shapes; only Effects is executable in this narrow Body subset, so readers must not assume the other contracts are already usable |
 | [Body index](#body-record-direct-block-index-and-regions) | Type/value/place inventories, exact definition locations, direct block/terminator addresses, normal boundary liveness and per-block final uses |
-| [Conditional and loop examples](#conditional-merge-and-loop-informative-shapes) | Which values merely transit a block, which ones are actually used there, and how pruning a dead arm updates surviving use-block counts |
+| [Conditional add](#adding-a-conditional-to-the-sum), [merge and loop](#conditional-merge-and-loop-informative-shapes) | How a single checked block grows normal branches and a backedge; which values merely transit a block, which ones are actually used there, and how pruning a dead arm updates surviving use-block counts |
 | [Checked-add bytes](#checked-add-end-to-end-informative) and [place example](#value-and-place-state-through-checked-arithmetic) | Ordered failures without artificial CFG edges; separate immutable values, addressable storage and their last-use/state transitions |
 
 A specializing inliner can seek a predicate's definition, inspect the
@@ -85,6 +87,15 @@ story or silently promote a pending Body schema to approved metadata.
 The [example fixture checks](../../tests/Terrum.CodeAnalysis.Tests/TrRmProposedBodyExampleTests.cs)
 independently decode the exact bytes below; they are test-only checks of
 this **proposed** schema, not an executable TRRM Body reader.
+
+The examples progress from a checked scalar sum in one block to a
+conditional sum and repeated additions around a loop header. A separate
+merge example supplies exact bytes for edge arguments, and an addressable
+local illustrates why place state differs from values. A later
+[exception sketch](#why-a-catch-is-not-another-normal-edge) describes a
+missing contract, not a usable handler encoding. The source snippets are
+illustrative; the recorded Body facts, not the spelling of a source local,
+define the proposed interchange.
 
 ## Instruction encoding structure
 
@@ -408,12 +419,52 @@ the opcode's semantic identity. Conformance should independently verify
 the bytes, decoded records and audited CFG/types/states; a same-writer
 round trip alone is insufficient.
 
+### Adding a conditional to the sum
+
+Now make the first add conditional:
+`int32 MaybeAdd(bool flag, int32 x, int32 y) {
+if (flag) { return x + y; } return x; }`.
+MethodSig supplies three by-value entry parameters. Let `t1` be `bool`
+and `t2` be `int32`. The Body has four by-value descriptors:
+`r1:t1` for `flag`, `r2:t2` for `x`, `r3:t2` for `y`, and `r4:t2`
+for the checked sum. Unlike the preceding example, there are three
+normal blocks, but the add remains an operation within its block:
+
+```text
+B1(r1 <- flag, r2 <- x, r3 <- y):  // liveOut=[r2,r3]
+    BranchIf r1, B2(), B3()
+B2():                              // liveIn=[r2,r3]
+    r4 = CheckedBinary add r2, r3
+    Return r4
+B3():                              // liveIn=[r2]
+    Return r2
+```
+
+`valueDefStarts=[0,3,4,4]`. The first three definition offsets are
+parameter sentinels in B1; `r4` points to B2's checked operation. The
+descriptors' `useBlockCount`s are `(1,2,1,1)` for `r1..r4`:
+B1 uses `r1` at its terminator, B2 uses `r2` and `r3` at its add
+and `r4` at Return, and B3 uses `r2` at Return. `r2` and `r3`
+cross B1 without an operand use there. Their last-use inventories are
+B1 `[(r1,0)]`, B2 `[(r2,0),(r3,0),(r4,1)]`, and B3 `[(r2,0)]`.
+The indices count B2 and B3 as distinct use blocks for `r2`, even
+though only one arm executes.
+
+If the flag is known false after specialization, B2 and its checked add
+are unreachable and may be pruned; if known true, B3 is unreachable.
+An unknown flag requires both branches and the checked failure in B2
+remains observable. An overflow in B2 fails at the add; it neither
+returns from B3 nor requires a fourth normal block. This shape is
+executable in the candidate fail-fast scalar subset, though this
+sketch does not assign its byte offsets. It introduces normal branching;
+the next example introduces a merge argument, and then a loop backedge.
+
 ### Conditional merge and loop (informative shapes)
 
-The following sketches use the same MethodSig, type-map, value-
-descriptor, block-header and edge **rules**. They show composition rather
-than another required source lowering or complete byte listing; a writer
-must still encode exact block and terminator offsets.
+The following sketches use the same type-map, value-descriptor,
+block-header and edge **rules**, with their own MethodSigs. They show
+composition rather than a required source lowering or complete byte
+listing; a writer must still encode exact block and terminator offsets.
 
 For `int32 TwiceSum(int32 x, int32 y) { int32 tmp = x + y;
 return tmp + tmp; }`, one block defines `r3 = CheckedBinary add r1, r2`,
@@ -512,61 +563,67 @@ to substitute it. This is a Copy-scalar example; dropping a unique
 argument or cleanup obligation requires its separate ownership/exit
 contract, not just a zero ordinary-use count.
 
-For `int32 CountTo(int32 n) { mut int32 i = 0; while (i < n) {
-i = i + 1; } return i; }`, MethodSig has one by-value `int32` parameter
-and an `int32` result. The Body has `(4,7,0,1,2)` for the same five
-counts, `ownerMethod` pointing to its MethodDef,
-`typeMap=[t1:TypeSpec[1] (int32),t2:TypeSpec[2] (bool)]`,
-and descriptors `r1,r2,r3,r5,r6,r7`
-of `t1` with `r4` of `t2`, all by-value. Region 1 is
-`(kind=loop,parent=0,entry=B2,exit=B4,cleanup=0)`; B2–B3 belong to
-it, while B1 and B4 are at region 0:
+To repeat the preceding addition, consider
+`int32 RepeatAdd(int32 x, int32 y, int32 n) {
+mut int32 sum = x; mut int32 i = 0;
+while (i < n) { sum = sum + y; i = i + 1; } return sum; }`.
+The method has three by-value `int32` parameters and an `int32`
+result. Here the loop's changing `sum` and `i` are block parameters,
+not addressable places: their source names are not needed by the Body.
+The five counts are `(4,11,0,1,2)`, with
+`typeMap=[t1:TypeSpec[1] (int32),t2:TypeSpec[2] (bool)]`.
+Region 1 is `(kind=loop,parent=0,entry=B2,exit=B4,cleanup=0)`;
+B2 and B3 belong to it, B1 and B4 to region 0:
 
 ```text
-B1(r1 <- n):                       // liveOut=[r1,r2]
-    r2 = ConstSigned t1, 0
-    Branch B2(r2)
-B2(r3 <- current i):               // liveIn=[r1], liveOut=[r1,r3]
-    r4 = Binary Less r3, r1         // t2 bool
-    BranchIf r4, B3(), B4(r3)
-B3():                              // liveIn=[r1,r3], liveOut=[r1,r6]
-    r5 = ConstSigned t1, 1
-    r6 = CheckedBinary add r3, r5
-    Branch B2(r6)
-B4(r7 <- final i):                 // no liveIn; outside loop
-    Return r7
+B1(r1 <- x, r2 <- y, r3 <- n):    // liveOut=[r1,r2,r3,r4]
+    r4 = ConstSigned t1, 0
+    Branch B2(r1,r4)
+B2(r5 <- sum, r6 <- i):           // liveIn=[r2,r3], liveOut=[r2,r3,r5,r6]
+    r7 = Binary Less r6, r3       // t2 bool
+    BranchIf r7, B3(), B4(r5)
+B3():                             // liveIn=[r2,r3,r5,r6], liveOut=[r2,r3,r8,r10]
+    r8 = CheckedBinary add r5, r2
+    r9 = ConstSigned t1, 1
+    r10 = CheckedBinary add r6, r9
+    Branch B2(r8,r10)
+B4(r11 <- final sum):             // no liveIn; outside loop
+    Return r11
 ```
 
-The header B2 receives its initial `i` from B1 and later iterations
-from B3. `r1` is a dominating value carried across the backedge through
-live-in/out sets, not an extra header parameter. B3 defines `r6` before
-explicitly supplying it to the header. The false edge supplies `r3` to
-the loop exit. A loop
-region and valid backedge do not make a failing add an implicit cleanup
-or catch edge.
+The initial edge supplies `(x,0)` and the backedge supplies the next
+`(sum,i)` to the same two header parameters. The false edge supplies
+the current sum to B4. `r2` and `r3` are dominating values, not
+additional header parameters: `r2` is read in B3 and `r3` in B2,
+and both transit other blocks so they remain available on the backedge.
+In particular, B3's `liveIn` and `liveOut` include `r3` although no
+B3 instruction reads it. Both additions may fail at their operation
+sites under the fail-fast policy. The region and its backedge do not
+create implicit exceptional successors.
 
-The seven value descriptors resolve to the type map in ID order:
-`[r1:t1/1,r2:t1/1,r3:t1/2,r4:t2/1,r5:t1/1,r6:t1/1,r7:t1/1]`.
+The eleven value descriptors, in ID order, are
+`[r1:t1/1,r2:t1/1,r3:t1/1,r4:t1/1,r5:t1/2,r6:t1/2,
+r7:t2/1,r8:t1/1,r9:t1/1,r10:t1/1,r11:t1/1]`.
 All have value kind; the suffix is `useBlockCount`, **not** the number
-of reads. `valueDefStarts=[0,2,4,6,7]`; `r1`, `r3` and `r7` have
-parameter-sentinel definition offsets, while the others point directly
-to `(B1,op0)`, `(B2,op0)`, `(B3,op0)` and `(B3,op1)`, respectively.
-The actual row stores byte offsets to those operations; this sketch
-does not assign their block-header or instruction bytes.
+of traversals of a loop edge. `valueDefStarts=[0,4,7,10,11]`;
+`r1..r3`, `r5..r6` and `r11` have parameter-sentinel definition offsets.
+The remaining offsets point to B1 operation 0, B2 operation 0, and
+B3 operations 0, 1 and 2, respectively. The actual row stores
+byte offsets, not these labels; this sketch does not assign bytes.
 
 | Block | `operationCount` | `valueLastUses` | Important distinction |
 |---|---:|---|---|
-| B1 | 1 | `(r2,1)` | `r1` is a live-out parameter but is not read here |
-| B2 | 1 | `(r1,0),(r3,1),(r4,1)` | `r3` is read by the comparison and again as the false-edge argument |
-| B3 | 2 | `(r3,1),(r5,1),(r6,2)` | `r1` transits the backedge through live-in/out but is not read here |
-| B4 | 0 | `(r7,0)` | `r7` is an entry definition read by Return |
+| B1 | 1 | `(r1,1),(r4,1)` | `r2` and `r3` merely transit B1 |
+| B2 | 1 | `(r3,0),(r5,1),(r6,0),(r7,1)` | `r5` is supplied on the false edge; `r6` is read by the comparison |
+| B3 | 3 | `(r2,0),(r5,0),(r6,2),(r8,3),(r9,2),(r10,3)` | `r3` transits the backedge without a B3 operand use |
+| B4 | 0 | `(r11,0)` | The exit parameter is a new definition read by Return |
 
-The loop-header `r3` is used in both B2 and B3, so its
-`useBlockCount=2`; its carried backedge replacements `r2` and `r6`
-each have one use block. There are no places in this SSA-shaped
-example, so `placeUseCount=0` in every block. These inventories are
-about normal operand uses, not a license to drop a checked add or
-proof that any managed root expires at an SSA last use.
+`r5` and `r6` each have two use blocks; their backedge replacements
+`r8` and `r10` each have one. Pruning B3 after proving the condition
+false removes its uses, but a consumer still must respect the checked
+operations whenever B3 is reachable. There are no places, so every
+block has `placeUseCount=0`. Ordinary last uses alone do not prove
+that a managed root or cleanup obligation may expire.
 
 The following are operand *kinds*, not additional on-wire tags. `ref`
 means the selected reference width, `count` the selected count width,
@@ -741,7 +798,7 @@ A block extent contains these fields in order:
 | `regionId` | `local` | Innermost containing region; zero for the function root |
 | `parameterCount`, `parameters` | `local`, then `local valueId[parameterCount]` | Values defined at this block's entry, in incoming-edge order; types come from `valueDescriptors` |
 | `liveInCount`, `liveIns` | `local`, then `local valueId[liveInCount]` | Prior definitions live at entry, excluding block parameters |
-| `liveOutCount`, `liveOuts` | `local`, then `local valueId[liveOutCount]` | Prior definitions needed on at least one outgoing normal edge |
+| `liveOutCount`, `liveOuts` | `local`, then `local valueId[liveOutCount]` | Definitions available at block exit and needed on at least one outgoing normal edge, including values defined in this block |
 | `inheritedPlaceCount`, `inheritedPlaces` | `local`, then `(local placeId, u8 state)[inheritedPlaceCount]` | Places continuing from predecessors; state 0 vacant, 1 initialized |
 | `startPlaceCount`, `startPlaces` | `local`, then `local placeId[startPlaceCount]` | Places becoming active at entry with the descriptor's initial state |
 | `endPlaceCount`, `endPlaces` | `local`, then `local placeId[endPlaceCount]` | Places ending after this block's operations, before normal successor transfer or return |
@@ -833,8 +890,9 @@ preceding fields. Names are descriptive, not a mandated host-language ABI:
 | `Terminator` | Registered opcode and its typed edge/return/failure payload | Directly indexed; each normal edge targets a block ID and transmits the listed arguments |
 
 Bound the Body row, descriptors and indexes before lookup. Decode each
-operation by its registered schema; strict audit compares the stream with
-the terminator index and checks type/flow. A trusted consumer may start at
+operation by its registered schema when importing its block; semantic audit
+compares the stream with the terminator index and checks type/flow. A
+consumer explicitly trusting the producer's semantic indexes may start at
 an indexed terminator and follow edges without decoding unrelated blocks.
 The format does not prescribe an object graph, register assignment,
 optimization tier or cache.
@@ -1137,6 +1195,27 @@ would combine a bounds check and Copy read without exposing an invalid
 intermediate place. Both remain non-executable pending backing,
 provenance, access and failure-order rules. Future intrinsics need explicit
 identities and contracts; callable names alone do not establish them.
+
+### Why a catch is not another normal edge
+
+A source extension of `MaybeAdd` could wrap its checked sum in
+`try { return x + y; } catch { return x; }` under a checked-exception
+policy. Its successful path still has the same B2 add and Return as
+above; overflow departs **at the add**, before the Return, and the
+handler returns `x`. It does not redirect B1's earlier choice to B3
+or imply a normal successor after every checked operation.
+The source `catch` is special/unsafe, not a fallback expression that
+turns an overflowing primitive operation into a wrapping sum.
+
+This is **not an encodable or executable Body example** in the present
+subset: only fail-fast policy 0 executes, and handler regions are
+reserved. A future representation must identify protected operation
+sites and their handler/cleanup order, the failure payload and policy,
+place/owner state and logical roots at exceptional departure, and how
+control enters the handler. Normal CFG indexes remain useful for
+branches, loop backedges and returns, but cannot stand in for those
+exceptional facts. Merely changing the runtime-policy byte on the
+previous exact-byte fixture would not supply them.
 
 ## Value and place state through checked arithmetic
 
