@@ -1038,6 +1038,10 @@ readers validate `(1, 0)` header and directory framing. The index enumerates
 validated directory entries with their
 policy flags and borrowed payloads, allowing tools to preserve optional
 nonsemantic sections without guessing kinds or dropping reference-slot policy.
+For optional policy-2 sections, a bounded slot rewriter preserves opaque
+payload bytes while replacing the complete slot array; a recomposed artifact
+must still pass target-row validation, and a tool must establish Body
+instruction identity separately before remapping its locations.
 Table readers validate String
 offsets and name rows, fixed Module rows and their partition cursors,
 ModuleRef identities and co-located producer requirements, optional SourceFile

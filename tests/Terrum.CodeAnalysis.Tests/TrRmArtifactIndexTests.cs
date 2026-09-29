@@ -237,6 +237,39 @@ public sealed class TrRmArtifactIndexTests
         index.GetSection(entry, out _, out _, out _, out _);
     }
 
+    [Fact]
+    public void RemapsOnlyOptionalExtensionSlotsAndRejectsDanglingTargets()
+    {
+        var original = WithReferenceSlottedExtension();
+        var index = new TrRmArtifactIndex(original);
+        var sections = new TrRmSection[index.SectionCount];
+        for (var entry = 0; entry < sections.Length; entry++)
+        {
+            index.GetSection(entry, out var kind, out var flags, out var bytes, out var count);
+            sections[entry] = new TrRmSection(kind, flags, (uint)count, bytes.ToArray());
+        }
+
+        var extension = sections[2];
+        sections[2] = TrRmOptionalSectionSlots.Replace(extension,
+            [new TrRmReferenceSlot(0x0001, 0, 1, 0, 0)]);
+        Assert.Equal(extension.Bytes.Span[20], sections[2].Bytes.Span[20]);
+        Assert.Equal((ushort)0x0002,
+            BinaryPrimitives.ReadUInt16LittleEndian(extension.Bytes.Span[4..]));
+        var remapped = new TrRmArtifactIndex(TrRmArtifactWriter.Encode(sections));
+        Assert.True(remapped.TryGetSection(0x8000, out var payload, out _));
+        Assert.Equal((ushort)0x0001, BinaryPrimitives.ReadUInt16LittleEndian(payload[4..]));
+        Assert.Equal(extension.Bytes.Span[20], payload[20]);
+
+        sections[2] = TrRmOptionalSectionSlots.Replace(extension,
+            [new TrRmReferenceSlot(0x0001, 0, 2, 0, 0)]);
+        Assert.Throws<InvalidDataException>(() => TrRmArtifactWriter.Encode(sections));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmOptionalSectionSlots.Replace(extension, []));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmOptionalSectionSlots.Replace(extension with { Flags = 1 },
+                [new TrRmReferenceSlot(0x0001, 0, 1, 0, 0)]));
+    }
+
     [Theory]
     [InlineData((ushort)1)]
     [InlineData((ushort)3)]
