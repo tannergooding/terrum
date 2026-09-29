@@ -22,7 +22,7 @@ namespace Terrum.CodeAnalysis;
 // Version-12 admits grouped integer binaries under unary plus or minus.
 // Version-13 admits unary complement over grouped unary-signed parameters.
 // Version-14 admits unary plus or minus over grouped complemented parameters.
-// Version-15 admits unary not over grouped unary-not parameters or literals.
+// Version-15 admits unary not over grouped unary-not or negated Boolean binaries.
 // Boolean parameter/literal pairs add 700 for a parameter on the left or
 // 900 for a literal on the left; slots hold the parameter index and literal kind.
 // Boolean literal pairs add 1100; both slots hold literal kinds.
@@ -429,7 +429,7 @@ mut class ScalarFrontendState
                 {
                     comparisonOperation = comparisonOperation - 1200;
                 }
-                if (nested.Type == 5
+                if (nested.Type == 5 && nested.Operation < 2000
                     && ((nested.Operation >= 65 && nested.Operation <= 75
                             && nested.LeftParameter >= 1
                             && nested.RightParameter >= 1)
@@ -451,14 +451,18 @@ mut class ScalarFrontendState
                     expression = negatedBinary;
                     return true;
                 }
-                if (nested.Type == 5 && nested.Operation == 62
-                    && (nested.LeftParameter >= 1
-                        || nested.RightParameter == 20 || nested.RightParameter == 21))
+                if (nested.Type == 5
+                    && ((nested.Operation == 62
+                            && (nested.LeftParameter >= 1
+                                || nested.RightParameter == 20
+                                || nested.RightParameter == 21))
+                        || (nested.Operation >= 2000 && nested.Operation < 4000)))
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
                         close.Range.End - literal.Range.Start, out var composedSpan);
-                    require ScalarFrontendExpression.TryCreate(5, 16062,
+                    require ScalarFrontendExpression.TryCreate(5,
+                        nested.Operation + 16000,
                         nested.LeftParameter, nested.RightParameter,
                         composedSpan, out var composed);
                     expression = composed;

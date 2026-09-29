@@ -389,13 +389,15 @@ public static class ScalarFrontendHost
                     && ValidExpression(new ScalarFrontendExpression(type, 63,
                         left, right, nestedSpan), type, parameters);
             }
-            if (operation == 16062)
+            if (operation == 16062 || operation is >= 18000 and < 20000
+                && IsNegatedBooleanBinary(operation - 16000))
             {
                 return words[0] >= 15 && expression.Type == 5 && type == 5
                     && ValidSpan(expression.Span, nonempty: true)
                     && TryGroupedUnarySpan(source, expression.Span,
                         TokenKind.Bang, out var nestedSpan)
-                    && ValidExpression(new ScalarFrontendExpression(5, 62,
+                    && ValidExpression(new ScalarFrontendExpression(5,
+                        operation - 16000,
                         left, right, nestedSpan), 5, parameters);
             }
             if (operation / 100 is 7 or 9
@@ -725,6 +727,10 @@ public static class ScalarFrontendHost
 
     private static bool IsNegatedBooleanBinary(int operation)
     {
+        if (operation >= 4000)
+        {
+            return false;
+        }
         if (operation is >= 2065 and <= 2075)
         {
             return true;
@@ -1059,14 +1065,17 @@ public static class ScalarFrontendHost
                     ? TokenKind.Minus : TokenKind.Plus,
                     Expression(nested), type, expression.Span));
             }
-            if (expression.Operation == 16062)
+            if (expression.Operation == 16062
+                || expression.Operation is >= 18000 and < 20000
+                    && IsNegatedBooleanBinary(expression.Operation - 16000))
             {
                 if (!TryGroupedUnarySpan(source, expression.Span,
                     TokenKind.Bang, out var nestedSpan))
                 {
                     throw InvalidResult();
                 }
-                var nested = new ScalarFrontendExpression(5, 62,
+                var nested = new ScalarFrontendExpression(5,
+                    expression.Operation - 16000,
                     expression.LeftParameter, expression.RightParameter, nestedSpan);
                 return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Bang,
                     Expression(nested), PrimitiveType.Bool, expression.Span));

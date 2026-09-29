@@ -107,7 +107,7 @@ JIT-executes the same bounded entry without writing an image. Like hosted
 supervise this in-process native command with a deadline.
 The bounded input and source directory remain required, and general source
 binding, broader libraries and compiler self-build remain outstanding.
-Two hundred and twelve shared scalar/conditional/Boolean/integer-literal fixtures have byte-identical DLL output from
+Two hundred and fifteen shared scalar/conditional/Boolean/integer-literal fixtures have byte-identical DLL output from
 the hosted and Terrum-authored frontend paths under both runtime policies;
 both paths still use the hosted native emitter.
 The bounded parameter/literal operands accept grouping inside or outside
@@ -121,7 +121,8 @@ admits grouped integer binaries under unary `~`; version 12 admits the same
 bounded integer binaries under unary `+` or checked `-`; version 13
 admits unary `~` over a grouped unary `+` or checked `-` parameter.
 Version 14 admits unary `+` or checked `-` over a grouped `~` parameter.
-Version 15 admits unary `!` over a grouped `!` parameter or Boolean literal.
+Version 15 admits unary `!` over a grouped `!` parameter/literal or a
+grouped `!` Boolean binary.
 This does not extend
 the provisional projection to arbitrary nested expressions.
 Twenty-seven bounded `int32 Main()` fixtures likewise emit byte-identical Windows

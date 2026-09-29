@@ -3269,11 +3269,14 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public async Task NativeScalarFrontendNegatedComparisonExecutesAsync(NativeRuntimePolicy policy)
+    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x, int32 y) { return !(x < y); }", 8, 2067, 2, 1)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x, int32 y) { return !(x < y); }", 8, 2067, 2, 1)]
+    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x, int32 y) { return !(!(x < y)); }", 15, 18067, 1, 2)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x, int32 y) { return !(!(x < y)); }", 15, 18067, 1, 2)]
+    public async Task NativeScalarFrontendNegatedComparisonExecutesAsync(
+        NativeRuntimePolicy policy, string text, int version, int operation,
+        int first, int second)
     {
-        const string text = "bool Value(int32 x, int32 y) { return !(x < y); }";
         var source = SourceText.From(text);
         var stage = await CompileAsync(text,
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
@@ -3282,21 +3285,29 @@ public sealed class ManagedScannerComponentTests
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(8, BinaryPrimitives.ReadInt32LittleEndian(bytes));
-        Assert.Equal(2067, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
-        BinaryPrimitives.WriteInt32LittleEndian(bytes, 7);
+        Assert.Equal(version, BinaryPrimitives.ReadInt32LittleEndian(bytes));
+        Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, version - 1);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-        BinaryPrimitives.WriteInt32LittleEndian(bytes, 8);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, version);
         var operationOffset = 23 * sizeof(int);
-        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), 2068);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), operation + 1);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
-        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), 2067);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), operation);
+        if (version == 15)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), 4067);
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, 11);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes, version);
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(operationOffset), operation);
+        }
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
-            SourceText.From("bool Value(int32 x, int32 y) { return !(y < x); }"), bytes));
+            SourceText.From(text.Replace("x < y", "y < x", StringComparison.Ordinal)), bytes));
         var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
         var call = new BoundCall(0,
-            [new BoundConstant(2, PrimitiveType.Int32, default),
-                new BoundConstant(1, PrimitiveType.Int32, default)],
+            [new BoundConstant(first, PrimitiveType.Int32, default),
+                new BoundConstant(second, PrimitiveType.Int32, default)],
             PrimitiveType.Bool, default);
         var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
             new BoundBlock([new BoundIf(call,
