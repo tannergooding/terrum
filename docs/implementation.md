@@ -1062,6 +1062,9 @@ A FieldDef-row writer checks TypeDef ownership, TypeSpec references,
 field names, flags and explicit layout offsets against those rows. An indexed
 TypeSpec-row writer validates form and operands against supplied table counts;
 a TypeArg-row writer checks constructed-type ownership, ordinals and references.
+MethodSig-row and Param-row writers check disjoint signature ranges and
+parameter ownership, ordinals, types and modes. A MethodDef-row writer checks
+module, signature, contract and Body-row ownership without encoding instructions.
 The self-host String-row
 candidate emits individual rows. These exercise approved metadata contracts in isolation,
 including a framed callable-table fixture, but do not parse executable Body
