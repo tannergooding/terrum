@@ -269,7 +269,7 @@ mut class ScalarFrontendState
         mut int32 depth = 0;
         require _tokens.TryGet(_at, out var first);
         mut Token next = first;
-        while (next.Kind == 46 && !StartsGroupedParameterBinary())
+        while (next.Kind == 46 && !StartsGroupedBinary())
         {
             _at = _at + 1;
             depth = depth + 1;
@@ -291,7 +291,7 @@ mut class ScalarFrontendState
         return true;
     }
 
-    private bool StartsGroupedParameterBinary()
+    private bool StartsGroupedBinary()
     {
         mut int32 cursor = _at;
         mut int32 groups = 0;
@@ -300,7 +300,9 @@ mut class ScalarFrontendState
             groups = groups + 1;
             cursor = cursor + 1;
         }
-        if (!_tokens.TryGet(cursor, out var name) || name.Kind != 2)
+        if (!_tokens.TryGet(cursor, out var atom)
+            || (atom.Kind != 2 && atom.Kind != 3
+                && atom.Kind != 20 && atom.Kind != 21))
         {
             return false;
         }
@@ -321,9 +323,26 @@ mut class ScalarFrontendState
             || (operation.Kind >= 65 && operation.Kind <= 75);
     }
 
+    private bool HasOperandKind(int32 index, int32 kind)
+    {
+        mut int32 cursor = index;
+        while (_tokens.TryGet(cursor, out var token) && token.Kind == 46)
+        {
+            cursor = cursor + 1;
+        }
+        return _tokens.TryGet(cursor, out var operand) && operand.Kind == kind;
+    }
+
     private mut bool ParseExpressionCore(int32 expectedType, out ScalarFrontendExpression expression)
     {
-        require _tokens.TryGet(_at, out var literal);
+        require _tokens.TryGet(_at, out var first);
+        mut Token literal = first;
+        mut int32 prefixGroups = 0;
+        if (first.Kind == 46)
+        {
+            require BeginUnaryOperand(out var grouped, out prefixGroups);
+            literal = grouped;
+        }
         if (literal.Kind == 62)
         {
             _at = _at + 1;
@@ -513,14 +532,23 @@ mut class ScalarFrontendState
             {
                 tokenIndex = tokenIndex + 1;
             }
-            _at = tokenIndex + 1;
+            _at = tokenIndex;
+            if (!FinishUnaryOperand(numberToken, prefixGroups, out var leftEnd))
+            {
+                return false;
+            }
             require _tokens.TryGet(_at, out var following);
             if (!negative && expectedType == 5
                 && following.Kind >= 65 && following.Kind <= 70)
             {
                 _at = _at + 1;
-                if (!Take(2, out var right)
-                    || !TryResolveParameter(right, out var parameter, out var parameterType))
+                require BeginUnaryOperand(out var right, out var groups);
+                if (right.Kind != 2)
+                {
+                    FailAt(1, right.Range);
+                    return false;
+                }
+                if (!TryResolveParameter(right, out var parameter, out var parameterType))
                 {
                     return false;
                 }
@@ -529,8 +557,12 @@ mut class ScalarFrontendState
                 {
                     return false;
                 }
-                require SourceRange.TryCreate(literal.Range.Start,
-                    right.Range.End - literal.Range.Start, out var comparisonSpan);
+                if (!FinishUnaryOperand(right, groups, out var end))
+                {
+                    return false;
+                }
+                require SourceRange.TryCreate(first.Range.Start,
+                    end - first.Range.Start, out var comparisonSpan);
                 require ScalarFrontendExpression.TryCreate(5,
                     following.Kind + (parameter + 2) * 100, low, high,
                     comparisonSpan, out var comparison);
@@ -548,16 +580,18 @@ mut class ScalarFrontendState
                 && _tokens.TryGet(_at, out var pairOperator)
                 && ((pairOperator.Kind >= 57 && pairOperator.Kind <= 61)
                     || pairOperator.Kind == 71 || pairOperator.Kind == 73 || pairOperator.Kind == 75)
-                && _tokens.TryGet(_at + 1, out var secondLiteral) && secondLiteral.Kind == 3)
+                && HasOperandKind(_at + 1, 3))
             {
-                _at = _at + 2;
-                if (!TryReadMagnitude(secondLiteral, _at - 1, expectedType, false,
-                    secondLiteral.Range, out var secondLow, out var secondHigh))
+                _at = _at + 1;
+                require BeginUnaryOperand(out var secondLiteral, out var groups);
+                if (!TryReadMagnitude(secondLiteral, _at, expectedType, false,
+                    secondLiteral.Range, out var secondLow, out var secondHigh)
+                    || !FinishUnaryOperand(secondLiteral, groups, out var end))
                 {
                     return false;
                 }
-                require SourceRange.TryCreate(literal.Range.Start,
-                    secondLiteral.Range.End - literal.Range.Start, out var pairSpan);
+                require SourceRange.TryCreate(first.Range.Start,
+                    end - first.Range.Start, out var pairSpan);
                 require ScalarFrontendExpression.TryCreate(expectedType,
                     pairOperator.Kind + 500, low, secondLow, pairSpan, out var foldedPair);
                 expression = foldedPair;
@@ -573,8 +607,10 @@ mut class ScalarFrontendState
                     return false;
                 }
                 _at = _at + 1;
-                if (!Take(2, out var right))
+                require BeginUnaryOperand(out var right, out var groups);
+                if (right.Kind != 2)
                 {
+                    FailAt(1, right.Range);
                     return false;
                 }
                 if (!TryResolveParameter(right, out var parameter, out var parameterType))
@@ -586,8 +622,12 @@ mut class ScalarFrontendState
                     FailAt(2, next.Range);
                     return false;
                 }
-                require SourceRange.TryCreate(literal.Range.Start,
-                    right.Range.End - literal.Range.Start, out var binarySpan);
+                if (!FinishUnaryOperand(right, groups, out var end))
+                {
+                    return false;
+                }
+                require SourceRange.TryCreate(first.Range.Start,
+                    end - first.Range.Start, out var binarySpan);
                 require ScalarFrontendExpression.TryCreate(expectedType,
                     next.Kind + (parameter + 2) * 100, low, high, binarySpan, out var binary);
                 expression = binary;
@@ -600,36 +640,50 @@ mut class ScalarFrontendState
         }
         if (literal.Kind == 20 || literal.Kind == 21)
         {
-            _at = _at + 1;
+            if (!FinishUnaryOperand(literal, prefixGroups, out var leftEnd))
+            {
+                return false;
+            }
             if (_tokens.TryGet(_at, out var booleanOperator)
                 && ((booleanOperator.Kind >= 71 && booleanOperator.Kind <= 75)
                     || booleanOperator.Kind == 65 || booleanOperator.Kind == 66))
             {
                 _at = _at + 1;
-                if (_tokens.TryGet(_at, out var booleanRight)
-                    && (booleanRight.Kind == 20 || booleanRight.Kind == 21))
+                require BeginUnaryOperand(out var booleanRight, out var groups);
+                if (booleanRight.Kind == 20 || booleanRight.Kind == 21)
                 {
-                    _at = _at + 1;
-                    require SourceRange.TryCreate(literal.Range.Start,
-                        booleanRight.Range.End - literal.Range.Start, out var literalSpan);
+                    if (!FinishUnaryOperand(booleanRight, groups, out var end))
+                    {
+                        return false;
+                    }
+                    require SourceRange.TryCreate(first.Range.Start,
+                        end - first.Range.Start, out var literalSpan);
                     require ScalarFrontendExpression.TryCreate(5,
                         booleanOperator.Kind + 1100, literal.Kind, booleanRight.Kind,
                         literalSpan, out var literals);
                     expression = literals;
                     return true;
                 }
-                if (!Take(2, out var right)
-                    || !TryResolveParameter(right, out var parameter, out var parameterType))
+                if (booleanRight.Kind != 2)
+                {
+                    FailAt(1, booleanRight.Range);
+                    return false;
+                }
+                if (!TryResolveParameter(booleanRight, out var parameter, out var parameterType))
                 {
                     return false;
                 }
                 if (parameterType != 5)
                 {
-                    FailAt(2, right.Range);
+                    FailAt(2, booleanRight.Range);
                     return false;
                 }
-                require SourceRange.TryCreate(literal.Range.Start,
-                    right.Range.End - literal.Range.Start, out var span);
+                if (!FinishUnaryOperand(booleanRight, groups, out var end))
+                {
+                    return false;
+                }
+                require SourceRange.TryCreate(first.Range.Start,
+                    end - first.Range.Start, out var span);
                 require ScalarFrontendExpression.TryCreate(5,
                     booleanOperator.Kind + 900, parameter, literal.Kind,
                     span, out var withLiteral);
@@ -641,7 +695,8 @@ mut class ScalarFrontendState
             expression = found;
             return true;
         }
-        require BeginUnaryOperand(out var left, out var leftGroups);
+        Token left = literal;
+        int32 leftGroups = prefixGroups;
         if (left.Kind != 2)
         {
             FailAt(1, left.Range);
@@ -679,21 +734,24 @@ mut class ScalarFrontendState
         {
             operation = next.Kind;
             _at = _at + 1;
+            require BeginUnaryOperand(out var right, out var groups);
             if (((operation >= 71 && operation <= 75)
                     || operation == 65 || operation == 66)
-                && _tokens.TryGet(_at, out var booleanRight)
-                && (booleanRight.Kind == 20 || booleanRight.Kind == 21))
+                && (right.Kind == 20 || right.Kind == 21))
             {
                 if (selected != 5)
                 {
                     FailAt(2, next.Range);
                     return false;
                 }
-                _at = _at + 1;
-                require SourceRange.TryCreate(left.Range.Start,
-                    booleanRight.Range.End - left.Range.Start, out var span);
+                if (!FinishUnaryOperand(right, groups, out end))
+                {
+                    return false;
+                }
+                require SourceRange.TryCreate(first.Range.Start,
+                    end - first.Range.Start, out var span);
                 require ScalarFrontendExpression.TryCreate(5,
-                    operation + 700, leftIndex, booleanRight.Kind,
+                    operation + 700, leftIndex, right.Kind,
                     span, out var withLiteral);
                 expression = withLiteral;
                 return true;
@@ -701,7 +759,7 @@ mut class ScalarFrontendState
             if (((operation >= 57 && operation <= 61)
                 || (operation >= 65 && operation <= 70)
                 || operation == 71 || operation == 73 || operation == 75)
-                && _tokens.TryGet(_at, out var literalRight) && literalRight.Kind == 3)
+                && right.Kind == 3)
             {
                 if ((operation >= 65 && operation <= 70 && selected == 5)
                     || ((operation < 65 || operation > 70) && (selected == 5 || selected == 6)))
@@ -710,14 +768,14 @@ mut class ScalarFrontendState
                     return false;
                 }
                 int32 index = _at;
-                _at = _at + 1;
-                if (!TryReadMagnitude(literalRight, index, selected, false,
-                    literalRight.Range, out var low, out var high))
+                if (!TryReadMagnitude(right, index, selected, false,
+                    right.Range, out var low, out var high)
+                    || !FinishUnaryOperand(right, groups, out end))
                 {
                     return false;
                 }
-                require SourceRange.TryCreate(left.Range.Start,
-                    literalRight.Range.End - left.Range.Start, out var literalSpan);
+                require SourceRange.TryCreate(first.Range.Start,
+                    end - first.Range.Start, out var literalSpan);
                 mut int32 resultType = selected;
                 if (operation >= 65 && operation <= 70)
                 {
@@ -728,7 +786,6 @@ mut class ScalarFrontendState
                 expression = withLiteral;
                 return true;
             }
-            require BeginUnaryOperand(out var right, out var groups);
             if (right.Kind != 2)
             {
                 FailAt(1, right.Range);
@@ -766,7 +823,7 @@ mut class ScalarFrontendState
                 return false;
             }
         }
-        require SourceRange.TryCreate(literal.Range.Start, end - literal.Range.Start, out var span);
+        require SourceRange.TryCreate(first.Range.Start, end - first.Range.Start, out var span);
         if (operation >= 65 && operation <= 70)
         {
             selected = 5;

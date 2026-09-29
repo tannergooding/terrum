@@ -341,16 +341,15 @@ public static class ScalarFrontendHost
                     expression.Span.Start, expression.Span.Length)));
                 var tokens = lexical.Tokens;
                 var name = left == 1 ? firstName : secondName;
-                return lexical.Diagnostics.IsEmpty && tokens.Length == 4
-                    && tokens[0].Span.Start == 0
-                    && tokens[0].Kind == (literalFirst ? (TokenKind)right : TokenKind.Identifier)
-                    && (literalFirst || tokens[0].Text
+                return lexical.Diagnostics.IsEmpty
+                    && TryBinaryOperandTokens(tokens, (TokenKind)(operation % 100),
+                        expression.Span.Length, out var first, out var second)
+                    && tokens[first].Kind == (literalFirst ? (TokenKind)right : TokenKind.Identifier)
+                    && (literalFirst || tokens[first].Text
                         == source.Text.Substring(name.Start, name.Length))
-                    && tokens[1].Kind == (TokenKind)(operation % 100)
-                    && tokens[2].Kind == (literalFirst ? TokenKind.Identifier : (TokenKind)right)
-                    && (!literalFirst || tokens[2].Text
-                        == source.Text.Substring(name.Start, name.Length))
-                    && tokens[2].Span.End == expression.Span.Length;
+                    && tokens[second].Kind == (literalFirst ? TokenKind.Identifier : (TokenKind)right)
+                    && (!literalFirst || tokens[second].Text
+                        == source.Text.Substring(name.Start, name.Length));
             }
             if (operation / 100 == 11
                 && operation % 100 is 65 or 66 or >= 71 and <= 75)
@@ -364,11 +363,10 @@ public static class ScalarFrontendHost
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
                 var tokens = lexical.Tokens;
-                return lexical.Diagnostics.IsEmpty && tokens.Length == 4
-                    && tokens[0].Span.Start == 0 && tokens[0].Kind == (TokenKind)left
-                    && tokens[1].Kind == (TokenKind)(operation % 100)
-                    && tokens[2].Kind == (TokenKind)right
-                    && tokens[2].Span.End == expression.Span.Length;
+                return lexical.Diagnostics.IsEmpty
+                    && TryBinaryOperandTokens(tokens, (TokenKind)(operation % 100),
+                        expression.Span.Length, out var first, out var second)
+                    && tokens[first].Kind == (TokenKind)left && tokens[second].Kind == (TokenKind)right;
             }
             if (operation / 100 == 5 && operation % 100 is >= 57 and <= 61 or 71 or 73 or 75)
             {
@@ -380,20 +378,19 @@ public static class ScalarFrontendHost
                 var text = source.Text.Substring(expression.Span.Start, expression.Span.Length);
                 var lexical = Lexer.Lex(SourceText.From(text));
                 var tokens = lexical.Tokens;
-                return lexical.Diagnostics.IsEmpty && tokens.Length == 4
-                    && tokens[0].Kind == TokenKind.NumericLiteral && tokens[0].Span.Start == 0
-                    && tokens[1].Kind == (TokenKind)(operation % 100)
-                    && tokens[2].Kind == TokenKind.NumericLiteral && tokens[2].Span.End == text.Length
-                    && ValidMagnitude(tokens[0].Text.AsSpan(), type, false, left, 0)
-                    && ValidMagnitude(tokens[2].Text.AsSpan(), type, false, right, 0);
+                return lexical.Diagnostics.IsEmpty
+                    && TryBinaryOperandTokens(tokens, (TokenKind)(operation % 100),
+                        text.Length, out var first, out var second)
+                    && tokens[first].Kind == TokenKind.NumericLiteral
+                    && tokens[second].Kind == TokenKind.NumericLiteral
+                    && ValidMagnitude(tokens[first].Text.AsSpan(), type, false, left, 0)
+                    && ValidMagnitude(tokens[second].Text.AsSpan(), type, false, right, 0);
             }
             if (operation / 100 is >= 1 and <= 4
                 && operation % 100 is >= 57 and <= 61 or >= 65 and <= 70 or 71 or 73 or 75)
             {
                 var literalFirst = operation >= 300;
                 var parameter = operation / 100 - (literalFirst ? 2 : 0);
-                var numberIndex = literalFirst ? 0 : 2;
-                var nameIndex = literalFirst ? 2 : 0;
                 var parameterType = parameter == 1 ? words[7] : words[8];
                 var comparison = operation % 100 is >= 65 and <= 70;
                 if (words[0] < 3 || expression.Type != type
@@ -408,14 +405,14 @@ public static class ScalarFrontendHost
                 var lexical = Lexer.Lex(SourceText.From(text));
                 var tokens = lexical.Tokens;
                 var name = parameter == 1 ? firstName : secondName;
-                return lexical.Diagnostics.IsEmpty && tokens.Length == 4
-                    && tokens[0].Span.Start == 0
-                    && tokens[nameIndex].Kind == TokenKind.Identifier
-                    && tokens[nameIndex].Text == source.Text.Substring(name.Start, name.Length)
-                    && tokens[1].Kind == (TokenKind)(operation % 100)
-                    && tokens[numberIndex].Kind == TokenKind.NumericLiteral
-                    && tokens[2].Span.End == text.Length
-                    && ValidMagnitude(tokens[numberIndex].Text.AsSpan(),
+                return lexical.Diagnostics.IsEmpty
+                    && TryBinaryOperandTokens(tokens, (TokenKind)(operation % 100),
+                        text.Length, out var first, out var second)
+                    && tokens[literalFirst ? second : first].Kind == TokenKind.Identifier
+                    && tokens[literalFirst ? second : first].Text
+                        == source.Text.Substring(name.Start, name.Length)
+                    && tokens[literalFirst ? first : second].Kind == TokenKind.NumericLiteral
+                    && ValidMagnitude(tokens[literalFirst ? first : second].Text.AsSpan(),
                         parameterType, false, left, right);
             }
             if (operation == 3)
@@ -568,6 +565,45 @@ public static class ScalarFrontendHost
             index++;
         }
         return index;
+    }
+
+    private static bool TryBinaryOperandTokens(ImmutableArray<SyntaxToken> tokens,
+        TokenKind operation, int length, out int left, out int right)
+    {
+        var at = 0;
+        left = -1;
+        right = -1;
+        if (tokens.Length < 4 || tokens[0].Span.Start != 0
+            || !TakeOperand(out left) || at >= tokens.Length - 1
+            || tokens[at++].Kind != operation || !TakeOperand(out right))
+        {
+            return false;
+        }
+        return at == tokens.Length - 1 && tokens[at - 1].Span.End == length;
+
+        bool TakeOperand(out int operand)
+        {
+            operand = -1;
+            var groups = 0;
+            while (at < tokens.Length - 1 && tokens[at].Kind == TokenKind.OpenParen)
+            {
+                at++;
+                groups++;
+            }
+            if (at >= tokens.Length - 1)
+            {
+                return false;
+            }
+            operand = at++;
+            for (var index = 0; index < groups; index++)
+            {
+                if (at >= tokens.Length - 1 || tokens[at++].Kind != TokenKind.CloseParen)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
     }
 
     private static bool TryUnaryOperand(ImmutableArray<SyntaxToken> tokens,

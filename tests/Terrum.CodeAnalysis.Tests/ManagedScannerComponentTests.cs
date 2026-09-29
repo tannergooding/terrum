@@ -2910,6 +2910,8 @@ public sealed class ManagedScannerComponentTests
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return y | 42; }", 0, 0)]
     [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return 42 ^ x; }", 0, 0)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return 42 ^ x; }", 0, 0)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return ((x)) + ((5)); }", 37, 0)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return ((47)) - (x); }", 5, 0)]
     public async Task NativeScalarFrontendParameterLiteralFactsExecuteAsync(
         NativeRuntimePolicy policy, string text, int first, int second)
     {
@@ -2999,6 +3001,10 @@ public sealed class ManagedScannerComponentTests
         PrimitiveType.Char16, 1L, 366)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(char16 x) { return 0xFFFF != x; }",
         PrimitiveType.Char16, 1L, 366)]
+    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return ((x)) >= (42); }",
+        PrimitiveType.Int32, 42L, 170)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return (42) < ((x)); }",
+        PrimitiveType.Int32, 43L, 367)]
     public async Task NativeScalarFrontendLiteralComparisonExecutesAsync(
         NativeRuntimePolicy policy, string text, PrimitiveType parameterType, long argument,
         int operation)
@@ -3151,6 +3157,8 @@ public sealed class ManagedScannerComponentTests
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "false ^ x", true, true, 975)]
     [InlineData(NativeRuntimePolicy.FailFast, "x == true", true, true, 765)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "false != x", true, true, 966)]
+    [InlineData(NativeRuntimePolicy.FailFast, "(x) && ((true))", true, true, 772)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "((false)) != (x)", true, true, 966)]
     public async Task NativeScalarFrontendBooleanLiteralPairExecutesAsync(
         NativeRuntimePolicy policy, string expression, bool input, bool expected, int operation)
     {
@@ -3194,6 +3202,7 @@ public sealed class ManagedScannerComponentTests
     [Theory]
     [InlineData("true && false", 1172)]
     [InlineData("true == false", 1165)]
+    [InlineData("(true) == ((false))", 1165)]
     public async Task ScalarFrontendBooleanLiteralPairRejectsForgedWordsAsync(
         string expression, int operation)
     {
@@ -3263,6 +3272,8 @@ public sealed class ManagedScannerComponentTests
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return 20 + 22; }", 557)]
     [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return 0x2A & 0x3F; }", 571)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return 0x2A & 0x3F; }", 571)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value() { return (20) + ((22)); }", 557)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return (20) + ((22)); }", 557)]
     public async Task NativeScalarFrontendIntegerLiteralPairExecutesAsync(
         NativeRuntimePolicy policy, string text, int operation)
     {

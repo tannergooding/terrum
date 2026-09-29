@@ -105,10 +105,10 @@ JIT-executes the same bounded entry without writing an image. Like hosted
 supervise this in-process native command with a deadline.
 The bounded input and source directory remain required, and general source
 binding, broader libraries and compiler self-build remain outstanding.
-One hundred and thirty shared scalar/conditional/Boolean/integer-literal fixtures have byte-identical DLL output from
+One hundred and forty-two shared scalar/conditional/Boolean/integer-literal fixtures have byte-identical DLL output from
 the hosted and Terrum-authored frontend paths under both runtime policies;
 both paths still use the hosted native emitter.
-Twenty-four bounded `int32 Main()` fixtures likewise emit byte-identical Windows
+Twenty-six bounded `int32 Main()` fixtures likewise emit byte-identical Windows
 executables and run under both policies; this does not establish an independent
 native emitter or compiler self-build.
 
