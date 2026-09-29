@@ -9,9 +9,9 @@ namespace Terrum.CodeAnalysis;
 // true/false literal (with no parameter slots). For a numeric literal,
 // the parameter slots carry the low/high 32-bit words of its contextual
 // magnitude; a leading minus is included in the expression span.
-// Version-3 binary parameter/literal expressions use operation 100/200 plus
-// the addition/subtraction token kind for parameter 1/2; the two slots then
-// hold the literal's low/high magnitude words.
+// Version-3 binary parameter/literal expressions add 100/200 to the operator
+// for a parameter on the left, or 300/400 for one on the right (parameter 1/2).
+// The two slots hold the literal's low/high magnitude words.
 // An invalid
 // result has only ErrorCode/ErrorSpan; all other fields, including visibility,
 // are empty. A valid result is public only for an explicit public keyword. Lexical errors
@@ -234,6 +234,44 @@ mut class ScalarFrontendState
                 numberSpan, out var low, out var high))
             {
                 return false;
+            }
+            if (!negative && expectedType >= 1 && expectedType <= 4
+                && _tokens.TryGet(_at, out var next)
+                && (next.Kind == 57 || next.Kind == 58))
+            {
+                _at = _at + 1;
+                if (!Take(2, out var right))
+                {
+                    return false;
+                }
+                mut int32 parameter = 0;
+                mut int32 parameterType = 0;
+                if (_parameterCount > 0 && SameTokenSpelling(_first, right))
+                {
+                    parameter = 1;
+                    parameterType = _firstType;
+                }
+                else if (_parameterCount > 1 && SameTokenSpelling(_second, right))
+                {
+                    parameter = 2;
+                    parameterType = _secondType;
+                }
+                if (parameter == 0)
+                {
+                    FailAt(3, right.Range);
+                    return false;
+                }
+                if (parameterType != expectedType)
+                {
+                    FailAt(2, next.Range);
+                    return false;
+                }
+                require SourceRange.TryCreate(literal.Range.Start,
+                    right.Range.End - literal.Range.Start, out var binarySpan);
+                require ScalarFrontendExpression.TryCreate(expectedType,
+                    next.Kind + (parameter + 2) * 100, low, high, binarySpan, out var binary);
+                expression = binary;
+                return true;
             }
             require ScalarFrontendExpression.TryCreate(expectedType, 3, low, high,
                 numberSpan, out var number);

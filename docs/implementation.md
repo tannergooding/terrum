@@ -853,8 +853,8 @@ references, optional conditional branches, explicit public visibility, and UTF-1
 function with zero to two scalar parameters, parameter references, Boolean
 literals, context-typed unsuffixed integer literals (including signed unary
 minus and decimal signed minima) in return expressions, and
-at most one binary operation per expression, including parameter-plus/minus-
-literal arithmetic for all four integer widths;
+at most one binary operation per expression, including either order of
+parameter/literal addition or subtraction for all four integer widths;
 unsupported or invalid shapes return a code and span without a partial
 artifact. Lexical failures remain scanner diagnostics. AOT/JIT execute this
 phase with the host source buffers, but `build-component` still passes
@@ -862,7 +862,7 @@ scanner records to the hosted parser and binder. Connecting the native phase
 to that compilation handoff remains open. A separate
 [`ScalarFrontendProjection`](../self-host/ScalarFrontendProjection.terrum)
 can publish its typed result through a fixed 34-word host buffer; version 3
-encodes a parameter index in the operation of parameter/literal arithmetic
+encodes a parameter index and operand order in the operation of parameter/literal arithmetic
 and carries both literal magnitude words in the operand slots. The
 `ScalarFrontendHost` reader bounds types, parameter indexes, operations and
 source spans, independently checks projected integer bits against source
@@ -886,7 +886,7 @@ emitter. It rejects other entry signatures before replacing output;
 writing a PE file, returning its raw exit code with no success envelope;
 the hosted compiler remains in parallel for general builds. This bounded
 result is a provisional component protocol, not approved TRRM metadata or a
-compiler self-build. Twenty-six shared scalar/conditional/Boolean/integer-literal sources produce
+compiler self-build. Thirty-one shared scalar/conditional/Boolean/integer-literal sources produce
 byte-identical DLLs through the Terrum-authored frontend and hosted compiler
 under both runtime policies; this does not establish parity for unsupported
 source shapes, independent native emitters or a self-build. Four supported

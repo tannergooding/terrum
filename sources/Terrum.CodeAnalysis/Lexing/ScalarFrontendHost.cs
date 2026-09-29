@@ -144,9 +144,12 @@ public static class ScalarFrontendHost
             var right = expression.RightParameter;
             var leftType = left == 1 ? words[7] : words[8];
             var rightType = right == 1 ? words[7] : words[8];
-            if (operation is 157 or 158 or 257 or 258)
+            if (operation is 157 or 158 or 257 or 258 or 357 or 358 or 457 or 458)
             {
-                var parameter = operation / 100;
+                var literalFirst = operation >= 300;
+                var parameter = operation / 100 - (literalFirst ? 2 : 0);
+                var numberIndex = literalFirst ? 0 : 2;
+                var nameIndex = literalFirst ? 2 : 0;
                 if (words[0] != 3 || expression.Type != type || type is not (1 or 2 or 3 or 4)
                     || parameter > parameters || (parameter == 1 ? words[7] : words[8]) != type
                     || !ValidSpan(expression.Span, nonempty: true))
@@ -158,12 +161,13 @@ public static class ScalarFrontendHost
                 var tokens = lexical.Tokens;
                 var name = parameter == 1 ? firstName : secondName;
                 return lexical.Diagnostics.IsEmpty && tokens.Length == 4
-                    && tokens[0].Kind == TokenKind.Identifier && tokens[0].Span.Start == 0
-                    && tokens[0].Text == source.Text.Substring(name.Start, name.Length)
-                    && tokens[1].Kind == (TokenKind)(operation - parameter * 100)
-                    && tokens[2].Kind == TokenKind.NumericLiteral
+                    && tokens[0].Span.Start == 0
+                    && tokens[nameIndex].Kind == TokenKind.Identifier
+                    && tokens[nameIndex].Text == source.Text.Substring(name.Start, name.Length)
+                    && tokens[1].Kind == (TokenKind)(operation % 100)
+                    && tokens[numberIndex].Kind == TokenKind.NumericLiteral
                     && tokens[2].Span.End == text.Length
-                    && ValidMagnitude(tokens[2].Text.AsSpan(), type, false, left, right);
+                    && ValidMagnitude(tokens[numberIndex].Text.AsSpan(), type, false, left, right);
             }
             if (operation == 3)
             {
@@ -343,9 +347,12 @@ public static class ScalarFrontendHost
 
         BoundExpression Expression(ScalarFrontendExpression expression)
         {
-            if (expression.Operation is 157 or 158 or 257 or 258)
+            if (expression.Operation is 157 or 158 or 257 or 258 or 357 or 358 or 457 or 458)
             {
-                var parameter = expression.Operation / 100;
+                var literalFirst = expression.Operation >= 300;
+                var parameter = expression.Operation / 100 - (literalFirst ? 2 : 0);
+                var numberIndex = literalFirst ? 0 : 2;
+                var nameIndex = literalFirst ? 2 : 0;
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
                 var tokens = lexical.Tokens;
@@ -354,11 +361,13 @@ public static class ScalarFrontendHost
                     : unchecked((long)((ulong)(uint)expression.RightParameter << 32
                         | (uint)expression.LeftParameter));
                 var leftOperand = new BoundRead(parameter - 1, types[parameter - 1].Type,
-                    new TextSpan(expression.Span.Start + tokens[0].Span.Start, tokens[0].Span.Length));
+                    new TextSpan(expression.Span.Start + tokens[nameIndex].Span.Start, tokens[nameIndex].Span.Length));
                 var literal = new BoundConstant(value, Type(expression.Type),
-                    new TextSpan(expression.Span.Start + tokens[2].Span.Start, tokens[2].Span.Length));
-                return new BoundBinary((TokenKind)(expression.Operation - parameter * 100),
-                    leftOperand, literal, Type(expression.Type), expression.Span);
+                    new TextSpan(expression.Span.Start + tokens[numberIndex].Span.Start,
+                        tokens[numberIndex].Span.Length));
+                return new BoundBinary((TokenKind)(expression.Operation % 100),
+                    literalFirst ? literal : leftOperand, literalFirst ? leftOperand : literal,
+                    Type(expression.Type), expression.Span);
             }
             if (expression.Operation == 3)
             {

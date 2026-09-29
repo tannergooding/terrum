@@ -2735,19 +2735,21 @@ public sealed class ManagedScannerComponentTests
         }
     }
 
-    [Fact]
-    public async Task ScalarFrontendProjectionRejectsForgedParameterLiteralWordsAsync()
+    [Theory]
+    [InlineData("int64 Value(int64 x, int64 y) { return y + 0xFFFFFFFFFFFFFFFF; }", 257)]
+    [InlineData("int64 Value(int64 x, int64 y) { return 0xFFFFFFFFFFFFFFFF + y; }", 457)]
+    public async Task ScalarFrontendProjectionRejectsForgedParameterLiteralWordsAsync(
+        string text, int expectedOperation)
     {
-        const string Text = "int64 Value(int64 x, int64 y) { return y + 0xFFFFFFFFFFFFFFFF; }";
-        var source = SourceText.From(Text);
-        var stage = await CompileAsync(Text,
+        var source = SourceText.From(text);
+        var stage = await CompileAsync(text,
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             BoundRuntimePolicy.FailFast, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, NativeRuntimePolicy.FailFast);
         Assert.Equal(42, native.ExitCode);
         var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
             ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
-        Assert.Equal(257, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        Assert.Equal(expectedOperation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
         foreach (var (word, replacement) in new[] { (0, 2), (23, 158), (24, 0), (25, 0) })
         {
             var offset = word * sizeof(int);
@@ -2840,13 +2842,15 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public async Task NativeScalarFrontendParameterLiteralFactsExecuteAsync(NativeRuntimePolicy policy)
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return y + 5; }", 0, 37)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return y + 5; }", 0, 37)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x, int32 y) { return 47 - x; }", 5, 0)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value(int32 x, int32 y) { return 47 - x; }", 5, 0)]
+    public async Task NativeScalarFrontendParameterLiteralFactsExecuteAsync(
+        NativeRuntimePolicy policy, string text, int first, int second)
     {
-        const string Text = "int32 Value(int32 x, int32 y) { return y + 5; }";
-        var source = SourceText.From(Text);
-        var stage = await CompileAsync(Text,
+        var source = SourceText.From(text);
+        var stage = await CompileAsync(text,
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);
@@ -2855,8 +2859,8 @@ public sealed class ManagedScannerComponentTests
             native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
                 ScalarFrontendHost.WordCount * sizeof(int)), (BoundRuntimePolicy)policy);
         var call = new BoundCall(0, [
-            new BoundConstant(0, PrimitiveType.Int32, default),
-            new BoundConstant(37, PrimitiveType.Int32, default),
+            new BoundConstant(first, PrimitiveType.Int32, default),
+            new BoundConstant(second, PrimitiveType.Int32, default),
         ], PrimitiveType.Int32, default);
         var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
             new BoundBlock([new BoundReturn(call, default)], default), default);
