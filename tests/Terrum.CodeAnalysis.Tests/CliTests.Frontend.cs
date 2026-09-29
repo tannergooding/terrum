@@ -20,6 +20,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return 42; }")]
     [InlineData("public int32 Main() { return 0x2A; }")]
     [InlineData("int32 Main() { if (true) { return 42; } else { return 0; } }")]
+    [InlineData("int32 Main() { return -0xFFFFFFD6; }")]
     public async Task FrontendBuiltExecutableMatchesHostedAndRunsAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -112,6 +113,12 @@ public sealed partial class CliTests
     [InlineData("public uint64 Value() { return 18446744073709551615; }")]
     [InlineData("public char16 Value() { return 0xFFFF; }")]
     [InlineData("public int32 Value() { if (true) { return 0b101010; } else { return 0; } }")]
+    [InlineData("public int32 Value() { return -42; }")]
+    [InlineData("public int32 Value() { return - /* whitespace */ 42; }")]
+    [InlineData("public int32 Value() { return -2147483648; }")]
+    [InlineData("public int32 Value() { return -0x80000000; }")]
+    [InlineData("public int64 Value() { return -9223372036854775808; }")]
+    [InlineData("public int64 Value() { return -0xFFFFFFFFFFFFFFFF; }")]
     public async Task FrontendBuiltLibraryMatchesHostedNativeBytesAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -303,6 +310,9 @@ public sealed partial class CliTests
     [InlineData("uint64", "18446744073709551616")]
     [InlineData("char16", "65536")]
     [InlineData("bool", "1")]
+    [InlineData("int32", "-2147483649")]
+    [InlineData("int64", "-9223372036854775809")]
+    [InlineData("uint32", "-1")]
     public async Task FrontendComponentRejectsOutOfRangeIntegerAsync(string type, string literal)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

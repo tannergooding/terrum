@@ -9,7 +9,7 @@ namespace Terrum.CodeAnalysis.Semantics;
 internal sealed partial class Binder
 {
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Only the supported built-in operators can be folded.")]
-    private static BoundExpression FoldScalarConstant(BoundExpression expression)
+    internal static BoundExpression FoldScalarConstant(BoundExpression expression)
     {
         BigInteger value;
         switch (expression)

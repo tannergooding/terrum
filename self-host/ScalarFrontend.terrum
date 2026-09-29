@@ -7,7 +7,8 @@ namespace Terrum.CodeAnalysis;
 // Parameter slots are 1-based (0 means absent); Operation is 0 for a parameter
 // reference or the scanner TokenKind ordinal for one binary operator or
 // true/false literal (with no parameter slots). For a numeric literal,
-// the parameter slots carry the low/high 32-bit words of its contextual value.
+// the parameter slots carry the low/high 32-bit words of its contextual
+// magnitude; a leading minus is included in the expression span.
 // An invalid
 // result has only ErrorCode/ErrorSpan; all other fields, including visibility,
 // are empty. A valid result is public only for an explicit public keyword. Lexical errors
@@ -162,10 +163,21 @@ mut class ScalarFrontendState
     private mut bool ParseExpression(int32 expectedType, out ScalarFrontendExpression expression)
     {
         require _tokens.TryGet(_at, out var literal);
-        if (literal.Kind == 3)
+        mut Token numberToken = literal;
+        bool negative = literal.Kind == 58;
+        if (negative && _tokens.TryGet(_at + 1, out var nextNumber)
+            && nextNumber.Kind == 3)
         {
-            int32 tokenIndex = _at;
-            _at = _at + 1;
+            numberToken = nextNumber;
+        }
+        if (numberToken.Kind == 3)
+        {
+            mut int32 tokenIndex = _at;
+            if (negative)
+            {
+                tokenIndex = tokenIndex + 1;
+            }
+            _at = tokenIndex + 1;
             mut int32 first = 0;
             mut int32 end = Host.IntegerValues[0];
             while (first < end)
@@ -184,25 +196,32 @@ mut class ScalarFrontendState
                 || Host.IntegerValues[first * 5 + 1] != tokenIndex
                 || Host.IntegerValues[first * 5 + 2] != 0)
             {
-                FailAt(2, literal.Range);
+                FailAt(2, numberToken.Range);
                 return false;
             }
             int32 low = Host.IntegerValues[first * 5 + 3];
             int32 high = Host.IntegerValues[first * 5 + 4];
             uint64 magnitude = DecodeScannerMagnitude(low, high);
-            bool based = IsBasedInteger(literal);
-            if ((expectedType == 1 && (high != 0 || (!based && low < 0)))
+            bool based = IsBasedInteger(numberToken);
+            require SourceRange.TryCreate(literal.Range.Start,
+                numberToken.Range.End - literal.Range.Start, out var numberSpan);
+            if ((expectedType == 1 && (high != 0
+                || (!based && magnitude > uint64(int32.MaxValue)
+                    && (!negative || magnitude != uint64(int32.MaxValue) + 1))))
                 || (expectedType == 2 && high != 0)
-                || (expectedType == 3 && !based && high < 0)
+                || (expectedType == 3 && !based
+                    && magnitude > uint64(int64.MaxValue)
+                    && (!negative || magnitude != uint64(int64.MaxValue) + 1))
                 || (expectedType == 6 && (high != 0 || magnitude > 65535))
                 || (expectedType != 1 && expectedType != 2
-                    && expectedType != 3 && expectedType != 4 && expectedType != 6))
+                    && expectedType != 3 && expectedType != 4 && expectedType != 6)
+                || (negative && expectedType != 1 && expectedType != 3))
             {
-                FailAt(2, literal.Range);
+                FailAt(2, numberSpan);
                 return false;
             }
             require ScalarFrontendExpression.TryCreate(expectedType, 3, low, high,
-                literal.Range, out var number);
+                numberSpan, out var number);
             expression = number;
             return true;
         }

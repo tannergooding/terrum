@@ -151,7 +151,13 @@ public static class ScalarFrontendHost
                 {
                     return false;
                 }
-                var digits = source.Text.AsSpan(expression.Span.Start, expression.Span.Length);
+                var negative = source.Text[expression.Span.Start] == '-';
+                if (negative && type is not (1 or 3))
+                {
+                    return false;
+                }
+                var numberSpan = NumericSpan(source, expression.Span);
+                var digits = source.Text.AsSpan(numberSpan.Start, numberSpan.Length);
                 if (ScannerHost.IntegerDigitCount(digits) != digits.Length
                     || !ScannerHost.TryParseIntegerMagnitude(digits, out var magnitude))
                 {
@@ -160,9 +166,11 @@ public static class ScalarFrontendHost
                 var based = ScannerHost.IntegerRadix(digits) != 10;
                 ulong max = type switch {
                     1 when based => uint.MaxValue,
+                    1 when negative => (ulong)int.MaxValue + 1,
                     1 => int.MaxValue,
                     2 => uint.MaxValue,
                     3 when based => ulong.MaxValue,
+                    3 when negative => (ulong)long.MaxValue + 1,
                     3 => long.MaxValue,
                     4 => ulong.MaxValue,
                     _ => ushort.MaxValue,
@@ -239,6 +247,23 @@ public static class ScalarFrontendHost
 
     private static bool ScalarType(int type) => type is >= 1 and <= 6;
 
+    private static TextSpan NumericSpan(SourceText source, TextSpan expression)
+    {
+        if (source.Text[expression.Start] != '-')
+        {
+            return expression;
+        }
+        var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(expression.Start, expression.Length)));
+        var tokens = lexical.Tokens;
+        if (!lexical.Diagnostics.IsEmpty || tokens.Length != 3
+            || tokens[0].Kind != TokenKind.Minus || tokens[0].Span.Start != 0
+            || tokens[1].Kind != TokenKind.NumericLiteral || tokens[1].Span.End != expression.Length)
+        {
+            throw InvalidResult();
+        }
+        return new TextSpan(expression.Start + tokens[1].Span.Start, tokens[1].Span.Length);
+    }
+
     private static string TypeName(int code) => code switch {
         1 => "int32", 2 => "uint32", 3 => "int64", 4 => "uint64",
         5 => "bool", 6 => "char16", _ => throw InvalidResult(),
@@ -296,11 +321,29 @@ public static class ScalarFrontendHost
         {
             if (expression.Operation == 3)
             {
+                var negative = source.Text[expression.Span.Start] == '-';
                 var value = expression.Type is 1 or 2
                     ? expression.LeftParameter
                     : unchecked((long)((ulong)(uint)expression.RightParameter << 32
                         | (uint)expression.LeftParameter));
-                return new BoundConstant(value, Type(expression.Type), expression.Span);
+                if (!negative)
+                {
+                    return new BoundConstant(value, Type(expression.Type), expression.Span);
+                }
+                var minimum = expression.Type == 1 ? (ulong)int.MaxValue + 1
+                    : (ulong)long.MaxValue + 1;
+                var magnitude = (ulong)(uint)expression.RightParameter << 32
+                    | (uint)expression.LeftParameter;
+                var operandSpan = NumericSpan(source, expression.Span);
+                var digits = source.Text.AsSpan(operandSpan.Start, operandSpan.Length);
+                if (ScannerHost.IntegerRadix(digits) == 10 && magnitude == minimum)
+                {
+                    return new BoundConstant(expression.Type == 1 ? int.MinValue : long.MinValue,
+                        Type(expression.Type), expression.Span);
+                }
+                return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Minus,
+                    new BoundConstant(value, Type(expression.Type), operandSpan),
+                    Type(expression.Type), expression.Span));
             }
             if (expression.Operation is 20 or 21)
             {
