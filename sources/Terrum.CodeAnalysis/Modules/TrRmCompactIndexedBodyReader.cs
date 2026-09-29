@@ -8,7 +8,7 @@ using System.IO;
 namespace Terrum.CodeAnalysis.Modules;
 
 /// <summary>Inspects the root-free, forward-branching scalar compact-indexed subset.</summary>
-/// <remarks>Only scalar constants and operators, Copy, Select, forward Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
+/// <remarks>Only scalar constants, operators, integer conversions, optional values, Copy, Select, forward Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
 public readonly ref struct TrRmCompactIndexedBodyReader
 {
     private readonly record struct Edge(int Target, int[] Arguments);
@@ -346,6 +346,22 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     if (kind is < 1 or > 12 || type != valueTypes[right]
                         || (!IsInteger(type) && !(kind is 4 or 5 && type == 1))
                         || valueTypes[result] != (comparison ? 1 : type))
+                    {
+                        throw InvalidBody();
+                    }
+                }
+                else if (opcode == 6)
+                {
+                    var typeId = ReadCount(extent, ref cursor, referenceWidth);
+                    var policy = Read(extent, ref cursor, 1);
+                    var source = ReadCount(extent, ref cursor, referenceWidth);
+                    Use(source, ordinal);
+                    if (typeId == 0 || typeId > typeCount
+                        || mappedTypes[typeId] != valueTypes[result]
+                        || !IsInteger(valueTypes[result]) || !IsInteger(valueTypes[source])
+                        || policy is < 1 or > 3
+                        || policy == 3 && (valueTypes[result] is 8 or 0x0D)
+                            != (valueTypes[source] is 8 or 0x0D))
                     {
                         throw InvalidBody();
                     }

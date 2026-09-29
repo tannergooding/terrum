@@ -697,6 +697,53 @@ public sealed class TrRmBodyExampleTests
                 parameters.Length, resultTypeSpec: resultType,
                 parameterTypeIds: parameters, thirdTypeCode: 0x0D));
 
+    [Theory]
+    [InlineData(1, (byte)0x0E, (byte)8)]
+    [InlineData(2, (byte)0x0E, (byte)8)]
+    [InlineData(3, (byte)0x0D, (byte)8)]
+    [InlineData(3, (byte)0x0E, (byte)9)]
+    public void CompactIndexedReaderAcceptsIntegerConvertPolicies(byte policy,
+        byte destinationType, byte sourceType)
+    {
+        var operation = new byte[] { 6, 2, 3, policy, 1 };
+        Assert.Equal((1, 2), InspectIndexed(
+            IndexedScalarOperation(operation, [2], 3), 1,
+            secondTypeCode: sourceType, resultTypeSpec: 3,
+            parameterTypeIds: [2], thirdTypeCode: destinationType));
+    }
+
+    [Fact]
+    public void CompactIndexedReaderAcceptsPrefixedConvertReferenceWidth()
+    {
+        byte[] operation = [0xF0, 1, 6, 2, 0, 3, 0, 1, 1, 0];
+        Assert.Equal((1, 2), InspectIndexed(
+            IndexedScalarOperation(operation, [2], 3), 1, resultTypeSpec: 3,
+            parameterTypeIds: [2], thirdTypeCode: 0x0D));
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 6, 2, 3, 0, 1 }, new byte[] { 2 }, (byte)3, (byte)0x0D)]
+    [InlineData(new byte[] { 6, 2, 3, 4, 1 }, new byte[] { 2 }, (byte)3, (byte)0x0D)]
+    [InlineData(new byte[] { 6, 2, 2, 1, 1 }, new byte[] { 2 }, (byte)3, (byte)0x0D)]
+    [InlineData(new byte[] { 6, 2, 3, 3, 1 }, new byte[] { 2 }, (byte)3, (byte)0x0E)]
+    [InlineData(new byte[] { 6, 2, 3, 1, 1 }, new byte[] { 1 }, (byte)3, (byte)0x0D)]
+    public void CompactIndexedReaderRejectsInvalidIntegerConvert(
+        byte[] operation, byte[] parameters, byte resultType, byte destinationType)
+        => Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(IndexedScalarOperation(operation, parameters, resultType),
+                parameters.Length, resultTypeSpec: resultType,
+                parameterTypeIds: parameters, thirdTypeCode: destinationType));
+
+    [Theory]
+    [InlineData(new byte[] { 6, 2, 3, 1, 1 }, new byte[] { 2 }, (byte)3)]
+    [InlineData(new byte[] { 6, 2, 2, 2, 1 }, new byte[] { 3 }, (byte)2)]
+    public void CompactIndexedReaderRejectsOptionalIntegerConvert(
+        byte[] operation, byte[] parameters, byte resultType)
+        => Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(IndexedScalarOperation(operation, parameters, resultType),
+                parameters.Length, resultTypeSpec: resultType,
+                parameterTypeIds: parameters, thirdTypeOptional: true));
+
     [Fact]
     public void CompactIndexedReaderRejectsUnsignedCheckedNegate()
     {

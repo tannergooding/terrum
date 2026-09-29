@@ -1232,8 +1232,9 @@ A separate compact-indexed reader checks the approved conditional-sum and
 merge examples and their bounded scalar subset:
 root-free, fail-fast bodies without regions, forward `Branch` and `BranchIf`
 edges with checked typed block arguments, scalar `ConstBits`,
-`ConstSigned`, `Copy`, scalar `Unary`, `Binary`, eager `Select` and checked
-integer arithmetic/shifts, integer `CheckedConvert`, signed `CheckedNegate`,
+`ConstSigned`, `Copy`, scalar `Unary`, `Binary`, integer `Convert`
+(wrapping, saturating and equal-width bit reinterpretation), eager `Select`,
+checked integer arithmetic/shifts, integer `CheckedConvert`, signed `CheckedNegate`,
 dual-result `CheckedDivRem`, `Return` and `Fail`.
 Optional scalar values retain their presence-qualified identity through
 `MakeOptional`, `None`, `IsPresent`, `Copy` and eager `Select`; they are not
