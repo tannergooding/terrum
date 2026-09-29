@@ -1195,10 +1195,10 @@ including unreferenced rows; name/path/key references still validate decoded
 text at their use sites. It checks Blob and Body offset indexes, including
 empty Blob rows, and composes a two-module Import/Export fixture, but does not
 interpret Blob contents or Body instructions. A Blob-table reader exposes
-validated, borrowed row bytes without interpreting them as references or
-requiring nonempty payloads.
-A Body-table reader likewise exposes validated nonempty row bytes without
-decoding instructions or claiming that the Body is executable.
+the validated row count and borrowed row bytes without interpreting them as
+references or requiring nonempty payloads.
+A Body-table reader likewise exposes the validated row count and nonempty row
+bytes without decoding instructions or claiming that the Body is executable.
 SourceMap rows check slots, spans and Body/SourceFile module
 association. A bounded SourceMap writer emits those slots, reuses SourceFile slots
 and rejects duplicate instruction locations; block/ordinal existence still

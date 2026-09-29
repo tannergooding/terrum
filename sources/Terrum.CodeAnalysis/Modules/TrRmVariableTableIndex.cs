@@ -16,6 +16,8 @@ public readonly ref struct TrRmVariableTableIndex
     private readonly int _minimumRowBytes;
     private readonly int _rowAlignment;
 
+    public int Count => _recordCount;
+
     public TrRmVariableTableIndex(ReadOnlySpan<byte> section, int recordCount,
         int minimumRowBytes, int rowAlignment)
     {

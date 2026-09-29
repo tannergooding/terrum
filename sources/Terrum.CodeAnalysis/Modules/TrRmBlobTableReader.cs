@@ -10,6 +10,8 @@ public readonly ref struct TrRmBlobTableReader
 {
     private readonly TrRmVariableTableIndex _rows;
 
+    public int Count => _rows.Count;
+
     public TrRmBlobTableReader(ReadOnlySpan<byte> section, int recordCount)
     {
         _rows = new TrRmVariableTableIndex(section, recordCount, 0, 1);

@@ -19,6 +19,7 @@ public sealed class TrRmVariableTableWriterTests
 
         Assert.Equal(new uint[] { 0, 0, 3 }, Offsets(bytes, 2));
         var reader = new TrRmBlobTableReader(bytes, 2);
+        Assert.Equal(2, reader.Count);
         Assert.True(reader.GetRow(1).IsEmpty);
         Assert.Equal(new byte[] { 1, 2, 3 }, reader.GetRow(2).ToArray());
     }
@@ -30,6 +31,7 @@ public sealed class TrRmVariableTableWriterTests
         var last = new byte[] { 0xFF, 0, 0x16, 0 };
         var section = TrRmVariableTableWriter.EncodeBlobs([first, ReadOnlyMemory<byte>.Empty, last]);
         var reader = new TrRmBlobTableReader(section, 3);
+        Assert.Equal(3, reader.Count);
 
         Assert.Equal(first, reader.GetRow(1).ToArray());
         Assert.True(reader.GetRow(2).IsEmpty);
@@ -73,6 +75,7 @@ public sealed class TrRmVariableTableWriterTests
 
         Assert.Equal(new uint[] { 0, 1, 3 }, Offsets(bytes, 2));
         var reader = new TrRmBodyTableReader(bytes, 2);
+        Assert.Equal(2, reader.Count);
         Assert.Equal(new byte[] { 0xFF }, reader.GetRow(1).ToArray());
         Assert.Equal(new byte[] { 1, 2 }, reader.GetRow(2).ToArray());
         Assert.Throws<InvalidDataException>(() => ReadBody(bytes, 0, 2));

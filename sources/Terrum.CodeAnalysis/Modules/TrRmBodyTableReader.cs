@@ -10,6 +10,8 @@ public readonly ref struct TrRmBodyTableReader
 {
     private readonly TrRmVariableTableIndex _rows;
 
+    public int Count => _rows.Count;
+
     public TrRmBodyTableReader(ReadOnlySpan<byte> section, int recordCount)
     {
         _rows = new TrRmVariableTableIndex(section, recordCount, 1, 1);
