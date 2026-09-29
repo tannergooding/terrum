@@ -144,6 +144,13 @@ props/targets, EditorConfig and public signing key. Actions are explicit:
 `.\pack.cmd` packages an existing build without publishing it. Direct
 `dotnet build Terrum.slnx` and `dotnet test Terrum.slnx` remain supported.
 See [build infrastructure](docs/building.md) for the few Terrum-specific changes.
+On Windows, building the full solution or `sources\terrumc\terrumc.csproj`
+also compiles the maintained `CharacterFacts`, `SourceRange` and `Token`
+sources into a native compiler-primitives DLL at
+`artifacts\bin\self-host\<configuration>\terrum-compiler-primitives.dll`.
+The incremental build skips regeneration when its inputs are unchanged. This
+native compiler-primitives companion is a library, not a self-host compiler or
+an executable scanner/parser.
 
 Outputs go to `artifacts\bin\<category>\<project>\<configuration>\<framework>`,
 intermediates to `artifacts\obj`, binary logs to `artifacts\log`, test results

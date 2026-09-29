@@ -3,6 +3,12 @@
 These files are parallel design candidates, not a bootstrapped compiler.
 They are not linked into the C# implementation. The native profile executes
 the range, character, integer and nested token components and a bounded token scanner.
+The full-solution build also produces
+`artifacts\bin\self-host\<configuration>\terrum-compiler-primitives.dll`
+from `CharacterFacts`, `SourceRange` and `Token`. This maintained native
+compiler-primitives library exports `Terrum.CodeAnalysis.IsAsciiDigit`,
+`Terrum.CodeAnalysis.IsLineBreak` and `Terrum.CodeAnalysis.GetDecimalDigit`;
+it is not a self-host compiler or an executable scanner/parser.
 The host test runner remains C#, even when it compiles and executes a candidate.
 The host parser's current language version is syntax-27. Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle

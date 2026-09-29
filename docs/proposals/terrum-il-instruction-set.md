@@ -22,8 +22,12 @@ operations and one terminator; each normal edge supplies its successor's
 parameters. Checked operations and potentially failing calls do not end a
 block merely because they can fail. They define their result at their
 operation site on success; failure terminates or unwinds under the selected
-runtime policy, without a normal edge. Explicit branches, returns, failures
-and region exits determine normal CFG boundaries.
+runtime policy, without a normal edge or a normal successor. Normal block
+boundaries are the method entry and explicit normal branch or transfer
+targets, including merge and backedge targets; branch, return, failure and
+region-exit terminators end their current block. A value definition or
+liveness change does not create a block. An optional unsafe catch requires
+separately specified exceptional state and handler rules.
 A **value ID** denotes an immutable typed definition. A **place** denotes
 addressable storage with separate initialization, mutability and ownership
 state; loading a value is distinct from borrowing or moving its place. A
@@ -224,8 +228,12 @@ not executable in **any** form.
 
 **Compact indexed** supports multiple normal blocks, including valid
 loop regions, when all parameters and results are root-free Copy values
-and no place inventory is required. It retains the direct definition,
-boundary and final-use information needed to prune an inlinable arm.
+and no place inventory is required. Here, root-free is a property of the
+complete value type and its contract; by-value and `Copy` alone do not
+prove it. This shape constraint does not supply method-level effects or
+per-safepoint roots for operations that can call or safepoint.
+It retains the direct definition, boundary and final-use information needed
+to prune an inlinable arm.
 Its row after `bodyLayout` has, in order:
 
 | Field | Compact indexed encoding |
@@ -270,7 +278,7 @@ representable. The common one-block target includes such methods when
 their selected calls, access paths, roots and effects have a complete
 compact contract, not by dropping any of those facts.
 
-These two assigned encodings are *candidates*, not a measured
+These two specified encodings are *candidates*, not a measured
 canonical writer choice. Prefer testing compact linear for eligible
 single blocks, which need one operation scan anyway. For two or three
 small blocks, compare compact indexed against an unassigned
@@ -926,6 +934,11 @@ owner/layout prefix but the distinct field sequences specified
 | `blockOffsets` | `u32[blockCount + 1]` little-endian | Relative to the following block-data start |
 | `terminatorOffsets` | `u32[blockCount]` little-endian | Each relative to its own block start; points directly to its terminator opcode or width prefix |
 | `blockData` | `blockOffsets[last]` bytes | One block per consecutive offset extent |
+
+The upfront value/place counts and descriptors are a pre-scan inventory of
+logical value IDs and addressable places, with their Body types and place
+metadata; they do not allocate native stack slots or assign JIT locations.
+A backend chooses physical locations during lowering.
 
 Body-layout width codes 0, 1 and 2 mean local widths of 1, 2 and 4 bytes;
 code 3 rejects. In the general form this width sizes all five counts,
