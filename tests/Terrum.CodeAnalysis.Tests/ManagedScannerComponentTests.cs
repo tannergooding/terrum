@@ -706,19 +706,24 @@ public sealed class ManagedScannerComponentTests
     [InlineData("int64(0x8000_0000_0000_0000) < int64(0)", true, true)]
     [InlineData("uint64(18446744073709551615) > uint64(0)", true, true)]
     [InlineData("int64(0xFFFF_FFFF_FFFF_FFFF) == int64(0)", true, false)]
+    [InlineData("char16(65535) > char16(1)", true, true)]
+    [InlineData("char16(0xFFFF) <= char16(65535)", true, true)]
+    [InlineData("char16(0) != char16(0)", true, false)]
     [InlineData("int32(2147483648) == int32(0)", false, false)]
     [InlineData("uint32(4294967296) == uint32(0)", false, false)]
     [InlineData("int64(9223372036854775808) < int64(0)", false, false)]
     [InlineData("uint64(18446744073709551616) > uint64(0)", false, false)]
+    [InlineData("char16(65536) > char16(0)", false, false)]
+    [InlineData("char16(1) < uint32(2)", false, false)]
     [InlineData("int32(1) < int64(2)", false, false)]
     [InlineData("int32(1) + int32(2)", false, false)]
-    public async Task BoundedNativeTypedIntegerComparisonUsesOwnedRecordsAsync(
+    public async Task BoundedNativeTypedScalarComparisonUsesOwnedRecordsAsync(
         string expression, bool evaluable, bool expected)
     {
         var text = $"bool Value() {{ return {expression}; }}";
         var assertion = evaluable
             ? $$"""
-                require TryEvaluateTypedIntegerComparisonReturn(move tokens, move integers,
+                require TryEvaluateTypedScalarComparisonReturn(move tokens, move integers,
                     out var name, out var bound);
                 if (name.Start != 5 || name.Length != 5 || bound != {{(expected ? "true" : "false")}})
                 {
@@ -726,7 +731,7 @@ public sealed class ManagedScannerComponentTests
                 }
                 """
             : """
-                if (TryEvaluateTypedIntegerComparisonReturn(move tokens, move integers,
+                if (TryEvaluateTypedScalarComparisonReturn(move tokens, move integers,
                     out var name, out var bound))
                 {
                     return 1;

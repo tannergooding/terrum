@@ -2,7 +2,7 @@ namespace Terrum.CodeAnalysis;
 
 // This bounded syntax-27 probe uses scanner-5 TokenKind ordinals, not source characters
 // to classify punctuation; the host parser's recovery remains a separate phase.
-// Scalar type codes: 1=int32, 2=uint32, 3=int64, 4=uint64, 5=bool.
+// Scalar type codes: 1=int32, 2=uint32, 3=int64, 4=uint64, 5=bool, 6=char16.
 bool TryGetScalarType(Token type, out int32 scalarType)
 {
     if (type.Kind != 2)
@@ -44,6 +44,13 @@ bool TryGetScalarType(Token type, out int32 scalarType)
             selected = 4;
         }
     }
+    else if (type.Range.Length == 6 && Host.Source[at] == char16(99)
+        && Host.Source[at + 1] == char16(104) && Host.Source[at + 2] == char16(97)
+        && Host.Source[at + 3] == char16(114) && Host.Source[at + 4] == char16(49)
+        && Host.Source[at + 5] == char16(54))
+    {
+        selected = 6;
+    }
     if (selected == 0)
     {
         return false;
@@ -62,7 +69,7 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     }
 
     require tokens.TryGet(0, out var type);
-    if (!TryGetScalarType(type, out var selected))
+    if (!TryGetScalarType(type, out var selected) || selected == 6)
     {
         return false;
     }
@@ -569,7 +576,7 @@ bool TryParseScalarBinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
         return false;
     }
     require tokens.TryGet(0, out var type);
-    if (!TryGetScalarType(type, out var selected) || selected == 5)
+    if (!TryGetScalarType(type, out var selected) || selected == 5 || selected == 6)
     {
         return false;
     }
@@ -612,7 +619,7 @@ bool TryParseScalarBinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
     return true;
 }
 
-bool TryEvaluateTypedIntegerComparisonReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+bool TryEvaluateTypedScalarComparisonReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     out SourceRange name, out bool result)
 {
     if (tokens.GetCount() != 18)
@@ -674,6 +681,15 @@ bool TryEvaluateTypedIntegerComparisonReturn(TokenSnapshot tokens, TokenIntegerS
     else if (selected == 2)
     {
         if (leftHigh != 0 || rightHigh != 0)
+        {
+            return false;
+        }
+    }
+    else if (selected == 6)
+    {
+        if (leftHigh != 0 || rightHigh != 0
+            || leftLow < 0 || rightLow < 0
+            || leftLow > 65535 || rightLow > 65535)
         {
             return false;
         }
