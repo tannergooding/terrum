@@ -420,6 +420,25 @@ mut class ScalarFrontendState
             {
                 return false;
             }
+            if (!negative && expectedType >= 1 && expectedType <= 2
+                && _tokens.TryGet(_at, out var pairOperator)
+                && ((pairOperator.Kind >= 57 && pairOperator.Kind <= 61)
+                    || pairOperator.Kind == 71 || pairOperator.Kind == 73 || pairOperator.Kind == 75)
+                && _tokens.TryGet(_at + 1, out var secondLiteral) && secondLiteral.Kind == 3)
+            {
+                _at = _at + 2;
+                if (!TryReadMagnitude(secondLiteral, _at - 1, expectedType, false,
+                    secondLiteral.Range, out var secondLow, out var secondHigh))
+                {
+                    return false;
+                }
+                require SourceRange.TryCreate(literal.Range.Start,
+                    secondLiteral.Range.End - literal.Range.Start, out var pairSpan);
+                require ScalarFrontendExpression.TryCreate(expectedType,
+                    pairOperator.Kind + 500, low, secondLow, pairSpan, out var foldedPair);
+                expression = foldedPair;
+                return true;
+            }
             if (!negative && _tokens.TryGet(_at, out var next)
                 && ((next.Kind >= 57 && next.Kind <= 61)
                     || next.Kind == 71 || next.Kind == 73 || next.Kind == 75))

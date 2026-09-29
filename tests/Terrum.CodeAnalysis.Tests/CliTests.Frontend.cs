@@ -23,6 +23,10 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return ((42)); }", 42)]
     [InlineData("int32 Main() { if (!false) { return 42; } else { return 0; } }", 42)]
     [InlineData("int32 Main() { return 0; }", 0)]
+    [InlineData("int32 Main() { return 20 + 22; }", 42)]
+    [InlineData("int32 Main() { return 84 / 2; }", 42)]
+    [InlineData("int32 Main() { return 0x2A & 0x3F; }", 42)]
+    [InlineData("int32 Main() { return 40 ^ 2; }", 42)]
     public async Task FrontendRunMatchesHostedJitAsync(string source, int expected)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -66,6 +70,14 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return -0xFFFFFFD6; }")]
     [InlineData("int32 Main() { return ((42)); }")]
     [InlineData("int32 Main() { if (!false) { return 42; } else { return 0; } }")]
+    [InlineData("int32 Main() { return 20 + 22; }")]
+    [InlineData("int32 Main() { return 6 * 7; }")]
+    [InlineData("int32 Main() { return 84 / 2; }")]
+    [InlineData("int32 Main() { return 85 % 43; }")]
+    [InlineData("int32 Main() { return 0x2A & 0x3F; }")]
+    [InlineData("int32 Main() { return 0 | 42; }")]
+    [InlineData("int32 Main() { return 40 ^ 2; }")]
+    [InlineData("int32 Main() { return 50 - 8; }")]
     public async Task FrontendBuiltExecutableMatchesHostedAndRunsAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -225,6 +237,10 @@ public sealed partial class CliTests
     [InlineData("public uint32 Value(uint32 x) { return +x; }")]
     [InlineData("public int64 Value(int64 x) { return +x; }")]
     [InlineData("public uint64 Value(uint64 x) { return +x; }")]
+    [InlineData("public int32 Value() { return 20 + 22; }")]
+    [InlineData("public uint32 Value() { return 0xFFFFFFFF & 42; }")]
+    [InlineData("public int32 Value() { return 84 / 2; }")]
+    [InlineData("public uint32 Value() { return 0b101010 ^ 0; }")]
     public async Task FrontendBuiltLibraryMatchesHostedNativeBytesAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -446,6 +462,7 @@ public sealed partial class CliTests
     [InlineData("uint32 Value(uint32 x) { return x & 4294967296; }", "4294967296")]
     [InlineData("uint32 Value(uint32 x) { return 4294967296 | x; }", "4294967296")]
     [InlineData("int32 Value() { return ~2147483648; }", "2147483648")]
+    [InlineData("int32 Value() { return 1 + 2147483648; }", "2147483648")]
     public async Task FrontendComponentRejectsOutOfRangeBinaryLiteralAsync(string source,
         string invalidLiteral)
     {
