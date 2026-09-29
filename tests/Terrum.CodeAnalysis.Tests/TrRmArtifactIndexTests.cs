@@ -291,6 +291,29 @@ public sealed class TrRmArtifactIndexTests
                 [new TrRmReferenceSlot(0x0001, 0, 1, 0, 0)]));
     }
 
+    [Fact]
+    public void InsertsSlottedExtensionWithoutMutatingExistingArtifact()
+    {
+        var baseArtifact = MinimalArtifact();
+        var framed = WithReferenceSlottedExtension();
+        var existing = new TrRmArtifactIndex(framed);
+        Assert.True(existing.TryGetSection(0x8000, out var payload, out var count));
+        var section = new TrRmSection(0x8000, 2, (uint)count, payload.ToArray());
+        Assert.Equal(framed, TrRmOptionalSectionSlots.InsertInArtifact(baseArtifact, section));
+        Assert.Equal(2u, BinaryPrimitives.ReadUInt32LittleEndian(baseArtifact.AsSpan(12)));
+
+        Assert.Throws<ArgumentException>(() =>
+            TrRmOptionalSectionSlots.InsertInArtifact(framed, section));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmOptionalSectionSlots.InsertInArtifact(baseArtifact,
+                TrRmOptionalSectionSlots.Replace(section,
+                    [new TrRmReferenceSlot(0x0002, 0, 2, 0, 0)])));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmOptionalSectionSlots.InsertInArtifact(baseArtifact, section with { Flags = 1 }));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmOptionalSectionSlots.InsertInArtifact(baseArtifact[..^1], section));
+    }
+
     [Theory]
     [InlineData((ushort)1)]
     [InlineData((ushort)3)]

@@ -15,6 +15,20 @@ public readonly record struct TrRmReferenceSlot(
 /// that relocated Body instruction references retain their meaning.</remarks>
 public static class TrRmOptionalSectionSlots
 {
+    public static byte[] InsertInArtifact(ReadOnlySpan<byte> artifact, TrRmSection extension)
+    {
+        if (extension.Kind < 0x8000 || extension.Flags != 2)
+        {
+            throw InvalidSlots();
+        }
+
+        var index = new TrRmArtifactIndex(artifact);
+        var sections = CopySections(index, 1);
+        sections[^1] = extension;
+        Array.Sort(sections, static (left, right) => left.Kind.CompareTo(right.Kind));
+        return TrRmArtifactWriter.Encode(sections);
+    }
+
     public static byte[] ReplaceInArtifact(ReadOnlySpan<byte> artifact, ushort kind,
         IReadOnlyList<TrRmReferenceSlot> slots)
     {
@@ -25,18 +39,15 @@ public static class TrRmOptionalSectionSlots
         }
 
         var index = new TrRmArtifactIndex(artifact);
-        var sections = new TrRmSection[index.SectionCount];
+        var sections = CopySections(index, 0);
         var found = false;
         for (var entry = 0; entry < sections.Length; entry++)
         {
-            index.GetSection(entry, out var currentKind, out var flags, out var bytes, out var count);
-            var section = new TrRmSection(currentKind, flags, (uint)count, bytes.ToArray());
-            if (currentKind == kind)
+            if (sections[entry].Kind == kind)
             {
-                section = Replace(section, slots);
+                sections[entry] = Replace(sections[entry], slots);
                 found = true;
             }
-            sections[entry] = section;
         }
 
         if (!found)
@@ -45,6 +56,17 @@ public static class TrRmOptionalSectionSlots
         }
 
         return TrRmArtifactWriter.Encode(sections);
+    }
+
+    private static TrRmSection[] CopySections(TrRmArtifactIndex index, int additional)
+    {
+        var sections = new TrRmSection[index.SectionCount + additional];
+        for (var entry = 0; entry < index.SectionCount; entry++)
+        {
+            index.GetSection(entry, out var kind, out var flags, out var bytes, out var count);
+            sections[entry] = new TrRmSection(kind, flags, (uint)count, bytes.ToArray());
+        }
+        return sections;
     }
 
     public static TrRmSection Replace(TrRmSection section, IReadOnlyList<TrRmReferenceSlot> slots)
