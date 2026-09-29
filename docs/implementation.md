@@ -1228,6 +1228,14 @@ structural command remains Body-opaque. When SourceMap is present, the opt-in
 check also verifies that each instruction slot addresses the inferred sole
 block and an existing operation or its terminator; it does not verify
 source-file contents.
+A separate compact-indexed reader checks the approved conditional-sum
+example and its bounded scalar subset: root-free, fail-fast bodies without
+regions, forward `BranchIf` edges without arguments, unprefixed checked
+integer add,
+`Return` and `Fail`. It checks type/definition/use indexes, operation and
+terminator offsets and live-in/out inventories against the decoded blocks.
+It rejects other assigned indexed operations, backedges and merge arguments;
+it is not yet part of either CLI validator or an executable Body verifier.
 SourceMap rows check slots, spans and Body/SourceFile module
 association. A bounded SourceMap writer emits those slots, reuses SourceFile slots
 and rejects duplicate instruction locations; block/ordinal existence still

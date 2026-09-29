@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using System.Text.RegularExpressions;
+using Terrum.CodeAnalysis.Modules;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -461,6 +462,112 @@ public sealed class TrRmBodyExampleTests
                 : blockId == 2 ? new byte[] { 0x83, 4 }
                 : new byte[] { 0x83, 2 }, block[cursor..].ToArray());
         }
+    }
+
+    [Fact]
+    public void CompactIndexedReaderInspectsConditionalAdd()
+    {
+        var section = ReadExample("#### Compact indexed conditional sum");
+        Assert.Equal((3, 4), InspectIndexed(section));
+    }
+
+    [Theory]
+    [InlineData(24, 1)]
+    [InlineData(36, 13)]
+    [InlineData(41, 11)]
+    [InlineData(44, 0x3A)]
+    [InlineData(58, 1)]
+    [InlineData(60, 2)]
+    [InlineData(77, 4)]
+    [InlineData(76, 2)]
+    public void CompactIndexedReaderRejectsInvalidIndexesAndEdges(int offset, byte value)
+    {
+        var section = ReadExample("#### Compact indexed conditional sum");
+        section[offset] = value;
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(section));
+    }
+
+    [Fact]
+    public void CompactIndexedReaderBoundsMutatedAndTruncatedRows()
+    {
+        var example = ReadExample("#### Compact indexed conditional sum");
+        for (var length = 8; length < example.Length; length++)
+        {
+            var section = example[..length];
+            BinaryPrimitives.WriteUInt32LittleEndian(section.AsSpan(4), (uint)(length - 8));
+            Assert.Throws<InvalidDataException>(() => InspectIndexed(section));
+        }
+
+        for (var offset = 8; offset < example.Length; offset++)
+        {
+            var section = (byte[])example.Clone();
+            section[offset] = 0xFF;
+            try
+            {
+                _ = InspectIndexed(section);
+            }
+            catch (InvalidDataException)
+            {
+            }
+        }
+    }
+
+    [Fact]
+    public void CompactIndexedReaderAllowsValueFreeFailureWithNonvoidSignature()
+    {
+        byte[] section =
+        [
+            0, 0, 0, 0, 14, 0, 0, 0,
+            0x08, 1, 0, 0, 0, 0, 0, 0, 4, 2, 0, 0, 0x87, 1,
+        ];
+        Assert.Equal((1, 0), InspectIndexed(section, 0));
+    }
+
+    private static (int Blocks, int Values) InspectIndexed(byte[] section, int parameterCount = 3)
+    {
+        var names = new TrRmStringTableReader(
+            TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]), 2);
+        var module = new byte[44];
+        foreach (var offset in new[] { 0, 4, 28, 32, 36, 40 })
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
+        }
+
+        var modules = new TrRmModuleTableReader(module, 1, names, 0, 0, 1, 0);
+        var defs = new TrRmTypeDefTableReader([], 0, names, modules, 0, 0, 0, 0);
+        byte[] typeBytes =
+        [
+            0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0,
+            1, 0, 1, 1, 0, 8,
+        ];
+        var types = new TrRmTypeSpecTableReader(typeBytes, 2, 0, 0, 0, 0);
+        var signature = new byte[24];
+        BinaryPrimitives.WriteUInt32LittleEndian(signature, 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(signature.AsSpan(8), parameterCount == 0 ? 0u : 1u);
+        BinaryPrimitives.WriteUInt32LittleEndian(signature.AsSpan(12), (uint)parameterCount);
+        var signatures = new TrRmMethodSigTableReader(signature, 1, types, parameterCount, 0);
+        var paramBytes = new byte[parameterCount * 16];
+        for (var index = 0; index < parameterCount; index++)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(paramBytes.AsSpan(index * 16), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(paramBytes.AsSpan(index * 16 + 4), (uint)index);
+            BinaryPrimitives.WriteUInt32LittleEndian(paramBytes.AsSpan(index * 16 + 8),
+                index == 0 ? 1u : 2u);
+        }
+
+        var parameters = parameterCount == 0 ? default
+            : new TrRmParamTableReader(paramBytes, parameterCount, signatures, types);
+        var method = new byte[28];
+        BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(4), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(12), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(24), 1);
+        var methods = new TrRmMethodDefTableReader(method, 1,
+            names, modules, defs, signatures, 0, 1);
+        var bodies = new TrRmBodyTableReader(section, 1);
+        var reader = new TrRmCompactIndexedBodyReader(bodies, 1, modules,
+            methods, signatures, parameters, types);
+        return (reader.BlockCount, reader.ValueCount);
     }
 
     private static byte[] ReadExample(string heading)
