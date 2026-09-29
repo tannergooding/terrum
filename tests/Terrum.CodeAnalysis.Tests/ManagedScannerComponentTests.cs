@@ -484,6 +484,48 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("int32 Answer() { return 42; }", true, 42, 0)]
+    [InlineData("int32 Answer() { return -42; }", true, 42, 0)]
+    [InlineData("int32 Answer() { return 0xFFFF_FFFF; }", true, -1, 0)]
+    [InlineData("int32 Answer() { return 18446744073709551616; }", false, 0, 0)]
+    [InlineData("int32 Answer() { return 1.5; }", false, 0, 0)]
+    [InlineData("int32 Answer() { return (42); }", false, 0, 0)]
+    public async Task BoundedParserSelectsOwnedIntegerRecordsAsync(
+        string text, bool accepted, int low, int high)
+    {
+        var hosted = SyntaxTree.Parse(text);
+        var name = hosted.Tokens[1].Span;
+        var result = hosted.Root.DescendantNodes().Single(node => node.Kind == SyntaxKind.ReturnStatement);
+        var expression = ((SyntaxNode)result.Children[1]).Span;
+        var assertion = accepted
+            ? FormattableString.Invariant($$"""
+                require TryParseScalarReturnInteger(move tokens, move integers,
+                    out var name, out var expression, out var low, out var high);
+                if (name.Start != {{name.Start}} || name.Length != {{name.Length}}
+                    || expression.Start != {{expression.Start}} || expression.Length != {{expression.Length}}
+                    || low != {{low}} || high != {{high}}) { return 1; }
+                """)
+            : """
+                if (TryParseScalarReturnInteger(move tokens, move integers,
+                    out var name, out var expression, out var low, out var high)) { return 1; }
+                """;
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                {{assertion}}
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("alpha 42 // trailing\r\n\uD801\uDC00")]
     public async Task CursorReadsPublishedTokensAndStopsAtEndAsync(string text)
