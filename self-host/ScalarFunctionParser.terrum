@@ -586,7 +586,8 @@ bool TryParseScalarBinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
     require tokens.TryGet(11, out var eof);
     if (function.Kind != 2 || openParameters.Kind != 46 || closeParameters.Kind != 47
         || openBody.Kind != 48 || returnKeyword.Kind != 19
-        || left.Kind != 3 || (binary.Kind < 57 || binary.Kind > 61)
+        || left.Kind != 3 || ((binary.Kind < 57 || binary.Kind > 61)
+            && binary.Kind != 71 && binary.Kind != 73 && binary.Kind != 75)
         || right.Kind != 3
         || semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0)
     {
@@ -641,6 +642,24 @@ bool TryEvaluateInt32RemainderReturn(TokenSnapshot tokens, TokenIntegerSnapshot 
     return TryEvaluateInt32BinaryReturn(move tokens, move integers, 61, out name, out result);
 }
 
+bool TryEvaluateInt32AndReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int32 result)
+{
+    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 71, out name, out result);
+}
+
+bool TryEvaluateInt32OrReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int32 result)
+{
+    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 73, out name, out result);
+}
+
+bool TryEvaluateInt32XorReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int32 result)
+{
+    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 75, out name, out result);
+}
+
 bool TryEvaluateInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     int32 expectedOperation, out SourceRange name, out int32 result)
 {
@@ -688,6 +707,18 @@ bool TryEvaluateInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
             value = int64(leftLow) % int64(rightLow);
         }
     }
+    if (operation == 71)
+    {
+        value = int64(leftLow & rightLow);
+    }
+    if (operation == 73)
+    {
+        value = int64(leftLow | rightLow);
+    }
+    if (operation == 75)
+    {
+        value = int64(leftLow ^ rightLow);
+    }
     if (value < int64(int32.MinValue) || value > int64(int32.MaxValue))
     {
         return false;
@@ -728,6 +759,24 @@ bool TryEvaluateUInt32RemainderReturn(TokenSnapshot tokens, TokenIntegerSnapshot
     return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 61, out name, out result);
 }
 
+bool TryEvaluateUInt32AndReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint32 result)
+{
+    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 71, out name, out result);
+}
+
+bool TryEvaluateUInt32OrReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint32 result)
+{
+    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 73, out name, out result);
+}
+
+bool TryEvaluateUInt32XorReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint32 result)
+{
+    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 75, out name, out result);
+}
+
 bool TryEvaluateUInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     int32 expectedOperation, out SourceRange name, out uint32 result)
 {
@@ -742,6 +791,23 @@ bool TryEvaluateUInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
     }
     uint64 left = DecodeScannerMagnitude(leftLow, leftHigh);
     uint64 right = DecodeScannerMagnitude(rightLow, rightHigh);
+    if (operation == 71 || operation == 73 || operation == 75)
+    {
+        name = foundName;
+        if (operation == 71)
+        {
+            result = uint32(left & right);
+        }
+        else if (operation == 73)
+        {
+            result = uint32(left | right);
+        }
+        else
+        {
+            result = uint32(left ^ right);
+        }
+        return true;
+    }
     if (operation == 60 || operation == 61)
     {
         if (right == 0)
@@ -814,6 +880,24 @@ bool TryEvaluateInt64RemainderReturn(TokenSnapshot tokens, TokenIntegerSnapshot 
     return TryEvaluateInt64BinaryReturn(move tokens, move integers, 61, out name, out result);
 }
 
+bool TryEvaluateInt64AndReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int64 result)
+{
+    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 71, out name, out result);
+}
+
+bool TryEvaluateInt64OrReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int64 result)
+{
+    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 73, out name, out result);
+}
+
+bool TryEvaluateInt64XorReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int64 result)
+{
+    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 75, out name, out result);
+}
+
 bool TryEvaluateInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     int32 expectedOperation, out SourceRange name, out int64 result)
 {
@@ -830,6 +914,23 @@ bool TryEvaluateInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
         return false;
     }
 
+    if (operation == 71 || operation == 73 || operation == 75)
+    {
+        name = foundName;
+        if (operation == 71)
+        {
+            result = left & right;
+        }
+        else if (operation == 73)
+        {
+            result = left | right;
+        }
+        else
+        {
+            result = left ^ right;
+        }
+        return true;
+    }
     if (operation == 60 || operation == 61)
     {
         if (right == 0)
@@ -921,6 +1022,24 @@ bool TryEvaluateUInt64RemainderReturn(TokenSnapshot tokens, TokenIntegerSnapshot
     return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 61, out name, out result);
 }
 
+bool TryEvaluateUInt64AndReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint64 result)
+{
+    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 71, out name, out result);
+}
+
+bool TryEvaluateUInt64OrReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint64 result)
+{
+    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 73, out name, out result);
+}
+
+bool TryEvaluateUInt64XorReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint64 result)
+{
+    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 75, out name, out result);
+}
+
 bool TryEvaluateUInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     int32 expectedOperation, out SourceRange name, out uint64 result)
 {
@@ -934,6 +1053,23 @@ bool TryEvaluateUInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
     }
     uint64 left = DecodeScannerMagnitude(leftLow, leftHigh);
     uint64 right = DecodeScannerMagnitude(rightLow, rightHigh);
+    if (operation == 71 || operation == 73 || operation == 75)
+    {
+        name = foundName;
+        if (operation == 71)
+        {
+            result = left & right;
+        }
+        else if (operation == 73)
+        {
+            result = left | right;
+        }
+        else
+        {
+            result = left ^ right;
+        }
+        return true;
+    }
     if (operation == 60 || operation == 61)
     {
         if (right == 0)
