@@ -2909,6 +2909,66 @@ public sealed class ManagedScannerComponentTests
         await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
     }
 
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return x >= 42; }",
+        PrimitiveType.Int32, 42L, 170)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return x >= 42; }",
+        PrimitiveType.Int32, 42L, 170)]
+    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return 42 < x; }",
+        PrimitiveType.Int32, 43L, 367)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return 42 < x; }",
+        PrimitiveType.Int32, 43L, 367)]
+    [InlineData(NativeRuntimePolicy.FailFast,
+        "bool Value(uint64 x) { return x == 18446744073709551615; }",
+        PrimitiveType.UInt64, -1L, 165)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions,
+        "bool Value(uint64 x) { return x == 18446744073709551615; }",
+        PrimitiveType.UInt64, -1L, 165)]
+    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(char16 x) { return x != 0xFFFF; }",
+        PrimitiveType.Char16, 1L, 166)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(char16 x) { return x != 0xFFFF; }",
+        PrimitiveType.Char16, 1L, 166)]
+    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(char16 x) { return 0xFFFF != x; }",
+        PrimitiveType.Char16, 1L, 366)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(char16 x) { return 0xFFFF != x; }",
+        PrimitiveType.Char16, 1L, 366)]
+    public async Task NativeScalarFrontendLiteralComparisonExecutesAsync(
+        NativeRuntimePolicy policy, string text, PrimitiveType parameterType, long argument,
+        int operation)
+    {
+        var source = SourceText.From(text);
+        var stage = await CompileAsync(text,
+            "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+            (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
+        var native = NativeJit.ExecuteWithData(stage, policy);
+        Assert.Equal(42, native.ExitCode);
+        var bytes = native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+            ScalarFrontendHost.WordCount * sizeof(int)).ToArray();
+        Assert.Equal(operation, ScalarFrontendHost.ReadResult(source, bytes).WhenTrue.Operation);
+        foreach (var word in new[] { 22, 23, 24, 25 })
+        {
+            var offset = word * sizeof(int);
+            var original = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original ^ 1);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), original);
+        }
+        var library = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
+        var call = new BoundCall(0, [new BoundConstant(argument, parameterType, default)],
+            PrimitiveType.Bool, default);
+        var branch = new BoundIf(call,
+            new BoundBlock([new BoundReturn(new BoundConstant(42, PrimitiveType.Int32, default),
+                default)], default),
+            new BoundBlock([new BoundReturn(new BoundConstant(0, PrimitiveType.Int32, default),
+                default)], default), default);
+        var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
+            new BoundBlock([branch], default), default);
+        var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
+        SemanticVerifier.Verify(executable);
+        Assert.Equal(42, NativeJit.Execute(executable, policy));
+        await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
+    }
+
     private static Task<BoundProgram> CompilePairParserAsync(string text, string entry, BoundRuntimePolicy policy) =>
         CompileAsync(text, entry, policy, "ScalarParameterPairParser");
 

@@ -210,6 +210,24 @@ mut class ScalarFrontendState
         return true;
     }
 
+    private mut bool TryResolveParameter(Token token, out int32 index, out int32 type)
+    {
+        if (_parameterCount > 0 && SameTokenSpelling(_first, token))
+        {
+            index = 1;
+            type = _firstType;
+            return true;
+        }
+        if (_parameterCount > 1 && SameTokenSpelling(_second, token))
+        {
+            index = 2;
+            type = _secondType;
+            return true;
+        }
+        FailAt(3, token.Range);
+        return false;
+    }
+
     private mut bool ParseExpression(int32 expectedType, out ScalarFrontendExpression expression)
     {
         mut int32 depth = 0;
@@ -304,6 +322,29 @@ mut class ScalarFrontendState
                 tokenIndex = tokenIndex + 1;
             }
             _at = tokenIndex + 1;
+            require _tokens.TryGet(_at, out var following);
+            if (!negative && expectedType == 5
+                && following.Kind >= 65 && following.Kind <= 70)
+            {
+                _at = _at + 1;
+                if (!Take(2, out var right)
+                    || !TryResolveParameter(right, out var parameter, out var parameterType))
+                {
+                    return false;
+                }
+                if (!TryReadMagnitude(numberToken, tokenIndex, parameterType, false,
+                    numberToken.Range, out var low, out var high))
+                {
+                    return false;
+                }
+                require SourceRange.TryCreate(literal.Range.Start,
+                    right.Range.End - literal.Range.Start, out var comparisonSpan);
+                require ScalarFrontendExpression.TryCreate(5,
+                    following.Kind + (parameter + 2) * 100, low, high,
+                    comparisonSpan, out var comparison);
+                expression = comparison;
+                return true;
+            }
             require SourceRange.TryCreate(literal.Range.Start,
                 numberToken.Range.End - literal.Range.Start, out var numberSpan);
             if (!TryReadMagnitude(numberToken, tokenIndex, expectedType, negative,
@@ -320,21 +361,8 @@ mut class ScalarFrontendState
                 {
                     return false;
                 }
-                mut int32 parameter = 0;
-                mut int32 parameterType = 0;
-                if (_parameterCount > 0 && SameTokenSpelling(_first, right))
+                if (!TryResolveParameter(right, out var parameter, out var parameterType))
                 {
-                    parameter = 1;
-                    parameterType = _firstType;
-                }
-                else if (_parameterCount > 1 && SameTokenSpelling(_second, right))
-                {
-                    parameter = 2;
-                    parameterType = _secondType;
-                }
-                if (parameter == 0)
-                {
-                    FailAt(3, right.Range);
                     return false;
                 }
                 if (parameterType != expectedType)
@@ -393,7 +421,8 @@ mut class ScalarFrontendState
         {
             operation = next.Kind;
             _at = _at + 1;
-            if ((operation == 57 || operation == 58)
+            if ((operation == 57 || operation == 58
+                || (operation >= 65 && operation <= 70))
                 && _tokens.TryGet(_at, out var literalRight) && literalRight.Kind == 3)
             {
                 int32 index = _at;
@@ -405,7 +434,12 @@ mut class ScalarFrontendState
                 }
                 require SourceRange.TryCreate(left.Range.Start,
                     literalRight.Range.End - left.Range.Start, out var literalSpan);
-                require ScalarFrontendExpression.TryCreate(selected,
+                mut int32 resultType = selected;
+                if (operation >= 65)
+                {
+                    resultType = 5;
+                }
+                require ScalarFrontendExpression.TryCreate(resultType,
                     operation + leftIndex * 100, low, high, literalSpan, out var withLiteral);
                 expression = withLiteral;
                 return true;

@@ -169,14 +169,19 @@ public static class ScalarFrontendHost
                     && tokens[1].Kind == TokenKind.Identifier
                     && tokens[1].Text == source.Text.Substring(name.Start, name.Length);
             }
-            if (operation is 157 or 158 or 257 or 258 or 357 or 358 or 457 or 458)
+            if (operation / 100 is >= 1 and <= 4
+                && operation % 100 is 57 or 58 or >= 65 and <= 70)
             {
                 var literalFirst = operation >= 300;
                 var parameter = operation / 100 - (literalFirst ? 2 : 0);
                 var numberIndex = literalFirst ? 0 : 2;
                 var nameIndex = literalFirst ? 2 : 0;
-                if (words[0] != 3 || expression.Type != type || type is not (1 or 2 or 3 or 4)
-                    || parameter > parameters || (parameter == 1 ? words[7] : words[8]) != type
+                var parameterType = parameter == 1 ? words[7] : words[8];
+                var comparison = operation % 100 >= 65;
+                if (words[0] != 3 || expression.Type != type
+                    || (comparison ? type != 5 || parameterType is not (1 or 2 or 3 or 4 or 6)
+                        : type != parameterType || parameterType is not (1 or 2 or 3 or 4))
+                    || parameter > parameters
                     || !ValidSpan(expression.Span, nonempty: true))
                 {
                     return false;
@@ -192,7 +197,8 @@ public static class ScalarFrontendHost
                     && tokens[1].Kind == (TokenKind)(operation % 100)
                     && tokens[numberIndex].Kind == TokenKind.NumericLiteral
                     && tokens[2].Span.End == text.Length
-                    && ValidMagnitude(tokens[numberIndex].Text.AsSpan(), type, false, left, right);
+                    && ValidMagnitude(tokens[numberIndex].Text.AsSpan(),
+                        parameterType, false, left, right);
             }
             if (operation == 3)
             {
@@ -385,7 +391,8 @@ public static class ScalarFrontendHost
                 return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Bang, operand,
                     PrimitiveType.Bool, expression.Span));
             }
-            if (expression.Operation is 157 or 158 or 257 or 258 or 357 or 358 or 457 or 458)
+            if (expression.Operation / 100 is >= 1 and <= 4
+                && expression.Operation % 100 is 57 or 58 or >= 65 and <= 70)
             {
                 var literalFirst = expression.Operation >= 300;
                 var parameter = expression.Operation / 100 - (literalFirst ? 2 : 0);
@@ -394,13 +401,14 @@ public static class ScalarFrontendHost
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
                 var tokens = lexical.Tokens;
-                var value = expression.Type is 1 or 2
+                var parameterType = types[parameter - 1].Type;
+                var value = parameterType is PrimitiveType.Int32 or PrimitiveType.UInt32
                     ? expression.LeftParameter
                     : unchecked((long)((ulong)(uint)expression.RightParameter << 32
                         | (uint)expression.LeftParameter));
-                var leftOperand = new BoundRead(parameter - 1, types[parameter - 1].Type,
+                var leftOperand = new BoundRead(parameter - 1, parameterType,
                     new TextSpan(expression.Span.Start + tokens[nameIndex].Span.Start, tokens[nameIndex].Span.Length));
-                var literal = new BoundConstant(value, Type(expression.Type),
+                var literal = new BoundConstant(value, parameterType,
                     new TextSpan(expression.Span.Start + tokens[numberIndex].Span.Start,
                         tokens[numberIndex].Span.Length));
                 return new BoundBinary((TokenKind)(expression.Operation % 100),
