@@ -1069,6 +1069,8 @@ A Layout-row writer checks assigned target and unique published TypeDef
 ownership; when Layout rows are available, fixed FieldDef offsets must fit
 within the published size. Target-specific alignment, packing and ABI validity
 remain outside structural validation.
+A PropertyDef-row writer checks that its getter belongs to the owning TypeDef
+and returns the declared TypeSpec, without inferring identity from its name.
 The self-host String-row
 candidate emits individual rows. These exercise approved metadata contracts in isolation,
 including a framed callable-table fixture, but do not parse executable Body
