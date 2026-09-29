@@ -848,6 +848,20 @@ protocols must tolerate abrupt termination/restart; `finally` and destructors
 are not crash-consistency mechanisms. On defined unwinding paths, ownership,
 conditional publication and promised `NoThrow` cleanup still apply.
 
+On checked unwinding, an authored `finally` runs before the pending failure
+continues to its next handler. If that `finally` faults, the new failure
+propagates with the pending failure preserved as its inner cause; repeated
+failures form a causal chain. An authored lexical `defer` follows these same
+rules: each action is registered only when reached and executes in reverse
+registration order on exit from its block, including checked unwinding.
+An action's expression/body is evaluated at exit, with its referenced
+places kept valid through execution. Faulting cleanup is not implicitly
+`NoThrow` or automatically unsafe; catching a failure still requires unsafe
+recovery. A `defer` action that faults on an otherwise normal exit starts an
+ordinary checked failure. The concrete exception-object representation,
+unwind ABI and general source syntax remain to specify; bounded compiler
+support is described in [implementation](implementation.md).
+
 Ordinary boolean requirements and conditional outputs preserve their declared
 cleanup behavior. Fail-fast and checked-exception policies govern how a failure
 propagates; neither permits reading or publishing an uninitialized output.
@@ -904,7 +918,7 @@ and packaging remain specification work in the
 
 ### Storage, concurrency, entry and boundaries
 
-Tracing GC handles aliased/cyclic application graphs; ownership handles deterministic native storage and resources. A unique owner may still refer to GC storage; a GC root does not keep a logically disposed native allocation valid. Distinguish storage acquisition, initialization, close, value destruction, storage release and eventual reclamation. Vacant/partially initialized/live/retired states, reverse-order partial cleanup, no-throw/non-suspending scope cleanup, direct destination construction and stable-address requirements must be checked. Replacing a live value builds the replacement before dropping the old one; explicit reconstruct-in-place may leave vacancy on failure. Pool leases revoke access on return; deferred dead-storage retirement differs from deferred live-value cleanup, with one retirement owner after commitment and explicit completion endpoints.
+Tracing GC handles aliased/cyclic application graphs; ownership handles deterministic native storage and resources. A unique owner may still refer to GC storage; a GC root does not keep a logically disposed native allocation valid. Distinguish storage acquisition, initialization, close, value destruction, storage release and eventual reclamation. Vacant/partially initialized/live/retired states, reverse-order partial cleanup, no-throw/non-suspending generated owner cleanup, direct destination construction and stable-address requirements must be checked. Authored `finally`/`defer` actions may fault under their ordinary checked contracts; they do not relax generated owner cleanup guarantees. Replacing a live value builds the replacement before dropping the old one; explicit reconstruct-in-place may leave vacancy on failure. Pool leases revoke access on return; deferred dead-storage retirement differs from deferred live-value cleanup, with one retirement owner after commitment and explicit completion endpoints.
 
 Values are thread-confined by default, not bound to a fixed OS thread or
 executor. `[ThreadTransferable]` describes a complete form that may cross a

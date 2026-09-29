@@ -161,11 +161,10 @@ source form. `abstract` remains a reserved lexical token for the bounded
 parser's existing syntax; it is not a declaration modifier in the target
 interface grammar below. Candidate words such as `init`, `implicit`, `params`,
 `ensure`, `get`, `set`, `some`, `is`, `const`, `do`, `when`, `yield`, `extern`,
-`extension`, `unchecked`, `defer`, `base`, and `pin` need explicit
+`extension`, `unchecked`, `defer`, `base`, `pin`, and `this` need explicit
 keyword-versus-contextual-token decisions before adoption; they are not all
-current keyword tokens. `default`, `operator`, `write`, and legacy `out`
-already have keyword tokens; `init` is the accepted target initialization-loan
-spelling, but its lexer and parameter grammar are not yet implemented.
+current keyword tokens. `default`, `operator`, and `write` already have
+keyword tokens; `init` is the accepted target initialization-loan spelling.
 In particular,
 §3.4 uses `is` contextually although it is not a current keyword token. `_` is
 its own reserved token.
@@ -301,7 +300,7 @@ interface IAdd<T>
 ### 3.2 Types, parameters, and arguments
 
 ```ebnf
-Type            = [ "write" ], ( "void" | DottedIdentifier ),
+Type            = [ "write" ], [ "pin" ], ( "void" | DottedIdentifier ),
                   [ "<", Type, { ",", Type }, ">" ], [ "?" ] ;
 ParameterList   = "(", [ Parameter, { ",", Parameter } ], ")" ;
 Parameter       = [ PassingMode ], Type, Identifier
@@ -323,11 +322,19 @@ variance.
 Argument labels and passing modes are source forms only; argument reordering,
 overload resolution, and output behavior are semantic contracts. The proposed
 `init ref<T>` is a distinct initialization-loan parameter form, with the
-accepted call-site spelling `Create(init value)`. Existing `out` and
-`out var` syntax remains supported by the bounded implementation but is not
-the target form for vacant-storage initialization; migration is not settled.
-`write` qualifies access in a type (for example,
-`write ref<T>`); `mut` qualifies a binding/receiver or a `mut ref` mode.
+accepted call-site spelling `Create(init value)`. `write` qualifies access
+through a reference and `pin` qualifies only `ref<T>` (for example,
+`write pin ref<T>`); other uses of `pin` in this broad `Type` production
+are invalid. `pin ref<T>` keeps its backing object rooted and at a stable
+address for the pin loan's lifetime. It may be reborrowed as an ordinary
+`ref<T>` without preserving the pin guarantee for that reborrow, but the
+underlying pin cannot end while any derived address depends on it. A raw
+`ptr<T>` is an address, not a relocatable managed reference; its value
+does not itself pin or root a GC allocation. Forming one into GC storage
+requires a live pin with an enforced provenance/lifetime dependency, or
+independently stable storage. Neither applying a qualifier to an existing
+reference nor forming a raw pointer silently acquires a pin. `mut` qualifies
+a binding/receiver or a `mut ref` mode.
 Neither `write` nor `init` is an unrestricted declaration modifier. Exact
 `write ref<T>` legality in `Parameter` and the other target parameter forms
 remain open, and this bounded production must not be used to reject the
@@ -339,6 +346,7 @@ accepted forms.
 Block           = "{", { Statement }, "}" ;
 Statement       = Block | IfStatement | WhileStatement | ForStatement
                 | RequireStatement | TryStatement | UnsafeStatement
+                | UncheckedStatement | DeferStatement
                 | ReturnStatement | LoopTransfer | LocalDecl
                 | DiscardStatement | AssignmentStatement
                 | ExpressionStatement | ";" ;
@@ -353,6 +361,8 @@ RequireStatement = "require", Expression, ";" ;
 TryStatement    = "try", Block, ( "finally", Block
                   | "catch", Block, [ "finally", Block ] ) ;
 UnsafeStatement = "unsafe", Block ;
+UncheckedStatement = "unchecked", Block ;
+DeferStatement  = "defer", ( Expression, ";" | Block ) ;
 ReturnStatement = "return", [ Expression ], ";" ;
 LoopTransfer    = ( "break" | "continue" ), ";" ;
 LocalDecl       = [ "mut" ], ( "var" | Type ), Identifier, "=", Expression, ";" ;
@@ -416,7 +426,10 @@ Postfix         = Primary, { ( ".", Identifier | Arguments
                              | "[", Expression, "]" ) } ;
 Primary         = "(", [ Expression ], ")" | "new", Type, Arguments
                 | Number | String | Boolean | Null
-                | Identifier | Identifier, TypeArguments, Arguments ;
+                | Identifier | Identifier, TypeArguments, Arguments
+                | "unsafe", "(", Expression, ")"
+                | "unchecked", "(", Expression, ")"
+                | "base", "<", Type, ">" ;
 TypeArguments   = "<", Type, { ",", Type }, ">" ;
 ```
 
@@ -431,6 +444,23 @@ null-coalescing, lambda, tuple, range, `await`, `throw`, type-test,
 prefix-cast, or general assignment expressions. `T(expression)` is an
 ordinary type-call-shaped expression; its checked-conversion interpretation
 is semantic.
+`unsafe(expr)` scopes caller-unsafe obligations to the expression; it is
+not a cast and does not switch arithmetic policy. `unchecked(expr)` selects
+declared unchecked variants only for participating operations inside the
+expression, without changing unrelated checks or callees. The block forms
+scope the same respective rules over their bodies. `base<I>.Member(...)`
+directly selects a named interface's available default body under a checked
+conformance; ordinary interface calls still use the selected witness.
+
+`defer expr;` and `defer { ... }` register an action when execution reaches
+the statement. The expression or block runs when the enclosing lexical block
+exits, including normal transfers and checked unwinding; operands are
+evaluated then, not when registered. Registered actions run in reverse order.
+References used by a deferred action must remain valid until it executes;
+control transfers cannot leave the action, just as they cannot leave a
+`finally`. Deferred actions have the same ordinary failure and effect rules
+as authored `finally`, not a special `NoThrow` requirement. See the
+[language exception contract](../language.md#safe-and-unsafe-boundaries).
 
 ## 4. Accepted language direction
 
@@ -450,8 +480,8 @@ or claim an implementation.
   states remain distinct, and vacant storage is never read. Exact `ensure`
   placement and metadata remain open (see [§5.8](#58-postcondition-syntax-for-conditional-output-state)).
   `init ref<T>` means
-  vacant-storage initialization, distinct from ordinary `ref`/`write ref` and
-  `out`; `Create(init value)` is the accepted call-site spelling, with exact
+  vacant-storage initialization, distinct from ordinary `ref`/`write ref`;
+  `Create(init value)` is the accepted call-site spelling, with exact
   grammar and output metadata still open.
 - **Generic type checking:** explicit parameters, constraints and static
   operator protocols are accepted direction; associated types and family
@@ -533,8 +563,8 @@ for authoritative organization and semantic IL/reference boundaries.
 
 **Accepted target spelling:** use `init` as the call-site argument mode for an
 `init ref<T>` parameter, e.g. `Create(init value)`. It designates vacant
-storage and is distinct from ordinary `ref`/`write ref` access and legacy
-`out`; it does not make an existing initialized value writable or readable
+storage and is distinct from ordinary `ref`/`write ref` access; it does not
+make an existing initialized value writable or readable
 through the initialization loan.
 
 ```terrum
@@ -542,8 +572,8 @@ through the initialization loan.
 Create(init value);
 ```
 
-This does not define migration from `out` or settle productions for labels,
-places, overload binding, or conditional output contracts. It does not
+This does not settle productions for labels, places, overload binding, or
+conditional output contracts. It does not
 introduce an extra transactional publication protocol.
 
 ### 5.2 Exact overload grammar, ranking, and disambiguation
@@ -613,14 +643,16 @@ by-value/`implicit ref<T>`/`params` priorities, exact ambiguity diagnostics,
 extension-disambiguation spelling, and serialized binding metadata. This is
 accepted semantic direction, not an adopted grammar or complete contract.
 
-### 5.3 Caller-unsafe declarations and explicit unsafe blocks
+### 5.3 Caller-unsafe declarations and explicit unsafe scopes
 
 **Accepted target syntax:** `unsafe` on a callable declaration exposes its
 caller obligations, e.g. `unsafe void M()`. An ordinary `void M()` does not
 propagate a caller-unsafe obligation. The declaration modifier does not make
 its body an unsafe context: unsafe operations inside either form still require
 an explicit `unsafe { ... }` block. A caller invoking the unsafe declaration
-must likewise satisfy the contract in an explicit unsafe block.
+must likewise satisfy the contract in an explicit unsafe block. The candidate
+`unsafe(expr)` form scopes the same caller obligations to one expression;
+it is not yet part of the accepted block-only contract.
 
 ```terrum
 // Candidate declaration form:
@@ -925,7 +957,8 @@ semantics](../language.md#interfaces-access-and-generic-properties).
 **Accepted semantic separation; exact grammar OPEN:** `public`/`internal`/
 `private` are visibility; `static` is member placement; `mut` controls a
 place/receiver/nominal declaration; `write` qualifies referent access in a
-type; `ref`/`out`/`init ref<T>` are distinct parameter/call-site modes.
+type; `ref` and `init ref<T>` distinguish ordinary access from vacant-storage
+initialization.
 `unique` is an ownership form, not an access synonym. `unsafe` on a callable
 declares caller obligations while an `unsafe { ... }` block scopes operations
 inside a body. Interface requirements need no `abstract` modifier: a
@@ -950,24 +983,29 @@ binary has a newly appended slot. Exact witness-mapping syntax and metadata
 representation remain open. Do not infer legality from the permissive
 `ContextualPrefix` placeholder.
 
-**Proposed vocabulary, not current lexer support:** `do` introduces a
-post-tested loop; `set` a writable property accessor; `when` a pattern guard;
-`yield` a suspended producer; `extern` an externally implemented declaration;
-`extension` a wrapper-scoped extension declaration; `unchecked` an explicit
-arithmetic policy scope; and `defer` scope-exit cleanup. Their productions,
-restrictions and (for `yield`/`extern`/`defer`) effects and lowering remain
-open. Universal checked arithmetic needs no matching `checked` toggle.
-`default` is already a token for switch arms; use in default-interface-body
-calls would require an additional, explicit grammar and binding contract.
-`base` is a candidate only for selecting a *named interface's* default body,
-not stateful base-class inheritance or an implicit linearization. A spelling
-such as `base<I>.Member(...)` must call that default body directly, while
-ordinary calls within it still dispatch through the selected witness; access,
-effects and diamond resolution must be checked. No `override` keyword is
-proposed: an explicit conformance implementation replaces an available
-default by member identity, not by a same-named declaration. `pin` is a
-candidate for a scoped pin operation; `pinned` need not also be a keyword
-unless its distinct use in a type or declaration is established.
+**Proposed vocabulary:** `do` introduces a post-tested loop; `set` a
+writable property accessor; `when` a pattern guard; `yield` a producer
+suspension point; `extern` an externally implemented declaration; and
+`extension` a scoped extension declaration. Their productions, restrictions,
+effects and lowering remain open. `unsafe` and `unchecked` each have block
+and parenthesized-expression forms in this proposal; default arithmetic
+remains checked without a `checked` source toggle. `defer` registers an
+explicit lexical-block-exit action (not automatic `[Cleanup]`, function-exit
+deferral, or delayed live-value destruction). One scope's registered actions
+can share a cleanup region, but conditional registration and reverse order
+must remain observable. Failures obey the same chaining and propagation
+rules as an authored `finally`; `defer` does not introduce unsafe recovery.
+
+`default` labels a switch arm, not an interface call. `base<I>.Member(...)`
+selects the named interface's default body directly, not stateful base-class
+inheritance or implicit linearization. The form may also apply to an
+explicit adapter implementing an extension interface, but cannot reach an
+unrelated extension or fabricate conformance. Calls made within a default
+body still dispatch through the selected witness. Access, effects and diamond
+resolution are checked. No `override` keyword is proposed: an explicit
+conformance implementation replaces an available default by member identity,
+not by a same-named declaration. `pin` qualifies `ref<T>` in `Type`, not
+`ptr<T>` or a pinning statement; `pinned` need not also be a keyword.
 
 Type-call conversions already use `T(expression)`; `cast` and `explicit`
 are not needed to invoke them. User-defined conversion *declarations*, raw
@@ -979,12 +1017,6 @@ Do not reserve iteration or pattern words beyond `foreach`, `is`, `some`,
 layout queries, allocation forms, and pinning need separate semantic and
 representation decisions before choosing between intrinsic names and
 keywords; `new` already covers the proposed ordinary allocation form.
-
-The current bounded parser still recognizes `static abstract` operator
-declarations. Removing that spelling from the **proposed** grammar does not
-silently migrate existing sources or alter the implemented syntax; coordinated
-parser, binder, diagnostic and fixture migration is a separate implementation
-step.
 
 There is no proposed `~Type()` finalizer production. Deterministic
 `[Cleanup]` for an owning value and scope/unwind cleanup are not GC
@@ -1083,11 +1115,11 @@ proposal, and accepted semantics do not approve its syntax.
 | Files and nominal declarations | **P** §3.1 sketches using/file namespace, top-level functions, structs, classes, interfaces, and integral-base enums; interface bases differ from nominal conformances. | Exact modifier/attribute legality and enum constant restrictions remain open. No union or nested nominal declaration is proposed; recursive generic type arguments in `Type` are not excluded. |
 | Constructors, members, operators, properties | **P** §3.1 requires bodies for concrete functions/operators/getters; constructors name their owner; operators are type/interface members, not global declarations. **A** §5.7 specifies unary operator direction; §5.10 limits property direction to explicit getter-only by-value properties. | Interface `;` versus body forms are separated in §3.1. Property/accessor effects, attribute targets, and metadata remain **O**; setters, auto/ref-return properties and indexers are not adopted. `++`/`--` appear only as future operator spellings, not current lexer tokens. |
 | Interface witnesses and dispatch | **A** §5.12: bodyless members require checked implementations; bodies supply replaceable defaults, selected by declaring-member identity. **P** §3.1 sketches the corresponding `;`/body forms. Static operator witnesses need no runtime vtable. | Explicit mapping syntax, metadata/ABI, inherited-default resolution syntax, and compatible binding for older witnesses remain **O**. No physical slot layout is selected. |
-| Types, parameters, arguments, modifiers | **P** §3.2 sketches recursive type arguments, one optional marker, `ref`/`out`/`mut ref`, labels, and `init` arguments. `mut`, `unique`, `unsafe`, visibility and `static` are candidate modifier vocabulary. | `init ref<T>`, `implicit ref<T>`, `write` parameter legality, `params`, generic defaults/inference, associated types, `ensure` contracts and exact modifier combinations remain **O**. Prefix names are context-valid placeholders; `abstract` is deliberately absent from target modifiers. |
+| Types, parameters, arguments, modifiers | **P** §3.2 sketches recursive type arguments, one optional marker, `ref`/`mut ref`/`init ref<T>`, labels, `init` arguments and `pin` on references. `mut`, `unique`, `unsafe`, visibility and `static` are candidate modifier vocabulary. | `implicit ref<T>`, `write` parameter legality, `params`, generic defaults/inference, associated types, `ensure` contracts and exact modifier combinations remain **O**. Prefix names are context-valid placeholders; `abstract` is deliberately absent from target modifiers. |
 | Statements and expressions | **P** §§3.3–3.4 sketch blocks, control flow, locals, calls, assignments, precedence, `is null`/`is some`, and `T(expression)`. **A** §5.6 gives standalone discard semantics; §3.3 records its distinct `_ = expression;` form. | Assignment's left side needs a writable-place check; catch typing/binding, constant-evaluation/static-proof syntax, and omitted constructs (including lambdas, patterns, `throw`, `await`, conditional expressions and general assignment expressions) remain outside this grammar. `is`/`some` token treatment remains open. |
 | Literals and compound operations | **P** `HexFloat` is part of the proposed `Number` and `Primary`; **I** currently covers decimal/hex/binary integer tokens, decimal fractional tokens and strings, not hex floats or executable floating literals. **A** §5.13 separates compound-operation semantics from `+`. | Hex-float token diagnostics and floating-value semantics still need implementation. Compound-assignment spelling, tokens, places and evaluation rules are **O**; `+=`…`^=` shorthand in §5.13 is not legal grammar. |
 | Cleanup and finalizers | **A** deterministic `[Cleanup]` is distinct from GC finalization; **I** support is listed by the implementation reference. | Attribute placement is still governed by open contextual-prefix rules. No finalizer production is proposed; whether to support one and its lifecycle/ABI contract remain **O** (§5.12). |
-| Implemented boundary | **I** is defined only by [implementation](../implementation.md), not by this proposal's examples or productions. | The bounded parser's existing `static abstract` syntax is unchanged. Nothing else marked **P** is thereby implemented or source-compatible. |
+| Implemented boundary | **I** is defined only by [implementation](../implementation.md), not by this proposal's examples or productions. | Nothing marked **P** is thereby implemented or source-compatible. |
 
 An implementation conforms only to an adopted language specification and its
 specified lexical, grammatical, and static-semantic rules. A recovery tree or
