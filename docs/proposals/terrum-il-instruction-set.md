@@ -157,11 +157,49 @@ Inlining profitability, register allocation and whether a particular
 result-producing instruction is dead remain consumer decisions. A direct
 terminator index does not by itself reveal calls or failures inside a block;
 tools still need to inspect its operations for those facts. A compact,
-mandatory method-level operation/effect summary could avoid repeated
+mandatory method-level operation/effect summary is needed to avoid repeated
 full-body scans for common inlining and policy decisions, but its exact
 counts, effect taxonomy, consistency checks and location in the Body header
 remain to be specified before claiming that fast path. Unvalidated summaries
 must not authorize omitting safety checks or dropping operations.
+
+### Direct-index requirements for pruning and inlining
+
+The existing block/terminator offsets, typed value descriptors and
+boundary liveness are necessary but **not sufficient** for a fast inliner.
+They do not say where a branch predicate was defined, which block owns
+each result, or which blocks use a value or place. An inliner specializing
+an argument should be able to find the predicate definition from its
+value ID, inspect only the predicate's needed dependencies, select a
+known branch, and discard its unreachable block subtree without decoding
+unvisited operation streams. That does not imply that arbitrary predicates
+are constant: effects, calls and unsupported expressions require the
+normal importer path.
+
+Before stabilizing this Body layout, specify a compact, directly indexed
+definition location for each value (block and byte offset of the defining
+operation, or an equivalent direct seek), plus
+per-block summaries of values used, places read/written/initialized/ended,
+normal successors, operation/effect counts and safepoints. Define how edge
+arguments, block parameters, loop backedges, region exits and future
+exceptional continuations participate in those summaries. For each value
+or place, the index must let a consumer determine whether *all* uses and
+obligations lie in discarded blocks; a sparse per-block use inventory
+with counts can support decrementing surviving uses as blocks are pruned.
+Effectful instructions must not disappear just because their result is
+unused. Block and value identity stays stable during import; native register
+allocation and target-dependent profitability are not wire facts.
+
+Ordinary value liveness, place/ownership state and logical GC-root
+continuity are distinct but related summaries. The producer should record
+root identity and required owner/interior-reference dependencies at
+indexed safepoints, including roots needed by cleanup or exceptional
+continuations. An inliner can then remove a dead block's root obligations
+without scanning its instructions, but must preserve roots at retained
+safepoints and let its backend build the final physical GC maps. The
+binary placement, compression, worst-case cost and audit rules for these
+indexes remain a stabilization decision; the currently encoded Body
+examples **do not yet contain** them.
 
 ### Checked add end to end (informative)
 
@@ -952,7 +990,7 @@ contract:
 | Surface | Missing binary and verification contract |
 |---|---|
 | Exception and cleanup | Authored catch/finally, cleanup on normal/exceptional exit, fault replacement, operation-site failure state (including calls) and required roots through cleanup. A potentially failing call without a local handler is insufficient. |
-| Fast method facts | Define any mandatory method-level operation/effect summary (such as operation and call counts or presence of failures), its bounds and consistency audit so importers can answer common policy questions without scanning every block. Per-consumer profitability and deadness are not serialized as authoritative facts. |
+| Fast method facts | Define the mandatory method-level operation/effect summary and indexed value-definition, per-block use/effect and safepoint/root inventories, with bounds and consistency audits. Specialized branch reachability and per-consumer profitability are computed at the call site, not serialized as authoritative facts. |
 | Loans and views | Place provenance, region escape/alias checks, retained backing and owner dependencies, interior references, `mut` versus `write`, suspension/capture and explicit begin/end loan forms. |
 | Managed values | Root maps at safepoints, stable descriptors, write barriers, allocation/collection, optional handles and per-image heap boundaries. Root lifetime cannot be inferred solely from SSA uses. |
 | Logical root inventory | Specify producer-recorded, directly indexed safepoint locations and live logical root/owner/interior-place dependencies (including exceptional continuation and cleanup), with precise lifetime and verification rules. The format should avoid making each interpreter/JIT reconstruct logical GC liveness from every use; it must not prescribe post-allocation native register/stack maps or assume that ordinary value liveness covers roots. |
