@@ -48,6 +48,27 @@ public readonly ref struct TrRmFieldDefTableReader
         }
     }
 
+    public TrRmFieldDefTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmStringTableReader strings, TrRmTypeDefTableReader types,
+        TrRmTypeSpecTableReader typeSpecs, TrRmLayoutTableReader layouts)
+        : this(section, recordCount, strings, types, typeSpecs)
+    {
+        for (var row = 1; row <= recordCount; row++)
+        {
+            var offset = Read(row - 1, 16);
+            if (offset == uint.MaxValue)
+            {
+                continue;
+            }
+
+            var owner = types.GetFieldOwner(row);
+            if (offset >= layouts.GetSize(types.GetLayoutRow(owner)))
+            {
+                throw InvalidField();
+            }
+        }
+    }
+
     public string GetName(int row)
     {
         if (row <= 0 || row > _recordCount)

@@ -1065,6 +1065,10 @@ a TypeArg-row writer checks constructed-type ownership, ordinals and references.
 MethodSig-row and Param-row writers check disjoint signature ranges and
 parameter ownership, ordinals, types and modes. A MethodDef-row writer checks
 module, signature, contract and Body-row ownership without encoding instructions.
+A Layout-row writer checks assigned target and unique published TypeDef
+ownership; when Layout rows are available, fixed FieldDef offsets must fit
+within the published size. Target-specific alignment, packing and ABI validity
+remain outside structural validation.
 The self-host String-row
 candidate emits individual rows. These exercise approved metadata contracts in isolation,
 including a framed callable-table fixture, but do not parse executable Body

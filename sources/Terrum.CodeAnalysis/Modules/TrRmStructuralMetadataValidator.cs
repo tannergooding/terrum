@@ -60,10 +60,11 @@ public static class TrRmStructuralMetadataValidator
             : new TrRmTypeArgTableReader(typeArgBytes, typeArgCount, typeSpecs);
         var types = new TrRmTypeDefTableReader(typeDefBytes, typeDefCount,
             strings, modules, fieldDefCount, genericParamCount, layoutCount, contractCount);
-        var fields = fieldDefCount == 0 ? default
-            : new TrRmFieldDefTableReader(fieldDefBytes, fieldDefCount, strings, types, typeSpecs);
         var layouts = layoutCount == 0 ? default
             : new TrRmLayoutTableReader(layoutBytes, layoutCount, types);
+        var fields = fieldDefCount == 0 ? default
+            : new TrRmFieldDefTableReader(fieldDefBytes, fieldDefCount, strings, types,
+                typeSpecs, layouts);
         var signatures = methodSigCount == 0 ? default
             : new TrRmMethodSigTableReader(methodSigBytes, methodSigCount,
                 typeSpecs, paramCount, genericParamCount);

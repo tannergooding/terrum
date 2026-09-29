@@ -11,6 +11,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly ref struct TrRmLayoutTableReader
 {
     private const int RowSize = 24;
+    private readonly ReadOnlySpan<byte> _rows;
 
     public TrRmLayoutTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmTypeDefTableReader types)
@@ -22,6 +23,7 @@ public readonly ref struct TrRmLayoutTableReader
             throw InvalidLayout();
         }
 
+        _rows = section;
         var owners = new int[recordCount + 1];
         for (var type = 1; type <= types.Count; type++)
         {
@@ -48,6 +50,16 @@ public readonly ref struct TrRmLayoutTableReader
                 throw InvalidLayout();
             }
         }
+    }
+
+    public uint GetSize(int row)
+    {
+        if (row <= 0 || (long)row * RowSize > _rows.Length)
+        {
+            throw InvalidLayout();
+        }
+
+        return Read(_rows.Slice((row - 1) * RowSize, RowSize), 8);
     }
 
     private static uint Read(ReadOnlySpan<byte> data, int offset)
