@@ -1235,7 +1235,7 @@ edges with checked typed block arguments, scalar `ConstBits`,
 `ConstSigned`, `Copy`, scalar `Unary`, `Binary`, integer `Convert`
 (wrapping, saturating and equal-width bit reinterpretation), eager `Select`,
 checked integer arithmetic/shifts, integer `CheckedConvert`, signed `CheckedNegate`,
-dual-result `CheckedDivRem`, `Return` and `Fail`.
+dual-result `CheckedDivRem`, `Switch`, `Return` and `Fail`.
 Optional scalar values retain their presence-qualified identity through
 `MakeOptional`, `None`, `IsPresent`, `Copy` and eager `Select`; they are not
 interchangeable with the underlying scalar in operations or signatures.
@@ -1243,8 +1243,9 @@ interchangeable with the underlying scalar in operations or signatures.
 `ConstBits`, `Copy`, equality, `Select` and optional presence operations apply,
 not integer arithmetic, ordering or conversions.
 The indexed reader also accepts valid `F0` reference/data widths on those
-operations and reference/count widths on supported `Branch`, `BranchIf`
-and `Return` terminators, independently of the Body-local width.
+operations and reference/count widths on supported `Branch`, `BranchIf`,
+`Switch` and `Return` terminators; `Switch` patterns additionally have an
+independent data width. These widths are independent of the Body-local width.
 It checks type/definition/use indexes, operation and
 terminator offsets and live-in/out inventories against the decoded blocks.
 It rejects other assigned indexed operations and backedges.

@@ -656,6 +656,67 @@ public sealed class TrRmBodyExampleTests
     }
 
     [Theory]
+    [InlineData(new byte[] { 0x82, 1, 1, 0, 3, 0, 2, 0 })]
+    [InlineData(new byte[] { 0x82, 1, 2, 0, 3, 0, 1, 2, 0, 2, 0 })]
+    [InlineData(new byte[] { 0xF0, 0x10, 0x82, 1, 1, 0, 0, 3, 0, 2, 0 })]
+    [InlineData(new byte[] { 0xF0, 0x05, 0x82, 1, 0, 1, 0, 0, 3, 0, 0, 0,
+        2, 0, 0, 0 })]
+    public void CompactIndexedReaderChecksSwitchEdges(byte[] terminator)
+        => Assert.Equal((3, 4), InspectIndexed(IndexedBoolSwitch(terminator)));
+
+    [Fact]
+    public void CompactIndexedReaderChecksChar16SwitchPatternWidth()
+    {
+        byte[] terminator = [0xF0, 0x10, 0x82, 1, 1, 0xFF, 0xFF, 3, 0, 2, 0];
+        Assert.Equal((3, 4), InspectIndexed(IndexedBoolSwitch(terminator),
+            firstTypeCode: 3));
+
+        byte[] invalid = [0xF0, 0x20, 0x82, 1, 1, 0, 0, 1, 0, 3, 0, 2, 0];
+        Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(IndexedBoolSwitch(invalid), firstTypeCode: 3));
+    }
+
+    [Fact]
+    public void CompactIndexedReaderChecksIntegerSwitchPatternWidth()
+    {
+        byte[] terminator = [0xF0, 0x20, 0x82, 1, 1, 0xFF, 0xFF, 0xFF, 0xFF,
+            3, 0, 2, 0];
+        Assert.Equal((3, 4), InspectIndexed(IndexedBoolSwitch(terminator),
+            firstTypeCode: 8, secondTypeCode: 0x0D));
+
+        byte[] invalid = [0xF0, 0x30, 0x82, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0,
+            3, 0, 2, 0];
+        Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(IndexedBoolSwitch(invalid),
+                firstTypeCode: 8, secondTypeCode: 0x0D));
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0x82, 1, 1, 2, 3, 0, 2, 0 })]
+    [InlineData(new byte[] { 0x82, 1, 2, 1, 3, 0, 0, 2, 0, 2, 0 })]
+    [InlineData(new byte[] { 0x82, 1, 10, 0, 3, 0, 2, 0 })]
+    [InlineData(new byte[] { 0x82, 1, 1, 0, 1, 0, 2, 0 })]
+    [InlineData(new byte[] { 0xF0, 0x40, 0x82, 1, 1, 0, 3, 0, 2, 0 })]
+    public void CompactIndexedReaderRejectsMalformedSwitch(byte[] terminator)
+        => Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(IndexedBoolSwitch(terminator)));
+
+    private static byte[] IndexedBoolSwitch(byte[] terminator)
+    {
+        var original = ReadExample("#### Compact indexed conditional sum");
+        var extra = terminator.Length - 6;
+        var section = new byte[original.Length + extra];
+        original.AsSpan(0, 56).CopyTo(section);
+        terminator.CopyTo(section, 56);
+        original.AsSpan(62).CopyTo(section.AsSpan(56 + terminator.Length));
+        section[4] = (byte)(82 + extra);
+        section[38] = (byte)(18 + extra);
+        section[39] = (byte)(37 + extra);
+        section[40] = (byte)(46 + extra);
+        return section;
+    }
+
+    [Theory]
     [InlineData(new byte[] { 4, 2, 2, 1 }, new byte[] { 2 }, (byte)2)]
     [InlineData(new byte[] { 5, 3, 4, 1, 2 }, new byte[] { 2, 2 }, (byte)1)]
     [InlineData(new byte[] { 5, 3, 6, 1, 2 }, new byte[] { 2, 2 }, (byte)1)]
@@ -954,7 +1015,8 @@ public sealed class TrRmBodyExampleTests
     private static (int Blocks, int Values) InspectIndexed(byte[] section,
         int parameterCount = 3, byte secondTypeCode = 8, int resultTypeSpec = 2,
         byte[]? parameterTypeIds = null, byte? thirdTypeCode = null,
-        byte runtimePolicy = 0, bool thirdTypeOptional = false)
+        byte runtimePolicy = 0, bool thirdTypeOptional = false,
+        byte firstTypeCode = 1)
     {
         var names = new TrRmStringTableReader(
             TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]), 2);
@@ -970,11 +1032,11 @@ public sealed class TrRmBodyExampleTests
         byte[] typeBytes = (thirdTypeOptional, thirdTypeCode) switch
         {
             (true, _) => [0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0, 12, 0, 0, 0,
-                1, 0, 1, 1, 0, secondTypeCode, 6, 0, 2, 0, 0, 0],
+                1, 0, firstTypeCode, 1, 0, secondTypeCode, 6, 0, 2, 0, 0, 0],
             (false, byte third) => [0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0, 9, 0, 0, 0,
-                1, 0, 1, 1, 0, secondTypeCode, 1, 0, third],
+                1, 0, firstTypeCode, 1, 0, secondTypeCode, 1, 0, third],
             _ => [0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0,
-                1, 0, 1, 1, 0, secondTypeCode],
+                1, 0, firstTypeCode, 1, 0, secondTypeCode],
         };
         var types = new TrRmTypeSpecTableReader(typeBytes,
             thirdTypeCode is null && !thirdTypeOptional ? 2 : 3, 0, 0, 0, 0);

@@ -269,10 +269,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     var bits = ReadData(extent, ref cursor, dataWidth);
                     if (typeId == 0 || typeId > typeCount
                         || mappedTypes[typeId] != valueTypes[result]
-                        || valueTypes[result] > byte.MaxValue
-                        || opcode == 1 && (valueTypes[result] == 1 && bits > 1
-                            || valueTypes[result] == 3 && bits > ushort.MaxValue
-                            || valueTypes[result] is (8 or 0x0D) && bits > uint.MaxValue)
+                        || opcode == 1 && !FitsBitPattern(valueTypes[result], bits)
                         || opcode == 2 && (valueTypes[result] is not (8 or 9 or 0x0D or 0x0E)
                             || !FitsSignedConstant(valueTypes[result], bits, dataWidth)))
                     {
@@ -458,7 +455,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
 
             useOffset = cursor;
-            var (terminator, terminatorWidth, countWidth) =
+            var (terminator, terminatorWidth, countWidth, terminatorDataWidth) =
                 ReadTerminator(extent, ref cursor);
             if (terminator == 0x81)
             {
@@ -493,6 +490,56 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 }
 
                 successors[block] = [edge];
+            }
+            else if (terminator == 0x82)
+            {
+                var selector = ReadCount(extent, ref cursor, terminatorWidth);
+                if (selector <= 0 || selector > ValueCount)
+                {
+                    throw InvalidBody();
+                }
+
+                Use(selector, operations);
+                var selectorType = valueTypes[selector];
+                if (selectorType is not (1 or 3) && !IsInteger(selectorType))
+                {
+                    throw InvalidBody();
+                }
+
+                var cases = ReadCount(extent, ref cursor, countWidth);
+                if (extent.Length - cursor < terminatorWidth + countWidth
+                    || cases > (extent.Length - cursor - terminatorWidth - countWidth)
+                        / (terminatorDataWidth + terminatorWidth + countWidth))
+                {
+                    throw InvalidBody();
+                }
+
+                var edges = new Edge[cases + 1];
+                ulong previous = 0;
+                for (var index = 0; index < cases; index++)
+                {
+                    var bits = ReadData(extent, ref cursor, terminatorDataWidth);
+                    if (!FitsBitPattern(selectorType, bits)
+                        || index != 0 && bits <= previous)
+                    {
+                        throw InvalidBody();
+                    }
+
+                    previous = bits;
+                    edges[index] = ReadEdge(extent, ref cursor, block, BlockCount,
+                        ValueCount, terminatorWidth, countWidth);
+                }
+
+                edges[cases] = ReadEdge(extent, ref cursor, block, BlockCount,
+                    ValueCount, terminatorWidth, countWidth);
+                successors[block] = edges;
+                foreach (var edge in edges)
+                {
+                    foreach (var value in edge.Arguments)
+                    {
+                        Use(value, operations);
+                    }
+                }
             }
             else if (terminator == 0x83)
             {
@@ -634,20 +681,31 @@ public readonly ref struct TrRmCompactIndexedBodyReader
     private static bool IsInteger(ushort type)
         => type is 8 or 9 or 0x0D or 0x0E;
 
-    private static (uint Opcode, int ReferenceWidth, int CountWidth) ReadTerminator(
+    private static bool FitsBitPattern(ushort type, ulong bits)
+        => type switch
+        {
+            1 => bits <= 1,
+            3 => bits <= ushort.MaxValue,
+            8 or 0x0D => bits <= uint.MaxValue,
+            9 or 0x0E => true,
+            _ => false,
+        };
+
+    private static (uint Opcode, int ReferenceWidth, int CountWidth, int DataWidth) ReadTerminator(
         ReadOnlySpan<byte> data, ref int position)
     {
         var opcode = Read(data, ref position, 1);
         if (opcode != 0xF0)
         {
-            return (opcode, 1, 1);
+            return (opcode, 1, 1, 1);
         }
 
         var layout = Read(data, ref position, 1);
         opcode = Read(data, ref position, 1);
-        if (layout == 0 || (layout & 0xF0) != 0
+        if (layout == 0 || (layout & 0xC0) != 0
             || (layout & 3) == 3 || ((layout >> 2) & 3) == 3
-            || opcode is not (0x80 or 0x81 or 0x83)
+            || opcode is not (0x80 or 0x81 or 0x82 or 0x83)
+            || opcode != 0x82 && (layout & 0x30) != 0
             || opcode == 0x83 && (layout & 0x0C) != 0)
         {
             throw InvalidBody();
@@ -655,7 +713,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
 
         var referenceWidth = (layout & 3) switch { 0 => 1, 1 => 2, _ => 4 };
         var countWidth = ((layout >> 2) & 3) switch { 0 => 1, 1 => 2, _ => 4 };
-        return (opcode, referenceWidth, countWidth);
+        var dataWidth = opcode == 0x82 ? 1 << ((int)(layout >> 4) & 3) : 0;
+        return (opcode, referenceWidth, countWidth, dataWidth);
     }
 
     private static (uint Opcode, int ReferenceWidth, int DataWidth) ReadOperation(
