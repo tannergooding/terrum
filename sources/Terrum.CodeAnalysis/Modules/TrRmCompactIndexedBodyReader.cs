@@ -417,18 +417,21 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
 
             useOffset = cursor;
-            var terminator = Read(extent, ref cursor, 1);
+            var (terminator, terminatorWidth, countWidth) =
+                ReadTerminator(extent, ref cursor);
             if (terminator == 0x81)
             {
-                var condition = ReadCount(extent, ref cursor, 1);
+                var condition = ReadCount(extent, ref cursor, terminatorWidth);
                 if (condition <= 0 || condition > ValueCount || valueTypes[condition] != 1)
                 {
                     throw InvalidBody();
                 }
 
                 Use(condition, operations);
-                var whenTrue = ReadEdge(extent, ref cursor, block, BlockCount, ValueCount);
-                var whenFalse = ReadEdge(extent, ref cursor, block, BlockCount, ValueCount);
+                var whenTrue = ReadEdge(extent, ref cursor, block, BlockCount,
+                    ValueCount, terminatorWidth, countWidth);
+                var whenFalse = ReadEdge(extent, ref cursor, block, BlockCount,
+                    ValueCount, terminatorWidth, countWidth);
                 successors[block] = [whenTrue, whenFalse];
                 foreach (var edge in successors[block])
                 {
@@ -441,7 +444,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
             else if (terminator == 0x80)
             {
-                var edge = ReadEdge(extent, ref cursor, block, BlockCount, ValueCount);
+                var edge = ReadEdge(extent, ref cursor, block, BlockCount,
+                    ValueCount, terminatorWidth, countWidth);
                 foreach (var value in edge.Arguments)
                 {
                     Use(value, operations);
@@ -451,7 +455,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
             else if (terminator == 0x83)
             {
-                var value = ReadCount(extent, ref cursor, 1);
+                var value = ReadCount(extent, ref cursor, terminatorWidth);
                 if (value == 0 ? !voidResult
                     : voidResult || value > ValueCount || valueTypes[value] != resultRow[2])
                 {
@@ -589,6 +593,30 @@ public readonly ref struct TrRmCompactIndexedBodyReader
     private static bool IsInteger(byte type)
         => type is 8 or 9 or 0x0D or 0x0E;
 
+    private static (uint Opcode, int ReferenceWidth, int CountWidth) ReadTerminator(
+        ReadOnlySpan<byte> data, ref int position)
+    {
+        var opcode = Read(data, ref position, 1);
+        if (opcode != 0xF0)
+        {
+            return (opcode, 1, 1);
+        }
+
+        var layout = Read(data, ref position, 1);
+        opcode = Read(data, ref position, 1);
+        if (layout == 0 || (layout & 0xF0) != 0
+            || (layout & 3) == 3 || ((layout >> 2) & 3) == 3
+            || opcode is not (0x80 or 0x81 or 0x83)
+            || opcode == 0x83 && (layout & 0x0C) != 0)
+        {
+            throw InvalidBody();
+        }
+
+        var referenceWidth = (layout & 3) switch { 0 => 1, 1 => 2, _ => 4 };
+        var countWidth = ((layout >> 2) & 3) switch { 0 => 1, 1 => 2, _ => 4 };
+        return (opcode, referenceWidth, countWidth);
+    }
+
     private static (uint Opcode, int ReferenceWidth, int DataWidth) ReadOperation(
         ReadOnlySpan<byte> data, ref int position)
     {
@@ -642,12 +670,12 @@ public readonly ref struct TrRmCompactIndexedBodyReader
     }
 
     private static Edge ReadEdge(ReadOnlySpan<byte> data, ref int position,
-        int block, int count, int valueCount)
+        int block, int count, int valueCount, int referenceWidth, int countWidth)
     {
-        var target = ReadCount(data, ref position, 1);
-        var arguments = ReadCount(data, ref position, 1);
+        var target = ReadCount(data, ref position, referenceWidth);
+        var arguments = ReadCount(data, ref position, countWidth);
         if (target <= block || target > count || arguments > valueCount
-            || arguments > data.Length - position)
+            || arguments > (data.Length - position) / referenceWidth)
         {
             throw InvalidBody();
         }
@@ -655,7 +683,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         var values = new int[arguments];
         for (var index = 0; index < arguments; index++)
         {
-            values[index] = ReadCount(data, ref position, 1);
+            values[index] = ReadCount(data, ref position, referenceWidth);
         }
 
         return new Edge(target, values);

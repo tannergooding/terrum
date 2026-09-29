@@ -1236,8 +1236,8 @@ edges with checked typed block arguments, scalar `ConstBits`,
 integer arithmetic/shifts, integer `CheckedConvert`, signed `CheckedNegate`,
 dual-result `CheckedDivRem`, `Return` and `Fail`.
 The indexed reader also accepts valid `F0` reference/data widths on those
-operations independently of the Body-local width; terminators remain
-unprefixed in this bounded subset.
+operations and reference/count widths on supported `Branch`, `BranchIf`
+and `Return` terminators, independently of the Body-local width.
 It checks type/definition/use indexes, operation and
 terminator offsets and live-in/out inventories against the decoded blocks.
 It rejects other assigned indexed operations and backedges.

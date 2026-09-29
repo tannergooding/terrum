@@ -617,6 +617,44 @@ public sealed class TrRmBodyExampleTests
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
     }
 
+    [Fact]
+    public void CompactIndexedReaderChecksPrefixedReturnWidth()
+    {
+        var original = IndexedConstantCopy();
+        var section = new byte[original.Length + 3];
+        original.AsSpan(0, 42).CopyTo(section);
+        section[4] = 39;
+        section[26] = 19;
+        byte[] terminator = [0xF0, 1, 0x83, 2, 0];
+        terminator.CopyTo(section, 42);
+        Assert.Equal((1, 2), InspectIndexed(section, 0));
+
+        section[43] = 5;
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
+    }
+
+    [Fact]
+    public void CompactIndexedReaderChecksPrefixedBranchReferenceAndCountWidths()
+    {
+        var original = ReadExample("#### Compact indexed conditional sum");
+        var section = new byte[original.Length + 7];
+        original.AsSpan(0, 56).CopyTo(section);
+        original.AsSpan(62).CopyTo(section.AsSpan(69));
+        section[4] = 89;
+        section[38] = 25;
+        section[39] = 44;
+        section[40] = 53;
+        byte[] terminator =
+        [
+            0xF0, 5, 0x81, 1, 0, 2, 0, 0, 0, 3, 0, 0, 0,
+        ];
+        terminator.CopyTo(section, 56);
+        Assert.Equal((3, 4), InspectIndexed(section));
+
+        section[57] = 0x25;
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(section));
+    }
+
     [Theory]
     [InlineData(new byte[] { 4, 2, 2, 1 }, new byte[] { 2 }, (byte)2)]
     [InlineData(new byte[] { 5, 3, 4, 1, 2 }, new byte[] { 2, 2 }, (byte)1)]
