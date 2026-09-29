@@ -526,6 +526,53 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("int32 Main() { return 2147483647; }", true, int.MaxValue)]
+    [InlineData("int32 Main() { return -2147483648; }", true, int.MinValue)]
+    [InlineData("int32 Main() { return - 2_147_483_648; }", true, int.MinValue)]
+    [InlineData("int32 Main() { return 2147483648; }", false, 0)]
+    [InlineData("int32 Main() { return -2147483649; }", false, 0)]
+    [InlineData("int32 Main() { return 0xFFFF_FFFF; }", true, -1)]
+    [InlineData("int32 Main() { return 0x0000_0000_FFFF_FFFF; }", true, -1)]
+    [InlineData("int32 Main() { return 0b1000_0000_0000_0000_0000_0000_0000_0000; }", true, int.MinValue)]
+    [InlineData("int32 Main() { return -0x8000_0000; }", false, 0)]
+    [InlineData("int32 Main() { return -0xFFFF_FFFF; }", true, 1)]
+    [InlineData("int32 Main() { return 0x1_0000_0000; }", false, 0)]
+    [InlineData("int32 Main() { return 1.5; }", false, 0)]
+    public async Task BoundedNativeInt32EvaluationMatchesHostedExecutedValuesAsync(
+        string text, bool evaluable, int value)
+    {
+        var assertion = evaluable
+            ? FormattableString.Invariant($$"""
+                require TryEvaluateInt32ScalarReturn(move tokens, move integers, out var name, out var bound);
+                if (name.Start != 6 || name.Length != 4 || bound != {{value}}) { return 1; }
+                """)
+            : """
+                if (TryEvaluateInt32ScalarReturn(move tokens, move integers,
+                    out var name, out var bound)) { return 1; }
+                """;
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                {{assertion}}
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            if (evaluable)
+            {
+                var hosted = Compilation.Create(SyntaxTree.Parse(text), (BoundRuntimePolicy)policy);
+                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.Equal(value, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+            }
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("alpha 42 // trailing\r\n\uD801\uDC00")]
     public async Task CursorReadsPublishedTokensAndStopsAtEndAsync(string text)

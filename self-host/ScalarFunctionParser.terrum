@@ -92,3 +92,61 @@ bool TryParseScalarReturnInteger(TokenSnapshot tokens, TokenIntegerSnapshot inte
     high = magnitudeHigh;
     return true;
 }
+
+bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int32 result)
+{
+    int32 count = tokens.GetCount();
+    if (count != 10 && count != 11)
+    {
+        return false;
+    }
+
+    mut int32 valueIndex = 6;
+    if (count == 11)
+    {
+        valueIndex = 7;
+    }
+    require tokens.TryGet(valueIndex, out var literal);
+    if (!TryParseScalarReturnInteger(move tokens, move integers, out var foundName,
+            out var expression, out var low, out var high)
+        || high != 0)
+    {
+        return false;
+    }
+
+    bool negative = count == 11;
+    int32 start = literal.Range.Start;
+    bool based = literal.Range.Length >= 2 && Host.Source[start] == char16(48)
+        && (Host.Source[start + 1] == char16(120)
+            || Host.Source[start + 1] == char16(88)
+            || Host.Source[start + 1] == char16(98)
+            || Host.Source[start + 1] == char16(66));
+    // Decimal signed minimum needs unary minus; based literals first form int32 bits.
+    if (low < 0)
+    {
+        if (!based)
+        {
+            if (!negative || low != int32.MinValue)
+            {
+                return false;
+            }
+            name = foundName;
+            result = int32.MinValue;
+            return true;
+        }
+        if (negative && low == int32.MinValue)
+        {
+            return false;
+        }
+    }
+
+    name = foundName;
+    mut int32 bound = low;
+    if (negative)
+    {
+        bound = -low;
+    }
+    result = bound;
+    return true;
+}
