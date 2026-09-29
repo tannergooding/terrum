@@ -84,4 +84,21 @@ public sealed class TrRmTypeSpecTableWriterTests
             TrRmTypeSpecTableWriter.Constructed(1, 1, 2),
         ], 1, 0, 0, 1));
     }
+
+    [Fact]
+    public void TypedPayloadsUseTheSpecifiedLittleEndianFieldOrder()
+    {
+        Assert.Equal(new byte[] { 1, 1, 8 }, TrRmTypeSpecTableWriter.Builtin(8, 1));
+        Assert.Equal(new byte[] { 1, 0, 0x80, 8 },
+            TrRmTypeSpecTableWriter.InlineFamily(0x80, 8));
+        Assert.Equal(new byte[] { 2, 1, 0xC3, 0xB2, 0xA1, 0 },
+            TrRmTypeSpecTableWriter.Reference(2, 0x00A1_B2C3, 1));
+        Assert.Equal(new byte[] {
+            5, 0, 3, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0,
+        }, TrRmTypeSpecTableWriter.Constructed(3, 1, 2));
+        Assert.Equal(new byte[] { 6, 0, 1, 0, 0, 0 },
+            TrRmTypeSpecTableWriter.Wrapped(6, 1));
+        Assert.Equal(new byte[] { 12, 0, 0x80, 1, 0, 0, 0 },
+            TrRmTypeSpecTableWriter.IndexedFamily(0x80, 1));
+    }
 }
