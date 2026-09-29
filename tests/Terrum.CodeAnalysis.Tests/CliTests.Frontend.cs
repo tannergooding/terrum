@@ -92,6 +92,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { if (true || false) { return 42; } return 0; }")]
     [InlineData("int32 Main() { if (false != true) { return 42; } return 0; }")]
     [InlineData("int32 Main() { if (!((false))) { return 42; } return 0; }")]
+    [InlineData("int32 Main() { return ~(0xFFFFFFD5); }")]
     public async Task FrontendBuiltExecutableMatchesHostedAndRunsAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -239,6 +240,8 @@ public sealed partial class CliTests
     [InlineData("public uint64 Value(uint64 x) { return ~x; }")]
     [InlineData("public int32 Value() { return ~0xFFFFFFD5; }")]
     [InlineData("public uint32 Value() { return ~4294967295; }")]
+    [InlineData("public int32 Value(int32 x) { return ~((x)); }")]
+    [InlineData("public int32 Value() { return ~(0xFFFFFFD5); }")]
     [InlineData("public int64 Value() { return ~0xFFFFFFFFFFFFFFFF; }")]
     [InlineData("public uint64 Value() { return ~0xFFFFFFFFFFFFFFFF; }")]
     [InlineData("public bool Value(bool x, bool y) { return x && y; }")]
@@ -270,6 +273,8 @@ public sealed partial class CliTests
     [InlineData("public int32 Value(bool x, bool y) { if (x && y) { return 42; } else { return 0; } }")]
     [InlineData("public int32 Value(int32 x) { return -x; }")]
     [InlineData("public int64 Value(int64 x, int64 y) { return -y; }")]
+    [InlineData("public int32 Value(int32 x) { return -(x); }")]
+    [InlineData("public int32 Value(int32 x) { return +((x)); }")]
     [InlineData("public int32 Value(int32 x) { return +x; }")]
     [InlineData("public uint32 Value(uint32 x) { return +x; }")]
     [InlineData("public int64 Value(int64 x) { return +x; }")]

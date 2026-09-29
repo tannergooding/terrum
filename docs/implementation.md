@@ -852,9 +852,10 @@ typed result: parameter types and names, expression operators and parameter
 references, optional conditional branches, declared `public`/`internal` visibility, and UTF-16 spans. It accepts one
 function with zero to two scalar parameters, parameter references, Boolean
 literals, unary `!` over a Boolean literal or named parameter (including grouped operands), unary `~`
-over a contextual integer literal or named integer parameter, and unary
-`+` over a contextual integer literal or named parameter, and signed `-`
-over a named integer parameter,
+over a contextual integer literal or named integer parameter (including grouped
+operands), and unary `+` over a contextual integer literal or named parameter,
+and signed `-` over a named integer parameter (including grouped named
+operands),
 context-typed unsuffixed integer literals (including signed unary minus and
 decimal signed minima) in return expressions, and
 at most one binary operation per expression, including either order of
@@ -900,10 +901,10 @@ emitter. It rejects other entry signatures before replacing output;
 writing a PE file, returning its raw exit code with no success envelope;
 the hosted compiler remains in parallel for general builds. This bounded
 result is a provisional component protocol, not approved TRRM metadata or a
-compiler self-build. One hundred and fifteen shared scalar/conditional/Boolean/integer-literal sources produce
+compiler self-build. One hundred and nineteen shared scalar/conditional/Boolean/integer-literal sources produce
 byte-identical DLLs through the Terrum-authored frontend and hosted compiler
 under both runtime policies; this does not establish parity for unsupported
-source shapes, independent native emitters or a self-build. Twenty-two bounded
+source shapes, independent native emitters or a self-build. Twenty-three bounded
 zero-parameter `Main` shapes also produce byte-identical, executable images
 through the same hosted emitter under both policies.
 

@@ -3031,6 +3031,10 @@ public sealed class ManagedScannerComponentTests
         0L, 657)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return +42; }",
         0L, 657)]
+    [InlineData(NativeRuntimePolicy.FailFast, "int32 Value(int32 x) { return ~((x)); }",
+        -43L, 63)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "int32 Value() { return ~(0xFFFFFFD5); }",
+        0L, 163)]
     public async Task NativeScalarFrontendIntegerUnaryExecutesAsync(
         NativeRuntimePolicy policy, string text, long argument, int operation)
     {
@@ -3196,14 +3200,16 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast, "-", -42, 58)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "-", -42, 58)]
-    [InlineData(NativeRuntimePolicy.FailFast, "+", 42, 57)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions, "+", 42, 57)]
+    [InlineData(NativeRuntimePolicy.FailFast, "-x", -42, 58)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "-x", -42, 58)]
+    [InlineData(NativeRuntimePolicy.FailFast, "+x", 42, 57)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "+x", 42, 57)]
+    [InlineData(NativeRuntimePolicy.FailFast, "-(x)", -42, 58)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "+((x))", 42, 57)]
     public async Task NativeScalarFrontendNamedUnaryIntegerExecutesAsync(
-        NativeRuntimePolicy policy, string op, int input, int operation)
+        NativeRuntimePolicy policy, string expression, int input, int operation)
     {
-        var text = $"int32 Value(int32 x) {{ return {op}x; }}";
+        var text = $"int32 Value(int32 x) {{ return {expression}; }}";
         var source = SourceText.From(text);
         var stage = await CompileAsync(text,
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
