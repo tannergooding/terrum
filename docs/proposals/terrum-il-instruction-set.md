@@ -356,7 +356,12 @@ return tmp + tmp; }`, one block defines `r3 = CheckedBinary add r1, r2`,
 then `r4 = CheckedBinary add r3, r3`, and returns `r4`. Reuse needs no
 duplicate descriptor or `Copy`
 operation for this Copy scalar; a unique value could not be duplicated
-the same way.
+the same way. With all four value descriptors `(t1,value,useBlockCount=1)`,
+its definition starts are `[0,4]`: `r1` and `r2` have the parameter
+sentinel, `r3` points to operation 0 and `r4` to operation 1. B1's
+last-use entries are `(r1,0),(r2,0),(r3,1),(r4,2)`, with ordinal 2
+denoting Return. `r3` is read *twice* by operation 1 but appears once
+in the per-block inventory and its `useBlockCount` is 1, not 2.
 
 For `int32 Choose(bool flag, int32 x, int32 y) { mut int32 chosen = x;
 if (flag) { chosen = y; } return chosen; }`, MethodSig has the three
@@ -384,6 +389,22 @@ but `r4` is defined once by B4's parameter, not by either predecessor.
 The branch copies only Copy values; `liveOut` is the union of the
 successors' live-ins and explicit edge arguments. Source variable names
 and the apparent assignment are not stored in the Body.
+
+The method-wide definition starts are `[0,3,3,3,4]`. The first
+three value-definition offsets are parameter sentinels in B1, and
+`r4` is a parameter sentinel in B4; the intervening empty intervals
+mean B2 and B3 define no values. The mapped value descriptors are
+`[r1:(t1,value,1),r2:(t2,value,1),r3:(t2,value,1),r4:(t2,value,1)]`,
+where the final number is `useBlockCount`. All four blocks have
+`operationCount=0`, so ordinal 0 means their terminator:
+
+| Block | `valueLastUses` | Boundary facts |
+|---|---|---|
+| B1 | `(r1,0)` | `r2` and `r3` are live-out transit values, not uses in B1 |
+| B2 | `(r3,0)` | `r3` is live-in and supplied as B4's edge argument |
+| B3 | `(r2,0)` | `r2` is live-in and supplied as B4's edge argument |
+| B4 | `(r4,0)` | `r4` is defined at entry and used by Return |
+
 If an inliner knows `flag` is true, B1's indexed terminator identifies
 B2 as the only normal successor. B3 can be removed; its use inventory
 lists `r2`, so removing B3 decrements `r2`'s remaining use-block count
@@ -426,6 +447,29 @@ explicitly supplying it to the header. The false edge supplies `r3` to
 the loop exit. A loop
 region and valid backedge do not make a failing add an implicit cleanup
 or catch edge.
+
+The seven value descriptors resolve to the type map in ID order:
+`[r1:t1/1,r2:t1/1,r3:t1/2,r4:t2/1,r5:t1/1,r6:t1/1,r7:t1/1]`.
+All have value kind; the suffix is `useBlockCount`, **not** the number
+of reads. `valueDefStarts=[0,2,4,6,7]`; `r1`, `r3` and `r7` have
+parameter-sentinel definition offsets, while the others point directly
+to `(B1,op0)`, `(B2,op0)`, `(B3,op0)` and `(B3,op1)`, respectively.
+The actual row stores byte offsets to those operations; this sketch
+does not assign their block-header or instruction bytes.
+
+| Block | `operationCount` | `valueLastUses` | Important distinction |
+|---|---:|---|---|
+| B1 | 1 | `(r2,1)` | `r1` is a live-out parameter but is not read here |
+| B2 | 1 | `(r1,0),(r3,1),(r4,1)` | `r3` is read by the comparison and again as the false-edge argument |
+| B3 | 2 | `(r3,1),(r5,1),(r6,2)` | `r1` transits the backedge through live-in/out but is not read here |
+| B4 | 0 | `(r7,0)` | `r7` is an entry definition read by Return |
+
+The loop-header `r3` is used in both B2 and B3, so its
+`useBlockCount=2`; its carried backedge replacements `r2` and `r6`
+each have one use block. There are no places in this SSA-shaped
+example, so `placeUseCount=0` in every block. These inventories are
+about normal operand uses, not a license to drop a checked add or
+proof that any managed root expires at an SSA last use.
 
 The following are operand *kinds*, not additional on-wire tags. `ref`
 means the selected reference width, `count` the selected count width,
@@ -825,18 +869,39 @@ The opcode/kind pair selects behavior; operand types supply width and
 signedness, and the result descriptor must match the result type.
 `CheckedBinary` is a provisional **integer primitive** mnemonic, not a
 polymorphic call to an operator named `+` or a promise that every type
-with a numeric witness accepts the opcode. A nominal operator, including
-one selected through an explicitly declared numeric witness, is a call
-to its bound MethodDef. A witness proves only its declared signature
-and checked contracts; it does not by itself establish purity, overflow
-behavior, commutativity, associativity or a unique constant result.
-If a future intrinsic/primitive-like profile permits a user-defined
-type to use an arithmetic opcode, that profile must name the selected
-witness, exact semantics, effect/failure and ownership behavior, and
-compatibility requirements. Equal layout or a familiar operator name is
-not sufficient. A consumer may inline or fold a call only under
-independently validated callable/constant-evaluation semantics, preserving
-the selected call's effects and failure order.
+with a numeric witness accepts the opcode. There are three distinct
+cases: this exact built-in primitive operation; an arbitrary nominal
+`operator +` selected as a MethodDef call; and a type explicitly opting
+into a **semantic numeric contract** whose selected witness commits
+to specified numeric rules. The third case need not be opaque to an
+optimizer merely because the implementation is user-defined. It still
+must retain the exact selected witness/MethodDef for fallback and separate
+compilation, rather than treating the interface name or a matching
+machine representation as a primitive operation.
+
+A generic operator witness currently establishes only its declared
+signature/effects, not algebraic laws. A stronger `INumber`-style
+contract could specify value domain, exact arithmetic and overflow
+policy, failure order, observable effects, result validity/ownership
+and which identities or transformations are observationally sound.
+Different contracts may promise different subsets: mathematical
+associativity alone cannot erase an intermediate checked failure,
+allocation failure or cleanup. A contract that explicitly permits
+folding still needs deterministic constant evaluation and a validated
+serialization of the resulting value. The producer's checked witness
+and published contract would be trusted under the metadata trust policy,
+or audited where required; neither a type name nor a convenient
+implementation body creates these promises.
+
+Before admitting the third case to executable Body, choose a wire form
+such as a semantic numeric operation carrying the selected witness and
+fallback MethodDef, or a selected call with a registered semantic
+profile. Define its binding, version/compatibility and exact optimizer
+permissions together; the present `CheckedBinary` operand schema
+cannot carry those identities. Until then, encode the selected call
+and do not silently substitute a primitive opcode. This is an open
+encoding choice, **not** a claim that opt-in numeric types must remain
+opaque or can never participate in constant folding.
 
 The symbolic spellings `Binary`, `CheckedBinary` and `ConstSigned` name
 this proposal's **opcode schemas**, not source-language operations or
@@ -997,6 +1062,21 @@ this decode-only shape:
 `Assign` lack complete place and failure-path rules, so this shape is not
 executable. `PlaceField` produces a place; `Extract` reads a Copy field
 from a by-value aggregate.
+
+Its `typeMap=[t1:TypeSpec[1] (int32)]` and the place descriptor is
+`p1:(t1,region0,flags=05,useBlockCount=1)`. The value descriptors are
+`r1:(t1,place-handle,1)` and `r2`–`r5:(t1,value,1)`: `r1` has the
+place's *referent* type, not a raw pointer type. No value is a block
+parameter; `valueDefStarts=[0,5]` and all five definition offsets
+point to B1 operations. `p1` becomes active vacant at entry and ends
+after the operations; its last-use ordinal 7 includes the end-place
+transition. `r1` first becomes available at `PlaceLocal` (operation 0)
+and is last read by `Assign` (6). Ordinary `r2` is last read by
+`Initialize` (2), `r3` and `r4` by the checked add (5), and `r5` by
+Return (7). `r5` is also read by `Assign` (6), but the last-use
+inventory stores only its *final* use. Dropping this block would also
+remove its place-state transitions; dropping individual effects from
+a retained block requires their full ownership and failure contract.
 
 The encoded Body section is 126 bytes. Its `05` place flags mean mutable
 and initially vacant; block offsets are `[0,51]`, and the terminator
