@@ -1030,6 +1030,103 @@ public sealed class TrRmBodyExampleTests
             resultTypeSpec: 1, firstTypeCode: 0));
     }
 
+    [Fact]
+    public void CompactIndexedReaderChecksLoopRegionAndBackedge()
+    {
+        var body = IndexedScalarLoop();
+        Assert.Equal((4, 7), InspectIndexed(body, parameterCount: 1,
+            resultTypeSpec: 2, parameterTypeIds: [2]));
+
+        var region = body.AsSpan().IndexOf(new byte[] { 1, 0, 2, 4, 0 });
+        Assert.True(region >= 0);
+        foreach (var (offset, replacement) in new[]
+            { (0, (byte)2), (2, (byte)3), (3, (byte)3), (4, (byte)1) })
+        {
+            var invalid = (byte[])body.Clone();
+            invalid[region + offset] = replacement;
+            Assert.Throws<InvalidDataException>(() => InspectIndexed(invalid,
+                parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
+        }
+
+        var backedge = body.AsSpan().LastIndexOf(new byte[] { 0x80, 2, 1, 6 });
+        Assert.True(backedge >= 0);
+        var wrongTarget = (byte[])body.Clone();
+        wrongTarget[backedge + 1] = 1;
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(wrongTarget,
+            parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
+        var missingBackedge = (byte[])body.Clone();
+        missingBackedge[backedge + 1] = 4;
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(missingBackedge,
+            parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(
+            IndexedScalarLoop(ghostLiveness: true), parameterCount: 1,
+            resultTypeSpec: 2, parameterTypeIds: [2]));
+    }
+
+    internal static byte[] IndexedScalarLoop(bool ghostLiveness = false)
+    {
+        var blocks = new List<byte[]>();
+        var definitions = new byte[] { 0xFF, 0, 0xFF, 0, 0, 0, 0xFF };
+        var terminators = new List<byte>();
+        void AddBlock(byte[] header, byte[][] operations, byte[] terminator, params int[] results)
+        {
+            var block = new List<byte>(header);
+            for (var index = 0; index < operations.Length; index++)
+            {
+                if (index < results.Length)
+                {
+                    definitions[results[index] - 1] = (byte)block.Count;
+                }
+
+                block.AddRange(operations[index]);
+            }
+
+            terminators.Add((byte)block.Count);
+            block.AddRange(terminator);
+            blocks.Add([.. block]);
+        }
+
+        AddBlock([0x1A, 1, 1, 2, 1, 2, 1, 2, 1, 1],
+            [[2, 2, 1, 0]], [0x80, 2, 1, 2], 2);
+        AddBlock(ghostLiveness
+            ? [0x1F, 1, 1, 3, 2, 1, 2, 3, 1, 2, 3, 3, 1, 0, 3, 1, 4, 1, 1]
+            : [0x1F, 1, 1, 3, 1, 1, 2, 1, 3, 3, 1, 0, 3, 1, 4, 1, 1],
+            [[5, 4, 6, 3, 1]], [0x81, 4, 3, 0, 4, 1, 3], 4);
+        AddBlock(ghostLiveness
+            ? [0x1D, 1, 3, 1, 2, 3, 3, 1, 2, 6, 3, 3, 1, 5, 1, 6, 2, 2]
+            : [0x1D, 1, 2, 1, 3, 2, 1, 6, 3, 3, 1, 5, 1, 6, 2, 2],
+            [[2, 5, 1, 1], [0x15, 6, 1, 3, 5]], [0x80, 2, 1, 6], 5, 6);
+        AddBlock([0x12, 1, 7, 1, 7, 0, 0],
+            [], [0x83, 7]);
+
+        var row = new List<byte> { 0x08, 4, 7, 1, 2,
+            2, 0, 0, 0, 1, 0, 0, 0,
+            1, 0, 2, 4, 0 };
+        var types = new byte[] { 1, 1, 1, 2, 1, 1, 1 };
+        var uses = new byte[] { 1, 1, 2, 1, 1, 1, 1 };
+        for (var value = 0; value < types.Length; value++)
+        {
+            row.Add(types[value]);
+            row.Add(uses[value]);
+        }
+        row.AddRange([0, 2, 4, 6, 7]);
+        row.AddRange(definitions);
+        var offset = 0;
+        row.Add(0);
+        foreach (var block in blocks)
+        {
+            offset += block.Length;
+            row.Add((byte)offset);
+        }
+        row.AddRange(terminators);
+        foreach (var block in blocks)
+        {
+            row.AddRange(block);
+        }
+
+        return TrRmVariableTableWriter.EncodeBodies([row.ToArray()]);
+    }
+
     private static byte[] IndexedDivRem()
         =>
         [

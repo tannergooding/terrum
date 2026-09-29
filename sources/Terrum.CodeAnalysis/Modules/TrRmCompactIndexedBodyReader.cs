@@ -74,7 +74,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         var typeCount = ReadCount(body, ref position, width);
         if (BlockCount == 0 || BlockCount > (body.Length - position) / (3 * width + 1)
             || ValueCount > (body.Length - position) / (3 * width)
-            || regionCount != 0 || typeCount > (body.Length - position) / 4)
+            || regionCount > 1 || typeCount > (body.Length - position) / 4)
         {
             throw InvalidBody();
         }
@@ -96,6 +96,26 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
 
             mappedTypes[typeId] = type;
+        }
+
+        var loopHeader = 0;
+        var loopExit = 0;
+        if (regionCount != 0)
+        {
+            if (body.Length - position < 1 + 4 * width || Read(body, ref position, 1) != 1
+                || ReadCount(body, ref position, width) != 0)
+            {
+                throw InvalidBody();
+            }
+
+            loopHeader = ReadCount(body, ref position, width);
+            loopExit = ReadCount(body, ref position, width);
+            if (loopHeader <= 1 || loopHeader > BlockCount
+                || loopExit == loopHeader || loopExit < 1 || loopExit > BlockCount
+                || ReadCount(body, ref position, width) != 0)
+            {
+                throw InvalidBody();
+            }
         }
 
         var valueTypes = new ushort[ValueCount + 1];
@@ -139,6 +159,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         var liveOuts = new int[BlockCount + 1][];
         var successors = new Edge[BlockCount + 1][];
         var externalUses = new HashSet<int>[BlockCount + 1];
+        var blockRegions = new int[BlockCount + 1];
         for (var block = 1; block <= BlockCount; block++)
         {
             if (starts[block] < starts[block - 1]
@@ -175,7 +196,14 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             var extent = blockData[(int)offsets[block - 1]..(int)offsets[block]];
             var cursor = 0;
             var presence = Read(extent, ref cursor, 1);
-            if ((presence & ~0x1Eu) != 0)
+            if ((presence & ~0x1Fu) != 0)
+            {
+                throw InvalidBody();
+            }
+
+            blockRegions[block] = (presence & 1) != 0
+                ? ReadCount(extent, ref cursor, width) : 0;
+            if (blockRegions[block] > regionCount || block == 1 && blockRegions[block] != 0)
             {
                 throw InvalidBody();
             }
@@ -594,9 +622,9 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 }
 
                 Use(condition, operations);
-                var whenTrue = ReadEdge(extent, ref cursor, block, BlockCount,
+                var whenTrue = ReadEdge(extent, ref cursor, BlockCount,
                     ValueCount, terminatorWidth, countWidth);
-                var whenFalse = ReadEdge(extent, ref cursor, block, BlockCount,
+                var whenFalse = ReadEdge(extent, ref cursor, BlockCount,
                     ValueCount, terminatorWidth, countWidth);
                 successors[block] = [whenTrue, whenFalse];
                 foreach (var edge in successors[block])
@@ -610,7 +638,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
             else if (terminator == 0x80)
             {
-                var edge = ReadEdge(extent, ref cursor, block, BlockCount,
+                var edge = ReadEdge(extent, ref cursor, BlockCount,
                     ValueCount, terminatorWidth, countWidth);
                 foreach (var value in edge.Arguments)
                 {
@@ -654,11 +682,11 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     }
 
                     previous = bits;
-                    edges[index] = ReadEdge(extent, ref cursor, block, BlockCount,
+                    edges[index] = ReadEdge(extent, ref cursor, BlockCount,
                         ValueCount, terminatorWidth, countWidth);
                 }
 
-                edges[cases] = ReadEdge(extent, ref cursor, block, BlockCount,
+                edges[cases] = ReadEdge(extent, ref cursor, BlockCount,
                     ValueCount, terminatorWidth, countWidth);
                 successors[block] = edges;
                 foreach (var edge in edges)
@@ -726,8 +754,69 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             }
         }
 
+        if (loopHeader != 0 && (blockRegions[loopHeader] != 1
+            || blockRegions[loopExit] != 0))
+        {
+            throw InvalidBody();
+        }
+
+        var backedge = false;
         var reachable = new bool[BlockCount + 1];
         reachable[1] = true;
+        for (var block = 1; block <= BlockCount; block++)
+        {
+            foreach (var edge in successors[block])
+            {
+                if (blockRegions[block] != blockRegions[edge.Target]
+                    && edge.Target != (blockRegions[block] == 0 ? loopHeader : loopExit)
+                    || edge.Target <= block
+                        && (blockRegions[block] != 1 || edge.Target != loopHeader))
+                {
+                    throw InvalidBody();
+                }
+
+                backedge |= edge.Target <= block;
+            }
+        }
+        if (loopHeader != 0 && !backedge)
+        {
+            throw InvalidBody();
+        }
+
+        if (loopHeader == 0)
+        {
+            for (var block = 1; block <= BlockCount; block++)
+            {
+                if (!reachable[block])
+                {
+                    throw InvalidBody();
+                }
+
+                foreach (var edge in successors[block])
+                {
+                    reachable[edge.Target] = true;
+                }
+            }
+        }
+        else
+        {
+            var pending = new Queue<int>();
+            pending.Enqueue(1);
+            while (pending.Count != 0)
+            {
+                foreach (var edge in successors[pending.Dequeue()])
+                {
+                    if (!reachable[edge.Target])
+                    {
+                        reachable[edge.Target] = true;
+                        pending.Enqueue(edge.Target);
+                    }
+                }
+            }
+        }
+
+        var neededIns = new HashSet<int>[BlockCount + 1];
+        var neededOuts = new HashSet<int>[BlockCount + 1];
         for (var block = 1; block <= BlockCount; block++)
         {
             if (!reachable[block])
@@ -735,15 +824,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 throw InvalidBody();
             }
 
-            foreach (var edge in successors[block])
-            {
-                reachable[edge.Target] = true;
-            }
-        }
-
-        for (var block = BlockCount; block > 0; block--)
-        {
-            var neededOut = new HashSet<int>();
+            neededIns[block] = new HashSet<int>(externalUses[block]);
+            neededOuts[block] = new HashSet<int>();
             foreach (var edge in successors[block])
             {
                 var targetParameters = blockParameters[edge.Target];
@@ -760,26 +842,50 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         throw InvalidBody();
                     }
                 }
-
-                neededOut.UnionWith(liveIns[edge.Target]);
-                neededOut.UnionWith(edge.Arguments);
             }
+        }
 
-            if (!neededOut.SetEquals(liveOuts[block]))
+        var changed = true;
+        for (var iteration = 0; changed && iteration <= BlockCount; iteration++)
+        {
+            changed = false;
+            for (var block = BlockCount; block > 0; block--)
             {
-                throw InvalidBody();
-            }
-
-            var neededIn = new HashSet<int>(externalUses[block]);
-            foreach (var value in neededOut)
-            {
-                if (owner[value] != block)
+                var neededOut = neededOuts[block];
+                foreach (var edge in successors[block])
                 {
-                    neededIn.Add(value);
+                    neededOut.UnionWith(neededIns[edge.Target]);
+                    neededOut.UnionWith(edge.Arguments);
                 }
+
+                var neededIn = neededIns[block];
+                var before = neededIn.Count;
+                foreach (var value in neededOut)
+                {
+                    if (owner[value] != block)
+                    {
+                        neededIn.Add(value);
+                    }
+                }
+
+                changed |= neededIn.Count != before;
             }
 
-            if (!neededIn.SetEquals(liveIns[block]))
+            if (loopHeader == 0)
+            {
+                changed = false;
+            }
+        }
+
+        if (changed)
+        {
+            throw InvalidBody();
+        }
+
+        for (var block = 1; block <= BlockCount; block++)
+        {
+            if (!neededOuts[block].SetEquals(liveOuts[block])
+                || !neededIns[block].SetEquals(liveIns[block]))
             {
                 throw InvalidBody();
             }
@@ -901,11 +1007,11 @@ public readonly ref struct TrRmCompactIndexedBodyReader
     }
 
     private static Edge ReadEdge(ReadOnlySpan<byte> data, ref int position,
-        int block, int count, int valueCount, int referenceWidth, int countWidth)
+        int count, int valueCount, int referenceWidth, int countWidth)
     {
         var target = ReadCount(data, ref position, referenceWidth);
         var arguments = ReadCount(data, ref position, countWidth);
-        if (target <= block || target > count || arguments > valueCount
+        if (target == 0 || target > count || arguments > valueCount
             || arguments > (data.Length - position) / referenceWidth)
         {
             throw InvalidBody();
