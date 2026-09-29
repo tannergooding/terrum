@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.IO;
 using Terrum.CodeAnalysis.Modules;
 using Xunit;
 
@@ -17,9 +18,50 @@ public sealed class TrRmVariableTableWriterTests
         source[0] = 0;
 
         Assert.Equal(new uint[] { 0, 0, 3 }, Offsets(bytes, 2));
-        var index = new TrRmVariableTableIndex(bytes, 2, 0, 1);
-        Assert.True(index.GetRow(1).IsEmpty);
-        Assert.Equal(new byte[] { 1, 2, 3 }, index.GetRow(2).ToArray());
+        var reader = new TrRmBlobTableReader(bytes, 2);
+        Assert.True(reader.GetRow(1).IsEmpty);
+        Assert.Equal(new byte[] { 1, 2, 3 }, reader.GetRow(2).ToArray());
+    }
+
+    [Fact]
+    public void BlobContentsRemainOpaqueAndRowsAreIndependentlyIndexed()
+    {
+        var first = new byte[] { 0x16, 0, 0, 1 };
+        var last = new byte[] { 0xFF, 0, 0x16, 0 };
+        var section = TrRmVariableTableWriter.EncodeBlobs([first, ReadOnlyMemory<byte>.Empty, last]);
+        var reader = new TrRmBlobTableReader(section, 3);
+
+        Assert.Equal(first, reader.GetRow(1).ToArray());
+        Assert.True(reader.GetRow(2).IsEmpty);
+        Assert.Equal(last, reader.GetRow(3).ToArray());
+        Assert.Throws<InvalidDataException>(() => ReadBlob(section, 0, 3));
+        Assert.Throws<InvalidDataException>(() => ReadBlob(section, 4, 3));
+    }
+
+    [Fact]
+    public void RejectsMalformedBlobIndexes()
+    {
+        byte[] section = TrRmVariableTableWriter.EncodeBlobs([
+            ReadOnlyMemory<byte>.Empty, new byte[] { 1, 2, 3 },
+        ]);
+        var changedStart = (byte[])section.Clone();
+        changedStart[0] = 1;
+        Assert.Throws<InvalidDataException>(() => ReadBlob(changedStart, 1, 2));
+
+        var changedEnd = (byte[])section.Clone();
+        changedEnd[8] = 2;
+        Assert.Throws<InvalidDataException>(() => ReadBlob(changedEnd, 1, 2));
+
+        var descending = (byte[])section.Clone();
+        descending[4] = 2;
+        descending[8] = 1;
+        Assert.Throws<InvalidDataException>(() => ReadBlob(descending, 1, 2));
+    }
+
+    private static byte[] ReadBlob(byte[] section, int row, int count)
+    {
+        var reader = new TrRmBlobTableReader(section, count);
+        return reader.GetRow(row).ToArray();
     }
 
     [Fact]

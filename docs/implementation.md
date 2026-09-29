@@ -1192,7 +1192,9 @@ framing and structural checks to tooling; success does not validate Body
 instructions, imported contracts or an executable module.
 It checks Blob and Body offset indexes, including empty Blob rows, and composes
 a two-module Import/Export fixture, but does not interpret Blob contents or
-Body instructions. SourceMap rows check slots, spans and Body/SourceFile module
+Body instructions. A Blob-table reader exposes validated, borrowed row bytes
+without interpreting them as references or requiring nonempty payloads.
+SourceMap rows check slots, spans and Body/SourceFile module
 association. A bounded SourceMap writer emits those slots, reuses SourceFile slots
 and rejects duplicate instruction locations; block/ordinal existence still
 requires instruction-aware verification. A separate provisional artifact writer

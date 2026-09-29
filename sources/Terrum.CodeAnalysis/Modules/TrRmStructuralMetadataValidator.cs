@@ -40,7 +40,7 @@ public static class TrRmStructuralMetadataValidator
 
         if (blobCount != 0)
         {
-            _ = new TrRmVariableTableIndex(blobBytes, blobCount, 0, 1);
+            _ = new TrRmBlobTableReader(blobBytes, blobCount);
         }
 
         if (bodyCount != 0)
