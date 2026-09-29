@@ -65,6 +65,14 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     require tokens.TryGet(first, out var initial);
     mut Token value = initial;
     bool grouped = count == 12 || count == 13;
+    bool outerSign = count == 13 && (initial.Kind == 57 || initial.Kind == 58);
+    mut Token group = initial;
+    if (outerSign)
+    {
+        first = first + 1;
+        require tokens.TryGet(first, out group);
+        value = group;
+    }
     if (grouped)
     {
         if (value.Kind != 46)
@@ -74,7 +82,7 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
         first = first + 1;
         require tokens.TryGet(first, out value);
     }
-    if (count == 11 || count == 13)
+    if (count == 11 || (count == 13 && !outerSign))
     {
         if (value.Kind != 57 && value.Kind != 58)
         {
@@ -111,9 +119,9 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     mut int32 start = value.Range.Start;
     if (grouped)
     {
-        start = initial.Range.Start;
+        start = group.Range.Start;
     }
-    if (count == 11)
+    if (count == 11 || outerSign)
     {
         require tokens.TryGet(6, out var prefix);
         start = prefix.Range.Start;
@@ -218,12 +226,21 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     }
     require tokens.TryGet(valueIndex, out var literal);
     mut bool negative = false;
+    mut bool outerSign = false;
     if (count == 11 || count == 13)
     {
         mut int32 prefixIndex = 6;
         if (count == 13)
         {
-            prefixIndex = 7;
+            require tokens.TryGet(6, out var firstToken);
+            if (firstToken.Kind == 46)
+            {
+                prefixIndex = 7;
+            }
+            else
+            {
+                outerSign = true;
+            }
         }
         require tokens.TryGet(prefixIndex, out var prefix);
         negative = prefix.Kind == 58;
@@ -236,12 +253,13 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     }
 
     bool based = IsBasedInteger(literal);
-    // Decimal signed minimum needs unary minus; based literals first form int32 bits.
+    // Decimal signed minimum needs minus directly on the literal, not outside parentheses.
+    // Based literals first form int32 bits.
     if (low < 0)
     {
         if (!based)
         {
-            if (!negative || low != int32.MinValue)
+            if (!negative || outerSign || low != int32.MinValue)
             {
                 return false;
             }
@@ -278,7 +296,11 @@ bool TryEvaluateUInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
         mut int32 prefixIndex = 6;
         if (count == 13)
         {
-            prefixIndex = 7;
+            require tokens.TryGet(6, out var firstToken);
+            if (firstToken.Kind == 46)
+            {
+                prefixIndex = 7;
+            }
         }
         require tokens.TryGet(prefixIndex, out var prefix);
         if (prefix.Kind != 57)
@@ -335,7 +357,11 @@ bool TryEvaluateUInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot in
         mut int32 prefixIndex = 6;
         if (count == 13)
         {
-            prefixIndex = 7;
+            require tokens.TryGet(6, out var firstToken);
+            if (firstToken.Kind == 46)
+            {
+                prefixIndex = 7;
+            }
         }
         require tokens.TryGet(prefixIndex, out var prefix);
         if (prefix.Kind != 57)
@@ -375,12 +401,21 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     }
     require tokens.TryGet(valueIndex, out var literal);
     mut bool negative = false;
+    mut bool outerSign = false;
     if (count == 11 || count == 13)
     {
         mut int32 prefixIndex = 6;
         if (count == 13)
         {
-            prefixIndex = 7;
+            require tokens.TryGet(6, out var firstToken);
+            if (firstToken.Kind == 46)
+            {
+                prefixIndex = 7;
+            }
+            else
+            {
+                outerSign = true;
+            }
         }
         require tokens.TryGet(prefixIndex, out var prefix);
         negative = prefix.Kind == 58;
@@ -398,7 +433,7 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     bool based = IsBasedInteger(literal);
     if (!based && magnitude > uint64(int64.MaxValue))
     {
-        if (!negative || magnitude != signBit)
+        if (!negative || outerSign || magnitude != signBit)
         {
             return false;
         }
