@@ -39,7 +39,7 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14)
+        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15)
             || words[1] is not (1 or 2))
         {
             throw InvalidResult();
@@ -388,6 +388,15 @@ public static class ScalarFrontendHost
                         minus ? TokenKind.Minus : TokenKind.Plus, out var nestedSpan)
                     && ValidExpression(new ScalarFrontendExpression(type, 63,
                         left, right, nestedSpan), type, parameters);
+            }
+            if (operation == 16062)
+            {
+                return words[0] >= 15 && expression.Type == 5 && type == 5
+                    && ValidSpan(expression.Span, nonempty: true)
+                    && TryGroupedUnarySpan(source, expression.Span,
+                        TokenKind.Bang, out var nestedSpan)
+                    && ValidExpression(new ScalarFrontendExpression(5, 62,
+                        left, right, nestedSpan), 5, parameters);
             }
             if (operation / 100 is 7 or 9
                 && operation % 100 is 65 or 66 or >= 71 and <= 75)
@@ -1049,6 +1058,18 @@ public static class ScalarFrontendHost
                 return Binder.FoldScalarConstant(new BoundUnary(minus
                     ? TokenKind.Minus : TokenKind.Plus,
                     Expression(nested), type, expression.Span));
+            }
+            if (expression.Operation == 16062)
+            {
+                if (!TryGroupedUnarySpan(source, expression.Span,
+                    TokenKind.Bang, out var nestedSpan))
+                {
+                    throw InvalidResult();
+                }
+                var nested = new ScalarFrontendExpression(5, 62,
+                    expression.LeftParameter, expression.RightParameter, nestedSpan);
+                return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Bang,
+                    Expression(nested), PrimitiveType.Bool, expression.Span));
             }
             if (expression.Operation / 100 is 7 or 9
                 && expression.Operation % 100 is 65 or 66 or >= 71 and <= 75)
