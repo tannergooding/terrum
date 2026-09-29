@@ -112,10 +112,20 @@ is asserted.
 
 Consider `AddFive` under the fail-fast policy. Assume MethodDef row 1 owns
 the body, its MethodSig declares the one by-value `int32` parameter and
-`int32` result, and TypeSpec row `t1` denotes `int32`. The expected
+`int32` result, and TypeSpec row 1 describes `int32`. The expected
 `int32` context types the literal `5`; `+` selects checked primitive
-addition, not a numeric fallback or user witness. This illustrative
-lowering is explanatory IR, not a required source rewrite or wire syntax:
+addition, not a numeric fallback or user witness.
+
+The notation below is explanatory, not wire syntax or a required source
+rewrite. `B1` and `B2` are one-based block IDs; parentheses on a block
+declaration list its typed input values. `t1` means TypeSpec row 1, not
+a primitive code. `r1`, `r2` and `r3` are one-based Body value IDs, not
+machine registers: the Body header has a descriptor `(t1, value)` for
+each. `r1` is the function parameter `x`, supplied to the entry block
+from MethodSig; `ConstSigned` creates `r2` from the typed literal `5`.
+The checked addition creates `r3` only on success, as B2's first block
+parameter. In `-> B2()`, the empty parentheses mean there are no
+*explicit* edge arguments in addition to that implicit result.
 
 ```text
 Source:   int32 AddFive(int32 x) { return x + 5; }
@@ -126,12 +136,6 @@ B1(r1: t1):
 B2(r3: t1):
     Return r3
 ```
-
-| Source/IR item | Role in the example |
-|---|---|
-| Parameter `x` | By-value B1 value `r1` (`t1`), not a place |
-| Literal `5` | Materialized by `ConstSigned` as B1 value `r2` (`t1`) |
-| Checked result | `r3` (`t1`), B2's implicit first parameter; no destination operand appears in B1 |
 
 Overflow follows the module's failure policy; only success reaches B2.
 
