@@ -584,9 +584,11 @@ public sealed partial class CliTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ValidateTrRmCompactIndexedChecksPersistedLoopRegionAsync(bool siblingLoop)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task ValidateTrRmCompactIndexedChecksPersistedLoopRegionAsync(
+        bool siblingLoop, bool nestedLoop)
     {
         var module = new byte[44];
         foreach (var offset in new[] { 0, 4, 28, 32, 36, 40 })
@@ -606,13 +608,14 @@ public sealed partial class CliTests
         BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(12), 2);
         BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(24), 1);
         var signature = new byte[24];
-        BinaryPrimitives.WriteUInt32LittleEndian(signature, 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(signature, nestedLoop ? 1u : 2u);
         BinaryPrimitives.WriteUInt32LittleEndian(signature.AsSpan(8), 1);
         BinaryPrimitives.WriteUInt32LittleEndian(signature.AsSpan(12), 1);
         var parameter = new byte[16];
         BinaryPrimitives.WriteUInt32LittleEndian(parameter, 1);
-        BinaryPrimitives.WriteUInt32LittleEndian(parameter.AsSpan(8), 2);
-        var body = TrRmBodyExampleTests.IndexedScalarLoop(siblingLoop: siblingLoop);
+        BinaryPrimitives.WriteUInt32LittleEndian(parameter.AsSpan(8), nestedLoop ? 1u : 2u);
+        var body = nestedLoop ? TrRmBodyExampleTests.IndexedNestedLoop()
+            : TrRmBodyExampleTests.IndexedScalarLoop(siblingLoop: siblingLoop);
         byte[] Artifact() => TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, module),
             new TrRmSection(0x0002, 0, 2, strings),
@@ -634,7 +637,8 @@ public sealed partial class CliTests
                 Assert.True(valid == 0, output + error);
             }
 
-            var region = body.AsSpan().IndexOf(new byte[] { 1, 0, 2, 4, 0 });
+            var region = body.AsSpan().IndexOf(nestedLoop
+                ? new byte[] { 1, 1, 2, 4, 0 } : [1, 0, 2, 4, 0]);
             Assert.True(region >= 0);
             body[region + 2] = 3;
             await File.WriteAllBytesAsync(path, Artifact());

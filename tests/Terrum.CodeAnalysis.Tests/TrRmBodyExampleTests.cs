@@ -1090,6 +1090,89 @@ public sealed class TrRmBodyExampleTests
             parameterCount: 1, resultTypeSpec: 2, parameterTypeIds: [2]));
     }
 
+    [Fact]
+    public void CompactIndexedReaderChecksNestedLoopRegions()
+    {
+        var body = IndexedNestedLoop();
+        Assert.Equal((6, 1), InspectIndexed(body, parameterCount: 1,
+            resultTypeSpec: 1, parameterTypeIds: [1]));
+
+        var innerRegion = body.AsSpan().IndexOf(new byte[] { 1, 1, 2, 4, 0 });
+        Assert.True(innerRegion >= 0);
+        foreach (var (offset, replacement) in new[]
+            { (1, (byte)0), (1, (byte)2), (2, (byte)3), (3, (byte)5) })
+        {
+            var invalid = (byte[])body.Clone();
+            invalid[innerRegion + offset] = replacement;
+            Assert.Throws<InvalidDataException>(() => InspectIndexed(invalid,
+                parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]));
+        }
+
+        var outerRegion = body.AsSpan().IndexOf(new byte[] { 1, 0, 1, 6, 0 });
+        Assert.True(outerRegion >= 0);
+        var wrongOuterExit = (byte[])body.Clone();
+        wrongOuterExit[outerRegion + 3] = 5;
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(wrongOuterExit,
+            parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]));
+
+        var skipInnerHeader = (byte[])body.Clone();
+        var outerBranch = body.AsSpan().IndexOf(new byte[] { 0x81, 1, 2, 0, 6, 0 });
+        Assert.True(outerBranch >= 0);
+        skipInnerHeader[outerBranch + 2] = 3;
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(skipInnerHeader,
+            parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]));
+
+        var skipInnerExit = (byte[])body.Clone();
+        var innerBranch = body.AsSpan().IndexOf(new byte[] { 0x81, 1, 3, 0, 4, 0 });
+        Assert.True(innerBranch >= 0);
+        skipInnerExit[innerBranch + 4] = 5;
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(skipInnerExit,
+            parameterCount: 1, resultTypeSpec: 1, parameterTypeIds: [1]));
+    }
+
+    internal static byte[] IndexedNestedLoop()
+    {
+        byte[][] blocks =
+        [
+            [0x1B, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0x81, 1, 2, 0, 6, 0],
+            [0x1D, 2, 1, 1, 1, 1, 1, 1, 0, 0, 0x81, 1, 3, 0, 4, 0],
+            [0x0D, 2, 1, 1, 1, 1, 0, 0x80, 2, 0],
+            [0x0D, 1, 1, 1, 1, 1, 0, 0x80, 5, 0],
+            [0x1D, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0x80, 1, 1, 1],
+            [0x14, 1, 1, 1, 1, 0, 0, 0x83, 1],
+        ];
+        var row = new List<byte>
+        {
+            0x08, 6, 1, 2, 1,
+            1, 0, 0, 0,
+            1, 0, 1, 6, 0,
+            1, 1, 2, 4, 0,
+            1, 4,
+            0, 1, 1, 1, 1, 1, 1,
+            0xFF,
+            0,
+        };
+        var offset = 0;
+        foreach (var block in blocks)
+        {
+            offset += block.Length;
+            row.Add((byte)offset);
+        }
+
+        byte[] terminatorLengths = [6, 6, 3, 3, 4, 2];
+        for (var index = 0; index < blocks.Length; index++)
+        {
+            row.Add((byte)(blocks[index].Length - terminatorLengths[index]));
+        }
+
+        foreach (var block in blocks)
+        {
+            row.AddRange(block);
+        }
+
+        return TrRmVariableTableWriter.EncodeBodies([row.ToArray()]);
+    }
+
     internal static byte[] IndexedScalarLoop(bool ghostLiveness = false,
         bool entryHeader = false, bool siblingLoop = false)
     {

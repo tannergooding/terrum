@@ -1280,8 +1280,10 @@ patterns additionally have an independent data width. These widths are
 independent of the Body-local width.
 It checks type/definition/use indexes, operation and
 terminator offsets and live-in/out inventories against the decoded blocks,
-including the least live-value solution around loops. Non-loop backedges,
-nested regions and other assigned indexed operations reject.
+including the least live-value solution around loops. Entry-header, sibling
+and nested loop regions are admitted with checked parent chains, designated
+entry/exit boundaries and backedges; non-loop backedges and other assigned
+indexed operations reject.
 `terrumc validate-trrm-compact-indexed <artifact> [--json]` opts into this
 subset across all owned Body rows after structural metadata checks; when
 SourceMap is present it checks block and operation/terminator ordinals.
