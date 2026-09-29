@@ -395,36 +395,35 @@ mut class ScalarFrontendState
         if (literal.Kind == 62)
         {
             _at = _at + 1;
-            require BeginUnaryOperand(out var operand, out var groups);
-            if (groups > 0 && operand.Kind == 2
-                && _tokens.TryGet(_at + 1, out var nestedOperator)
-                && nestedOperator.Kind >= 65 && nestedOperator.Kind <= 75)
+            mut int32 cursor = _at;
+            while (_tokens.TryGet(cursor, out var open) && open.Kind == 46)
             {
-                if (!ParseExpressionCore(5, out var nested)
-                    || nested.Type != 5 || nested.Operation < 65
-                    || nested.Operation > 75 || nested.LeftParameter < 1
-                    || nested.RightParameter < 1)
+                cursor = cursor + 1;
+            }
+            if (cursor > _at && _tokens.TryGet(cursor, out var firstOperand)
+                && firstOperand.Kind == 2)
+            {
+                int32 start = _at;
+                if (!ParseExpression(5, out var nested))
                 {
-                    FailAt(1, operand.Range);
                     return false;
                 }
-                mut int32 end = nested.Span.End;
-                for (mut int32 index = 0; index < groups; index = index + 1)
+                if (nested.Type == 5 && nested.Operation >= 65
+                    && nested.Operation <= 75 && nested.LeftParameter >= 1
+                    && nested.RightParameter >= 1)
                 {
-                    if (!Take(47, out var close))
-                    {
-                        return false;
-                    }
-                    end = close.Range.End;
+                    require _tokens.TryGet(_at - 1, out var close);
+                    require SourceRange.TryCreate(literal.Range.Start,
+                        close.Range.End - literal.Range.Start, out var nestedSpan);
+                    require ScalarFrontendExpression.TryCreate(5,
+                        nested.Operation + 2000, nested.LeftParameter,
+                        nested.RightParameter, nestedSpan, out var negatedBinary);
+                    expression = negatedBinary;
+                    return true;
                 }
-                require SourceRange.TryCreate(literal.Range.Start,
-                    end - literal.Range.Start, out var nestedSpan);
-                require ScalarFrontendExpression.TryCreate(5,
-                    nested.Operation + 2000, nested.LeftParameter,
-                    nested.RightParameter, nestedSpan, out var negatedBinary);
-                expression = negatedBinary;
-                return true;
+                _at = start;
             }
+            require BeginUnaryOperand(out var operand, out var groups);
             mut int32 parameter = 0;
             mut int32 booleanKind = 0;
             if (operand.Kind == 20 || operand.Kind == 21)

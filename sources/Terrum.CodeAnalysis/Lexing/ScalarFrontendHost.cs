@@ -675,25 +675,47 @@ public static class ScalarFrontendHost
         {
             return false;
         }
-        var at = 1;
-        while (at < tokens.Length - 1 && tokens[at].Kind == TokenKind.OpenParen)
-        {
-            at++;
-        }
-        var groups = at - 1;
-        if (groups == 0 || tokens[tokens.Length - 2].Span.End != span.Length)
+        var last = tokens.Length - 2;
+        if (tokens[1].Kind != TokenKind.OpenParen
+            || tokens[last].Kind != TokenKind.CloseParen
+            || tokens[last].Span.End != span.Length)
         {
             return false;
         }
-        var last = tokens.Length - 2;
-        for (var index = 0; index < groups; index++)
+        var openings = new int[tokens.Length];
+        var closing = new int[tokens.Length];
+        var depth = 0;
+        for (var index = 1; index <= last; index++)
         {
-            if (last - index <= at || tokens[last - index].Kind != TokenKind.CloseParen)
+            if (tokens[index].Kind == TokenKind.OpenParen)
+            {
+                openings[depth++] = index;
+            }
+            else if (tokens[index].Kind == TokenKind.CloseParen)
+            {
+                if (depth == 0)
+                {
+                    return false;
+                }
+                closing[openings[--depth]] = index;
+            }
+            if (depth == 0 && index < last)
             {
                 return false;
             }
         }
-        last -= groups;
+        if (depth != 0)
+        {
+            return false;
+        }
+        var at = 2;
+        last--;
+        while (at < last && tokens[at].Kind == TokenKind.OpenParen
+            && closing[at] == last)
+        {
+            at++;
+            last--;
+        }
         nested = new TextSpan(span.Start + tokens[at].Span.Start,
             tokens[last].Span.End - tokens[at].Span.Start);
         return true;
