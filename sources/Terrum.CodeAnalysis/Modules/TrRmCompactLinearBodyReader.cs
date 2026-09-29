@@ -111,7 +111,8 @@ public readonly ref struct TrRmCompactLinearBodyReader
         {
             var offset = position;
             var (opcode, referenceWidth, dataWidth) = ReadInstruction(body, ref position);
-            if (opcode is not (1 or 2 or 0x15) || valueCount == maximum)
+            if (opcode is not (1 or 2 or 3 or 4 or 5 or 7 or 0x15 or 0x17)
+                || valueCount == maximum)
             {
                 throw InvalidBody();
             }
@@ -164,28 +165,70 @@ public readonly ref struct TrRmCompactLinearBodyReader
                     }
                 }
             }
+            else if (opcode == 3)
+            {
+                resultType = Use(body, ref position, referenceWidth, result, ordinal);
+            }
+            else if (opcode is 4 or 0x17)
+            {
+                var kind = opcode == 4 ? ReadByte(body, ref position) : (byte)0;
+                var source = Use(body, ref position, referenceWidth, result, ordinal);
+                if (opcode == 4
+                    ? kind switch
+                    {
+                        1 => source != 1,
+                        2 or 3 => !IsInteger(source),
+                        _ => true,
+                    }
+                    : source is not (8 or 9))
+                {
+                    throw InvalidBody();
+                }
+
+                resultType = source;
+            }
+            else if (opcode == 7)
+            {
+                var condition = Use(body, ref position, referenceWidth, result, ordinal);
+                var whenTrue = Use(body, ref position, referenceWidth, result, ordinal);
+                var whenFalse = Use(body, ref position, referenceWidth, result, ordinal);
+                if (condition != 1 || whenTrue != whenFalse)
+                {
+                    throw InvalidBody();
+                }
+
+                resultType = whenTrue;
+            }
             else
             {
-                if (dataWidth != 0 || position >= body.Length
-                    || body[position++] is < 1 or > 5)
+                var kind = ReadByte(body, ref position);
+                if (opcode == 0x15 ? kind is < 1 or > 7 : kind is < 1 or > 12)
                 {
                     throw InvalidBody();
                 }
 
-                var left = ReadLocal(body, ref position, referenceWidth);
-                var right = ReadLocal(body, ref position, referenceWidth);
-                if (left == 0 || right == 0 || left >= result || right >= result
-                    || _values[left].TypeCode != _values[right].TypeCode
-                    || !IsInteger(_values[left].TypeCode))
+                var left = Use(body, ref position, referenceWidth, result, ordinal);
+                var right = Use(body, ref position, referenceWidth, result, ordinal);
+                var shift = opcode == 0x15 && kind is 6 or 7;
+                if (shift
+                    ? !IsInteger(left) || right != 0x0D
+                    : left != right
+                        || kind switch
+                        {
+                            4 or 5 when opcode == 5 => false,
+                            _ => !IsInteger(left),
+                        })
                 {
                     throw InvalidBody();
                 }
 
-                resultType = _values[left].TypeCode;
-                _values[left].Used = true;
-                _values[right].Used = true;
-                _values[left].LastUseOrdinal = ordinal;
-                _values[right].LastUseOrdinal = ordinal;
+                resultType = opcode == 5 && kind is >= 4 and <= 9 ? (byte)1 : left;
+            }
+
+            if ((opcode is not (1 or 2) && dataWidth != 0)
+                || Array.IndexOf(mappedTypes, resultType, 1) < 0)
+            {
+                throw InvalidBody();
             }
 
             _values[result].TypeCode = resultType;
@@ -252,6 +295,29 @@ public readonly ref struct TrRmCompactLinearBodyReader
         }
 
         return type[2];
+    }
+
+    private byte Use(ReadOnlySpan<byte> body, ref int position, int width, int result, int ordinal)
+    {
+        var source = ReadLocal(body, ref position, width);
+        if (source == 0 || source >= result)
+        {
+            throw InvalidBody();
+        }
+
+        _values[source].Used = true;
+        _values[source].LastUseOrdinal = ordinal;
+        return _values[source].TypeCode;
+    }
+
+    private static byte ReadByte(ReadOnlySpan<byte> body, ref int position)
+    {
+        if (position >= body.Length)
+        {
+            throw InvalidBody();
+        }
+
+        return body[position++];
     }
 
     private static (byte Opcode, int ReferenceWidth, int DataWidth) ReadInstruction(

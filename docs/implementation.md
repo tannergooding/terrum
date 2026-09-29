@@ -1208,9 +1208,11 @@ A Body-table reader likewise exposes the validated row count and nonempty row
 bytes without decoding instructions or claiming that the Body is executable.
 A separate compact-linear reader takes the owning MethodDef, MethodSig,
 Param and TypeSpec rows and checks the fail-fast scalar subset of `ConstBits`,
-`ConstSigned`, `CheckedBinary`, `Return` and `Fail`. It reconstructs parameter
-and operation definitions and final uses from the one-block stream, rejecting
-unknown operations, invalid IDs, types, modes, widths and trailing bytes.
+`ConstSigned`, `Copy`, `Unary`, `Binary`, `Select`, `CheckedBinary`,
+`CheckedNegate`, `Return` and `Fail`. It reconstructs parameter and operation
+definitions, use-block counts and final uses from the one-block stream,
+including mapped Boolean comparison results, rejecting unknown operations,
+invalid IDs, types, modes, widths and trailing bytes.
 This does not validate published effects, execute instructions, accept other
 compact/general forms or make the structural CLI an executable Body verifier.
 SourceMap rows check slots, spans and Body/SourceFile module
