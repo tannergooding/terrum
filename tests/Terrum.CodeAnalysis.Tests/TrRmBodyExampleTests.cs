@@ -987,7 +987,7 @@ public sealed class TrRmBodyExampleTests
             0x18, 3, 4, 1, 2, 0x83, 4,
         ];
 
-    private static byte[] IndexedScalarOperation(byte[] operation, byte[] parameters,
+    internal static byte[] IndexedScalarOperation(byte[] operation, byte[] parameters,
         byte resultType)
     {
         var count = parameters.Length + 1;

@@ -348,4 +348,67 @@ public sealed partial class CliTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task ValidateTrRmCompactIndexedChecksPersistedCallMethodRowsAsync()
+    {
+        var module = new byte[44];
+        foreach (var offset in new[] { 0, 4, 28, 32, 36, 40 })
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
+        }
+
+        var strings = TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]);
+        byte[] typeSpec =
+        [
+            0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0,
+            1, 0, 1, 1, 0, 8,
+        ];
+        var signature = new byte[24];
+        BinaryPrimitives.WriteUInt32LittleEndian(signature, 2);
+        var method = new byte[28];
+        BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(4), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(12), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(24), 1);
+        var body = TrRmBodyExampleTests.IndexedScalarOperation([0x12, 1, 1, 0], [], 2);
+        byte[] Artifact() => TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, module),
+            new TrRmSection(0x0002, 0, 2, strings),
+            new TrRmSection(0x0011, 0, 2, typeSpec),
+            new TrRmSection(0x0016, 0, 1, method),
+            new TrRmSection(0x0017, 0, 1, signature),
+            new TrRmSection(0x0020, 0, 1, body),
+        ]);
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-trrm-call-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            await File.WriteAllBytesAsync(path, Artifact());
+            var (valid, output, error) = await RunAsync([],
+                "validate-trrm-compact-indexed", path, "--json");
+            Assert.Equal(0, valid);
+            Assert.Empty(error);
+            using (var result = JsonDocument.Parse(output))
+            {
+                Assert.True(result.RootElement.GetProperty("success").GetBoolean());
+            }
+
+            byte[] operationBytes = [0x12, 1, 1, 0, 0x83, 1];
+            var operation = body.AsSpan().IndexOf(operationBytes);
+            Assert.True(operation >= 0);
+            body[operation + 2] = 2;
+            await File.WriteAllBytesAsync(path, Artifact());
+            var (structural, _, _) = await RunAsync([],
+                "validate-trrm-structure", path, "--json");
+            Assert.Equal(0, structural);
+            var (invalid, _, _) = await RunAsync([],
+                "validate-trrm-compact-indexed", path, "--json");
+            Assert.Equal(1, invalid);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }
