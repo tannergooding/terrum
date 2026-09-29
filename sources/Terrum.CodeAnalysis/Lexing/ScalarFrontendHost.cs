@@ -318,11 +318,12 @@ public static class ScalarFrontendHost
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
                 var tokens = lexical.Tokens;
-                return lexical.Diagnostics.IsEmpty && tokens.Length == 3
-                    && tokens[0].Kind == TokenKind.Plus && tokens[0].Span.Start == 0
-                    && tokens[1].Kind == TokenKind.NumericLiteral
-                    && tokens[1].Span.End == expression.Span.Length
-                    && ValidMagnitude(tokens[1].Text.AsSpan(), type, false, left, right);
+                return lexical.Diagnostics.IsEmpty
+                    && TryUnaryOperand(tokens, TokenKind.Plus, expression.Span.Length,
+                        out var operandIndex)
+                    && tokens[operandIndex].Kind == TokenKind.NumericLiteral
+                    && ValidMagnitude(tokens[operandIndex].Text.AsSpan(),
+                        type, false, left, right);
             }
             if (operation / 100 is 7 or 9
                 && operation % 100 is 65 or 66 or >= 71 and <= 75)
@@ -685,7 +686,7 @@ public static class ScalarFrontendHost
             {
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
-                var token = lexical.Tokens[1];
+                var token = lexical.Tokens[UnaryOperandIndex(lexical.Tokens)];
                 var operandSpan = new TextSpan(expression.Span.Start + token.Span.Start, token.Span.Length);
                 var type = Type(expression.Type);
                 var value = expression.Type is 1 or 2

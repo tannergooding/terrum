@@ -93,6 +93,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { if (false != true) { return 42; } return 0; }")]
     [InlineData("int32 Main() { if (!((false))) { return 42; } return 0; }")]
     [InlineData("int32 Main() { return ~(0xFFFFFFD5); }")]
+    [InlineData("int32 Main() { return +((42)); }")]
     public async Task FrontendBuiltExecutableMatchesHostedAndRunsAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -284,6 +285,8 @@ public sealed partial class CliTests
     [InlineData("public int32 Value() { return 84 / 2; }")]
     [InlineData("public uint32 Value() { return 0b101010 ^ 0; }")]
     [InlineData("public int32 Value() { return +42; }")]
+    [InlineData("public int32 Value() { return +((42)); }")]
+    [InlineData("public uint32 Value() { return +(4294967295); }")]
     [InlineData("public int32 Value() { return +0xFFFFFFFF; }")]
     [InlineData("public uint32 Value() { return +4294967295; }")]
     [InlineData("public int64 Value() { return +9223372036854775807; }")]
@@ -584,6 +587,7 @@ public sealed partial class CliTests
     [InlineData("int32 Value() { return ~2147483648; }", "2147483648")]
     [InlineData("int32 Value() { return 1 + 2147483648; }", "2147483648")]
     [InlineData("int32 Value() { return +2147483648; }", "2147483648")]
+    [InlineData("uint32 Value() { return +(4294967296); }", "4294967296")]
     public async Task FrontendComponentRejectsOutOfRangeBinaryLiteralAsync(string source,
         string invalidLiteral)
     {
