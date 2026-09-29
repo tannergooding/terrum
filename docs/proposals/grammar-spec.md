@@ -69,12 +69,15 @@ The schematic lexical terminals used below are:
 
 ```ebnf
 Identifier       = lexer-identifier-token ;
-Number           = DecimalNumber | HexInteger | BinaryInteger ;
+Number           = DecimalNumber | HexFloat | HexInteger | BinaryInteger ;
 DecimalNumber    = DecimalDigits, [ ".", DecimalDigits ],
                    [ ( "e" | "E" ), [ "+" | "-" ], DecimalDigits ] ;
+HexFloat         = ( "0x" | "0X" ), ( { "_" }, HexDigits, [ ".", [ HexDigits ] ]
+                 | ".", HexDigits ), ( "p" | "P" ), [ "+" | "-" ], DecimalDigits ;
 HexInteger       = ( "0x" | "0X" ), { "_" }, HexDigit, { { "_" }, HexDigit } ;
 BinaryInteger    = ( "0b" | "0B" ), { "_" }, BinaryDigit, { { "_" }, BinaryDigit } ;
 DecimalDigits    = Digit, { { "_" }, Digit } ;
+HexDigits        = HexDigit, { { "_" }, HexDigit } ;
 Digit            = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
 HexDigit         = Digit | "a".."f" | "A".."F" ;
 BinaryDigit      = "0" | "1" ;
@@ -94,26 +97,17 @@ keywords and the standalone reserved `_`; it is not three grammar symbols.
 
 `Number` is one token: unary `-` is an operator, not part of the number.
 Numeric target selection/range and the lack of a default type are semantic
-rules (see [conversions](../conversions.md)).
+rules (see [conversions](../conversions.md)). A hex float requires a binary
+exponent (`p`/`P`), so `0x1f` is an integer while `0x1.fp+2` is a floating
+token. It has digits on at least one side of the point; the exponent has
+decimal digits, and `_` follows the existing between-digits rules. A leading
+sign is separate from the token, unlike the exponent sign.
 
-**PROPOSED lexical extension, not currently recognized or executable:** a hex
-float requires a binary exponent (`p`/`P`) so `0x1f` remains an integer and
-`0x1.fp+2` denotes a candidate floating token. It may have digits on either
-side of the point, but not neither. The exponent has decimal digits; `_`
-separators follow the existing between-digits rules. A leading sign is a
-separate unary operator, apart from the exponent sign.
-
-```ebnf
-HexFloat       = ( "0x" | "0X" ), ( { "_" }, HexDigits, [ ".", [ HexDigits ] ]
-               | ".", HexDigits ), ( "p" | "P" ), [ "+" | "-" ], DecimalDigits ;
-HexDigits      = HexDigit, { { "_" }, HexDigit } ;
-```
-
-The hex-float proposal does **not** extend the current `Number` production or
-override the [lexical grammar](../lexical-grammar.md); doing so requires
-coordinated token boundaries and diagnostics (including incomplete `p`
-exponents, separators and identifier tails), target-format rounding and
-literal conversion rules, and implementation tests. Neither decimal nor
+This proposed `Number` production is broader than the implemented
+[lexical grammar](../lexical-grammar.md): its `HexFloat` alternative still
+needs coordinated token boundaries and diagnostics (including incomplete
+`p` exponents, separators and identifier tails), target-format rounding,
+literal conversion rules and implementation tests. Neither decimal nor
 hexadecimal floating spellings have an executable value in the present
 frontend.
 
@@ -384,9 +378,8 @@ Primary         = "(", [ Expression ], ")" | "new", Type, Arguments
 TypeArguments   = "<", Type, { ",", Type }, ">" ;
 ```
 
-`HexFloat` is not in this baseline `Primary`: §2 proposes it as a separate
-lexical extension, not as an executable literal or part of the current
-`Number` token.
+`HexFloat` participates in the proposed `Number` alternative above; the
+current lexer and compiler do not yet recognize or evaluate it.
 
 The generic-call alternative is explicit function-call syntax, not a general
 expression type-application operator. It does not express partial holes (`_`),
@@ -964,11 +957,10 @@ typed catches, interpolation and collections. Reserved `switch`, `case`,
 `foreach`, `async`, `await`, `union`, `throw` and `own` are not implementations
 of those features. They need complete syntax, binding, effects and
 representation rules, not isolated extra alternatives in `Statement` or
-`Primary`. The baseline `Primary` includes `Number` (decimal fractions
-lexically, integer values executable); `HexFloat` is a separate proposed
-lexical extension, not a baseline grammar alternative, and cannot become a
-lexer token or executable value without the coordinated lexical and numeric
-work above.
+`Primary`. The proposed `Primary` includes `Number`, including `HexFloat`; current
+lexing recognizes decimal fractions and executable integer values, but not
+hexadecimal floating tokens or executable floating values. Coordinated
+lexical and numeric work remains required.
 
 ### 5.14 Documentation-comment grammar and tooling
 
@@ -1015,13 +1007,13 @@ proposal, and accepted semantics do not approve its syntax.
 
 | Surface | Coverage and status | Explicit boundary or remaining gap |
 |---|---|---|
-| Lexing, keywords, built-in names | The canonical lexer contract is [lexical grammar](../lexical-grammar.md); §2 summarizes it and separately proposes `HexFloat`. Primitive type names are identifiers; `void` is a keyword. | `abstract` remains a lexical token for legacy parser syntax, not a target modifier. `is` is used contextually but is not a current keyword token; `get`, `some`, `init`, `implicit`, `params`, `ensure`, and `const` need token decisions. Built-in/library APIs are declarations, not grammar productions. |
+| Lexing, keywords, built-in names | The canonical current lexer contract is [lexical grammar](../lexical-grammar.md); §2 includes `HexFloat` in the proposed `Number` production. Primitive type names are identifiers; `void` is a keyword. | `abstract` remains a lexical token for legacy parser syntax, not a target modifier. `is` is used contextually but is not a current keyword token; `get`, `some`, `init`, `implicit`, `params`, `ensure`, and `const` need token decisions. Built-in/library APIs are declarations, not grammar productions. |
 | Files and nominal declarations | **P** §3.1 sketches using/file namespace, top-level functions, structs, classes, interfaces, and integral-base enums; interface bases differ from nominal conformances. | Exact modifier/attribute legality and enum constant restrictions remain open. No union or nested nominal declaration is proposed; recursive generic type arguments in `Type` are not excluded. |
 | Constructors, members, operators, properties | **P** §3.1 requires bodies for concrete functions/operators/getters; constructors name their owner; operators are type/interface members, not global declarations. **A** §5.7 specifies unary operator direction; §5.10 limits property direction to explicit getter-only by-value properties. | Interface `;` versus body forms are separated in §3.1. Property/accessor effects, attribute targets, and metadata remain **O**; setters, auto/ref-return properties and indexers are not adopted. `++`/`--` appear only as future operator spellings, not current lexer tokens. |
 | Interface witnesses and dispatch | **A** §5.12: bodyless members require checked implementations; bodies supply replaceable defaults, selected by declaring-member identity. **P** §3.1 sketches the corresponding `;`/body forms. Static operator witnesses need no runtime vtable. | Explicit mapping syntax, metadata/ABI, inherited-default resolution syntax, and compatible binding for older witnesses remain **O**. No physical slot layout is selected. |
 | Types, parameters, arguments, modifiers | **P** §3.2 sketches recursive type arguments, one optional marker, `ref`/`out`/`mut ref`, labels, and `init` arguments. `mut`, `unique`, `unsafe`, visibility and `static` are candidate modifier vocabulary. | `init ref<T>`, `implicit ref<T>`, `write` parameter legality, `params`, generic defaults/inference, associated types, `ensure` contracts and exact modifier combinations remain **O**. Prefix names are context-valid placeholders; `abstract` is deliberately absent from target modifiers. |
 | Statements and expressions | **P** §§3.3–3.4 sketch blocks, control flow, locals, calls, assignments, precedence, `is null`/`is some`, and `T(expression)`. **A** §5.6 gives standalone discard semantics; §3.3 records its distinct `_ = expression;` form. | Assignment's left side needs a writable-place check; catch typing/binding, constant-evaluation/static-proof syntax, and omitted constructs (including lambdas, patterns, `throw`, `await`, conditional expressions and general assignment expressions) remain outside this grammar. `is`/`some` token treatment remains open. |
-| Literals and compound operations | **I** lexical numbers/strings and target-typed integer direction are described in §§2, 4 and the implementation reference. **A** §5.13 separates compound-operation semantics from `+`. | `HexFloat` is a separate proposed lexical extension, not a baseline `Primary` or executable literal. Compound-assignment spelling, tokens, places and evaluation rules are **O**; `+=`…`^=` shorthand in §5.13 is not legal grammar. |
+| Literals and compound operations | **P** `HexFloat` is part of the proposed `Number` and `Primary`; **I** currently covers decimal/hex/binary integer tokens, decimal fractional tokens and strings, not hex floats or executable floating literals. **A** §5.13 separates compound-operation semantics from `+`. | Hex-float token diagnostics and floating-value semantics still need implementation. Compound-assignment spelling, tokens, places and evaluation rules are **O**; `+=`…`^=` shorthand in §5.13 is not legal grammar. |
 | Cleanup and finalizers | **A** deterministic `[Cleanup]` is distinct from GC finalization; **I** support is listed by the implementation reference. | Attribute placement is still governed by open contextual-prefix rules. No finalizer production is proposed; whether to support one and its lifecycle/ABI contract remain **O** (§5.12). |
 | Implemented boundary | **I** is defined only by [implementation](../implementation.md), not by this proposal's examples or productions. | The bounded parser's existing `static abstract` syntax is unchanged. Nothing else marked **P** is thereby implemented or source-compatible. |
 
