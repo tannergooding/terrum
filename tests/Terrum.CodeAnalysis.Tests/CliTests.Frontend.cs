@@ -187,6 +187,15 @@ public sealed partial class CliTests
     [InlineData("public bool Value(int32 x) { return 42 < x; }")]
     [InlineData("public bool Value(char16 x) { return 0xFFFF != x; }")]
     [InlineData("public int32 Value(int32 x) { if (x < 42) { return x; } else { return 42; } }")]
+    [InlineData("public int32 Value(int32 x, int32 y) { return x * y; }")]
+    [InlineData("public uint64 Value(uint64 x, uint64 y) { return x / y; }")]
+    [InlineData("public int32 Value(int32 x, int32 y) { return x % y; }")]
+    [InlineData("public int32 Value(int32 x) { return x * 7; }")]
+    [InlineData("public uint32 Value(uint32 x) { return x / 0xFFFF; }")]
+    [InlineData("public int64 Value(int64 x) { return x % 9223372036854775807; }")]
+    [InlineData("public uint64 Value(uint64 x) { return 7 * x; }")]
+    [InlineData("public int32 Value(int32 x) { return 42 / x; }")]
+    [InlineData("public uint64 Value(uint64 x) { return 18446744073709551615 % x; }")]
     public async Task FrontendBuiltLibraryMatchesHostedNativeBytesAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -403,6 +412,8 @@ public sealed partial class CliTests
     [InlineData("int32 Value(int32 x) { return 2147483648 + x; }")]
     [InlineData("bool Value(int32 x) { return x < 2147483648; }")]
     [InlineData("bool Value(int32 x) { return 2147483648 < x; }")]
+    [InlineData("int32 Value(int32 x) { return x * 2147483648; }")]
+    [InlineData("int32 Value(int32 x) { return 2147483648 / x; }")]
     public async Task FrontendComponentRejectsOutOfRangeBinaryLiteralAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

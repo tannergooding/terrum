@@ -354,7 +354,7 @@ mut class ScalarFrontendState
             }
             if (!negative && expectedType >= 1 && expectedType <= 4
                 && _tokens.TryGet(_at, out var next)
-                && (next.Kind == 57 || next.Kind == 58))
+                && next.Kind >= 57 && next.Kind <= 61)
             {
                 _at = _at + 1;
                 if (!Take(2, out var right))
@@ -416,12 +416,12 @@ mut class ScalarFrontendState
         mut int32 rightIndex = 0;
         mut int32 end = left.Range.End;
         require _tokens.TryGet(_at, out var next);
-        if (next.Kind == 57 || next.Kind == 58
+        if ((next.Kind >= 57 && next.Kind <= 61)
             || (next.Kind >= 65 && next.Kind <= 70))
         {
             operation = next.Kind;
             _at = _at + 1;
-            if ((operation == 57 || operation == 58
+            if (((operation >= 57 && operation <= 61)
                 || (operation >= 65 && operation <= 70))
                 && _tokens.TryGet(_at, out var literalRight) && literalRight.Kind == 3)
             {
@@ -466,7 +466,7 @@ mut class ScalarFrontendState
             {
                 rightType = _secondType;
             }
-            if (selected != rightType || ((operation == 57 || operation == 58)
+            if (selected != rightType || ((operation >= 57 && operation <= 61)
                 && (selected == 5 || selected == 6))
                 || (operation >= 65 && selected == 5))
             {
