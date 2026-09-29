@@ -114,8 +114,9 @@ bool TryParseScalarReturnFunction(TokenSnapshot tokens,
     return true;
 }
 
-bool TryParseScalarReturnInteger(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out SourceRange expression, out int32 low, out int32 high)
+bool TryParseScalarReturnIntegerTyped(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out int32 scalarType, out SourceRange name, out SourceRange expression,
+    out int32 low, out int32 high)
 {
     mut int32 valueIndex = 6;
     if (tokens.GetCount() == 11)
@@ -126,16 +127,34 @@ bool TryParseScalarReturnInteger(TokenSnapshot tokens, TokenIntegerSnapshot inte
     if (!integers.TryFind(valueIndex, out var overflow, out var magnitudeLow,
             out var magnitudeHigh)
         || overflow
-        || !TryParseScalarReturnFunction(move tokens, out var foundName,
-            out var foundExpression))
+        || !TryParseScalarReturnFunctionTyped(move tokens, out var foundType,
+            out var foundName, out var foundExpression))
+    {
+        return false;
+    }
+
+    scalarType = foundType;
+    name = foundName;
+    expression = foundExpression;
+    low = magnitudeLow;
+    high = magnitudeHigh;
+    return true;
+}
+
+bool TryParseScalarReturnInteger(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out SourceRange expression, out int32 low, out int32 high)
+{
+    if (!TryParseScalarReturnIntegerTyped(move tokens, move integers, out var scalarType,
+            out var foundName, out var foundExpression, out var foundLow, out var foundHigh)
+        || scalarType != 1)
     {
         return false;
     }
 
     name = foundName;
     expression = foundExpression;
-    low = magnitudeLow;
-    high = magnitudeHigh;
+    low = foundLow;
+    high = foundHigh;
     return true;
 }
 
@@ -194,5 +213,29 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
         bound = -low;
     }
     result = bound;
+    return true;
+}
+
+bool TryEvaluateUInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint32 result)
+{
+    if (tokens.GetCount() != 10
+        || !TryParseScalarReturnIntegerTyped(move tokens, move integers,
+            out var scalarType, out var foundName, out var expression,
+            out var low, out var high)
+        || scalarType != 2 || high != 0)
+    {
+        return false;
+    }
+
+    name = foundName;
+    if (low < 0)
+    {
+        result = uint32(int64(low) + 4294967296);
+    }
+    else
+    {
+        result = uint32(low);
+    }
     return true;
 }
