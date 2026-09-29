@@ -58,6 +58,7 @@ public sealed partial class CliTests
     {
         var directory = Directory.CreateTempSubdirectory("terrum-core-module-").FullName;
         var source = Path.Combine(directory, "core.terrum");
+        var additionalSource = Path.Combine(directory, "unsigned.terrum");
         var caller = Path.Combine(directory, "caller.terrum");
         var provider = Path.Combine(directory, "core.trm");
         var consumer = Path.Combine(directory, "caller.trm");
@@ -72,8 +73,14 @@ public sealed partial class CliTests
                     public int32 Read() { return value; }
                 }
                 """);
+            await File.WriteAllTextAsync(additionalSource, """
+                public struct uint32 {
+                    private uint32 value;
+                    public static uint32 Identity(uint32 input) { return input.value; }
+                }
+                """);
             await File.WriteAllTextAsync(caller,
-                "int32 Main() { return int32.AddOne(5).Read(); }");
+                "int32 Main() { return int32.AddOne(5).Read() + int32(uint32.Identity(uint32(1))); }");
 
             var (withoutSwitch, _, _) = await RunAsync([],
                 "compile-module", "producer", source, "int32.AddOne",
@@ -82,7 +89,8 @@ public sealed partial class CliTests
 
             var (produced, producerOutput, producerError) = await RunAsync([],
                 "compile-module", "producer", source, "int32.AddOne",
-                "--export", "int32.Read", "-o", provider, "--runtime", policy,
+                "--source", additionalSource, "--export", "int32.Read",
+                "--export", "uint32.Identity", "-o", provider, "--runtime", policy,
                 "--corelib", "--json");
             Assert.True(produced == 0, producerOutput + producerError);
 
@@ -93,7 +101,7 @@ public sealed partial class CliTests
 
             var (executed, _, _) = await RunAsync([],
                 "run-module", consumer, provider, "--runtime", policy);
-            Assert.Equal(6, executed);
+            Assert.Equal(7, executed);
 
             var (consumerSwitch, _, _) = await RunAsync([],
                 "compile-module", "consumer", caller, provider, "-o", consumer, "--corelib", "--json");
@@ -101,7 +109,8 @@ public sealed partial class CliTests
 
             var (nativeProduced, nativeOutput, nativeError) = await RunAsync([],
                 "compile-native", "producer", source, "CorePrimitive",
-                "--export", "int32.AddOne", "--export", "int32.Read",
+                "--source", additionalSource, "--export", "int32.AddOne",
+                "--export", "int32.Read", "--export", "uint32.Identity",
                 "-o", nativeProvider, "--runtime", policy, "--corelib", "--json");
             Assert.True(nativeProduced == 0, nativeOutput + nativeError);
 
@@ -116,7 +125,7 @@ public sealed partial class CliTests
 
             var (nativeExecuted, _, _) = await RunAsync([],
                 "run-native", nativeConsumer, nativeProvider, "--runtime", policy);
-            Assert.Equal(6, nativeExecuted);
+            Assert.Equal(7, nativeExecuted);
 
             var (nativeConsumerSwitch, _, _) = await RunAsync([],
                 "compile-native", "consumer", caller, nativeProvider, "-o", nativeConsumer,
@@ -126,6 +135,7 @@ public sealed partial class CliTests
         finally
         {
             File.Delete(source);
+            File.Delete(additionalSource);
             File.Delete(caller);
             File.Delete(provider);
             File.Delete(consumer);
