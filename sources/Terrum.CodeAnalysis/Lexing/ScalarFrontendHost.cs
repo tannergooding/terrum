@@ -245,20 +245,34 @@ public static class ScalarFrontendHost
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
                 var tokens = lexical.Tokens;
-                if (!lexical.Diagnostics.IsEmpty || tokens.Length != 3
+                var operandIndex = 1;
+                while (operandIndex < tokens.Length - 1
+                    && tokens[operandIndex].Kind == TokenKind.OpenParen)
+                {
+                    operandIndex++;
+                }
+                var groups = operandIndex - 1;
+                if (!lexical.Diagnostics.IsEmpty || tokens.Length != 3 + groups * 2
                     || tokens[0].Kind != TokenKind.Bang || tokens[0].Span.Start != 0
-                    || tokens[1].Span.End != expression.Span.Length)
+                    || tokens[tokens.Length - 2].Span.End != expression.Span.Length)
                 {
                     return false;
                 }
+                for (var index = 0; index < groups; index++)
+                {
+                    if (tokens[operandIndex + 1 + index].Kind != TokenKind.CloseParen)
+                    {
+                        return false;
+                    }
+                }
                 if (left == 0)
                 {
-                    return right is 20 or 21 && tokens[1].Kind == (TokenKind)right;
+                    return right is 20 or 21 && tokens[operandIndex].Kind == (TokenKind)right;
                 }
                 var name = left == 1 ? firstName : secondName;
                 return right == 0 && left >= 1 && left <= parameters && leftType == 5
-                    && tokens[1].Kind == TokenKind.Identifier
-                    && tokens[1].Text == source.Text.Substring(name.Start, name.Length);
+                    && tokens[operandIndex].Kind == TokenKind.Identifier
+                    && tokens[operandIndex].Text == source.Text.Substring(name.Start, name.Length);
             }
             if (operation is 63 or 163)
             {
@@ -605,7 +619,12 @@ public static class ScalarFrontendHost
             {
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
-                var token = lexical.Tokens[1];
+                var index = 1;
+                while (lexical.Tokens[index].Kind == TokenKind.OpenParen)
+                {
+                    index++;
+                }
+                var token = lexical.Tokens[index];
                 var operandSpan = new TextSpan(expression.Span.Start + token.Span.Start, token.Span.Length);
                 BoundExpression operand = expression.LeftParameter == 0
                     ? new BoundConstant(expression.RightParameter == 20 ? 1 : 0,

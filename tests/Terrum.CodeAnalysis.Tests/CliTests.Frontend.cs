@@ -91,6 +91,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { if (true && false) { return 0; } else { return 42; } }")]
     [InlineData("int32 Main() { if (true || false) { return 42; } return 0; }")]
     [InlineData("int32 Main() { if (false != true) { return 42; } return 0; }")]
+    [InlineData("int32 Main() { if (!((false))) { return 42; } return 0; }")]
     public async Task FrontendBuiltExecutableMatchesHostedAndRunsAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -204,6 +205,8 @@ public sealed partial class CliTests
     [InlineData("public bool Value() { if (((true))) { return (false); } else { return true; } }")]
     [InlineData("public bool Value() { return !false; }")]
     [InlineData("public bool Value(bool x) { return !x; }")]
+    [InlineData("public bool Value(bool x) { return !((x)); }")]
+    [InlineData("public bool Value() { return !(false); }")]
     [InlineData("public bool Value(bool x, bool y) { return !y; }")]
     [InlineData("public int32 Value(bool x) { if (!x) { return 42; } else { return 0; } }")]
     [InlineData("public bool Value(int32 x) { return x >= 42; }")]
@@ -645,6 +648,7 @@ public sealed partial class CliTests
     [Theory]
     [InlineData("bool Value(int32 x) { return !x; }", 2)]
     [InlineData("bool Value(bool x) { return !missing; }", 3)]
+    [InlineData("bool Value(bool x) { return !(missing); }", 3)]
     public async Task FrontendComponentRejectsInvalidBooleanNegationAsync(
         string source, int expectedError)
     {

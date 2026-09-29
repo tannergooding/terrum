@@ -2917,13 +2917,16 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
-    [InlineData(NativeRuntimePolicy.FailFast)]
-    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
-    public async Task NativeScalarFrontendBooleanNegationExecutesAsync(NativeRuntimePolicy policy)
+    [InlineData(NativeRuntimePolicy.FailFast, "!x")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "!x")]
+    [InlineData(NativeRuntimePolicy.FailFast, "!((x))")]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "!((x))")]
+    public async Task NativeScalarFrontendBooleanNegationExecutesAsync(
+        NativeRuntimePolicy policy, string expression)
     {
-        const string Text = "bool Value(bool x) { return !x; }";
-        var source = SourceText.From(Text);
-        var stage = await CompileAsync(Text,
+        var text = $"bool Value(bool x) {{ return {expression}; }}";
+        var source = SourceText.From(text);
+        var stage = await CompileAsync(text,
             "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
             (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
         var native = NativeJit.ExecuteWithData(stage, policy);

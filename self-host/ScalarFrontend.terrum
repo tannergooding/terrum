@@ -266,7 +266,16 @@ mut class ScalarFrontendState
         if (literal.Kind == 62)
         {
             _at = _at + 1;
-            require _tokens.TryGet(_at, out var operand);
+            require _tokens.TryGet(_at, out var firstOperand);
+            mut Token operand = firstOperand;
+            mut int32 groups = 0;
+            while (operand.Kind == 46)
+            {
+                _at = _at + 1;
+                groups = groups + 1;
+                require _tokens.TryGet(_at, out var nested);
+                operand = nested;
+            }
             mut int32 parameter = 0;
             mut int32 booleanKind = 0;
             if (operand.Kind == 20 || operand.Kind == 21)
@@ -305,8 +314,17 @@ mut class ScalarFrontendState
                 return false;
             }
             _at = _at + 1;
+            mut int32 end = operand.Range.End;
+            for (mut int32 index = 0; index < groups; index = index + 1)
+            {
+                if (!Take(47, out var close))
+                {
+                    return false;
+                }
+                end = close.Range.End;
+            }
             require SourceRange.TryCreate(literal.Range.Start,
-                operand.Range.End - literal.Range.Start, out var span);
+                end - literal.Range.Start, out var span);
             require ScalarFrontendExpression.TryCreate(5, 62, parameter, booleanKind,
                 span, out var negated);
             expression = negated;
