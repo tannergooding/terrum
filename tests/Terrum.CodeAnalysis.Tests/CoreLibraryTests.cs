@@ -127,6 +127,32 @@ public sealed class CoreLibraryTests
         Assert.Equal(2, Assert.IsType<BoundProgram>(compilation.Program).Functions.Length);
     }
 
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public void DistinctCorePrimitiveMethodsExecuteFromSeparateSources(
+        BoundRuntimePolicy runtimePolicy)
+    {
+        var compilation = Compilation.CreateCoreLibrary([
+            SyntaxTree.Parse(
+                "public struct int32 { private int32 value; public static int32 Next(int32 input) { return input.value + 1; } }"),
+            SyntaxTree.Parse(
+                "public struct uint32 { private uint32 value; public static uint32 Next(uint32 input) { return input.value + 1; } }"),
+        ], runtimePolicy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(compilation.Program),
+            ["int32.Next", "uint32.Next"]);
+        var consumer = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return int32.Next(39) + int32(uint32.Next(uint32(1))); }"),
+            ModuleCompiler.CreateReference(producer), runtimePolicy);
+        Assert.False(consumer.HasErrors, string.Join(Environment.NewLine, consumer.Diagnostics));
+        var consumerBytes = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(consumer.Program), producer);
+        Assert.Equal(42, NativeJit.Execute(ModuleCompiler.Link(consumerBytes, producer),
+            runtimePolicy == BoundRuntimePolicy.FailFast
+                ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions));
+    }
+
     [Fact]
     public void PrimitiveOwnerVerificationDoesNotReinterpretHistoricalNominalLayouts()
     {
