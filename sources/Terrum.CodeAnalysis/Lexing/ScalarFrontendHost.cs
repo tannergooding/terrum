@@ -248,11 +248,13 @@ public static class ScalarFrontendHost
             return expression.Type == type && ValidSpan(expression.Span, nonempty: true)
                 && left >= 1 && left <= parameters
                 && (operation == 0 ? right == 0 && leftType == type
-                    : (operation is >= 57 and <= 61 or >= 65 and <= 70 or 71 or 73 or 75)
+                    : (operation is >= 57 and <= 61 or >= 65 and <= 75)
                         && right >= 1 && right <= parameters && leftType == rightType
                         && (operation is >= 57 and <= 61 or 71 or 73 or 75
-                            ? type == leftType && leftType is >= 1 and <= 4
-                            : type == 5 && leftType is >= 1 and <= 4 or 6))
+                            ? type == leftType && (leftType is >= 1 and <= 4
+                                || operation is 71 or 73 or 75 && leftType == 5)
+                            : type == 5 && (operation is 72 or 74
+                                ? leftType == 5 : leftType is >= 1 and <= 4 or 6)))
                 && MatchesSource(expression, left, right);
         }
 
@@ -282,7 +284,7 @@ public static class ScalarFrontendHost
                 57 => "+", 58 => "-", 59 => "*", 60 => "/", 61 => "%",
                 65 => "==", 66 => "!=", 67 => "<",
                 68 => "<=", 69 => ">", 70 => ">=", 71 => "&", 73 => "|",
-                75 => "^", _ => throw InvalidResult(),
+                72 => "&&", 74 => "||", 75 => "^", _ => throw InvalidResult(),
             };
             var middle = source.Text.AsSpan(span.Start + leftName.Length, middleLength);
             if (middle.Trim().SequenceEqual(spelling.AsSpan()))
