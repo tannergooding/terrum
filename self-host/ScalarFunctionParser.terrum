@@ -559,8 +559,8 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     return true;
 }
 
-bool TryParseScalarAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out int32 scalarType, out SourceRange name,
+bool TryParseScalarBinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out int32 scalarType, out int32 operation, out SourceRange name,
     out int32 firstLow, out int32 firstHigh, out bool firstBased,
     out int32 secondLow, out int32 secondHigh, out bool secondBased)
 {
@@ -579,14 +579,14 @@ bool TryParseScalarAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers
     require tokens.TryGet(4, out var openBody);
     require tokens.TryGet(5, out var returnKeyword);
     require tokens.TryGet(6, out var left);
-    require tokens.TryGet(7, out var addition);
+    require tokens.TryGet(7, out var binary);
     require tokens.TryGet(8, out var right);
     require tokens.TryGet(9, out var semicolon);
     require tokens.TryGet(10, out var closeBody);
     require tokens.TryGet(11, out var eof);
     if (function.Kind != 2 || openParameters.Kind != 46 || closeParameters.Kind != 47
         || openBody.Kind != 48 || returnKeyword.Kind != 19
-        || left.Kind != 3 || addition.Kind != 57 || right.Kind != 3
+        || left.Kind != 3 || (binary.Kind != 57 && binary.Kind != 58) || right.Kind != 3
         || semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0)
     {
         return false;
@@ -599,6 +599,7 @@ bool TryParseScalarAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers
     }
 
     scalarType = selected;
+    operation = binary.Kind;
     name = function.Range;
     firstLow = leftLow;
     firstHigh = leftHigh;
@@ -612,39 +613,80 @@ bool TryParseScalarAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers
 bool TryEvaluateInt32AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     out SourceRange name, out int32 result)
 {
-    if (!TryParseScalarAddReturn(move tokens, move integers,
-            out var scalarType, out var foundName,
+    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 57, out name, out result);
+}
+
+bool TryEvaluateInt32SubtractReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int32 result)
+{
+    return TryEvaluateInt32BinaryReturn(move tokens, move integers, 58, out name, out result);
+}
+
+bool TryEvaluateInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    int32 expectedOperation, out SourceRange name, out int32 result)
+{
+    if (!TryParseScalarBinaryReturn(move tokens, move integers,
+            out var scalarType, out var operation, out var foundName,
             out var leftLow, out var leftHigh, out var leftBased,
             out var rightLow, out var rightHigh, out var rightBased)
-        || scalarType != 1 || leftHigh != 0 || rightHigh != 0
+        || scalarType != 1 || operation != expectedOperation
+        || leftHigh != 0 || rightHigh != 0
         || (leftLow < 0 && !leftBased) || (rightLow < 0 && !rightBased))
     {
         return false;
     }
-    int64 sum = int64(leftLow) + int64(rightLow);
-    if (sum < int64(int32.MinValue) || sum > int64(int32.MaxValue))
+    mut int64 value = int64(leftLow) + int64(rightLow);
+    if (operation == 58)
+    {
+        value = int64(leftLow) - int64(rightLow);
+    }
+    if (value < int64(int32.MinValue) || value > int64(int32.MaxValue))
     {
         return false;
     }
 
     name = foundName;
-    result = int32(sum);
+    result = int32(value);
     return true;
 }
 
 bool TryEvaluateUInt32AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     out SourceRange name, out uint32 result)
 {
-    if (!TryParseScalarAddReturn(move tokens, move integers,
-            out var scalarType, out var foundName,
+    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 57, out name, out result);
+}
+
+bool TryEvaluateUInt32SubtractReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint32 result)
+{
+    return TryEvaluateUInt32BinaryReturn(move tokens, move integers, 58, out name, out result);
+}
+
+bool TryEvaluateUInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    int32 expectedOperation, out SourceRange name, out uint32 result)
+{
+    if (!TryParseScalarBinaryReturn(move tokens, move integers,
+            out var scalarType, out var operation, out var foundName,
             out var leftLow, out var leftHigh, out var leftBased,
             out var rightLow, out var rightHigh, out var rightBased)
-        || scalarType != 2 || leftHigh != 0 || rightHigh != 0)
+        || scalarType != 2 || operation != expectedOperation
+        || leftHigh != 0 || rightHigh != 0)
     {
         return false;
     }
-    uint64 sum = DecodeScannerMagnitude(leftLow, leftHigh)
-        + DecodeScannerMagnitude(rightLow, rightHigh);
+    uint64 left = DecodeScannerMagnitude(leftLow, leftHigh);
+    uint64 right = DecodeScannerMagnitude(rightLow, rightHigh);
+    if (operation == 58)
+    {
+        if (left < right)
+        {
+            return false;
+        }
+        name = foundName;
+        result = uint32(left - right);
+        return true;
+    }
+    uint64 sum = left + right;
     if (sum > uint64(uint32.MaxValue))
     {
         return false;
@@ -658,21 +700,47 @@ bool TryEvaluateUInt32AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
 bool TryEvaluateInt64AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     out SourceRange name, out int64 result)
 {
-    if (!TryParseScalarAddReturn(move tokens, move integers,
-            out var scalarType, out var foundName,
+    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 57, out name, out result);
+}
+
+bool TryEvaluateInt64SubtractReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int64 result)
+{
+    return TryEvaluateInt64BinaryReturn(move tokens, move integers, 58, out name, out result);
+}
+
+bool TryEvaluateInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    int32 expectedOperation, out SourceRange name, out int64 result)
+{
+    if (!TryParseScalarBinaryReturn(move tokens, move integers,
+            out var scalarType, out var operation, out var foundName,
             out var leftLow, out var leftHigh, out var leftBased,
             out var rightLow, out var rightHigh, out var rightBased)
-        || scalarType != 3
+        || scalarType != 3 || operation != expectedOperation
         || !TryDecodeSigned64Scalar(DecodeScannerMagnitude(leftLow, leftHigh),
             leftBased, out var left)
         || !TryDecodeSigned64Scalar(DecodeScannerMagnitude(rightLow, rightHigh),
-            rightBased, out var right)
-        || (right > 0 && left > int64.MaxValue - right)
-        || (right < 0 && left < int64.MinValue - right))
+            rightBased, out var right))
     {
         return false;
     }
 
+    if (operation == 58)
+    {
+        if ((right < 0 && left > int64.MaxValue + right)
+            || (right > 0 && left < int64.MinValue + right))
+        {
+            return false;
+        }
+        name = foundName;
+        result = left - right;
+        return true;
+    }
+    if ((right > 0 && left > int64.MaxValue - right)
+        || (right < 0 && left < int64.MinValue - right))
+    {
+        return false;
+    }
     name = foundName;
     result = left + right;
     return true;
@@ -681,16 +749,38 @@ bool TryEvaluateInt64AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot intege
 bool TryEvaluateUInt64AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     out SourceRange name, out uint64 result)
 {
-    if (!TryParseScalarAddReturn(move tokens, move integers,
-            out var scalarType, out var foundName,
+    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 57, out name, out result);
+}
+
+bool TryEvaluateUInt64SubtractReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint64 result)
+{
+    return TryEvaluateUInt64BinaryReturn(move tokens, move integers, 58, out name, out result);
+}
+
+bool TryEvaluateUInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    int32 expectedOperation, out SourceRange name, out uint64 result)
+{
+    if (!TryParseScalarBinaryReturn(move tokens, move integers,
+            out var scalarType, out var operation, out var foundName,
             out var leftLow, out var leftHigh, out var leftBased,
             out var rightLow, out var rightHigh, out var rightBased)
-        || scalarType != 4)
+        || scalarType != 4 || operation != expectedOperation)
     {
         return false;
     }
     uint64 left = DecodeScannerMagnitude(leftLow, leftHigh);
     uint64 right = DecodeScannerMagnitude(rightLow, rightHigh);
+    if (operation == 58)
+    {
+        if (left < right)
+        {
+            return false;
+        }
+        name = foundName;
+        result = left - right;
+        return true;
+    }
     if (left > uint64.MaxValue - right)
     {
         return false;

@@ -772,6 +772,77 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("int32", "8 - 3", true, "5")]
+    [InlineData("int32", "0 - 0xFFFF_FFFF", true, "1")]
+    [InlineData("int32", "0x8000_0000 - 0x8000_0000", true, "0")]
+    [InlineData("int32", "0x8000_0000 - 1", false, "0")]
+    [InlineData("int32", "2147483647 - 0xFFFF_FFFF", false, "0")]
+    [InlineData("int32", "2147483648 - 0", false, "0")]
+    [InlineData("uint32", "8 - 3", true, "5")]
+    [InlineData("uint32", "0xFFFF_FFFF - 1", true, "4294967294")]
+    [InlineData("uint32", "0 - 1", false, "0")]
+    [InlineData("uint32", "4294967296 - 0", false, "0")]
+    [InlineData("int64", "4294967296 - 1", true, "4294967295")]
+    [InlineData("int64", "0x8000_0000_0000_0000 - 0xFFFF_FFFF_FFFF_FFFF", true, "-9223372036854775807")]
+    [InlineData("int64", "0x8000_0000_0000_0000 - 1", false, "0")]
+    [InlineData("int64", "9223372036854775807 - 0xFFFF_FFFF_FFFF_FFFF", false, "0")]
+    [InlineData("int64", "9223372036854775808 - 0", false, "0")]
+    [InlineData("uint64", "4294967296 - 1", true, "4294967295")]
+    [InlineData("uint64", "18446744073709551615 - 1", true, "18446744073709551614")]
+    [InlineData("uint64", "0 - 1", false, "0")]
+    [InlineData("uint64", "18446744073709551616 - 0", false, "0")]
+    public async Task BoundedNativeSubtractionUsesOwnedIntegerRecordsAsync(
+        string typeName, string expression, bool evaluable, string expected)
+    {
+        var evaluator = typeName switch
+        {
+            "int32" => "TryEvaluateInt32SubtractReturn",
+            "uint32" => "TryEvaluateUInt32SubtractReturn",
+            "int64" => "TryEvaluateInt64SubtractReturn",
+            "uint64" => "TryEvaluateUInt64SubtractReturn",
+            _ => throw new ArgumentOutOfRangeException(nameof(typeName)),
+        };
+        var text = $"{typeName} Value() {{ return {expression}; }}";
+        var assertion = evaluable
+            ? $$"""
+                require {{evaluator}}(move tokens, move integers, out var name, out var bound);
+                if (name.Start != {{typeName.Length + 1}} || name.Length != 5
+                    || bound != {{expected}}) { return 1; }
+                """
+            : $$"""
+                if ({{evaluator}}(move tokens, move integers,
+                    out var name, out var bound)) { return 1; }
+                """;
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TryScanCompilerInput(init var tokens, init var trivia, init var integers);
+                {{assertion}}
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            if (evaluable)
+            {
+                var source = text + $$"""
+                     int32 Main() {
+                         {{typeName}} actual = Value();
+                         if (actual == {{expected}}) { return 42; }
+                         return 1;
+                     }
+                    """;
+                var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+            }
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData("int32 Answer() { return 42; }", true, 42, 0)]
     [InlineData("int32 Answer() { return -42; }", true, 42, 0)]
     [InlineData("int32 Answer() { return +42; }", true, 42, 0)]
