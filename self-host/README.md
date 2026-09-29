@@ -131,7 +131,7 @@ Version 17 admits unary `+` or checked `-` over a grouped complemented
 integer binary.
 This does not extend
 the provisional projection to arbitrary nested expressions.
-Twenty-seven bounded `int32 Main()` fixtures likewise emit byte-identical Windows
+Thirty bounded `int32 Main()` fixtures likewise emit byte-identical Windows
 executables and run under both policies; this does not establish an independent
 native emitter or compiler self-build.
 

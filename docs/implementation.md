@@ -916,7 +916,7 @@ result is a provisional component protocol, not approved TRRM metadata or a
 compiler self-build. Two hundred and thirty-three shared scalar/conditional/Boolean/integer-literal sources produce
 byte-identical DLLs through the Terrum-authored frontend and hosted compiler
 under both runtime policies; this does not establish parity for unsupported
-source shapes, independent native emitters or a self-build. Twenty-seven bounded
+source shapes, independent native emitters or a self-build. Thirty bounded
 zero-parameter `Main` shapes also produce byte-identical, executable images
 through the same hosted emitter under both policies.
 
