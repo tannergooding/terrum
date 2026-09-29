@@ -3266,6 +3266,8 @@ public sealed class ManagedScannerComponentTests
     [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return !(x < 42); }", 2167, "int32", 42L)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return !(42 >= x); }", 2370, "int32", 43L)]
     [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return !(x >= -1); }", 3370, "int32", -2L)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(int32 x) { return !(-42 < x); }", 3567, "int32", -43L)]
+    [InlineData(NativeRuntimePolicy.FailFast, "bool Value(int32 x) { return !(+42 <= x); }", 3968, "int32", 41L)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions, "bool Value(uint64 x) { return !(x != 0xFFFFFFFFFFFFFFFF); }", 2166, "uint64", -1L)]
     public async Task NativeScalarFrontendNegatedNumericLiteralExecutesAsync(
         NativeRuntimePolicy policy, string text, int operation, string typeName, long value)

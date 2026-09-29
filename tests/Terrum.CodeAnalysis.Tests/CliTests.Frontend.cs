@@ -312,6 +312,8 @@ public sealed partial class CliTests
     [InlineData("public bool Value(int32 x) { return !(x < 42); }")]
     [InlineData("public bool Value(int32 x) { return !((x) < (42)); }")]
     [InlineData("public bool Value(int32 x) { return !(42 >= x); }")]
+    [InlineData("public bool Value(int32 x) { return !(-42 < x); }")]
+    [InlineData("public bool Value(int32 x) { return !(+42 <= x); }")]
     [InlineData("public bool Value(int32 x) { return !(x >= -1); }")]
     [InlineData("public bool Value(uint64 x) { return !(x != 0xFFFFFFFFFFFFFFFF); }")]
     [InlineData("public bool Value(bool x, bool y) { return !((x && y)); }")]
