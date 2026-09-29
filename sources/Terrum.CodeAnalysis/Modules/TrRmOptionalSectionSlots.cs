@@ -43,9 +43,9 @@ public static class TrRmOptionalSectionSlots
         }
 
         var index = new TrRmArtifactIndex(artifact);
-        var sections = CopySections(index, 1);
-        sections[^1] = extension;
-        Array.Sort(sections, static (left, right) => left.Kind.CompareTo(right.Kind));
+        var sections = CopySections(index);
+        sections.Add(extension);
+        sections.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
         return TrRmArtifactWriter.Encode(sections);
     }
 
@@ -59,9 +59,9 @@ public static class TrRmOptionalSectionSlots
         }
 
         var index = new TrRmArtifactIndex(artifact);
-        var sections = CopySections(index, 0);
+        var sections = CopySections(index);
         var found = false;
-        for (var entry = 0; entry < sections.Length; entry++)
+        for (var entry = 0; entry < sections.Count; entry++)
         {
             if (sections[entry].Kind == kind)
             {
@@ -78,13 +78,17 @@ public static class TrRmOptionalSectionSlots
         return TrRmArtifactWriter.Encode(sections);
     }
 
-    private static TrRmSection[] CopySections(TrRmArtifactIndex index, int additional)
+    private static List<TrRmSection> CopySections(TrRmArtifactIndex index)
     {
-        var sections = new TrRmSection[index.SectionCount + additional];
+        var sections = new List<TrRmSection>(index.SectionCount + 1);
         for (var entry = 0; entry < index.SectionCount; entry++)
         {
             index.GetSection(entry, out var kind, out var flags, out var bytes, out var count);
-            sections[entry] = new TrRmSection(kind, flags, (uint)count, bytes.ToArray());
+            if (kind >= 0x8000 && flags == 3)
+            {
+                continue;
+            }
+            sections.Add(new TrRmSection(kind, flags, (uint)count, bytes.ToArray()));
         }
         return sections;
     }

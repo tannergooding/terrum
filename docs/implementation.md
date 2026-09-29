@@ -1047,6 +1047,8 @@ instruction identity separately before remapping its locations.
 The same validated artifact boundary inserts a reference-slotted optional
 section while preserving and rechecking the existing ordered entries; a
 typed slot constructor supplies its prelude without hand-encoded offsets.
+Both artifact-level rewrites drop unrecognized discard-on-rewrite policy-3
+sections; policy-2 references to unchanged core rows retain their targets.
 Table readers validate String
 offsets and name rows, fixed Module rows and their partition cursors,
 ModuleRef identities and co-located producer requirements, optional SourceFile

@@ -321,6 +321,34 @@ public sealed class TrRmArtifactIndexTests
             TrRmOptionalSectionSlots.Create(0x8000, 0, [], ReadOnlyMemory<byte>.Empty));
     }
 
+    [Fact]
+    public void ArtifactChangesDropDiscardOnRewriteExtensions()
+    {
+        var original = WithReferenceSlottedExtension();
+        var index = new TrRmArtifactIndex(original);
+        var sections = new TrRmSection[index.SectionCount + 2];
+        for (var entry = 0; entry < index.SectionCount; entry++)
+        {
+            index.GetSection(entry, out var kind, out var flags, out var bytes, out var count);
+            sections[entry] = new TrRmSection(kind, flags, (uint)count, bytes.ToArray());
+        }
+        sections[^2] = new TrRmSection(0x8001, 1, 1, new byte[] { 9 });
+        sections[^1] = new TrRmSection(0x8002, 3, 1, new byte[] { 42 });
+        var withDiscard = TrRmArtifactWriter.Encode(sections);
+        var replacement = new[] { new TrRmReferenceSlot(0x0001, 0, 1, 0, 0) };
+        var remapped = new TrRmArtifactIndex(
+            TrRmOptionalSectionSlots.ReplaceInArtifact(withDiscard, 0x8000, replacement));
+        Assert.True(remapped.TryGetSection(0x8001, out _, out _));
+        Assert.False(remapped.TryGetSection(0x8002, out _, out _));
+        Assert.Equal(4, remapped.SectionCount);
+
+        var added = new TrRmArtifactIndex(TrRmOptionalSectionSlots.InsertInArtifact(withDiscard,
+            TrRmOptionalSectionSlots.Create(0x8003, 1, [], new byte[] { 1 })));
+        Assert.True(added.TryGetSection(0x8001, out _, out _));
+        Assert.False(added.TryGetSection(0x8002, out _, out _));
+        Assert.True(added.TryGetSection(0x8003, out _, out _));
+    }
+
     [Theory]
     [InlineData((ushort)1)]
     [InlineData((ushort)3)]
