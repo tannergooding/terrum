@@ -8,7 +8,7 @@ using System.IO;
 namespace Terrum.CodeAnalysis.Modules;
 
 /// <summary>Inspects the root-free, forward-branching scalar compact-indexed subset.</summary>
-/// <remarks>Only scalar constants, operators, integer conversions, optional values, Copy, Select, local and expected-import scalar calls, forward Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
+/// <remarks>Only scalar constants, operators, integer conversions, optional values, Copy, Select, local, expected-import and packed direct scalar calls, forward Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
 public readonly ref struct TrRmCompactIndexedBodyReader
 {
     private readonly record struct Edge(int Target, int[] Arguments);
@@ -405,6 +405,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         if (definition >> 24 != 0x16 || modules.Count < 2
                             || target == 0 || target > methods.Count
                             || methods.GetOwnerModule(target) == callerModule
+                            || methods.GetFlags(target) != 2
+                            || methods.GetOwnerType(target) != 0
                             || methods.GetBodyRow(target) == 0)
                         {
                             throw InvalidBody();

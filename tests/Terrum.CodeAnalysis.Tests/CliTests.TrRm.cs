@@ -411,4 +411,98 @@ public sealed partial class CliTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task ValidateTrRmCompactIndexedChecksPackedCallDefIdsAsync()
+    {
+        var modules = new byte[88];
+        foreach (var offset in new[] { 0, 4, 28, 32, 36, 40, 48, 72, 76, 84 })
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(modules.AsSpan(offset), 1);
+        }
+        BinaryPrimitives.WriteUInt32LittleEndian(modules.AsSpan(44), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(modules.AsSpan(80), 2);
+        var strings = TrRmStringTableWriter.EncodeNames([("Module", 0), ("Producer", 0)]);
+        byte[] typeSpec =
+        [
+            0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0,
+            1, 0, 1, 1, 0, 8,
+        ];
+        var signature = new byte[24];
+        BinaryPrimitives.WriteUInt32LittleEndian(signature, 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(signature.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(signature.AsSpan(12), 1);
+        var parameter = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(parameter, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(parameter.AsSpan(8), 2);
+        var methods = new byte[56];
+        foreach (var offset in new[] { 4, 32 })
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(offset), 2);
+        }
+        foreach (var offset in new[] { 8, 24, 36 })
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(offset), 1);
+        }
+        BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(40), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(52), 2);
+        var caller = TrRmBodyExampleTests.IndexedScalarOperation(
+            [0x12, 2, 0, 2, 0, 0, 0x16, 1, 1], [2], 2);
+        var producer = TrRmBodyExampleTests.IndexedScalarOperation([3, 2, 1], [2], 2);
+        var callerLength = caller.Length - 8;
+        var body = new byte[12 + callerLength + producer.Length - 8];
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4), (uint)callerLength);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(8), (uint)(body.Length - 12));
+        caller.AsSpan(8).CopyTo(body.AsSpan(12));
+        producer.AsSpan(8).CopyTo(body.AsSpan(12 + callerLength));
+        byte[] Artifact() => TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 2, modules),
+            new TrRmSection(0x0002, 0, 2, strings),
+            new TrRmSection(0x0011, 0, 2, typeSpec),
+            new TrRmSection(0x0016, 0, 2, methods),
+            new TrRmSection(0x0017, 0, 1, signature),
+            new TrRmSection(0x0018, 0, 1, parameter),
+            new TrRmSection(0x0020, 0, 2, body),
+        ]);
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-trrm-packed-call-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            await File.WriteAllBytesAsync(path, Artifact());
+            var (valid, output, error) = await RunAsync([],
+                "validate-trrm-compact-indexed", path, "--json");
+            Assert.Equal(0, valid);
+            Assert.Empty(error);
+            using (var result = JsonDocument.Parse(output))
+            {
+                Assert.True(result.RootElement.GetProperty("success").GetBoolean());
+            }
+
+            BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(40), 0);
+            await File.WriteAllBytesAsync(path, Artifact());
+            var (privateStructural, _, _) = await RunAsync([],
+                "validate-trrm-structure", path, "--json");
+            Assert.Equal(0, privateStructural);
+            var (privateCall, _, _) = await RunAsync([],
+                "validate-trrm-compact-indexed", path, "--json");
+            Assert.Equal(1, privateCall);
+            BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(40), 2);
+
+            byte[] encodedCall = [0x12, 2, 0, 2, 0, 0, 0x16, 1, 1];
+            var call = body.AsSpan().IndexOf(encodedCall);
+            Assert.True(call >= 0);
+            body[call + 3] = 1;
+            await File.WriteAllBytesAsync(path, Artifact());
+            var (structural, _, _) = await RunAsync([],
+                "validate-trrm-structure", path, "--json");
+            Assert.Equal(0, structural);
+            var (invalid, _, _) = await RunAsync([],
+                "validate-trrm-compact-indexed", path, "--json");
+            Assert.Equal(1, invalid);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

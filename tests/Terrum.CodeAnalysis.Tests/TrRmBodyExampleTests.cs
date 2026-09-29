@@ -1193,6 +1193,10 @@ public sealed class TrRmBodyExampleTests
             method.CopyTo(methodRows, 28);
             BinaryPrimitives.WriteUInt32LittleEndian(methodRows.AsSpan(28),
                 ownedTarget ? 1u : 0u);
+            if (packedTarget)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(methodRows.AsSpan(40), 2);
+            }
             BinaryPrimitives.WriteUInt32LittleEndian(methodRows.AsSpan(52),
                 importedTarget ? 0u : 2u);
         }
