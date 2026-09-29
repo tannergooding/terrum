@@ -496,6 +496,8 @@ public sealed class ManagedScannerComponentTests
     [InlineData("uint64 Answer() { return 42; }", 4)]
     [InlineData("int64 Answer() { return (42); }", 3)]
     [InlineData("uint64 Answer() { return (+42); }", 4)]
+    [InlineData("bool Answer() { return true; }", 5)]
+    [InlineData("bool Answer() { return (false); }", 5)]
     [InlineData("uint64 Answer() { return +(42); }", 4)]
     [InlineData("float32 Answer() { return 42; }", 0)]
     public async Task TypedScalarParserMatchesHostedDeclarationSpansAsync(string text, int type)
@@ -526,6 +528,53 @@ public sealed class ManagedScannerComponentTests
             """;
         foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
         {
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData("bool Value() { return true; }", true, true)]
+    [InlineData("bool Value() { return false; }", true, false)]
+    [InlineData("bool Value() { return (true); }", true, true)]
+    [InlineData("bool Value() { return (false); }", true, false)]
+    [InlineData("bool Value() { return !true; }", false, false)]
+    [InlineData("int32 Value() { return 1; }", false, false)]
+    public async Task BoundedNativeBoolEvaluationMatchesHostedExecutedValuesAsync(
+        string text, bool evaluable, bool value)
+    {
+        var expected = value ? "true" : "false";
+        var assertion = evaluable
+            ? $$"""
+                require TryEvaluateBoolScalarReturn(move tokens, out var name, out var bound);
+                if (name.Start != 5 || name.Length != 5 || bound != {{expected}}) { return 1; }
+                """
+            : """
+                if (TryEvaluateBoolScalarReturn(move tokens, out var name, out var bound)) { return 1; }
+                """;
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                {{assertion}}
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            if (evaluable)
+            {
+                var hostedSource = text + $$"""
+                     int32 Main() {
+                         if (Value() == {{expected}}) { return 42; }
+                         return 1;
+                     }
+                    """;
+                var hosted = Compilation.Create(SyntaxTree.Parse(hostedSource), (BoundRuntimePolicy)policy);
+                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+            }
             var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
             Assert.Equal(42, NativeJit.Execute(program, policy));
             await ExecuteAotAsync(program, policy).ConfigureAwait(true);

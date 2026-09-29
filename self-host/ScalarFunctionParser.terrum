@@ -2,7 +2,7 @@ namespace Terrum.CodeAnalysis;
 
 // This bounded syntax-27 probe uses scanner-5 TokenKind ordinals, not source characters
 // to classify punctuation; the host parser's recovery remains a separate phase.
-// Scalar type codes: 1=int32, 2=uint32, 3=int64, 4=uint64.
+// Scalar type codes: 1=int32, 2=uint32, 3=int64, 4=uint64, 5=bool.
 bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     out int32 scalarType, out SourceRange name, out SourceRange expression)
 {
@@ -20,7 +20,14 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
 
     int32 at = type.Range.Start;
     mut int32 selected = 0;
-    if (type.Range.Length == 5 && Host.Source[at] == char16(105)
+    if (type.Range.Length == 4 && Host.Source[at] == char16(98)
+        && Host.Source[at + 1] == char16(111)
+        && Host.Source[at + 2] == char16(111)
+        && Host.Source[at + 3] == char16(108))
+    {
+        selected = 5;
+    }
+    else if (type.Range.Length == 5 && Host.Source[at] == char16(105)
         && Host.Source[at + 1] == char16(110) && Host.Source[at + 2] == char16(116))
     {
         if (Host.Source[at + 3] == char16(51) && Host.Source[at + 4] == char16(50))
@@ -46,6 +53,10 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
         }
     }
     if (selected == 0)
+    {
+        return false;
+    }
+    if (selected == 5 && count != 10 && count != 12)
     {
         return false;
     }
@@ -91,7 +102,8 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
         first = first + 1;
         require tokens.TryGet(first, out value);
     }
-    if (value.Kind != 3)
+    if ((selected == 5 && value.Kind != 20 && value.Kind != 21)
+        || (selected != 5 && value.Kind != 3))
     {
         return false;
     }
@@ -130,6 +142,32 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     scalarType = selected;
     name = function.Range;
     expression = scalar;
+    return true;
+}
+
+bool TryEvaluateBoolScalarReturn(TokenSnapshot tokens,
+    out SourceRange name, out bool result)
+{
+    int32 count = tokens.GetCount();
+    if (count != 10 && count != 12)
+    {
+        return false;
+    }
+    mut int32 valueIndex = 6;
+    if (count == 12)
+    {
+        valueIndex = 7;
+    }
+    require tokens.TryGet(valueIndex, out var literal);
+    if (!TryParseScalarReturnFunctionTyped(move tokens, out var scalarType,
+            out var foundName, out var expression)
+        || scalarType != 5)
+    {
+        return false;
+    }
+
+    name = foundName;
+    result = literal.Kind == 20;
     return true;
 }
 
