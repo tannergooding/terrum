@@ -507,7 +507,8 @@ currently encoded Body examples **do not yet contain** GC roots.
 
 ### Checked add end to end (informative)
 
-Consider `AddThenThree` under the fail-fast policy. The example uses
+Consider `int32 AddThenThree(int32 x, int32 y) { return x + y + 3; }`
+under the fail-fast policy. The example uses
 the compact-linear encoding appropriate to this root-free, one-block
 method. The [compact-form accounting](#compact-form-information-accounting)
 summarizes what this representation stores versus reconstructs. The
@@ -521,11 +522,10 @@ Inline byte examples are instruction or operand fragments, not full
 artifacts.
 
 ```text
-Source: int32 AddThenThree(int32 x, int32 y) { return x + y + 3; }
 Artifact-wide table rows (separate sections; not Body bytes):
-    TypeSpec (0x0011): // TypeSpec section
+    TypeSpec (0x0011):
         row[1]: Builtin(int32)
-    MethodSig (0x0017): // MethodSig section
+    MethodSig (0x0017):
         row[1]:
             resultTypeSpec: TypeSpec[1]
             receiverTypeSpec: 0
@@ -533,7 +533,7 @@ Artifact-wide table rows (separate sections; not Body bytes):
             paramCount: 2
             genericFirst: 0
             genericCount: 0
-    Param (0x0018): // Param section
+    Param (0x0018):
         row[1]:
             ownerMethodSig: MethodSig[1]
             ordinal: 0
@@ -544,11 +544,13 @@ Artifact-wide table rows (separate sections; not Body bytes):
             ordinal: 1
             typeSpec: TypeSpec[1]
             mode: 0
-    MethodDef (0x0016): // MethodDef section
+    MethodDef (0x0016):
         row[1]:
             signature: MethodSig[1]
             bodyRow: Body[1]
+```
 
+```text
 Body (0x0020): // Body section; directory recordCount=1
     // Candidate compact linear; 31 encoded bytes
     rowOffsets: [0, 23] // 8-byte section index; bounds Body row 1
@@ -563,6 +565,38 @@ Body (0x0020): // Body section; directory recordCount=1
             r4 = ConstSigned t1, 3
             r5 = CheckedBinary add r3, r4
         terminator: Return r5
+```
+
+```text
+Body shape (inferred projection; not additional compact-linear bytes):
+    counts:
+        blockCount: 1
+        valueCount: 5
+        placeCount: 0
+        regionCount: 0
+    valueDescriptors:
+        r1: t1 // x; by-value parameter
+        r2: t1 // y; by-value parameter
+        r3: t1 // first checked add
+        r4: t1 // constant 3
+        r5: t1 // second checked add, returned
+    blocks:
+        B1(r1 <- x, r2 <- y):
+            r3 = CheckedBinary add r1, r2
+            r4 = ConstSigned t1, 3
+            r5 = CheckedBinary add r3, r4
+            Return r5
+```
+
+```text
+Body index (inferred projection; not stored in compact linear):
+    valueDefStarts: [0, 5]
+    definitions:
+        r1, r2: entry parameter sentinels
+        r3..r5: B1 operations 0..2
+    useBlockCounts: [1, 1, 1, 1, 1] // r1..r5
+    last uses:
+        B1: [(r1,0),(r2,0),(r3,2),(r4,2),(r5,3)]
 ```
 
 The header's `directoryOffset` locates the artifact directory. Each
@@ -606,7 +640,9 @@ the section index followed by Body row 1:
 
 Here MethodSig supplies
 by-value `r1` and `r2` (source `x` and `y`), and the three ordered
-operations define `r3`–`r5`. The expected `int32` context selects
+operations define `r3`–`r5`. The descriptor and block shape above are
+inferred from that signature and instruction stream, not encoded as
+separate rows in the compact-linear Body. The expected `int32` context selects
 checked primitive addition, not a numeric fallback or user witness.
 A bounded scan derives their types,
 definitions and last-use ordinals `(0,0,2,2,3)`, as well as the
@@ -652,18 +688,48 @@ The following separates artifact-wide metadata context from the Body's
 local type IDs and logical block shape; it is not a byte listing:
 
 ```text
-Metadata context (separate sections; not Body bytes):
+Artifact-wide table rows (separate sections; not Body bytes):
     TypeSpec (0x0011):
         row[1]: Builtin(bool)
         row[2]: Builtin(int32)
-    MaybeAdd signature summary (semantic; MethodSig/Param row layout omitted):
-        parameters: [by-value TypeSpec[1], by-value TypeSpec[2],
-                     by-value TypeSpec[2]]
-        result: TypeSpec[2]
-    MethodDef reference:
-        bodyRow: this Body row
+    MethodSig (0x0017):
+        row[1]:
+            resultTypeSpec: TypeSpec[2]
+            receiverTypeSpec: 0
+            paramFirst: 1
+            paramCount: 3
+            genericFirst: 0
+            genericCount: 0
+    Param (0x0018):
+        row[1]:
+            ownerMethodSig: MethodSig[1]
+            ordinal: 0
+            typeSpec: TypeSpec[1]
+            mode: 0
+        row[2]:
+            ownerMethodSig: MethodSig[1]
+            ordinal: 1
+            typeSpec: TypeSpec[2]
+            mode: 0
+        row[3]:
+            ownerMethodSig: MethodSig[1]
+            ordinal: 2
+            typeSpec: TypeSpec[2]
+            mode: 0
+    MethodDef (0x0016):
+        row[1]:
+            signature: MethodSig[1]
+            bodyRow: Body[1]
+```
 
+```text
 Body shape (logical projection; not wire syntax):
+    counts:
+        blockCount: 3
+        valueCount: 4
+        placeCount: 0
+        regionCount: 0
+        typeCount: 2
     typeMap:
         t1: TypeSpec[1]
         t2: TypeSpec[2]
@@ -683,11 +749,11 @@ Body shape (logical projection; not wire syntax):
 ```
 
 The Body has four by-value descriptors and three normal blocks; the add
-remains an operation within its block. Its Body index projection (not
-encoded bytes) is:
+remains an operation within its block. Its Body index projection (logical
+fields encoded by compact indexed, not a byte listing) is:
 
 ```text
-Body index:
+Body index (logical projection; not wire syntax):
 valueDefStarts: [0, 3, 4, 4]
 definition offsets:
     r1..r3: parameter sentinels in B1
@@ -752,26 +818,53 @@ block-header and edge **rules**, with their own MethodSigs. They show
 composition rather than a required source lowering or complete byte
 listing; a writer must still encode exact block and terminator offsets.
 Artifact-wide TypeSpec and MethodSig/Param context is shown separately
-from Body-local IDs. Only blocks explicitly labeled as encoded bytes
+from Body-local IDs. Only listings explicitly labeled as encoded bytes
 give a wire listing.
 
 For `int32 TwiceSum(int32 x, int32 y) { int32 tmp = x + y;
 return tmp + tmp; }`, its artifact-wide metadata context is:
 
 ```text
-Signature summary (semantic; MethodSig/Param row layout omitted):
-    parameters: [by-value int32, by-value int32]
-    result: int32
-TypeSpec selected by Body-local t1:
-    complete int32 TypeSpec row
+Artifact-wide table rows (separate sections; not Body bytes):
+    TypeSpec (0x0011):
+        row[1]: Builtin(int32)
+    MethodSig (0x0017):
+        row[1]:
+            resultTypeSpec: TypeSpec[1]
+            receiverTypeSpec: 0
+            paramFirst: 1
+            paramCount: 2
+            genericFirst: 0
+            genericCount: 0
+    Param (0x0018):
+        row[1]:
+            ownerMethodSig: MethodSig[1]
+            ordinal: 0
+            typeSpec: TypeSpec[1]
+            mode: 0
+        row[2]:
+            ownerMethodSig: MethodSig[1]
+            ordinal: 1
+            typeSpec: TypeSpec[1]
+            mode: 0
+    MethodDef (0x0016):
+        row[1]:
+            signature: MethodSig[1]
+            bodyRow: Body[1]
 ```
 
-The row number is not material to this logical shape. Its Body shape is:
+Its Body shape is:
 
 ```text
 Body shape (logical projection; no bytes assigned):
+    counts:
+        blockCount: 1
+        valueCount: 4
+        placeCount: 0
+        regionCount: 0
+        typeCount: 1
     typeMap:
-        t1: complete int32 TypeSpec
+        t1: TypeSpec[1] // int32
     valueDescriptors:
         r1..r4:
             typeId: t1
@@ -782,14 +875,17 @@ Body shape (logical projection; no bytes assigned):
             r3 = CheckedBinary add r1, r2
             r4 = CheckedBinary add r3, r3
             Return r4
-    indexes:
-        valueDefStarts: [0, 4]
-        definitions:
-            r1, r2: parameter sentinels
-            r3: B1 operation 0
-            r4: B1 operation 1
-        last uses:
-            B1: [(r1,0),(r2,0),(r3,1),(r4,2)]
+```
+
+```text
+Body index (logical projection; not wire syntax):
+    valueDefStarts: [0, 4]
+    definitions:
+        r1, r2: parameter sentinels
+        r3: B1 operation 0
+        r4: B1 operation 1
+    last uses:
+        B1: [(r1,0),(r2,0),(r3,1),(r4,2)]
 ```
 
 Reuse needs no duplicate descriptor or `Copy` operation for this Copy
@@ -802,15 +898,38 @@ if (flag) { chosen = y; } return chosen; }`, the artifact-wide metadata
 context is separate from the Body:
 
 ```text
-TypeSpec (0x0011):
-    row[1]: Builtin(bool)
-    row[2]: Builtin(int32)
-Choose signature summary (semantic; MethodSig/Param row layout omitted):
-    parameters: [by-value TypeSpec[1], by-value TypeSpec[2],
-                 by-value TypeSpec[2]]
-    result: TypeSpec[2]
-Choose MethodDef reference:
-    bodyRow: this Body row
+Artifact-wide table rows (separate sections; not Body bytes):
+    TypeSpec (0x0011):
+        row[1]: Builtin(bool)
+        row[2]: Builtin(int32)
+    MethodSig (0x0017):
+        row[1]:
+            resultTypeSpec: TypeSpec[2]
+            receiverTypeSpec: 0
+            paramFirst: 1
+            paramCount: 3
+            genericFirst: 0
+            genericCount: 0
+    Param (0x0018):
+        row[1]:
+            ownerMethodSig: MethodSig[1]
+            ordinal: 0
+            typeSpec: TypeSpec[1]
+            mode: 0
+        row[2]:
+            ownerMethodSig: MethodSig[1]
+            ordinal: 1
+            typeSpec: TypeSpec[2]
+            mode: 0
+        row[3]:
+            ownerMethodSig: MethodSig[1]
+            ordinal: 2
+            typeSpec: TypeSpec[2]
+            mode: 0
+    MethodDef (0x0016):
+        row[1]:
+            signature: MethodSig[1]
+            bodyRow: Body[1]
 ```
 
 The Body-local type map and logical CFG are:
@@ -852,7 +971,7 @@ needs no place for the unaddressed source local.
 The method-wide Body index projection (not encoded bytes) is:
 
 ```text
-Body index:
+Body index (logical projection; not wire syntax):
 valueDefStarts: [0, 3, 3, 3, 4]
 definitions:
     r1..r3: parameter sentinels in B1
@@ -938,13 +1057,38 @@ while (i < n) { sum = sum + y; i = i + 1; } return sum; }`.
 The artifact-wide metadata context is:
 
 ```text
-TypeSpec (0x0011):
-    row[1]: Builtin(int32)
-    row[2]: Builtin(bool)
-RepeatAdd signature summary (semantic; MethodSig/Param row layout omitted):
-    parameters: [by-value TypeSpec[1], by-value TypeSpec[1],
-                 by-value TypeSpec[1]]
-    result: TypeSpec[1]
+Artifact-wide table rows (separate sections; not Body bytes):
+    TypeSpec (0x0011):
+        row[1]: Builtin(int32)
+        row[2]: Builtin(bool)
+    MethodSig (0x0017):
+        row[1]:
+            resultTypeSpec: TypeSpec[1]
+            receiverTypeSpec: 0
+            paramFirst: 1
+            paramCount: 3
+            genericFirst: 0
+            genericCount: 0
+    Param (0x0018):
+        row[1]:
+            ownerMethodSig: MethodSig[1]
+            ordinal: 0
+            typeSpec: TypeSpec[1]
+            mode: 0
+        row[2]:
+            ownerMethodSig: MethodSig[1]
+            ordinal: 1
+            typeSpec: TypeSpec[1]
+            mode: 0
+        row[3]:
+            ownerMethodSig: MethodSig[1]
+            ordinal: 2
+            typeSpec: TypeSpec[1]
+            mode: 0
+    MethodDef (0x0016):
+        row[1]:
+            signature: MethodSig[1]
+            bodyRow: Body[1]
 ```
 
 The Body shape is a logical projection, not an assigned byte listing:
@@ -960,6 +1104,10 @@ Body shape (logical projection; byte offsets are not assigned):
     typeMap:
         t1: TypeSpec[1] // int32
         t2: TypeSpec[2] // bool
+    valueDescriptors: // all kind: value
+        r1..r6: t1
+        r7: t2
+        r8..r11: t1
     region 1:
         kind: loop
         parent: 0
@@ -997,28 +1145,21 @@ B3 instruction reads it. Both additions may fail at their operation
 sites under the fail-fast policy. The region and its backedge do not
 create implicit exceptional successors.
 
-The Body index projection is:
+The Body index projection (logical fields of the general form, not
+assigned bytes) is:
 
 ```text
-valueDescriptors: // all value kind
-    r1..r4:
-        typeId: t1
-        useBlockCount: 1
-    r5..r6:
-        typeId: t1
-        useBlockCount: 2
-    r7:
-        typeId: t2
-        useBlockCount: 1
-    r8..r11:
-        typeId: t1
-        useBlockCount: 1
-valueDefStarts: [0, 4, 7, 10, 11]
-definitions:
-    r1..r3, r5..r6, r11: parameter sentinels
-    r4: B1 operation 0
-    r7: B2 operation 0
-    r8..r10: B3 operations 0..2
+Body index (logical projection; not wire syntax):
+    useBlockCounts:
+        r1..r4: 1
+        r5..r6: 2
+        r7..r11: 1
+    valueDefStarts: [0, 4, 7, 10, 11]
+    definitions:
+        r1..r3, r5..r6, r11: parameter sentinels
+        r4: B1 operation 0
+        r7: B2 operation 0
+        r8..r10: B3 operations 0..2
 ```
 
 These descriptor counts are `useBlockCount`, **not** the number of
@@ -1648,23 +1789,44 @@ previous exact-byte fixture would not supply them.
 
 The introductory [checked-add example](#checked-add-end-to-end-informative)
 shows the executable by-value case in the narrow fail-fast `(1, 0)`
-profile: `r1` is its parameter and `r3` is defined by the first checked
+profile: `r1` and `r2` are its parameters and `r3` is defined by the first checked
 operation in B1. The alternative below adds an addressable local place
 and is decode-only in this revision.
 
-For `local = local + 5`, instead declare a mutable, initially vacant
+For `int32 IncrementLocal() { mut int32 local = 10;
+local = local + 5; return local; }`, instead declare a mutable, initially vacant
 `int32` place `p1` in the Body place table. Its artifact-wide type context
 is separate from the Body:
 
 ```text
-TypeSpec (0x0011):
-    row[1]: Builtin(int32)
+Artifact-wide table rows (separate sections; not Body bytes):
+    TypeSpec (0x0011):
+        row[1]: Builtin(int32)
+    MethodSig (0x0017):
+        row[1]:
+            resultTypeSpec: TypeSpec[1]
+            receiverTypeSpec: 0
+            paramFirst: 0
+            paramCount: 0
+            genericFirst: 0
+            genericCount: 0
+    Param (0x0018): no rows selected
+    MethodDef (0x0016):
+        row[1]:
+            signature: MethodSig[1]
+            bodyRow: Body[1]
 ```
 
 The following Body projection is decode-only and not a wire listing:
 
 ```text
-Body shape:
+Body shape (logical projection; not wire syntax):
+    counts:
+        blockCount: 1
+        valueCount: 5
+        placeCount: 1
+        regionCount: 0
+        typeCount: 1
     typeMap:
         t1: TypeSpec[1]
     placeDescriptors:
@@ -1710,7 +1872,7 @@ from a by-value aggregate.
 is a block parameter; the Body index projection (not encoded bytes) is:
 
 ```text
-Body index:
+Body index (logical projection; not wire syntax):
 valueDefStarts: [0, 5]
 valueDefinitionOffsets: [24, 27, 34, 37, 41] // B1-relative bytes
 placeLastUses: [(p1, 7)] // end-place transition
@@ -1768,11 +1930,22 @@ For [metadata example](../il-metadata.md#row-assignment-example),
 the artifact-wide metadata context, separate from the Body section, is:
 
 ```text
-TypeSpec (0x0011):
-    row[1]: Builtin(int32)
-MethodDef (0x0016):
-    row[1]: // selects the zero-argument int32-returning declaration
-        bodyRow: Body[1]
+Artifact-wide table rows (separate sections; not Body bytes):
+    TypeSpec (0x0011):
+        row[1]: Builtin(int32)
+    MethodSig (0x0017):
+        row[1]:
+            resultTypeSpec: TypeSpec[1]
+            receiverTypeSpec: 0
+            paramFirst: 0
+            paramCount: 0
+            genericFirst: 0
+            genericCount: 0
+    Param (0x0018): no rows selected
+    MethodDef (0x0016):
+        row[1]:
+            signature: MethodSig[1]
+            bodyRow: Body[1]
 ```
 
 The `return 42` Body has one value, one implicit entry block, no places
@@ -1790,7 +1963,7 @@ the separate MethodSig and mapped TypeSpec supply the complete result
 type. Its Body row projection and exact bytes are:
 
 ```text
-Body row (compact linear; 13 bytes):
+Body row (compact linear; 13 encoded bytes):
     bodyLayout: 0x04
     typeCount: 1
     typeMap:
@@ -1799,6 +1972,31 @@ Body row (compact linear; 13 bytes):
     operations:
         r1 = ConstBits t1, 42
     terminator: Return r1
+```
+
+```text
+Body shape (inferred projection; not additional compact-linear bytes):
+    counts:
+        blockCount: 1
+        valueCount: 1
+        placeCount: 0
+        regionCount: 0
+    valueDescriptors:
+        r1: t1 // constant 42, defined by operation 0
+    blocks:
+        B1():
+            r1 = ConstBits t1, 42
+            Return r1
+```
+
+```text
+Body index (inferred projection; not stored in compact linear):
+    valueDefStarts: [0, 1]
+    definitions:
+        r1: B1 operation 0
+    useBlockCounts: [1]
+    last uses:
+        B1: [(r1,1)]
 ```
 
 The absent block header, place/region records, descriptor and
@@ -1820,24 +2018,64 @@ For a separate `Identity` fixture,
 `int32 Identity(int32 x) { return x; }`, the artifact-wide context is:
 
 ```text
-TypeSpec (0x0011):
-    row[1]: Builtin(int32)
-MethodDef (0x0016):
-    row[1]: // Identity takes int32 by value and returns int32
-        bodyRow: Body[1]
+Artifact-wide table rows (separate sections; not Body bytes):
+    TypeSpec (0x0011):
+        row[1]: Builtin(int32)
+    MethodSig (0x0017):
+        row[1]:
+            resultTypeSpec: TypeSpec[1]
+            receiverTypeSpec: 0
+            paramFirst: 1
+            paramCount: 1
+            genericFirst: 0
+            genericCount: 0
+    Param (0x0018):
+        row[1]:
+            ownerMethodSig: MethodSig[1]
+            ordinal: 0
+            typeSpec: TypeSpec[1]
+            mode: 0
+    MethodDef (0x0016):
+        row[1]:
+            signature: MethodSig[1]
+            bodyRow: Body[1]
 ```
 
 The entry parameter is Body-local `r1`; its row shape and exact Body
 (0x0020) section bytes are:
 
 ```text
-Body row (compact linear; 9 bytes):
+Body row (compact linear; 9 encoded bytes):
     bodyLayout: 0x04
     typeCount: 1
     typeMap:
         t1: TypeSpec[1] // int32
     operationCount: 0
     terminator: Return r1
+```
+
+```text
+Body shape (inferred projection; not additional compact-linear bytes):
+    counts:
+        blockCount: 1
+        valueCount: 1
+        placeCount: 0
+        regionCount: 0
+    valueDescriptors:
+        r1: t1 // x; by-value parameter
+    blocks:
+        B1(r1 <- x):
+            Return r1
+```
+
+```text
+Body index (inferred projection; not stored in compact linear):
+    valueDefStarts: [0, 1]
+    definitions:
+        r1: entry parameter sentinel
+    useBlockCounts: [1]
+    last uses:
+        B1: [(r1,0)]
 ```
 
 This is a 17-byte Body section (8-byte row index and 9-byte row):
