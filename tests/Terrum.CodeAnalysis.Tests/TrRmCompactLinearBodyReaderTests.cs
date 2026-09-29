@@ -91,6 +91,20 @@ public sealed class TrRmCompactLinearBodyReaderTests
     }
 
     [Fact]
+    public void ReturnZeroRequiresVoidResultAndNoValueDefinition()
+    {
+        byte[] row = [0x04, 0, 0, 0x83, 0];
+        var index = Inspect(row, 0, typeCode: 0);
+        Assert.Equal(0, index.ValueCount);
+        Assert.Equal(0, index.Operations);
+        Assert.Empty(index.UseBlocks);
+        Assert.Throws<InvalidDataException>(() => Inspect(row, 0));
+
+        byte[] invalid = [0x04, 0, 0, 0x83, 1];
+        Assert.Throws<InvalidDataException>(() => Inspect(invalid, 0, typeCode: 0));
+    }
+
+    [Fact]
     public void OptionalPresenceRetainsCompleteValueTypes()
     {
         byte[] make =

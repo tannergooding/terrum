@@ -337,15 +337,27 @@ public readonly ref struct TrRmCompactLinearBodyReader
         if (terminator == 0x83)
         {
             var result = ReadLocal(body, ref position, terminatorWidth);
-            var expected = MatchType(types, mappedTypes,
-                signatures.GetResultTypeSpec(signature));
-            if (result == 0 || result > valueCount || _values[result].TypeKey != expected)
+            var resultSpec = types.GetRow(signatures.GetResultTypeSpec(signature));
+            if (result == 0)
             {
-                throw InvalidBody();
+                if (resultSpec.Length != 3 || resultSpec[0] != 1
+                    || resultSpec[1] != 0 || resultSpec[2] != 0)
+                {
+                    throw InvalidBody();
+                }
             }
+            else
+            {
+                var expected = MatchType(types, mappedTypes,
+                    signatures.GetResultTypeSpec(signature));
+                if (result > valueCount || _values[result].TypeKey != expected)
+                {
+                    throw InvalidBody();
+                }
 
-            _values[result].Used = true;
-            _values[result].LastUseOrdinal = operationCount;
+                _values[result].Used = true;
+                _values[result].LastUseOrdinal = operationCount;
+            }
         }
         else if (terminator == 0x87 && terminatorWidth == 1)
         {

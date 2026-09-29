@@ -1211,7 +1211,8 @@ Param and TypeSpec rows and checks the fail-fast scalar subset of `ConstBits`,
 `ConstSigned`, `Copy`, `Unary`, `Binary`, `Convert`, `Select`,
 `MakeOptional`, `None`, `IsPresent`, `CheckedBinary`, `CheckedConvert`,
 `CheckedNegate`, `CheckedDivRem`, `Return` and `Fail`. Optional scalar
-types retain their presence separately from their underlying atomic type.
+types retain their presence separately from their underlying atomic type;
+`Return 0` is valid only for a declared `void` result.
 It reconstructs parameter and operation
 definitions, use-block counts and final uses from the one-block stream,
 including mapped Boolean comparison results, rejecting unknown operations,
