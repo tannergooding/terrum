@@ -850,7 +850,8 @@ The bounded [Terrum-authored scalar frontend](../self-host/ScalarFrontend.terrum
 consumes one successful scanner token snapshot and publishes an in-process
 typed result: parameter types and names, expression operators and parameter
 references, optional conditional branches, explicit public visibility, and UTF-16 spans. It accepts one
-function with at most two scalar parameters and one operation per expression;
+function with zero to two scalar parameters, parameter references, Boolean
+literals, and at most one binary operation per expression;
 unsupported or invalid shapes return a code and span without a partial
 artifact. Lexical failures remain scanner diagnostics. AOT/JIT execute this
 phase with the host source buffers, but `build-component` still passes
@@ -873,7 +874,7 @@ projects typed facts or scanner/shape errors for inspection.
 explicitly public scalar DLL, preserving an existing output on failure;
 the hosted compiler remains in parallel for general builds. This bounded
 result is a provisional component protocol, not approved TRRM metadata or a
-compiler self-build. Four shared scalar/conditional sources produce
+compiler self-build. Seven shared scalar/conditional/Boolean-literal sources produce
 byte-identical DLLs through the Terrum-authored frontend and hosted compiler
 under both runtime policies; this does not establish parity for unsupported
 source shapes, independent native emitters or a self-build.

@@ -20,6 +20,9 @@ public sealed partial class CliTests
     [InlineData("public int32 Value(int32 x, int32 y) { if (x < y) { return x + y; } else { return x - y; } }")]
     [InlineData("public bool Value(int32 x, int32 y) { return x >= y; }")]
     [InlineData("public char16 Value(char16 x, char16 y) { if (x != y) { return y; } else { return x; } }")]
+    [InlineData("public bool Value() { return true; }")]
+    [InlineData("public bool Value() { return false; }")]
+    [InlineData("public bool Value() { if (true) { return false; } else { return true; } }")]
     public async Task FrontendBuiltLibraryMatchesHostedNativeBytesAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
@@ -183,5 +186,23 @@ public sealed partial class CliTests
         Assert.Empty(error);
         using var document = JsonDocument.Parse(output);
         Assert.False(document.RootElement.GetProperty("success").GetBoolean());
+    }
+
+    [Fact]
+    public async Task FrontendComponentRejectsBooleanLiteralWithIncompatibleReturnTypeAsync()
+    {
+        var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")), "self-host");
+        var (exit, output, error) = await RunAsync(
+            Encoding.UTF8.GetBytes("public int32 Value() { return true; }"),
+            "frontend-component", directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.Equal(1, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        var result = document.RootElement.GetProperty("result");
+        Assert.False(result.GetProperty("valid").GetBoolean());
+        Assert.False(result.GetProperty("public").GetBoolean());
+        Assert.Equal(2, result.GetProperty("errorCode").GetInt32());
+        Assert.Equal(30, result.GetProperty("errorSpan").GetProperty("start").GetInt32());
     }
 }

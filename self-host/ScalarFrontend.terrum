@@ -5,7 +5,8 @@ namespace Terrum.CodeAnalysis;
 // Expressions preserve operator identities; later lowering must retain checked arithmetic.
 // This in-process contract uses UTF-16 SourceRange values against the input source.
 // Parameter slots are 1-based (0 means absent); Operation is 0 for a parameter
-// reference or the scanner TokenKind ordinal for one binary operator. An invalid
+// reference or the scanner TokenKind ordinal for one binary operator or
+// true/false literal (with no parameter slots). An invalid
 // result has only ErrorCode/ErrorSpan; all other fields, including visibility,
 // are empty. A valid result is public only for an explicit public keyword. Lexical errors
 // prevent snapshot publication and remain in TokenDiagnosticSnapshot.
@@ -158,6 +159,15 @@ mut class ScalarFrontendState
 
     private mut bool ParseExpression(out ScalarFrontendExpression expression)
     {
+        require _tokens.TryGet(_at, out var literal);
+        if (literal.Kind == 20 || literal.Kind == 21)
+        {
+            _at = _at + 1;
+            require ScalarFrontendExpression.TryCreate(5, literal.Kind, 0, 0,
+                literal.Range, out var found);
+            expression = found;
+            return true;
+        }
         if (!Take(2, out var left))
         {
             return false;

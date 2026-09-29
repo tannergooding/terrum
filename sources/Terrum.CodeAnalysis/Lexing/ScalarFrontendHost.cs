@@ -62,10 +62,12 @@ public static class ScalarFrontendHost
         var count = words[6];
         var isPublic = words[0] == 2 && words[2] == 1;
         if ((words[0] == 1 ? words[2] != 0 : words[2] is not (0 or 1))
-            || !AllZero(3, 5) || !ScalarType(words[5]) || count is < 1 or > 2
-            || !ScalarType(words[7]) || (count == 1 ? words[8] != 0 : !ScalarType(words[8]))
-            || !ValidSpan(name, nonempty: true) || !ValidSpan(firstName, nonempty: true)
-            || (count == 1 ? secondName != default : !ValidSpan(secondName, nonempty: true))
+            || !AllZero(3, 5) || !ScalarType(words[5]) || count is < 0 or > 2
+            || (count == 0 ? words[7] != 0 : !ScalarType(words[7]))
+            || (count <= 1 ? words[8] != 0 : !ScalarType(words[8]))
+            || !ValidSpan(name, nonempty: true)
+            || (count == 0 ? firstName != default : !ValidSpan(firstName, nonempty: true))
+            || (count < 2 ? secondName != default : !ValidSpan(secondName, nonempty: true))
             || !ValidHeader()
             || words[15] is not (0 or 1))
         {
@@ -110,17 +112,19 @@ public static class ScalarFrontendHost
 
         bool ValidHeader()
         {
-            var end = count == 1 ? firstName.End : secondName.End;
+            var end = count switch { 0 => name.End, 1 => firstName.End, _ => secondName.End };
             var lexical = Lexer.Lex(SourceText.From(source.Text[..end]));
             var tokens = lexical.Tokens;
             var offset = isPublic ? 1 : 0;
-            return lexical.Diagnostics.IsEmpty && tokens.Length == (count == 1 ? 6 : 9) + offset
+            return lexical.Diagnostics.IsEmpty && tokens.Length == (count switch {
+                0 => 3, 1 => 6, _ => 9,
+            }) + offset
                 && (!isPublic || tokens[0].Kind == TokenKind.PublicKeyword)
                 && tokens[offset].Kind == TokenKind.Identifier
                 && tokens[offset].Text == TypeName(words[5])
                 && tokens[offset + 1].Kind == TokenKind.Identifier
                 && tokens[offset + 1].Span == name
-                && tokens[offset + 2].Kind == TokenKind.OpenParen
+                && (count == 0 || (tokens[offset + 2].Kind == TokenKind.OpenParen
                 && tokens[offset + 3].Kind == TokenKind.Identifier
                 && tokens[offset + 3].Text == TypeName(words[7])
                 && tokens[offset + 4].Kind == TokenKind.Identifier
@@ -130,7 +134,7 @@ public static class ScalarFrontendHost
                     && tokens[offset + 6].Text == TypeName(words[8])
                     && tokens[offset + 7].Kind == TokenKind.Identifier
                     && tokens[offset + 7].Span == secondName
-                    && tokens[offset + 4].Text != tokens[offset + 7].Text));
+                    && tokens[offset + 4].Text != tokens[offset + 7].Text))));
         }
 
         bool ValidExpression(ScalarFrontendExpression expression, int type, int parameters)
@@ -140,6 +144,13 @@ public static class ScalarFrontendHost
             var right = expression.RightParameter;
             var leftType = left == 1 ? words[7] : words[8];
             var rightType = right == 1 ? words[7] : words[8];
+            if (operation is 20 or 21)
+            {
+                return type == 5 && expression.Type == 5 && left == 0 && right == 0
+                    && ValidSpan(expression.Span, nonempty: true)
+                    && source.Text.AsSpan(expression.Span.Start, expression.Span.Length)
+                        .SequenceEqual((operation == 20 ? "true" : "false").AsSpan());
+            }
             return expression.Type == type && ValidSpan(expression.Span, nonempty: true)
                 && left >= 1 && left <= parameters
                 && (operation == 0 ? right == 0 && leftType == type
@@ -216,9 +227,12 @@ public static class ScalarFrontendHost
         {
             throw InvalidResult();
         }
-        var firstType = Type(result.FirstType);
         var variables = ImmutableArray.CreateBuilder<BoundVariable>(result.ParameterCount);
-        variables.Add(new BoundVariable(Name(result.FirstName), firstType, false, result.FirstName));
+        if (result.ParameterCount > 0)
+        {
+            variables.Add(new BoundVariable(Name(result.FirstName), Type(result.FirstType),
+                false, result.FirstName));
+        }
         if (result.ParameterCount == 2)
         {
             variables.Add(new BoundVariable(Name(result.SecondName), Type(result.SecondType),
@@ -254,6 +268,11 @@ public static class ScalarFrontendHost
 
         BoundExpression Expression(ScalarFrontendExpression expression)
         {
+            if (expression.Operation is 20 or 21)
+            {
+                return new BoundConstant(expression.Operation == 20 ? 1 : 0,
+                    PrimitiveType.Bool, expression.Span);
+            }
             var leftName = expression.LeftParameter == 1 ? result.FirstName : result.SecondName;
             var left = new BoundRead(expression.LeftParameter - 1,
                 types[expression.LeftParameter - 1].Type,
