@@ -118,3 +118,13 @@ bool TryDecodeSigned64Scalar(uint64 magnitude, bool based, out int64 value)
     }
     return true;
 }
+
+bool EvaluateScalarComparison(int32 operation, bool equal, bool less, bool greater)
+{
+    return operation == 65 && equal
+        || operation == 66 && !equal
+        || operation == 67 && less
+        || operation == 68 && !greater
+        || operation == 69 && greater
+        || operation == 70 && !less;
+}

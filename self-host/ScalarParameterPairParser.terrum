@@ -1,6 +1,7 @@
 namespace Terrum.CodeAnalysis;
 
 bool TryParseTwoParameterBinaryPrefix(TokenSnapshot tokens, int32 operatorKind,
+    bool comparison,
     out int32 scalarType, out SourceRange name)
 {
     if (tokens.GetCount() != 17 && tokens.GetCount() != 19)
@@ -21,11 +22,13 @@ bool TryParseTwoParameterBinaryPrefix(TokenSnapshot tokens, int32 operatorKind,
     require tokens.TryGet(11, out var firstUse);
     require tokens.TryGet(12, out var binary);
     require tokens.TryGet(13, out var secondUse);
-    if (!TryGetScalarType(returnType, out var selected)
+    if (!TryGetScalarType(returnType, out var resultType)
         || !TryGetScalarType(firstType, out var matchingFirst)
         || !TryGetScalarType(secondType, out var matchingSecond)
-        || selected != matchingFirst || selected != matchingSecond
-        || selected == 5 || selected == 6
+        || matchingFirst != matchingSecond
+        || (comparison && resultType != 5)
+        || (!comparison && resultType != matchingFirst)
+        || matchingFirst == 5 || (!comparison && matchingFirst == 6)
         || function.Kind != 2 || openParameters.Kind != 46 || comma.Kind != 53
         || closeParameters.Kind != 47 || openBody.Kind != 48
         || returnKeyword.Kind != 19 || binary.Kind != operatorKind
@@ -35,7 +38,7 @@ bool TryParseTwoParameterBinaryPrefix(TokenSnapshot tokens, int32 operatorKind,
     {
         return false;
     }
-    scalarType = selected;
+    scalarType = matchingFirst;
     name = function.Range;
     return true;
 }
@@ -43,7 +46,7 @@ bool TryParseTwoParameterBinaryPrefix(TokenSnapshot tokens, int32 operatorKind,
 bool TryParseTwoParameterAddPrefix(TokenSnapshot tokens,
     out int32 scalarType, out SourceRange name)
 {
-    return TryParseTwoParameterBinaryPrefix(move tokens, 57, out scalarType, out name);
+    return TryParseTwoParameterBinaryPrefix(move tokens, 57, false, out scalarType, out name);
 }
 
 bool TryParseTwoParameterAddReturn(TokenSnapshot tokens,
@@ -77,7 +80,31 @@ bool TryParseTwoParameterSubtractReturn(TokenSnapshot tokens,
     {
         return false;
     }
-    return TryParseTwoParameterBinaryPrefix(move tokens, 58, out scalarType, out name);
+    return TryParseTwoParameterBinaryPrefix(move tokens, 58, false, out scalarType, out name);
+}
+
+bool TryParseTwoParameterComparisonReturn(TokenSnapshot tokens,
+    out int32 scalarType, out int32 operation, out SourceRange name)
+{
+    if (tokens.GetCount() != 17)
+    {
+        return false;
+    }
+    require tokens.TryGet(12, out var comparison);
+    require tokens.TryGet(14, out var semicolon);
+    require tokens.TryGet(15, out var closeBody);
+    require tokens.TryGet(16, out var eof);
+    if (comparison.Kind < 65 || comparison.Kind > 70
+        || semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0
+        || !TryParseTwoParameterBinaryPrefix(move tokens, comparison.Kind, true,
+            out var selected, out var foundName))
+    {
+        return false;
+    }
+    scalarType = selected;
+    operation = comparison.Kind;
+    name = foundName;
+    return true;
 }
 
 bool TryParseTwoParameterAddAndLiteralReturn(TokenSnapshot tokens,
@@ -325,5 +352,75 @@ bool TryEvaluateUInt64TwoParameterSubtractReturn(TokenSnapshot tokens, uint64 fi
     }
     name = foundName;
     result = first - second;
+    return true;
+}
+
+bool TryEvaluateInt32TwoParameterComparisonReturn(TokenSnapshot tokens, int32 first, int32 second,
+    out SourceRange name, out bool result)
+{
+    if (!TryParseTwoParameterComparisonReturn(move tokens,
+            out var selected, out var operation, out var foundName)
+        || selected != 1)
+    {
+        return false;
+    }
+    name = foundName;
+    result = EvaluateScalarComparison(operation, first == second, first < second, first > second);
+    return true;
+}
+
+bool TryEvaluateUInt32TwoParameterComparisonReturn(TokenSnapshot tokens, uint32 first, uint32 second,
+    out SourceRange name, out bool result)
+{
+    if (!TryParseTwoParameterComparisonReturn(move tokens,
+            out var selected, out var operation, out var foundName)
+        || selected != 2)
+    {
+        return false;
+    }
+    name = foundName;
+    result = EvaluateScalarComparison(operation, first == second, first < second, first > second);
+    return true;
+}
+
+bool TryEvaluateInt64TwoParameterComparisonReturn(TokenSnapshot tokens, int64 first, int64 second,
+    out SourceRange name, out bool result)
+{
+    if (!TryParseTwoParameterComparisonReturn(move tokens,
+            out var selected, out var operation, out var foundName)
+        || selected != 3)
+    {
+        return false;
+    }
+    name = foundName;
+    result = EvaluateScalarComparison(operation, first == second, first < second, first > second);
+    return true;
+}
+
+bool TryEvaluateUInt64TwoParameterComparisonReturn(TokenSnapshot tokens, uint64 first, uint64 second,
+    out SourceRange name, out bool result)
+{
+    if (!TryParseTwoParameterComparisonReturn(move tokens,
+            out var selected, out var operation, out var foundName)
+        || selected != 4)
+    {
+        return false;
+    }
+    name = foundName;
+    result = EvaluateScalarComparison(operation, first == second, first < second, first > second);
+    return true;
+}
+
+bool TryEvaluateChar16TwoParameterComparisonReturn(TokenSnapshot tokens, char16 first, char16 second,
+    out SourceRange name, out bool result)
+{
+    if (!TryParseTwoParameterComparisonReturn(move tokens,
+            out var selected, out var operation, out var foundName)
+        || selected != 6)
+    {
+        return false;
+    }
+    name = foundName;
+    result = EvaluateScalarComparison(operation, first == second, first < second, first > second);
     return true;
 }

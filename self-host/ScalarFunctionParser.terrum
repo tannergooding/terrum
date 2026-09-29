@@ -609,16 +609,6 @@ bool TryEvaluateTypedScalarComparisonReturn(TokenSnapshot tokens, TokenIntegerSn
     return true;
 }
 
-bool EvaluateScalarComparison(int32 operation, bool equal, bool less, bool greater)
-{
-    return operation == 65 && equal
-        || operation == 66 && !equal
-        || operation == 67 && less
-        || operation == 68 && !greater
-        || operation == 69 && greater
-        || operation == 70 && !less;
-}
-
 bool TryParseParameterComparisonReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     out int32 scalarType, out int32 operation, out SourceRange name,
     out uint64 magnitude, out bool based)

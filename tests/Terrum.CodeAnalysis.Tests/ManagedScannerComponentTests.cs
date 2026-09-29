@@ -1008,6 +1008,83 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("int32", "-1", "0", "x < y", true, true)]
+    [InlineData("int32", "-1", "0", "x <= y", true, true)]
+    [InlineData("int32", "-1", "0", "x > y", true, false)]
+    [InlineData("int32", "-1", "0", "x >= y", true, false)]
+    [InlineData("int32", "-1", "-1", "x == y", true, true)]
+    [InlineData("int32", "-1", "-1", "x != y", true, false)]
+    [InlineData("int32", "1", "2", "y < x", false, false)]
+    [InlineData("int32", "1", "2", "x < x", false, false)]
+    [InlineData("int32", "1", "2", "x + y", false, false)]
+    [InlineData("uint32", "uint32.MaxValue", "0", "x > y", true, true)]
+    [InlineData("uint32", "uint32.MaxValue", "uint32.MaxValue", "x >= y", true, true)]
+    [InlineData("int64", "int64.MinValue", "int64.MaxValue", "x < y", true, true)]
+    [InlineData("int64", "int64.MaxValue", "int64.MinValue", "x <= y", true, false)]
+    [InlineData("uint64", "uint64.MaxValue", "0", "x != y", true, true)]
+    [InlineData("uint64", "0", "uint64.MaxValue", "x > y", true, false)]
+    [InlineData("char16", "char16(65535)", "char16(0)", "x > y", true, true)]
+    [InlineData("char16", "char16(0)", "char16(65535)", "x == y", true, false)]
+    public async Task BoundedNativeTwoParameterComparisonsBindBothNamesAsync(
+        string typeName, string first, string second, string expression,
+        bool evaluable, bool expected)
+    {
+        var evaluator = typeName switch
+        {
+            "int32" => "TryEvaluateInt32TwoParameterComparisonReturn",
+            "uint32" => "TryEvaluateUInt32TwoParameterComparisonReturn",
+            "int64" => "TryEvaluateInt64TwoParameterComparisonReturn",
+            "uint64" => "TryEvaluateUInt64TwoParameterComparisonReturn",
+            "char16" => "TryEvaluateChar16TwoParameterComparisonReturn",
+            _ => throw new ArgumentOutOfRangeException(nameof(typeName)),
+        };
+        var text = $"bool Value({typeName} x, {typeName} y) {{ return {expression}; }}";
+        var expectedValue = expected ? "true" : "false";
+        var assertion = evaluable
+            ? $$"""
+                require {{evaluator}}(move tokens, {{first}}, {{second}},
+                    out var name, out var bound);
+                if (name.Start != 5 || name.Length != 5 || bound != {{expectedValue}})
+                {
+                    return 1;
+                }
+                """
+            : $$"""
+                if ({{evaluator}}(move tokens, {{first}}, {{second}},
+                    out var name, out var bound))
+                {
+                    return 1;
+                }
+                """;
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                {{assertion}}
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            if (evaluable)
+            {
+                var source = text + $$"""
+                     int32 Main() {
+                         if (Value({{first}}, {{second}}) == {{expectedValue}}) { return 42; }
+                         return 1;
+                     }
+                    """;
+                var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+            }
+            var program = await CompilePairParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData("int32", "18", "21", "x + y + 3", true, "42")]
     [InlineData("int32", "int32.MaxValue", "-1", "x + y + 1", true, "int32.MaxValue")]
     [InlineData("int32", "int32.MinValue", "int32.MaxValue", "x + y + 1", true, "0")]
