@@ -850,7 +850,7 @@ The bounded [Terrum-authored scalar frontend](../self-host/ScalarFrontend.terrum
 consumes one successful scanner token snapshot and publishes an in-process
 typed result: parameter types and names, expression operators and parameter
 references, optional conditional branches, declared `public`/`internal` visibility, and UTF-16 spans. It accepts one
-function with zero to two scalar parameters, parameter references, Boolean
+function with zero to three scalar parameters, parameter references, Boolean
 literals, unary `!` over a Boolean literal or named parameter (including grouped operands), unary `~`
 over a contextual integer literal or named integer parameter (including grouped
 operands), and unary `+` over a contextual integer literal or named parameter
@@ -875,7 +875,14 @@ phase with the host source buffers, but `build-component` still passes
 scanner records to the hosted parser and binder. Connecting the native phase
 to that compilation handoff remains open. A separate
 [`ScalarFrontendProjection`](../self-host/ScalarFrontendProjection.terrum)
-can publish its typed result through a fixed 34-word host buffer; version 3
+can publish its typed result through a fixed 37-word host buffer; versions
+1–18 retain their original 34-word payload with three zero extension words.
+Version 19 assigns words 34–36 to the third parameter's type and UTF-16
+name span. Its parameter/literal operations reserve the disjoint 40000 offset
+for the third parameter (using the first-parameter group before adding the
+offset), including supported signed literal and grouped unary wrappers;
+parameter/parameter operations retain token operator and operand indexes.
+Version 3
 encodes a parameter index and operand order in parameter/literal operations
 and carries both literal magnitude words in the operand slots; two-literal
 32-bit operations use one slot per magnitude. Version 4 distinguishes a

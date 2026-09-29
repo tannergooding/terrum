@@ -12,7 +12,7 @@ void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expres
 
 bool TryPublishScalarFrontend()
 {
-    if (Host.Frontend.Length != 34 || !TryScanScalarFrontend(out var result))
+    if (Host.Frontend.Length != 37 || !TryScanScalarFrontend(out var result))
     {
         return false;
     }
@@ -41,6 +41,9 @@ bool TryPublishScalarFrontend()
     Host.Frontend[12] = result.FirstName.Length;
     Host.Frontend[13] = result.SecondName.Start;
     Host.Frontend[14] = result.SecondName.Length;
+    Host.Frontend[34] = result.ThirdType;
+    Host.Frontend[35] = result.ThirdName.Start;
+    Host.Frontend[36] = result.ThirdName.Length;
     if (result.HasCondition)
     {
         if (result.HasFallthrough)
@@ -145,6 +148,10 @@ bool TryPublishScalarFrontend()
             || result.WhenFalse.Operation >= 38000)))
     {
         Host.Frontend[0] = 18;
+    }
+    if (result.ParameterCount == 3)
+    {
+        Host.Frontend[0] = 19;
     }
     Host.Frontend[1] = 1;
     return true;

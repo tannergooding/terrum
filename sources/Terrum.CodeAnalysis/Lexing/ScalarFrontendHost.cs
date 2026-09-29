@@ -11,7 +11,7 @@ namespace Terrum.CodeAnalysis.Lexing;
 /// <summary>Bounds the provisional, in-process scalar frontend result projection.</summary>
 public static class ScalarFrontendHost
 {
-    public const int WordCount = 34;
+    public const int WordCount = 37;
     public const int BufferIndex = 9;
 
     public static ImmutableArray<HostBuffer> CreateBuffers(SourceText source)
@@ -39,7 +39,7 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 14 or 15 or 16 or 17 or 18)
+        if (words[0] is < 1 or > 19
             || words[1] is not (1 or 2))
         {
             throw InvalidResult();
@@ -54,21 +54,27 @@ public static class ScalarFrontendHost
                 throw InvalidResult();
             }
             return new ScalarFrontendResult(false, false, words[2], errorSpan,
-                0, 0, 0, 0, default, default, default, false, false, default, default, default);
+                0, 0, 0, 0, 0, default, default, default, default,
+                false, false, default, default, default);
         }
 
         var name = Span(9);
         var firstName = Span(11);
         var secondName = Span(13);
+        var thirdName = Span(35);
         var count = words[6];
         var isPublic = words[0] >= 2 && words[2] == 1;
         if ((words[0] == 1 ? words[2] != 0 : words[2] is not (0 or 1))
-            || !AllZero(3, 5) || !ScalarType(words[5]) || count is < 0 or > 2
+            || !AllZero(3, 5) || !ScalarType(words[5]) || count is < 0 or > 3
+            || (words[0] < 19 && (!AllZero(34, WordCount) || count == 3))
+            || (words[0] == 19 && count != 3)
             || (count == 0 ? words[7] != 0 : !ScalarType(words[7]))
             || (count <= 1 ? words[8] != 0 : !ScalarType(words[8]))
+            || (count < 3 ? words[34] != 0 : !ScalarType(words[34]))
             || !ValidSpan(name, nonempty: true)
             || (count == 0 ? firstName != default : !ValidSpan(firstName, nonempty: true))
             || (count < 2 ? secondName != default : !ValidSpan(secondName, nonempty: true))
+            || (count < 3 ? thirdName != default : !ValidSpan(thirdName, nonempty: true))
             || !ValidHeader()
             || words[15] is not (0 or 1 or 2)
             || (words[0] < 4 && words[15] == 2)
@@ -82,7 +88,7 @@ public static class ScalarFrontendHost
         var whenFalse = Expression(28);
         if (!ValidExpression(whenTrue, words[5], count)
             || (words[15] == 0
-                ? !AllZero(16, 22) || !AllZero(28, WordCount)
+                ? !AllZero(16, 22) || !AllZero(28, 34)
                 : !ValidExpression(condition, 5, count)
                     || !ValidExpression(whenFalse, words[5], count))
             || !ValidBody())
@@ -91,7 +97,7 @@ public static class ScalarFrontendHost
         }
 
         return new ScalarFrontendResult(true, isPublic, 0, default, words[5], count,
-            words[7], words[8], name, firstName, secondName,
+            words[7], words[8], words[34], name, firstName, secondName, thirdName,
             words[15] != 0, words[15] == 2, condition, whenTrue, whenFalse);
 
         TextSpan Span(int offset)
@@ -116,14 +122,14 @@ public static class ScalarFrontendHost
 
         bool ValidHeader()
         {
-            var end = count switch { 0 => name.End, 1 => firstName.End, _ => secondName.End };
+            var end = count switch { 0 => name.End, 1 => firstName.End, 2 => secondName.End, _ => thirdName.End };
             var lexical = Lexer.Lex(SourceText.From(source.Text[..end]));
             var tokens = lexical.Tokens;
             var isInternal = !isPublic && words[0] >= 3
                 && tokens[0].Kind == TokenKind.InternalKeyword;
             var offset = isPublic || isInternal ? 1 : 0;
             return lexical.Diagnostics.IsEmpty && tokens.Length == (count switch {
-                0 => 3, 1 => 6, _ => 9,
+                0 => 3, 1 => 6, 2 => 9, _ => 12,
             }) + offset
                 && (!isPublic || tokens[0].Kind == TokenKind.PublicKeyword)
                 && tokens[offset].Kind == TokenKind.Identifier
@@ -140,12 +146,19 @@ public static class ScalarFrontendHost
                     && tokens[offset + 6].Text == TypeName(words[8])
                     && tokens[offset + 7].Kind == TokenKind.Identifier
                     && tokens[offset + 7].Span == secondName
-                    && tokens[offset + 4].Text != tokens[offset + 7].Text))));
+                    && tokens[offset + 4].Text != tokens[offset + 7].Text
+                    && (count == 2 || (tokens[offset + 8].Kind == TokenKind.Comma
+                        && tokens[offset + 9].Kind == TokenKind.Identifier
+                        && tokens[offset + 9].Text == TypeName(words[34])
+                        && tokens[offset + 10].Kind == TokenKind.Identifier
+                        && tokens[offset + 10].Span == thirdName
+                        && tokens[offset + 4].Text != tokens[offset + 10].Text
+                        && tokens[offset + 7].Text != tokens[offset + 10].Text))))));
         }
 
         bool ValidBody()
         {
-            var headerEnd = count switch { 0 => name.End, 1 => firstName.End, _ => secondName.End };
+            var headerEnd = count switch { 0 => name.End, 1 => firstName.End, 2 => secondName.End, _ => thirdName.End };
             var lexical = Lexer.Lex(SourceText.From(source.Text[headerEnd..]));
             var tokens = lexical.Tokens;
             var at = 0;
@@ -232,11 +245,17 @@ public static class ScalarFrontendHost
 
         bool ValidExpression(ScalarFrontendExpression expression, int type, int parameters)
         {
-            var operation = expression.Operation;
+            var encodedOffset = expression.Operation >= 40000 ? 40000 : 0;
+            var operation = expression.Operation - encodedOffset;
             var left = expression.LeftParameter;
             var right = expression.RightParameter;
-            var leftType = left == 1 ? words[7] : words[8];
-            var rightType = right == 1 ? words[7] : words[8];
+            var leftType = ParameterType(left);
+            var rightType = ParameterType(right);
+            if (encodedOffset != 0 && (words[0] < 19 || parameters != 3
+                || operation < 100 || operation >= 40000))
+            {
+                return false;
+            }
             if (operation == 62)
             {
                 if (words[0] < 3 || expression.Type != 5 || type != 5
@@ -257,7 +276,7 @@ public static class ScalarFrontendHost
                 {
                     return right is 20 or 21 && tokens[operandIndex].Kind == (TokenKind)right;
                 }
-                var name = left == 1 ? firstName : secondName;
+                var name = ParameterName(left);
                 return right == 0 && left >= 1 && left <= parameters && leftType == 5
                     && tokens[operandIndex].Kind == TokenKind.Identifier
                     && tokens[operandIndex].Text == source.Text.Substring(name.Start, name.Length);
@@ -283,7 +302,7 @@ public static class ScalarFrontendHost
                     return tokens[operandIndex].Kind == TokenKind.NumericLiteral
                         && ValidMagnitude(tokens[operandIndex].Text.AsSpan(), type, false, left, right);
                 }
-                var name = left == 1 ? firstName : secondName;
+                var name = ParameterName(left);
                 return right == 0 && left >= 1 && left <= parameters && leftType == type
                     && tokens[operandIndex].Kind == TokenKind.Identifier
                     && tokens[operandIndex].Text == source.Text.Substring(name.Start, name.Length);
@@ -299,7 +318,7 @@ public static class ScalarFrontendHost
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
                 var tokens = lexical.Tokens;
-                var name = left == 1 ? firstName : secondName;
+                var name = ParameterName(left);
                 if (!lexical.Diagnostics.IsEmpty
                     || !TryUnaryOperand(tokens, (TokenKind)operation, expression.Span.Length,
                         out var operandIndex))
@@ -339,7 +358,7 @@ public static class ScalarFrontendHost
                     && ValidSpan(expression.Span, nonempty: true)
                     && TryGroupedUnarySpan(source, expression.Span,
                         TokenKind.Bang, out var nestedSpan)
-                    && ValidExpression(new ScalarFrontendExpression(5, operation - 2000,
+                    && ValidExpression(new ScalarFrontendExpression(5, operation - 2000 + encodedOffset,
                         left, right, nestedSpan), 5, parameters);
             }
             if (IsComplementedIntegerBinary(operation))
@@ -351,7 +370,7 @@ public static class ScalarFrontendHost
                     && ValidSpan(expression.Span, nonempty: true)
                     && TryGroupedUnarySpan(source, expression.Span,
                         TokenKind.Tilde, out var nestedSpan)
-                    && ValidExpression(new ScalarFrontendExpression(type, operation - 4000,
+                    && ValidExpression(new ScalarFrontendExpression(type, operation - 4000 + encodedOffset,
                         left, right, nestedSpan), type, parameters);
             }
             if (IsSignedIntegerBinary(operation))
@@ -366,7 +385,7 @@ public static class ScalarFrontendHost
                     && ValidSpan(expression.Span, nonempty: true)
                     && TryGroupedUnarySpan(source, expression.Span,
                         minus ? TokenKind.Minus : TokenKind.Plus, out var nestedSpan)
-                    && ValidExpression(new ScalarFrontendExpression(type, binary,
+                    && ValidExpression(new ScalarFrontendExpression(type, binary + encodedOffset,
                         left, right, nestedSpan), type, parameters);
             }
             if (IsSignedIntegerBinary(operation - 16000))
@@ -377,7 +396,7 @@ public static class ScalarFrontendHost
                     && TryGroupedUnarySpan(source, expression.Span,
                         TokenKind.Tilde, out var nestedSpan)
                     && ValidExpression(new ScalarFrontendExpression(type,
-                        operation - 16000, left, right, nestedSpan), type, parameters);
+                        operation - 16000 + encodedOffset, left, right, nestedSpan), type, parameters);
             }
             if (operation is >= 38000 and < 40000)
             {
@@ -388,7 +407,7 @@ public static class ScalarFrontendHost
                     && TryGroupedUnarySpan(source, expression.Span,
                         TokenKind.Tilde, out var nestedSpan)
                     && ValidExpression(new ScalarFrontendExpression(type,
-                        operation - 34000, left, right, nestedSpan), type, parameters);
+                        operation - 34000 + encodedOffset, left, right, nestedSpan), type, parameters);
             }
             if (operation is 10003 or 10057 or 10058 or 10657 or 10658)
             {
@@ -398,7 +417,7 @@ public static class ScalarFrontendHost
                         TokenKind.Tilde, out var nestedSpan)
                     && (operation != 10003 || source.Text[nestedSpan.Start] == '-')
                     && ValidExpression(new ScalarFrontendExpression(type,
-                        operation - 10000, left, right, nestedSpan), type, parameters);
+                        operation - 10000 + encodedOffset, left, right, nestedSpan), type, parameters);
             }
             if (operation is 12063 or 12163 or 14063 or 14163)
             {
@@ -409,7 +428,7 @@ public static class ScalarFrontendHost
                     && ValidSpan(expression.Span, nonempty: true)
                     && TryGroupedUnarySpan(source, expression.Span,
                         minus ? TokenKind.Minus : TokenKind.Plus, out var nestedSpan)
-                    && ValidExpression(new ScalarFrontendExpression(type, nestedOperation,
+                    && ValidExpression(new ScalarFrontendExpression(type, nestedOperation + encodedOffset,
                         left, right, nestedSpan), type, parameters);
             }
             if (operation is >= 30000 and < 34000)
@@ -423,7 +442,7 @@ public static class ScalarFrontendHost
                     && TryGroupedUnarySpan(source, expression.Span,
                         minus ? TokenKind.Minus : TokenKind.Plus, out var nestedSpan)
                     && ValidExpression(new ScalarFrontendExpression(type,
-                        nestedOperation, left, right, nestedSpan), type, parameters);
+                        nestedOperation + encodedOffset, left, right, nestedSpan), type, parameters);
             }
             if (operation == 16062 || operation is >= 18000 and < 20000
                 && IsNegatedBooleanBinary(operation - 16000))
@@ -433,7 +452,7 @@ public static class ScalarFrontendHost
                     && TryGroupedUnarySpan(source, expression.Span,
                         TokenKind.Bang, out var nestedSpan)
                     && ValidExpression(new ScalarFrontendExpression(5,
-                        operation - 16000,
+                        operation - 16000 + encodedOffset,
                         left, right, nestedSpan), 5, parameters);
             }
             if (operation / 100 is 7 or 9
@@ -441,7 +460,7 @@ public static class ScalarFrontendHost
             {
                 if (words[0] < 3 || expression.Type != 5 || type != 5
                     || left < 1 || left > parameters
-                    || (left == 1 ? words[7] : words[8]) != 5
+                    || leftType != 5
                     || right is not (20 or 21)
                     || !ValidSpan(expression.Span, nonempty: true))
                 {
@@ -451,7 +470,7 @@ public static class ScalarFrontendHost
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
                 var tokens = lexical.Tokens;
-                var name = left == 1 ? firstName : secondName;
+                var name = ParameterName(left);
                 return lexical.Diagnostics.IsEmpty
                     && TryBinaryOperandTokens(tokens, (TokenKind)(operation % 100),
                         expression.Span.Length, out var first, out var second)
@@ -504,10 +523,12 @@ public static class ScalarFrontendHost
                 && binaryOperation % 100 is >= 57 and <= 61 or >= 65 and <= 70 or 71 or 73 or 75)
             {
                 var literalFirst = binaryOperation >= 300;
-                var parameter = binaryOperation / 100 - (literalFirst ? 2 : 0);
-                var parameterType = parameter == 1 ? words[7] : words[8];
+                var parameter = encodedOffset != 0 ? 3
+                    : binaryOperation / 100 - (literalFirst ? 2 : 0);
+                var parameterType = ParameterType(parameter);
                 var comparison = binaryOperation % 100 is >= 65 and <= 70;
-                if (words[0] < (positiveLiteral ? 6 : negativeLiteral ? 5 : 3)
+                if ((encodedOffset != 0 && binaryOperation / 100 != (literalFirst ? 3 : 1))
+                    || words[0] < (positiveLiteral ? 6 : negativeLiteral ? 5 : 3)
                     || expression.Type != type
                     || (comparison ? type != 5 || parameterType is not (1 or 2 or 3 or 4 or 6)
                         : type != parameterType || parameterType is not (1 or 2 or 3 or 4))
@@ -519,7 +540,7 @@ public static class ScalarFrontendHost
                 var text = source.Text.Substring(expression.Span.Start, expression.Span.Length);
                 var lexical = Lexer.Lex(SourceText.From(text));
                 var tokens = lexical.Tokens;
-                var name = parameter == 1 ? firstName : secondName;
+                var name = ParameterName(parameter);
                 return lexical.Diagnostics.IsEmpty
                     && TryBinaryOperandTokens(tokens, (TokenKind)(binaryOperation % 100),
                         text.Length, out var first, out var second, literalFirst,
@@ -551,7 +572,8 @@ public static class ScalarFrontendHost
                     && source.Text.AsSpan(expression.Span.Start, expression.Span.Length)
                         .SequenceEqual((operation == 20 ? "true" : "false").AsSpan());
             }
-            return expression.Type == type && ValidSpan(expression.Span, nonempty: true)
+            return encodedOffset == 0 && expression.Type == type
+                && ValidSpan(expression.Span, nonempty: true)
                 && left >= 1 && left <= parameters
                 && (operation == 0 ? right == 0 && leftType == type
                     : (operation is >= 57 and <= 61 or >= 65 and <= 75)
@@ -565,9 +587,17 @@ public static class ScalarFrontendHost
                 && MatchesSource(expression, left, right);
         }
 
+        int ParameterType(int index) => index switch {
+            1 => words[7], 2 => words[8], 3 => words[34], _ => 0,
+        };
+
+        TextSpan ParameterName(int index) => index switch {
+            1 => firstName, 2 => secondName, 3 => thirdName, _ => default,
+        };
+
         bool MatchesSource(ScalarFrontendExpression expression, int left, int right)
         {
-            var leftName = left == 1 ? firstName : secondName;
+            var leftName = ParameterName(left);
             var span = expression.Span;
             var groupedLeft = source.Text[span.Start] == '(';
             if (span.Length < leftName.Length
@@ -581,7 +611,7 @@ public static class ScalarFrontendHost
                 return !groupedLeft && span.Length == leftName.Length;
             }
 
-            var rightName = right == 1 ? firstName : secondName;
+            var rightName = ParameterName(right);
             var middleLength = span.Length - leftName.Length - rightName.Length;
             var spelling = expression.Operation switch {
                 57 => "+", 58 => "-", 59 => "*", 60 => "/", 61 => "%",
@@ -928,10 +958,15 @@ public static class ScalarFrontendHost
             variables.Add(new BoundVariable(Name(result.FirstName), Type(result.FirstType),
                 false, result.FirstName));
         }
-        if (result.ParameterCount == 2)
+        if (result.ParameterCount >= 2)
         {
             variables.Add(new BoundVariable(Name(result.SecondName), Type(result.SecondType),
                 false, result.SecondName));
+        }
+        if (result.ParameterCount == 3)
+        {
+            variables.Add(new BoundVariable(Name(result.ThirdName), Type(result.ThirdType),
+                false, result.ThirdName));
         }
         var types = variables.ToImmutable();
         var methodSpan = new TextSpan(0, source.Length);
@@ -967,7 +1002,9 @@ public static class ScalarFrontendHost
 
         BoundExpression Expression(ScalarFrontendExpression expression)
         {
-            if (expression.Operation == 62)
+            var encodedOffset = expression.Operation >= 40000 ? 40000 : 0;
+            var operation = expression.Operation - encodedOffset;
+            if (operation == 62)
             {
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
@@ -980,7 +1017,7 @@ public static class ScalarFrontendHost
                 return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Bang, operand,
                     PrimitiveType.Bool, expression.Span));
             }
-            if (expression.Operation is 63 or 163)
+            if (operation is 63 or 163)
             {
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
@@ -988,7 +1025,7 @@ public static class ScalarFrontendHost
                 var operandSpan = new TextSpan(expression.Span.Start + token.Span.Start, token.Span.Length);
                 var type = Type(expression.Type);
                 BoundExpression operand;
-                if (expression.Operation == 63)
+                if (operation == 63)
                 {
                     operand = new BoundRead(expression.LeftParameter - 1, type, operandSpan);
                 }
@@ -1003,18 +1040,18 @@ public static class ScalarFrontendHost
                 return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Tilde, operand,
                     type, expression.Span));
             }
-            if (expression.Operation is 57 or 58 && expression.RightParameter == 0)
+            if (operation is 57 or 58 && expression.RightParameter == 0)
             {
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
                 var token = lexical.Tokens[UnaryOperandIndex(lexical.Tokens)];
                 var operandSpan = new TextSpan(expression.Span.Start + token.Span.Start, token.Span.Length);
                 var type = Type(expression.Type);
-                return new BoundUnary((TokenKind)expression.Operation,
+                return new BoundUnary((TokenKind)operation,
                     new BoundRead(expression.LeftParameter - 1, type, operandSpan),
                     type, expression.Span);
             }
-            if (expression.Operation is 657 or 658)
+            if (operation is 657 or 658)
             {
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
@@ -1025,23 +1062,23 @@ public static class ScalarFrontendHost
                     ? expression.LeftParameter
                     : unchecked((long)((ulong)(uint)expression.RightParameter << 32
                         | (uint)expression.LeftParameter));
-                return Binder.FoldScalarConstant(new BoundUnary(expression.Operation == 658
+                return Binder.FoldScalarConstant(new BoundUnary(operation == 658
                     ? TokenKind.Minus : TokenKind.Plus,
                     new BoundConstant(value, type, operandSpan), type, expression.Span));
             }
-            if (IsNegatedBooleanBinary(expression.Operation))
+            if (IsNegatedBooleanBinary(operation))
             {
                 if (!TryGroupedUnarySpan(source, expression.Span,
                     TokenKind.Bang, out var nestedSpan))
                 {
                     throw InvalidResult();
                 }
-                var nested = new ScalarFrontendExpression(5, expression.Operation - 2000,
+                var nested = new ScalarFrontendExpression(5, operation - 2000 + encodedOffset,
                     expression.LeftParameter, expression.RightParameter, nestedSpan);
                 return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Bang,
                     Expression(nested), PrimitiveType.Bool, expression.Span));
             }
-            if (IsComplementedIntegerBinary(expression.Operation))
+            if (IsComplementedIntegerBinary(operation))
             {
                 if (!TryGroupedUnarySpan(source, expression.Span,
                     TokenKind.Tilde, out var nestedSpan))
@@ -1049,15 +1086,15 @@ public static class ScalarFrontendHost
                     throw InvalidResult();
                 }
                 var nested = new ScalarFrontendExpression(expression.Type,
-                    expression.Operation - 4000, expression.LeftParameter,
+                    operation - 4000 + encodedOffset, expression.LeftParameter,
                     expression.RightParameter, nestedSpan);
                 var type = Type(expression.Type);
                 return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Tilde,
                     Expression(nested), type, expression.Span));
             }
-            if (IsSignedIntegerBinary(expression.Operation))
+            if (IsSignedIntegerBinary(operation))
             {
-                var minus = expression.Operation >= 8000;
+                var minus = operation >= 8000;
                 var offset = minus ? 8000 : 6000;
                 if (!TryGroupedUnarySpan(source, expression.Span,
                     minus ? TokenKind.Minus : TokenKind.Plus, out var nestedSpan))
@@ -1065,14 +1102,14 @@ public static class ScalarFrontendHost
                     throw InvalidResult();
                 }
                 var nested = new ScalarFrontendExpression(expression.Type,
-                    expression.Operation - offset, expression.LeftParameter,
+                    operation - offset + encodedOffset, expression.LeftParameter,
                     expression.RightParameter, nestedSpan);
                 var type = Type(expression.Type);
                 return Binder.FoldScalarConstant(new BoundUnary(minus
                     ? TokenKind.Minus : TokenKind.Plus, Expression(nested),
                     type, expression.Span));
             }
-            if (IsSignedIntegerBinary(expression.Operation - 16000))
+            if (IsSignedIntegerBinary(operation - 16000))
             {
                 if (!TryGroupedUnarySpan(source, expression.Span,
                     TokenKind.Tilde, out var nestedSpan))
@@ -1081,12 +1118,12 @@ public static class ScalarFrontendHost
                 }
                 var type = Type(expression.Type);
                 var nested = new ScalarFrontendExpression(expression.Type,
-                    expression.Operation - 16000, expression.LeftParameter,
+                    operation - 16000 + encodedOffset, expression.LeftParameter,
                     expression.RightParameter, nestedSpan);
                 return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Tilde,
                     Expression(nested), type, expression.Span));
             }
-            if (expression.Operation is >= 38000 and < 40000)
+            if (operation is >= 38000 and < 40000)
             {
                 if (!TryGroupedUnarySpan(source, expression.Span,
                     TokenKind.Tilde, out var nestedSpan))
@@ -1095,12 +1132,12 @@ public static class ScalarFrontendHost
                 }
                 var type = Type(expression.Type);
                 var nested = new ScalarFrontendExpression(expression.Type,
-                    expression.Operation - 34000, expression.LeftParameter,
+                    operation - 34000 + encodedOffset, expression.LeftParameter,
                     expression.RightParameter, nestedSpan);
                 return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Tilde,
                     Expression(nested), type, expression.Span));
             }
-            if (expression.Operation is 10003 or 10057 or 10058 or 10657 or 10658)
+            if (operation is 10003 or 10057 or 10058 or 10657 or 10658)
             {
                 if (!TryGroupedUnarySpan(source, expression.Span,
                     TokenKind.Tilde, out var nestedSpan))
@@ -1109,14 +1146,14 @@ public static class ScalarFrontendHost
                 }
                 var type = Type(expression.Type);
                 var nested = new ScalarFrontendExpression(expression.Type,
-                    expression.Operation - 10000, expression.LeftParameter,
+                    operation - 10000 + encodedOffset, expression.LeftParameter,
                     expression.RightParameter, nestedSpan);
                 return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Tilde,
                     Expression(nested), type, expression.Span));
             }
-            if (expression.Operation is 12063 or 12163 or 14063 or 14163)
+            if (operation is 12063 or 12163 or 14063 or 14163)
             {
-                var minus = expression.Operation is 14063 or 14163;
+                var minus = operation is 14063 or 14163;
                 if (!TryGroupedUnarySpan(source, expression.Span,
                     minus ? TokenKind.Minus : TokenKind.Plus, out var nestedSpan))
                 {
@@ -1124,15 +1161,15 @@ public static class ScalarFrontendHost
                 }
                 var type = Type(expression.Type);
                 var nested = new ScalarFrontendExpression(expression.Type,
-                    expression.Operation - (minus ? 14000 : 12000),
+                    operation - (minus ? 14000 : 12000) + encodedOffset,
                     expression.LeftParameter, expression.RightParameter, nestedSpan);
                 return Binder.FoldScalarConstant(new BoundUnary(minus
                     ? TokenKind.Minus : TokenKind.Plus,
                     Expression(nested), type, expression.Span));
             }
-            if (expression.Operation is >= 30000 and < 34000)
+            if (operation is >= 30000 and < 34000)
             {
-                var minus = expression.Operation >= 32000;
+                var minus = operation >= 32000;
                 if (!TryGroupedUnarySpan(source, expression.Span,
                     minus ? TokenKind.Minus : TokenKind.Plus, out var nestedSpan))
                 {
@@ -1140,15 +1177,15 @@ public static class ScalarFrontendHost
                 }
                 var type = Type(expression.Type);
                 var nested = new ScalarFrontendExpression(expression.Type,
-                    expression.Operation - (minus ? 28000 : 26000),
+                    operation - (minus ? 28000 : 26000) + encodedOffset,
                     expression.LeftParameter, expression.RightParameter, nestedSpan);
                 return Binder.FoldScalarConstant(new BoundUnary(minus
                     ? TokenKind.Minus : TokenKind.Plus, Expression(nested),
                     type, expression.Span));
             }
-            if (expression.Operation == 16062
-                || expression.Operation is >= 18000 and < 20000
-                    && IsNegatedBooleanBinary(expression.Operation - 16000))
+            if (operation == 16062
+                || operation is >= 18000 and < 20000
+                    && IsNegatedBooleanBinary(operation - 16000))
             {
                 if (!TryGroupedUnarySpan(source, expression.Span,
                     TokenKind.Bang, out var nestedSpan))
@@ -1156,18 +1193,18 @@ public static class ScalarFrontendHost
                     throw InvalidResult();
                 }
                 var nested = new ScalarFrontendExpression(5,
-                    expression.Operation - 16000,
+                    operation - 16000 + encodedOffset,
                     expression.LeftParameter, expression.RightParameter, nestedSpan);
                 return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Bang,
                     Expression(nested), PrimitiveType.Bool, expression.Span));
             }
-            if (expression.Operation / 100 is 7 or 9
-                && expression.Operation % 100 is 65 or 66 or >= 71 and <= 75)
+            if (operation / 100 is 7 or 9
+                && operation % 100 is 65 or 66 or >= 71 and <= 75)
             {
-                var literalFirst = expression.Operation >= 900;
+                var literalFirst = operation >= 900;
                 var tokens = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length))).Tokens;
-                if (!TryBinaryOperandTokens(tokens, (TokenKind)(expression.Operation % 100),
+                if (!TryBinaryOperandTokens(tokens, (TokenKind)(operation % 100),
                     expression.Span.Length, out var firstIndex, out var secondIndex))
                 {
                     throw InvalidResult();
@@ -1180,16 +1217,16 @@ public static class ScalarFrontendHost
                     PrimitiveType.Bool, literalFirst ? second : first);
                 var literal = new BoundConstant(expression.RightParameter == 20 ? 1 : 0,
                     PrimitiveType.Bool, literalFirst ? first : second);
-                return new BoundBinary((TokenKind)(expression.Operation % 100),
+                return new BoundBinary((TokenKind)(operation % 100),
                     literalFirst ? literal : parameter, literalFirst ? parameter : literal,
                     PrimitiveType.Bool, expression.Span);
             }
-            if (expression.Operation / 100 == 11
-                && expression.Operation % 100 is 65 or 66 or >= 71 and <= 75)
+            if (operation / 100 == 11
+                && operation % 100 is 65 or 66 or >= 71 and <= 75)
             {
                 var tokens = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length))).Tokens;
-                if (!TryBinaryOperandTokens(tokens, (TokenKind)(expression.Operation % 100),
+                if (!TryBinaryOperandTokens(tokens, (TokenKind)(operation % 100),
                     expression.Span.Length, out var firstIndex, out var secondIndex))
                 {
                     throw InvalidResult();
@@ -1201,11 +1238,11 @@ public static class ScalarFrontendHost
                     PrimitiveType.Bool, new TextSpan(expression.Span.Start + tokens[secondIndex].Span.Start,
                         tokens[secondIndex].Span.Length));
                 return Binder.FoldScalarConstant(new BoundBinary(
-                    (TokenKind)(expression.Operation % 100), first, second,
+                    (TokenKind)(operation % 100), first, second,
                     PrimitiveType.Bool, expression.Span));
             }
-            if (expression.Operation / 100 == 5
-                && expression.Operation % 100 is >= 57 and <= 61 or 71 or 73 or 75)
+            if (operation / 100 == 5
+                && operation % 100 is >= 57 and <= 61 or 71 or 73 or 75)
             {
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
@@ -1216,19 +1253,20 @@ public static class ScalarFrontendHost
                 var second = new BoundConstant(expression.RightParameter, type,
                     new TextSpan(expression.Span.Start + tokens[2].Span.Start, tokens[2].Span.Length));
                 return Binder.FoldScalarConstant(new BoundBinary(
-                    (TokenKind)(expression.Operation % 100), first, second, type,
+                    (TokenKind)(operation % 100), first, second, type,
                     expression.Span));
             }
-            var positiveLiteral = expression.Operation >= 1600;
-            var negativeLiteral = !positiveLiteral && expression.Operation >= 1200;
-            var binaryOperation = expression.Operation
+            var positiveLiteral = operation >= 1600;
+            var negativeLiteral = !positiveLiteral && operation >= 1200;
+            var binaryOperation = operation
                 - (positiveLiteral ? 1600 : negativeLiteral ? 1200 : 0);
             if (binaryOperation / 100 is >= 1 and <= 4
                 && binaryOperation % 100 is >= 57 and <= 61 or >= 65 and <= 70
                     or 71 or 73 or 75)
             {
                 var literalFirst = binaryOperation >= 300;
-                var parameter = binaryOperation / 100 - (literalFirst ? 2 : 0);
+                var parameter = encodedOffset != 0 ? 3
+                    : binaryOperation / 100 - (literalFirst ? 2 : 0);
                 var lexical = Lexer.Lex(SourceText.From(source.Text.Substring(
                     expression.Span.Start, expression.Span.Length)));
                 var tokens = lexical.Tokens;
@@ -1272,7 +1310,7 @@ public static class ScalarFrontendHost
                     literalFirst ? literal : leftOperand, literalFirst ? leftOperand : literal,
                     Type(expression.Type), expression.Span);
             }
-            if (expression.Operation == 3)
+            if (operation == 3)
             {
                 var negative = source.Text[expression.Span.Start] == '-';
                 var value = expression.Type is 1 or 2
@@ -1298,16 +1336,16 @@ public static class ScalarFrontendHost
                     new BoundConstant(value, Type(expression.Type), operandSpan),
                     Type(expression.Type), expression.Span));
             }
-            if (expression.Operation is 20 or 21)
+            if (operation is 20 or 21)
             {
-                return new BoundConstant(expression.Operation == 20 ? 1 : 0,
+                return new BoundConstant(operation == 20 ? 1 : 0,
                     PrimitiveType.Bool, expression.Span);
             }
             var leftName = expression.LeftParameter == 1 ? result.FirstName : result.SecondName;
             var left = new BoundRead(expression.LeftParameter - 1,
                 types[expression.LeftParameter - 1].Type,
                 new TextSpan(expression.Span.Start, leftName.Length));
-            if (expression.Operation == 0)
+            if (operation == 0)
             {
                 return left;
             }
@@ -1315,7 +1353,7 @@ public static class ScalarFrontendHost
             var right = new BoundRead(expression.RightParameter - 1,
                 types[expression.RightParameter - 1].Type,
                 new TextSpan(expression.Span.End - rightName.Length, rightName.Length));
-            return new BoundBinary((TokenKind)expression.Operation, left, right,
+            return new BoundBinary((TokenKind)operation, left, right,
                 Type(expression.Type), expression.Span);
         }
     }
@@ -1336,6 +1374,7 @@ public readonly record struct ScalarFrontendExpression(
 
 public readonly record struct ScalarFrontendResult(
     bool IsValid, bool IsPublic, int ErrorCode, TextSpan ErrorSpan, int ReturnType, int ParameterCount,
-    int FirstType, int SecondType, TextSpan Name, TextSpan FirstName, TextSpan SecondName,
+    int FirstType, int SecondType, int ThirdType, TextSpan Name, TextSpan FirstName, TextSpan SecondName,
+    TextSpan ThirdName,
     bool HasCondition, bool HasFallthrough, ScalarFrontendExpression Condition, ScalarFrontendExpression WhenTrue,
     ScalarFrontendExpression WhenFalse);

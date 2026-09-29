@@ -26,6 +26,8 @@ namespace Terrum.CodeAnalysis;
 // Version-16 admits unary complement over grouped signed integer binaries.
 // Version-17 admits unary signs over grouped complemented integer binaries.
 // Version-18 admits unary complement over grouped complemented integer binaries.
+// Version-19 adds a third named parameter; its parameter/literal operation family
+// adds 40000 to the first-parameter code, including any enclosing unary operation.
 // Boolean parameter/literal pairs add 700 for a parameter on the left or
 // 900 for a literal on the left; slots hold the parameter index and literal kind.
 // Boolean literal pairs add 1100; both slots hold literal kinds.
@@ -62,9 +64,11 @@ public class ScalarFrontendResult
     public int32 ParameterCount;
     public int32 FirstType;
     public int32 SecondType;
+    public int32 ThirdType;
     public SourceRange Name;
     public SourceRange FirstName;
     public SourceRange SecondName;
+    public SourceRange ThirdName;
     public bool HasCondition;
     public bool HasFallthrough;
     public ScalarFrontendExpression Condition;
@@ -73,7 +77,8 @@ public class ScalarFrontendResult
 
     public ScalarFrontendResult(bool valid, bool isPublic, int32 errorCode, SourceRange errorSpan,
         int32 returnType, int32 parameterCount, int32 firstType, int32 secondType,
-        SourceRange name, SourceRange firstName, SourceRange secondName,
+        int32 thirdType, SourceRange name, SourceRange firstName, SourceRange secondName,
+        SourceRange thirdName,
         bool hasCondition, bool hasFallthrough, ScalarFrontendExpression condition,
         ScalarFrontendExpression whenTrue, ScalarFrontendExpression whenFalse)
     {
@@ -85,9 +90,11 @@ public class ScalarFrontendResult
         ParameterCount = parameterCount;
         FirstType = firstType;
         SecondType = secondType;
+        ThirdType = thirdType;
         Name = name;
         FirstName = firstName;
         SecondName = secondName;
+        ThirdName = thirdName;
         HasCondition = hasCondition;
         HasFallthrough = hasFallthrough;
         Condition = condition;
@@ -104,8 +111,10 @@ mut class ScalarFrontendState
     private mut SourceRange _errorSpan;
     private mut Token _first;
     private mut Token _second;
+    private mut Token _third;
     private mut int32 _firstType;
     private mut int32 _secondType;
+    private mut int32 _thirdType;
     private mut int32 _parameterCount;
     private mut bool _isPublic;
 
@@ -117,8 +126,10 @@ mut class ScalarFrontendState
         _errorSpan = empty;
         _first = new Token(2, empty);
         _second = new Token(2, empty);
+        _third = new Token(2, empty);
         _firstType = 0;
         _secondType = 0;
+        _thirdType = 0;
         _parameterCount = 0;
         _isPublic = false;
     }
@@ -173,6 +184,11 @@ mut class ScalarFrontendState
             return false;
         }
         if (_parameterCount > 0 && SameTokenSpelling(_first, parameter))
+        {
+            FailAt(4, parameter.Range);
+            return false;
+        }
+        if (_parameterCount > 1 && SameTokenSpelling(_second, parameter))
         {
             FailAt(4, parameter.Range);
             return false;
@@ -237,14 +253,38 @@ mut class ScalarFrontendState
             type = _firstType;
             return true;
         }
+
         if (_parameterCount > 1 && SameTokenSpelling(_second, token))
         {
             index = 2;
             type = _secondType;
             return true;
         }
+        if (_parameterCount > 2 && SameTokenSpelling(_third, token))
+        {
+            index = 3;
+            type = _thirdType;
+            return true;
+        }
         FailAt(3, token.Range);
         return false;
+    }
+
+    private int32 ParameterLiteralOperation(int32 kind, int32 parameter,
+        bool literalFirst, int32 signedOffset)
+    {
+        mut int32 group = parameter;
+        mut int32 extra = 0;
+        if (parameter == 3)
+        {
+            group = 1;
+            extra = 40000;
+        }
+        if (literalFirst)
+        {
+            group = group + 2;
+        }
+        return kind + group * 100 + signedOffset + extra;
     }
 
     private mut bool BeginUnaryOperand(out Token operand, out int32 groups)
@@ -424,6 +464,13 @@ mut class ScalarFrontendState
                 mut int32 nestedKind = nested.Operation % 100;
                 mut int32 nestedGroup = nested.Operation / 100;
                 mut int32 comparisonOperation = nested.Operation;
+                mut int32 nestedBase = nested.Operation;
+                if (comparisonOperation >= 40000)
+                {
+                    comparisonOperation = comparisonOperation - 40000;
+                    nestedBase = comparisonOperation;
+                    nestedGroup = comparisonOperation / 100;
+                }
                 if (comparisonOperation >= 1600)
                 {
                     comparisonOperation = comparisonOperation - 1600;
@@ -432,8 +479,8 @@ mut class ScalarFrontendState
                 {
                     comparisonOperation = comparisonOperation - 1200;
                 }
-                if (nested.Type == 5 && nested.Operation < 2000
-                    && ((nested.Operation >= 65 && nested.Operation <= 75
+                if (nested.Type == 5 && nestedBase < 2000
+                    && ((nestedBase >= 65 && nestedBase <= 75
                             && nested.LeftParameter >= 1
                             && nested.RightParameter >= 1)
                         || ((nestedGroup == 7 || nestedGroup == 9
@@ -459,7 +506,7 @@ mut class ScalarFrontendState
                             && (nested.LeftParameter >= 1
                                 || nested.RightParameter == 20
                                 || nested.RightParameter == 21))
-                        || (nested.Operation >= 2000 && nested.Operation < 4000)))
+                        || (nestedBase >= 2000 && nestedBase < 4000)))
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
@@ -495,6 +542,15 @@ mut class ScalarFrontendState
                 {
                     parameter = 2;
                     if (_secondType != 5)
+                    {
+                        FailAt(2, operand.Range);
+                        return false;
+                    }
+                }
+                else if (_parameterCount > 2 && SameTokenSpelling(_third, operand))
+                {
+                    parameter = 3;
+                    if (_thirdType != 5)
                     {
                         FailAt(2, operand.Range);
                         return false;
@@ -546,6 +602,10 @@ mut class ScalarFrontendState
                     return false;
                 }
                 mut int32 binaryOperation = nested.Operation;
+                if (binaryOperation >= 40000)
+                {
+                    binaryOperation = binaryOperation - 40000;
+                }
                 if (binaryOperation >= 1600)
                 {
                     binaryOperation = binaryOperation - 1600;
@@ -589,7 +649,8 @@ mut class ScalarFrontendState
                     return true;
                 }
                 if (nested.Type == expectedType
-                    && nested.Operation >= 6000 && nested.Operation < 10000)
+                    && nested.Operation % 40000 >= 6000
+                    && nested.Operation % 40000 < 10000)
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
@@ -601,7 +662,8 @@ mut class ScalarFrontendState
                     return true;
                 }
                 if (nested.Type == expectedType
-                    && nested.Operation >= 4000 && nested.Operation < 6000)
+                    && nested.Operation % 40000 >= 4000
+                    && nested.Operation % 40000 < 6000)
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
@@ -683,6 +745,10 @@ mut class ScalarFrontendState
                     return false;
                 }
                 mut int32 binaryOperation = nested.Operation;
+                if (binaryOperation >= 40000)
+                {
+                    binaryOperation = binaryOperation - 40000;
+                }
                 if (binaryOperation >= 1600)
                 {
                     binaryOperation = binaryOperation - 1600;
@@ -735,7 +801,8 @@ mut class ScalarFrontendState
                     return true;
                 }
                 if (nested.Type == expectedType
-                    && nested.Operation >= 4000 && nested.Operation < 6000)
+                    && nested.Operation % 40000 >= 4000
+                    && nested.Operation % 40000 < 6000)
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
@@ -909,7 +976,7 @@ mut class ScalarFrontendState
                     signedOffset = 1600;
                 }
                 require ScalarFrontendExpression.TryCreate(5,
-                    following.Kind + (parameter + 2) * 100 + signedOffset,
+                    ParameterLiteralOperation(following.Kind, parameter, true, signedOffset),
                     low, high,
                     comparisonSpan, out var comparison);
                 expression = comparison;
@@ -990,7 +1057,7 @@ mut class ScalarFrontendState
                     signedOffset = 1600;
                 }
                 require ScalarFrontendExpression.TryCreate(expectedType,
-                    next.Kind + (parameter + 2) * 100 + signedOffset,
+                    ParameterLiteralOperation(next.Kind, parameter, true, signedOffset),
                     low, high, binarySpan, out var binary);
                 expression = binary;
                 return true;
@@ -1079,6 +1146,11 @@ mut class ScalarFrontendState
         {
             leftIndex = 2;
             selected = _secondType;
+        }
+        else if (_parameterCount > 2 && SameTokenSpelling(_third, left))
+        {
+            leftIndex = 3;
+            selected = _thirdType;
         }
         if (selected == 0)
         {
@@ -1188,7 +1260,7 @@ mut class ScalarFrontendState
                     signedOffset = 1600;
                 }
                 require ScalarFrontendExpression.TryCreate(resultType,
-                    operation + leftIndex * 100 + signedOffset,
+                    ParameterLiteralOperation(operation, leftIndex, false, signedOffset),
                     low, high, literalSpan, out var withLiteral);
                 expression = withLiteral;
                 return true;
@@ -1206,6 +1278,10 @@ mut class ScalarFrontendState
             {
                 rightIndex = 2;
             }
+            else if (_parameterCount > 2 && SameTokenSpelling(_third, right))
+            {
+                rightIndex = 3;
+            }
             if (rightIndex == 0)
             {
                 FailAt(3, right.Range);
@@ -1215,6 +1291,10 @@ mut class ScalarFrontendState
             if (rightIndex == 2)
             {
                 rightType = _secondType;
+            }
+            else if (rightIndex == 3)
+            {
+                rightType = _thirdType;
             }
             if (selected != rightType || ((operation >= 57 && operation <= 61)
                 && (selected == 5 || selected == 6))
@@ -1306,6 +1386,18 @@ mut class ScalarFrontendState
                 _secondType = secondType;
                 _second = second;
                 _parameterCount = 2;
+                require _tokens.TryGet(_at, out var thirdComma);
+                if (thirdComma.Kind == 53)
+                {
+                    _at = _at + 1;
+                    if (!ParseParameter(out var thirdType, out var third))
+                    {
+                        return false;
+                    }
+                    _thirdType = thirdType;
+                    _third = third;
+                    _parameterCount = 3;
+                }
             }
         }
         if (!Take(47, out var closeParameters) || !Take(48, out var openBody))
@@ -1391,10 +1483,10 @@ mut class ScalarFrontendState
         if (_error != 0)
         {
             return ScalarFrontendResult.TryCreate(false, false, _error, _errorSpan, 0, 0,
-                0, 0, empty, empty, empty, false, false, absent, absent, absent, out result);
+                0, 0, 0, empty, empty, empty, empty, false, false, absent, absent, absent, out result);
         }
         return ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty, returnType, _parameterCount,
-            _firstType, _secondType, name, _first.Range, _second.Range,
+            _firstType, _secondType, _thirdType, name, _first.Range, _second.Range, _third.Range,
             hasCondition, hasFallthrough, condition, whenTrue, whenFalse, out result);
     }
 }
@@ -1407,8 +1499,8 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     {
         require tokens.TryGet(64, out var excess);
         require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
-        return ScalarFrontendResult.TryCreate(false, false, 1, excess.Range, 0, 0, 0, 0,
-            empty, empty, empty, false, false, absent, absent, absent, out result);
+        return ScalarFrontendResult.TryCreate(false, false, 1, excess.Range, 0, 0, 0, 0, 0,
+            empty, empty, empty, empty, false, false, absent, absent, absent, out result);
     }
     if (count < 1 || !ManagedTokenChain.TryCreate(out var chain))
     {
