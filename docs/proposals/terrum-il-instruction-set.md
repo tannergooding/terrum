@@ -160,8 +160,13 @@ multiplying the opcode catalog by width combinations. It adds two bytes to a
 wide instruction and avoids continuation decoding per operand; no read or
 validation cost is implied.
 
-The exact-byte fixtures below encode the **general** Body layout. That
-layout is not yet an acceptable default size for trivial methods: the
+The exact-byte fixtures below encode only the **general** Body layout.
+`bodyLayout=0` selects one-byte local fields within that layout; it is
+**not** a compact-form tag. No compact form tag, layout or canonical
+writer-selection rule has been assigned, so the one-block examples
+below demonstrate semantics and a general-form decoder fixture, **not**
+the expected bytes of a production small-body writer. That layout is
+not yet an acceptable default size for trivial methods: the
 one-block checked-add section is 109 bytes for 16 instruction bytes,
 and `return 42` is 61 bytes for 6 instruction bytes. The section
 index accounts for 8 bytes in each; the rest is mostly repeated type,
@@ -289,14 +294,19 @@ currently encoded Body examples **do not yet contain** GC roots.
 
 ### Checked add end to end (informative)
 
-Consider `AddThenThree` under the fail-fast policy. Assume MethodDef row
+Consider `AddThenThree` under the fail-fast policy. This first shows
+the *logical* one-block value flow, then an expanded general-form
+encoding for checking the presently assigned fields. The 109-byte
+fixture is valid under that general layout but is **not** the selected
+compact encoding for this method: no compact wire layout exists yet.
+Assume MethodDef row
 1 owns the body, its MethodSig declares two by-value `int32` parameters
 and an `int32` result, and TypeSpec row 1 describes `int32`. The
 expected `int32` context types the literal `3`; each `+` selects
 checked primitive addition, not a numeric fallback or user witness.
 
-The notation below exposes the metadata and Body facts needed to read the
-example; it is not wire syntax or a required source rewrite. `t1` is
+The notation below exposes the metadata and general-form Body facts needed
+to read the example; it is not wire syntax or a required source rewrite. `t1` is
 Body-local type ID 1, mapped by a fixed `u32` header entry to TypeSpec
 row 1. That TypeSpec row's built-in form uses primitive code `0x08`
 for `int32`. `r1`–`r5` are one-based Body value IDs, not machine registers.
@@ -314,7 +324,7 @@ TypeSpec[1] = Builtin(int32)                // row payload 01 00 08
 MethodSig[1] = (parameter[0]: TypeSpec[1], parameter[1]: TypeSpec[1])
                -> TypeSpec[1]              // x, y in source order
 MethodDef[1] = (signature=1, bodyRow=1)
-Body: ownerMethod=1, bodyLayout=0
+General-form Body: ownerMethod=1, bodyLayout=0
       blockCount=1, valueCount=5, placeCount=0, regionCount=0, typeCount=1
       typeMap=[t1: TypeSpec[1]]             // fixed u32 typed reference
       valueDescriptors=[r1:(t1,value,useBlocks=1), r2:(t1,value,useBlocks=1),
@@ -361,8 +371,8 @@ That keeps `t1` one byte per use without the TypeSpec lookup; it does
 not license replacing the current `01 00 00 00` entry in this fixture
 until the metadata reference rule changes.
 
-The Body **section** uses one mapped type, five values, one block and
-no places or regions. Its 109-byte structure is:
+The general-form Body **section** uses one mapped type, five values, one
+block and no places or regions. Its 109-byte structure is:
 
 | Region | Size and contents |
 |---|---|
@@ -371,14 +381,26 @@ no places or regions. Its 109-byte structure is:
 | Body row offset arrays | 12 fixed-`u32` bytes: `blockOffsets=[0,38]`, `terminatorOffsets=[36]` |
 | Block data | 38 bytes: B1 has five last-use entries, three operations and one return |
 
-Here `bodyLayout=0` selects one-byte Body-local widths. The owner,
+A compact single-block form for this *same* method could derive the two
+parameter definitions and their types from MethodSig, imply B1 and the
+function region, and avoid storing empty place/region/live arrays. It
+could encode the three result definitions and last uses more densely
+than the 20-byte offset array and repeated descriptor pairs above.
+That is a **design target**, not a byte recipe: whether direct
+definition seeks survive compact encoding, which fields are derived
+versus stored, and how the form is tagged and audited must be fixed
+before writing compact example bytes. The ordered checked operations
+and their failure sites cannot be compressed away.
+
+Here `bodyLayout=0` selects one-byte Body-local widths in the
+**general** layout; it does not select or forbid a compact form. The owner,
 type-map entries and offset arrays remain fixed `u32`; instruction
 widths are independent, and none here has an `F0` prefix.
 Body fields and validation rules are specified in
 [Body record, direct block index and regions](#body-record-direct-block-index-and-regions).
 
-The exact section bytes are the eight-byte offset index followed by the
-101-byte Body row:
+The exact **general-form** section bytes are the eight-byte offset index
+followed by the 101-byte Body row:
 
 ```text
 00 00 00 00  65 00 00 00
@@ -1289,7 +1311,9 @@ source.
 For [metadata example](../il-metadata.md#row-assignment-example),
 MethodDef row 1 returns `int32` with no arguments; TypeSpec row 1 is
 `int32`. Its `return 42` body has one value, one block, zero places and
-zero explicit regions. The Body **section** for its single row is:
+zero explicit regions. This is another **general-form fixture**, not
+the expected compact representation of a constant getter. Its Body
+**section** for one row is:
 
 ```text
 00 00 00 00  35 00 00 00
@@ -1313,7 +1337,10 @@ metadata sections, the artifact is **365 bytes** before alignment: a
 32-byte header, eight 16-byte directory entries and 205 bytes of sections.
 The direct definition/use indexes increase this tiny Body section from
 the former 50 bytes to 61 bytes; their cost on representative bodies
-still needs measurement before approval. This is encoded size, not throughput;
+still needs measurement before approval. The single block, parameterless
+signature and trivial definition/return should be candidates for a
+compact form, but substituting guessed short bytes here would falsely
+claim a registered form. This is encoded size, not throughput;
 IDs, prefixes, blocks, decoding, branches, debug data and alignment also
 affect cost.
 
