@@ -3,16 +3,8 @@ namespace Terrum.CodeAnalysis;
 // This bounded syntax-27 probe uses scanner-5 TokenKind ordinals, not source characters
 // to classify punctuation; the host parser's recovery remains a separate phase.
 // Scalar type codes: 1=int32, 2=uint32, 3=int64, 4=uint64, 5=bool.
-bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
-    out int32 scalarType, out SourceRange name, out SourceRange expression)
+bool TryGetScalarType(Token type, out int32 scalarType)
 {
-    int32 count = tokens.GetCount();
-    if (count != 10 && count != 11 && count != 12 && count != 13)
-    {
-        return false;
-    }
-
-    require tokens.TryGet(0, out var type);
     if (type.Kind != 2)
     {
         return false;
@@ -53,6 +45,24 @@ bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
         }
     }
     if (selected == 0)
+    {
+        return false;
+    }
+    scalarType = selected;
+    return true;
+}
+
+bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
+    out int32 scalarType, out SourceRange name, out SourceRange expression)
+{
+    int32 count = tokens.GetCount();
+    if (count != 10 && count != 11 && count != 12 && count != 13)
+    {
+        return false;
+    }
+
+    require tokens.TryGet(0, out var type);
+    if (!TryGetScalarType(type, out var selected))
     {
         return false;
     }
@@ -402,6 +412,24 @@ uint64 DecodeScannerMagnitude(int32 low, int32 high)
     return uint64(highBits) * 4294967296 + uint64(lowBits);
 }
 
+bool TryDecodeSigned64Scalar(uint64 magnitude, bool based, out int64 value)
+{
+    uint64 signBit = uint64(int64.MaxValue) + 1;
+    if (!based && magnitude > uint64(int64.MaxValue))
+    {
+        return false;
+    }
+    if (magnitude >= signBit)
+    {
+        value = int64(magnitude - signBit) + int64.MinValue;
+    }
+    else
+    {
+        value = int64(magnitude);
+    }
+    return true;
+}
+
 bool TryEvaluateUInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
     out SourceRange name, out uint64 result)
 {
@@ -508,15 +536,11 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
         return true;
     }
 
-    mut int64 bound = 0;
-    if (based && magnitude >= signBit)
+    if (!TryDecodeSigned64Scalar(magnitude, based, out var decoded))
     {
-        bound = int64(magnitude - signBit) + int64.MinValue;
+        return false;
     }
-    else
-    {
-        bound = int64(magnitude);
-    }
+    mut int64 bound = decoded;
     if (negative)
     {
         if (bound == int64.MinValue)
@@ -535,19 +559,17 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     return true;
 }
 
-bool TryEvaluateInt32AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
-    out SourceRange name, out int32 result)
+bool TryParseScalarAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out int32 scalarType, out SourceRange name,
+    out int32 firstLow, out int32 firstHigh, out bool firstBased,
+    out int32 secondLow, out int32 secondHigh, out bool secondBased)
 {
     if (tokens.GetCount() != 12)
     {
         return false;
     }
     require tokens.TryGet(0, out var type);
-    int32 start = type.Range.Start;
-    if (type.Kind != 2 || type.Range.Length != 5
-        || Host.Source[start] != char16(105) || Host.Source[start + 1] != char16(110)
-        || Host.Source[start + 2] != char16(116) || Host.Source[start + 3] != char16(51)
-        || Host.Source[start + 4] != char16(50))
+    if (!TryGetScalarType(type, out var selected) || selected == 5)
     {
         return false;
     }
@@ -571,9 +593,31 @@ bool TryEvaluateInt32AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot intege
     }
     if (!integers.TryFind(6, out var leftOverflow, out var leftLow, out var leftHigh)
         || !integers.TryFind(8, out var rightOverflow, out var rightLow, out var rightHigh)
-        || leftOverflow || rightOverflow || leftHigh != 0 || rightHigh != 0
-        || (leftLow < 0 && !IsBasedInteger(left))
-        || (rightLow < 0 && !IsBasedInteger(right)))
+        || leftOverflow || rightOverflow)
+    {
+        return false;
+    }
+
+    scalarType = selected;
+    name = function.Range;
+    firstLow = leftLow;
+    firstHigh = leftHigh;
+    firstBased = IsBasedInteger(left);
+    secondLow = rightLow;
+    secondHigh = rightHigh;
+    secondBased = IsBasedInteger(right);
+    return true;
+}
+
+bool TryEvaluateInt32AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int32 result)
+{
+    if (!TryParseScalarAddReturn(move tokens, move integers,
+            out var scalarType, out var foundName,
+            out var leftLow, out var leftHigh, out var leftBased,
+            out var rightLow, out var rightHigh, out var rightBased)
+        || scalarType != 1 || leftHigh != 0 || rightHigh != 0
+        || (leftLow < 0 && !leftBased) || (rightLow < 0 && !rightBased))
     {
         return false;
     }
@@ -583,7 +627,76 @@ bool TryEvaluateInt32AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot intege
         return false;
     }
 
-    name = function.Range;
+    name = foundName;
     result = int32(sum);
+    return true;
+}
+
+bool TryEvaluateUInt32AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint32 result)
+{
+    if (!TryParseScalarAddReturn(move tokens, move integers,
+            out var scalarType, out var foundName,
+            out var leftLow, out var leftHigh, out var leftBased,
+            out var rightLow, out var rightHigh, out var rightBased)
+        || scalarType != 2 || leftHigh != 0 || rightHigh != 0)
+    {
+        return false;
+    }
+    uint64 sum = DecodeScannerMagnitude(leftLow, leftHigh)
+        + DecodeScannerMagnitude(rightLow, rightHigh);
+    if (sum > uint64(uint32.MaxValue))
+    {
+        return false;
+    }
+
+    name = foundName;
+    result = uint32(sum);
+    return true;
+}
+
+bool TryEvaluateInt64AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out int64 result)
+{
+    if (!TryParseScalarAddReturn(move tokens, move integers,
+            out var scalarType, out var foundName,
+            out var leftLow, out var leftHigh, out var leftBased,
+            out var rightLow, out var rightHigh, out var rightBased)
+        || scalarType != 3
+        || !TryDecodeSigned64Scalar(DecodeScannerMagnitude(leftLow, leftHigh),
+            leftBased, out var left)
+        || !TryDecodeSigned64Scalar(DecodeScannerMagnitude(rightLow, rightHigh),
+            rightBased, out var right)
+        || (right > 0 && left > int64.MaxValue - right)
+        || (right < 0 && left < int64.MinValue - right))
+    {
+        return false;
+    }
+
+    name = foundName;
+    result = left + right;
+    return true;
+}
+
+bool TryEvaluateUInt64AddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integers,
+    out SourceRange name, out uint64 result)
+{
+    if (!TryParseScalarAddReturn(move tokens, move integers,
+            out var scalarType, out var foundName,
+            out var leftLow, out var leftHigh, out var leftBased,
+            out var rightLow, out var rightHigh, out var rightBased)
+        || scalarType != 4)
+    {
+        return false;
+    }
+    uint64 left = DecodeScannerMagnitude(leftLow, leftHigh);
+    uint64 right = DecodeScannerMagnitude(rightLow, rightHigh);
+    if (left > uint64.MaxValue - right)
+    {
+        return false;
+    }
+
+    name = foundName;
+    result = left + right;
     return true;
 }
