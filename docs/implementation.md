@@ -1074,6 +1074,9 @@ and returns the declared TypeSpec, without inferring identity from its name.
 GenericParam-row and Constraint-row writers check formal ownership, ordinals,
 complete constraint ranges and required type references; unassigned kinds and
 witness references remain structurally opaque, not executable contracts.
+Import-row and Export-row writers check retained expected definitions and
+public producer keys against local structural tables; they do not resolve a
+producer or prove contract compatibility.
 The self-host String-row
 candidate emits individual rows. These exercise approved metadata contracts in isolation,
 including a framed callable-table fixture, but do not parse executable Body

@@ -92,10 +92,29 @@ public sealed class TrRmImportExportTableReaderTests
             propertyFlags: 2, frameArtifact: true));
     }
 
+    [Fact]
+    public void WrittenRetainedImportAndPublicExportComposeThroughTheArtifactValidator()
+    {
+        Assert.True(Read(Import(), Export(0x1600_0001),
+            frameArtifact: true, writeRows: true));
+        Assert.True(Read(Import(), Export(0x1E00_0001),
+            propertyFlags: 2, frameArtifact: true, writeRows: true));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            Read(Import(), [], writeRows: true));
+        Assert.Throws<InvalidDataException>(() =>
+            Read(Import(0x1600_0001), Export(0x1300_0001), writeRows: true));
+        Assert.Throws<InvalidDataException>(() =>
+            Read(Import(), Export(0x1600_0002), writeRows: true));
+        Assert.Throws<InvalidDataException>(() =>
+            Read(Import(), Export(0x1600_0001, 0x1300_0001), writeRows: true));
+        Assert.Throws<InvalidDataException>(() =>
+            Read(Import(), Export(0x1300_0001), producerTypeVisibility: 1, writeRows: true));
+    }
+
     private static bool Read(byte[] importRows, byte[] exportRows,
         uint producerVisibility = 2, uint producerTypeVisibility = 2, uint propertyFlags = 0,
         bool producerOwnsRef = false, bool producerMethodOwned = false,
-        bool frameArtifact = false)
+        bool frameArtifact = false, bool writeRows = false)
     {
         var nameBytes = TrRmStringTableWriter.EncodeTextRows(
             [("", 0), ("Producer", 0), ("Consumer", 0), ("Widget", 0),
@@ -140,8 +159,31 @@ public sealed class TrRmImportExportTableReaderTests
                 names, types, typeSpecs, methods, signatures);
         var moduleRefRows = ModuleRef();
         var references = new TrRmModuleRefTableReader(moduleRefRows, 1, names, modules);
+        if (writeRows)
+        {
+            var row = new TrRmImportRow(
+                (int)BinaryPrimitives.ReadUInt32LittleEndian(importRows),
+                (int)BinaryPrimitives.ReadUInt32LittleEndian(importRows.AsSpan(4)),
+                BinaryPrimitives.ReadUInt32LittleEndian(importRows.AsSpan(8)));
+            importRows = TrRmImportTableWriter.Encode(
+                [row], names, references, types, methods, properties);
+        }
         var imports = new TrRmImportTableReader(importRows, importRows.Length / 12,
             names, references, types, methods, properties);
+        if (writeRows)
+        {
+            var rows = new TrRmExportRow[exportRows.Length / 8];
+            for (var index = 0; index < rows.Length; index++)
+            {
+                var offset = index * 8;
+                rows[index] = new TrRmExportRow(
+                    BinaryPrimitives.ReadUInt32LittleEndian(exportRows.AsSpan(offset)),
+                    (int)BinaryPrimitives.ReadUInt32LittleEndian(exportRows.AsSpan(offset + 4)));
+            }
+
+            exportRows = TrRmExportTableWriter.Encode(
+                rows, names, types, methods, properties, imports);
+        }
         _ = new TrRmExportTableReader(exportRows, exportRows.Length / 8,
             names, types, methods, properties, imports);
         if (frameArtifact)
