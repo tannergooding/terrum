@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -372,14 +373,50 @@ public sealed partial class CliTests
         BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(12), 2);
         BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(24), 1);
         var body = TrRmBodyExampleTests.IndexedScalarOperation([0x12, 1, 1, 0], [], 2);
-        byte[] Artifact() => TrRmArtifactWriter.Encode([
-            new TrRmSection(0x0001, 0, 1, module),
-            new TrRmSection(0x0002, 0, 2, strings),
-            new TrRmSection(0x0011, 0, 2, typeSpec),
-            new TrRmSection(0x0016, 0, 1, method),
-            new TrRmSection(0x0017, 0, 1, signature),
-            new TrRmSection(0x0020, 0, 1, body),
-        ]);
+        byte[] Artifact(bool withImport = false)
+        {
+            var sections = new List<TrRmSection>
+            {
+                new(0x0001, 0, 1, module),
+                new(0x0002, 0, withImport ? 3u : 2u,
+                    withImport ? TrRmStringTableWriter.EncodeNames(
+                        [("Module", 0), ("Run", 0), ("Producer", 0)]) : strings),
+            };
+            if (withImport)
+            {
+                var moduleRef = new byte[12];
+                BinaryPrimitives.WriteUInt32LittleEndian(moduleRef, 3);
+                sections.Add(new TrRmSection(0x0010, 0, 1, moduleRef));
+            }
+
+            sections.Add(new TrRmSection(0x0011, 0, 2, typeSpec));
+            if (withImport)
+            {
+                var methods = new byte[56];
+                method.CopyTo(methods, 0);
+                BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(32), 2);
+                BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(36), 1);
+                BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(40), 2);
+                sections.Add(new TrRmSection(0x0016, 0, 2, methods));
+            }
+            else
+            {
+                sections.Add(new TrRmSection(0x0016, 0, 1, method));
+            }
+
+            sections.Add(new TrRmSection(0x0017, 0, 1, signature));
+            if (withImport)
+            {
+                var import = new byte[12];
+                BinaryPrimitives.WriteUInt32LittleEndian(import, 1);
+                BinaryPrimitives.WriteUInt32LittleEndian(import.AsSpan(4), 2);
+                BinaryPrimitives.WriteUInt32LittleEndian(import.AsSpan(8), 0x1600_0002);
+                sections.Add(new TrRmSection(0x001C, 0, 1, import));
+            }
+
+            sections.Add(new TrRmSection(0x0020, 0, 1, body));
+            return TrRmArtifactWriter.Encode([.. sections]);
+        }
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-trrm-call-{Guid.NewGuid():N}.trrm");
         try
@@ -405,6 +442,16 @@ public sealed partial class CliTests
             var (invalid, _, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
             Assert.Equal(1, invalid);
+
+            await File.WriteAllBytesAsync(path, Artifact(withImport: true));
+            var (imported, importedOutput, importedError) = await RunAsync([],
+                "validate-trrm-compact-indexed", path, "--json");
+            Assert.Equal(0, imported);
+            Assert.Empty(importedError);
+            using (var result = JsonDocument.Parse(importedOutput))
+            {
+                Assert.True(result.RootElement.GetProperty("success").GetBoolean());
+            }
         }
         finally
         {
