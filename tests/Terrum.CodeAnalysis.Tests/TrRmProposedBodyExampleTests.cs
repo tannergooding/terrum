@@ -247,7 +247,7 @@ public sealed class TrRmProposedBodyExampleTests
     }
 
     [Theory]
-    [InlineData("#### Compact linear checked add (recommended illustrative form)", 35, 3, 5, 2)]
+    [InlineData("### Checked add end to end (informative)", 35, 3, 5, 2)]
     [InlineData("### Compact linear constant return", 25, 1, 1, 0)]
     [InlineData("#### Compact linear parameter return", 21, 0, 1, 1)]
     public void ProposedCompactLinearDerivesDefinitionsAndUses(

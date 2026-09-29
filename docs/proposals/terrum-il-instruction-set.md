@@ -439,29 +439,31 @@ currently encoded Body examples **do not yet contain** GC roots.
 
 Consider `AddThenThree` under the fail-fast policy. The example uses
 the compact-linear encoding appropriate to this root-free, one-block
-method. Assume MethodDef row 1 owns the body, its MethodSig
-declares two by-value `int32` parameters
-and an `int32` result, and TypeSpec row 1 describes `int32`. The
-expected `int32` context types the literal `3`; each `+` selects
-checked primitive addition, not a numeric fallback or user witness.
+method. The field listing is a readable projection of the stored rows,
+not an additional wire syntax. The byte sequence below encodes the Body
+section only.
 
 ```text
 Source: int32 AddThenThree(int32 x, int32 y) { return x + y + 3; }
-MethodSig[1] = (int32 x, int32 y) -> int32
-B1(r1 <- x, r2 <- y):
+TypeSpec[1] = Builtin(int32)
+MethodSig[1] = (parameter[0]: TypeSpec[1], parameter[1]: TypeSpec[1])
+               -> TypeSpec[1]
+MethodDef[1] = (signature=1, bodyRow=1)
+Body[1] (compact linear):
+    ownerMethod=1
+    bodyLayout=0x04
+    typeCount=1
+    typeMap=[t1: TypeSpec[1]]
+    operationCount=3
     r3 = CheckedBinary add r1, r2
-    r4 = ConstSigned int32, 3
+    r4 = ConstSigned t1, 3
     r5 = CheckedBinary add r3, r4
     Return r5
 ```
 
-#### Compact linear checked add (recommended illustrative form)
-
-One mapped type and three operations suffice. The compact-linear row
-stores `ownerMethod=1`, `bodyLayout=0x04`, `typeCount=1`,
-`typeMap=[TypeSpec row 1]`, `operationCount=3`, then the 16
-instruction bytes. The Body section is 35 bytes (8-byte shared row
-index and 27-byte row):
+The Body section is 35 bytes: an 8-byte shared row index, an
+11-byte row header and 16 instruction bytes. The Body fields above
+appear in row order:
 
 ```text
 00 00 00 00  1B 00 00 00
@@ -472,8 +474,10 @@ index and 27-byte row):
 There is no separate entry-block record, region 0 record, place or
 boundary-live array, parameter-definition sentinel, value descriptor,
 definition-offset table or last-use list in this row. B1 and region 0
-are implicit; MethodSig supplies `r1` and `r2`, and the three ordered
-operations define `r3`–`r5`. A bounded scan derives their types,
+are implicit; MethodSig supplies by-value `r1` and `r2` (source `x`
+and `y`), and the three ordered operations define `r3`–`r5`. The
+expected `int32` context selects checked primitive addition, not a
+numeric fallback or user witness. A bounded scan derives their types,
 definitions and last-use ordinals `(0,0,2,2,3)`, as well as the
 checked failure order and return. The `typeMap` still supplies complete
 `int32` identity. Those omitted records are either inapplicable here
