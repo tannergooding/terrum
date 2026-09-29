@@ -404,7 +404,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
         return type;
     }
 
-    private static ushort ResolveType(TrRmTypeSpecTableReader types, int row)
+    internal static ushort ResolveType(TrRmTypeSpecTableReader types, int row)
     {
         var type = types.GetRow(row);
         if (type.Length == 6 && type[0] == 6 && type[1] == 0)

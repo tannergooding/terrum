@@ -1235,6 +1235,9 @@ edges with checked typed block arguments, scalar `ConstBits`,
 `ConstSigned`, `Copy`, scalar `Unary`, `Binary`, eager `Select` and checked
 integer arithmetic/shifts, integer `CheckedConvert`, signed `CheckedNegate`,
 dual-result `CheckedDivRem`, `Return` and `Fail`.
+Optional scalar values retain their presence-qualified identity through
+`MakeOptional`, `None`, `IsPresent`, `Copy` and eager `Select`; they are not
+interchangeable with the underlying scalar in operations or signatures.
 The indexed reader also accepts valid `F0` reference/data widths on those
 operations and reference/count widths on supported `Branch`, `BranchIf`
 and `Return` terminators, independently of the Body-local width.

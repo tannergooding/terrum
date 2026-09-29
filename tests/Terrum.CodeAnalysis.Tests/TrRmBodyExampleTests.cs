@@ -706,6 +706,33 @@ public sealed class TrRmBodyExampleTests
                 parameterTypeIds: [2]));
     }
 
+    [Theory]
+    [InlineData(new byte[] { 8, 2, 3, 1 }, new byte[] { 2 }, (byte)3)]
+    [InlineData(new byte[] { 9, 1, 3 }, new byte[] { }, (byte)3)]
+    [InlineData(new byte[] { 0x0A, 2, 1 }, new byte[] { 3 }, (byte)1)]
+    [InlineData(new byte[] { 3, 2, 1 }, new byte[] { 3 }, (byte)3)]
+    [InlineData(new byte[] { 7, 4, 1, 2, 3 }, new byte[] { 1, 3, 3 }, (byte)3)]
+    public void CompactIndexedReaderPreservesOptionalPresence(
+        byte[] operation, byte[] parameters, byte resultType)
+    {
+        var section = IndexedScalarOperation(operation, parameters, resultType);
+        Assert.Equal((1, parameters.Length + 1),
+            InspectIndexed(section, parameters.Length, resultTypeSpec: resultType,
+                parameterTypeIds: parameters, thirdTypeOptional: true));
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 8, 2, 3, 1 }, new byte[] { 3 }, (byte)3)]
+    [InlineData(new byte[] { 9, 1, 2 }, new byte[] { }, (byte)3)]
+    [InlineData(new byte[] { 0x0A, 2, 1 }, new byte[] { 2 }, (byte)1)]
+    [InlineData(new byte[] { 1, 1, 3, 1 }, new byte[] { }, (byte)3)]
+    public void CompactIndexedReaderRejectsOptionalScalarConfusion(
+        byte[] operation, byte[] parameters, byte resultType)
+        => Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(IndexedScalarOperation(operation, parameters, resultType),
+                parameters.Length, resultTypeSpec: resultType,
+                parameterTypeIds: parameters, thirdTypeOptional: true));
+
     [Fact]
     public void CompactIndexedReaderRejectsCheckedExceptionPolicy()
     {
@@ -782,11 +809,14 @@ public sealed class TrRmBodyExampleTests
         var terminator = row.Count;
         row.Add(0);
         var start = row.Count;
-        row.Add(0x12);
-        row.Add((byte)parameters.Length);
-        for (var value = 1; value <= parameters.Length; value++)
+        row.Add((byte)(parameters.Length == 0 ? 0x10 : 0x12));
+        if (parameters.Length != 0)
         {
-            row.Add((byte)value);
+            row.Add((byte)parameters.Length);
+            for (var value = 1; value <= parameters.Length; value++)
+            {
+                row.Add((byte)value);
+            }
         }
 
         row.Add((byte)count);
@@ -841,7 +871,7 @@ public sealed class TrRmBodyExampleTests
     private static (int Blocks, int Values) InspectIndexed(byte[] section,
         int parameterCount = 3, byte secondTypeCode = 8, int resultTypeSpec = 2,
         byte[]? parameterTypeIds = null, byte? thirdTypeCode = null,
-        byte runtimePolicy = 0)
+        byte runtimePolicy = 0, bool thirdTypeOptional = false)
     {
         var names = new TrRmStringTableReader(
             TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]), 2);
@@ -854,13 +884,17 @@ public sealed class TrRmBodyExampleTests
         BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(8), runtimePolicy);
         var modules = new TrRmModuleTableReader(module, 1, names, 0, 0, 1, 0);
         var defs = new TrRmTypeDefTableReader([], 0, names, modules, 0, 0, 0, 0);
-        byte[] typeBytes = thirdTypeCode is byte third
-            ? [0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0, 9, 0, 0, 0,
-                1, 0, 1, 1, 0, secondTypeCode, 1, 0, third]
-            : [0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0,
-                1, 0, 1, 1, 0, secondTypeCode];
+        byte[] typeBytes = (thirdTypeOptional, thirdTypeCode) switch
+        {
+            (true, _) => [0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0, 12, 0, 0, 0,
+                1, 0, 1, 1, 0, secondTypeCode, 6, 0, 2, 0, 0, 0],
+            (false, byte third) => [0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0, 9, 0, 0, 0,
+                1, 0, 1, 1, 0, secondTypeCode, 1, 0, third],
+            _ => [0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0,
+                1, 0, 1, 1, 0, secondTypeCode],
+        };
         var types = new TrRmTypeSpecTableReader(typeBytes,
-            thirdTypeCode is null ? 2 : 3, 0, 0, 0, 0);
+            thirdTypeCode is null && !thirdTypeOptional ? 2 : 3, 0, 0, 0, 0);
         var signature = new byte[24];
         BinaryPrimitives.WriteUInt32LittleEndian(signature, (uint)resultTypeSpec);
         BinaryPrimitives.WriteUInt32LittleEndian(signature.AsSpan(8), parameterCount == 0 ? 0u : 1u);

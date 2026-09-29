@@ -61,7 +61,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         }
 
         _operationCounts = new int[BlockCount + 1];
-        var mappedTypes = new byte[typeCount + 1];
+        var mappedTypes = new ushort[typeCount + 1];
         for (var typeId = 1; typeId <= typeCount; typeId++)
         {
             var row = Read(body, ref position, 4);
@@ -70,18 +70,17 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                 throw InvalidBody();
             }
 
-            var type = types.GetRow((int)row);
-            if (type.Length != 3 || type[0] != 1 || type[1] != 0
-                || type[2] is not (1 or 8 or 9 or 0x0D or 0x0E)
-                || Array.IndexOf(mappedTypes, type[2], 1, typeId - 1) >= 0)
+            var type = TrRmCompactLinearBodyReader.ResolveType(types, (int)row);
+            if ((type & 0xFF) == 3
+                || Array.IndexOf(mappedTypes, type, 1, typeId - 1) >= 0)
             {
                 throw InvalidBody();
             }
 
-            mappedTypes[typeId] = type[2];
+            mappedTypes[typeId] = type;
         }
 
-        var valueTypes = new byte[ValueCount + 1];
+        var valueTypes = new ushort[ValueCount + 1];
         var useBlockCounts = new int[ValueCount + 1];
         for (var value = 1; value <= ValueCount; value++)
         {
@@ -144,12 +143,13 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             throw InvalidBody();
         }
 
-        var resultRow = types.GetRow(signatures.GetResultTypeSpec(signature));
+        var resultTypeSpec = signatures.GetResultTypeSpec(signature);
+        var resultRow = types.GetRow(resultTypeSpec);
         var voidResult = resultRow.Length == 3 && resultRow[0] == 1
             && resultRow[1] == 0 && resultRow[2] == 0;
-        if (!voidResult && (resultRow.Length != 3 || resultRow[0] != 1
-            || resultRow[1] != 0
-            || resultRow[2] is not (1 or 8 or 9 or 0x0D or 0x0E)))
+        var resultType = voidResult ? (ushort)0
+            : TrRmCompactLinearBodyReader.ResolveType(types, resultTypeSpec);
+        if ((resultType & 0xFF) == 3)
         {
             throw InvalidBody();
         }
@@ -275,6 +275,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     var bits = ReadData(extent, ref cursor, dataWidth);
                     if (typeId == 0 || typeId > typeCount
                         || mappedTypes[typeId] != valueTypes[result]
+                        || valueTypes[result] > byte.MaxValue
                         || opcode == 1 && (valueTypes[result] == 1 && bits > 1
                             || valueTypes[result] is (8 or 0x0D) && bits > uint.MaxValue)
                         || opcode == 2 && (valueTypes[result] is not (8 or 9 or 0x0D or 0x0E)
@@ -288,6 +289,35 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     var source = ReadCount(extent, ref cursor, referenceWidth);
                     Use(source, ordinal);
                     if (valueTypes[source] != valueTypes[result])
+                    {
+                        throw InvalidBody();
+                    }
+                }
+                else if (opcode is 8 or 9)
+                {
+                    var typeId = ReadCount(extent, ref cursor, referenceWidth);
+                    if (typeId == 0 || typeId > typeCount
+                        || mappedTypes[typeId] < 0x100
+                        || mappedTypes[typeId] != valueTypes[result])
+                    {
+                        throw InvalidBody();
+                    }
+
+                    if (opcode == 8)
+                    {
+                        var source = ReadCount(extent, ref cursor, referenceWidth);
+                        Use(source, ordinal);
+                        if (valueTypes[source] != (mappedTypes[typeId] & 0xFF))
+                        {
+                            throw InvalidBody();
+                        }
+                    }
+                }
+                else if (opcode == 0x0A)
+                {
+                    var source = ReadCount(extent, ref cursor, referenceWidth);
+                    Use(source, ordinal);
+                    if (valueTypes[source] < 0x100 || valueTypes[result] != 1)
                     {
                         throw InvalidBody();
                     }
@@ -457,7 +487,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             {
                 var value = ReadCount(extent, ref cursor, terminatorWidth);
                 if (value == 0 ? !voidResult
-                    : voidResult || value > ValueCount || valueTypes[value] != resultRow[2])
+                    : voidResult || value > ValueCount || valueTypes[value] != resultType)
                 {
                     throw InvalidBody();
                 }
@@ -571,14 +601,14 @@ public readonly ref struct TrRmCompactIndexedBodyReader
     }
 
     private static bool ParametersMatch(int[] values, TrRmParamTableReader parameters,
-        TrRmTypeSpecTableReader types, int first, byte[] valueTypes)
+        TrRmTypeSpecTableReader types, int first, ushort[] valueTypes)
     {
         for (var index = 0; index < values.Length; index++)
         {
-            var type = types.GetRow(parameters.GetTypeSpec(first + index));
+            var type = TrRmCompactLinearBodyReader.ResolveType(types,
+                parameters.GetTypeSpec(first + index));
             if (values[index] != index + 1 || parameters.GetMode(first + index) != 0
-                || type.Length != 3 || type[0] != 1 || type[1] != 0
-                || type[2] != valueTypes[values[index]])
+                || type != valueTypes[values[index]])
             {
                 return false;
             }
@@ -590,7 +620,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
     private static bool Contains(int[] values, int value)
         => Array.BinarySearch(values, value) >= 0;
 
-    private static bool IsInteger(byte type)
+    private static bool IsInteger(ushort type)
         => type is 8 or 9 or 0x0D or 0x0E;
 
     private static (uint Opcode, int ReferenceWidth, int CountWidth) ReadTerminator(
@@ -656,7 +686,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         return bits;
     }
 
-    private static bool FitsSignedConstant(byte type, ulong bits, int dataWidth)
+    private static bool FitsSignedConstant(ushort type, ulong bits, int dataWidth)
     {
         var shift = 64 - dataWidth * 8;
         var value = unchecked((long)(bits << shift)) >> shift;
