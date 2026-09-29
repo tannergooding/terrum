@@ -9,7 +9,7 @@ Accepted semantic direction is identified separately from proposed signatures;
 exact syntax and several API contracts remain open. Examples do not establish
 conformance or implementation. This is not an ABI layout specification.
 
-The [grammar proposal](terrum-grammar-spec.md) and
+The [grammar proposal](grammar-spec.md) and
 [approved current semantic IL/metadata design](../il-metadata.md) are separate
 documents; neither adopts the signatures here. Related accepted direction is
 described in [language](../language.md), [libraries](../libraries.md),

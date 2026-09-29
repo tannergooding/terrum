@@ -14,7 +14,7 @@ The [language](../language.md), [memory model](../memory-model.md),
 [conversions](../conversions.md), [lifetimes](../lifetimes.md), and
 [libraries](../libraries.md) documents define the related accepted semantic
 direction. The [approved current semantic IL/metadata design](../il-metadata.md)
-and [core-library proposal](terrum-core-library-reference.md) are separate
+and [core-library proposal](core-library-reference.md) are separate
 documents; cross-references do not adopt their candidate forms.
 
 ## 1. Scope, status, and notation

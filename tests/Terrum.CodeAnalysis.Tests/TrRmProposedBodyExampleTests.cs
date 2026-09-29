@@ -514,7 +514,7 @@ public sealed class TrRmProposedBodyExampleTests
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var document = File.ReadAllText(Path.Combine(root, "docs", "proposals",
-            "terrum-il-instruction-set.md"));
+            "il-instruction-set.md"));
         var start = document.IndexOf(heading, StringComparison.Ordinal);
         Assert.True(start >= 0);
         var next = document.IndexOf("\n## ", start + heading.Length, StringComparison.Ordinal);
