@@ -2751,6 +2751,16 @@ public sealed class ManagedScannerComponentTests
         BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(23 * sizeof(int)),
             operation - 40000);
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        foreach (var forged in new[] { operation + 100, operation + 200, operation + 40000 })
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(23 * sizeof(int)), forged);
+            Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(source, bytes));
+        }
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(23 * sizeof(int)), operation);
+        var changed = text.ToCharArray();
+        changed[text.LastIndexOf('z')] = 'x';
+        Assert.Throws<ArgumentException>(() =>
+            ScalarFrontendHost.ReadResult(SourceText.From(new string(changed)), bytes));
     }
 
     [Theory]
@@ -2800,6 +2810,39 @@ public sealed class ManagedScannerComponentTests
                 new BoundConstant(x, PrimitiveType.Int32, default),
                 new BoundConstant(y, PrimitiveType.Int32, default),
                 new BoundConstant(z, PrimitiveType.Int32, default),
+            ], PrimitiveType.Int32, default);
+            var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
+                new BoundBlock([new BoundReturn(call, default)], default), default);
+            var executable = library with { Functions = [.. library.Functions, main], EntryPoint = 1 };
+            SemanticVerifier.Verify(executable);
+            Assert.Equal(42, NativeJit.Execute(executable, policy));
+            await ExecuteAotAsync(executable, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData("int32 Value(bool x, bool y, bool z) { if (z && x) { return 42; } return 0; }", true, false, true)]
+    [InlineData("int32 Value(bool x, bool y, bool z) { if (!z) { return 42; } return 0; }", false, true, false)]
+    [InlineData("int32 Value(bool x, bool y, bool z) { if (z || x) { return 42; } return 0; }", true, false, false)]
+    [InlineData("int32 Value(bool x, bool y, bool z) { if (z && false) { return 0; } return 42; }", true, true, true)]
+    public async Task NativeScalarFrontendThirdBooleanParameterExecutesAsync(
+        string text, bool x, bool y, bool z)
+    {
+        var source = SourceText.From(text);
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var stage = await CompileAsync(text,
+                "using Terrum.CodeAnalysis; int32 Main() { require TryPublishScalarFrontend(); return 42; }",
+                (BoundRuntimePolicy)policy, "ScalarFrontendProjection").ConfigureAwait(true);
+            var native = NativeJit.ExecuteWithData(stage, policy);
+            Assert.Equal(42, native.ExitCode);
+            var library = ScalarFrontendHost.BindLibrary(source,
+                native.Data.AsSpan(native.BufferOffsets[ScalarFrontendHost.BufferIndex],
+                    ScalarFrontendHost.WordCount * sizeof(int)), (BoundRuntimePolicy)policy);
+            var call = new BoundCall(0, [
+                new BoundConstant(x ? 1 : 0, PrimitiveType.Bool, default),
+                new BoundConstant(y ? 1 : 0, PrimitiveType.Bool, default),
+                new BoundConstant(z ? 1 : 0, PrimitiveType.Bool, default),
             ], PrimitiveType.Int32, default);
             var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
                 new BoundBlock([new BoundReturn(call, default)], default), default);
