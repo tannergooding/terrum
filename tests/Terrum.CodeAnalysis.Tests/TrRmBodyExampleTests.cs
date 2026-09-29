@@ -906,6 +906,54 @@ public sealed class TrRmBodyExampleTests
             InspectIndexed(section, 2, parameterTypeIds: [2, 2]));
     }
 
+    [Theory]
+    [InlineData(new byte[] { 0x12, 1, 1, 0 }, new byte[0], 1)]
+    [InlineData(new byte[] { 0x12, 2, 1, 1, 1 }, new byte[] { 2 }, 2)]
+    [InlineData(new byte[] { 0xF0, 0x04, 0x12, 2, 1, 1, 0, 1 }, new byte[] { 2 }, 2)]
+    [InlineData(new byte[] { 0xF0, 0x05, 0x12, 2, 0, 1, 0, 1, 0, 1, 0 },
+        new byte[] { 2 }, 2)]
+    public void CompactIndexedReaderChecksLocalScalarCalls(
+        byte[] operation, byte[] parameters, int values)
+        => Assert.Equal((1, values), InspectIndexed(
+            IndexedScalarOperation(operation, parameters, 2),
+            parameters.Length, resultTypeSpec: 2, parameterTypeIds: parameters));
+
+    [Fact]
+    public void CompactIndexedReaderPreservesOptionalCallSignatures()
+        => Assert.Equal((1, 2), InspectIndexed(
+            IndexedScalarOperation([0x12, 2, 1, 1, 1], [3], 3),
+            parameterCount: 1, resultTypeSpec: 3, parameterTypeIds: [3],
+            thirdTypeOptional: true));
+
+    [Theory]
+    [InlineData(new byte[] { 0x12, 1, 0, 0 }, new byte[0])]
+    [InlineData(new byte[] { 0x12, 1, 2, 0 }, new byte[0])]
+    [InlineData(new byte[] { 0x12, 1, 1, 1, 1 }, new byte[0])]
+    [InlineData(new byte[] { 0x12, 2, 1, 0 }, new byte[] { 2 })]
+    [InlineData(new byte[] { 0x12, 0, 1, 0 }, new byte[0])]
+    [InlineData(new byte[] { 0xF0, 0x0C, 0x12, 1, 1, 0 }, new byte[0])]
+    public void CompactIndexedReaderRejectsInvalidLocalScalarCalls(
+        byte[] operation, byte[] parameters)
+        => Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(IndexedScalarOperation(operation, parameters, 2),
+                parameters.Length, resultTypeSpec: 2, parameterTypeIds: parameters));
+
+    [Fact]
+    public void CompactIndexedReaderAllowsVoidCallsWithoutValueDefinitions()
+    {
+        byte[] row =
+        [
+            0x08, 1, 0, 0, 0,
+            0, 0, 0, 8, 6,
+            0, 1, 0x12, 0, 1, 0, 0x83, 0,
+        ];
+        var section = new byte[row.Length + 8];
+        BinaryPrimitives.WriteUInt32LittleEndian(section.AsSpan(4), (uint)row.Length);
+        row.CopyTo(section, 8);
+        Assert.Equal((1, 0), InspectIndexed(section, parameterCount: 0,
+            resultTypeSpec: 1, firstTypeCode: 0));
+    }
+
     private static byte[] IndexedDivRem()
         =>
         [

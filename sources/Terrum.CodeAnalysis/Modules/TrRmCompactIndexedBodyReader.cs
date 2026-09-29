@@ -8,7 +8,7 @@ using System.IO;
 namespace Terrum.CodeAnalysis.Modules;
 
 /// <summary>Inspects the root-free, forward-branching scalar compact-indexed subset.</summary>
-/// <remarks>Only scalar constants, operators, integer conversions, optional values, Copy, Select, forward Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
+/// <remarks>Only scalar constants, operators, integer conversions, optional values, Copy, Select, local scalar calls, forward Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
 public readonly ref struct TrRmCompactIndexedBodyReader
 {
     private readonly record struct Edge(int Target, int[] Arguments);
@@ -148,6 +148,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             && resultRow[1] == 0 && resultRow[2] == 0;
         var resultType = voidResult ? (ushort)0
             : TrRmCompactLinearBodyReader.ResolveType(types, resultTypeSpec);
+        var localMethodStart = 0;
+        var localMethodEnd = 0;
         for (var block = 1; block <= BlockCount; block++)
         {
             var extent = blockData[(int)offsets[block - 1]..(int)offsets[block]];
@@ -243,9 +245,13 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             {
                 var operationOffset = cursor;
                 useOffset = cursor;
-                var (opcode, referenceWidth, dataWidth) = ReadOperation(extent, ref cursor);
+                var (opcode, referenceWidth, operationCountWidth, dataWidth) = ReadOperation(extent, ref cursor);
                 var result = ReadCount(extent, ref cursor, referenceWidth);
-                if (result != nextResult++ || result > ValueCount || owner[result] != block
+                if (result == 0 && opcode == 0x12)
+                {
+                    // A void call has no value descriptor or definition offset.
+                }
+                else if (result != nextResult++ || result > ValueCount || owner[result] != block
                     || definitions[result - 1] != operationOffset)
                 {
                     throw InvalidBody();
@@ -373,6 +379,58 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         throw InvalidBody();
                     }
                 }
+                else if (opcode == 0x12)
+                {
+                    var method = ReadCount(extent, ref cursor, referenceWidth);
+                    if (localMethodStart == 0)
+                    {
+                        (localMethodStart, localMethodEnd) = modules.GetMethodDefRange(
+                            methods.GetOwnerModule(methodRow));
+                    }
+                    if (method == 0 || method > localMethodEnd - localMethodStart)
+                    {
+                        throw InvalidBody();
+                    }
+
+                    var target = localMethodStart + method - 1;
+                    var targetSignature = methods.GetSignature(target);
+                    if (methods.GetOwnerType(target) != 0 || methods.GetBodyRow(target) == 0
+                        || signatures.GetReceiverTypeSpec(targetSignature) != 0
+                        || signatures.GetGenericCount(targetSignature) != 0)
+                    {
+                        throw InvalidBody();
+                    }
+
+                    var targetResult = signatures.GetResultTypeSpec(targetSignature);
+                    var targetRow = types.GetRow(targetResult);
+                    var targetVoid = targetRow.Length == 3 && targetRow[0] == 1
+                        && targetRow[1] == 0 && targetRow[2] == 0;
+                    if (targetVoid ? result != 0
+                        : result == 0 || valueTypes[result]
+                            != TrRmCompactLinearBodyReader.ResolveType(types, targetResult))
+                    {
+                        throw InvalidBody();
+                    }
+
+                    var (first, count) = signatures.GetParamRange(targetSignature);
+                    var arguments = ReadCount(extent, ref cursor, operationCountWidth);
+                    if (arguments != count || arguments > (extent.Length - cursor) / referenceWidth)
+                    {
+                        throw InvalidBody();
+                    }
+
+                    for (var argument = 0; argument < arguments; argument++)
+                    {
+                        var value = ReadCount(extent, ref cursor, referenceWidth);
+                        Use(value, ordinal);
+                        if (parameters.GetMode(first + argument) != 0
+                            || valueTypes[value] != TrRmCompactLinearBodyReader.ResolveType(types,
+                                parameters.GetTypeSpec(first + argument)))
+                        {
+                            throw InvalidBody();
+                        }
+                    }
+                }
                 else if (opcode == 0x15)
                 {
                     var kind = Read(extent, ref cursor, 1);
@@ -432,12 +490,15 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     throw InvalidBody();
                 }
 
-                if (defined[result])
+                if (result != 0 && defined[result])
                 {
                     throw InvalidBody();
                 }
 
-                defined[result] = true;
+                if (result != 0)
+                {
+                    defined[result] = true;
+                }
                 if (secondResult != 0)
                 {
                     defined[secondResult] = true;
@@ -717,26 +778,29 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         return (opcode, referenceWidth, countWidth, dataWidth);
     }
 
-    private static (uint Opcode, int ReferenceWidth, int DataWidth) ReadOperation(
+    private static (uint Opcode, int ReferenceWidth, int CountWidth, int DataWidth) ReadOperation(
         ReadOnlySpan<byte> data, ref int position)
     {
         var opcode = Read(data, ref position, 1);
         if (opcode != 0xF0)
         {
-            return (opcode, 1, opcode is 1 or 2 ? 1 : 0);
+            return (opcode, 1, 1, opcode is 1 or 2 ? 1 : 0);
         }
 
         var layout = Read(data, ref position, 1);
         opcode = Read(data, ref position, 1);
-        if (layout == 0 || (layout & 0xCC) != 0 || (layout & 3) == 3
+        if (layout == 0 || (layout & 0xC0) != 0 || (layout & 3) == 3
+            || ((layout >> 2) & 3) == 3
+            || opcode != 0x12 && (layout & 0x0C) != 0
             || opcode is not (1 or 2) && (layout & 0x30) != 0)
         {
             throw InvalidBody();
         }
 
         var referenceWidth = (layout & 3) switch { 0 => 1, 1 => 2, _ => 4 };
+        var countWidth = ((layout >> 2) & 3) switch { 0 => 1, 1 => 2, _ => 4 };
         var dataWidth = opcode is 1 or 2 ? 1 << ((int)(layout >> 4) & 3) : 0;
-        return (opcode, referenceWidth, dataWidth);
+        return (opcode, referenceWidth, countWidth, dataWidth);
     }
 
     private static ulong ReadData(ReadOnlySpan<byte> data, ref int position, int width)
