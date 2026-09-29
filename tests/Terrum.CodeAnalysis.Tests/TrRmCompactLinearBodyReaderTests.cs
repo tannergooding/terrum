@@ -202,6 +202,42 @@ public sealed class TrRmCompactLinearBodyReaderTests
         Assert.Equal([0, 1], index.LastUses);
     }
 
+    [Fact]
+    public void CheckedDivRemDefinesTwoValuesAtOneOperation()
+    {
+        byte[] row =
+        [
+            0x04, 1, 1, 0, 0, 0, 1,
+            0x18, 3, 4, 1, 2,
+            0x83, 4,
+        ];
+        var index = Inspect(row, 2);
+        Assert.Equal(4, index.ValueCount);
+        Assert.Equal([-1, -1, 7, 7], index.Definitions);
+        Assert.Equal([0, 0, 0, 1], index.LastUses);
+        Assert.Equal([1, 1, 0, 1], index.UseBlocks);
+        Assert.Equal([8, 8, 8, 8], index.TypeCodes);
+
+        row[9] = 5;
+        Assert.Throws<InvalidDataException>(() => Inspect(row, 2));
+    }
+
+    [Fact]
+    public void MultipleDivRemOperationsKeepSequentialResultIds()
+    {
+        byte[] row =
+        [
+            0x04, 1, 1, 0, 0, 0, 2,
+            0x18, 3, 4, 1, 2,
+            0x18, 5, 6, 3, 4,
+            0x83, 6,
+        ];
+        var index = Inspect(row, 2);
+        Assert.Equal(6, index.ValueCount);
+        Assert.Equal([-1, -1, 7, 7, 12, 12], index.Definitions);
+        Assert.Equal([0, 0, 1, 1, 0, 2], index.LastUses);
+    }
+
     [Theory]
     [InlineData(new byte[] { 6, 2, 2, 0, 1 }, (byte)8, (byte)0x0D)]
     [InlineData(new byte[] { 6, 2, 2, 4, 1 }, (byte)8, (byte)0x0D)]

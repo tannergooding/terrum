@@ -11,8 +11,9 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly ref struct TrRmCompactLinearBodyReader
 {
     private readonly ValueInfo[] _values;
+    private readonly int _valueCount;
 
-    public int ValueCount => _values.Length - 1;
+    public int ValueCount => _valueCount;
     public int OperationCount { get; }
 
     private struct ValueInfo
@@ -93,6 +94,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
         }
 
         _values = new ValueInfo[parameterCount + operationCount + 1];
+        _valueCount = 0;
         OperationCount = operationCount;
         for (var index = 1; index <= parameterCount; index++)
         {
@@ -111,16 +113,38 @@ public readonly ref struct TrRmCompactLinearBodyReader
         {
             var offset = position;
             var (opcode, referenceWidth, dataWidth) = ReadInstruction(body, ref position);
-            if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 0x15 or 0x16 or 0x17)
+            if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 0x15 or 0x16 or 0x17 or 0x18)
                 || valueCount == maximum)
             {
                 throw InvalidBody();
+            }
+
+            if (opcode == 0x18 && _values.Length == parameterCount + operationCount + 1)
+            {
+                var expanded = new ValueInfo[_values.Length + operationCount];
+                _values.CopyTo(expanded, 0);
+                _values = expanded;
             }
 
             var result = ReadLocal(body, ref position, referenceWidth);
             if (result != ++valueCount)
             {
                 throw InvalidBody();
+            }
+
+            var secondResult = 0;
+            if (opcode == 0x18)
+            {
+                if (valueCount == maximum)
+                {
+                    throw InvalidBody();
+                }
+
+                secondResult = ReadLocal(body, ref position, referenceWidth);
+                if (secondResult != ++valueCount)
+                {
+                    throw InvalidBody();
+                }
             }
 
             byte resultType;
@@ -224,6 +248,17 @@ public readonly ref struct TrRmCompactLinearBodyReader
 
                 resultType = whenTrue;
             }
+            else if (opcode == 0x18)
+            {
+                var left = Use(body, ref position, referenceWidth, result, ordinal);
+                var right = Use(body, ref position, referenceWidth, result, ordinal);
+                if (left != right || !IsInteger(left))
+                {
+                    throw InvalidBody();
+                }
+
+                resultType = left;
+            }
             else
             {
                 var kind = ReadByte(body, ref position);
@@ -258,8 +293,14 @@ public readonly ref struct TrRmCompactLinearBodyReader
 
             _values[result].TypeCode = resultType;
             _values[result].DefinitionOffset = offset;
+            if (secondResult != 0)
+            {
+                _values[secondResult].TypeCode = resultType;
+                _values[secondResult].DefinitionOffset = offset;
+            }
         }
 
+        _valueCount = valueCount;
         var (terminator, terminatorWidth, terminatorDataWidth) = ReadInstruction(body, ref position);
         if (terminatorDataWidth != 0)
         {
