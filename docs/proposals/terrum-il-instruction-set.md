@@ -53,6 +53,16 @@ opcode variant. There are two instruction envelopes:
 | Common | `opcode operands` | Reference, count and data operands each occupy one byte |
 | Wide | `F0 layout opcode operands` | `layout` selects the widths for this instruction alone; its `opcode` has exactly the common form's meaning |
 
+The approved metadata design encodes table references as fixed `u32`
+words, including TypeSpec references in MethodSig. This proposal instead
+uses selected widths for TypeSpec and FieldDef row references *inside
+Body*, as well as for body-local IDs. That cross-table exception is
+**not approved**. Before this draft can become an executable format,
+either Body cross-table references must use the approved `u32` encoding,
+or the metadata design must explicitly authorize compact Body-local
+encodings of those row numbers. The examples below show the current
+candidate, not a third encoding that can silently bypass that decision.
+
 The `layout` byte selects widths independently by operand class; bits
 6–7 must be zero:
 
@@ -116,28 +126,49 @@ the body, its MethodSig declares the one by-value `int32` parameter and
 `int32` context types the literal `5`; `+` selects checked primitive
 addition, not a numeric fallback or user witness.
 
-The notation below is explanatory, not wire syntax or a required source
-rewrite. `B1` and `B2` are one-based block IDs; parentheses on a block
-declaration list its typed input values. `t1` means TypeSpec row 1, not
-a primitive code. `r1`, `r2` and `r3` are one-based Body value IDs, not
-machine registers: the Body header has a descriptor `(t1, value)` for
-each. `r1` is the function parameter `x`, supplied to the entry block
-from MethodSig; `ConstSigned` creates `r2` from the typed literal `5`.
-The checked addition creates `r3` only on success, as B2's first block
-parameter. In `-> B2()`, the empty parentheses mean there are no
-*explicit* edge arguments in addition to that implicit result.
+The notation below exposes the metadata and Body facts needed to read the
+example; it is not wire syntax or a required source rewrite. `t1` is
+TypeSpec row 1, whose built-in form uses primitive code `0x08` for
+`int32`. `r1`–`r3` are one-based Body value IDs, not machine registers.
+The value-descriptor array declares each ID's type and kind; the block
+parameters or operations define its value. `B1` and `B2` are one-based
+block IDs. A block's parameter list declares values received on entry,
+not all values that its operations will define.
 
 ```text
 Source:   int32 AddFive(int32 x) { return x + 5; }
 
-B1(r1: t1):
+TypeSpec[1] = Builtin(int32)                // t1, row payload 01 00 08
+MethodSig[1] = (parameter[0]: t1) -> t1     // source parameter[0] is x
+MethodDef[1] = (signature=1, bodyRow=1)
+Body: ownerMethod=1, bodyLayout=0
+      blockCount=2, valueCount=3, placeCount=0, regionCount=0
+      valueDescriptors=[r1:(t1,value), r2:(t1,value), r3:(t1,value)]
+      blockOffsets=[0,19,30], terminatorOffsets=[13,9]
+      B1 operationCount=1, B2 operationCount=0
+      both blocks: region=0, liveIns=[], liveOuts=[], place lists=[]
+
+B1(r1 <- parameter[0]):                   // r1 is x, defined on entry
     r2 = ConstSigned t1, 5
-    CheckedBinary add r1, r2 -> B2()
-B2(r3: t1):
+    CheckedBinary add r1, r2 -> B2()       // no explicit edge arguments
+B2(r3 <- checked add):                    // r3 is the implicit success result
     Return r3
 ```
 
-Overflow follows the module's failure policy; only success reaches B2.
+`ConstSigned` defines `r2` in B1 using the typed literal `5`; it is not
+a block input. The checked terminator defines no value in B1: on
+success it supplies `r3` as B2's first parameter, before the explicit
+arguments listed in `B2()` (none here). Overflow follows the module's
+failure policy, so B2 is not entered. Every value has one descriptor
+and one definition; the descriptor alone does not create a value.
+The Body stores numeric IDs, not the source name `x` or these comments.
+Under this candidate Body encoding, each `t1` reference occupies one byte,
+as would primitive code `0x08`; the approved MethodSig reference still
+occupies four bytes. The unresolved cross-table width decision above
+therefore changes these Body bytes if fixed `u32` is selected. Encoding
+direct primitive codes in Body descriptors would require an unambiguous
+discriminator from row IDs; it could save bytes or a lookup when row
+references are wide, but is not an assigned alternative here.
 
 The Body **section** uses three values, two blocks and no places or
 regions. Its 73-byte structure is:
@@ -791,6 +822,7 @@ contract:
 | Published contracts | Full effects, ownership/transfer, correlated output states, pre/postconditions, capability and witness evidence, generic specialization/export metadata and layout/ABI compatibility. Metadata clauses must be specified together with verifier inputs. |
 | Operations | Checked indexing/backing, raw/unaligned and atomic memory order, floating/SIMD/tensor semantics, indirect calls, traits/witness dispatch, intrinsics, async state and typed failure values. Assign only operations whose exact type, failure, ordering and lifetime rules are known. |
 | Revision and reader policy | No on-wire selector or feature/revision negotiation for the candidate executable subset; nonminimal-width load policy, unknown opcodes in unvisited trusted blocks, diagnostic/recovery behavior and numeric parser/audit budgets remain open. |
+| Metadata reference width | The approved metadata rule uses fixed `u32` table references, while this draft uses compact TypeSpec/FieldDef row references in Body. Choose fixed-width Body references or explicitly approve a compact Body exception, then update all Body widths, examples and decoding rules together. |
 
 These are explicit blockers to declaring the proposals final, not an
 invitation to invent semantics or serialize the current private bound tree.
