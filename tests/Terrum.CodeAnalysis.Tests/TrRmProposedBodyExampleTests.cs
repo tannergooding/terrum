@@ -18,17 +18,7 @@ public sealed class TrRmProposedBodyExampleTests
         string heading, int sectionLength, int valueCount, bool hasPlace,
         int blockLength, int terminatorOffset, int operationCount)
     {
-        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-            "..", "..", "..", "..", "..", ".."));
-        var document = File.ReadAllText(Path.Combine(root, "docs", "proposals",
-            "terrum-il-instruction-set.md"));
-        var start = document.IndexOf(heading, StringComparison.Ordinal);
-        Assert.True(start >= 0);
-        var next = document.IndexOf("\n## ", start + heading.Length, StringComparison.Ordinal);
-        var section = document[start..(next < 0 ? document.Length : next)];
-        var match = Regex.Match(section, @"```text\r?\n(?<hex>(?:[0-9A-Fa-f ]+\r?\n)+)```");
-        Assert.True(match.Success);
-        var bytes = Convert.FromHexString(Regex.Replace(match.Groups["hex"].Value, @"\s+", ""));
+        var bytes = ReadExample(heading);
 
         Assert.Equal(sectionLength, bytes.Length);
         var position = 0;
@@ -168,6 +158,107 @@ public sealed class TrRmProposedBodyExampleTests
             Assert.Equal(expected == uint.MaxValue ? -1 : (int)expected, observedDefinitions[value]);
             Assert.Equal(expectedLastUses[value - 1], observedLastUses[value]);
         }
+    }
+
+    [Fact]
+    public void ProposedConditionalMergeHasIndexedDefsUsesAndNormalEdges()
+    {
+        var bytes = ReadExample("### Conditional merge and loop");
+        Assert.Equal(169, bytes.Length);
+        var position = 0;
+        Assert.Equal(0u, ReadUInt32(bytes, ref position));
+        Assert.Equal(161u, ReadUInt32(bytes, ref position));
+        Assert.Equal(1u, ReadUInt32(bytes, ref position));
+        Assert.Equal(new byte[] { 0, 4, 4, 0, 0, 2 },
+            bytes.AsSpan(position, 6).ToArray());
+        position += 6;
+        Assert.Equal(1u, ReadUInt32(bytes, ref position));
+        Assert.Equal(2u, ReadUInt32(bytes, ref position));
+        for (var value = 1; value <= 4; value++)
+        {
+            Assert.Equal((byte)(value == 1 ? 1 : 2), bytes[position++]);
+            Assert.Equal((byte)0, bytes[position++]);
+            Assert.Equal((byte)1, bytes[position++]);
+        }
+        Assert.Equal(new byte[] { 0, 3, 3, 3, 4 },
+            bytes.AsSpan(position, 5).ToArray());
+        position += 5;
+        for (var value = 0; value < 4; value++)
+        {
+            Assert.Equal(uint.MaxValue, ReadUInt32(bytes, ref position));
+        }
+        int[] offsets = [0, 23, 41, 59, 74];
+        int[] terminators = [17, 14, 14, 13];
+        foreach (var offset in offsets)
+        {
+            Assert.Equal((uint)offset, ReadUInt32(bytes, ref position));
+        }
+        foreach (var terminator in terminators)
+        {
+            Assert.Equal((uint)terminator, ReadUInt32(bytes, ref position));
+        }
+        var blockData = bytes.AsSpan(position);
+        Assert.Equal(74, blockData.Length);
+        byte[] usedValues = [1, 3, 2, 4];
+        for (var blockId = 1; blockId <= 4; blockId++)
+        {
+            var block = blockData[offsets[blockId - 1]..offsets[blockId]];
+            var cursor = 0;
+            Assert.Equal((byte)0, block[cursor++]);
+            byte[][] parameters = [[1, 2, 3], [], [], [4]];
+            Assert.Equal((byte)parameters[blockId - 1].Length, block[cursor++]);
+            foreach (var parameter in parameters[blockId - 1])
+            {
+                Assert.Equal(parameter, block[cursor++]);
+            }
+            byte[][] liveIns = [[], [3], [2], []];
+            byte[][] liveOuts = [[2, 3], [3], [2], []];
+            foreach (var expected in new[] { liveIns[blockId - 1], liveOuts[blockId - 1] })
+            {
+                Assert.Equal((byte)expected.Length, block[cursor++]);
+                foreach (var value in expected)
+                {
+                    Assert.Equal(value, block[cursor++]);
+                }
+            }
+            Assert.Equal((byte)0, block[cursor++]);
+            Assert.Equal((byte)0, block[cursor++]);
+            Assert.Equal((byte)0, block[cursor++]);
+            Assert.Equal((byte)1, block[cursor++]);
+            Assert.Equal(usedValues[blockId - 1], block[cursor++]);
+            Assert.Equal((byte)0, block[cursor++]);
+            Assert.Equal((byte)0, block[cursor++]);
+            Assert.Equal((byte)0, block[cursor++]);
+            Assert.Equal(terminators[blockId - 1], cursor);
+            if (blockId == 1)
+            {
+                Assert.Equal(new byte[] { 0x81, 1, 2, 0, 3, 0 }, block[cursor..].ToArray());
+            }
+            else if (blockId == 4)
+            {
+                Assert.Equal(new byte[] { 0x83, 4 }, block[cursor..].ToArray());
+            }
+            else
+            {
+                Assert.Equal(new byte[] { 0x80, 4, 1, usedValues[blockId - 1] },
+                    block[cursor..].ToArray());
+            }
+        }
+    }
+
+    private static byte[] ReadExample(string heading)
+    {
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", ".."));
+        var document = File.ReadAllText(Path.Combine(root, "docs", "proposals",
+            "terrum-il-instruction-set.md"));
+        var start = document.IndexOf(heading, StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        var next = document.IndexOf("\n## ", start + heading.Length, StringComparison.Ordinal);
+        var section = document[start..(next < 0 ? document.Length : next)];
+        var match = Regex.Match(section, @"```text\r?\n(?<hex>(?:[0-9A-Fa-f ]+\r?\n)+)```");
+        Assert.True(match.Success);
+        return Convert.FromHexString(Regex.Replace(match.Groups["hex"].Value, @"\s+", ""));
     }
 
     private static uint ReadUInt32(byte[] bytes, ref int position)

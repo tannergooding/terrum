@@ -149,6 +149,41 @@ multiplying the opcode catalog by width combinations. It adds two bytes to a
 wide instruction and avoids continuation decoding per operand; no read or
 validation cost is implied.
 
+The exact-byte fixtures below encode the **general** Body layout. That
+layout is not yet an acceptable default size for trivial methods: the
+one-block checked-add section is 109 bytes for 16 instruction bytes,
+and `return 42` is 61 bytes for 6 instruction bytes. The section
+index accounts for 8 bytes in each; the rest is mostly repeated type,
+definition and use metadata. Those are measured *encoded sizes* of
+these examples, not evidence that removing indexes always makes JIT
+import faster. A compact Body form is a stabilization requirement for
+ordinary wrappers, getters and other small bodies.
+
+Candidate compact shapes should retain the **same logical** type,
+effect, definition/use, ownership and failure semantics: omit forced
+empty region/place/live lists; imply a sole block and its root region;
+derive by-value parameter IDs from MethodSig order; compress uniform
+types/kinds and per-value last-use positions instead of repeating
+IDs; and store short direct offsets with a wider form when needed.
+For a single block without a normal branch, a per-value definition
+seek table may cost more than decoding the retained instructions once.
+For two or three blocks with an inlinable predicate, direct branch,
+definition and use indexes can save an otherwise repeated CFG/dataflow
+scan. An explicitly selected Body form should make those tradeoffs
+visible without hiding a different execution language or weakening
+untrusted-input checks.
+
+Do not use a hard 1–3 block threshold or drop a required root/effect
+fact solely to save bytes. Define eligible shapes and canonical writer
+selection, an unambiguous form tag, bounded decoding to the same
+logical records and an independently tested general-form fallback.
+Measure encoded bytes **and** cold import/inlining time on real small
+methods, including wrappers, simple constructors and methods with
+declaration pre/postconditions (which do not add Body CFG blocks),
+before fixing compact thresholds. The general-form fixtures remain
+useful for exposing every field, but must not be mistaken for the
+expected encoding of every common method.
+
 Opcodes `0x01..0x7F` are operations; `0x80..0xEF` are terminators.
 `0xF0` introduces a width layout and is not standalone; `0x00` and
 `0xF1..0xFF` reject. A wide prefix, layout and registered opcode must fit
@@ -433,6 +468,39 @@ where the final number is `useBlockCount`. All four blocks have
 | B2 | `(r3,0)` | `r3` is live-in and supplied as B4's edge argument |
 | B3 | `(r2,0)` | `r2` is live-in and supplied as B4's edge argument |
 | B4 | `(r4,0)` | `r4` is defined at entry and used by Return |
+
+With one-byte Body-local IDs and common instructions, the **169-byte
+Body section** for this shape has a 161-byte row. Its direct indexes
+are `blockOffsets=[0,23,41,59,74]` and
+`terminatorOffsets=[17,14,14,13]`; all four value-definition offsets
+are `0xFFFF_FFFF` because these definitions are block parameters.
+The eight-byte section index, row header, block indexes and four block
+extents are:
+
+```text
+00 00 00 00  A1 00 00 00
+01 00 00 00  00  04 04 00 00 02  01 00 00 00  02 00 00 00
+01 00 01  02 00 01  02 00 01  02 00 01
+00 03 03 03 04
+FF FF FF FF  FF FF FF FF  FF FF FF FF  FF FF FF FF
+00 00 00 00  17 00 00 00  29 00 00 00
+3B 00 00 00  4A 00 00 00
+11 00 00 00  0E 00 00 00  0E 00 00 00  0D 00 00 00
+00 03 01 02 03 00 02 02 03 00 00 00 01 01 00 00 00
+81 01 02 00 03 00
+00 00 01 03 01 03 00 00 00 01 03 00 00 00
+80 04 01 03
+00 00 01 02 01 02 00 00 00 01 02 00 00 00
+80 04 01 02
+00 01 04 00 00 00 00 00 01 04 00 00 00
+83 04
+```
+
+B1's terminator selects B2 or B3, each with zero edge arguments.
+B2 and B3 each send one typed argument to B4; the sent `r3` or `r2`
+is an operand *use* at the terminator, while B4's `r4` is a new
+parameter definition. The row's use-block counts do not count B1's
+transit-only live-outs as reads.
 
 If an inliner knows `flag` is true, B1's indexed terminator identifies
 B2 as the only normal successor. B3 can be removed; its use inventory
