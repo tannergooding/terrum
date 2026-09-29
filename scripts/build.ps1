@@ -26,30 +26,6 @@ function Build() {
   if ($LastExitCode -ne 0) {
     throw "'Build' failed for '$solution'"
   }
-
-  if ([IO.Path]::GetFullPath($solution) -eq [IO.Path]::GetFullPath((Join-Path $RepoRoot "Terrum.slnx"))) {
-    BuildSelfHost
-  }
-}
-
-function BuildSelfHost() {
-  $candidateDir = Join-Path $ArtifactsDir "bin\self-host\$configuration"
-  Create-Directory -Path $candidateDir
-  $output = Join-Path $candidateDir "terrum-compiler-primitives.dll"
-  $compiler = Join-Path $RepoRoot "sources\terrumc\terrumc.csproj"
-  $character = Join-Path $RepoRoot "self-host\CharacterFacts.terrum"
-  $range = Join-Path $RepoRoot "self-host\SourceRange.terrum"
-  $token = Join-Path $RepoRoot "self-host\Token.terrum"
-  & dotnet run --no-build --project $compiler -c "$configuration" -- build-library $character `
-    --source $range --source $token `
-    --export Terrum.CodeAnalysis.IsAsciiDigit `
-    --export Terrum.CodeAnalysis.IsLineBreak `
-    --export Terrum.CodeAnalysis.GetDecimalDigit `
-    -o $output --runtime fail-fast
-
-  if ($LastExitCode -ne 0) {
-    throw "'Self-host compiler primitives' failed for '$solution'"
-  }
 }
 
 function Create-Directory([string[]] $Path) {

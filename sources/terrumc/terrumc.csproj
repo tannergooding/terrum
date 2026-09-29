@@ -12,4 +12,12 @@
     <ProjectReference Include="..\Terrum.CodeAnalysis\Terrum.CodeAnalysis.csproj" />
   </ItemGroup>
 
+  <Target Name="BuildNativeCompilerPrimitives" AfterTargets="Build"
+          Condition="'$(OS)' == 'Windows_NT'"
+          Inputs="$(MSBuildProjectFullPath);$(TargetPath);$(TargetDir)Terrum.CodeAnalysis.dll;$(MSBuildProjectDirectory)\..\..\self-host\CharacterFacts.terrum;$(MSBuildProjectDirectory)\..\..\self-host\SourceRange.terrum;$(MSBuildProjectDirectory)\..\..\self-host\Token.terrum"
+          Outputs="$(BaseArtifactsPath)bin/self-host/$(Configuration)/terrum-compiler-primitives.dll">
+    <MakeDir Directories="$(BaseArtifactsPath)bin/self-host/$(Configuration)" />
+    <Exec Command="dotnet &quot;$(TargetPath)&quot; build-library &quot;$(MSBuildProjectDirectory)\..\..\self-host\CharacterFacts.terrum&quot; --source &quot;$(MSBuildProjectDirectory)\..\..\self-host\SourceRange.terrum&quot; --source &quot;$(MSBuildProjectDirectory)\..\..\self-host\Token.terrum&quot; --export Terrum.CodeAnalysis.IsAsciiDigit --export Terrum.CodeAnalysis.IsLineBreak --export Terrum.CodeAnalysis.GetDecimalDigit -o &quot;$(BaseArtifactsPath)bin/self-host/$(Configuration)/terrum-compiler-primitives.dll&quot; --runtime fail-fast" />
+  </Target>
+
 </Project>
