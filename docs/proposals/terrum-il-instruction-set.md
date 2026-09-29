@@ -299,6 +299,47 @@ cannot fit. All block offsets, terminator offsets and the final
 block-data length must fit the selected width. Validate each bounded
 offset and list before use, even when semantic indexes are trusted.
 
+#### Compact-form information accounting
+
+> [!IMPORTANT]
+> **Compact encodings omit storage only where the form defines how to
+> reconstruct it.** They never infer control flow from natural
+> fallthrough: operation counts and instructions remain encoded, and
+> every block has an explicit terminator.
+>
+> - **Compact linear (form bits 1; `bodyLayout=0x04` at one-byte
+>   width):** one block (B1), region 0,
+>   no places, no normal edges, and the corresponding block/region/place
+>   counts and boundary/use lists are implicit. Entry parameter types
+>   and modes and the declared result come from the selected
+>   MethodSig/Param rows; only by-value parameters are eligible, and
+>   Body-local entry IDs follow parameter order. Result IDs follow
+>   operation result order. `valueCount` (by-value parameter count plus
+>   scanned result counts), value kinds/types/descriptors, definition
+>   locations, use-block counts and last-use ordinals are reconstructed
+>   by scanning encoded operations in order, using their schemas and
+>   selected contracts. Still encoded are `typeCount`, the fixed-`u32`
+>   TypeSpec `typeMap`, `operationCount`, every operation and the
+>   terminator. The terminator is not inferred from the row end.
+> - **Compact indexed (form bits 2; `bodyLayout=0x08` at one-byte
+>   width):** `placeCount=0` and place
+>   fields are absent; descriptor kind is implicitly by-value (kind 0).
+>   A missing `presence` bit means its list is empty; a missing region
+>   bit means `regionId=0`. Nonzero region IDs and nonempty lists are
+>   encoded. Block IDs follow `blockOffsets` order; each descriptor slot
+>   `i` describes value ID `i+1`. Counts, type map, region entries,
+>   descriptors, definition indexes, block/terminator offsets,
+>   operation counts, operations and explicit terminators remain
+>   encoded. Edges and liveness are not inferred from fallthrough.
+> - **Cross-section and section data (both forms):** `MethodDef.bodyRow`
+>   selects the Body row; `MethodDef.signature` selects MethodSig, whose
+>   parameter range selects Param rows. The Body `typeMap` contains
+>   encoded fixed-`u32` references to artifact-wide TypeSpec rows; local
+>   `t` IDs index that map, not metadata rows. The owning module supplies
+>   contextual resolution for method/import operands. Directory entries
+>   and the Body-section row-offset index are also encoded outside the
+>   Body row; they are not omitted or reconstructed from the row.
+
 The general form remains the structural fallback for places, non-value
 parameters and other rich bodies; **neither form yet encodes** complete
 ownership/loan/cleanup, safepoint roots or exceptional regions. A
@@ -468,58 +509,94 @@ currently encoded Body examples **do not yet contain** GC roots.
 
 Consider `AddThenThree` under the fail-fast policy. The example uses
 the compact-linear encoding appropriate to this root-free, one-block
-method. The field listing is a readable projection of the stored rows,
-not an additional wire syntax. The byte sequence below encodes the Body
-section only.
+method. The [compact-form accounting](#compact-form-information-accounting)
+summarizes what this representation stores versus reconstructs. The
+field listing is a readable projection of the stored rows, not an
+additional wire syntax. The byte sequence below encodes the Body section
+only.
+Throughout the examples, artifact-wide metadata context is separate from
+Body-local type IDs and CFG/index facts; shape listings are projections,
+and explicitly labeled byte listings contain complete Body sections.
+Inline byte examples are instruction or operand fragments, not full
+artifacts.
 
 ```text
 Source: int32 AddThenThree(int32 x, int32 y) { return x + y + 3; }
-TRRM artifact directory (one entry per present section kind):
-    TypeSpec (0x0011)   -> TypeSpec section, row 1: Builtin(int32)
-    MethodSig (0x0017)  -> MethodSig section, row 1:
-                          (resultTypeSpec=1, receiverTypeSpec=0,
-                           paramFirst=1, paramCount=2,
-                           genericFirst=0, genericCount=0)
-    Param (0x0018)      -> Param section, row 1:
-                          (ownerMethodSig=1, ordinal=0, typeSpec=1, mode=0)
-                          Param section, row 2:
-                          (ownerMethodSig=1, ordinal=1, typeSpec=1, mode=0)
-    MethodDef (0x0016)  -> MethodDef section, row 1:
-                          (signature=1, bodyRow=1)
-    Body (0x0020)       -> Body section, row 1 (compact linear):
-                          bodyLayout=0x04
-                          typeCount=1
-                          typeMap=[t1: TypeSpec[1]]
-                          operationCount=3
-                          r3 = CheckedBinary add r1, r2
-                          r4 = ConstSigned t1, 3
-                          r5 = CheckedBinary add r3, r4
-                          Return r5
+Artifact-wide table rows (separate sections; not Body bytes):
+    TypeSpec (0x0011): // TypeSpec section
+        row[1]: Builtin(int32)
+    MethodSig (0x0017): // MethodSig section
+        row[1]:
+            resultTypeSpec: TypeSpec[1]
+            receiverTypeSpec: 0
+            paramFirst: 1
+            paramCount: 2
+            genericFirst: 0
+            genericCount: 0
+    Param (0x0018): // Param section
+        row[1]:
+            ownerMethodSig: MethodSig[1]
+            ordinal: 0
+            typeSpec: TypeSpec[1]
+            mode: 0
+        row[2]:
+            ownerMethodSig: MethodSig[1]
+            ordinal: 1
+            typeSpec: TypeSpec[1]
+            mode: 0
+    MethodDef (0x0016): // MethodDef section
+        row[1]:
+            signature: MethodSig[1]
+            bodyRow: Body[1]
+
+Body (0x0020): // Body section; directory recordCount=1
+    // Candidate compact linear; 31 encoded bytes
+    rowOffsets: [0, 23] // 8-byte section index; bounds Body row 1
+    row[1]: // 23-byte Body row
+        bodyLayout: 0x04
+        typeCount: 1
+        typeMap:
+            t1: TypeSpec[1] // fixed-u32 reference to the TypeSpec row
+        operationCount: 3
+        operations:
+            r3 = CheckedBinary add r1, r2
+            r4 = ConstSigned t1, 3
+            r5 = CheckedBinary add r3, r4
+        terminator: Return r5
 ```
 
-The header's `directoryOffset` locates the directory. Each entry above
-stores its section kind, policy flags, record count, artifact-relative
-section offset and section byte length; the arrows are explanatory, not additional
-wire fields. `[1]` means the one-based row in that artifact-wide table,
-not a byte offset, local instruction ID or per-method subtable. The
-Body entry has `recordCount=1`; its section starts with offsets `0,23`
-(the first eight bytes below), bounding one 23-byte Body row.
+The header's `directoryOffset` locates the artifact directory. Each
+directory entry stores its section kind, policy flags, record count,
+artifact-relative section offset and section byte length; the directory
+is not included in the Body section bytes shown below. Table row numbers
+such as `TypeSpec[1]` and `MethodSig[1]` are one-based and artifact-wide;
+they are not byte offsets, Body-local IDs or per-method subtables.
+The displayed fields contain references to those separate rows, not
+copies of their contents.
 `MethodDef[1].signature` selects the separate MethodSig row, whose
-parameter range selects the two Param rows; its `bodyRow` selects
-the Body row. All section entries and row numbers here are artifact-wide,
-not copied into the method. TypeSpec and MethodSig (with its Param rows)
-are structural data available to other declarations; contracts, names
-and visibility belong to each MethodDef, not to the Body. For example,
-a distinct `MethodDef[2]` with `signature=1` and `bodyRow=1` could have
-different pre/postconditions, provided this implementation satisfies
-both declarations' contracts once those clauses are defined. The Body
-bytes remain one shared row, not
-one copy per declaration. This candidate sharing is **not** permitted
-by the currently approved metadata ownership rule.
+`paramFirst` and `paramCount` select the two Param rows; its `bodyRow`
+selects Body row 1. The Body section's offset index is separate from its
+row: offsets `0,23` bound that one 23-byte row. TypeSpec and MethodSig
+(with its Param rows) are structural data available to other
+declarations; contracts, names and visibility belong to each MethodDef,
+not to the Body. For example, a distinct MethodDef row can select the
+same artifact-wide signature and Body row:
 
-The Body section is 31 bytes: an 8-byte shared row index, a
-7-byte row header and 16 instruction bytes. The Body fields above
-appear in row order:
+```text
+MethodDef (0x0016), row[2]: // illustrative references; no bytes shown
+    signature: MethodSig[1]
+    bodyRow: Body[1]
+```
+
+It could have different pre/postconditions, provided this implementation
+satisfies both declarations' contracts once those clauses are defined.
+The Body bytes remain one shared row, not one copy per declaration. This
+candidate sharing is **not** permitted by the currently approved
+metadata ownership rule.
+
+The encoded Body section is 31 bytes: an 8-byte shared row index, a
+7-byte row header and 16 instruction bytes. The sequence below encodes
+the section index followed by Body row 1:
 
 ```text
 00 00 00 00  17 00 00 00
@@ -527,13 +604,11 @@ appear in row order:
 15 03 01 01 02  02 04 01 03  15 05 01 03 04  83 05
 ```
 
-There is no separate entry-block record, region 0 record, place or
-boundary-live array, parameter-definition sentinel, value descriptor,
-definition-offset table or last-use list in this row. B1 and region 0
-are implicit; MethodSig supplies by-value `r1` and `r2` (source `x`
-and `y`), and the three ordered operations define `r3`–`r5`. The
-expected `int32` context selects checked primitive addition, not a
-numeric fallback or user witness. A bounded scan derives their types,
+Here MethodSig supplies
+by-value `r1` and `r2` (source `x` and `y`), and the three ordered
+operations define `r3`–`r5`. The expected `int32` context selects
+checked primitive addition, not a numeric fallback or user witness.
+A bounded scan derives their types,
 definitions and last-use ordinals `(0,0,2,2,3)`, as well as the
 checked failure order and return. The `typeMap` still supplies complete
 `int32` identity. Those omitted records are either inapplicable here
@@ -559,7 +634,8 @@ For example, if a checked add instead defines `r256`, it uses
 the destination and both operands. That instruction prefix does not set
 the Body's structural widths; a real Body with 256 values also needs
 a two-byte local width for its `valueCount`.
-In a separate body, `ConstSigned r3, t1, 200` instead uses
+For a separate instruction fragment (not a complete Body section), let
+Body-local `t1` map to an `int32` TypeSpec. `ConstSigned r3, t1, 200` uses
 `F0 10 02 03 01 C8 00` (one-byte references, two-byte signed data); if
 its result ID were 256, it would use
 `F0 11 02 00 01 01 00 C8 00`. The prefix changes encoded widths, not
@@ -572,31 +648,61 @@ round trip alone is insufficient.
 Now make the first add conditional:
 `int32 MaybeAdd(bool flag, int32 x, int32 y) {
 if (flag) { return x + y; } return x; }`.
-MethodSig supplies three by-value entry parameters. Let `t1` be `bool`
-and `t2` be `int32`. The Body has four by-value descriptors:
-`r1:t1` for `flag`, `r2:t2` for `x`, `r3:t2` for `y`, and `r4:t2`
-for the checked sum. Unlike the preceding example, there are three
-normal blocks, but the add remains an operation within its block:
+The following separates artifact-wide metadata context from the Body's
+local type IDs and logical block shape; it is not a byte listing:
 
 ```text
-B1(r1 <- flag, r2 <- x, r3 <- y):  // liveOut=[r2,r3]
-    BranchIf r1, B2(), B3()
-B2():                              // liveIn=[r2,r3]
-    r4 = CheckedBinary add r2, r3
-    Return r4
-B3():                              // liveIn=[r2]
-    Return r2
+Metadata context (separate sections; not Body bytes):
+    TypeSpec (0x0011):
+        row[1]: Builtin(bool)
+        row[2]: Builtin(int32)
+    MaybeAdd signature summary (semantic; MethodSig/Param row layout omitted):
+        parameters: [by-value TypeSpec[1], by-value TypeSpec[2],
+                     by-value TypeSpec[2]]
+        result: TypeSpec[2]
+    MethodDef reference:
+        bodyRow: this Body row
+
+Body shape (logical projection; not wire syntax):
+    typeMap:
+        t1: TypeSpec[1]
+        t2: TypeSpec[2]
+    valueDescriptors:
+        r1: t1 // flag
+        r2: t2 // x
+        r3: t2 // y
+        r4: t2 // checked sum
+    blocks:
+        B1(r1 <- flag, r2 <- x, r3 <- y): // liveOut=[r2,r3]
+            BranchIf r1, B2(), B3()
+        B2(): // liveIn=[r2,r3]
+            r4 = CheckedBinary add r2, r3
+            Return r4
+        B3(): // liveIn=[r2]
+            Return r2
 ```
 
-`valueDefStarts=[0,3,4,4]`. The first three definition offsets are
-parameter sentinels in B1; `r4` points to B2's checked operation. The
-descriptors' `useBlockCount`s are `(1,2,1,1)` for `r1..r4`:
+The Body has four by-value descriptors and three normal blocks; the add
+remains an operation within its block. Its Body index projection (not
+encoded bytes) is:
+
+```text
+Body index:
+valueDefStarts: [0, 3, 4, 4]
+definition offsets:
+    r1..r3: parameter sentinels in B1
+    r4: B2 checked operation
+useBlockCounts: [1, 2, 1, 1] // r1..r4
+last uses:
+    B1: [(r1,0)]
+    B2: [(r2,0),(r3,0),(r4,1)]
+    B3: [(r2,0)]
+```
+
 B1 uses `r1` at its terminator, B2 uses `r2` and `r3` at its add
 and `r4` at Return, and B3 uses `r2` at Return. `r2` and `r3`
-cross B1 without an operand use there. Their last-use inventories are
-B1 `[(r1,0)]`, B2 `[(r2,0),(r3,0),(r4,1)]`, and B3 `[(r2,0)]`.
-The indices count B2 and B3 as distinct use blocks for `r2`, even
-though only one arm executes.
+cross B1 without an operand use there. The use-block counts count B2
+and B3 as distinct use blocks for `r2`, even though only one arm executes.
 
 If the flag is known false after specialization, B2 and its checked add
 are unreachable and may be pruned; if known true, B3 is unreachable.
@@ -609,14 +715,18 @@ the next example introduces a merge argument, and then a loop backedge.
 
 #### Compact indexed conditional sum
 
-With `TypeSpec[1]=bool`, `TypeSpec[2]=int32` and the MethodSig above,
-the three-block `MaybeAdd` row has `valueDefStarts=[0,3,4,4]`.
-The first three definition offsets are parameter sentinels and the
-fourth seeks B2's checked add at offset 12. Its value descriptors'
-use-block counts are `(1,2,1,1)` as described above. Compact block
-offsets are `[0,18,37,46]`; terminator offsets are `[12,17,7]`.
-The candidate compact-indexed Body section is 90 bytes (8-byte
-offset index plus an 82-byte row):
+See [compact-form information accounting](#compact-form-information-accounting)
+for the implicit-versus-encoded fields in this form.
+
+This fixture uses the same artifact-wide metadata context and Body-local
+type map shown above. Its exact bytes encode only the candidate
+compact-indexed Body (0x0020) section: 90 bytes (8-byte offset index plus an
+82-byte row). The three-block `MaybeAdd` row has
+`valueDefStarts=[0,3,4,4]`: the first three definition offsets are
+parameter sentinels and the fourth seeks B2's checked add at offset 12.
+Its value descriptors' use-block counts are `(1,2,1,1)`.
+Compact block offsets are `[0,18,37,46]`; terminator offsets are
+`[12,17,7]`:
 
 ```text
 00 00 00 00  52 00 00 00
@@ -641,53 +751,126 @@ The following sketches use the same type-map, value-descriptor,
 block-header and edge **rules**, with their own MethodSigs. They show
 composition rather than a required source lowering or complete byte
 listing; a writer must still encode exact block and terminator offsets.
+Artifact-wide TypeSpec and MethodSig/Param context is shown separately
+from Body-local IDs. Only blocks explicitly labeled as encoded bytes
+give a wire listing.
 
 For `int32 TwiceSum(int32 x, int32 y) { int32 tmp = x + y;
-return tmp + tmp; }`, one block defines `r3 = CheckedBinary add r1, r2`,
-then `r4 = CheckedBinary add r3, r3`, and returns `r4`. Reuse needs no
-duplicate descriptor or `Copy`
-operation for this Copy scalar; a unique value could not be duplicated
-the same way. With all four value descriptors `(t1,value,useBlockCount=1)`,
-its definition starts are `[0,4]`: `r1` and `r2` have the parameter
-sentinel, `r3` points to operation 0 and `r4` to operation 1. B1's
-last-use entries are `(r1,0),(r2,0),(r3,1),(r4,2)`, with ordinal 2
-denoting Return. `r3` is read *twice* by operation 1 but appears once
-in the per-block inventory and its `useBlockCount` is 1, not 2.
-
-For `int32 Choose(bool flag, int32 x, int32 y) { mut int32 chosen = x;
-if (flag) { chosen = y; } return chosen; }`, MethodSig has the three
-by-value parameters in that order and an `int32` result. The Body has
-`(blockCount,valueCount,placeCount,regionCount,typeCount)=(4,4,0,0,2)`,
-its MethodDef's `bodyRow` pointing to this row,
-`typeMap=[t1:TypeSpec[1] (bool),t2:TypeSpec[2] (int32)]`, and descriptors
-`[r1:t1,r2:t2,r3:t2,r4:t2]`, all by-value. All blocks have region 0,
-no places and no operations. An SSA lowering needs no place for the
-unaddressed source local:
+return tmp + tmp; }`, its artifact-wide metadata context is:
 
 ```text
-B1(r1 <- flag, r2 <- x, r3 <- y): // liveOut=[r2,r3]
-    BranchIf r1, B2(), B3()
-B2():                              // liveIn=[r3], liveOut=[r3]
-    Branch B4(r3)
-B3():                              // liveIn=[r2], liveOut=[r2]
-    Branch B4(r2)
-B4(r4 <- selected value):          // no liveIn
-    Return r4
+Signature summary (semantic; MethodSig/Param row layout omitted):
+    parameters: [by-value int32, by-value int32]
+    result: int32
+TypeSpec selected by Body-local t1:
+    complete int32 TypeSpec row
+```
+
+The row number is not material to this logical shape. Its Body shape is:
+
+```text
+Body shape (logical projection; no bytes assigned):
+    typeMap:
+        t1: complete int32 TypeSpec
+    valueDescriptors:
+        r1..r4:
+            typeId: t1
+            kind: value
+            useBlockCount: 1
+    blocks:
+        B1(r1 <- x, r2 <- y):
+            r3 = CheckedBinary add r1, r2
+            r4 = CheckedBinary add r3, r3
+            Return r4
+    indexes:
+        valueDefStarts: [0, 4]
+        definitions:
+            r1, r2: parameter sentinels
+            r3: B1 operation 0
+            r4: B1 operation 1
+        last uses:
+            B1: [(r1,0),(r2,0),(r3,1),(r4,2)]
+```
+
+Reuse needs no duplicate descriptor or `Copy` operation for this Copy
+scalar; a unique value could not be duplicated the same way. Ordinal 2
+denotes Return. `r3` is read *twice* by operation 1 but appears once
+in the per-block inventory, so its `useBlockCount` is 1, not 2.
+
+For `int32 Choose(bool flag, int32 x, int32 y) { mut int32 chosen = x;
+if (flag) { chosen = y; } return chosen; }`, the artifact-wide metadata
+context is separate from the Body:
+
+```text
+TypeSpec (0x0011):
+    row[1]: Builtin(bool)
+    row[2]: Builtin(int32)
+Choose signature summary (semantic; MethodSig/Param row layout omitted):
+    parameters: [by-value TypeSpec[1], by-value TypeSpec[2],
+                 by-value TypeSpec[2]]
+    result: TypeSpec[2]
+Choose MethodDef reference:
+    bodyRow: this Body row
+```
+
+The Body-local type map and logical CFG are:
+
+```text
+Body shape (logical projection; not wire syntax):
+    counts:
+        blockCount: 4
+        valueCount: 4
+        placeCount: 0
+        regionCount: 0
+        typeCount: 2
+    typeMap:
+        t1: TypeSpec[1] // bool
+        t2: TypeSpec[2] // int32
+    valueDescriptors:
+        r1: t1 // flag
+        r2: t2 // x
+        r3: t2 // y
+        r4: t2 // selected value
+    blocks: // all in region 0; no places or operations
+        B1(r1 <- flag, r2 <- x, r3 <- y): // liveOut=[r2,r3]
+            BranchIf r1, B2(), B3()
+        B2(): // liveIn=[r3], liveOut=[r3]
+            Branch B4(r3)
+        B3(): // liveIn=[r2], liveOut=[r2]
+            Branch B4(r2)
+        B4(r4 <- selected value): // no liveIn
+            Return r4
 ```
 
 The two explicit incoming arguments to B4 have the same complete type,
 but `r4` is defined once by B4's parameter, not by either predecessor.
 The branch copies only Copy values; `liveOut` is the union of the
 successors' live-ins and explicit edge arguments. Source variable names
-and the apparent assignment are not stored in the Body.
+and the apparent assignment are not stored in the Body. An SSA lowering
+needs no place for the unaddressed source local.
 
-The method-wide definition starts are `[0,3,3,3,4]`. The first
-three value-definition offsets are parameter sentinels in B1, and
-`r4` is a parameter sentinel in B4; the intervening empty intervals
-mean B2 and B3 define no values. The mapped value descriptors are
-`[r1:(t1,value,1),r2:(t2,value,1),r3:(t2,value,1),r4:(t2,value,1)]`,
-where the final number is `useBlockCount`. All four blocks have
-`operationCount=0`, so ordinal 0 means their terminator:
+The method-wide Body index projection (not encoded bytes) is:
+
+```text
+Body index:
+valueDefStarts: [0, 3, 3, 3, 4]
+definitions:
+    r1..r3: parameter sentinels in B1
+    r4: parameter sentinel in B4
+valueDescriptors:
+    r1:
+        typeId: t1
+        kind: value
+        useBlockCount: 1
+    r2..r4:
+        typeId: t2
+        kind: value
+        useBlockCount: 1
+```
+
+The intervening empty definition intervals mean B2 and B3 define no
+values. All four blocks have `operationCount=0`, so ordinal 0 means
+their terminator:
 
 | Block | `valueLastUses` | Boundary facts |
 |---|---|---|
@@ -698,6 +881,9 @@ where the final number is `useBlockCount`. All four blocks have
 
 #### Compact indexed conditional merge
 
+See [compact-form information accounting](#compact-form-information-accounting)
+for the implicit-versus-encoded fields in this form.
+
 The four-block `Choose` example qualifies for compact indexed despite
 having more than three blocks: it has only Copy values and normal
 edges, and its direct definitions/uses and branch addresses remain
@@ -705,8 +891,10 @@ available. The local-width (one-byte) definition-offset sentinels,
 block offsets `[0,18,31,44,53]` and terminator offsets
 `[12,9,9,7]` directly index the definitions and terminators. Each block's
 presence byte omits zero counts and lists; the four value descriptor
-kinds are implicitly by-value. Its Body section is 100 bytes
-(8-byte index, 92-byte row):
+kinds are implicitly by-value. Its Body (0x0020) section is 100 bytes
+(8-byte index, 92-byte row). The following
+exact byte listing contains only that Body (0x0020) section; the artifact-wide
+TypeSpec and signature context is separate:
 
 ```text
 00 00 00 00  5C 00 00 00
@@ -747,30 +935,58 @@ To repeat the preceding addition, consider
 `int32 RepeatAdd(int32 x, int32 y, int32 n) {
 mut int32 sum = x; mut int32 i = 0;
 while (i < n) { sum = sum + y; i = i + 1; } return sum; }`.
-The method has three by-value `int32` parameters and an `int32`
-result. Here the loop's changing `sum` and `i` are block parameters,
-not addressable places: their source names are not needed by the Body.
-The five counts are `(4,11,0,1,2)`, with
-`typeMap=[t1:TypeSpec[1] (int32),t2:TypeSpec[2] (bool)]`.
-Region 1 is `(kind=loop,parent=0,entry=B2,exit=B4,cleanup=0)`;
-B2 and B3 belong to it, B1 and B4 to region 0:
+The artifact-wide metadata context is:
 
 ```text
-B1(r1 <- x, r2 <- y, r3 <- n):    // liveOut=[r1,r2,r3,r4]
-    r4 = ConstSigned t1, 0
-    Branch B2(r1,r4)
-B2(r5 <- sum, r6 <- i):           // liveIn=[r2,r3], liveOut=[r2,r3,r5,r6]
-    r7 = Binary Less r6, r3       // t2 bool
-    BranchIf r7, B3(), B4(r5)
-B3():                             // liveIn=[r2,r3,r5,r6], liveOut=[r2,r3,r8,r10]
-    r8 = CheckedBinary add r5, r2
-    r9 = ConstSigned t1, 1
-    r10 = CheckedBinary add r6, r9
-    Branch B2(r8,r10)
-B4(r11 <- final sum):             // no liveIn; outside loop
-    Return r11
+TypeSpec (0x0011):
+    row[1]: Builtin(int32)
+    row[2]: Builtin(bool)
+RepeatAdd signature summary (semantic; MethodSig/Param row layout omitted):
+    parameters: [by-value TypeSpec[1], by-value TypeSpec[1],
+                 by-value TypeSpec[1]]
+    result: TypeSpec[1]
 ```
 
+The Body shape is a logical projection, not an assigned byte listing:
+
+```text
+Body shape (logical projection; byte offsets are not assigned):
+    counts:
+        blockCount: 4
+        valueCount: 11
+        placeCount: 0
+        regionCount: 1
+        typeCount: 2
+    typeMap:
+        t1: TypeSpec[1] // int32
+        t2: TypeSpec[2] // bool
+    region 1:
+        kind: loop
+        parent: 0
+        entry: B2
+        exit: B4
+        cleanup: 0
+    region membership:
+        B1, B4: region 0
+        B2, B3: region 1
+    blocks:
+        B1(r1 <- x, r2 <- y, r3 <- n): // liveOut=[r1,r2,r3,r4]
+            r4 = ConstSigned t1, 0
+            Branch B2(r1,r4)
+        B2(r5 <- sum, r6 <- i): // liveIn=[r2,r3], liveOut=[r2,r3,r5,r6]
+            r7 = Binary Less r6, r3 // t2 bool
+            BranchIf r7, B3(), B4(r5)
+        B3(): // liveIn=[r2,r3,r5,r6], liveOut=[r2,r3,r8,r10]
+            r8 = CheckedBinary add r5, r2
+            r9 = ConstSigned t1, 1
+            r10 = CheckedBinary add r6, r9
+            Branch B2(r8,r10)
+        B4(r11 <- final sum): // no liveIn; outside loop
+            Return r11
+```
+
+The loop's changing `sum` and `i` are block parameters, not addressable
+places; their source names are not stored in the Body.
 The initial edge supplies `(x,0)` and the backedge supplies the next
 `(sum,i)` to the same two header parameters. The false edge supplies
 the current sum to B4. `r2` and `r3` are dominating values, not
@@ -781,15 +997,33 @@ B3 instruction reads it. Both additions may fail at their operation
 sites under the fail-fast policy. The region and its backedge do not
 create implicit exceptional successors.
 
-The eleven value descriptors, in ID order, are
-`[r1:t1/1,r2:t1/1,r3:t1/1,r4:t1/1,r5:t1/2,r6:t1/2,
-r7:t2/1,r8:t1/1,r9:t1/1,r10:t1/1,r11:t1/1]`.
-All have value kind; the suffix is `useBlockCount`, **not** the number
-of traversals of a loop edge. `valueDefStarts=[0,4,7,10,11]`;
-`r1..r3`, `r5..r6` and `r11` have parameter-sentinel definition offsets.
-The remaining offsets point to B1 operation 0, B2 operation 0, and
-B3 operations 0, 1 and 2, respectively. The actual row stores
-byte offsets, not these labels; this sketch does not assign bytes.
+The Body index projection is:
+
+```text
+valueDescriptors: // all value kind
+    r1..r4:
+        typeId: t1
+        useBlockCount: 1
+    r5..r6:
+        typeId: t1
+        useBlockCount: 2
+    r7:
+        typeId: t2
+        useBlockCount: 1
+    r8..r11:
+        typeId: t1
+        useBlockCount: 1
+valueDefStarts: [0, 4, 7, 10, 11]
+definitions:
+    r1..r3, r5..r6, r11: parameter sentinels
+    r4: B1 operation 0
+    r7: B2 operation 0
+    r8..r10: B3 operations 0..2
+```
+
+These descriptor counts are `useBlockCount`, **not** the number of
+traversals of a loop edge. The actual row stores byte offsets, not the
+operation labels above; this sketch does not assign bytes.
 
 | Block | `operationCount` | `valueLastUses` | Important distinction |
 |---|---:|---|---|
@@ -857,8 +1091,9 @@ consumer rejects them before execution. Diagnostic codes, error
 ordering/recovery and numeric parser or audit budgets are not assigned here.
 
 The [introductory checked-add example](#checked-add-end-to-end-informative)
-traces the common form from source through Body structure to operand bytes.
-It also shows why a wide instruction prefix and the enclosing
+traces compact-linear Body storage and its unprefixed instruction
+operands from source through structure to bytes. The adjacent wider
+operand variants show that an instruction prefix and the enclosing
 `bodyLayout` select widths independently.
 
 ## Body record, direct block index and regions
@@ -1418,12 +1653,52 @@ operation in B1. The alternative below adds an addressable local place
 and is decode-only in this revision.
 
 For `local = local + 5`, instead declare a mutable, initially vacant
-`int32` place `p1` in the body place table. Its header and operations have
-this decode-only shape:
+`int32` place `p1` in the Body place table. Its artifact-wide type context
+is separate from the Body:
 
-| Block | Value parameters | Live-in / live-out values | Inherited places | Starts / ends | Operations and terminator |
-|---|---|---|---|---|---|
-| B1 | None | None / none | None | Start `p1` vacant / end `p1` | `r1 = PlaceLocal p1`; `r2 = ConstSigned t1, 10`; `Initialize r1, r2`; `r3 = Load r1`; `r4 = ConstSigned t1, 5`; `r5 = CheckedBinary add r3, r4`; `Assign r1, r5`; `Return r5` |
+```text
+TypeSpec (0x0011):
+    row[1]: Builtin(int32)
+```
+
+The following Body projection is decode-only and not a wire listing:
+
+```text
+Body shape:
+    typeMap:
+        t1: TypeSpec[1]
+    placeDescriptors:
+        p1:
+            typeId: t1
+            regionId: 0
+            flags: 0x05
+            useBlockCount: 1
+    valueDescriptors:
+        r1:
+            typeId: t1
+            kind: place-handle
+            useBlockCount: 1
+        r2..r5:
+            typeId: t1
+            kind: value
+            useBlockCount: 1
+    blocks:
+        B1:
+            parameters: []
+            liveIn, liveOut: [], []
+            inheritedPlaces: []
+            startPlaces: [p1 vacant]
+            operations:
+                r1 = PlaceLocal p1
+                r2 = ConstSigned t1, 10
+                Initialize r1, r2
+                r3 = Load r1
+                r4 = ConstSigned t1, 5
+                r5 = CheckedBinary add r3, r4
+                Assign r1, r5
+            endPlaces: [p1]
+            terminator: Return r5
+```
 
 `r5` is assigned and returned only after the check succeeds. `PlaceLocal`,
 `Initialize`, `Load` and
@@ -1431,22 +1706,33 @@ this decode-only shape:
 executable. `PlaceField` produces a place; `Extract` reads a Copy field
 from a by-value aggregate.
 
-Its `typeMap=[t1:TypeSpec[1] (int32)]` and the place descriptor is
-`p1:(t1,region0,flags=05,useBlockCount=1)`. The value descriptors are
-`r1:(t1,place-handle,1)` and `r2`–`r5:(t1,value,1)`: `r1` has the
-place's *referent* type, not a raw pointer type. No value is a block
-parameter; `valueDefStarts=[0,5]` and all five definition offsets
-point to B1 operations. `p1` becomes active vacant at entry and ends
-after the operations; its last-use ordinal 7 includes the end-place
-transition. `r1` first becomes available at `PlaceLocal` (operation 0)
-and is last read by `Assign` (6). Ordinary `r2` is last read by
-`Initialize` (2), `r3` and `r4` by the checked add (5), and `r5` by
-Return (7). `r5` is also read by `Assign` (6), but the last-use
-inventory stores only its *final* use. Dropping this block would also
+`r1` has the place's *referent* type, not a raw pointer type. No value
+is a block parameter; the Body index projection (not encoded bytes) is:
+
+```text
+Body index:
+valueDefStarts: [0, 5]
+valueDefinitionOffsets: [24, 27, 34, 37, 41] // B1-relative bytes
+placeLastUses: [(p1, 7)] // end-place transition
+valueLastUses:
+    r1: Assign (6)
+    r2: Initialize (2)
+    r3, r4: CheckedBinary (5)
+    r5: Return (7)
+```
+
+All five definition offsets point to B1 operations. `p1` becomes active
+vacant at entry and ends after the operations; its last-use ordinal 7
+includes the end-place transition. `r1` first becomes available at
+`PlaceLocal` (operation 0) and is last read by `Assign` (6). Ordinary
+`r2` is last read by `Initialize` (2), `r3` and `r4` by the checked add
+(5), and `r5` by Return (7). `r5` is also read by `Assign` (6), but the
+last-use inventory stores only its *final* use. Dropping this block would also
 remove its place-state transitions; dropping individual effects from
 a retained block requires their full ownership and failure contract.
 
-The encoded Body section is 122 bytes. Its `05` place flags mean mutable
+The following exact bytes encode only the 122-byte Body (0x0020) section
+(8-byte offset index and 114-byte row). Its `05` place flags mean mutable
 and initially vacant; block offsets are `[0,51]`, and the terminator
 offset is `[49]`. `p1` occurs in one block; B1's last-use inventory records
 its end transition at ordinal 7. The five value definitions occur at
@@ -1479,19 +1765,45 @@ source.
 ## Worked bytes and illustrative size
 
 For [metadata example](../il-metadata.md#row-assignment-example),
-MethodDef row 1 returns `int32` with no arguments; TypeSpec row 1 is
-`int32`. Its `return 42` body has one value, one implicit entry block,
-no places and no explicit regions. Compact linear is the natural
-space-saving illustration; the general form remains valid but is not
-repeated here.
+the artifact-wide metadata context, separate from the Body section, is:
+
+```text
+TypeSpec (0x0011):
+    row[1]: Builtin(int32)
+MethodDef (0x0016):
+    row[1]: // selects the zero-argument int32-returning declaration
+        bodyRow: Body[1]
+```
+
+The `return 42` Body has one value, one implicit entry block, no places
+and no explicit regions. Compact linear is the natural space-saving
+illustration; the general form remains valid but is not repeated here.
 
 ### Compact linear constant return
 
-The `return 42` method uses a compact-linear Body section of
-21 bytes (8-byte row index and 13-byte row). `ConstBits` and Return
-are unchanged; MethodSig and the mapped type supply the complete
-result type. The absent block header, place/region records, descriptor
-and definition/last-use indexes need no empty placeholders:
+See [compact-form information accounting](#compact-form-information-accounting)
+for the implicit-versus-encoded fields in this form.
+
+The `return 42` method uses a compact-linear Body section of 21 bytes
+(8-byte row index and 13-byte row). `ConstBits` and Return are unchanged;
+the separate MethodSig and mapped TypeSpec supply the complete result
+type. Its Body row projection and exact bytes are:
+
+```text
+Body row (compact linear; 13 bytes):
+    bodyLayout: 0x04
+    typeCount: 1
+    typeMap:
+        t1: TypeSpec[1] // int32
+    operationCount: 1
+    operations:
+        r1 = ConstBits t1, 42
+    terminator: Return r1
+```
+
+The absent block header, place/region records, descriptor and
+definition/last-use indexes need no empty placeholders. The following
+sequence contains only the Body (0x0020) section bytes:
 
 ```text
 00 00 00 00  0D 00 00 00
@@ -1501,10 +1813,34 @@ and definition/last-use indexes need no empty placeholders:
 
 #### Compact linear parameter return
 
-For `int32 Identity(int32 x) { return x; }`, assume MethodDef row 1
-and TypeSpec row 1 as above. The entry parameter is `r1`,
-`operationCount=0` and `Return r1` follows. This is a 17-byte section
-with a 9-byte row:
+See [compact-form information accounting](#compact-form-information-accounting)
+for the implicit-versus-encoded fields in this form.
+
+For a separate `Identity` fixture,
+`int32 Identity(int32 x) { return x; }`, the artifact-wide context is:
+
+```text
+TypeSpec (0x0011):
+    row[1]: Builtin(int32)
+MethodDef (0x0016):
+    row[1]: // Identity takes int32 by value and returns int32
+        bodyRow: Body[1]
+```
+
+The entry parameter is Body-local `r1`; its row shape and exact Body
+(0x0020) section bytes are:
+
+```text
+Body row (compact linear; 9 bytes):
+    bodyLayout: 0x04
+    typeCount: 1
+    typeMap:
+        t1: TypeSpec[1] // int32
+    operationCount: 0
+    terminator: Return r1
+```
+
+This is a 17-byte Body section (8-byte row index and 9-byte row):
 
 ```text
 00 00 00 00  09 00 00 00
