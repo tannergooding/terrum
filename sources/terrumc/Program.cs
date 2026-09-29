@@ -29,6 +29,7 @@ internal static partial class Program
         + "       terrumc frontend-build <self-host-directory> <input|-> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc frontend-run <self-host-directory> <input|-> --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc validate-trrm-structure <artifact> [--json]\n"
+        + "       terrumc validate-trrm-compact-linear <artifact> [--json]\n"
         + "       terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <output.trm> [--runtime <fail-fast|checked-exceptions>] [--json]\n"
         + "       terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <output.trm> [--runtime <fail-fast|checked-exceptions>] [--json]\n"
         + "       terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
@@ -53,6 +54,7 @@ internal static partial class Program
         + "scan-component/build-component/frontend-component/frontend-build-library/frontend-build/frontend-run execute native components in this process; supervise them with a deadline.\n"
         + "frontend-run returns Main's raw exit status without a success envelope; --json applies to diagnostics only.\n"
         + "validate-trrm-structure checks provisional (1, 0) framing and structural metadata only, not Body instructions or executable contracts.\n"
+        + "validate-trrm-compact-linear additionally checks the bounded scalar compact-linear Body shape, not effects or execution.\n"
         + "'-' reads strict UTF-8 from stdin. Exit: 0 success, 1 source/compile diagnostics, 2 usage/input/output error.";
 
     private static int Main(string[] args)
@@ -76,7 +78,7 @@ internal static partial class Program
             return RunFrontendComponent(args, json);
         }
 
-        if (args.Length != 0 && args[0] == "validate-trrm-structure")
+        if (args.Length != 0 && args[0] is "validate-trrm-structure" or "validate-trrm-compact-linear")
         {
             return RunTrRmStructureCommand(args, json);
         }

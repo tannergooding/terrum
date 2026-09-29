@@ -1219,6 +1219,11 @@ including mapped Boolean comparison results, rejecting unknown operations,
 invalid IDs, types, modes, widths and trailing bytes.
 This does not validate published effects, execute instructions, accept other
 compact/general forms or make the structural CLI an executable Body verifier.
+`terrumc validate-trrm-compact-linear <artifact> [--json]` opts into these
+bounded checks for Body rows referenced by local MethodDefs after the same
+framing and structural checks. Its success does not validate unreferenced
+Body rows, published effects or executable contracts; the structural command
+remains Body-opaque.
 SourceMap rows check slots, spans and Body/SourceFile module
 association. A bounded SourceMap writer emits those slots, reuses SourceFile slots
 and rejects duplicate instruction locations; block/ordinal existence still

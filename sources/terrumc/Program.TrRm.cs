@@ -11,6 +11,7 @@ internal static partial class Program
 {
     private static int RunTrRmStructureCommand(string[] args, bool json)
     {
+        var compact = args[0] == "validate-trrm-compact-linear";
         if (args.Length is not (2 or 3) || args[1] == "-"
             || (args.Length == 3 && args[2] != "--json"))
         {
@@ -32,7 +33,14 @@ internal static partial class Program
 
         try
         {
-            TrRmStructuralMetadataValidator.Validate(artifact);
+            if (compact)
+            {
+                TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
+            }
+            else
+            {
+                TrRmStructuralMetadataValidator.Validate(artifact);
+            }
         }
         catch (InvalidDataException exception)
         {
@@ -48,12 +56,16 @@ internal static partial class Program
             writer.WriteNumber("schema", 1);
             writer.WriteString("command", args[0]);
             writer.WriteBoolean("success", true);
-            writer.WriteString("scope", "framing-and-structural-metadata");
+            writer.WriteString("scope", compact
+                ? "framing-structural-metadata-and-compact-linear-shapes"
+                : "framing-and-structural-metadata");
             writer.WriteEndObject();
         }
         else
         {
-            Console.Out.WriteLine($"{args[1]}: TRRM framing and structural metadata valid (Body not verified)");
+            Console.Out.WriteLine(compact
+                ? $"{args[1]}: TRRM compact-linear Body shapes valid (effects and execution not verified)"
+                : $"{args[1]}: TRRM framing and structural metadata valid (Body not verified)");
         }
         return 0;
     }

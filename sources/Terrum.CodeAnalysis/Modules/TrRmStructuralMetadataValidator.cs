@@ -10,6 +10,12 @@ namespace Terrum.CodeAnalysis.Modules;
 public static class TrRmStructuralMetadataValidator
 {
     public static void Validate(ReadOnlySpan<byte> artifact)
+        => ValidateCore(artifact, false);
+
+    public static void ValidateCompactLinear(ReadOnlySpan<byte> artifact)
+        => ValidateCore(artifact, true);
+
+    private static void ValidateCore(ReadOnlySpan<byte> artifact, bool inspectCompactLinear)
     {
         var index = new TrRmArtifactIndex(artifact);
         if (!index.TryGetSection(0x0001, out var moduleBytes, out var moduleCount)
@@ -43,10 +49,8 @@ public static class TrRmStructuralMetadataValidator
             _ = new TrRmBlobTableReader(blobBytes, blobCount);
         }
 
-        if (bodyCount != 0)
-        {
-            _ = new TrRmBodyTableReader(bodyBytes, bodyCount);
-        }
+        var bodies = bodyCount == 0 ? default
+            : new TrRmBodyTableReader(bodyBytes, bodyCount);
 
         var strings = new TrRmStringTableReader(stringBytes, stringCount);
         strings.ValidateShapes(stringCount);
@@ -92,6 +96,18 @@ public static class TrRmStructuralMetadataValidator
         var sourceMaps = sourceMapCount == 0 ? default
             : new TrRmSourceMapTableReader(sourceMapBytes, sourceMapCount,
                 methods, sourceFiles);
+
+        if (inspectCompactLinear)
+        {
+            for (var method = 1; method <= methods.Count; method++)
+            {
+                if (methods.GetBodyRow(method) != 0)
+                {
+                    _ = new TrRmCompactLinearBodyReader(bodies, method, modules,
+                        methods, signatures, parameters, typeSpecs);
+                }
+            }
+        }
 
         _ = typeArgs;
         _ = fields;
