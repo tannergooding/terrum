@@ -1087,6 +1087,87 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("int32", "int32.MinValue", "int32.MaxValue", "x < y", true, "int32.MinValue")]
+    [InlineData("int32", "int32.MinValue", "int32.MaxValue", "x > y", true, "int32.MaxValue")]
+    [InlineData("int32", "1", "1", "x <= y", true, "1")]
+    [InlineData("int32", "1", "2", "x == y", true, "2")]
+    [InlineData("int32", "1", "2", "x != y", true, "1")]
+    [InlineData("int32", "1", "2", "x >= y", true, "2")]
+    [InlineData("uint32", "uint32.MaxValue", "0", "x > y", true, "uint32.MaxValue")]
+    [InlineData("uint32", "uint32.MaxValue", "0", "x < y", true, "0")]
+    [InlineData("int64", "int64.MinValue", "int64.MaxValue", "x < y", true, "int64.MinValue")]
+    [InlineData("uint64", "0", "uint64.MaxValue", "x >= y", true, "uint64.MaxValue")]
+    [InlineData("char16", "char16(65535)", "char16(0)", "x != y", true, "char16(65535)")]
+    [InlineData("char16", "char16(0)", "char16(65535)", "x > y", true, "char16(65535)")]
+    [InlineData("int32", "1", "2", "y < x", false, "0")]
+    [InlineData("int32", "1", "2", "x < x", false, "0")]
+    [InlineData("int32", "1", "2", "x + y", false, "0")]
+    public async Task BoundedNativeComparisonConditionalBindsPredicateAndReturnsAsync(
+        string typeName, string first, string second, string comparison,
+        bool evaluable, string expected)
+    {
+        var evaluator = typeName switch
+        {
+            "int32" => "TryEvaluateInt32ComparisonConditionalReturn",
+            "uint32" => "TryEvaluateUInt32ComparisonConditionalReturn",
+            "int64" => "TryEvaluateInt64ComparisonConditionalReturn",
+            "uint64" => "TryEvaluateUInt64ComparisonConditionalReturn",
+            "char16" => "TryEvaluateChar16ComparisonConditionalReturn",
+            _ => throw new ArgumentOutOfRangeException(nameof(typeName)),
+        };
+        var text = $$"""
+            {{typeName}} Value({{typeName}} x, {{typeName}} y) {
+                if ({{comparison}}) { return x; } else { return y; }
+            }
+            """;
+        var assertion = evaluable
+            ? $$"""
+                require {{evaluator}}(move tokens, {{first}}, {{second}},
+                    out var name, out var bound);
+                if (name.Start != {{typeName.Length + 1}} || name.Length != 5
+                    || bound != {{expected}})
+                {
+                    return 1;
+                }
+                """
+            : $$"""
+                if ({{evaluator}}(move tokens, {{first}}, {{second}},
+                    out var name, out var bound))
+                {
+                    return 1;
+                }
+                """;
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                {{assertion}}
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            if (evaluable)
+            {
+                var source = text + $$"""
+                     int32 Main() {
+                         {{typeName}} actual = Value({{first}}, {{second}});
+                         if (actual == {{expected}}) { return 42; }
+                         return 1;
+                     }
+                    """;
+                var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+            }
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy,
+                "ScalarComparisonConditionalParser").ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData("int32", "-1", "0", "x < y", true, true)]
     [InlineData("int32", "-1", "0", "x <= y", true, true)]
     [InlineData("int32", "-1", "0", "x > y", true, false)]
