@@ -1076,6 +1076,8 @@ names, assigned flags and owned field ranges against the supplied tables.
 A FieldDef-row writer checks TypeDef ownership, TypeSpec references,
 field names, flags and explicit layout offsets against those rows. An indexed
 TypeSpec-row writer validates form and operands against supplied table counts;
+a set of typed payload constructors encodes the assigned built-in, reference,
+constructed, wrapper and indexed-family forms before that validation;
 a TypeArg-row writer checks constructed-type ownership, ordinals and references.
 MethodSig-row and Param-row writers check disjoint signature ranges and
 parameter ownership, ordinals, types and modes. A MethodDef-row writer checks
