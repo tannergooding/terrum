@@ -833,6 +833,103 @@ public sealed class ManagedScannerComponentTests
     }
 
     [Theory]
+    [InlineData("int32", "21", "21", "x + y", true, "42")]
+    [InlineData("int32", "int32.MinValue", "int32.MaxValue", "x + y", true, "-1")]
+    [InlineData("int32", "int32.MaxValue", "1", "x + y", false, "0")]
+    [InlineData("int32", "int32.MinValue", "-1", "x + y", false, "0")]
+    [InlineData("int32", "1", "2", "x + x", false, "0")]
+    [InlineData("int32", "1", "2", "y + x", false, "0")]
+    [InlineData("uint32", "uint32.MaxValue", "0", "x + y", true, "uint32.MaxValue")]
+    [InlineData("uint32", "uint32.MaxValue", "1", "x + y", false, "0")]
+    [InlineData("int64", "int64.MinValue", "int64.MaxValue", "x + y", true, "-1")]
+    [InlineData("int64", "int64.MaxValue", "1", "x + y", false, "0")]
+    [InlineData("int64", "int64.MinValue", "-1", "x + y", false, "0")]
+    [InlineData("uint64", "uint64.MaxValue", "0", "x + y", true, "uint64.MaxValue")]
+    [InlineData("uint64", "uint64.MaxValue", "1", "x + y", false, "0")]
+    public async Task BoundedNativeTwoParameterAdditionBindsBothNamesAsync(
+        string typeName, string first, string second, string expression,
+        bool evaluable, string expected)
+    {
+        var evaluator = typeName switch
+        {
+            "int32" => "TryEvaluateInt32TwoParameterAddReturn",
+            "uint32" => "TryEvaluateUInt32TwoParameterAddReturn",
+            "int64" => "TryEvaluateInt64TwoParameterAddReturn",
+            "uint64" => "TryEvaluateUInt64TwoParameterAddReturn",
+            _ => throw new ArgumentOutOfRangeException(nameof(typeName)),
+        };
+        var text = $"{typeName} Value({typeName} x, {typeName} y) {{ return {expression}; }}";
+        var assertion = evaluable
+            ? $$"""
+                require {{evaluator}}(move tokens, {{first}}, {{second}},
+                    out var name, out var bound);
+                if (name.Start != {{typeName.Length + 1}} || name.Length != 5
+                    || bound != {{expected}})
+                {
+                    return 1;
+                }
+                """
+            : $$"""
+                if ({{evaluator}}(move tokens, {{first}}, {{second}},
+                    out var name, out var bound))
+                {
+                    return 1;
+                }
+                """;
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                {{assertion}}
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            if (evaluable)
+            {
+                var source = text + $$"""
+                     int32 Main() {
+                         {{typeName}} actual = Value({{first}}, {{second}});
+                         if (actual == {{expected}}) { return 42; }
+                         return 1;
+                     }
+                    """;
+                var hosted = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+                Assert.False(hosted.HasErrors, string.Join(Environment.NewLine, hosted.Diagnostics));
+                Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(hosted.Program), policy));
+            }
+            var program = await CompilePairParserAsync(text, entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData("int32 Value(int32 x, int32 x) { return x + x; }")]
+    [InlineData("int32 Value(int32 x, uint32 y) { return x + y; }")]
+    [InlineData("int32 Value(int32 x int32 y) { return x + y; }")]
+    [InlineData("char16 Value(char16 x, char16 y) { return x + y; }")]
+    public async Task BoundedNativeTwoParameterAdditionRejectsInvalidDeclarationsAsync(string text)
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var tokens);
+                if (TryEvaluateInt32TwoParameterAddReturn(move tokens, 1, 2,
+                    out var name, out var value)) { return 1; }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompilePairParserAsync(text, Entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData("int32", "-1", "x < 0", true, true)]
     [InlineData("int32", "-1", "x == 0xFFFF_FFFF", true, true)]
     [InlineData("int32", "int32.MaxValue", "x <= 2147483647", true, true)]
@@ -1865,18 +1962,21 @@ public sealed class ManagedScannerComponentTests
     }
 
     private static Task<BoundProgram> CompileParserAsync(string text, string entry, BoundRuntimePolicy policy) =>
-        CompileAsync(text, entry, policy, includeScalarParser: true);
+        CompileAsync(text, entry, policy, "ScalarFunctionParser");
+
+    private static Task<BoundProgram> CompilePairParserAsync(string text, string entry, BoundRuntimePolicy policy) =>
+        CompileAsync(text, entry, policy, "ScalarParameterPairParser");
 
     private static async Task<BoundProgram> CompileAsync(string text, string entry,
-        BoundRuntimePolicy policy, bool includeScalarParser = false)
+        BoundRuntimePolicy policy, string? parserName = null)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         string[] names = ["SourceRange", "Token", "ManagedTokenChain", "Scanner", "ManagedScanner",
             "TokenSnapshot", "TokenTriviaSnapshot", "TokenIntegerSnapshot",
             "TokenDiagnosticSnapshot"];
-        if (includeScalarParser)
+        if (parserName is not null)
         {
-            names = [.. names, "ScalarFunctionParser"];
+            names = [.. names, "ScalarParserTypes", parserName];
         }
         var trees = new List<SyntaxTree>(names.Length + 1);
         foreach (var name in names)

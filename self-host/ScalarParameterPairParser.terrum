@@ -1,0 +1,109 @@
+namespace Terrum.CodeAnalysis;
+
+bool TryParseTwoParameterAddReturn(TokenSnapshot tokens,
+    out int32 scalarType, out SourceRange name)
+{
+    if (tokens.GetCount() != 17)
+    {
+        return false;
+    }
+    require tokens.TryGet(0, out var returnType);
+    require tokens.TryGet(1, out var function);
+    require tokens.TryGet(2, out var openParameters);
+    require tokens.TryGet(3, out var firstType);
+    require tokens.TryGet(4, out var firstParameter);
+    require tokens.TryGet(5, out var comma);
+    require tokens.TryGet(6, out var secondType);
+    require tokens.TryGet(7, out var secondParameter);
+    require tokens.TryGet(8, out var closeParameters);
+    require tokens.TryGet(9, out var openBody);
+    require tokens.TryGet(10, out var returnKeyword);
+    require tokens.TryGet(11, out var firstUse);
+    require tokens.TryGet(12, out var add);
+    require tokens.TryGet(13, out var secondUse);
+    require tokens.TryGet(14, out var semicolon);
+    require tokens.TryGet(15, out var closeBody);
+    require tokens.TryGet(16, out var eof);
+    if (!TryGetScalarType(returnType, out var selected)
+        || !TryGetScalarType(firstType, out var matchingFirst)
+        || !TryGetScalarType(secondType, out var matchingSecond)
+        || selected != matchingFirst || selected != matchingSecond
+        || selected == 5 || selected == 6
+        || function.Kind != 2 || openParameters.Kind != 46 || comma.Kind != 53
+        || closeParameters.Kind != 47 || openBody.Kind != 48
+        || returnKeyword.Kind != 19 || add.Kind != 57
+        || semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0
+        || !SameTokenSpelling(firstParameter, firstUse)
+        || !SameTokenSpelling(secondParameter, secondUse)
+        || SameTokenSpelling(firstParameter, secondParameter))
+    {
+        return false;
+    }
+    scalarType = selected;
+    name = function.Range;
+    return true;
+}
+
+bool TryEvaluateInt32TwoParameterAddReturn(TokenSnapshot tokens, int32 first, int32 second,
+    out SourceRange name, out int32 result)
+{
+    if (!TryParseTwoParameterAddReturn(move tokens, out var selected, out var foundName)
+        || selected != 1)
+    {
+        return false;
+    }
+    int64 sum = int64(first) + int64(second);
+    if (sum < int64(int32.MinValue) || sum > int64(int32.MaxValue))
+    {
+        return false;
+    }
+    name = foundName;
+    result = int32(sum);
+    return true;
+}
+
+bool TryEvaluateUInt32TwoParameterAddReturn(TokenSnapshot tokens, uint32 first, uint32 second,
+    out SourceRange name, out uint32 result)
+{
+    if (!TryParseTwoParameterAddReturn(move tokens, out var selected, out var foundName)
+        || selected != 2)
+    {
+        return false;
+    }
+    uint64 sum = uint64(first) + uint64(second);
+    if (sum > uint64(uint32.MaxValue))
+    {
+        return false;
+    }
+    name = foundName;
+    result = uint32(sum);
+    return true;
+}
+
+bool TryEvaluateInt64TwoParameterAddReturn(TokenSnapshot tokens, int64 first, int64 second,
+    out SourceRange name, out int64 result)
+{
+    if (!TryParseTwoParameterAddReturn(move tokens, out var selected, out var foundName)
+        || selected != 3
+        || (second > 0 && first > int64.MaxValue - second)
+        || (second < 0 && first < int64.MinValue - second))
+    {
+        return false;
+    }
+    name = foundName;
+    result = first + second;
+    return true;
+}
+
+bool TryEvaluateUInt64TwoParameterAddReturn(TokenSnapshot tokens, uint64 first, uint64 second,
+    out SourceRange name, out uint64 result)
+{
+    if (!TryParseTwoParameterAddReturn(move tokens, out var selected, out var foundName)
+        || selected != 4 || first > uint64.MaxValue - second)
+    {
+        return false;
+    }
+    name = foundName;
+    result = first + second;
+    return true;
+}

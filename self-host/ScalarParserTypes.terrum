@@ -1,0 +1,76 @@
+namespace Terrum.CodeAnalysis;
+
+// Scalar type codes: 1=int32, 2=uint32, 3=int64, 4=uint64, 5=bool, 6=char16.
+bool TryGetScalarType(Token type, out int32 scalarType)
+{
+    if (type.Kind != 2)
+    {
+        return false;
+    }
+
+    int32 at = type.Range.Start;
+    mut int32 selected = 0;
+    if (type.Range.Length == 4 && Host.Source[at] == char16(98)
+        && Host.Source[at + 1] == char16(111)
+        && Host.Source[at + 2] == char16(111)
+        && Host.Source[at + 3] == char16(108))
+    {
+        selected = 5;
+    }
+    else if (type.Range.Length == 5 && Host.Source[at] == char16(105)
+        && Host.Source[at + 1] == char16(110) && Host.Source[at + 2] == char16(116))
+    {
+        if (Host.Source[at + 3] == char16(51) && Host.Source[at + 4] == char16(50))
+        {
+            selected = 1;
+        }
+        else if (Host.Source[at + 3] == char16(54) && Host.Source[at + 4] == char16(52))
+        {
+            selected = 3;
+        }
+    }
+    else if (type.Range.Length == 6 && Host.Source[at] == char16(117)
+        && Host.Source[at + 1] == char16(105) && Host.Source[at + 2] == char16(110)
+        && Host.Source[at + 3] == char16(116))
+    {
+        if (Host.Source[at + 4] == char16(51) && Host.Source[at + 5] == char16(50))
+        {
+            selected = 2;
+        }
+        else if (Host.Source[at + 4] == char16(54) && Host.Source[at + 5] == char16(52))
+        {
+            selected = 4;
+        }
+    }
+    else if (type.Range.Length == 6 && Host.Source[at] == char16(99)
+        && Host.Source[at + 1] == char16(104) && Host.Source[at + 2] == char16(97)
+        && Host.Source[at + 3] == char16(114) && Host.Source[at + 4] == char16(49)
+        && Host.Source[at + 5] == char16(54))
+    {
+        selected = 6;
+    }
+    if (selected == 0)
+    {
+        return false;
+    }
+    scalarType = selected;
+    return true;
+}
+
+bool SameTokenSpelling(Token first, Token second)
+{
+    if (first.Kind != 2 || second.Kind != 2
+        || first.Range.Length != second.Range.Length)
+    {
+        return false;
+    }
+    for (mut int32 index = 0; index < first.Range.Length; index = index + 1)
+    {
+        if (Host.Source[first.Range.Start + index]
+            != Host.Source[second.Range.Start + index])
+        {
+            return false;
+        }
+    }
+    return true;
+}

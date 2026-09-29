@@ -2,63 +2,6 @@ namespace Terrum.CodeAnalysis;
 
 // This bounded syntax-27 probe uses scanner-5 TokenKind ordinals, not source characters
 // to classify punctuation; the host parser's recovery remains a separate phase.
-// Scalar type codes: 1=int32, 2=uint32, 3=int64, 4=uint64, 5=bool, 6=char16.
-bool TryGetScalarType(Token type, out int32 scalarType)
-{
-    if (type.Kind != 2)
-    {
-        return false;
-    }
-
-    int32 at = type.Range.Start;
-    mut int32 selected = 0;
-    if (type.Range.Length == 4 && Host.Source[at] == char16(98)
-        && Host.Source[at + 1] == char16(111)
-        && Host.Source[at + 2] == char16(111)
-        && Host.Source[at + 3] == char16(108))
-    {
-        selected = 5;
-    }
-    else if (type.Range.Length == 5 && Host.Source[at] == char16(105)
-        && Host.Source[at + 1] == char16(110) && Host.Source[at + 2] == char16(116))
-    {
-        if (Host.Source[at + 3] == char16(51) && Host.Source[at + 4] == char16(50))
-        {
-            selected = 1;
-        }
-        else if (Host.Source[at + 3] == char16(54) && Host.Source[at + 4] == char16(52))
-        {
-            selected = 3;
-        }
-    }
-    else if (type.Range.Length == 6 && Host.Source[at] == char16(117)
-        && Host.Source[at + 1] == char16(105) && Host.Source[at + 2] == char16(110)
-        && Host.Source[at + 3] == char16(116))
-    {
-        if (Host.Source[at + 4] == char16(51) && Host.Source[at + 5] == char16(50))
-        {
-            selected = 2;
-        }
-        else if (Host.Source[at + 4] == char16(54) && Host.Source[at + 5] == char16(52))
-        {
-            selected = 4;
-        }
-    }
-    else if (type.Range.Length == 6 && Host.Source[at] == char16(99)
-        && Host.Source[at + 1] == char16(104) && Host.Source[at + 2] == char16(97)
-        && Host.Source[at + 3] == char16(114) && Host.Source[at + 4] == char16(49)
-        && Host.Source[at + 5] == char16(54))
-    {
-        selected = 6;
-    }
-    if (selected == 0)
-    {
-        return false;
-    }
-    scalarType = selected;
-    return true;
-}
-
 bool TryParseScalarReturnFunctionTyped(TokenSnapshot tokens,
     out int32 scalarType, out SourceRange name, out SourceRange expression)
 {
@@ -749,17 +692,9 @@ bool TryParseParameterComparisonReturn(TokenSnapshot tokens, TokenIntegerSnapsho
         || returnKeyword.Kind != 19 || parameterUse.Kind != 2
         || comparison.Kind < 65 || comparison.Kind > 70 || literal.Kind != 3
         || semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0
-        || parameter.Range.Length != parameterUse.Range.Length)
+        || !SameTokenSpelling(parameter, parameterUse))
     {
         return false;
-    }
-    for (mut int32 index = 0; index < parameter.Range.Length; index = index + 1)
-    {
-        if (Host.Source[parameter.Range.Start + index]
-            != Host.Source[parameterUse.Range.Start + index])
-        {
-            return false;
-        }
     }
     if (!integers.TryFind(10, out var overflow, out var low, out var high) || overflow)
     {
@@ -890,17 +825,9 @@ bool TryParseParameterAddReturn(TokenSnapshot tokens, TokenIntegerSnapshot integ
         || openBody.Kind != 48 || returnKeyword.Kind != 19
         || parameterUse.Kind != 2 || add.Kind != 57 || literal.Kind != 3
         || semicolon.Kind != 52 || closeBody.Kind != 49 || eof.Kind != 0
-        || parameter.Range.Length != parameterUse.Range.Length)
+        || !SameTokenSpelling(parameter, parameterUse))
     {
         return false;
-    }
-    for (mut int32 index = 0; index < parameter.Range.Length; index = index + 1)
-    {
-        if (Host.Source[parameter.Range.Start + index]
-            != Host.Source[parameterUse.Range.Start + index])
-        {
-            return false;
-        }
     }
     if (!integers.TryFind(10, out var overflow, out var low, out var high) || overflow)
     {
