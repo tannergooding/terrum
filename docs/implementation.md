@@ -1113,6 +1113,9 @@ frames caller-supplied sections under the `(1, 0)` directory and checks that
 framing without changing the current semantic-module writer. An offset-indexed
 writer emits opaque Blob rows (including empty rows) and nonempty Body rows,
 but does not decode, generate or verify executable instructions.
+Separate test-only fixtures independently decode proposed general and compact
+Body examples and check their indexes against the written bytes; they are not
+an executable Body reader or an adopted metadata writer.
 Historical-revision readers and feature-dependent writer
 selection are temporary implementation support to remove before v1. That
 cleanup must update writers and fixtures together and reject unsupported

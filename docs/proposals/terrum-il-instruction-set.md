@@ -69,6 +69,7 @@ replaceable opcode trivia. The intended fast path crosses two documents:
 | [Approved metadata tables](../il-metadata.md#section-kinds-and-row-layouts) | Selected declaration and complete type/signature; retained imports bind against published contracts without re-proving dependency bodies |
 | [Contract clauses](../il-metadata.md#semantic-contracts-and-stable-binding) | Assigned effects such as `NoThrow`/`DoesNotReturn` and reserved output, transfer, dependency and cleanup shapes; only Effects is executable in this narrow Body subset, so readers must not assume the other contracts are already usable |
 | [Body index](#body-record-direct-block-index-and-regions) | Type/value/place inventories, exact definition locations, direct block/terminator addresses, normal boundary liveness and per-block final uses |
+| [Compact Body forms](#compact-body-forms) | One-block linear encoding derives indexes on a scan; compact indexed retains direct seeks for small CFGs; neither omits required semantics or enables unassigned roots |
 | [Conditional add](#adding-a-conditional-to-the-sum), [merge and loop](#conditional-merge-and-loop-informative-shapes) | How a single checked block grows normal branches and a backedge; which values merely transit a block, which ones are actually used there, and how pruning a dead arm updates surviving use-block counts |
 | [Checked-add bytes](#checked-add-end-to-end-informative) and [place example](#value-and-place-state-through-checked-arithmetic) | Ordered failures without artificial CFG edges; separate immutable values, addressable storage and their last-use/state transitions |
 
@@ -85,7 +86,7 @@ companion document, retain this contract map and links from the
 normative rules; splitting the examples must not orphan the fast-import
 story or silently promote a pending Body schema to approved metadata.
 The [example fixture checks](../../tests/Terrum.CodeAnalysis.Tests/TrRmProposedBodyExampleTests.cs)
-independently decode the exact bytes below; they are test-only checks of
+independently decode the general and compact example bytes below; they are test-only checks of
 this **proposed** schema, not an executable TRRM Body reader.
 
 The examples progress from a checked scalar sum in one block to a
@@ -160,45 +161,162 @@ multiplying the opcode catalog by width combinations. It adds two bytes to a
 wide instruction and avoids continuation decoding per operand; no read or
 validation cost is implied.
 
-The exact-byte fixtures below encode only the **general** Body layout.
-`bodyLayout=0` selects one-byte local fields within that layout; it is
-**not** a compact-form tag. No compact form tag, layout or canonical
-writer-selection rule has been assigned, so the one-block examples
-below demonstrate semantics and a general-form decoder fixture, **not**
-the expected bytes of a production small-body writer. That layout is
-not yet an acceptable default size for trivial methods: the
-one-block checked-add section is 109 bytes for 16 instruction bytes,
+The general-form fixtures below expose every field. `bodyLayout=0`
+selects one-byte local fields in the general form; the compact form
+tags below select different **storage for the same logical Body**.
+The general form is not an acceptable default size for trivial methods:
+the one-block checked-add section is 109 bytes for 16 instruction bytes,
 and `return 42` is 61 bytes for 6 instruction bytes. The section
 index accounts for 8 bytes in each; the rest is mostly repeated type,
 definition and use metadata. Those are measured *encoded sizes* of
-these examples, not evidence that removing indexes always makes JIT
-import faster. A compact Body form is a stabilization requirement for
-ordinary wrappers, getters and other small bodies.
+these single-row examples, not evidence that removing indexes always
+makes JIT import faster. In a multi-row Body section the offset index
+uses `4 * (rowCount + 1)` bytes, not a separate eight-byte index for
+each row; compare row payloads and shared index overhead separately.
 
-Candidate compact shapes should retain the **same logical** type,
-effect, definition/use, ownership and failure semantics: omit forced
-empty region/place/live lists; imply a sole block and its root region;
-derive by-value parameter IDs from MethodSig order; compress uniform
-types/kinds and per-value last-use positions instead of repeating
-IDs; and store short direct offsets with a wider form when needed.
-For a single block without a normal branch, a per-value definition
-seek table may cost more than decoding the retained instructions once.
-For two or three blocks with an inlinable predicate, direct branch,
-definition and use indexes can save an otherwise repeated CFG/dataflow
-scan. An explicitly selected Body form should make those tradeoffs
-visible without hiding a different execution language or weakening
-untrusted-input checks.
+### Compact Body forms
 
-Do not use a hard 1–3 block threshold or drop a required root/effect
-fact solely to save bytes. Define eligible shapes and canonical writer
-selection, an unambiguous form tag, bounded decoding to the same
-logical records and an independently tested general-form fallback.
-Measure encoded bytes **and** cold import/inlining time on real small
-methods, including wrappers, simple constructors and methods with
-declaration pre/postconditions (which do not add Body CFG blocks),
-before fixing compact thresholds. The general-form fixtures remain
-useful for exposing every field, but must not be mistaken for the
-expected encoding of every common method.
+The Body row still begins with `ownerMethod` (`u32`) and `bodyLayout`
+(`u8`). Bits 0–1 choose the Body-local width as in the general form;
+bits 2–3 choose the form, with `0` general, `1` compact linear
+(`bodyLayout=0x04` at one-byte width), `2` compact indexed
+(`bodyLayout=0x08` at one-byte width), and `3` invalid. Bits 4–7
+must be zero. Codes `3` in bits 0–1 still reject. The Body-section
+row-offset index and instruction envelopes are unchanged. There is
+no second implicit width for instruction operands: each instruction
+keeps its own common or `F0` wide layout. Every form must reconstruct
+the same Body-local IDs, types, ordered effects, boundaries and uses;
+decoding a different form never licenses weaker safety checks.
+
+**Compact linear** is for exactly one root-region block with only
+by-value parameters and results, no places and no normal successor.
+Its row after `bodyLayout` is `local typeCount`,
+`u32 typeMap[typeCount]`, `local operationCount`, exactly that many
+operations and one `Return` or `Fail` terminator, consuming the row
+exactly. No other index or block header is stored. Block ID 1 and its
+region 0 are implicit. Entry parameter IDs, types and modes come from
+MethodSig in order; every value type, including a parameter or returned
+value not named by an instruction, must occur exactly once in `typeMap`.
+The mapped complete type must match each MethodSig type. Results such as
+comparison `bool` need their own mapped type even when no instruction
+has an explicit `t` operand. Result IDs follow in operation order without
+gaps; multi-result operations use their declared result-operand order.
+Only preceding definitions may be read. Derive `valueCount` from the
+by-value parameter count plus instruction result counts as they are
+decoded; reject a result that exceeds the selected Body-local width
+**before** growing descriptor storage or continuing the scan. Counted
+fields and all operands remain bounded by the row extent. Operation
+result types and kinds come from mapped type IDs, validated opcode schemas and
+selected metadata contracts. Derive descriptors, definition locations,
+use-block counts (0 or 1), and last-use ordinals by a bounded
+instruction scan. An independent consumer or a repeated uncached
+import scans again; this form does not claim direct definition seeks.
+There are no stored empty place/region/live arrays, sentinel offsets
+or per-value pairs. Only opcodes whose complete result types and effects
+can be recovered from their schema and selected declarations are eligible.
+The executable compact-linear subset is restricted to the existing
+root-free, Copy scalar/optional forms and policy 0; by-value alone does
+not prove an operand is root-free or has no cleanup obligation.
+Place-producing and place-using operations, non-value parameter modes
+and region exits use the general form for structural inspection.
+Operations requiring an unassigned root or exceptional contract are
+not executable in **any** form.
+
+**Compact indexed** supports multiple normal blocks, including valid
+loop regions, when all parameters and results are root-free Copy values
+and no place inventory is required. It retains the direct definition,
+boundary and final-use information needed to prune an inlinable arm.
+Its row after `bodyLayout` has, in order:
+
+| Field | Compact indexed encoding |
+|---|---|
+| Counts and types | `local blockCount`, `local valueCount`, `local regionCount`, `local typeCount`, then `u32 typeMap[typeCount]`; positive blockCount |
+| Regions | `regionCount` entries with the general form's `u8 kind, local parent/entry/exit/cleanup` schema |
+| Value descriptors | For each ID, `local typeId, local useBlockCount`; kind 0 (by-value) is implicit |
+| Definitions | `local valueDefStarts[blockCount+1]` and `local valueDefinitionOffsets[valueCount]`; all-ones at the local width marks a block parameter, otherwise the offset seeks the defining operation within its block |
+| Direct addresses | `local blockOffsets[blockCount+1]` from block-data start and `local terminatorOffsets[blockCount]` relative to each block start |
+| Block data | Exactly `blockOffsets[last]` bytes of compact block extents in ID order |
+
+A compact block begins with `u8 presence`: bit 0 means a nonzero
+`local regionId` follows; bits 1, 2, 3 and 4 mean respectively a
+nonempty parameter list, live-in list, live-out list and value-last-use
+inventory follows; bits 5–7 reject. Each present list has a `local`
+count and the same ordered `local` ID or `(valueId,lastUseOrdinal)`
+entries as the general block; an absent list is empty. Then come
+`local operationCount`, its operations and one indexed terminator.
+There are no place fields. B1's parameter list still matches
+MethodSig; other block parameters match incoming edges. The
+general-form definition and liveness audits apply to these decoded
+logical records. The compact indexed offsets are one/two/four bytes
+according to `bodyLayout`, instead of always four. The all-ones
+definition sentinel cannot be an operation offset; choose a wider
+Body-local width or the general form when any count, ordinal or offset
+cannot fit. All block offsets, terminator offsets and the final
+block-data length must fit the selected width. Validate each bounded
+offset and list before use, even when semantic indexes are trusted.
+
+The general form remains the structural fallback for places, non-value
+parameters and other rich bodies; **neither form yet encodes** complete
+ownership/loan/cleanup, safepoint roots or exceptional regions. A
+compact form may structurally contain assigned opcode
+shapes only when its derived records are complete; it does not make
+decode-only calls, fields or exceptional operations executable.
+Future root and method/block effect inventories must be represented
+in *every* eligible form before adding features requiring them to its
+executable subset. `NoThrow` is neither purity nor a no-safepoint
+promise. In particular, a scalar-only compact example is not evidence
+that an arbitrary managed forwarder or auto-property getter is already
+representable. The common one-block target includes such methods when
+their selected calls, access paths, roots and effects have a complete
+compact contract, not by dropping any of those facts.
+
+These two assigned encodings are *candidates*, not a measured
+canonical writer choice. Prefer testing compact linear for eligible
+single blocks, which need one operation scan anyway. For two or three
+small blocks, compare compact indexed against an unassigned
+**boundary-only** candidate: direct block/terminator extents and typed
+edge parameters, with value definitions, use inventories and boundary
+liveness rebuilt on a bounded scan. The latter is smaller only if its
+saved index bytes outweigh repeated scanning or lost selective-import
+opportunities; no bytes or decoder are assigned for it yet. Four-plus
+blocks may still favor compact indexed (the four-block fixture does),
+but a few large blocks may favor full indexes even when one-block
+linear is smaller. Compare instruction volume, direct-seek usefulness,
+region complexity and real bytes rather than imposing a block-count
+cutoff. Widening compact-indexed offsets past 255 bytes currently
+widens **all** its local fields; independently sized offsets should
+be compared before fixing the encoding. All forms use minimal field
+widths where selected; a reader can accept a valid general form for
+a compact-eligible body. Measure bytes, cold import, allocation,
+selective inlining and interpreter/tool overhead, with trusted and
+audited inputs separately, before prescribing canonical form selection.
+Declaration pre/postconditions can eliminate authored guard blocks
+from a method Body, but their checks and failure/effect facts still
+belong to the declaration's contract execution and import cost; this
+does not claim pre/postcondition encoding is already executable or free.
+
+| Method shape | Candidate importer tradeoff | Present status |
+|---|---|---|
+| Root-free one block, no normal edges | Compact linear has the least metadata; decode instructions to derive uses and definitions once per uncached consumer | Assigned candidate bytes: checked add 35, `return 42` 25, `return x` 21 section bytes |
+| Small root-free normal CFG | Compare boundary-only scanning with compact indexed's direct definition/use and terminator seeks; 2 or 3 blocks alone do not determine the winner | Indexed candidate assigned; lighter alternative and import measurements open |
+| More blocks, loops or many uses | Indexed summaries may avoid reconstructing CFG/use data and allow selective import, but local-width offset cliffs and large inventories can change the result | Four-block indexed merge 104 versus general 169 section bytes; no general performance claim |
+| Places, owners, handlers, roots | Required state, effects, cleanup and safepoint facts dominate; choose sparse sidecars or compact headers by actual density without changing meaning | General structural form for current decode shapes; executable root/exception contract unassigned |
+
+Accelerator sidecars (for example, precomputed definitions or last uses)
+can be optional only if readers have a specified, bounded reconstruction
+path and rewrites discard or rebuild stale facts. Logical roots,
+owner/interior dependencies and exceptional cleanup are **required**
+semantics, not optional hints: a future sidecar containing them must
+be required and feature-negotiated for executable users, with validated
+Body ownership and reference remapping. The approved optional-section
+skip policy does not make required Body semantics dispensable. Native
+post-allocation GC maps remain JIT/AOT products, not reusable Body
+metadata. Shape interning across bodies likewise requires a separate
+validated template reference: approved Body rows have unique MethodDef
+owners, and `return 42` and `return x` differ in definitions and uses.
+Compare template binding, remapping and lookup cost against storing
+13–17-byte rows plus the amortized section index before introducing
+a shared table.
 
 Opcodes `0x01..0x7F` are operations; `0x80..0xEF` are terminators.
 `0xF0` introduces a width layout and is not standalone; `0x00` and
@@ -208,8 +326,9 @@ per-instruction length. Unknown opcodes reject semantic loading and cannot
 be skipped using an apparent length or prefix. Bound every operand and
 counted field to the remaining block extent before use. Before allocating or
 traversing repeated items, prove their minimum encoded bytes fit that extent.
-After exactly `operationCount` operations, the indexed terminator must be
-one registered instruction that ends the block.
+After exactly `operationCount` operations, the terminator must be
+one registered instruction that ends the block. General and compact
+indexed forms also verify their stored terminator offset.
 
 Only opcode values assigned in the tables below are registered; other
 values in the operation and terminator bands are reserved. This stream has
@@ -229,11 +348,14 @@ minimizing every large literal or body. Explicit edges, place-state joins and
 loop headers expose dataflow to consumers; no throughput or total-size win
 is asserted.
 
-The Body's upfront type, place and value inventories, block/terminator
-offsets, direct value-definition locations, and per-block use/last-use
-inventories are intended as **shared importer inputs**:
+The general and compact-indexed forms' upfront type/value inventories,
+block/terminator offsets, direct value-definition locations, and
+per-block use/last-use inventories are intended as **shared importer
+inputs**. The general form also carries place state. For these forms,
 each consumer can obtain typed ID bounds, normal CFG targets and boundary
-liveness without rediscovering them by scanning the operation stream.
+liveness without rediscovering them by scanning the operation stream;
+compact linear deliberately derives its omitted one-block facts by
+decoding the stream instead.
 Inlining profitability, register allocation and whether a particular
 result-producing instruction is dead remain consumer decisions. A direct
 terminator index does not by itself reveal calls or failures inside a block;
@@ -246,8 +368,9 @@ must not authorize omitting safety checks or dropping operations.
 
 ### Direct-index requirements for pruning and inlining
 
-Block/terminator offsets, typed value descriptors and boundary liveness
-alone are **not sufficient** for a fast inliner. The definition index and
+For general or compact-indexed multi-block bodies, block/terminator
+offsets, typed value descriptors and boundary liveness alone are
+**not sufficient** for a fast inliner. The definition index and
 per-block use inventories below additionally identify where a branch
 predicate was defined, which block owns each result, and which blocks
 use a value or place. An inliner specializing
@@ -296,9 +419,9 @@ currently encoded Body examples **do not yet contain** GC roots.
 
 Consider `AddThenThree` under the fail-fast policy. This first shows
 the *logical* one-block value flow, then an expanded general-form
-encoding for checking the presently assigned fields. The 109-byte
-fixture is valid under that general layout but is **not** the selected
-compact encoding for this method: no compact wire layout exists yet.
+encoding for checking every field, followed by its compact-linear form.
+The 109-byte fixture is valid under the general layout but is **not**
+the compact encoding for this method.
 Assume MethodDef row
 1 owns the body, its MethodSig declares two by-value `int32` parameters
 and an `int32` result, and TypeSpec row 1 describes `int32`. The
@@ -381,16 +504,12 @@ block and no places or regions. Its 109-byte structure is:
 | Body row offset arrays | 12 fixed-`u32` bytes: `blockOffsets=[0,38]`, `terminatorOffsets=[36]` |
 | Block data | 38 bytes: B1 has five last-use entries, three operations and one return |
 
-A compact single-block form for this *same* method could derive the two
-parameter definitions and their types from MethodSig, imply B1 and the
-function region, and avoid storing empty place/region/live arrays. It
-could encode the three result definitions and last uses more densely
-than the 20-byte offset array and repeated descriptor pairs above.
-That is a **design target**, not a byte recipe: whether direct
-definition seeks survive compact encoding, which fields are derived
-versus stored, and how the form is tagged and audited must be fixed
-before writing compact example bytes. The ordered checked operations
-and their failure sites cannot be compressed away.
+The compact-linear form derives the two parameter definitions from
+MethodSig and the three result definitions and last uses from its
+instruction scan. It implies B1 and region 0 and omits the empty
+place/region/live lists, 20-byte definition-offset array and repeated
+descriptor pairs. The ordered checked operations and their failure
+sites remain unchanged.
 
 Here `bodyLayout=0` selects one-byte Body-local widths in the
 **general** layout; it does not select or forbid a compact form. The owner,
@@ -440,6 +559,28 @@ its result ID were 256, it would use
 the opcode's semantic identity. Conformance should independently verify
 the bytes, decoded records and audited CFG/types/states; a same-writer
 round trip alone is insufficient.
+
+#### Compact linear checked add (same logical body)
+
+For the preceding MethodDef, one mapped type and three operations, the
+compact-linear row stores `ownerMethod=1`, `bodyLayout=0x04`,
+`typeCount=1`, `typeMap=[TypeSpec row 1]`, `operationCount=3`, then
+the **same 16 instruction bytes**. The Body section is 35 bytes
+(8-byte row index and 27-byte row), rather than the general form's
+109 bytes:
+
+```text
+00 00 00 00  1B 00 00 00
+01 00 00 00  04 01 01 00 00 00 03
+15 03 01 01 02  02 04 01 03  15 05 01 03 04  83 05
+```
+
+This loses direct definition seeks *by design*: one scan establishes
+the same `(r1..r5)` descriptors, B1 parameter/result definitions,
+last-use ordinals `(0,0,2,2,3)`, checked failure order and Return.
+The type map still supplies the complete `int32` identity. Importing
+the method again requires another scan unless a consumer retains its
+decoded records; no per-method cache or performance win is assumed.
 
 ### Adding a conditional to the sum
 
@@ -568,6 +709,38 @@ FF FF FF FF  FF FF FF FF  FF FF FF FF  FF FF FF FF
 00 01 04 00 00 00 00 00 01 04 00 00 00
 83 04
 ```
+
+#### Compact indexed conditional merge (same logical body)
+
+The four-block `Choose` example qualifies for compact indexed despite
+having more than three blocks: it has only Copy values and normal
+edges, and its direct definitions/uses and branch addresses remain
+available. The local-width (one-byte) definition-offset sentinels,
+block offsets `[0,18,31,44,53]` and terminator offsets
+`[12,9,9,7]` replace the general form's `u32` arrays. Each block's
+presence byte omits zero counts and lists; the four value descriptor
+kinds are implicitly by-value. Its Body section is 104 bytes
+(8-byte index, 96-byte row), compared with 169 bytes above:
+
+```text
+00 00 00 00  60 00 00 00
+01 00 00 00  08 04 04 00 02  01 00 00 00  02 00 00 00
+01 01  02 01  02 01  02 01
+00 03 03 03 04  FF FF FF FF
+00 12 1F 2C 35  0C 09 09 07
+1A 03 01 02 03 02 02 03 01 01 00 00  81 01 02 00 03 00
+1C 01 03 01 03 01 03 00 00  80 04 01 03
+1C 01 02 01 02 01 02 00 00  80 04 01 02
+12 01 04 01 04 00 00  83 04
+```
+
+The indexed compact header still says that B1 uses `r1`, B2 uses
+`r3`, B3 uses `r2`, and B4 uses `r4` at their terminators. B1's
+`r2`/`r3` live-outs remain transit-only. An inliner may follow the
+four terminator offsets and decrement B3's `r2` use-block count when
+discarding that arm, just as with the general form. The eight bytes
+for the section's row index are unchanged; these savings are only
+within the Body row.
 
 B1's terminator selects B2 or B3, each with zero edge arguments.
 B2 and B3 each send one typed argument to B4; the sent `r3` or `r2`
@@ -706,12 +879,15 @@ It also shows why a wide instruction prefix and the enclosing
 ## Body record, direct block index and regions
 
 A Body table row is the bytes between adjacent Body-section offsets, with
-no further row-length prefix. Its fields, in order, are:
+no further row-length prefix. The following table gives the **general
+form** (`bodyLayout` form bits zero); compact forms have the common
+owner/layout prefix but the distinct field sequences specified
+[above](#compact-body-forms). Its fields, in order, are:
 
 | Field | Encoding | Constraint |
 |---|---|---|
 | `ownerMethod` | typed `u32` little-endian | Nonzero local MethodDef row with zero high byte, whose `bodyRow` points here |
-| `bodyLayout` | `u8` | Bits 0–1 Body-local width; bits 2–7 zero |
+| `bodyLayout` | `u8` | Bits 0–1 Body-local width; bits 2–3 zero for this form, bits 4–7 zero for every form |
 | `blockCount`, `valueCount`, `placeCount`, `regionCount`, `typeCount` | five local-width unsigned integers | Body-local counts; blockCount is positive; typeCount is zero iff no local type ID is used |
 | `typeMap` | `u32[typeCount]` little-endian | Distinct nonzero typed TypeSpec references, indexed by one-based Body-local type ID |
 | `places` | `placeCount` entries | local-width `typeId`, local-width `regionId`, `u8 flags`, local-width `useBlockCount` each |
@@ -723,8 +899,9 @@ no further row-length prefix. Its fields, in order, are:
 | `terminatorOffsets` | `u32[blockCount]` little-endian | Each relative to its own block start; points directly to its terminator opcode or width prefix |
 | `blockData` | `blockOffsets[last]` bytes | One block per consecutive offset extent |
 
-Body-layout codes 0, 1 and 2 mean local widths of 1, 2 and 4 bytes; code 3
-rejects. This width sizes all five counts, structural block/region/value/
+Body-layout width codes 0, 1 and 2 mean local widths of 1, 2 and 4 bytes;
+code 3 rejects. In the general form this width sizes all five counts,
+structural block/region/value/
 place/type IDs, block parameters, place-state and operation counts, region
 fields, per-descriptor use-block counts, definition starts, last-use
 ordinals and place-region references. Choose the smallest width that
@@ -911,7 +1088,10 @@ preceding fields. Names are descriptive, not a mandated host-language ABI:
 | `Instruction` | Registered opcode, three resolved widths and the opcode-specific typed operands | The wide prefix changes the byte widths only; do not store raw bytes as if they were an addressing mode |
 | `Terminator` | Registered opcode and its typed edge/return/failure payload | Directly indexed; each normal edge targets a block ID and transmits the listed arguments |
 
-Bound the Body row, descriptors and indexes before lookup. Decode each
+Bound the Body row, descriptors and indexes before lookup. Materialize
+the same logical records for all three forms, deriving the omitted
+one-block facts on a compact-linear scan and expanding compact-indexed
+presence lists and local offsets with checked arithmetic. Decode each
 operation by its registered schema when importing its block; semantic audit
 compares the stream with the terminator index and checks type/flow. A
 consumer explicitly trusting the producer's semantic indexes may start at
@@ -1343,6 +1523,40 @@ compact form, but substituting guessed short bytes here would falsely
 claim a registered form. This is encoded size, not throughput;
 IDs, prefixes, blocks, decoding, branches, debug data and alignment also
 affect cost.
+
+### Compact linear constant return
+
+The same `return 42` method uses a compact-linear Body section of
+25 bytes (8-byte row index and 17-byte row), compared with the
+61-byte general fixture above. `ConstBits` and Return are unchanged;
+the method's result type comes from MethodSig and the operation's
+mapped type:
+
+```text
+00 00 00 00  11 00 00 00
+01 00 00 00  04 01 01 00 00 00 01
+01 01 01 2A 83 01
+```
+
+#### Compact linear parameter return
+
+For `int32 Identity(int32 x) { return x; }`, assume MethodDef row 1
+and TypeSpec row 1 as above. The entry parameter is `r1`,
+`operationCount=0` and `Return r1` follows. This is a 21-byte section
+with a 13-byte row:
+
+```text
+00 00 00 00  0D 00 00 00
+01 00 00 00  04 01 01 00 00 00 00 83 01
+```
+
+It has the same one-block *shape* as `return 42` but a different
+definition/use graph. There is no second type-independent opcode or
+license to share an executable Body across different MethodSigs.
+Interning a reusable shape across methods would require a new
+bounded template/reference contract with type, operand, effect and
+ownership substitutions; cross-body template lookup could cost more
+than these short rows and is not assigned in this draft.
 
 ## Tool roles and stabilization blockers
 
