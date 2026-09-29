@@ -378,15 +378,16 @@ public static class ScalarFrontendHost
                     && ValidExpression(new ScalarFrontendExpression(type,
                         operation - 10000, left, right, nestedSpan), type, parameters);
             }
-            if (operation is 12063 or 14063)
+            if (operation is 12063 or 12163 or 14063 or 14163)
             {
-                var minus = operation == 14063;
+                var minus = operation is 14063 or 14163;
+                var nestedOperation = operation - (minus ? 14000 : 12000);
                 return words[0] >= 14 && expression.Type == type
                     && (minus ? type is 1 or 3 : type is >= 1 and <= 4)
                     && ValidSpan(expression.Span, nonempty: true)
                     && TryGroupedUnarySpan(source, expression.Span,
                         minus ? TokenKind.Minus : TokenKind.Plus, out var nestedSpan)
-                    && ValidExpression(new ScalarFrontendExpression(type, 63,
+                    && ValidExpression(new ScalarFrontendExpression(type, nestedOperation,
                         left, right, nestedSpan), type, parameters);
             }
             if (operation == 16062 || operation is >= 18000 and < 20000
@@ -1050,16 +1051,17 @@ public static class ScalarFrontendHost
                 return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Tilde,
                     Expression(nested), type, expression.Span));
             }
-            if (expression.Operation is 12063 or 14063)
+            if (expression.Operation is 12063 or 12163 or 14063 or 14163)
             {
-                var minus = expression.Operation == 14063;
+                var minus = expression.Operation is 14063 or 14163;
                 if (!TryGroupedUnarySpan(source, expression.Span,
                     minus ? TokenKind.Minus : TokenKind.Plus, out var nestedSpan))
                 {
                     throw InvalidResult();
                 }
                 var type = Type(expression.Type);
-                var nested = new ScalarFrontendExpression(expression.Type, 63,
+                var nested = new ScalarFrontendExpression(expression.Type,
+                    expression.Operation - (minus ? 14000 : 12000),
                     expression.LeftParameter, expression.RightParameter, nestedSpan);
                 return Binder.FoldScalarConstant(new BoundUnary(minus
                     ? TokenKind.Minus : TokenKind.Plus,
