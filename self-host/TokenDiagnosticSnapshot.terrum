@@ -1,0 +1,79 @@
+namespace Terrum.CodeAnalysis;
+
+// Diagnostics remain available when lexical errors prevent token publication.
+public unique struct TokenDiagnosticSnapshot
+{
+    private OwnedInt32Buffer _records;
+    private int32 _count;
+
+    private TokenDiagnosticSnapshot(OwnedInt32Buffer records, int32 count)
+    {
+        _records = move records;
+        _count = count;
+    }
+
+    public int32 GetCount()
+    {
+        return _count;
+    }
+
+    public bool TryGet(int32 index, out int32 code, out SourceRange span)
+    {
+        if (index < 0 || index >= _count)
+        {
+            return false;
+        }
+
+        int32 offset = index * 3;
+        require SourceRange.TryCreate(_records.Read(offset + 1), _records.Read(offset + 2),
+            out var found);
+        code = _records.Read(offset);
+        span = found;
+        return true;
+    }
+
+    public static bool TryBuild(init ref<TokenDiagnosticSnapshot> result)
+    {
+        if (Host.Diagnostics.Length < 1)
+        {
+            return false;
+        }
+        int32 count = Host.Diagnostics[0];
+        if (count < 0 || count > int32.MaxValue / 3
+            || count > (Host.Diagnostics.Length - 1) / 3
+            || !OwnedInt32Buffer.TryCreate(count * 3, out var created))
+        {
+            return false;
+        }
+
+        mut OwnedInt32Buffer records = move created;
+        for (mut int32 index = 0; index < count; index = index + 1)
+        {
+            int32 offset = index * 3 + 1;
+            int32 code = Host.Diagnostics[offset];
+            int32 start = Host.Diagnostics[offset + 1];
+            int32 length = Host.Diagnostics[offset + 2];
+            if (code < 1 || code > 9 || start < 0 || length < 0
+                || start > Host.Source.Length || length > Host.Source.Length - start)
+            {
+                return false;
+            }
+
+            require records.TryAppend(code);
+            require records.TryAppend(start);
+            require records.TryAppend(length);
+        }
+
+        result = new TokenDiagnosticSnapshot(move records, count);
+        return true;
+    }
+
+    public static bool TryScan(init ref<TokenDiagnosticSnapshot> result)
+    {
+        if (Scan() < 1)
+        {
+            return false;
+        }
+        return TryBuild(init result);
+    }
+}

@@ -84,6 +84,73 @@ public sealed class ManagedScannerComponentTests
             string.Join(" ", Enumerable.Repeat("a", identifiers)), fails);
 
     [Theory]
+    [InlineData("")]
+    [InlineData("alpha 1i32")]
+    [InlineData("0x")]
+    [InlineData("\uD800")]
+    [InlineData("\"unterminated\n\"\\q\"")]
+    public async Task OwnedDiagnosticsRemainAvailableOnLexicalFailureAsync(string text)
+    {
+        var expected = Lexer.Lex(SourceText.From(text)).Diagnostics;
+        var entry = new StringBuilder("""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenDiagnosticSnapshot.TryScan(init var diagnostics);
+            """);
+        _ = entry.Append(CultureInfo.InvariantCulture,
+            $"if (diagnostics.GetCount() != {expected.Length} || diagnostics.TryGet(-1, out var invalidCode, out var invalidSpan) || diagnostics.TryGet({expected.Length}, out var beyondCode, out var beyondSpan)) {{ return 1; }}");
+        if (expected.Length != 0)
+        {
+            _ = entry.Append("if (TokenSnapshot.TryBuild(1, init var invalidTokens)) { return 3; } Host.Diagnostics[1] = -1;");
+        }
+        for (var index = 0; index < expected.Length; index++)
+        {
+            var diagnostic = expected[index];
+            var code = int.Parse(diagnostic.Code.AsSpan(3), CultureInfo.InvariantCulture);
+            _ = entry.Append(CultureInfo.InvariantCulture,
+                $"require diagnostics.TryGet({index}, out var code{index}, out var span{index});"
+                + $" if (code{index} != {code} || span{index}.Start != {diagnostic.Span.Start}"
+                + $" || span{index}.Length != {diagnostic.Span.Length}) {{ return 2; }}");
+        }
+        _ = entry.Append("return 42; }");
+
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, entry.ToString(), (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
+    [InlineData(0, -1)]
+    [InlineData(0, int.MaxValue)]
+    [InlineData(1, 0)]
+    [InlineData(1, 10)]
+    [InlineData(2, -1)]
+    [InlineData(2, 2)]
+    [InlineData(3, -1)]
+    [InlineData(3, 2)]
+    public async Task InvalidDiagnosticRecordsDoNotPublishSnapshotAsync(int word, int value)
+    {
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                int32 tokenCount = Scan();
+                Host.Diagnostics[{{word}}] = {{value}};
+                if (TokenDiagnosticSnapshot.TryBuild(init var diagnostics)) { return 1; }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync("\uD800", entry, (BoundRuntimePolicy)policy).ConfigureAwait(true);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy).ConfigureAwait(true);
+        }
+    }
+
+    [Theory]
     [InlineData(NativeRuntimePolicy.FailFast)]
     [InlineData(NativeRuntimePolicy.CheckedExceptions)]
     public async Task OwnedTokenSnapshotSupportsIndexedReadsBeyondManagedChainLimitAsync(
@@ -1359,7 +1426,8 @@ public sealed class ManagedScannerComponentTests
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         string[] names = ["SourceRange", "Token", "ManagedTokenChain", "Scanner", "ManagedScanner",
-            "TokenSnapshot", "TokenTriviaSnapshot", "TokenIntegerSnapshot", "ScalarFunctionParser"];
+            "TokenSnapshot", "TokenTriviaSnapshot", "TokenIntegerSnapshot",
+            "TokenDiagnosticSnapshot", "ScalarFunctionParser"];
         var trees = new List<SyntaxTree>(names.Length + 1);
         foreach (var name in names)
         {
