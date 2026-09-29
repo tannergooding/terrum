@@ -665,9 +665,19 @@ bool TryEvaluateInt32BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     }
     if (operation == 60 || operation == 61)
     {
-        if (rightLow == 0 || (leftLow == int32.MinValue && rightLow == -1))
+        if (rightLow == 0)
         {
             return false;
+        }
+        if (leftLow == int32.MinValue && rightLow == -1)
+        {
+            if (operation == 60)
+            {
+                return false;
+            }
+            name = foundName;
+            result = 0;
+            return true;
         }
         if (operation == 60)
         {
@@ -822,9 +832,19 @@ bool TryEvaluateInt64BinaryReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
 
     if (operation == 60 || operation == 61)
     {
-        if (right == 0 || (left == int64.MinValue && right == -1))
+        if (right == 0)
         {
             return false;
+        }
+        if (left == int64.MinValue && right == -1)
+        {
+            if (operation == 60)
+            {
+                return false;
+            }
+            name = foundName;
+            result = 0;
+            return true;
         }
         name = foundName;
         if (operation == 60)
