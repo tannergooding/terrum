@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using Terrum.CodeAnalysis.Modules;
@@ -616,6 +617,91 @@ public sealed class TrRmBodyExampleTests
         Assert.Throws<InvalidDataException>(() => InspectIndexed(section, 0));
     }
 
+    [Theory]
+    [InlineData(new byte[] { 4, 2, 2, 1 }, new byte[] { 2 }, (byte)2)]
+    [InlineData(new byte[] { 5, 3, 4, 1, 2 }, new byte[] { 2, 2 }, (byte)1)]
+    [InlineData(new byte[] { 5, 3, 6, 1, 2 }, new byte[] { 2, 2 }, (byte)1)]
+    [InlineData(new byte[] { 5, 3, 10, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
+    [InlineData(new byte[] { 5, 3, 4, 1, 2 }, new byte[] { 1, 1 }, (byte)1)]
+    [InlineData(new byte[] { 7, 4, 1, 2, 3 }, new byte[] { 1, 2, 2 }, (byte)2)]
+    [InlineData(new byte[] { 4, 2, 1, 1 }, new byte[] { 1 }, (byte)1)]
+    public void CompactIndexedReaderChecksScalarOperatorResults(
+        byte[] operation, byte[] parameters, byte resultType)
+    {
+        var section = IndexedScalarOperation(operation, parameters, resultType);
+        Assert.Equal((1, parameters.Length + 1),
+            InspectIndexed(section, parameters.Length, resultTypeSpec: resultType,
+                parameterTypeIds: parameters));
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 4, 2, 0, 1 }, new byte[] { 2 }, (byte)2)]
+    [InlineData(new byte[] { 5, 3, 13, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
+    [InlineData(new byte[] { 5, 3, 4, 1, 2 }, new byte[] { 2, 2 }, (byte)2)]
+    [InlineData(new byte[] { 7, 4, 2, 1, 3 }, new byte[] { 1, 2, 2 }, (byte)2)]
+    [InlineData(new byte[] { 5, 3, 1, 1, 2 }, new byte[] { 1, 1 }, (byte)1)]
+    public void CompactIndexedReaderRejectsInvalidScalarOperatorResults(
+        byte[] operation, byte[] parameters, byte resultType)
+        => Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(IndexedScalarOperation(operation, parameters, resultType),
+                parameters.Length, resultTypeSpec: resultType,
+                parameterTypeIds: parameters));
+
+    private static byte[] IndexedScalarOperation(byte[] operation, byte[] parameters,
+        byte resultType)
+    {
+        var count = parameters.Length + 1;
+        var row = new List<byte> { 0x08, 1, (byte)count, 0, 2, 1, 0, 0, 0, 2, 0, 0, 0 };
+        foreach (var type in parameters)
+        {
+            row.Add(type);
+            row.Add(1);
+        }
+
+        row.Add(resultType);
+        row.Add(1);
+        row.Add(0);
+        row.Add((byte)count);
+        for (var index = 0; index < parameters.Length; index++)
+        {
+            row.Add(0xFF);
+        }
+
+        var definition = row.Count;
+        row.Add(0);
+        row.Add(0);
+        var blockLength = row.Count;
+        row.Add(0);
+        var terminator = row.Count;
+        row.Add(0);
+        var start = row.Count;
+        row.Add(0x12);
+        row.Add((byte)parameters.Length);
+        for (var value = 1; value <= parameters.Length; value++)
+        {
+            row.Add((byte)value);
+        }
+
+        row.Add((byte)count);
+        for (var value = 1; value <= count; value++)
+        {
+            row.Add((byte)value);
+            row.Add((byte)(value == count ? 1 : 0));
+        }
+
+        row.Add(1);
+        row[definition] = (byte)(row.Count - start);
+        row.AddRange(operation);
+        row[terminator] = (byte)(row.Count - start);
+        row.Add(0x83);
+        row.Add((byte)count);
+        row[blockLength] = (byte)(row.Count - start);
+        var section = new byte[8 + row.Count];
+        BinaryPrimitives.WriteUInt32LittleEndian(section.AsSpan(4), (uint)row.Count);
+        row.CopyTo(section, 8);
+        return section;
+    }
+
     private static byte[] WideIndexedConstant()
     {
         var original = IndexedConstantCopy();
@@ -646,7 +732,8 @@ public sealed class TrRmBodyExampleTests
         ];
 
     private static (int Blocks, int Values) InspectIndexed(byte[] section,
-        int parameterCount = 3, byte secondTypeCode = 8, int resultTypeSpec = 2)
+        int parameterCount = 3, byte secondTypeCode = 8, int resultTypeSpec = 2,
+        byte[]? parameterTypeIds = null)
     {
         var names = new TrRmStringTableReader(
             TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]), 2);
@@ -675,7 +762,7 @@ public sealed class TrRmBodyExampleTests
             BinaryPrimitives.WriteUInt32LittleEndian(paramBytes.AsSpan(index * 16), 1);
             BinaryPrimitives.WriteUInt32LittleEndian(paramBytes.AsSpan(index * 16 + 4), (uint)index);
             BinaryPrimitives.WriteUInt32LittleEndian(paramBytes.AsSpan(index * 16 + 8),
-                index == 0 ? 1u : 2u);
+                parameterTypeIds is null ? (index == 0 ? 1u : 2u) : parameterTypeIds[index]);
         }
 
         var parameters = parameterCount == 0 ? default

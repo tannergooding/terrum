@@ -1232,7 +1232,8 @@ A separate compact-indexed reader checks the approved conditional-sum and
 merge examples and their bounded scalar subset:
 root-free, fail-fast bodies without regions, forward `Branch` and `BranchIf`
 edges with checked typed block arguments, scalar `ConstBits`,
-`ConstSigned`, `Copy` and checked integer add, `Return` and `Fail`.
+`ConstSigned`, `Copy`, scalar `Unary`, `Binary`, eager `Select` and checked
+integer add, `Return` and `Fail`.
 The indexed reader also accepts valid `F0` reference/data widths on those
 operations independently of the Body-local width; terminators remain
 unprefixed in this bounded subset.

@@ -8,7 +8,7 @@ using System.IO;
 namespace Terrum.CodeAnalysis.Modules;
 
 /// <summary>Inspects the root-free, forward-branching scalar compact-indexed subset.</summary>
-/// <remarks>Only scalar constants, Copy, checked integer addition, forward Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
+/// <remarks>Only scalar constants and operators, Copy, Select, forward Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
 public readonly ref struct TrRmCompactIndexedBodyReader
 {
     private readonly record struct Edge(int Target, int[] Arguments);
@@ -280,6 +280,49 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         throw InvalidBody();
                     }
                 }
+                else if (opcode == 4)
+                {
+                    var kind = Read(extent, ref cursor, 1);
+                    var source = ReadCount(extent, ref cursor, referenceWidth);
+                    Use(source, ordinal);
+                    var type = valueTypes[source];
+                    if (valueTypes[result] != type || !(kind == 1 && type == 1
+                        || kind is 2 or 3 && IsInteger(type)))
+                    {
+                        throw InvalidBody();
+                    }
+                }
+                else if (opcode == 5)
+                {
+                    var kind = Read(extent, ref cursor, 1);
+                    var left = ReadCount(extent, ref cursor, referenceWidth);
+                    var right = ReadCount(extent, ref cursor, referenceWidth);
+                    Use(left, ordinal);
+                    Use(right, ordinal);
+                    var type = valueTypes[left];
+                    var comparison = kind is >= 4 and <= 9;
+                    if (kind is < 1 or > 12 || type != valueTypes[right]
+                        || (!IsInteger(type) && !(kind is 4 or 5 && type == 1))
+                        || valueTypes[result] != (comparison ? 1 : type))
+                    {
+                        throw InvalidBody();
+                    }
+                }
+                else if (opcode == 7)
+                {
+                    var condition = ReadCount(extent, ref cursor, referenceWidth);
+                    var whenTrue = ReadCount(extent, ref cursor, referenceWidth);
+                    var whenFalse = ReadCount(extent, ref cursor, referenceWidth);
+                    Use(condition, ordinal);
+                    Use(whenTrue, ordinal);
+                    Use(whenFalse, ordinal);
+                    if (valueTypes[condition] != 1
+                        || valueTypes[whenTrue] != valueTypes[whenFalse]
+                        || valueTypes[result] != valueTypes[whenTrue])
+                    {
+                        throw InvalidBody();
+                    }
+                }
                 else if (opcode == 0x15)
                 {
                     var kind = Read(extent, ref cursor, 1);
@@ -488,6 +531,9 @@ public readonly ref struct TrRmCompactIndexedBodyReader
 
     private static bool Contains(int[] values, int value)
         => Array.BinarySearch(values, value) >= 0;
+
+    private static bool IsInteger(byte type)
+        => type is 8 or 9 or 0x0D or 0x0E;
 
     private static (uint Opcode, int ReferenceWidth, int DataWidth) ReadOperation(
         ReadOnlySpan<byte> data, ref int position)
