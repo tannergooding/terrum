@@ -346,7 +346,7 @@ accepted forms.
 Block           = "{", { Statement }, "}" ;
 Statement       = Block | IfStatement | WhileStatement | ForStatement
                 | RequireStatement | TryStatement | UnsafeStatement
-                | UncheckedStatement | DeferStatement
+                | UncheckedStatement | DeferStatement | PolicyStatement
                 | ReturnStatement | LoopTransfer | LocalDecl
                 | DiscardStatement | AssignmentStatement
                 | ExpressionStatement | ";" ;
@@ -363,6 +363,7 @@ TryStatement    = "try", Block, ( "finally", Block
 UnsafeStatement = "unsafe", Block ;
 UncheckedStatement = "unchecked", Block ;
 DeferStatement  = "defer", ( Expression, ";" | Block ) ;
+PolicyStatement = [ "require" ], "policy", PolicyCases, Block ;
 ReturnStatement = "return", [ Expression ], ";" ;
 LoopTransfer    = ( "break" | "continue" ), ";" ;
 LocalDecl       = [ "mut" ], ( "var" | Type ), Identifier, "=", Expression, ";" ;
@@ -429,8 +430,11 @@ Primary         = "(", [ Expression ], ")" | "new", Type, Arguments
                 | Identifier | Identifier, TypeArguments, Arguments
                 | "unsafe", "(", Expression, ")"
                 | "unchecked", "(", Expression, ")"
+                | [ "require" ], "policy", PolicyCases, "(", Expression, ")"
                 | "base", "<", Type, ">" ;
 TypeArguments   = "<", Type, { ",", Type }, ">" ;
+PolicyCases     = "<", PolicyCase, { ",", PolicyCase }, ">" ;
+PolicyCase      = DottedIdentifier ;
 ```
 
 `HexFloat` participates in the proposed `Number` alternative above; the
@@ -461,6 +465,10 @@ control transfers cannot leave the action, just as they cannot leave a
 `finally`. Deferred actions have the same ordinary failure and effect rules
 as authored `finally`, not a special `NoThrow` requirement. See the
 [language exception contract](../language.md#safe-and-unsafe-boundaries).
+
+`PolicyCase` binds a compile-time constant named enum case, not a type
+argument or a runtime enum value. Exact policy selection, strictness and
+generic forwarding are described in [§5.12](#512-modifiers-cleanup-and-finalization).
 
 ## 4. Accepted language direction
 
@@ -1007,6 +1015,44 @@ conformance implementation replaces an available default by member identity,
 not by a same-named declaration. `pin` qualifies `ref<T>` in `Type`, not
 `ptr<T>` or a pinning statement; `pinned` need not also be a keyword.
 
+**Policy selection (PROPOSED):** initially, policy enum domains are defined
+by Core, and methods may declare variants of their own unannotated base
+declaration. Resolve that base by ordinary overload rules first. Variants
+have the same parameter/result types and ownership/loan shape; effects may
+differ by policy. No imported extension can attach a variant to an unrelated
+declaration. A `policy<Domain.Case>` scope is a preference, not a guarantee:
+for each call it tries the variant of the already selected base declaration
+matching the innermost scope's case tuple, then each enclosing scope's tuple,
+then the unannotated base. No callee inherits the caller's source policy.
+The compiler records the selected variant and its contract; linking and JIT
+do not repeat source policy selection. Adding a variant can change selection
+on source recompilation, not silently retarget an existing compiled binding.
+
+`policy<A.X, B.Y>` names one atomic tuple with at most one case per enum
+domain. It tries the exact combined variant, not automatically A-only and
+B-only or any subset. Separate nested scopes do not synthesize combinations:
+`policy<A.X> { policy<B.Y> { ... } }` tries B-only, A-only, then base.
+Authors can nest an explicit combined scope inside individual scopes to
+specify their own fallback order. Lookup is linear in lexical scope depth,
+not exponential in the number of active domains. A `require policy<...>`
+scope is a strict boundary: calls within it must select a variant satisfying
+its complete case tuple, rather than silently using an incompatible variant
+or the base. All other policy scopes preserve ordinary fallback. The exact
+source annotation on variant declarations and the relationship to existing
+`unchecked` syntax remain open; no policy may manufacture access, lifetime,
+initialization, unsafe authorization or a runtime GC exclusion lease.
+
+The `policy<...>` arguments above are compile-time enum values; this does not
+select a syntax for const-value generic formals. A future generic formal
+could carry such a value into `policy<P>` with checked definition-site
+binding, but ordinary runtime enum parameters require explicit dispatch and
+cannot select different source overloads depending on inlining. A query such
+as `if (policy<P>)` remains open until compile-time conditional and generic
+rules specify whether it tests the active request or a particular call's
+selected variant. User-defined policy domains are a separate future question:
+their authors cannot retroactively intercept another owner's methods, and
+their enum case alone cannot prove a mathematical law about a variant.
+
 Type-call conversions already use `T(expression)`; `cast` and `explicit`
 are not needed to invoke them. User-defined conversion *declarations*, raw
 reinterpretation, and their safety constraints still need contracts before
@@ -1116,7 +1162,7 @@ proposal, and accepted semantics do not approve its syntax.
 | Constructors, members, operators, properties | **P** §3.1 requires bodies for concrete functions/operators/getters; constructors name their owner; operators are type/interface members, not global declarations. **A** §5.7 specifies unary operator direction; §5.10 limits property direction to explicit getter-only by-value properties. | Interface `;` versus body forms are separated in §3.1. Property/accessor effects, attribute targets, and metadata remain **O**; setters, auto/ref-return properties and indexers are not adopted. `++`/`--` appear only as future operator spellings, not current lexer tokens. |
 | Interface witnesses and dispatch | **A** §5.12: bodyless members require checked implementations; bodies supply replaceable defaults, selected by declaring-member identity. **P** §3.1 sketches the corresponding `;`/body forms. Static operator witnesses need no runtime vtable. | Explicit mapping syntax, metadata/ABI, inherited-default resolution syntax, and compatible binding for older witnesses remain **O**. No physical slot layout is selected. |
 | Types, parameters, arguments, modifiers | **P** §3.2 sketches recursive type arguments, one optional marker, `ref`/`mut ref`/`init ref<T>`, labels, `init` arguments and `pin` on references. `mut`, `unique`, `unsafe`, visibility and `static` are candidate modifier vocabulary. | `implicit ref<T>`, `write` parameter legality, `params`, generic defaults/inference, associated types, `ensure` contracts and exact modifier combinations remain **O**. Prefix names are context-valid placeholders; `abstract` is deliberately absent from target modifiers. |
-| Statements and expressions | **P** §§3.3–3.4 sketch blocks, control flow, locals, calls, assignments, precedence, `is null`/`is some`, and `T(expression)`. **A** §5.6 gives standalone discard semantics; §3.3 records its distinct `_ = expression;` form. | Assignment's left side needs a writable-place check; catch typing/binding, constant-evaluation/static-proof syntax, and omitted constructs (including lambdas, patterns, `throw`, `await`, conditional expressions and general assignment expressions) remain outside this grammar. `is`/`some` token treatment remains open. |
+| Statements and expressions | **P** §§3.3–3.4 sketch blocks, control flow, locals, calls, assignments, `policy<...>` scopes, precedence, `is null`/`is some`, and `T(expression)`. **A** §5.6 gives standalone discard semantics; §3.3 records its distinct `_ = expression;` form. | Assignment's left side needs a writable-place check; catch typing/binding, policy-variant declaration syntax, const-enum generic form, constant-evaluation/static-proof syntax, and omitted constructs (including lambdas, patterns, `throw`, `await`, conditional expressions and general assignment expressions) remain outside this grammar. `is`/`some` token treatment remains open. |
 | Literals and compound operations | **P** `HexFloat` is part of the proposed `Number` and `Primary`; **I** currently covers decimal/hex/binary integer tokens, decimal fractional tokens and strings, not hex floats or executable floating literals. **A** §5.13 separates compound-operation semantics from `+`. | Hex-float token diagnostics and floating-value semantics still need implementation. Compound-assignment spelling, tokens, places and evaluation rules are **O**; `+=`…`^=` shorthand in §5.13 is not legal grammar. |
 | Cleanup and finalizers | **A** deterministic `[Cleanup]` is distinct from GC finalization; **I** support is listed by the implementation reference. | Attribute placement is still governed by open contextual-prefix rules. No finalizer production is proposed; whether to support one and its lifecycle/ABI contract remain **O** (§5.12). |
 | Implemented boundary | **I** is defined only by [implementation](../implementation.md), not by this proposal's examples or productions. | Nothing marked **P** is thereby implemented or source-compatible. |
