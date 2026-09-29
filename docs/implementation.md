@@ -1257,9 +1257,10 @@ checked integer arithmetic/shifts, integer `CheckedConvert`, signed `CheckedNega
 dual-result `CheckedDivRem`, static `Call` to global or type-owned local or
 retained imported MethodDefs with scalar/optional parameters and result
 (including void), `Switch`, `Return` and `Fail`. The bounded call inspection
-rejects receiver/generic calls and packed cross-module DefIds; it checks the expected
-import definition and signature, not producer binding, call effects or
-executable callee bodies.
+rejects receiver/generic calls. Packed direct MethodDef `DefId` calls require
+an authored target in another included module; retained imports require their
+expected local definition. It checks signatures, not producer binding, call
+effects or executable callee bodies.
 Optional scalar values retain their presence-qualified identity through
 `MakeOptional`, `None`, `IsPresent`, `Copy` and eager `Select`; they are not
 interchangeable with the underlying scalar in operations or signatures.

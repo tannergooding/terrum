@@ -158,6 +158,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             : TrRmCompactLinearBodyReader.ResolveType(types, resultTypeSpec);
         var localMethodStart = 0;
         var localMethodEnd = 0;
+        var callerModule = 0;
         for (var block = 1; block <= BlockCount; block++)
         {
             var extent = blockData[(int)offsets[block - 1]..(int)offsets[block]];
@@ -392,15 +393,31 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     var method = ReadCount(extent, ref cursor, referenceWidth);
                     if (localMethodStart == 0)
                     {
+                        callerModule = methods.GetOwnerModule(methodRow);
                         (localMethodStart, localMethodEnd) = modules.GetMethodDefRange(
-                            methods.GetOwnerModule(methodRow));
+                            callerModule);
                     }
-                    if (method == 0 || method > localMethodEnd - localMethodStart)
+                    int target;
+                    if (method == 0)
+                    {
+                        var definition = Read(extent, ref cursor, 4);
+                        target = (int)(definition & 0xFF_FFFF);
+                        if (definition >> 24 != 0x16 || modules.Count < 2
+                            || target == 0 || target > methods.Count
+                            || methods.GetOwnerModule(target) == callerModule
+                            || methods.GetBodyRow(target) == 0)
+                        {
+                            throw InvalidBody();
+                        }
+                    }
+                    else if (method > localMethodEnd - localMethodStart)
                     {
                         throw InvalidBody();
                     }
-
-                    var target = localMethodStart + method - 1;
+                    else
+                    {
+                        target = localMethodStart + method - 1;
+                    }
                     var targetSignature = methods.GetSignature(target);
                     if ((methods.GetBodyRow(target) == 0
                         && !imports.IsExpectedDefinition(0x1600_0000u | (uint)target))

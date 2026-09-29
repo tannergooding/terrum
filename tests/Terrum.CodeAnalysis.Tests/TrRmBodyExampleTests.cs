@@ -947,6 +947,38 @@ public sealed class TrRmBodyExampleTests
             expectedTarget: true));
     }
 
+    [Fact]
+    public void CompactIndexedReaderChecksPackedDirectCallIdentity()
+    {
+        var body = IndexedScalarOperation([0x12, 2, 0, 2, 0, 0, 0x16, 1, 1],
+            [2], 2);
+        Assert.Equal((1, 2), InspectIndexed(body, parameterCount: 1,
+            parameterTypeIds: [2], secondMethod: true, packedTarget: true));
+        var wide = IndexedScalarOperation(
+            [0xF0, 5, 0x12, 2, 0, 0, 0, 2, 0, 0, 0x16, 1, 0, 1, 0], [2], 2);
+        Assert.Equal((1, 2), InspectIndexed(wide, parameterCount: 1,
+            parameterTypeIds: [2], secondMethod: true, packedTarget: true));
+
+        foreach (var (offset, value) in new (int, byte)[]
+        {
+            (3, 1),
+            (3, 3),
+            (6, 0x15),
+        })
+        {
+            var invalid = IndexedScalarOperation([0x12, 2, 0, 2, 0, 0, 0x16, 1, 1],
+                [2], 2);
+            var direct = invalid.AsSpan().IndexOf(new byte[] { 0x12, 2, 0, 2, 0, 0, 0x16, 1, 1 });
+            Assert.True(direct >= 0);
+            invalid[direct + offset] = value;
+            Assert.Throws<InvalidDataException>(() => InspectIndexed(invalid,
+                parameterCount: 1, parameterTypeIds: [2],
+                secondMethod: true, packedTarget: true));
+        }
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(body,
+            parameterCount: 1, parameterTypeIds: [2], secondMethod: true));
+    }
+
     [Theory]
     [InlineData(new byte[] { 0x12, 1, 0, 0 }, new byte[0])]
     [InlineData(new byte[] { 0x12, 1, 2, 0 }, new byte[0])]
@@ -1088,18 +1120,28 @@ public sealed class TrRmBodyExampleTests
         byte runtimePolicy = 0, bool thirdTypeOptional = false,
         byte firstTypeCode = 1, bool secondMethod = false,
         bool importedTarget = false, bool expectedTarget = false,
-        bool ownedTarget = false)
+        bool ownedTarget = false, bool packedTarget = false)
     {
         var names = new TrRmStringTableReader(
             TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]), 2);
-        var module = new byte[44];
+        var module = new byte[packedTarget ? 88 : 44];
         foreach (var offset in new[] { 0, 4, 28, 32, 36, 40 })
         {
             BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
         }
 
+        if (packedTarget)
+        {
+            foreach (var offset in new[] { 48, 72, 76, 84 })
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
+            }
+            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(44), 2);
+            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(80), 2);
+        }
         BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(8), runtimePolicy);
-        var modules = new TrRmModuleTableReader(module, 1, names, expectedTarget ? 1 : 0,
+        var modules = new TrRmModuleTableReader(module, packedTarget ? 2 : 1,
+            names, expectedTarget ? 1 : 0,
             ownedTarget ? 1 : 0,
             secondMethod ? 2 : 1, 0);
         byte[] reference = new byte[12];
@@ -1159,11 +1201,16 @@ public sealed class TrRmBodyExampleTests
         if (bodyCount == 2)
         {
             var length = section.Length - 8;
-            bodyRows = new byte[12 + length * 2];
+            var second = packedTarget
+                ? IndexedScalarOperation([3, 2, 1], [2], 2)
+                : section;
+            var secondLength = second.Length - 8;
+            bodyRows = new byte[12 + length + secondLength];
             BinaryPrimitives.WriteUInt32LittleEndian(bodyRows.AsSpan(4), (uint)length);
-            BinaryPrimitives.WriteUInt32LittleEndian(bodyRows.AsSpan(8), (uint)(length * 2));
+            BinaryPrimitives.WriteUInt32LittleEndian(bodyRows.AsSpan(8),
+                (uint)(length + secondLength));
             section.AsSpan(8).CopyTo(bodyRows.AsSpan(12));
-            section.AsSpan(8).CopyTo(bodyRows.AsSpan(12 + length));
+            second.AsSpan(8).CopyTo(bodyRows.AsSpan(12 + length));
         }
         var methods = new TrRmMethodDefTableReader(methodRows, secondMethod ? 2 : 1,
             names, modules, defs, signatures, 0, bodyCount);
