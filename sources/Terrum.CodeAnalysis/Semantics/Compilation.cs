@@ -518,6 +518,11 @@ public sealed class Compilation
         CreateCore(trees, [], isLibrary: true, cancellationToken, runtimePolicy: runtimePolicy);
 
     /// <summary>Binds the compiler-owned primitive declarations and APIs of a Core library without a standard-library reference.</summary>
+    public static Compilation CreateCoreLibrary(IEnumerable<SyntaxTree> trees,
+        CancellationToken cancellationToken = default) =>
+        CreateCore(trees, [], isLibrary: true, cancellationToken, coreLibrary: true);
+
+    /// <summary>Binds the compiler-owned primitive declarations and APIs of a Core library without a standard-library reference.</summary>
     public static Compilation CreateCoreLibrary(IEnumerable<SyntaxTree> trees, BoundRuntimePolicy runtimePolicy,
         CancellationToken cancellationToken = default) =>
         CreateCore(trees, [], isLibrary: true, cancellationToken, runtimePolicy: runtimePolicy,

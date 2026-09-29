@@ -28,8 +28,7 @@ public sealed class CoreLibraryTests
     [Fact]
     public void CorePrimitiveApisRetainTheirIntrinsicTypeAcrossModuleBinding()
     {
-        var compilation = Compilation.CreateCoreLibrary([SyntaxTree.Parse(Core)],
-            BoundRuntimePolicy.FailFast);
+        var compilation = Compilation.CreateCoreLibrary([SyntaxTree.Parse(Core)]);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = Assert.IsType<BoundProgram>(compilation.Program);
         Assert.Empty(program.Structures);

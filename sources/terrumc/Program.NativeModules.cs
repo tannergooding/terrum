@@ -14,7 +14,7 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
-    private const string NativeModuleUsage = "Usage: terrumc compile-native producer <source> <identity> --export <name> [--export <name>] [--source <source>] -o <producer.trmn> --runtime <fail-fast|checked-exceptions> [--json]; "
+    private const string NativeModuleUsage = "Usage: terrumc compile-native producer <source> <identity> --export <name> [--export <name>] [--source <source>] -o <producer.trmn> --runtime <fail-fast|checked-exceptions> [--corelib] [--json]; "
         + "terrumc compile-native consumer <source> <producer.trmn> [--source <source>] -o <consumer.trmn> --runtime <fail-fast|checked-exceptions> [--json]; "
         + "terrumc validate-native <consumer.trmn> <producer.trmn> [--json]; "
         + "terrumc run-native <consumer.trmn> <producer.trmn> --runtime <fail-fast|checked-exceptions> [--json]";
@@ -33,7 +33,7 @@ internal static partial class Program
             if (count >= 8 && args[0] == "compile-native" && args[1] is "producer" or "consumer")
             {
                 if (!TryReadModuleOptions(args, count, out var paths, out var exports, out var output,
-                    out var runtimePolicy, out _))
+                    out var runtimePolicy, out var coreLibrary))
                 {
                     WriteInputError(json, "TRM2000", NativeModuleUsage);
                     return 2;
@@ -48,7 +48,9 @@ internal static partial class Program
                 }
                 var snapshots = ReadModuleSources(paths);
                 var reference = producer ? null : ReadModuleFile(args[3], 16 * 1024 * 1024);
-                var compilation = reference is null ? Compilation.CreateLibrary(snapshots, (BoundRuntimePolicy)runtimePolicy)
+                var compilation = coreLibrary
+                    ? Compilation.CreateCoreLibrary(snapshots, (BoundRuntimePolicy)runtimePolicy)
+                    : reference is null ? Compilation.CreateLibrary(snapshots, (BoundRuntimePolicy)runtimePolicy)
                     : Compilation.Create(snapshots, NativeModuleCompiler.CreateReference(reference), (BoundRuntimePolicy)runtimePolicy);
                 if (compilation.HasErrors)
                 {

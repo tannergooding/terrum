@@ -59,6 +59,8 @@ public sealed partial class CliTests
         var caller = Path.Combine(directory, "caller.terrum");
         var provider = Path.Combine(directory, "core.trm");
         var consumer = Path.Combine(directory, "caller.trm");
+        var nativeProvider = Path.Combine(directory, "core.trmn");
+        var nativeConsumer = Path.Combine(directory, "caller.trmn");
         try
         {
             await File.WriteAllTextAsync(source, """
@@ -92,6 +94,30 @@ public sealed partial class CliTests
             var (consumerSwitch, _, _) = await RunAsync([],
                 "compile-module", "consumer", caller, provider, "-o", consumer, "--corelib", "--json");
             Assert.Equal(2, consumerSwitch);
+
+            var (nativeProduced, nativeOutput, nativeError) = await RunAsync([],
+                "compile-native", "producer", source, "CorePrimitive",
+                "--export", "int32.AddOne", "--export", "int32.Read",
+                "-o", nativeProvider, "--runtime", "fail-fast", "--corelib", "--json");
+            Assert.True(nativeProduced == 0, nativeOutput + nativeError);
+
+            var (nativeConsumed, nativeConsumerOutput, nativeConsumerError) = await RunAsync([],
+                "compile-native", "consumer", caller, nativeProvider, "-o", nativeConsumer,
+                "--runtime", "fail-fast", "--json");
+            Assert.True(nativeConsumed == 0, nativeConsumerOutput + nativeConsumerError);
+
+            var (validated, validationOutput, validationError) = await RunAsync([],
+                "validate-native", nativeConsumer, nativeProvider, "--json");
+            Assert.True(validated == 0, validationOutput + validationError);
+
+            var (nativeExecuted, _, _) = await RunAsync([],
+                "run-native", nativeConsumer, nativeProvider, "--runtime", "fail-fast");
+            Assert.Equal(6, nativeExecuted);
+
+            var (nativeConsumerSwitch, _, _) = await RunAsync([],
+                "compile-native", "consumer", caller, nativeProvider, "-o", nativeConsumer,
+                "--runtime", "fail-fast", "--corelib", "--json");
+            Assert.Equal(2, nativeConsumerSwitch);
         }
         finally
         {
@@ -99,6 +125,8 @@ public sealed partial class CliTests
             File.Delete(caller);
             File.Delete(provider);
             File.Delete(consumer);
+            File.Delete(nativeProvider);
+            File.Delete(nativeConsumer);
             Directory.Delete(directory);
         }
     }

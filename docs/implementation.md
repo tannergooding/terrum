@@ -15,7 +15,8 @@ Primitive type names in the implemented set (`bool`, `char16`, `int32`,
 `uint32`, `int64`, `uint64`) cannot be redeclared by ordinary structs or
 classes, even in another namespace. `Compilation.CreateCoreLibrary` and
 `terrumc analyze|build-library --corelib` and
-`terrumc compile-module producer --corelib` opt into a bounded Core bootstrap
+`terrumc compile-module producer --corelib` and
+`terrumc compile-native producer --corelib` opt into a bounded Core bootstrap
 without a referenced standard library. The Core compilation may declare a
 global primitive struct with exactly one private, uninitialized field of
 its own type; the field reads as the compiler-owned primitive value without

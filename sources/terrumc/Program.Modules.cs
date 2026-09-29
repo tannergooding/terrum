@@ -156,7 +156,7 @@ internal static partial class Program
         {
             if (args[index] == "--corelib")
             {
-                if (native || args[1] != "producer" || coreLibrary)
+                if (args[1] != "producer" || coreLibrary)
                 {
                     return false;
                 }
