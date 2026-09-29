@@ -16,6 +16,7 @@ namespace Terrum.CodeAnalysis;
 // Version-6 unary plus on that literal adds another 1600.
 // Version-7 grouped unary minus on a standalone literal uses operation 658.
 // Version-8 unary not on a grouped two-parameter Boolean binary adds 2000.
+// Version-9 also admits a grouped Boolean binary with literal operands.
 // Boolean parameter/literal pairs add 700 for a parameter on the left or
 // 900 for a literal on the left; slots hold the parameter index and literal kind.
 // Boolean literal pairs add 1100; both slots hold literal kinds.
@@ -401,16 +402,24 @@ mut class ScalarFrontendState
                 cursor = cursor + 1;
             }
             if (cursor > _at && _tokens.TryGet(cursor, out var firstOperand)
-                && firstOperand.Kind == 2)
+                && (firstOperand.Kind == 2 || firstOperand.Kind == 20
+                    || firstOperand.Kind == 21))
             {
                 int32 start = _at;
                 if (!ParseExpression(5, out var nested))
                 {
                     return false;
                 }
-                if (nested.Type == 5 && nested.Operation >= 65
-                    && nested.Operation <= 75 && nested.LeftParameter >= 1
-                    && nested.RightParameter >= 1)
+                mut int32 nestedKind = nested.Operation % 100;
+                mut int32 nestedGroup = nested.Operation / 100;
+                if (nested.Type == 5
+                    && ((nested.Operation >= 65 && nested.Operation <= 75
+                            && nested.LeftParameter >= 1
+                            && nested.RightParameter >= 1)
+                        || ((nestedGroup == 7 || nestedGroup == 9
+                                || nestedGroup == 11)
+                            && (nestedKind == 65 || nestedKind == 66
+                                || (nestedKind >= 71 && nestedKind <= 75)))))
                 {
                     require _tokens.TryGet(_at - 1, out var close);
                     require SourceRange.TryCreate(literal.Range.Start,
