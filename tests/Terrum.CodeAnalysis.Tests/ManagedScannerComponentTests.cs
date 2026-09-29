@@ -441,7 +441,8 @@ public sealed class ManagedScannerComponentTests
     [InlineData("int32 Answer() { return -42; }", true)]
     [InlineData("int32 Answer() { return +42; }", true)]
     [InlineData("uint32 Answer() { return 42; }", false)]
-    [InlineData("int32 Answer() { return (42); }", false)]
+    [InlineData("int32 Answer() { return (42); }", true)]
+    [InlineData("int32 Answer() { return -(42); }", false)]
     [InlineData("int32 Answer() { return true; }", false)]
     [InlineData("int32 Answer() { return 42 }", false)]
     public async Task BoundedScalarParserAgreesWithHostedSyntaxForItsAcceptedShapeAsync(
@@ -492,6 +493,7 @@ public sealed class ManagedScannerComponentTests
     [InlineData("uint32 Answer() { return +42; }", 2)]
     [InlineData("int64 Answer() { return -42; }", 3)]
     [InlineData("uint64 Answer() { return 42; }", 4)]
+    [InlineData("int64 Answer() { return (42); }", 3)]
     [InlineData("float32 Answer() { return 42; }", 0)]
     public async Task TypedScalarParserMatchesHostedDeclarationSpansAsync(string text, int type)
     {
@@ -534,7 +536,7 @@ public sealed class ManagedScannerComponentTests
     [InlineData("int32 Answer() { return 0xFFFF_FFFF; }", true, -1, 0)]
     [InlineData("int32 Answer() { return 18446744073709551616; }", false, 0, 0)]
     [InlineData("int32 Answer() { return 1.5; }", false, 0, 0)]
-    [InlineData("int32 Answer() { return (42); }", false, 0, 0)]
+    [InlineData("int32 Answer() { return (42); }", true, 42, 0)]
     public async Task BoundedParserSelectsOwnedIntegerRecordsAsync(
         string text, bool accepted, int low, int high)
     {
@@ -573,6 +575,7 @@ public sealed class ManagedScannerComponentTests
     [Theory]
     [InlineData("int32 Main() { return 2147483647; }", true, int.MaxValue)]
     [InlineData("int32 Main() { return +2147483647; }", true, int.MaxValue)]
+    [InlineData("int32 Main() { return (2147483647); }", true, int.MaxValue)]
     [InlineData("int32 Main() { return +0xFFFF_FFFF; }", true, -1)]
     [InlineData("int32 Main() { return -2147483648; }", true, int.MinValue)]
     [InlineData("int32 Main() { return - 2_147_483_648; }", true, int.MinValue)]
@@ -624,6 +627,7 @@ public sealed class ManagedScannerComponentTests
     [InlineData("uint32 Value() { return 0; }", true, 0u)]
     [InlineData("uint32 Value() { return 4294967295; }", true, uint.MaxValue)]
     [InlineData("uint32 Value() { return +4294967295; }", true, uint.MaxValue)]
+    [InlineData("uint32 Value() { return (4294967295); }", true, uint.MaxValue)]
     [InlineData("uint32 Value() { return 0xFFFF_FFFF; }", true, uint.MaxValue)]
     [InlineData("uint32 Value() { return 0x0000_0000_FFFF_FFFF; }", true, uint.MaxValue)]
     [InlineData("uint32 Value() { return 4294967296; }", false, 0u)]
@@ -673,6 +677,7 @@ public sealed class ManagedScannerComponentTests
     [InlineData("uint64 Value() { return 9223372036854775808; }", true, 9223372036854775808ul)]
     [InlineData("uint64 Value() { return 18446744073709551615; }", true, ulong.MaxValue)]
     [InlineData("uint64 Value() { return +18446744073709551615; }", true, ulong.MaxValue)]
+    [InlineData("uint64 Value() { return (18446744073709551615); }", true, ulong.MaxValue)]
     [InlineData("uint64 Value() { return 0xFFFF_FFFF_FFFF_FFFF; }", true, ulong.MaxValue)]
     [InlineData("uint64 Value() { return 18446744073709551616; }", false, 0ul)]
     [InlineData("uint64 Value() { return -1; }", false, 0ul)]
@@ -717,6 +722,7 @@ public sealed class ManagedScannerComponentTests
     [InlineData("int64 Value() { return 0; }", true, 0L)]
     [InlineData("int64 Value() { return 9223372036854775807; }", true, long.MaxValue)]
     [InlineData("int64 Value() { return +9223372036854775807; }", true, long.MaxValue)]
+    [InlineData("int64 Value() { return (9223372036854775807); }", true, long.MaxValue)]
     [InlineData("int64 Value() { return +0xFFFF_FFFF_FFFF_FFFF; }", true, -1L)]
     [InlineData("int64 Value() { return -9223372036854775808; }", true, long.MinValue)]
     [InlineData("int64 Value() { return - 9_223_372_036_854_775_808; }", true, long.MinValue)]
