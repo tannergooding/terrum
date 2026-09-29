@@ -18,7 +18,12 @@ metadata tokens or runtime ABI.
 ## Model and canonical form
 
 A body implements one MethodDef. A **block** has typed parameters, ordered
-operations and one terminator; each edge supplies its successor's parameters.
+operations and one terminator; each normal edge supplies its successor's
+parameters. Checked operations and potentially failing calls do not end a
+block merely because they can fail. They define their result at their
+operation site on success; failure leaves normal control flow under the
+selected runtime policy. Explicit branches, returns, failures and region
+exits determine normal CFG boundaries.
 A **value ID** denotes an immutable typed definition. A **place** denotes
 addressable storage with separate initialization, mutability and ownership
 state; loading a value is distinct from borrowing or moving its place. A
@@ -33,6 +38,17 @@ merges, but place writes, calls and failures remain ordered effects.
 Interpreters, JITs and AOT compilers may lower verified blocks independently.
 Untrusted loop/region facts require validation; trusted producers may supply
 them to a fast consumer, with semantic audit as an explicit option.
+
+Value IDs and block parameters form an SSA-like value graph, while mutable
+places and ordered effects remain explicit rather than pretending all storage
+is in SSA. The Body records value types and cross-block liveness for ordinary
+values; consumers need not infer those solely from instruction uses. It does
+not yet encode the *intra-block* last uses, per-safepoint logical roots or
+the native locations required by a GC. Those are separate concerns: a
+producer can publish logical root identity, lexical lifetime, ownership and
+interior-reference dependencies, but only the backend knows which registers
+or stack slots hold them after lowering. Do not treat source-local counts or
+ordinary SSA last-use as a complete GC root map.
 
 Numeric policy (checked, wrapping, saturating, bit reinterpretation) is
 explicit; converting one into another is not a space-saving normalization.
@@ -133,6 +149,20 @@ minimizing every large literal or body. Explicit edges, place-state joins and
 loop headers expose dataflow to consumers; no throughput or total-size win
 is asserted.
 
+The Body's upfront type, place and value inventories, block/terminator
+offsets, and per-block live sets are intended as **shared importer inputs**:
+each consumer can obtain typed ID bounds, normal CFG targets and boundary
+liveness without rediscovering them by scanning the operation stream.
+Inlining profitability, register allocation and whether a particular
+result-producing instruction is dead remain consumer decisions. A direct
+terminator index does not by itself reveal calls or failures inside a block;
+tools still need to inspect its operations for those facts. A compact,
+mandatory method-level operation/effect summary could avoid repeated
+full-body scans for common inlining and policy decisions, but its exact
+counts, effect taxonomy, consistency checks and location in the Body header
+remain to be specified before claiming that fast path. Unvalidated summaries
+must not authorize omitting safety checks or dropping operations.
+
 ### Checked add end to end (informative)
 
 Consider `AddThenThree` under the fail-fast policy. Assume MethodDef row
@@ -147,8 +177,8 @@ Body-local type ID 1, mapped by a fixed `u32` header entry to TypeSpec
 row 1. That TypeSpec row's built-in form uses primitive code `0x08`
 for `int32`. `r1`–`r5` are one-based Body value IDs, not machine registers.
 The value-descriptor array declares each ID's type and kind; the block
-parameters or operations define its value. `B1`–`B3` are one-based
-block IDs. A block's parameter list declares values received on entry,
+parameters or operations define its value. `B1` is a one-based
+block ID. A block's parameter list declares values received on entry,
 not all values that its operations will define.
 
 ```text
@@ -159,30 +189,25 @@ MethodSig[1] = (parameter[0]: TypeSpec[1], parameter[1]: TypeSpec[1])
                -> TypeSpec[1]              // x, y in source order
 MethodDef[1] = (signature=1, bodyRow=1)
 Body: ownerMethod=1, bodyLayout=0
-      blockCount=3, valueCount=5, placeCount=0, regionCount=0, typeCount=1
+      blockCount=1, valueCount=5, placeCount=0, regionCount=0, typeCount=1
       typeMap=[t1: TypeSpec[1]]             // fixed u32 typed reference
       valueDescriptors=[r1:(t1,value), r2:(t1,value), r3:(t1,value),
                         r4:(t1,value), r5:(t1,value)]
-      blockOffsets=[0,16,35,46], terminatorOffsets=[10,13,9]
-      B1 operationCount=0, B2 operationCount=1, B3 operationCount=0
-      all blocks: region=0, liveIns=[], liveOuts=[], place lists=[]
+      blockOffsets=[0,26], terminatorOffsets=[24]
+      B1 operationCount=3, region=0, liveIns=[], liveOuts=[], place lists=[]
 
 B1(r1 <- parameter[0], r2 <- parameter[1]):  // x, y defined on entry
-    CheckedBinary add r1, r2 -> B2()
-B2(r3 <- first checked add):                 // implicit success value
+    r3 = CheckedBinary add r1, r2
     r4 = ConstSigned t1, 3
-    CheckedBinary add r3, r4 -> B3()
-B3(r5 <- second checked add):                // implicit success value
+    r5 = CheckedBinary add r3, r4
     Return r5
 ```
 
-`ConstSigned` defines `r4` in B2 using the typed literal `3`; it is not
-a block input. The first checked terminator supplies `r3` as B2's
-first parameter; the second supplies `r5` as B3's first parameter.
-Neither terminator defines a value in its own block, and neither
-success edge carries an explicit argument. On first-add overflow B2
-is not entered; on second-add overflow B3 is not entered. Both
-failures follow the module policy. Every value has one descriptor
+The operations define `r3`, `r4` and `r5` in source order within B1;
+`ConstSigned` types the literal `3`. On first-add overflow the later
+operations do not run; on second-add overflow the return does not run.
+Both failures follow the module policy without manufacturing normal CFG
+edges or block parameters. Every value has one descriptor
 and one definition; the descriptor alone does not create a value.
 The Body stores numeric IDs, not the source names or these comments.
 The TypeSpec row reference occupies four bytes in `typeMap`, as it does
@@ -195,15 +220,15 @@ That keeps `t1` one byte per use without the TypeSpec lookup; it does
 not license replacing the current `01 00 00 00` entry in this fixture
 until the metadata reference rule changes.
 
-The Body **section** uses one mapped type, five values, three blocks and
-no places or regions. Its 106-byte structure is:
+The Body **section** uses one mapped type, five values, one block and
+no places or regions. Its 70-byte structure is:
 
 | Region | Size and contents |
 |---|---|
-| Body-section offset index | 8 bytes: `00 00 00 00 62 00 00 00` = `[0,98]`; not an instruction |
-| Body row header | 24 bytes: `ownerMethod=1`, `bodyLayout=0`, counts `(block,value,place,region,type)=(3,5,0,0,1)`, `typeMap=[TypeSpec row 1]` and five `(t1,value)` descriptors |
-| Body row offset arrays | 28 fixed-`u32` bytes: `blockOffsets=[0,16,35,46]`, `terminatorOffsets=[10,13,9]` |
-| Block data | 46 bytes: B1 is 16 bytes; B2 is 19 bytes; B3 is 11 bytes |
+| Body-section offset index | 8 bytes: `00 00 00 00 3E 00 00 00` = `[0,62]`; not an instruction |
+| Body row header | 24 bytes: `ownerMethod=1`, `bodyLayout=0`, counts `(block,value,place,region,type)=(1,5,0,0,1)`, `typeMap=[TypeSpec row 1]` and five `(t1,value)` descriptors |
+| Body row offset arrays | 12 fixed-`u32` bytes: `blockOffsets=[0,26]`, `terminatorOffsets=[24]` |
+| Block data | 26 bytes: B1 has three operations and one return |
 
 Here `bodyLayout=0` selects one-byte Body-local widths. The owner,
 type-map entries and offset arrays remain fixed `u32`; instruction
@@ -212,42 +237,37 @@ Body fields and validation rules are specified in
 [Body record, direct block index and regions](#body-record-direct-block-index-and-regions).
 
 The exact section bytes are the eight-byte offset index followed by the
-98-byte Body row:
+62-byte Body row:
 
 ```text
-00 00 00 00  62 00 00 00
-01 00 00 00  00  03 05 00 00 01  01 00 00 00
+00 00 00 00  3E 00 00 00
+01 00 00 00  00  01 05 00 00 01  01 00 00 00
 01 00  01 00  01 00  01 00  01 00
-00 00 00 00  10 00 00 00  23 00 00 00  2E 00 00 00
-0A 00 00 00  0D 00 00 00  09 00 00 00
-00 02 01 02 00 00 00 00 00 00  84 01 01 02 02 00
-00 01 03 00 00 00 00 00 01  02 04 01 03  84 01 03 04 03 00
-00 01 05 00 00 00 00 00 00  83 05
+00 00 00 00  1A 00 00 00  18 00 00 00
+00 02 01 02 00 00 00 00 00 03
+15 03 01 01 02  02 04 01 03  15 05 01 03 04  83 05
 ```
 
 | Location | Opcode-specific schema, in byte order | Widths / layout | Encoded fields | Reading |
 |---|---|---|---|---|
-| B1 terminator | `84 CheckedBinary u8(kind) ref(rLeft) ref(rRight) edgeSuccess` | Common; ref=1, count=1; kind=`u8` | `84` opcode · `01` kind · `01` rLeft · `02` rRight · `02` targetBlock · `00` argumentCount | `kind=1` add; inputs `r1` (`x`) and `r2` (`y`); implicit result is B2's `r3` |
-| B2 operation | `02 ConstSigned ref(rNew) ref(t) signedData(value)` | Common; ref=1, data=1 | `02` opcode · `04` rNew · `01` t · `03` signedData | Define `r4` as mapped `t1` value `3` |
-| B2 terminator | `84 CheckedBinary u8(kind) ref(rLeft) ref(rRight) edgeSuccess` | Common; ref=1, count=1; kind=`u8` | `84` opcode · `01` kind · `03` rLeft · `04` rRight · `03` targetBlock · `00` argumentCount | Add `r3` and `r4`; implicit result is B3's `r5` |
-| B3 terminator | `83 Return ref(result)` | Common; ref=1 | `83` opcode · `05` result | Return `r5`, the second checked result |
+| B1 operation 1 | `15 CheckedBinary ref(rNew) u8(kind) ref(rLeft) ref(rRight)` | Common; ref=1; kind=`u8` | `15` opcode · `03` rNew · `01` kind · `01` rLeft · `02` rRight | `kind=1` checked add; define `r3` from `r1` and `r2` |
+| B1 operation 2 | `02 ConstSigned ref(rNew) ref(t) signedData(value)` | Common; ref=1, data=1 | `02` opcode · `04` rNew · `01` t · `03` signedData | Define `r4` as mapped `t1` value `3` |
+| B1 operation 3 | `15 CheckedBinary ref(rNew) u8(kind) ref(rLeft) ref(rRight)` | Common; ref=1; kind=`u8` | `15` opcode · `05` rNew · `01` kind · `03` rLeft · `04` rRight | Define `r5` from `r3` and `r4` |
+| B1 terminator | `83 Return ref(result)` | Common; ref=1 | `83` opcode · `05` result | Return `r5`, the second checked result |
 
-In the terminator schema, `edgeSuccess` expands to
-`ref(targetBlock), count(argumentCount), ref[argumentCount]`; a zero
-count means no trailing argument references. `CheckedBinary` encodes no
-destination: each success value is its target's first parameter (`r3`,
-then `r5`). `ConstSigned` carries signed data, not an add immediate.
+Each checked operation encodes its own destination and has no success
+edge. `ConstSigned` carries signed data, not an add immediate.
 By-value parameters need no place; an addressable mutable local needs
 `PlaceLocal` then `Load`, with
 `Assign` through that place on success. See the
 [local-place shape](#value-and-place-state-through-checked-arithmetic),
 which is decode-only in this revision.
 
-For example, if B1's checked add instead targets block 256, it uses
-`F0 01 84 01 01 00 02 00 00 01 00`: two-byte references widen both
-operands and the target, while the count stays one byte. That instruction
-prefix does not set the Body's structural widths; a real Body with 256
-blocks also needs a two-byte local width for its `blockCount`.
+For example, if a checked add instead defines `r256`, it uses
+`F0 01 15 00 01 01 01 00 02 00`: two-byte references widen
+the destination and both operands. That instruction prefix does not set
+the Body's structural widths; a real Body with 256 values also needs
+a two-byte local width for its `valueCount`.
 In a separate body, `ConstSigned r3, t1, 200` instead uses
 `F0 10 02 03 01 C8 00` (one-byte references, two-byte signed data); if
 its result ID were 256, it would use
@@ -264,10 +284,9 @@ than another required source lowering or complete byte listing; a writer
 must still encode exact block and terminator offsets.
 
 For `int32 TwiceSum(int32 x, int32 y) { int32 tmp = x + y;
-return tmp + tmp; }`, the first checked add passes its implicit
-`int32` result into B2 as `r3`. B2's second checked terminator uses
-`r3` for *both* input operands and passes its new implicit result to
-B3 for `Return`. Reuse needs no duplicate descriptor or `Copy`
+return tmp + tmp; }`, one block defines `r3 = CheckedBinary add r1, r2`,
+then `r4 = CheckedBinary add r3, r3`, and returns `r4`. Reuse needs no
+duplicate descriptor or `Copy`
 operation for this Copy scalar; a unique value could not be duplicated
 the same way.
 
@@ -300,13 +319,13 @@ and the apparent assignment are not stored in the Body.
 
 For `int32 CountTo(int32 n) { mut int32 i = 0; while (i < n) {
 i = i + 1; } return i; }`, MethodSig has one by-value `int32` parameter
-and an `int32` result. The Body has `(5,7,0,1,2)` for the same five
+and an `int32` result. The Body has `(4,7,0,1,2)` for the same five
 counts, `ownerMethod` pointing to its MethodDef,
 `typeMap=[t1:TypeSpec[1] (int32),t2:TypeSpec[2] (bool)]`,
 and descriptors `r1,r2,r3,r5,r6,r7`
 of `t1` with `r4` of `t2`, all by-value. Region 1 is
-`(kind=loop,parent=0,entry=B2,exit=B5,cleanup=0)`; B2–B4 belong to
-it, while B1 and B5 are at region 0:
+`(kind=loop,parent=0,entry=B2,exit=B4,cleanup=0)`; B2–B3 belong to
+it, while B1 and B4 are at region 0:
 
 ```text
 B1(r1 <- n):                       // liveOut=[r1,r2]
@@ -314,21 +333,20 @@ B1(r1 <- n):                       // liveOut=[r1,r2]
     Branch B2(r2)
 B2(r3 <- current i):               // liveIn=[r1], liveOut=[r1,r3]
     r4 = Binary Less r3, r1         // t2 bool
-    BranchIf r4, B3(), B5(r3)
-B3():                              // liveIn=[r1,r3], liveOut=[r1]
+    BranchIf r4, B3(), B4(r3)
+B3():                              // liveIn=[r1,r3], liveOut=[r1,r6]
     r5 = ConstSigned t1, 1
-    CheckedBinary add r3, r5 -> B4()
-B4(r6 <- checked add):             // liveIn=[r1], liveOut=[r1,r6]
+    r6 = CheckedBinary add r3, r5
     Branch B2(r6)
-B5(r7 <- final i):                 // no liveIn; outside loop
+B4(r7 <- final i):                 // no liveIn; outside loop
     Return r7
 ```
 
 The header B2 receives its initial `i` from B1 and later iterations
-from B4. `r1` is a dominating value carried across the backedge through
-live-in/out sets, not an extra header parameter. The checked result is
-B4's implicit first parameter; B4 then explicitly supplies `r6` to
-the header. The false edge supplies `r3` to the loop exit. A loop
+from B3. `r1` is a dominating value carried across the backedge through
+live-in/out sets, not an extra header parameter. B3 defines `r6` before
+explicitly supplying it to the header. The false edge supplies `r3` to
+the loop exit. A loop
 region and valid backedge do not make a failing add an implicit cleanup
 or catch edge.
 
@@ -347,7 +365,7 @@ means the selected reference width, `count` the selected count width,
 | `fieldDefRow` | fixed `u32` | Typed FieldDef reference, high byte zero, row `1..FieldDef.recordCount` owned by the selected type; a trusted merger may bind it directly to a field of a packed producer's resolved TypeDef |
 | `targetBlock`, `regionId` | `ref` | Body-local block or region ID; only explicitly specified region roots permit zero |
 | `args` | `count`, then `ref[count]` | Ordered value IDs; zero is not an argument |
-| `edge` | `ref targetBlock`, then `args` | Target's typed parameter list consumes the arguments, subject to implicit checked results |
+| `edge` | `ref targetBlock`, then `args` | Target's typed parameter list consumes the arguments |
 | `data(bits)`, `signedData(value)` | `data` | Unsigned bit pattern or signed two's-complement literal, respectively |
 | `kind`, `policy`, `reason` | `u8` | Numeric discriminant from the assigned tables below; zero and unassigned values reject |
 
@@ -486,7 +504,7 @@ A block extent contains these fields in order:
 | `startPlaceCount`, `startPlaces` | `local`, then `local placeId[startPlaceCount]` | Places becoming active at entry with the descriptor's initial state |
 | `endPlaceCount`, `endPlaces` | `local`, then `local placeId[endPlaceCount]` | Places ending after this block's operations, before normal successor transfer or return |
 | `operationCount`, `operations` | `local`, then `operationCount` coded instructions | Definitions and state transitions in source order |
-| `terminator` | One coded terminator | Explicit successor/return/failure; no fall-through |
+| `terminator` | One coded terminator | Explicit normal successor/return/failure; no fall-through |
 
 Block ID is its one-based index in `blockOffsets`; region 0 is the function
 root, and entry block ID is 1. Its by-value parameters match MethodSig
@@ -505,8 +523,12 @@ arguments. Returns and failures have no live-outs. Account for every
 cross-block use and transit in these lists; definitions in the block need
 no `liveIn`.
 Optional audit checks definitions, transfers, dominance and exact lists.
-This permits ordinary dominating values while typing merge values and
-checked results as block parameters.
+This permits ordinary dominating values while typing merge values as
+block parameters; checked operations define results within their block.
+These block-boundary lists are not a per-instruction live-range table and
+cannot determine when a reference ceases to be a logical GC root. Root
+lifetime can extend beyond the last ordinary use, especially for owning
+storage, interior references, cleanup and exceptional continuations.
 
 Place lists are strictly increasing, duplicate-free; inherited and starting
 places are disjoint. Each place has one declaration and lexical start block,
@@ -517,13 +539,12 @@ set. Successor starts are not inherited, and all predecessors must agree.
 An initialized place may end only if its type is Copy and needs no cleanup;
 otherwise explicitly `Move` or `Drop` it. `Return` requires an empty set.
 These records expose local state at block boundaries. Failure still needs
-separate cleanup/root rules; place metadata cannot create an unwind edge or
-enable unsupported operations.
+separate cleanup/root rules, including the exact failure site within a block;
+place metadata cannot create an unwind edge or enable unsupported operations.
 
 Value IDs are gapless unique definitions in `1..valueCount`, assigned in
 block/operation order: block parameters first, then result-producing
-operations. An implicit checked result is the target's first parameter,
-not a terminator definition. Direct
+operations. Checked results are ordinary operation definitions. Direct
 cross-block uses require dominance and liveness on every crossed normal edge.
 Distinct incoming definitions become typed parameters with explicit edge
 arguments; edge arguments are live at the terminator. These facts do not
@@ -555,7 +576,7 @@ preceding fields. Names are descriptive, not a mandated host-language ABI:
 | `BlockLocation` | Block-data start + `blockOffsets[i-1]`, next block offset, relative terminator offset | Entry `i-1` addresses block ID `i`; terminator lies inside this block's extent |
 | `BlockHeader` | Region, parameter IDs, live-in/out IDs, inherited/starting/ending place states, operation count | Parameters define values; live sets refer to prior definitions, not machine registers |
 | `Instruction` | Registered opcode, three resolved widths and the opcode-specific typed operands | The wide prefix changes the byte widths only; do not store raw bytes as if they were an addressing mode |
-| `Terminator` | Registered opcode and its typed edge/result/failure payload | Directly indexed; each normal edge targets a block ID and transmits the listed arguments |
+| `Terminator` | Registered opcode and its typed edge/return/failure payload | Directly indexed; each normal edge targets a block ID and transmits the listed arguments |
 
 Bound the Body row, descriptors and indexes before lookup. Decode each
 operation by its registered schema; strict audit compares the stream with
@@ -611,7 +632,9 @@ classification, not numeric identity.
 | `PlaceLocal`, `PlaceField` | Place-valued ID with referent, access, owner and region from the place/field declaration |
 | `CallNoThrow` | Selected MethodSig result type, or no definition when `rNew?=0` |
 | `Extract` | Selected field's complete type, requiring a Copy-by-value field |
-| Checked terminator | First target parameter(s) receive typed computed results; the terminator defines no additional ID in its own block |
+| `CheckedBinary`, `CheckedNegate`, `CheckedDivRem` | Result ID(s) defined in the same block on success; their failure is an ordered effect, not a normal edge |
+| `CheckedConvert` | Exact `tDest` at its result ID on success |
+| `CallMayFail` | Selected MethodSig result type, or no definition when `rNew?=0` |
 
 The scalar executable profile accepts supported primitives and optional
 forms, but rejects place-valued results. Other rows define decode
@@ -629,9 +652,9 @@ bodies.
 | `01` | `ConstBits rNew, t, data(bits)` | Canonical zero-extended bit pattern for supported scalar; `bool` 0/1, `char16` 16 bits, signed integers canonical after zero-extension to their declared bit width. |
 | `02` | `ConstSigned rNew, t, signedData(value)` | Sign-extended signed integer literal; range checked in `t`, no default numeric type. |
 | `03` | `Copy rNew, r` | Source's complete type has checked `Copy`; does not duplicate a unique obligation. |
-| `04` | `Unary rNew, u8(kind), r` | Kind 1 bool NOT, 2 integer bitwise NOT, 3 integer unary plus. Checked negation uses a failure terminator. |
+| `04` | `Unary rNew, u8(kind), r` | Kind 1 bool NOT, 2 integer bitwise NOT, 3 integer unary plus. Checked negation has its own operation. |
 | `05` | `Binary rNew, u8(kind), rLeft, rRight` | Kinds 1/2/3 bitwise AND/OR/XOR, 4/5 equality/inequality, 6/7/8/9 ordered `<`/`<=`/`>`/`>=`, 10/11/12 explicit wrapping add/subtract/multiply. Only built-in scalar operations; no invented user witness. |
-| `06` | `Convert rNew, tDest, u8(policy), rSource` | Policy 1 integer wrapping, 2 integer saturation, 3 checked bit-preserving reinterpretation of eligible equal-size representations. Checked range conversion uses a failure terminator. |
+| `06` | `Convert rNew, tDest, u8(policy), rSource` | Policy 1 integer wrapping, 2 integer saturation, 3 checked bit-preserving reinterpretation of eligible equal-size representations. Checked range conversion has its own operation. |
 | `07` | `Select rNew, rCondition, rTrue, rFalse` | Both source values already exist; eager selection of equal complete Copy types, never conditional evaluation or owner transfer. |
 | `08` | `MakeOptional rNew, tOptional, rValue` | Wrap one fully initialized value; payload type and qualification match. |
 | `09` | `None rNew, tOptional` | Absent optional; no fabricated payload or extra optional layer. |
@@ -646,12 +669,19 @@ bodies.
 | `12` | `CallNoThrow rNew?, m, args` | Exact selected callable; accepts only matching modes/contracts and a declared NoThrow effect. `rNew=0` iff result is void. Does not drop observable effects. |
 | `13` | `Aggregate rNew, t, args` | Fully constructs ordered fields in declaration order, with checked Copy/unique transfer and validity; no implicit zero-fill or padding observation. |
 | `14` | `Extract rNew, rAggregate, fieldDefRow` | Copy-only by-value field; unique fields require an authorized place and Move. |
+| `15` | `CheckedBinary rNew, u8(kind), rLeft, rRight` | Kinds 1..5 checked add/subtract/multiply/divide/remainder; 6/7 checked-count left/right shift. Failure at this operation follows the selected policy; no result is defined on failure. |
+| `16` | `CheckedConvert rNew, tDest, rSource` | Checked numeric range conversion; `rNew` has `tDest` on success. |
+| `17` | `CheckedNegate rNew, rOperand` | Checked signed negation; fails at the minimum. |
+| `18` | `CheckedDivRem rQuotient, rRemainder, rLeft, rRight` | Single checked failure decision; two distinct same-typed results on success. |
+| `19` | `CallMayFail rNew?, m, args` | Potentially failing exact selected call; `rNew=0` iff void. Failure follows runtime policy, and authored handlers need a future exception-region contract. |
+| `1A` | `CheckedIndex rNew, rBase, rIndex` | Reserved: checked indexed place result; backing and authority rules are not executable yet. |
+| `1B` | `CheckedRange rNew, rBase, rStart, rCount` | Reserved: checked bounded view; backing, access and loan rules are not executable yet. |
+| `1C` | `CheckedReadIndex rNew, rBase, rIndex` | Reserved: checked Copy element read without an intermediate place. |
 
 The `u8(kind)` following `Unary`, `Binary` or `CheckedBinary` is one
 of these **exact** assignments. Every other value, including zero,
-rejects for that opcode. `Binary` produces an `rNew` in the same block;
-`CheckedBinary` instead produces its result as its success block's
-first parameter:
+rejects for that opcode. Both `Binary` and `CheckedBinary` produce an
+`rNew` in the same block:
 
 | Opcode | Kind byte | Name | Valid sources | Result and failure |
 |---:|---:|---|---|---|
@@ -670,18 +700,16 @@ first parameter:
 | `05` | `0A` | WrappingAdd | Equal integer types | Same type, sum modulo its bit width |
 | `05` | `0B` | WrappingSubtract | Equal integer types | Same type, difference modulo its bit width |
 | `05` | `0C` | WrappingMultiply | Equal integer types | Same type, product modulo its bit width |
-| `84` | `01` | CheckedAdd | Equal integer types | Same type on success; failure if mathematical sum is out of range |
-| `84` | `02` | CheckedSubtract | Equal integer types | Same type on success; failure if mathematical difference is out of range |
-| `84` | `03` | CheckedMultiply | Equal integer types | Same type on success; failure if mathematical product is out of range |
-| `84` | `04` | CheckedDivide | Equal integer types | Same type on success; zero divisor or signed minimum / `-1` fails |
-| `84` | `05` | CheckedRemainder | Equal integer types | Same type on success; zero divisor fails, signed minimum % `-1` is zero |
-| `84` | `06` | CheckedShiftLeft | Integer left, `uint32` count right | Same left type; count outside `[0,width)` fails, bits shifted out are discarded |
-| `84` | `07` | CheckedShiftRight | Integer left, `uint32` count right | Same left type; count outside `[0,width)` fails, sign-fill for signed, zero-fill for unsigned |
+| `15` | `01` | CheckedAdd | Equal integer types | Same type on success; failure if mathematical sum is out of range |
+| `15` | `02` | CheckedSubtract | Equal integer types | Same type on success; failure if mathematical difference is out of range |
+| `15` | `03` | CheckedMultiply | Equal integer types | Same type on success; failure if mathematical product is out of range |
+| `15` | `04` | CheckedDivide | Equal integer types | Same type on success; zero divisor or signed minimum / `-1` fails |
+| `15` | `05` | CheckedRemainder | Equal integer types | Same type on success; zero divisor fails, signed minimum % `-1` is zero |
+| `15` | `06` | CheckedShiftLeft | Integer left, `uint32` count right | Same left type; count outside `[0,width)` fails, bits shifted out are discarded |
+| `15` | `07` | CheckedShiftRight | Integer left, `uint32` count right | Same left type; count outside `[0,width)` fails, sign-fill for signed, zero-fill for unsigned |
 
-`Binary` defines its result with `rNew`; `CheckedBinary` has no result
-operand and supplies its result as the success target's first parameter.
 The opcode/kind pair selects behavior; operand types supply width and
-signedness, and the target parameter must match the result type.
+signedness, and the result descriptor must match the result type.
 
 The other discriminants are `Convert.policy`: `01` integer wrap,
 `02` integer saturate, `03` equal-width integer bit reinterpretation;
@@ -689,7 +717,7 @@ and `Fail.reason`: `01` requirement, `02` overflow, `03` division by
 zero, `04` invalid shift count. These are separate enum domains even
 when the same byte value occurs. `CheckedConvert` has **no policy
 byte**: it performs a checked range conversion with `tDest` before its
-source `r` and sends the result to its success edge. Wrapping converts
+source `r` and defines `rNew` on success. Wrapping converts
 the mathematical integer modulo the destination bit width; saturation
 clamps to its range. Neither is an alternate decoding of `CheckedConvert`.
 
@@ -721,7 +749,7 @@ carry explicit Body-local type IDs resolving to TypeSpec; arithmetic reads types
 descriptors and must match the result descriptor. No instruction assumes
 a default integer type or implicitly narrows, promotes, loads, updates or
 swaps operands. `Load` produces a typed Copy value; `Assign` writes through
-a place only after a successful result edge. Unsupported floating, vector,
+a place only after a preceding checked operation succeeds. Unsupported floating, vector,
 atomic, raw-pointer and text operations have no numeric opcode.
 
 `Convert` policy 1 wraps the mathematical value modulo the destination
@@ -732,7 +760,7 @@ nominal values. `Unary` NOT and `Binary` bitwise/wrapping kinds apply only
 to integers; Boolean NOT, equality and comparisons have separate rules.
 `Switch` patterns must be canonical `ConstBits` patterns of the selector
 type, without truncated high bits or duplicates. Other effectful or
-potentially failing operations require a specified terminator or future
+potentially failing operations require a specified operation or future
 feature, not `CallNoThrow`.
 
 `Initialize`, `Assign`, `Move`, `Drop` and `Aggregate` require complete
@@ -756,25 +784,16 @@ void; failure uses the module's fail-fast or checked-exception policy.
 | `81` | `BranchIf rBool, edgeTrue, edgeFalse` | Evaluates an already computed Boolean once. |
 | `82` | `Switch rScalar, count(caseCount), (data(bits), edge)[caseCount], edgeDefault` | Exact type-width patterns sorted strictly by unsigned bits; one selected edge, no repeated selector evaluation. |
 | `83` | `Return r?` | Matches declared result; moved owner transfers, remaining obligations must be discharged. |
-| `84` | `CheckedBinary u8(kind), rLeft, rRight, edgeSuccess` | Kinds 1..5 checked add/subtract/multiply/divide/remainder; 6/7 checked-count left/right shift. Computed result is an *implicit first* success-block parameter, before the edge's explicit arguments; numeric/count failures dispatch the selected policy. |
-| `85` | `CheckedConvert tDest, rSource, edgeSuccess` | Checked numeric range conversion; implicit first success parameter is `tDest`. |
-| `86` | `Invoke m, args, edgeSuccess` | Potentially failing exact selected call. A non-void result is the implicit first success parameter; failure departs under runtime policy. Authored handlers require a future exception-region encoding. |
 | `87` | `Fail u8(reason)` | Declared requirement failure (`1`), overflow (`2`), division by zero (`3`), invalid shift count (`4`); no successor. |
-| `88` | `CheckedNegate rOperand, edgeSuccess` | Checked signed negation with implicit first success parameter. |
-| `89` | `CheckedIndex rBase, rIndex, edgeSuccess` | Bounds/validity check and implicit first result place; requires a specified indexed-backing feature before emission. |
 | `8A` | `Leave count(exitCount), regionId[exitCount], edge` | Reserved for explicit scope/cleanup exit; not executable until its unwind contract is assigned. |
-| `8B` | `CheckedDivRem rLeft, rRight, edgeSuccess` | One evaluation and failure decision produces quotient and remainder as the first **two** success-block parameters, in that order, before explicit edge arguments. |
-| `8C` | `CheckedRange rBase, rStart, rCount, edgeSuccess` | Reserved: validates a contiguous range once and produces a bounded view on success; backing, access and loan rules require a future feature. |
-| `8D` | `CheckedReadIndex rBase, rIndex, edgeSuccess` | Reserved: bounds check and Copy element read form one ordered failure boundary, returning a value without publishing an intermediate place. |
 
 Failure never becomes an unchecked result or `None`. A potentially failing
-terminator is forbidden in a `NoThrow` method unless a specified static
-proof rules out failure; `(1, 0)` defines no such proof. `Invoke` checks the
-selected signature, effects, argument modes and return ownership. An
-implicit result adds one first parameter to the success target, before
-explicit edge arguments. Failure policy does not create a catch or cleanup
-edge, so a caller needing cleanup on failure is unsupported. `CheckedIndex`
-and `Leave` are reserved and rejected by `(1, 0)`.
+operation or `Fail` terminator is forbidden in a `NoThrow` method unless a
+specified static proof rules out failure; `(1, 0)` defines no such proof.
+`CallMayFail` checks the selected signature, effects, argument modes and
+return ownership. Failure policy does not create a normal CFG edge or
+automatic cleanup, so a caller needing cleanup on failure is unsupported.
+`CheckedIndex` and `Leave` are reserved and rejected by `(1, 0)`.
 
 `CheckedBinary` kinds 1..5 use equal integer types; kinds 6/7 take a
 `uint32` right operand as the shift count. Signed negation fails at the
@@ -786,10 +805,9 @@ decodes operations and recomputes predecessors, dominance and liveness.
 Neither may assign new meaning to an unknown opcode.
 
 `CheckedDivRem` takes equal complete integer types. It checks a zero
-divisor or signed minimum divided by `-1` once, then returns same-typed
-quotient and remainder. Quotient truncates
-toward zero; remainder follows the dividend, and the target has
-`edge.argumentCount + 2` parameters. `CheckedBinary` remainder does not
+divisor or signed minimum divided by `-1` once, then defines distinct
+same-typed quotient and remainder results. Quotient truncates
+toward zero; remainder follows the dividend. `CheckedBinary` remainder does not
 fail for signed minimum `% -1` (the result is zero), so it cannot be
 rewritten as combined division/remainder. A consumer may fuse distinct
 operations only when failure order, uses and effects permit it.
@@ -806,9 +824,9 @@ identities and contracts; callable names alone do not establish them.
 
 The introductory [checked-add example](#checked-add-end-to-end-informative)
 shows the executable by-value case in the narrow fail-fast `(1, 0)`
-profile: `r1` is its parameter and `r3` is the implicit checked result
-in B2. The alternative below adds an addressable local place and is
-decode-only in this revision.
+profile: `r1` is its parameter and `r3` is defined by the first checked
+operation in B1. The alternative below adds an addressable local place
+and is decode-only in this revision.
 
 For `local = local + 5`, instead declare a mutable, initially vacant
 `int32` place `p1` in the body place table. Its header and operations have
@@ -816,37 +834,31 @@ this decode-only shape:
 
 | Block | Value parameters | Live-in / live-out values | Inherited places | Starts / ends | Operations and terminator |
 |---|---|---|---|---|---|
-| B1 | None | None / `r1` | None | Start `p1` vacant / end none | `r1 = PlaceLocal p1`; `r2 = ConstSigned t1, 10`; `Initialize r1, r2`; `r3 = Load r1`; `r4 = ConstSigned t1, 5`; `CheckedBinary add r3, r4 -> B2()` |
-| B2 | `r5` (descriptor `t1`, value), implicit checked result | `r1` / none | `(p1,initialized)` | Start none / end `p1` | `Assign r1, r5`; `Return r5` |
+| B1 | None | None / none | None | Start `p1` vacant / end `p1` | `r1 = PlaceLocal p1`; `r2 = ConstSigned t1, 10`; `Initialize r1, r2`; `r3 = Load r1`; `r4 = ConstSigned t1, 5`; `r5 = CheckedBinary add r3, r4`; `Assign r1, r5`; `Return r5` |
 
-The successful edge carries initialized state for `p1` and keeps its
-handle `r1` live, but not the local's old contents. `r4` dies in B1; `r5`
-is both assigned and returned. `PlaceLocal`, `Initialize`, `Load` and
+`r5` is assigned and returned only after the check succeeds. `PlaceLocal`,
+`Initialize`, `Load` and
 `Assign` lack complete place and failure-path rules, so this shape is not
 executable. `PlaceField` produces a place; `Extract` reads a Copy field
 from a by-value aggregate.
 
-The encoded Body section is 106 bytes. Its `05` place flags mean mutable
-and initially vacant; block offsets are `[0,33,51]`, and terminator
-offsets are `[27,16]`:
+The encoded Body section is 84 bytes. Its `05` place flags mean mutable
+and initially vacant; block offsets are `[0,37]`, and the terminator
+offset is `[35]`:
 
 ```text
-00 00 00 00  62 00 00 00
-01 00 00 00  00  02 05 01 00 01  01 00 00 00  01 00 05
+00 00 00 00  4C 00 00 00
+01 00 00 00  00  01 05 01 00 01  01 00 00 00  01 00 05
 01 01  01 00  01 00  01 00  01 00
-00 00 00 00  21 00 00 00  33 00 00 00
-1B 00 00 00  10 00 00 00
-00 00 00 01 01 00 01 01 00 05
+00 00 00 00  25 00 00 00  23 00 00 00
+00 00 00 00 00 01 01 01 01 07
 0B 01 01  02 02 01 0A  0E 01 02  0D 03 01  02 04 01 05
-84 01 03 04 02 00
-00 01 05 01 01 00 01 01 01 00 01 01 01
-0F 01 05  83 05
+15 05 01 03 04  0F 01 05  83 05
 ```
 
-B1 has live-out `r1`, starts vacant `p1`, and has five operations. B2 has
-parameter `r5` (descriptor 5), live-in `r1`, inherited initialized place
-`(p1,1)`, ends `p1`, and has one operation. These headers and the
-terminator index are directly readable; they do not authorize executing
+B1 starts vacant `p1`, ends `p1` after seven operations, and has no
+cross-block live values or inherited places. Its header and the terminator
+index are directly readable; they do not authorize executing
 the unsupported place operations. An interpreter may use value slots and
 verified place storage; JIT/AOT may choose registers or memory. The format
 does not prescribe native stack slots or separate add opcodes by operand
@@ -895,8 +907,9 @@ SourceMap cannot change execution.
 | Consumer question | Direct format input | Remaining consumer freedom |
 |---|---|---|
 | Where is a block and its branch? | Block and terminator offsets, explicit target IDs | Choose hot/cold layout and machine branch forms without bytecode displacement fixups. |
-| What crosses a block boundary? | Typed merge parameters, sorted live-in/out value IDs, active place/state joins | Fast tier can allocate slots directly; optimizing tier can rebuild SSA, liveness or register allocation if profitable. |
-| Which loops and failures are present? | Region headers/exits, typed success edges, explicit ordered failure terminators | Lower failure/cleanup and optimize loops without treating hints as a prescribed machine CFG. |
+| What crosses a block boundary? | Typed merge parameters, sorted live-in/out value IDs, active place/state joins | Fast tier can avoid rebuilding boundary liveness; optimizing tier may rebuild SSA/liveness or choose a different register allocation. Native stack slots are not prescribed. |
+| What must be rooted at a safepoint? | Typed values, place descriptors and boundary liveness identify candidates, but no per-safepoint root/lifetime index is assigned | A backend must currently establish logical root continuity and emit its own register/stack GC maps; boundary liveness alone cannot supply them. |
+| Which loops and failures are present? | Region headers/exits; checked operations carry ordered failure effects; explicit `Fail` terminators | Lower failure/cleanup and optimize loops without treating hints as a prescribed machine CFG. Locating failures inside blocks still needs an operation scan until an effect summary is assigned. |
 | Which calls are intrinsic candidates? | Exact selected method identities and declared contracts; future registered intrinsics require explicit semantics | Inline or lower only compatible recognized identities, never guess from names or rewrite effectful calls as pure arithmetic. |
 | Which numeric/vector operations exist? | Stable opcode semantics plus TypeSpec and required feature identity | Extend primitives and SIMD via new registered types/operations; do not silently reinterpret old scalar opcodes or assume every lane has the scalar's failure behavior. |
 
@@ -910,7 +923,7 @@ For `(1, 0)`, an executable body uses only scalar TypeSpecs (`bool`,
 `char16`, `int32`, `uint32`, `int64`, `uint64`) and optional forms of those
 scalars, by-value parameters, no receiver, no places, and no generic or
 external call. It can contain loop regions as constrained above. Operations
-`01..0A` and terminators `80..85`, `87..88`, `8B` are executable with their stated
+`01..0A`, `15..18` and terminators `80..83`, `87` are executable with their stated
 type, state and failure checks. `CheckedBinary` kinds 4 and 5 require
 an integer divisor and use the selected module fail-fast policy on failure;
 `CheckedConvert` accepts the assigned integer types and `char16` as a
@@ -921,7 +934,7 @@ checked-exception dispatch requires a specified exceptional edge, payload
 and cleanup protocol. All live values in this subset are Copy values, so a
 failure cannot strand a unique cleanup obligation.
 
-`0B..14`, `86`, `89..8A`, `8C..8D`, and nonzero place counts are **assigned
+`0B..14`, `19..1C`, `8A`, and nonzero place counts are **assigned
 decode shapes, not executable forms**. They require place authority,
 ownership, cleanup, call failure, backing or region rules that this revision
 does not encode completely. The `02` lexical and `03..07` region kinds are
@@ -938,9 +951,11 @@ contract:
 
 | Surface | Missing binary and verification contract |
 |---|---|
-| Exception and cleanup | Authored catch/finally, cleanup on normal/exceptional exit, fault replacement, call-site unwind successors and required roots through cleanup. `Invoke` without a local handler is insufficient. |
+| Exception and cleanup | Authored catch/finally, cleanup on normal/exceptional exit, fault replacement, operation-site failure state (including calls) and required roots through cleanup. A potentially failing call without a local handler is insufficient. |
+| Fast method facts | Define any mandatory method-level operation/effect summary (such as operation and call counts or presence of failures), its bounds and consistency audit so importers can answer common policy questions without scanning every block. Per-consumer profitability and deadness are not serialized as authoritative facts. |
 | Loans and views | Place provenance, region escape/alias checks, retained backing and owner dependencies, interior references, `mut` versus `write`, suspension/capture and explicit begin/end loan forms. |
 | Managed values | Root maps at safepoints, stable descriptors, write barriers, allocation/collection, optional handles and per-image heap boundaries. Root lifetime cannot be inferred solely from SSA uses. |
+| Logical root inventory | Specify producer-recorded, directly indexed safepoint locations and live logical root/owner/interior-place dependencies (including exceptional continuation and cleanup), with precise lifetime and verification rules. The format should avoid making each interpreter/JIT reconstruct logical GC liveness from every use; it must not prescribe post-allocation native register/stack maps or assume that ordinary value liveness covers roots. |
 | Published contracts | Full effects, ownership/transfer, correlated output states, pre/postconditions, capability and witness evidence, generic specialization/export metadata and layout/ABI compatibility. Metadata clauses must be specified together with verifier inputs. |
 | Operations | Checked indexing/backing, raw/unaligned and atomic memory order, floating/SIMD/tensor semantics, indirect calls, traits/witness dispatch, intrinsics, async state and typed failure values. Assign only operations whose exact type, failure, ordering and lifetime rules are known. |
 | Revision and reader policy | No on-wire selector or feature/revision negotiation for the candidate executable subset; nonminimal-width load policy, unknown opcodes in unvisited trusted blocks, diagnostic/recovery behavior and numeric parser/audit budgets remain open. |
