@@ -128,8 +128,13 @@ length accommodates quote runs in the content, as in
 `""""He wrote """ literally.""""`. Raw text retains ordinary target-directed
 text typing; rawness does not select an allocating string type.
 `lexer-raw-text-content` denotes content bounded by that selected fence, not
-an identifier token. Exact quote-boundary handling remains separate lexical
-design work.
+an identifier token. The entire contiguous opening quote run selects the
+fence length; a closing fence must be a whole matching run. Longer closing
+runs reject rather than splitting into content quotes and a shorter fence.
+Single-line raw payloads cannot begin or end with a quote adjoining the
+fence; use multiline framing for quote-edge content. A contiguous all-quote
+run does not split into an opening and closing fence to represent empty raw
+text; use ordinary `""` or the empty framed form.
 
 Multiline raw text uses delimiter lines. After the opening fence, optional
 horizontal whitespace and an optional newline directive precede the framing
@@ -1919,7 +1924,7 @@ appears in §2.
 | Concept | Defined direction | Still to specify |
 |---|---|---|
 | Lexical tokens | §2 gives identifier and reserved-word forms; primitive names are identifiers with reserved bindings. | Exact contextual-word classification and `HexFloat` token boundaries/diagnostics. |
-| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give framed/dedented raw text with preserve/default or explicit newline headers, `$"..."` interpolation and deterministic `$`-count raw interpolation. | Complete floating token recovery, character diagnostics, raw quote-boundary rules, format/alignment spelling and registered text/whole-output normalization APIs. |
+| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give whole-run raw fences, framing/dedenting, preserve/default or explicit newline headers, `$"..."` interpolation and deterministic `$`-count raw interpolation. | Complete floating token recovery, character diagnostics, raw/interpolation recovery, format/alignment spelling and registered text/whole-output normalization APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or block namespaces, without mixing. | Nested namespace blocks and namespace-local imports. |
 | Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
