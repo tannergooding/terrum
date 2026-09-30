@@ -83,6 +83,10 @@ String           = '"', { StringCharacter | Escape }, '"' ;
 RawText          = RawDelimiter, RawContent, RawDelimiter ;
 RawDelimiter     = '"""', { '"' } ;
 RawContent       = lexer-raw-text-content ;
+InterpolatedRawText = DollarPrefix, RawDelimiter,
+                      RawInterpolatedContent, RawDelimiter ;
+DollarPrefix     = "$", { "$" } ;
+RawInterpolatedContent = lexer-raw-interpolated-content ;
 InterpolatedText = "$", '"',
                    { InterpolatedTextCharacter | Escape | LiteralBrace
                    | InterpolationHole }, '"' ;
@@ -123,8 +127,22 @@ length accommodates quote runs in the content, as in
 `""""He wrote """ literally.""""`. Raw text retains ordinary target-directed
 text typing; rawness does not select an allocating string type.
 `lexer-raw-text-content` denotes content bounded by that selected fence, not
-an identifier token. Exact single-line boundary handling, multiline framing,
-indentation and raw interpolation remain separate lexical design work.
+an identifier token. Exact single-line boundary handling, multiline framing
+and indentation remain separate lexical design work.
+
+Interpolated raw text prefixes its quote fence with one or more contiguous
+`$` characters. With `N` dollar signs, a hole uses `N` opening and `N` closing
+braces around an ordinary expression; text brace runs shorter than `N` are
+literal. For example, `$$"""{ "count": {{count}} }"""` preserves the single
+JSON braces and interpolates `count`. Quote-fence length and brace-delimiter
+length are independent. Raw text segments perform neither backslash escape
+decoding nor brace doubling. Hole expressions retain ordinary lexical and
+parsing rules; their nested literals and delimiters are not outer text
+segments. `lexer-raw-interpolated-content` denotes these alternating segments
+and holes under the selected delimiter lengths. Longer text brace runs,
+multiline framing and exact recovery remain separate lexical design work.
+Both interpolated forms use the same checked target-directed handler and
+capture/drain contracts in §3.4.
 
 Trivia separates tokens but does not impose a style rule on otherwise
 unambiguous token sequences: `x+y` and `x + y` have the same meaning, as do
@@ -814,7 +832,7 @@ Primary         = "(", [ Expression ], ")" | TupleExpression
                 | SwitchExpression | CollectionExpression
                 | "new", Type, Arguments,
                   [ ObjectInitializer ]
-                | Number | String | RawText | InterpolatedText
+                | Number | String | RawText | InterpolatedText | InterpolatedRawText
                 | Character | Boolean | Null | "field"
                 | Identifier, [ TypeArguments, Arguments ]
                 | "unsafe", "(", Expression, ")"
@@ -1839,7 +1857,7 @@ appears in §2.
 | Concept | Defined direction | Still to specify |
 |---|---|---|
 | Lexical tokens | §2 gives identifier and reserved-word forms; primitive names are identifiers with reserved bindings. | Exact contextual-word classification and `HexFloat` token boundaries/diagnostics. |
-| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw quote fences and `$"..."` interpolation with doubled literal braces. | Complete floating token recovery, character diagnostics, raw boundary/multiline/interpolation rules, format/alignment spelling and registered text APIs. |
+| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw quote fences, `$"..."` interpolation and `$`-count raw interpolation. | Complete floating token recovery, character diagnostics, raw boundary/multiline/long-brace rules, format/alignment spelling and registered text APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or block namespaces, without mixing. | Nested namespace blocks and namespace-local imports. |
 | Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
