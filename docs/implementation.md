@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-33, semantic v43 integer updates, native-10 through native-20
+## Current boundary: syntax-34, semantic v43 integer updates, native-10 through native-20
 
 The approved [source grammar](grammar-spec.md) is broader than this
 implementation. Syntax-28 adds `=>` bodies to supported top-level functions
@@ -133,7 +133,7 @@ failed-output retention cover this bounded compiler component.
 Projections v28–31 add pre-tested `while` bodies containing scalar assignments
 and nested `while` loops, followed by the existing terminal return envelope.
 Declarations remain at outer function scope and may occur between loops;
-loop-body declarations, other nested control flow, early returns, named
+loop-body declarations, early returns, named
 transfers, `break`/`continue` and native update expressions are rejected.
 There are at most six nested loop headers, twelve total statement records
 (headers included), eight locals and thirty-two expression nodes. Zero-local
@@ -144,6 +144,19 @@ checked failures and body order without a runtime iteration cap. Independent
 source validation checks body extents, scope, mutability and structural
 limits before shared `BoundWhile` lowering. Existing v1–27 payloads, the
 392-word buffer and public ABI/profiles remain unchanged.
+
+Projections v32–35 add braced `if`/optional `else` bodies containing assignments
+and nested branches; v36–39 also admit loops nested in either direction.
+Within each group, the next version adds conversions, the second adds `?:`,
+and the third adds both. Exactly those features must occur in the records.
+The six-level nesting bound is shared by branches and loops; else markers
+count toward the twelve statement records. Conditions run once per branch,
+and only the selected arm executes. Declarations remain outer-only.
+Body returns/transfers, unbraced arms, `else if` shorthand and native update
+expressions remain unsupported. Existing terminal if-return shapes retain
+their old projections. The independent reader checks both arm extents,
+source delimiters, node ownership and local authority before `BoundIf`
+lowering; the fixed buffer and public ABI/profiles do not change.
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -401,14 +414,15 @@ using       = "using" qualifiedName ";"
 namespace   = "namespace" qualifiedName ";"
 declaration = attributes modifiers (function | struct | class | interface)
 attributes  = ("[" name "]")*
-modifiers   = ("public" | "internal" | "private" | "static" | "abstract" | "mut" | "unique")*
+modifiers   = ("public" | "internal" | "private" | "static" | "mut" | "unique")*
 function    = type name typeParameters? parameters constraints* block
 struct      = "struct" name (":" type ("," type)*)? "{" member* "}"
 class       = "class" name "{" member* "}"
-interface   = "interface" name typeParameters "{" (attributes modifiers operator)* "}"
+interface   = "interface" name interfaceParameters "{" (attributes modifiers operator)* "}"
 member      = attributes modifiers (field | constructor | function | operator)
 operator    = type "operator" ("+" | "*") parameters (";" | block)
 typeParameters = "<" name ("," name)* ">"
+interfaceParameters = "<" "this"? name ("," name)* ">"
 constraints = "where" name ":" (type | attributes) ("," (type | attributes))*
 field       = type name ("=" expression)? ";"
 constructor = containingTypeName parameters block
@@ -691,7 +705,7 @@ with optional `finally`; a try requires at least one handler or cleanup clause.
 `syntax-10` adds static operator interfaces, explicit struct conformance,
 generic function constraints and generic-name call expressions. Its executable
 subset is deliberately compilation-local: each interface has three type
-parameters and one `static abstract` binary operator declaration (originally
+parameters and one bodyless `static` binary operator declaration (originally
 `+` or `*`, extended in syntax-17); an internal Copy
 struct explicitly implements a closed homogeneous instance. Parameter/result
 types, accessibility and declared effects must match. An internal generic
@@ -746,7 +760,7 @@ views, concurrency semantics, or a public generic/managed ABI.
 
 **Comparison operator protocols (implemented; syntax-19).**
 
-The compilation-local protocol family uses one static abstract binary
+The compilation-local protocol family uses one bodyless static binary
 declaration per nominal protocol and the existing three-parameter interface
 shape (`TSelf`, `TOther`, `TResult`). Arithmetic and bitwise operators
 (`+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`) close over homogeneous `Copy`
@@ -772,9 +786,9 @@ version.
 
 **Unary operator protocols (implemented; syntax-21).**
 
-Compilation-local interfaces may declare one static abstract unary `+`, `-`,
+Compilation-local interfaces may declare one bodyless static unary `+`, `-`,
 `!`, or `~` with two formals (`TOperand`, `TResult`), such as
-`interface Negation<T, R> { static abstract R operator -(T value); }`.
+`interface Negation<T, R> { static R operator -(T value); }`.
 Closed nominal conformances require a `Copy` struct operand and a supported
 `Copy` result. The result is independent of the operand and `!` need not
 return `bool`; result-only overloads are not supported. Unary and binary
@@ -784,7 +798,28 @@ accessible declared operators without conformance. Closed specializations
 lower through existing verified calls and private module servicing. No
 primitive witnesses, nullable operand operators, `++`/`--`, `true`/`false`,
 public generic ABI, new semantic bytes or native-profile change are implied.
-The two-formal source shape is provisional pending broader language review.
+The two-formal shape is a bounded implementation of the approved interface grammar.
+
+**Static requirements and implementing-type formals (implemented; syntax-34).**
+
+Requirements use `static R operator ...;` without `abstract`; `abstract`
+lexes as an ordinary identifier. Its old token slot 77 remains reserved and
+surviving token identities do not move. The shared compiled-scanner catalog
+uses the same classification. A protocol may mark its first operand formal
+with `this`, for example `interface Addition<this T, U, R>`.
+A struct conformance `Addition<Value, Value>` supplies the remaining operand
+and result arguments; self is the conforming struct. A constraint
+`where T : Addition<T, T>, [Copy]` similarly binds self to its constrained
+formal. Explicit extra self arguments, later/repeated self markers and
+incompatible operand/result/effect contracts reject. No-self protocols
+continue to pass all their ordinary arguments explicitly.
+
+This retains the bounded homogeneous binary/comparison and independent unary
+result contracts above, including definition-site proofs, inferred calls and
+nominal witness identity. It does not add heterogeneous binary witnesses,
+associated/default resolution, public generic/witness ABI or nominal updates.
+Self is resolved before ordinary call lowering, so semantic/native formats
+and persisted private-specialization servicing remain unchanged.
 
 Forward calls, imported local templates, and direct/mutual recursion reuse
 closed specializations; recursion has the ordinary native call/stack behavior,
@@ -1094,6 +1129,15 @@ Nested body endpoints cannot cross an enclosing endpoint. Source validation
 derives the braced body span rather than trusting an extra payload field.
 Earlier versions reject this statement kind and retain variable-slot meaning
 for their declaration/assignment records.
+Versions 32–35 require branches without loops; versions 36–39 require both.
+Within either group, +1 selects conversions and +2 selects conditional trees.
+Kind 4 carries the Boolean condition root, whole-if span and exclusive
+true-arm end index. An optional kind-5 record at that index carries root -1,
+the else keyword/body span and the exclusive else-arm end. Body records
+follow their header/marker in preorder. Both arms require braces; nested
+endpoints cannot cross the enclosing arm, and an else marker cannot stand
+alone. The reader derives both braced spans from independently checked
+source tokens. Older versions reject these kinds; v1–31 payloads are unchanged.
 Version 19 assigns words 34–36 to the third parameter's type and UTF-16
 name span. Its parameter/literal operations reserve the disjoint 40000 offset
 for the third parameter (using the first-parameter group before adding the

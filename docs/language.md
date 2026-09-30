@@ -370,7 +370,8 @@ bindings, optional first `<this T>`, `.via<I>` witness selection and restricted
 current-receiver `default<I>.Member()` calls follow the
 [source grammar](grammar-spec.md#54-aliases-and-associated-types-declarations-and-open-binding).
 Complete inherited-witness resolution, metadata and ABI remain to specify; current bounded
-`static abstract` parser support is documented in [implementation](implementation.md).
+static operator requirement and self-binding support is documented in
+[implementation](implementation.md).
 
 There is no `dyn` keyword or implicit stored interface handle. Bare `I` names
 the behavior/abstract payload type, not a storable local or field. `T : I`

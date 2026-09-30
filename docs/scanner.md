@@ -21,6 +21,11 @@ Syntax-33 appends `++` and `--` as token identities 86 and 87, preserving all
 earlier identities and scanner-5 records. Both scanners select longest
 matches. New adjacent update/additive runs such as `x+++y` diagnose rather
 than being reinterpreted; trivia distinguishes `x++ +y` from `x+ ++y`.
+Syntax-34 treats `abstract` as an ordinary identifier, not a declaration
+modifier. Its retired slot 77 remains reserved; `operator`, `where` and all
+other token identities retain their values. The interface self marker `this`
+uses its existing contextual identifier spelling. Scanner-5 records and the
+syntax-protocol schema are unchanged.
 Compiled-scanner input and hosted lexing produce the same checked lowering.
 
 The shared operator catalog includes syntax-28's `=>` token for expression
