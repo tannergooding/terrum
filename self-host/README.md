@@ -1,6 +1,9 @@
 # Candidate Terrum compiler sources
 
 These files are parallel design candidates, not a bootstrapped compiler.
+The approved [source grammar](../docs/grammar-spec.md) defines the language
+target, not the execution status of these candidates or approval of their
+sketched library APIs.
 They are not linked into the C# implementation. The native profile executes
 the range, character, integer and nested token components and a bounded token scanner.
 The full-solution build also produces

@@ -222,7 +222,7 @@ Public relationships come from declarations, language-versioned defaults and inh
 | Multiple eligible sources | Explicit permitted source set; conservatively bound by **every** listed source, not by which branch today's body selects |
 | Boolean-success `init ref<T>` without an explicit conditional postcondition | Destination starts vacant; `true` initializes it and `false` leaves it uninitialized |
 | Other result type with `init ref<T>` and no explicit conditional postcondition | Destination starts vacant and must be completely initialized on every normal return |
-| Explicit conditional postcondition for `init ref<T>` | The declared status/result relationship governs initialization; `ensure <expr>` uses an ordinary Boolean expression, with exact clause placement/grammar and metadata still to specify |
+| Explicit conditional postcondition for `init ref<T>` | The declared status/result relationship governs initialization; `ensure <expr>` uses an ordinary Boolean expression with [specified clause placement](grammar-spec.md#31-source-file-structure-and-declarations); correlated-output metadata remains to specify |
 | Declared `Task<TResult>` | May retain borrowed inputs/receiver until completion and required cleanup, whether or not the method is `async` |
 | Implemented interface/registered builder | Inherit the source, access, output and effect contract; no implementation-by-implementation repetition |
 

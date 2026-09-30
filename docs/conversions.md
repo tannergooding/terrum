@@ -101,8 +101,9 @@ operands, while `int32 a = 50000; int64 y = a * a` requires explicit conversion.
 For a schematic `U Convert<T, U>(T value)`, a typed argument establishes `T`;
 an expected result can establish `U`, or `Convert<_, int32>(typedValue)` can
 pin `U` while inferring `T`. A unique method signature may fill a local
-callable hole, as in `func<_, int32> f = ToInt32`. `_` is illustrative, not
-settled grammar. Every hole must resolve at the local binding; exported
+callable hole, as in `func<_, int32> f = ToInt32`. The
+[source grammar](grammar-spec.md#32-types-parameters-and-arguments) specifies
+`_` inference holes and explicit `default` selection. Every hole must resolve at the local binding; exported
 fields, aliases and parameters cannot retain unresolved holes. Holes are not
 wildcards, existential values or higher-kinded types, and inference does not
 invert non-injective `T?`, `box<T>` or associated-type projections. Ambiguity
@@ -192,7 +193,7 @@ failure. Numeric conversion is distinct from bit reinterpretation.
 Floating-to-floating numeric conversion does not promise fixed NaN payload
 preservation or cross-format exactness; bit-preserving `FromBits`/`ToBits`
 operations remain distinct. These policies do not grant arbitrary user-defined
-conversions or choose witness lookup/declaration grammar. Exact conversion and
+conversions or choose witness lookup rules. Exact conversion eligibility and
 other per-pair APIs remain specification work.
 
 Granular `ICheckedConversion<TSelf, TSource>`,
@@ -200,8 +201,10 @@ Granular `ICheckedConversion<TSelf, TSource>`,
 [numerics](../library/numerics.api.terrum) let generic algorithms request only a
 supported policy for a source/destination pair. Neither a broad number marker
 nor the existence of a checked conversion promises the other two. Final
-source/destination witness lookup and user-defined operator declaration grammar
-remain to be specified; consumers must bind to a published contract, never
+source/destination witness lookup remains to be specified. A user conversion
+is declared as the static nominal member `operator T(U source)` and called
+explicitly as `T(value)`; constructor/conversion ranking, ownership, effects
+and eligibility remain open. Consumers must bind to a published contract, never
 inspect a body or silently switch to another policy.
 
 Named wrapping operations remain sufficient for the current sketches.
@@ -229,7 +232,7 @@ wrapping and numeric-key bit hashing intentionally keep their explicit
 
 ## Character intent
 
-The design-only `'x'` notation denotes one Unicode scalar after escape decoding,
+The source `'x'` notation denotes one Unicode scalar after escape decoding,
 not an untyped integer or a UTF-16 default. An expected `rune`/`char32` accepts
 any scalar; `char16` accepts a scalar representable by one nonsurrogate code
 unit; `char8` accepts only ASCII as one standalone UTF-8 unit. Multicode-unit

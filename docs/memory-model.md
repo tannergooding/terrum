@@ -1053,7 +1053,7 @@ The policy choices above are accepted. The work below makes them precise and
 implements them; it is not a list of open policy alternatives.
 This acceptance does not settle the separate
 [layout/ABI open questions](data-layout-and-abi.md#open-questions)
-or [remaining call-contract syntax](proposals/grammar-spec.md).
+or [source call contracts and remaining choices](grammar-spec.md).
 
 | Area | Remaining work |
 |---|---|

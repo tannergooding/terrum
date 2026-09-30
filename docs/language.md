@@ -1,6 +1,6 @@
 # Terrum language design
 
-Terrum (TAIR-um), from TerraFX, is a proposed C#-shaped language for applications through systems code. This document specifies accepted semantic direction; source spellings in design samples remain provisional. Detailed call, output and checking contracts are in [language contracts](language-contracts.md). Actual compiler and runtime support is documented in [implementation](implementation.md), its staging in [roadmap](roadmap.md), runnable examples in [samples](samples.md), accepted library direction in [libraries](libraries.md), and candidate API declarations in the [core-library proposal](proposals/core-library-reference.md).
+Terrum (TAIR-um), from TerraFX, is a C#-shaped language for applications through systems code. This document specifies accepted semantic direction; the [source grammar](grammar-spec.md) defines approved source forms and explicitly open boundaries. Design examples remain informative, not blanket approval of their library APIs. Detailed call, output and checking contracts are in [language contracts](language-contracts.md). Actual compiler and runtime support is documented in [implementation](implementation.md), its staging in [roadmap](roadmap.md), runnable examples in [samples](samples.md), accepted library direction in [libraries](libraries.md), and candidate API declarations in the [core-library proposal](proposals/core-library-reference.md).
 
 ## Definitions and notation
 
@@ -27,7 +27,7 @@ value) and `own<T>` (native owning indirection).
 - C#/.NET application and API ergonomics are the baseline; ownership, access, representation, lifetime, effects and placement are distinct contracts. An application can use managed cyclic graphs without propagating lifetime parameters through every edge; unique native resources and deterministic cleanup remain nonduplicable. There is no implicit copy, boxing, pinning, retain, synchronization or materialization to repair an invalid program.
 - AOT and JIT must implement the same semantics for supported features. Independently serviced modules, DLLs and plugins require published, versioned contracts and binding-time compatibility; closed-world optimization or implementation pinning is explicit. Neither a compiler host nor a particular backend defines Terrum's type system, semantic IL or permanent ABI; current target support is documented in [implementation](implementation.md).
 - Concrete types are sealed by default; `sealed` prohibits inheritance, not interface dispatch or API evolution. Types are evolvable by default: closed case sets, fixed layouts and frozen APIs are separate scoped contracts. Interface inheritance and composition replace general concrete inheritance. Public namespaces express concepts, not library tiers. Public source visibility is `public`, `internal` (module) and `private` (declaring type); there is no protected-family or friend-module access through `unsafe` or linking. Author-approved generation may act within the declaring module's implementation scope, but grants no consumer private access. A public Terrum surface is not automatically a native export.
-- Exceptions propagate exceptional failures; expected alternatives use conditional outputs or explicit domain statuses. `require` is a safe checked failure; catching/recovering requires unsafe recovery authorization, while unsafe operations and caller-unsafe invocations require explicit `unsafe { ... }` blocks. Cleanup and `try/finally` do not require unsafe authorization. Unsafe recovery does not prove an object's invariant has survived. Platform callbacks must contain faults or terminate rather than unwind across a foreign ABI.
+- Exceptions propagate exceptional failures; expected alternatives use conditional outputs or explicit domain statuses. `require` is a safe checked failure; catching/recovering requires unsafe recovery authorization, while unsafe operations and caller-unsafe invocations require explicit `unsafe { ... }` blocks or `unsafe(expr)` expressions. Cleanup and `try/finally` do not require unsafe authorization. Unsafe recovery does not prove an object's invariant has survived. Platform callbacks must contain faults or terminate rather than unwind across a foreign ABI.
 - Type, declaration, interface and metadata contracts are authoritative. A compiler may infer private implementation facts but cannot silently publish stronger or weaker promises from a replaceable body. Consumers bind against the producer's resolved contracts and rule version, not their own reinterpretation of its source defaults. [Lifetimes](lifetimes.md) specifies this distinction for borrowed results.
 - Source compilation checks authored bodies against declared contracts. Ordinary binary consumers safely decode and structurally validate artifacts, resolve references, check binding/contract compatibility and validate caller use, then trust declared metadata contracts for external dependencies instead of re-proving dependency implementations. Callers still satisfy imported preconditions, access, ownership and effects. This is not permission to trust malformed bytes; optional deeper audit tooling is not a v1 promise. Signing/provenance is separate from semantic correctness; no mandatory signature or trust store is selected, and signer identity does not prove a contract true. Current reader and verifier support is documented in [implementation](implementation.md).
 - Keep minimum language requirements separate from the standard application-library/runtime surface and feature-specific dependencies. Foundational types such as `ref<T>`, `ptr<T>` and `int32` are illustrative, not a complete mandatory API list. Language conformance alone does not require heap/GC, a scheduler or OS services; richer features retain their dependencies and checked contracts when used, with no silent semantic weakening or fallback. This can enable embedded/kernel environments in principle, but does not promise a backend there or universal support for every feature.
@@ -45,8 +45,9 @@ Mark caller obligations with `unsafe` on the callable declaration:
 `unsafe void M()` propagates obligations to callers, while ordinary
 `void M()` does not. This modifier does not make the callable body an unsafe
 context: unsafe operations inside either form still require explicit
-`unsafe { ... }` blocks, and calls to caller-unsafe declarations require an
-explicit unsafe block at the call site. Encourage a `# safety` documentation
+`unsafe { ... }` blocks or `unsafe(expr)` expressions, and calls to
+caller-unsafe declarations require an explicit unsafe context at the call site.
+Encourage a `# safety` documentation
 section to explain caller responsibilities; prose is informative, not a
 compiler proof or a substitute for checked contract metadata. Safe declarations
 may contain internally scoped unsafe work without an extra
@@ -364,8 +365,11 @@ Static operator witnesses are selected without a runtime vtable; erased
 instance dispatch may use a table/slot or equivalent, without prescribing a
 physical slot for every default. Diamond conflicts require explicit
 resolution, and compatible interface evolution requires a dispatch mechanism
-that can bind older witnesses to a newly supplied default. Exact witness
-mapping syntax, metadata and ABI remain to specify; current bounded
+that can bind older witnesses to a newly supplied default. Qualified member
+bindings, optional first `<this T>`, `.via<I>` witness selection and restricted
+current-receiver `default<I>.Member()` calls follow the
+[source grammar](grammar-spec.md#54-aliases-and-associated-types-declarations-and-open-binding).
+Complete inherited-witness resolution, metadata and ABI remain to specify; current bounded
 `static abstract` parser support is documented in [implementation](implementation.md).
 
 There is no `dyn` keyword or implicit stored interface handle. Bare `I` names
@@ -460,9 +464,9 @@ its effects and failures, and apply ordinary ownership/cleanup. It is not an
 assignment and has no name-dependent fallback. Positional wildcard patterns
 and omitted lambda parameter names are separate nonbinding contexts; they do
 not drop the matched/argument value or alter parameter mode. Separately
-proposed type holes are not identifiers and are not covered by this discard
-rule. Exact grammar contexts beyond the accepted discard direction remain to
-specify. Wildcard patterns, lambda placeholders and generic type holes are
+specified type holes are not identifiers and are not covered by this discard
+rule. Their bounded source forms are defined in the [source grammar](grammar-spec.md).
+Wildcard patterns, lambda placeholders and generic type holes are
 separate features; see the [implementation boundary](implementation.md).
 
 Adding an interface member compatibly for existing implementations requires a
@@ -482,7 +486,7 @@ coverage merely by naming a case, and
 the initial form is a final unguarded wildcard. Missing-case warnings can be
 elevated; ordinary `_` suppresses them. For integer enums, diagnostics concern
 declared names while a fallback still accepts unnamed underlying values.
-Exact match grammar and the closed-case marker remain open. Unknown payloads
+Complete nominal/destructuring pattern grammar and the closed-case marker remain open. Unknown payloads
 must be safely rooted,
 forwarded and disposed or the representation is rejected.
 
@@ -515,7 +519,7 @@ reuse needs stable observations, equivalent inputs and compatible code
 identity; mutable inputs can change between pure calls. Dynamic effects/read
 regions belong to interface and module contracts.
 
-The working `IContiguousSequence<T>.AsSpan()` returns a read projection. `Span<T>` implements it **explicitly**, permitting constrained generic calls without a redundant concrete `span.AsSpan()` member. Known-code-unit `TextSpan<TCodeUnit>.AsSpan()` and `Text.AsSpan()` stay public because those change the view; erased `TextSpan<void>` has no `AsSpan()` or `IContiguousSequence<void>`. A stored or returned view must preserve its opaque backing dependency, even for empty/end slices. Detailed receiver and backing rules are in [lifetimes](lifetimes.md). `ISequence<T>` traversal and associated borrowing contracts remain to be specified. Working `Task<TResult = void>` makes `Task` precisely `Task<void>` after type-argument expansion, not an independent task protocol; type-default syntax remains open.
+The working `IContiguousSequence<T>.AsSpan()` returns a read projection. `Span<T>` implements it **explicitly**, permitting constrained generic calls without a redundant concrete `span.AsSpan()` member. Known-code-unit `TextSpan<TCodeUnit>.AsSpan()` and `Text.AsSpan()` stay public because those change the view; erased `TextSpan<void>` has no `AsSpan()` or `IContiguousSequence<void>`. A stored or returned view must preserve its opaque backing dependency, even for empty/end slices. Detailed receiver and backing rules are in [lifetimes](lifetimes.md). `ISequence<T>` traversal and associated borrowing contracts remain to be specified. Working `Task<TResult = void>` makes `Task` precisely `Task<void>` after type-argument expansion, not an independent task protocol; type-default syntax follows the [source grammar](grammar-spec.md#32-types-parameters-and-arguments).
 
 Declared [type families](type-families.md) can expose checked common operations and conditional members/conformance. A static parameter meaning "any fixed vector of float32" preserves its actual type, width and associated mask, including same-instantiation relationships between operands/results; it does not require users to introduce a nominal `ISimdVector` solely to name the family. Runtime interchange that hides an encoding is different from preserving an unspecified static instantiation. Erased forms are explicit family contracts, never an automatic `Type<T>` to `Type<void>` rule; copy/move, tracing, cleanup, lifetime and ABI obligations survive. `Task<void>` still means no result, not permission to discard an arbitrary owning result.
 
@@ -592,7 +596,7 @@ cohorts normalized) are separate from IEEE operator equality.
 
 Source text is UTF-8; runtime text has **no default encoding**. The single `TextSpan<TCodeUnit = void>` family has immutable validated `char8`/`char16`/`char32` members and a family-declared encoding-erased `void` specialization: bare `TextSpan` is exactly `TextSpan<void>`. Here `void` does not mean zero-size units or a default encoding. Erasure needs no text copy/transcoding and retains actual encoding, backing, access and lifetime/lease dependencies. Checked typed projection rejects a mismatched representation rather than transcoding; only known-code-unit forms expose typed `AsSpan` and contiguous-sequence conformance. Common `IsEmpty`, ordinal and formatting operations work on either form. A raw `AsSpan()` can forget text validity but not immutable backing, access, lifetime or rooting. Raw slices can split scalars; text slices must preserve scalar boundaries. Editing copies into mutable raw storage or a builder, then validates and freezes before publication; transferring an exclusively held initial buffer may avoid a copy only by revoking all writes. Readonly aliasing or validation alone cannot establish immutable text. Registered string targets use ordinary calls such as `utf8z("Terrum")`, not lexer prefixes or suffix tokens; the target validates encoding, termination and embedded-zero rules without implying pointer lifetime. Final storage, string facade, adaptive/block/RLE representation and projection ABI require experiments.
 
-Design-only character literals carry one scalar, target-typed to a representable code-unit/scalar type without a numeric or UTF-16 fallback. Registered text targets provide `rune` context and forward scalar fragments directly through the writer protocol. A raw `char8` is not automatically a valid standalone UTF-8 scalar. Precise representability rules and the current unsupported-syntax boundary are in [conversions](conversions.md#character-intent).
+Character literals carry one scalar, target-typed to a representable code-unit/scalar type without a numeric or UTF-16 fallback. Registered text targets provide `rune` context and forward scalar fragments directly through the writer protocol. A raw `char8` is not automatically a valid standalone UTF-8 scalar. Precise representability rules are in [conversions](conversions.md#character-intent); compiler coverage remains in [implementation](implementation.md).
 
 Defaults are **ordinal plus invariant together**: exact Unicode scalar sequence equality and scalar ordering across encodings, matching hash, no implicit normalization/casing/linguistic comparison, and ASCII digits/signs/punctuation for numeric parsing and formatting. U+0661/U+FF11 digits and U+2212 minus do not act like ASCII tokens. Arbitrary valid Unicode remains valid text data. Termination, embedded-zero exclusion, pinning and lifetime are distinct native-string requirements. `Text` is a common payload/facade. The target sketch uses `own<val<Text>>` when it means a native owner of inline `Text` payload; construction, conversion and cleanup syntax remain open. Text implementation support is documented in [implementation](implementation.md).
 
@@ -675,7 +679,7 @@ access/qualification weakening, and crossed better/worse arguments are
 ambiguous rather than summed into a score. Apply declared specificity and the
 by-value/`implicit ref<T>`/`params` priorities. Return type, declaration
 order, literal numeric fit and conversion-chain search do not resolve a tie.
-Exact grammar, diagnostics and generic collection-expression inference remain
+Complete applicability, diagnostics and generic collection-expression inference remain
 specification work. Binding is fixed at source compilation; a backend does not
 choose among overloads. For
 example, given `Log<T>(T item)` and `Log<T>(params List<T> items)`, a
@@ -684,8 +688,15 @@ have identity matches after inference, but the declared `List<T>` parameter
 shape is more specific than bare `T`. This same specificity applies without
 the `params` modifier; it is not a count of inferred parameters or solver work.
 
-These are target contracts. Callable and tuple syntax, checked witnesses and
-contextual lambda lowering remain open; user-defined type-pack expansion,
+The [source grammar](grammar-spec.md#32-types-parameters-and-arguments)
+specifies final `params` placement, eligible Copy parameter defaults,
+position-preserving named/positional argument mixtures and tuple forms.
+Tuple indexing uses a constant `[index]`; labels do not change tuple
+identity. End-relative `^offset` indexing and half-open slice bounds retain
+their checked source rules. Target-directed lambdas and collection
+expressions do not infer a canonical callable representation or permit
+stronger hidden obligations on the caller. Checked witnesses and contextual
+lambda lowering remain open; user-defined type-pack expansion,
 pack indexing/folds, polymorphic callable erasure and implicit callback
 vectorization are outside this direction. Current compiler support is
 documented in [implementation](implementation.md).
@@ -703,7 +714,7 @@ type from constraints or invert optional/box normalization. General constructor
 inference remains separate target work; current inference support is documented
 in [implementation](implementation.md).
 
-The target parser contract is `IParsable<TSelf>.TryParse(TextSpan, init ref<TSelf>)`, including user types. `init ref<T>` is a vacant initialization loan: its destination cannot be read before complete initialization and publication. The accepted call-site form is `TryParse(text, init result)`. Conditional initialization facts are normally authored as declaration postconditions using `ensure <expr>`, an ordinary Boolean expression that may compose patterns and short-circuit predicates. A legal value predicate such as `result > 0` implies initialization; source-body/path checking must prove reads are legal and may not inspect vacant storage to decide a predicate's result. A successful value predicate establishes initialization. These clauses correlate the output's live/uninitialized state with the declared status/result; they are not a separate conditional-assertion block language. An initialized nullable value (including null) is a live `T` value; an uninitialized outcome has no `T` lifetime, access or cleanup, even if physical storage remains. Callers cannot receive an undiscriminated maybe-live owner or access/clean up a vacant arm. Exact clause placement, grammar and metadata remain to be specified; equivalent routine output attributes are not a parallel authoring mechanism. Failure cleans partial initialization according to the declared contract and never fabricates `default(T)`; asynchronous publication occurs at operation completion. This contract is distinct from a general writable reference. Expected invalid input normally branches on `Try...`/status. Domain outcomes may use response types; there is no mandatory language-wide `Option`/`Result` wrapper or typed-throws failure-set machinery. Current output-mode support is documented in [implementation](implementation.md).
+The target parser contract is `IParsable<TSelf>.TryParse(TextSpan, init ref<TSelf>)`, including user types. `init ref<T>` is a vacant initialization loan: its destination cannot be read before complete initialization and publication. The accepted call-site form is `TryParse(text, init result)`. Conditional initialization facts are normally authored as declaration postconditions using `ensure <expr>`, an ordinary Boolean expression that may compose patterns and short-circuit predicates. A legal value predicate such as `result > 0` implies initialization; source-body/path checking must prove reads are legal and may not inspect vacant storage to decide a predicate's result. A successful value predicate establishes initialization. These clauses correlate the output's live/uninitialized state with the declared status/result; they are not a separate conditional-assertion block language. An initialized nullable value (including null) is a live `T` value; an uninitialized outcome has no `T` lifetime, access or cleanup, even if physical storage remains. Callers cannot receive an undiscriminated maybe-live owner or access/clean up a vacant arm. Clause placement follows the [source grammar](grammar-spec.md#31-source-file-structure-and-declarations); correlated-output metadata remains to be specified, and equivalent routine output attributes are not a parallel authoring mechanism. Failure cleans partial initialization according to the declared contract and never fabricates `default(T)`; asynchronous publication occurs at operation completion. This contract is distinct from a general writable reference. Expected invalid input normally branches on `Try...`/status. Domain outcomes may use response types; there is no mandatory language-wide `Option`/`Result` wrapper or typed-throws failure-set machinery. Current output-mode support is documented in [implementation](implementation.md).
 
 The language-versioned boolean-success default initializes the output on
 `true` and leaves it uninitialized on `false`. For other result types, an
@@ -741,8 +752,8 @@ raises rather than exposing a vacant destination or manufacturing `default(T)`.
 This is based on declaration metadata, not a `Try` naming convention. Multiple
 outputs stay explicit; status APIs use an explicit declared success predicate
 and preserve other statuses for explicit matching/diagnostics rather than
-guessing an enum-zero member. Pattern and `init ref` invocation grammar remain
-scheduled.
+guessing an enum-zero member. Bounded patterns and `init` argument forms are
+specified in the [source grammar](grammar-spec.md); lifting metadata remains open.
 
 Declaration placement determines contract visibility. A declaration
 precondition (`require`) and postcondition (`ensure`) are published promises;
@@ -914,7 +925,7 @@ resolve a link; a separately configured documentation build may opt into
 example checks. Exact tokenization and escaping, unknown-heading behavior,
 attachment and inheritance details, member identities, schema, diagnostics
 and packaging remain specification work in the
-[grammar proposal](proposals/grammar-spec.md).
+[source grammar](grammar-spec.md#514-documentation-comment-grammar-and-tooling).
 
 ### Storage, concurrency, entry and boundaries
 
@@ -1014,7 +1025,34 @@ and effect guarantees. The `TRRM` identifier names the evolving semantic-IL and
 module format; its wire schema and revision encoding remain open. Actual module
 and backend support is documented in [implementation](implementation.md).
 
-## Provisional source notation and open decisions
+<a id="provisional-source-notation-and-open-decisions"></a>
+
+## Source notation and open decisions
+
+The [source grammar](grammar-spec.md) is normative within its stated scope.
+It defines contextual literal typing without fallback, optional/coalescing
+and conditional expressions, guarded switch coverage and explicit
+constant/wildcard transfers. Open pattern and protocol details remain open,
+not implicit adoption of every illustrative API.
+
+Mixed automatic/authored property accessors share one backing field when an
+auto accessor or property-local `field` requires it; fully authored accessors
+without `field` have no implicit storage. Receiver mutation uses `mut get`
+or `mut set`, while `init` alone provides unpublished initialization access.
+Constructor `ensure P is init` clauses publish minimum guarantees, and
+init-property writes may repeat before publication under ordinary cleanup
+rules. These do not authorize later mutation through `init`.
+
+`async` marks an implementation and `await` is a prefix expression. Ordinary
+async invocation starts eagerly; there is no `async void` form. Producers
+instead use a resolved `[Iterator]` attribute, `yield expression;` and
+`return;`, with lazy body start on first advance. `[Iterator] async` requires
+an async-producer result, not merely `Task<Sequence<T>>`. `await for` and
+ordinary iteration perform structured checked close, including awaited
+async close. Protocol identities, element loans, scheduling/cancellation
+APIs and representation remain open. Typed/captured failure transport and
+catch-filter source forms do not silently swallow filter failures; general
+exception transport and ABI remain separate work.
 
 The design examples use canonical `ref<T>`, `ptr<T>`, `box<T>`, `val<T>`,
 `own<T>`, `init ref<T>`, `mut`, and `write` forms, plus `move`, bracketed
@@ -1028,9 +1066,9 @@ as `TRM0006`; prefix casts are not parsed. In particular, legacy `out` remains
 supported while a coherent general migration to initialization loans is
 planned. Current support for numeric conversions and initialization loans is
 documented in [implementation](implementation.md).
-Exact generic constraint,
-associated-type and extension-disambiguation syntax, inference-hole spelling,
-closed-case marker/match grammar and compatibility-forwarder attributes/source
+Complete generic constraint,
+associated-equality and extension-disambiguation syntax,
+closed-case markers/full pattern grammar and compatibility-forwarder attributes/source
 visibility remain open. So do transparent-wrapper eligibility/ABI profiles,
 conditional copy capabilities, first-class
 stored-loan ABI, erased-interface dispatch ABI, span-anchor layout/calling
@@ -1038,8 +1076,8 @@ convention, inline `val<C>`, native ownership transitions, structural unions,
 decimal encoding, text storage, wither omission/overloads,
 handling/registration, task lifecycle/cancellation APIs, generic dispatch
 selectors and exception ABI. Eager async invocation and ordinary-await
-continuation semantics are accepted; the exact awaiter, executor and affinity
-syntax remain open.
+continuation semantics are accepted; awaiter registration, executor and affinity
+contracts remain open.
 Syntax follows checked contracts; actual implementation boundaries are listed
 in [implementation](implementation.md) and staged in [roadmap](roadmap.md).
 

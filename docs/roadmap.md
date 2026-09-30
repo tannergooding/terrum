@@ -1,13 +1,14 @@
 # Development roadmap
 
 The current milestone is a small checked native compiler, not the entire language.
-The [language](language.md) defines accepted semantic direction, while
+The [language](language.md) and [source grammar](grammar-spec.md) define
+approved semantic and source contracts, while
 [implementation](implementation.md) records actual support and tool contracts.
 The [proposal index](proposals/README.md) separates pending designs from
 the accepted contracts and this implementation sequence.
 The approved current [metadata design](il-metadata.md) and bounded
 [coded instruction set](il-instruction-set.md) are distinct from the
-still-proposed grammar and core-library drafts in the
+still-proposed core-library and IL-extension drafts in the
 [proposal index](proposals/README.md). None is evidence of current compiler support.
 
 | Stage | Deliverable | Exit evidence |
@@ -181,8 +182,9 @@ Existing implemented compatibility behavior and explicit migration
 requirements remain unchanged. No pre-v1 stability level is promised; any
 stability declaration is deferred until closer to v1.
 
-Substantial compiler, runtime, and library increments may proceed without
-waiting for final review of the grammar or core-library companion drafts.
+Substantial compiler, runtime, and library increments may proceed against
+the approved [source grammar](grammar-spec.md) without waiting for its
+remaining open decisions or approval of the core-library proposal.
 The approved current [metadata design](il-metadata.md) and
 [coded instruction set](il-instruction-set.md) define specified framing,
 row and bounded Body contracts, not compiler support or a released byte

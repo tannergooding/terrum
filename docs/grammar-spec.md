@@ -1,39 +1,41 @@
-# Terrum grammar proposal
+<a id="terrum-grammar-proposal"></a>
+
+# Terrum source grammar
 
 > [!IMPORTANT]
-> Proposal only: this document is not an approved grammar or a claim of
-> implementation. Accepted semantic direction does not approve the candidate
-> productions below.
+> The settled source forms and semantic constraints in this document are
+> approved language specification, not a claim of compiler support.
+> Explicitly open or deferred choices remain unresolved; informative examples
+> and library names do not establish additional contracts.
 
-This proposal specifies candidate source notation and selected semantic
-constraints. It is not yet an approved language specification; exact grammar
-and several semantic contracts remain open. Examples are informative unless
-explicitly identified as accepted semantic direction.
+This document specifies source notation and selected semantic constraints.
+It is a bounded specification, not a complete grammar for every language
+feature. The [implementation reference](implementation.md) records supported
+subsets independently.
 
-The [language](../language.md), [memory model](../memory-model.md),
-[conversions](../conversions.md), [lifetimes](../lifetimes.md), and
-[libraries](../libraries.md) documents define the related accepted semantic
-direction. The [approved current semantic IL/metadata design](../il-metadata.md)
-and [core-library proposal](core-library-reference.md) are separate
-documents; cross-references do not adopt their candidate forms.
+The [language](language.md), [memory model](memory-model.md),
+[conversions](conversions.md), [lifetimes](lifetimes.md), and
+[libraries](libraries.md) documents define the related accepted semantic
+contracts. The [approved current semantic IL/metadata design](il-metadata.md),
+[core-library proposal](proposals/core-library-reference.md) and
+[IL extension proposal](proposals/il-extensions.md) are separate documents;
+source approval does not adopt proposed APIs or metadata extensions.
 
 ## 1. Scope, status, and notation
 
 The notation is EBNF-like: `{ X }` means zero or more, `[ X ]` means
 optional, `|` means alternative, terminals are in quotes, and named lexical
-tokens such as `Identifier` are supplied by the lexer. A production labeled
-**PROPOSED** is a candidate, not normative grammar. **ACCEPTED DIRECTION** identifies a semantic constraint that is normative in
-the canonical language references; it does not approve the syntax used to
-illustrate it. **OPEN**
-marks a decision not made by this proposal. Examples are informative and
+tokens such as `Identifier` are supplied by the lexer. Productions and their
+stated static-semantic restrictions define the approved source forms.
+**ACCEPTED DIRECTION** identifies a settled semantic constraint.
+**OPEN**, **proposed**, and **deferred** boundaries explicitly identify matters
+not settled here; permissive placeholders do not resolve them. Examples are informative and
 conformance cannot be inferred from matching an example.
 
-The proposal uses three distinct kinds of statement: accepted semantic
-constraints, candidate source forms, and unresolved choices. It makes no
-compatibility promise or implementation claim.
+Source forms, semantic constraints, and unresolved choices have distinct
+roles. This specification makes no implementation or pre-v1 stability claim.
 
-This is a bounded source-language proposal, not a complete grammar for all
-language features. A reserved spelling does not by itself establish a
+This is a bounded source-language specification. A reserved spelling does not by itself establish a
 production; recovery syntax is not a conforming source form.
 
 **Documentation-comment direction (accepted source form, detailed grammar
@@ -54,12 +56,12 @@ packaging remain work. Normal extraction does not execute embedded code or fetch
 ## 2. Lexical notation
 
 The lexical contract is specified in the canonical
-[lexical grammar](../lexical-grammar.md). The following summarizes relevant
+[lexical grammar](lexical-grammar.md). The following summarizes relevant
 syntax boundaries:
 
 - Source positions and token lengths count UTF-16 code units. Identifier starts/continues follow the pinned Unicode 17.0.0 XID properties plus `_`; spelling is ordinal, case-sensitive, and not normalized. Keywords are lower-case ASCII token spellings. Primitive names such as `int32` are ordinary identifiers.
 - Whitespace and comments are leading trivia; line breaks include CRLF, CR, LF, NEL, LS, PS. Line/block comments do not nest. EOF owns trailing trivia.
-- Unsuffixed decimal, hexadecimal (`0x`/`0X`), binary (`0b`/`0B`) and proposed hexadecimal floating-point forms are described below. Separators may occur between digits and, for based values, immediately after the prefix. Signs are separate operators except an exponent sign. Width suffixes are invalid; `10i32` is not a typed literal. `_123` is an identifier.
+- Unsuffixed decimal, hexadecimal (`0x`/`0X`), binary (`0b`/`0B`) and hexadecimal floating-point forms are described below. Separators may occur between digits and, for based values, immediately after the prefix. Signs are separate operators except an exponent sign. Width suffixes are invalid; `10i32` is not a typed literal. `_123` is an identifier.
 - Strings use `"..."` with the documented escapes. Interpolated text uses `$"..."` with `{expression}` holes; ordinary strings do not interpolate. Single-quoted character literals denote one decoded Unicode scalar; numeric width suffixes are invalid.
 - Lexical diagnostics preserve malformed source spelling; bad characters/surrogates, invalid escapes, unterminated literals/comments, bad prefixes, separators, and attached width suffixes have distinct diagnostic codes in the lexical reference.
 
@@ -259,25 +261,24 @@ fallback character type.
 
 `Number` is one token: unary `-` is an operator, not part of the number.
 Numeric target selection/range and the lack of a default type are semantic
-rules (see [conversions](../conversions.md)). A hex float requires a binary
+rules (see [conversions](conversions.md)). A hex float requires a binary
 exponent (`p`/`P`), so `0x1f` is an integer while `0x1.fp+2` is a floating
 token. It has digits on at least one side of the point; the exponent has
 decimal digits, and `_` follows the existing between-digits rules. A leading
 sign is separate from the token, unlike the exponent sign.
 
-The `HexFloat` production above specifies its candidate spelling and is
+The `HexFloat` production above specifies its spelling and is
 included in `Number` and `Primary` just like other numeric literals.
 Its token-boundary and diagnostic rules (including incomplete `p` exponents,
-separators and identifier tails), target-format rounding and literal
-conversion rules still need to be specified before adoption.
+separators and identifier tails) still need to be specified.
 The selected floating target supplies the format; a hex float's exact
 binary-rational value is rounded directly to that format using the selected
 IEEE-754 nearest/ties-even default and the established overflow/underflow
 rules, not through an intermediate host floating type. Both
 `float32 x = 0x1.fp+2;` and `var x = float32(0x1.fp+2);` select `float32`;
 `var x = 0x1.fp+2;` has no target and diagnoses.
-The [lexical grammar](../lexical-grammar.md) specifies the adopted lexical
-profile separately; this candidate does not silently revise that contract.
+The [lexical grammar](lexical-grammar.md) shares these source rules; open
+recovery details do not permit alternative target-format rounding.
 
 Primitive spellings (`int32`, `float32`, `bool`, `char16`, etc.) remain
 ordinary identifier **tokens**, not lexical keywords. Their exact type
@@ -286,7 +287,7 @@ package cannot declare a type with a reserved primitive name, including in
 another namespace. This does not reserve all lowercase type names or prevent
 ordinary code from using primitive types. The proposed width-explicit integer,
 floating, character, vector and decimal families are listed in the
-[language design](../language.md#primitives-strict-arithmetic-and-text);
+[language design](language.md#primitives-strict-arithmetic-and-text);
 the set of reserved bindings follows the primitives actually selected by the
 language, not every candidate in this grammar. Neither `@identifier` nor
 backtick-delimited identifiers have a production here, so reserved words
@@ -295,7 +296,7 @@ keyword escape remains an open alternative, not an adopted arbitrary-string
 delimiter. Core does not need an escape to declare `int32`: escaping a token
 would not confer the right to define a compiler-owned binding.
 
-**Core bootstrap proposal:** A designated Core-library compilation has no
+**Core bootstrap contract:** A designated Core-library compilation has no
 implicit prebuilt standard-library reference and has explicit permission to
 declare the reserved primitive types using the ordinary `struct int32`
 spelling (and analogously for each supported primitive). Omitting the
@@ -360,9 +361,12 @@ context.
 uses `init ref<T>`; arithmetic selection uses policy cases rather than a
 separate arithmetic-toggle source form.
 
-## 3. Candidate grammar productions (PROPOSED)
+<a id="3-candidate-grammar-productions-proposed"></a>
 
-The productions below are candidates, not an adopted grammar. `Identifier`
+## 3. Grammar productions
+
+The productions below are subject to their stated semantic restrictions and
+explicit open boundaries. `Identifier`
 means one lexical identifier token; dotted names are written explicitly.
 Semantic constraints are stated separately.
 The prefix names below are metasyntactic placeholders for only the
@@ -495,7 +499,7 @@ OperatorSymbol  = "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^"
                 | "++" | "--" | "true" | "false" ;
 ```
 
-This candidate permits one file-scoped namespace or namespace blocks, without
+The source file permits one file-scoped namespace or namespace blocks, without
 mixing those forms in a file. Namespace blocks may coexist with root
 declarations; nested namespace blocks and namespace-local imports remain
 separate grammar work. Declarations retain source order within compiler file
@@ -590,17 +594,17 @@ conversion keyword. Constructor-versus-conversion ranking and duplicate source-/
 conversion eligibility remain open; declaration order cannot break ties.
 A bodyless static interface operator is a required compile-time witness; a
 bodyful one supplies a default. Static operator witness selection needs no
-runtime vtable. The candidate generic type parameters and conformance lists
+runtime vtable. The generic type parameters and conformance lists
 apply to structs **and** classes; interface base lists express interface
 composition, not implementation of an interface by itself.
-The candidate integral enum base and constant-valued members preserve unnamed
+The integral enum base and constant-valued members preserve unnamed
 underlying values; `[Flags]` is an optional declaration contract, not a
 different closed enum grammar. `IntegralType` and `ConstantExpression` require
 semantic restrictions beyond their syntactic approximations. `AliasDecl`
 names the target type without defining a new nominal identity or adding
 conformance; generic aliases substitute their type formals into the target.
 Its namespace-level placement and visibility are deliberate; aliases are
-not nested in nominal types in this proposal. Associated
+not nested in nominal types. Associated
 `type Name;` declares an interface requirement; `type Name = Type;` in an
 implementing nominal type binds a selected requirement rather than declaring
 an arbitrary nested nominal type. Witness mapping, alias cycles and metadata
@@ -619,12 +623,12 @@ executes one legal statement for void methods, setters, init accessors and
 constructors. It is shorthand for the corresponding checked block, not a
 general assignment-expression feature. Constructors name their enclosing
 type and must still establish their published completion guarantees.
-Nested type declarations are deliberately excluded from this candidate
-grammar; this is a proposed scope boundary, not a claim that nested type
+Nested type declarations are deliberately deferred from this
+grammar; this is a scope boundary, not a claim that nested type
 arguments in `Type` are excluded. See [§5.11](#511-nested-types-and-scoped-operators).
 
 ```terrum
-// Candidate interface syntax.
+// Informative interface example.
 interface IAdd<T>
 {
     static T operator +(T left, T right);
@@ -655,7 +659,7 @@ Argument        = [ Identifier, ":" ],
                   ( [ PassingMode ], Expression | "init", Expression ) ;
 ```
 
-Repeated optional markers such as `T??` are not a proposed source form.
+Repeated optional markers such as `T??` are not a valid source form.
 Optional normalization such as `T?` with an already-optional substitution is a
 separate semantic rule. In these productions, `mut` in a parameter is a
 passing mode (`mut ref`), not a type argument. Grammar does not itself grant a
@@ -689,7 +693,7 @@ left-to-right in source order. Unknown/duplicate labels and unsupplied
 required parameters reject. A positional argument may follow an in-position
 named argument; after an out-of-position label, subsequent arguments must be
 named. There is no search for the next unfilled parameter and no empty slot.
-Overload selection and output behavior remain checked semantic contracts. The proposed
+Overload selection and output behavior remain checked semantic contracts. The
 `init ref<T>` is a distinct initialization-loan parameter form, with the
 accepted call-site spelling `Create(init value)`. `write` qualifies access
 through a reference and `pin` qualifies only `ref<T>` (for example,
@@ -790,7 +794,7 @@ PatternAtom     = "_" | "null" | "some", ( Identifier | "_" )
 `for` initializers and iterators omit their internal semicolon; an iterator
 may be an expression or one `=` assignment. Ordinary local bindings require an
 initializer. `init var name;` instead declares vacant storage whose type is
-established by a checked initialization; proposed `init T name;` makes its
+established by a checked initialization; `init T name;` makes its
 type explicit. Neither form is a default value, and neither permits reads
 before complete publication. Bare `T name;` is not a declaration here.
 By-value iteration is the default. `ref` iteration borrows an element place
@@ -829,7 +833,7 @@ apply. The condition uses the ordinary checked Boolean contract, and body
 locals do not escape their block into the condition.
 Blocks are required after `if`, `while`, `do`, `for`, `try`, `catch`,
 `finally`, and `unsafe`; a single unbraced statement is not part of this
-candidate. Assignment is a
+grammar. Assignment is a
 statement-level form, not a general right-associative expression; its left
 expression must pass a writable-place check, which this syntactic
 approximation does not define. `DiscardStatement` is only the standalone
@@ -897,7 +901,7 @@ ownership metadata, and cause/transport rules remain open.
 
 ### 3.4 Expressions and precedence
 
-The candidate grammar uses the precedence table to parse an operand, then
+The grammar uses the precedence table to parse an operand, then
 repeated binary operators and operands. For example, `a && b || c` is
 `(a && b) || c`; there is no need to read a chain of one production per
 operator level. Ordinary binary operators at the same level associate left;
@@ -1177,7 +1181,7 @@ References used by a deferred action must remain valid until it executes;
 control transfers cannot leave the action, just as they cannot leave a
 `finally`. Deferred actions have the same ordinary failure and effect rules
 as authored `finally`, not a special `NoThrow` requirement. See the
-[language exception contract](../language.md#safe-and-unsafe-boundaries).
+[language exception contract](language.md#safe-and-unsafe-boundaries).
 
 `PolicyCase` binds a compile-time constant named enum case, not a type
 argument or a runtime enum value. Exact policy selection, strictness and
@@ -1185,39 +1189,39 @@ generic forwarding are described in [§5.12](#512-modifiers-cleanup-and-finaliza
 
 ## 4. Accepted language direction
 
-These accepted semantic constraints do not approve the proposed source forms
-or claim an implementation.
+These semantic constraints accompany the source forms above; they do not
+claim an implementation or settle the explicitly open boundaries.
 
 - **Access, borrowing, and output state:** canonical forms include `ref<T>`,
   `ptr<T>`, `box<T>`, `val<T>`, `own<T>` and `write`. `mut` qualifies a place,
   nominal declaration or receiver; here `mut ref` is a passing mode, not a
   generic type qualifier. Access and receiver rules follow [language types and
-  operations](../language.md#types-and-operations); readonly access does not
+  operations](language.md#types-and-operations); readonly access does not
   upgrade to writable access. `implicit ref<T>` follows the [parameter-only
-  loan contract](../lifetimes.md#parameter-only-implicit-readonly-loans); it
+  loan contract](lifetimes.md#parameter-only-implicit-readonly-loans); it
   adds no noescape rule or permission to widen declared dependencies.
-  Conditional outputs follow [declaration postconditions](../language-contracts.md#2-outcome-initialization-and-nullability-are-separate):
+  Conditional outputs follow [declaration postconditions](language-contracts.md#2-outcome-initialization-and-nullability-are-separate):
   `ensure` is an ordinary Boolean postcondition, live/nullable-live/vacant
   states remain distinct, and vacant storage is never read. Named callable
-  clauses use §3.1; anonymous/producer contract forms and correlated-output
+  clauses use §3.1 and target-checked lambdas use §3.4; producer phases and correlated-output
   metadata remain open (see [§5.8](#58-postcondition-syntax-for-conditional-output-state)).
   `init ref<T>` means
   vacant-storage initialization, distinct from ordinary `ref`/`write ref`;
-  `Create(init value)` is the accepted call-site spelling, with exact
-  grammar and output metadata still open.
+  `Create(init value)` is the call-site spelling; complete passing-mode/place
+  rules and output metadata remain open.
 - **Generic type checking:** explicit parameters, constraints and static
   operator protocols are accepted direction; associated types and family
-  membership follow [type-family contracts](../type-families.md#explicit-families)
-  and [associated relationships](../type-families.md#nominal-witnesses-and-associated-relationships).
+  membership follow [type-family contracts](type-families.md#explicit-families)
+  and [associated relationships](type-families.md#nominal-witnesses-and-associated-relationships).
   Optional projection is non-injective and semantically idempotent, but
-  repeated source `T??` is not proposed syntax. This proposal gives `_` holes,
+  repeated source `T??` is not valid syntax. This specification gives `_` holes,
   generic defaults and selected associated-type spellings; full inference,
   constructor and witness contracts remain separate work. Type packs are
   deferred, not ruled out as a future language capability.
 - **Functions and overloads:** overload selection is source-time and fixes the
   selected declaration and closed type arguments; runtime virtual/interface
   dispatch is separate. Applicability and ranking follow [callable and
-  `params` rules](../language.md#callable-values-params-and-tuples): only
+  `params` rules](language.md#callable-values-params-and-tuples): only
   declared projections/attenuations apply, no implicit numeric/conversion-chain
   search is performed, constraints do not create overloads, return type is not
   a tie-breaker, and applicable members outrank extensions. By-value `T` beats
@@ -1225,12 +1229,12 @@ or claim an implementation.
   `params` candidate. Exact grammar, diagnostics and extension disambiguation
   remain open.
 - **Types and declarations:** type/declaration semantics follow [language
-  interfaces and generic properties](../language.md#interfaces-access-and-generic-properties).
+  interfaces and generic properties](language.md#interfaces-access-and-generic-properties).
   An intended reserved word does not establish a declaration or statement
-  production; union, async, matching and failure forms require their
-  respective grammar and semantic rules.
+  production; the bounded async, matching and failure forms above do not
+  settle union declarations or their remaining protocol and metadata rules.
 - **Adapters, families, and protocols:** conformance, adapters, associated
-  projections and family erasure follow [type-family contracts](../type-families.md#nominal-witnesses-and-associated-relationships).
+  projections and family erasure follow [type-family contracts](type-families.md#nominal-witnesses-and-associated-relationships).
   Conformance and projections are explicit and checked; imports, matching
   members, or equal representation do not create them. Adapters do not change
   the original witness set; ABI-transparent wrappers are distinct from
@@ -1258,28 +1262,30 @@ or claim an implementation.
   are separate and may combine. Raw object-byte blits and unmediated foreign
   transfers are unsafe; serializers account for emitted bytes, and verified/
   trusted raw copying requires a covering contract. See [layout
-  definitions](../data-layout-and-abi.md#definitions), [fixed
-  representations](../data-layout-and-abi.md#fixed-directly-interoperable-representations),
-  [packing/alignment](../data-layout-and-abi.md#packing-and-aggregate-alignment),
-  and [overlap safety](../memory-model.md#overlap-representation-access-and-unions).
+  definitions](data-layout-and-abi.md#definitions), [fixed
+  representations](data-layout-and-abi.md#fixed-directly-interoperable-representations),
+  [packing/alignment](data-layout-and-abi.md#packing-and-aggregate-alignment),
+  and [overlap safety](memory-model.md#overlap-representation-access-and-unions).
   Exact syntax and profile limits remain open.
-- **Text and numeric forms:** [conversion policies](../conversions.md#conversion-policies)
-  define numeric behavior and [character intent](../conversions.md#character-intent)
+- **Text and numeric forms:** [conversion policies](conversions.md#conversion-policies)
+  define numeric behavior and [character intent](conversions.md#character-intent)
   defines character forms. There are no width suffixes or default numeric type;
   `T(expression)` is a checked conversion, literals are context-typed, and
   numeric operators are checked by default. Floating APIs are target-specific;
-  character literals and custom literal registration remain proposed,
-  floating token-boundary and registration details remain work, and `utf8z("...")` is an
+  character literals have the scalar/target rules in §2, while custom literal
+  registration and floating token-boundary details remain work. `utf8z("...")` is an
   ordinary call rather than a lexer prefix.
 
-## 5. Open grammar and semantic choices
+<a id="5-open-grammar-and-semantic-choices"></a>
 
-Examples in this section are informative. **Accepted direction** records
-settled semantic constraints; **PROPOSED** forms remain candidates and
-**OPEN** choices are unresolved.
-See the canonical [language direction](../language.md),
-[library layering](../libraries.md#dependency-layers-and-package-boundaries),
-and [specification roadmap](../roadmap.md#language-semantic-il-and-metadata-specification)
+## 5. Source contracts and open choices
+
+Examples in this section are informative. Settled source and semantic
+contracts apply as stated; explicitly **OPEN**, proposed or deferred choices
+are unresolved.
+See the canonical [language direction](language.md),
+[library layering](libraries.md#dependency-layers-and-package-boundaries),
+and [specification roadmap](roadmap.md#language-semantic-il-and-metadata-specification)
 for authoritative organization and semantic IL/reference boundaries.
 
 ### 5.1 Initialization loans at call sites
@@ -1291,12 +1297,12 @@ make an existing initialized value writable or readable
 through the initialization loan.
 
 ```terrum
-// Accepted semantic direction; candidate grammar form:
+// Initialization-loan argument.
 Create(init value);
 ```
 
-This does not settle productions for labels, places, overload binding, or
-conditional output contracts. It does not
+Argument labels are specified in §3.2; complete place, overload-binding and
+conditional-output metadata rules remain open. This does not
 introduce an extra transactional publication protocol.
 
 ### 5.2 Exact overload grammar, ranking, and disambiguation
@@ -1314,16 +1320,16 @@ access/qualification weakening may participate in matching (for example,
 projection/erasure is inferred. Constraints filter applicability, not form
 constraint-only overloads. Return type alone does not distinguish overloads.
 Applicable members outrank extensions. These decisions are authoritative in
-[language](../language.md#callable-values-params-and-tuples),
-[conversions](../conversions.md#conversion-policies), and
-[type families](../type-families.md); exact overload grammar remains open.
+[language](language.md#callable-values-params-and-tuples),
+[conversions](conversions.md#conversion-policies), and
+[type families](type-families.md); complete overload resolution remains open.
 
-The declarations below illustrate accepted overload semantics; their exact
-source grammar and diagnostics remain open. No new overload keyword is
+The declarations below illustrate accepted overload semantics; complete
+applicability rules and diagnostics remain open. No new overload keyword is
 required by this direction.
 
 ```terrum
-// Candidate declarations illustrating accepted overload semantics.
+// Declarations illustrating overload semantics.
 int32 Parse(int32 value) { return value; }
 uint32 Parse(uint32 value) { return value; }
 
@@ -1335,11 +1341,10 @@ void ParseExample()
 ```
 
 The accepted `implicit ref<T>` form also participates, but a by-value match
-wins for ordinary `Inspect(item)` when both candidates apply. Its exact source
-parameter modifier remains open:
+wins for ordinary `Inspect(item)` when both candidates apply:
 
 ```terrum
-// Candidate parameter form illustrating accepted overload semantics:
+// Parameter forms illustrating overload semantics.
 int32 Inspect(Item value) { return 0; }
 int32 Inspect(implicit ref<Item> value) { return 1; }
 void InspectExample(Item item) { int32 selected = Inspect(item); }
@@ -1364,7 +1369,7 @@ overload resolution.
 specificity relation, interaction with generic inference and the accepted
 by-value/`implicit ref<T>`/`params` priorities, exact ambiguity diagnostics,
 extension-disambiguation spelling, and serialized binding metadata. This is
-accepted semantic direction, not an adopted grammar or complete contract.
+accepted semantic direction, not a complete overload-resolution contract.
 
 ### 5.3 Caller-unsafe declarations and explicit unsafe scopes
 
@@ -1372,13 +1377,12 @@ accepted semantic direction, not an adopted grammar or complete contract.
 caller obligations, e.g. `unsafe void M()`. An ordinary `void M()` does not
 propagate a caller-unsafe obligation. The declaration modifier does not make
 its body an unsafe context: unsafe operations inside either form still require
-an explicit `unsafe { ... }` block. A caller invoking the unsafe declaration
-must likewise satisfy the contract in an explicit unsafe block. The candidate
-`unsafe(expr)` form scopes the same caller obligations to one expression;
-it is not yet part of the accepted block-only contract.
+an explicit `unsafe { ... }` block or `unsafe(expr)` expression. A caller invoking the unsafe declaration
+must likewise satisfy the contract in an explicit unsafe context. The
+`unsafe(expr)` form scopes the same caller obligations to one expression.
 
 ```terrum
-// Candidate declaration form:
+// Caller-unsafe declaration.
 unsafe uint32 LoadAligned(uint64 address)
 {
     unsafe { return 0; }
@@ -1406,15 +1410,17 @@ contract is checked; no extra trusted-implementation source marker is required. 
 default binary-trust model does not require downstream consumers to re-prove
 dependency bodies.
 
-The exact declaration grammar and contract metadata remain open.
+The contract metadata representation remains open.
 
-### 5.4 Aliases and associated types: candidate declarations, open binding
+<a id="54-aliases-and-associated-types-candidate-declarations-open-binding"></a>
+
+### 5.4 Aliases and associated types: declarations and open binding
 
 **Accepted semantic direction:** families opt in explicitly and declare
 checked associated projections and constraints. Existing explicit
 declarations such as `TextSpan<void>` are not reopened; this is not universal
 `Type<T>`-to-`Type<void>` erasure. Associated types are named type members of
-an interface witness. The candidate §3.1 forms are `type Wider;` in the
+an interface witness. The §3.1 forms are `type Wider;` in the
 interface and `type Wider = MyWideInteger;` in a conforming type.
 `T.Wider` resolves through the selected `IInteger<T>` witness. An associated
 equality may explicitly bind a type parameter, illustratively
@@ -1423,7 +1429,7 @@ from an associated result, choose an arbitrary implementer from a constraint,
 or silently resolve collisions; ambiguous witness/projection uses require
 explicit qualification.
 
-**Proposed alias form:** `alias Option<T> = T?;` names the same resolved type,
+**Alias form:** `alias Option<T> = T?;` names the same resolved type,
 not a distinct wrapper or new witness. Aliases are namespace-level
 declarations, with `public`, `internal` or `private` visibility like other
 top-level declarations; they are not nominal members. Exporting or
@@ -1437,7 +1443,7 @@ the exact alias metadata encoding still need checked rules.
 Associated-type bindings are distinct: they satisfy a selected interface
 member and have witness identity, rather than providing a general synonym.
 
-**Proposed self-binding spelling:** `interface IInteger<this T>` declares
+**Self-binding spelling:** `interface IInteger<this T>` declares
 one explicit implementing-type formal rather than an implicit `Self` name.
 It is the first formal when present; a conformance binds it to its
 implementing type. Interfaces with no self dependency omit it. Ordinary
@@ -1471,7 +1477,7 @@ change the original type's witnesses.
 **Open:** complete associated-equality and inherited-witness qualification
 rules and their metadata representation. Keep family opt-in and declared checked projections; do
 not introduce universal erasure or inferred covariance.
-Interface constructors are not part of this proposal: a future requirement
+Interface constructors are deferred: a future requirement
 needs a checked construction and initialization-completion contract. Fixed
 `const T Name = value;` interface constants are owned by the interface
 definition; a bodyless `const T Name;` instead requires a checked
@@ -1483,7 +1489,7 @@ is made here; generic defaults and collection spreads are not type packs.
 
 ### 5.5 Accepted temporary scope for `implicit ref<T>`
 
-For `Foo(5).Bar(); Baz();`, materialization is shorthand for initializing an ordinary hidden local at the argument's original evaluation point in the current enclosing lexical scope, then passing its readonly reference. The local is not hoisted to scope entry and does not create a shorter lifetime-only scope. If conditional or short-circuit control flow skips the argument, no local is initialized and there is no owner to clean up. Scope exit follows ordinary initialized/moved-state cleanup. A valid returned reference may be used by later statements in that scope, subject to ordinary declared dependencies; existing place/backing lifetimes are not widened and capture/suspension/escape permissions do not change. See the canonical [reference contract](../language-contracts.md#1-one-call-and-reference-model) and [implicit-loan lifetime rules](../lifetimes.md#parameter-only-implicit-readonly-loans). General source/loan metadata remain open.
+For `Foo(5).Bar(); Baz();`, materialization is shorthand for initializing an ordinary hidden local at the argument's original evaluation point in the current enclosing lexical scope, then passing its readonly reference. The local is not hoisted to scope entry and does not create a shorter lifetime-only scope. If conditional or short-circuit control flow skips the argument, no local is initialized and there is no owner to clean up. Scope exit follows ordinary initialized/moved-state cleanup. A valid returned reference may be used by later statements in that scope, subject to ordinary declared dependencies; existing place/backing lifetimes are not widened and capture/suspension/escape permissions do not change. See the canonical [reference contract](language-contracts.md#1-one-call-and-reference-model) and [implicit-loan lifetime rules](lifetimes.md#parameter-only-implicit-readonly-loans). General source/loan metadata remain open.
 
 **Open recommendation:** implicit borrowing introduces no special two-phase
 reservation/activation mechanism. Form the reference when the equivalent
@@ -1500,8 +1506,8 @@ effects and failures, and apply ordinary ownership/cleanup. It is not assignment
 and has no name-dependent fallback. Positional wildcard patterns and omitted
 lambda parameter names are separate nonbinding contexts; they do not consume
 the matched value or alter argument evaluation/parameter mode. A possible
-generic type hole is another distinct nonbinding grammar role, not a named
-identifier and not approved by the discard decision. In a match over `T?`,
+generic type hole is another distinct nonbinding grammar role defined in §3.2,
+not a named identifier or a consequence of the discard rule. In a match over `T?`,
 `some` covers the present case and `_` can cover the remaining absent case
 when those are the only possibilities. The wildcard still means "any
 remaining value", not `none`: it also matches other unhandled cases if the
@@ -1510,7 +1516,7 @@ bounded switch/pattern productions and coverage rules are in §3.3; complete
 nominal-case and destructuring patterns remain to specify.
 
 ```terrum
-// Accepted discard semantics; candidate source form:
+// Standalone discard statements.
 _ = MakeOwner(); // Evaluate once; clean the returned owner at statement end.
 _ = int32(42);   // The type call supplies the literal's target.
 ```
@@ -1554,7 +1560,7 @@ specification work. Existing binary contracts are unchanged.
 
 C# 14 separately permits instance `++`/`--` and instance compound-assignment
 operators with `void` return to mutate a receiver. That form is not part of
-this proposal and must not be inferred from the static operator direction.
+this specification and must not be inferred from the static operator direction.
 
 **Official comparison sources:** [C# language specification, §15.10.2 Unary
 operators](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/classes#15102-unary-operators)
@@ -1630,7 +1636,7 @@ callable forms and the contextual result reference. Lambda clauses follow the ta
 Producer phase mapping and source-to-metadata mapping for
 correlated initialization facts remain open. There is no
 special conditional postcondition block grammar. See the canonical
-[conditional output contract](../language-contracts.md#2-outcome-initialization-and-nullability-are-separate).
+[conditional output contract](language-contracts.md#2-outcome-initialization-and-nullability-are-separate).
 
 ### 5.9 Static-proof floor and constant evaluation
 
@@ -1671,7 +1677,7 @@ initialization safety. No example fixes the exact source spelling.
 ### 5.10 Properties and accessor-local effects
 
 **Accepted direction:** by-value properties on compact `Copy` structs and
-source classes. **Proposed forms:** `get`, `set`, and construction-only `init`
+source classes. **Source forms:** `get`, `set`, and construction-only `init`
 accessors, including backed auto-properties and authored indexers (§3.1).
 Ref-returning properties and indexers still need the general result-loan contract.
 
@@ -1683,11 +1689,11 @@ per-index backing storage.
 
 An explicit concrete getter body makes the getter an ordinary checked
 callable member with its declared readonly or `mut` receiver; `{ get; }` generates a backed auto-getter under
-the proposed extension. Accessor attributes such as `[NoThrow]` attach to
+the backing rules below. Accessor attributes such as `[NoThrow]` attach to
 the getter:
 
 ```terrum
-// Candidate property form illustrating the accepted direction:
+// Informative property example.
 struct Point
 {
     int32 _x;
@@ -1741,7 +1747,7 @@ through an independently writable referent does not by itself mutate `this`.
 `init` provides mutability within its initialization scope without a redundant
 `mut init` modifier.
 
-**Proposed construction rule:** a constructor initializes all private state
+**Construction rule:** a constructor initializes all private state
 it does not leave to declared `init` properties. Its published completion
 contract guarantees a minimum set of `init` properties through checked,
 published clauses such as `S(int32 value) ensure P is init { P = value; }`.
@@ -1773,7 +1779,7 @@ completion obligations.
 
 ### 5.11 Nested types and scoped operators
 
-**Proposed boundary:** defer nested nominal types; begin with namespace-level
+**Deferred boundary:** defer nested nominal types; begin with namespace-level
 types and their members. Private nesting is genuinely useful for hiding
 implementation details, tying a helper's type parameters to its container,
 and grouping tightly related types. On the other hand, nested public types
@@ -1785,7 +1791,7 @@ consumers, though not from the rest of its module. Core-library naming such as `
 is a reason to revisit the boundary before fixing public library identities.
 Nesting, if added, does not imply an implicit outer instance or capture.
 
-**Recommendation (PROPOSED):** do not allow operator declarations in
+**Operator placement:** do not allow operator declarations in
 `TopDeclaration`. A user operator is selected from the containing type's
 declared operation or an applicable checked interface witness. Imports and
 extension lookup must not silently add an operator or a witness to a foreign
@@ -1795,7 +1801,7 @@ its operator is a member of that adapter or its interface contract. Define
 any later extension-operator syntax, operand eligibility and selection
 separately rather than interpreting a global `operator` as an extension.
 These choices preserve the [accepted adapter and witness
-semantics](../language.md#interfaces-access-and-generic-properties).
+semantics](language.md#interfaces-access-and-generic-properties).
 
 ### 5.12 Modifiers, cleanup and finalization
 
@@ -1926,7 +1932,7 @@ status, not the compiler-known provenance of an in-compilation generator.
 Detailed merge compatibility, including partial accessor implementations and
 attribute multiplicity, remains open; ordinary mixed backing is defined in §5.10.
 
-**Policy selection (PROPOSED):** policy domains may be Core-defined or
+**Policy selection:** policy domains may be Core-defined or
 user-defined enums. A policy case is a compile-time preference for a variant
 of the method being called, not a hook or interception mechanism. Methods may
 declare variants of their own unannotated base declaration. Resolve that
@@ -1976,20 +1982,20 @@ not by itself impose additional semantic obligations. `require policy<...>`
 guarantees selection of a matching variant, not properties beyond that
 variant's declared contract.
 
-Type-call conversions already use `T(expression)`. The proposed user
+Type-call conversions use `T(expression)`. The user
 conversion declaration `operator T(U source)` fixes its destination type
 at declaration; it does not grant raw reinterpretation or implicit
 conversion. Conversion ownership, ambiguity, effects and safety constraints
 remain open. `operator` already has a token; `cast` and `explicit` need not
 be reserved solely to declare or invoke a checked conversion.
-`in` marks the proposed iteration form; `and`, `or` and `not` combine
+`in` marks the iteration form; `and`, `or` and `not` combine
 patterns, distinct from Boolean `&&`, `||` and `!`. The full pattern and
 iteration binding rules remain open. Reflection and
 layout queries, allocation forms, and pinning need separate semantic and
 representation decisions before choosing between intrinsic names and
-keywords; `new` already covers the proposed ordinary allocation form.
+keywords; `new` already covers the ordinary construction form.
 
-There is no proposed `~Type()` finalizer production. Deterministic
+There is no `~Type()` finalizer production. Deterministic
 `[Cleanup]` for an owning value and scope/unwind cleanup are not GC
 finalization: a GC finalizer would need a separate lifecycle, resurrection,
 threading, failure/effects and resource-safety policy. **OPEN:** whether to
@@ -2021,7 +2027,7 @@ general `const` declarations/expressions,
 general ownership/reference results, constructor inference, async completion
 and scheduling protocols, producers, capture/exception transport, and registered collection-fragment
 construction. Source type packs and tuple arity extensions remain deferred.
-Giving a form candidate syntax does not complete its checked lifetime,
+Specifying a source form does not complete its open lifetime,
 effect, representation or separate-compilation contracts. Hexadecimal float
 spelling and target rounding are above; exact lexical recovery/boundaries
 remain to specify.
@@ -2029,7 +2035,7 @@ remain to specify.
 ### 5.14 Documentation-comment grammar and tooling
 
 The accepted attachment, markup and contract boundary is in
-[language](../language.md#documentation-comments). The following details are
+[language](language.md#documentation-comments). The following details are
 **open specification work**, not a defined XML schema:
 
 | Surface | What remains to specify |
@@ -2051,19 +2057,19 @@ remote includes or reveal private declarations merely to resolve a link.
 
 ### 5.15 Specification-to-tooling gate
 
-Before promoting this proposal to an approved grammar, reconcile every
-production with the lexical contract (including contextual keywords and
-longest-match rules), restrict modifiers and declaration bodies by context,
-define the accepted semantic forms that lack productions, and specify static
-semantics for invalid combinations. Positive and negative source examples
-should cover the specified boundaries. A candidate spelling in an example
-does not establish a normative production.
+Tooling must implement the approved lexical, grammatical and static-semantic
+rules together, including modifier legality and declaration-body restrictions.
+Remaining specification work includes exact contextual-token classification,
+open lexical boundaries and semantic forms that still lack productions.
+Positive and negative source examples should cover each specified boundary;
+recovery syntax and informative API examples do not establish new productions.
+Implementation support is recorded separately, not inferred from approval.
 
 ## 6. Source-form coverage and open boundaries
 
 This index separates concepts for readers; it does not add productions or
 approve unresolved forms. The sections named in the middle column give the
-candidate source forms or accepted semantic direction. An open boundary
+source forms or accepted semantic direction. An open boundary
 remains unspecified rather than becoming legal merely because a related word
 appears in §2.
 
@@ -2103,6 +2109,6 @@ appears in §2.
 | Finalization | §5.12 does not equate GC finalization with cleanup. | Whether finalizers exist and their lifecycle/ABI contract. |
 | Documentation comments | §§1 and 5.14 describe attachment and structured prose direction. | Exact markup/reference grammar and XML artifact schema. |
 
-Only an adopted specification and its lexical, grammatical and static-semantic
-rules establish conformance. The [implementation reference](../implementation.md)
-records supported subsets separately from this proposal.
+The specified lexical, grammatical and static-semantic rules establish
+conformance within their stated scope. The [implementation reference](implementation.md)
+records supported subsets separately from this specification.

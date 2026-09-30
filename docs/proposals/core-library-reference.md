@@ -9,7 +9,7 @@ Accepted semantic direction is identified separately from proposed signatures;
 exact syntax and several API contracts remain open. Examples do not establish
 conformance or implementation. This is not an ABI layout specification.
 
-The [grammar proposal](grammar-spec.md) and
+The approved [source grammar](../grammar-spec.md) and
 [approved current semantic IL/metadata design](../il-metadata.md) are separate
 documents; neither adopts the signatures here. Related accepted direction is
 described in [language](../language.md), [libraries](../libraries.md),
@@ -90,7 +90,8 @@ Expected domain alternatives should be represented by a status/union/result cont
 
 These are opt-in behavior contracts, not automatic primitive or root
 conformance. Bodyless interface members require a checked witness; a body
-would supply an overridable default. The sketches use the proposed grammar.
+would supply an overridable default. The sketches use the source grammar
+without adopting these candidate API declarations.
 Equality intended for a map key must be paired with a hash that agrees on
 equivalent values.
 

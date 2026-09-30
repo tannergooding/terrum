@@ -1,6 +1,6 @@
 # Terrum specification proposals
 
-The [metadata design](../il-metadata.md) and bounded
+The [source grammar](../grammar-spec.md), [metadata design](../il-metadata.md) and bounded
 [coded instruction set](../il-instruction-set.md) are approved current
 designs outside this proposal directory. The documents below remain proposals,
 not approved specifications or claims of implementation. Approval does not
@@ -8,8 +8,6 @@ make the metadata or instruction encoding released or freeze pre-v1
 revisions. An **accepted direction** records a settled semantic boundary
 without approving adjacent grammar or API forms.
 
-- [Grammar proposal](grammar-spec.md) defines notation, accepted
-  semantic direction, candidate productions and unresolved grammar.
 - [Core-library proposal](core-library-reference.md) records candidate
   declarations, dependency layers and unresolved API contracts.
 - [Static-proof and constant-evaluation proposal](static-proof-and-constant-evaluation.md)
@@ -19,9 +17,12 @@ without approving adjacent grammar or API forms.
   built-in type word and compact-profile follow-up, separate from the
   approved `(1, 0)` designs.
 
-These proposals are the homes for unresolved source syntax, API signatures
+These proposals are the homes for candidate API signatures
 and format extensions, not a second checklist of accepted policy or
-implementation tasks. Accepted call, output, cleanup and proof contracts are
+implementation tasks. Remaining source choices are identified in the approved
+[source grammar](../grammar-spec.md); approval of its settled forms does not
+resolve those choices or adopt the library and IL-extension proposals.
+Accepted call, output, cleanup and proof contracts are
 in [language contracts](../language-contracts.md); detailed lifetime,
 conversion, layout, type-family, memory and library direction remains in
 its corresponding canonical document. Implementation and remaining

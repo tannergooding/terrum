@@ -17,8 +17,10 @@ add complete-publication construction and descriptor-based tracing. General
 stored loans and managed layouts, general exception objects and the standard library are not
 implemented.
 
-Design documents and `samples\design` describe the target contract separately
-from this executable subset: places default to readonly, `mut` applies to
+The approved [source grammar](docs/grammar-spec.md) and related design
+documents describe the target contract separately
+from this executable subset; `samples\design` remains informative.
+Places default to readonly, `mut` applies to
 places/receivers, and `write` qualifies reference or view access. The target
 initialization-loan form is `init ref<T>`; current executable examples still
 use the legacy `bool`/`out` contract until compiler declarations and call sites
@@ -181,7 +183,7 @@ Read the [language design](docs/language.md), [language contracts](docs/language
 [sample catalog](docs/samples.md),
 [syntax API and support matrix](docs/implementation.md), and [roadmap](docs/roadmap.md).
 The repository is the canonical design/development location.
-The [pending language and library proposals](docs/proposals/README.md)
+The [pending library, proof and IL-extension proposals](docs/proposals/README.md)
 identify unresolved choices; accepted rules live in the design documents above.
 Pending alternatives are not additions to the current implementation scope.
 

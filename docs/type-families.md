@@ -1,7 +1,8 @@
 # Type-family design
 
 These are accepted semantic directions expressed as design contracts, not
-accepted syntax or implemented APIs. The spelling of family declarations,
+implemented APIs. The [source grammar](grammar-spec.md) specifies approved
+alias, interface and associated-member forms. The spelling of family declarations,
 conditional members, extensions and witnesses remains open; participation
 itself requires an explicit family opt-in with declared projections and
 constraints. The local pseudo-code below labels relationships rather than
@@ -85,13 +86,32 @@ that member to a concrete type; `T.Wider` is resolved through the selected
 for example `where T : IInteger<T, Wider = U>`. This does not infer the
 original `T` backward from an associated result. If multiple valid witnesses
 or relations could supply a projection, the use must explicitly disambiguate
-them. These semantic directions are accepted; exact grammar and metadata
-remain to be specified. Associated bindings do not replace independent
+them. The associated-equality example above remains illustrative; complete
+equality, inherited-witness and metadata rules remain to be specified.
+Associated bindings do not replace independent
 `[Copy]`, access, ownership, or family constraints.
 For a lending iterator, `Item<'a>` is one candidate associated relation; it
 must retain the complete item's qualification and its declared backing and
 loan dependencies. The exact iterator/item selection and ABI are later library
 design, not an inference from the current method body.
+
+An interface may declare its implementing-type formal first as `<this T>`;
+interfaces without a self dependency omit it. `type Item;` requires a
+binding, while `type Item = uint8;` supplies a replaceable checked default.
+Qualified implementations such as `type ISource.Item = uint8;` retain the
+declaring interface's identity. `T.via<ISource>.Item` and
+`value.via<ISource>.Member()` select an existing witness explicitly without
+creating conformance, boxing or upgrading access. Conflicting claims for
+the same type/interface pair reject. `default<I>.Member()` selects the
+interface's default body only for the current implementing `this`; calls
+inside that body still dispatch through the witness.
+
+Namespace-level `alias` declarations are transparent type synonyms.
+A public alias exports its name and mapping as a source contract; executable
+signatures use the resolved target identity. It does not create a nominal
+type, new witness or changed access/layout contract. Cycles, substitution and
+metadata encoding remain open. See the
+[alias and witness source rules](grammar-spec.md#54-aliases-and-associated-types-declarations-and-open-binding).
 
 ## Text views
 

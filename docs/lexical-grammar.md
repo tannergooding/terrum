@@ -1,5 +1,10 @@
 # Lexical grammar
 
+This document and the [source grammar](grammar-spec.md#2-lexical-notation)
+specify approved source rules. Open recovery and contextual-token details
+are identified explicitly; [implementation](implementation.md) records which
+forms the compiler supports.
+
 ## Definitions and notation
 
 A **UTF-16 code unit** is one 16-bit element of the source snapshot. A
@@ -45,8 +50,8 @@ grant them discard semantics.
 ## Numeric tokens
 
 Numeric tokens begin with a decimal digit and are unsuffixed. The lexer
-recognizes decimal, hexadecimal and binary integer forms plus `_`
-separators in their digit runs; a type is selected later by context or an
+recognizes decimal and hexadecimal floating forms, decimal, hexadecimal and
+binary integer forms, and `_` separators in their digit runs; a type is selected later by context or an
 explicit type-call target. Decimal fractional/exponent forms have lexical
 syntax here, but their value semantics are specified separately. An
 underscore-starting spelling such as `_123` is an identifier, not a number.
@@ -54,11 +59,13 @@ Width tags are not part of the target grammar, so spellings such as `10i32`
 are not typed numeric literals.
 
 ```text
-number          := decimalNumber | hexInteger | binaryInteger
+number          := decimalNumber | hexFloat | hexInteger | binaryInteger
 decimalNumber   := decimalDigits ('.' decimalDigits)? (('e' | 'E') ('+' | '-')? decimalDigits)?
+hexFloat        := ('0x' | '0X') ('_'* hexDigits ('.' hexDigits?)? | '.' hexDigits) ('p' | 'P') ('+' | '-')? decimalDigits
 hexInteger      := ('0x' | '0X') basedHexDigits
 binaryInteger   := ('0b' | '0B') basedBinaryDigits
 decimalDigits   := digit ('_'* digit)*
+hexDigits       := hexDigit ('_'* hexDigit)*
 basedHexDigits  := '_'* hexDigit ('_'* hexDigit)*
 basedBinaryDigits := '_'* binaryDigit ('_'* binaryDigit)*
 digit           := '0'..'9'
@@ -99,6 +106,24 @@ using its signed representation, while an unsigned target retains the
 unsigned value. Nonzero bits beyond the target width are rejected; leading
 zeroes and separators do not count as significant bits.
 
+A hexadecimal float requires a `p`/`P` exponent with decimal digits and
+hexadecimal digits on at least one side of the optional point. `0x1f` is an
+integer; `0x1.fp+2` is floating. Its exact binary-rational value rounds
+directly to the contextual target under the specified floating conversion
+policy, without an intermediate host type. Exact malformed-exponent,
+separator and identifier-tail recovery remains open.
+
+## Punctuation boundaries
+
+A contiguous run of operator glyphs must be one defined operator, not
+implicitly concatenated operators: `x+++y` rejects, whereas `x++ +y` and
+`x+ ++y` separate their operators. Trivia can separate operators; grouping
+delimiters, commas and semicolons are not part of such a run. Nested generic
+closing delimiters are recognized in type-argument context. Exact glyph
+membership and contextual exceptions, including optional/type punctuation
+and comment openers, remain to specify. Neither recovery nor a formatter may
+guess a different expression from an invalid run.
+
 ## Strings and character notation
 
 Strings are delimited by ASCII double quotes. Escapes supported are `\n`,
@@ -106,19 +131,43 @@ Strings are delimited by ASCII double quotes. Escapes supported are `\n`,
 `\U` plus exactly eight hexadecimal digits representing a Unicode scalar
 (not a surrogate or an out-of-range value). The original raw text, including
 invalid escapes, is preserved. A line break or EOF before a closing quote
-diagnoses an unterminated string without swallowing the next line. No
-interpolation is defined; `$` outside a string is a bad token. Encoded text
+diagnoses an unterminated string without swallowing the next line. Encoded text
 targets such as `utf8z("Terrum")` are ordinary type/call forms, not lexer
 prefixes or suffixed string tokens; the selected target parser validates
 encoding and terminator requirements without itself granting pointer lifetime.
 
-Single quotes do not delimit a token in this grammar. Their proposed
+Single quotes delimit one decoded Unicode scalar, with the ordinary escapes
+and `\'`; empty, multiple-scalar and surrogate values reject. The expected
+type must represent that scalar, with no fallback character type. The
 scalar/target-representability contract is in
 [conversions](conversions.md#character-intent); it does not choose UTF-16 as
 runtime text's default encoding. Checked numeric type-call conversions use
 `T(expression)`, not a numeric prefix-cast production. Source functions and
 local shadowing follow call precedence independent of literal tokenization.
 Literal conversion remains distinct from raw tokenization.
+
+`$"..."` interpolates expression-aware `{...}` holes; doubled braces in
+literal segments denote literal braces. Decoded escapes never become hole
+delimiters. Ordinary quoted text does not interpolate.
+Raw text uses whole matching quote fences of at least three quotes.
+Multiline and empty raw values use delimiter-line framing and exact
+closing-indent prefix removal, not visual-column indentation. Unmarked raw
+text preserves source line endings. An opening-line escaped newline
+directive normalizes literal segments only to LF, CR, VT, FF, NEL, LS, PS or
+CRLF; it does not reclassify source VT/FF as line breaks.
+
+For raw interpolation, `N` leading dollar signs select `N`-brace delimiters.
+In literal text, shorter runs are literal; opening runs of length `N` through
+`2N - 1` put their literal excess before the hole, and closing runs put it
+after the hole. Boundary runs of `2N` or more reject. Nested expression
+delimiters are parsed as expressions, not split by the outer text scanner.
+The [source grammar](grammar-spec.md#2-lexical-notation) defines complete
+framing, whitespace-prefix, directive and brace-boundary rules.
+Interpolation formats are an identifier's static spelling, ordinary/raw
+quoted text, or a parenthesized runtime expression. Alignment is an ordinary
+expression; each hole's value, width and format are captured once in source
+order before draining. Target handlers and representation remain separate
+checked contracts. Exact recovery for these text forms remains open.
 
 ## Trivia and diagnostics
 

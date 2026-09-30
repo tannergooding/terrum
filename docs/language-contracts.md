@@ -3,7 +3,7 @@
 This document records accepted execution and checking contracts that refine
 [language](language.md) and [lifetimes](lifetimes.md). It does not approve
 candidate syntax, a proof budget or a new semantic-IL representation.
-Unresolved source forms are in the [grammar proposal](proposals/grammar-spec.md)
+Approved source forms and remaining open choices are in the [source grammar](grammar-spec.md)
 and the remaining proof rules and budgets in the
 [proof proposal](proposals/static-proof-and-constant-evaluation.md).
 [Implementation](implementation.md) remains the executable support boundary;
@@ -125,7 +125,7 @@ silently substitute a copy, delay the reference, or invent a special two-phase
 loan to make the implicit spelling succeed.
 
 Whether ordinary references eventually need reservation/activation remains
-an [open grammar and loan question](proposals/grammar-spec.md).
+an [open grammar and loan question](grammar-spec.md#55-accepted-temporary-scope-for-implicit-reft).
 Implicit convenience syntax cannot silently change the ordinary loan
 contract.
 
@@ -192,8 +192,30 @@ required. Source-body and path analysis must establish that every value read
 by the predicate is legal, and must never read vacant storage to discover that
 the predicate is false. A successful value predicate implies initialization.
 Do not add a special `ensure-if` statement grammar or equivalent routine output
-attributes. Exact clause placement, grammar, and metadata representation
-remain specification work.
+attributes. Named callables group `require` clauses before `ensure` clauses
+after parameters and generic constraints; accessors place them after their
+keyword. A direct expression-bodied property/indexer places getter clauses
+before `=>`. Target-checked lambdas use the same grouping after parameters.
+A top-level unparenthesized `=>` delimits the body; contract lambdas must be
+grouped or nested in another expression delimiter. The
+[source grammar](grammar-spec.md#31-source-file-structure-and-declarations)
+defines these forms; correlated-output metadata remains specification work.
+
+Within a declaration postcondition, contextual `return` observes that
+declaration's result through its live destination, not a consumed source or
+an entry snapshot. It is unavailable in preconditions and ordinary body
+expressions. A nested lambda does not rebind it, and captures obey ordinary
+lifetime and ownership rules. For an ordinary async callable it denotes the
+completed payload, not its task handle. Constructors use receiver
+initialization facts instead; producer phase mapping remains open.
+
+Constructors publish a minimum set of guaranteed initialized properties
+with clauses such as `ensure P is init`. Callers initialize the remainder
+before publication. Init-property assignment may repeat during unpublished
+construction, in source order with ordinary replacement/cleanup checks; it
+is not permission to initialize an already live object. Removing a guarantee
+breaks callers that relied on it; strengthening one can retain older callers'
+explicit assignments. See the [construction rules](grammar-spec.md#510-properties-and-accessor-local-effects).
 
 The language-versioned default for a boolean-success output contract is
 initialized on `true` and uninitialized on `false`. For other result types,
