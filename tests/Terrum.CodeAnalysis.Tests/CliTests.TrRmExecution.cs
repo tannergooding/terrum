@@ -256,8 +256,8 @@ public sealed partial class CliTests
     }
 
     [Theory]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { int32 inner = x; x = inner + 1; } return x; }")]
-    [InlineData("int32 Main() { mut int32 x = 0; if (x == 0) { int32 inner = x; x = inner + 1; } return x; }")]
+    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { int32 inner = x; init int32 vacant; x = inner + 1; } return x; }")]
+    [InlineData("int32 Main() { mut int32 x = 0; if (x == 0) { int32 inner = x; init int32 vacant; x = inner + 1; } return x; }")]
     public async Task TrRmSourceRejectionDoesNotOverwritePreviousArtifactAsync(string source)
     {
         var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-reject-{Guid.NewGuid():N}.trrm");
