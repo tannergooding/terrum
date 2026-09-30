@@ -17,6 +17,13 @@ add complete-publication construction and descriptor-based tracing. General
 stored loans and managed layouts, general exception objects and the standard library are not
 implemented.
 
+An additive [TRRM scalar interchange path](docs/implementation.md#executable-trrm-scalar-interchange)
+now compiles verified source to approved metadata and compact-linear Body
+bytes, audits them on source-free load, and uses the shared backend for JIT,
+EXE and DLL output. This is a self-contained fail-fast scalar subset, not
+general interchange, imported-call linking or checked-exception Body support.
+Existing source and development semantic/native module commands are unchanged.
+
 The approved [source grammar](docs/grammar-spec.md) and related design
 documents describe the target contract separately
 from this executable subset; `samples\design` remains informative.

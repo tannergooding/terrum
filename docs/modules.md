@@ -13,9 +13,14 @@ versions persisted IR contracts; it is distinct from a native-profile label.
 The artifact contains verified, typed, source-mapped structured IR, not source
 text or a native DLL. It is distinct from the approved current
 [`TRRM` metadata design](il-metadata.md), whose candidate `(1, 0)`
-framing and rows are not yet the semantic-module writer's output.
-The highest implemented semantic revision is 36, selected
-by the artifact's required features; not every artifact uses revision 36.
+framing and rows are not this development semantic-module writer's output.
+The separate [`compile-trrm` execution path](implementation.md#executable-trrm-scalar-interchange)
+now emits approved metadata and compact-linear Bodies to `.trrm` files for a
+self-contained, fail-fast scalar subset. It does not replace the `.trm`
+producer/consumer commands or add TRRM import linking. This page describes
+the existing development semantic/native module paths.
+The highest implemented semantic revision is 45, selected
+by the artifact's required features; not every artifact uses revision 45.
 Revision-specific reader behavior and feature-dependent writer selection
 describe repository support, not an externally released binary compatibility
 matrix. See [implementation](implementation.md) for the compiler support

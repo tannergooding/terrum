@@ -17,6 +17,13 @@ The profile is deliberately narrower than the syntax grammar and proposed
 libraries. It does not imply general ownership/lifetime checking, general
 semantic IL, general managed graphs, or standard-library execution.
 
+The additive [approved-TRRM scalar path](implementation.md#executable-trrm-scalar-interchange)
+loads audited compact-linear Bodies into this same backend for JIT, EXE and
+DLL output. It supports fail-fast only; the approved Body subset does not
+encode checked-exception dispatch, even though the native backend supports
+that policy for the existing source and development-module paths. Loading
+does not rebind producer source, bypass verification or introduce a new ABI.
+
 ## Implemented profiles and versioned contracts
 
 The version identifiers below state current support and persisted compatibility

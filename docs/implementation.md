@@ -1455,6 +1455,83 @@ target, references, contract-rule version and authorization context. Changes in
 serviced library bodies must not silently change a declaration-derived public
 lifetime contract or a source program's validity.
 
+## Executable TRRM scalar interchange
+
+`TrRmExecutableCompiler.Emit(BoundProgram, moduleIdentity)` produces actual
+approved `(1, 0)` metadata and compact-linear Body bytes, separately from the
+development `.trm` semantic-module encoding. The additive CLI path is:
+
+```text
+terrumc compile-trrm <source|-> --identity <name> -o <artifact.trrm> --runtime fail-fast [--library] [--source <path>] [--json]
+terrumc build-trrm <artifact.trrm> -o <output.exe> --runtime fail-fast [--json]
+terrumc build-trrm-library <artifact.trrm> --export <name> [--export <name>] -o <output.dll> --runtime fail-fast [--json]
+terrumc run-trrm <artifact.trrm> --runtime fail-fast [--json]
+```
+
+Compilation uses the ordinary source binder and verifier, then the bounded
+TRRM emitter. Loading uses only artifact bytes, never producer source or a
+private semantic payload. `Load` checks framing and metadata, scans every
+Body, audits the supported operations and declared effects, and reconstructs
+typed immutable value definitions for the shared mandatory verifier and x64
+backend. There is no producer-trust bypass or success fallback. JIT execution
+returns the raw `Main` status; `--json` affects its diagnostics, not program
+results. Failed compilation/loading leaves an existing output unchanged.
+Input/output failures use status 2; invalid source or unsupported/malformed
+executable contracts use status 1.
+
+The current envelope is one self-contained Windows x64 Module
+(`targetRequirement=1`, `runtimePolicy=0`), with module-level scalar functions
+and by-value parameters. Supported types are `bool`, `char16`, `int32`,
+`uint32`, `int64`, `uint64`, and a `void` result. An executable entry must be a
+local parameterless `int32` function; `--library` produces a no-entry module.
+Every public function has one Export key equal to its full callable name;
+private/internal visibility is not promoted, and arbitrary key aliases are
+not supported by this loader. DLL exports use the existing scalar native ABI.
+Independent native consumers do not imply TRRM Import/ModuleRef linking.
+
+Initialized scalar locals, ordinary local reassignment, scalar discards,
+and a terminal return lower to immutable value IDs. Reassignment changes the
+current source-slot mapping, not a serialized place; prior reads retain their
+snapshots. Every operation is materialized once, in source order, even when
+its result is discarded or reused. The loader accepts `ConstBits`,
+`ConstSigned`, `Copy`, Boolean NOT, integer bitwise NOT/unary plus,
+scalar equality/inequality, integer ordering/bitwise operations, checked
+integer arithmetic/negation, checked numeric conversion and `Return`.
+Integer division/remainder retain their distinct signed-minimum behavior.
+`char16` has conversion/equality semantics, not integer arithmetic or ordering.
+Retained shifts, wrapping/saturating conversion, optional values, eager
+`Select`, combined division/remainder and `Fail` are outside this initial
+executable implementation even where the approved ISA assigns them.
+
+Body and instruction widths are emitted minimally; loading performs a strict
+minimal-width audit. Source binding may fold an expression to a constant
+before this boundary, including shifts; that does not enable its retained
+operation in TRRM. Required constant evaluation and body static proofs are
+discharged by the binder. Compilation-local `[ConstEval]` eligibility is not a published
+TRRM contract. A retained `NoThrow` promise is encoded as an Effects clause
+and audited against every operation: the TRRM subset supplies no proof rule
+that would excuse a retained checked operation. Other effect promises and
+contract clauses reject, as do unsupported sections, parameter modes,
+generic/nominal declarations and qualified types.
+
+Calls, including local `NoThrow` calls, remain **inspection-only** assigned
+shapes in the approved ISA; this execution path rejects them. Branches,
+loops, places, roots, ownership, cleanup, exceptional transfer and imported
+declarations are not implemented here. Checked-exception source or execution
+requests reject rather than relabeling a fail-fast artifact; the existing
+source and development semantic/native commands still support both policies.
+No new protected Body encoding, native ABI or public profile was invented.
+The existing verifier bounds apply, including 1,024 functions, 64 parameters
+per function and 256 materialized scalar values per function; parameter and
+operation-result IDs share that last bound. These are implementation limits,
+not new normative format limits.
+
+Independent handwritten metadata/Body fixtures, malformed IDs/types/effects,
+reserved Contract flags, source-free process loading, actual scalar DLL
+exports and native byte parity exercise this boundary. The structural
+`validate-trrm-*` commands keep their narrower inspection contracts; their
+success alone never authorizes execution.
+
 ## Binding and backend path
 
 Keep diagnostics and source mapping through syntax -> bound operations ->
@@ -1535,9 +1612,10 @@ An offset-indexed Contract-row writer checks assigned clause shapes and
 cross-table ownership, including cleanup's declared `NoThrow` target; it does
 not prove effects or encode general executable contracts.
 The self-host String-row
-candidate emits individual rows. These exercise approved metadata contracts in isolation,
-including a framed callable-table fixture, but do not parse executable Body
-instructions or replace the current module writer. A provisional structural
+candidate emits individual rows. These table-level APIs exercise approved
+metadata contracts, including a framed callable-table fixture; the executable
+path above composes them with Body emission rather than replacing the legacy
+semantic-module writer. A provisional structural
 entry point composes the known table checks over one framed artifact without
 claiming semantic import binding, target-layout validity or executable clauses.
 `terrumc validate-trrm-structure <artifact> [--json]` exposes those same
