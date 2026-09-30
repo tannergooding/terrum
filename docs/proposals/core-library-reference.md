@@ -550,6 +550,91 @@ implicit no-throw cleanup metadata remain open; the `Dispose` name alone
 supplies none of them. A vector retains its explicitly supplied allocator
 dependency for future growth rather than consulting an ambient provider.
 
+### Proposed borrowed arena and typed rental storage
+
+These **PROPOSED** `Terrum.Collections` declarations expand the storage
+inventory without introducing a global allocator. `ByteArena` is a
+fixed-capacity borrowed byte arena, not the owned/growable arena family.
+The initial pool element profile is `[Sized], [Copy]`; the rental itself
+remains a unique release owner.
+
+```terrum
+public mut unique struct ByteArena
+{
+    [Captures("storage")]
+    public ByteArena(write Span<uint8> storage);
+    public nuint Capacity { get; }
+    public nuint Used { get; }
+    public mut write Span<uint8> Allocate(nuint byteLength, nuint alignment);
+    public mut bool TryAllocate(nuint byteLength, nuint alignment,
+        init ref<write Span<uint8>> storage);
+    public mut void Reset();
+    public mut void Dispose();
+}
+public mut unique struct MemoryPool<T>
+    where T : [Sized], [Copy]
+{
+    public static MemoryPool<T> Create(AllocatorContext allocator);
+    public mut MemoryOwner<T> Rent(nuint minimumCapacity);
+    public mut bool TryRent(nuint minimumCapacity, init ref<MemoryOwner<T>> owner);
+    public mut void Dispose();
+}
+public mut unique struct MemoryOwner<T>
+    where T : [Sized], [Copy]
+{
+    public nuint Capacity { get; }
+    public nuint Count { get; }
+    public mut void Initialize(nuint index, T value);
+    public Span<T> AsSpan();
+    [ViewOf(Access.Write)] public mut write Span<T> GetWriteAccess();
+    public mut void Clear();
+    public mut void Dispose();
+}
+```
+
+| Candidate owner | Storage, publication and release contract |
+|---|---|
+| `ByteArena` | Captures exclusive access to caller-provided initialized bytes. Allocation publishes a disjoint slice from the remaining backing; `Used` includes alignment padding. Capacity never grows and existing slices never relocate. |
+| `MemoryPool<T>` | Owns the explicitly supplied allocator context and reusable allocations. A successful rent publishes one allocation-specific return obligation; the pool itself is not an ambient provider or a freely copied handle. |
+| `MemoryOwner<T>` | Owns one current rental with `Capacity >= minimumCapacity` and initially `Count == 0`. Returned spans expose only its initialized prefix and retain the rental's backing/release dependency. |
+
+Arena allocation checks a supported nonzero power-of-two alignment and
+the actual returned address, not merely the offset within the byte span.
+Padding and the complete requested range must fit without overflow before
+`Used` changes. `TryAllocate` returns false only for insufficient capacity,
+leaving state unchanged and its output vacant; invalid size/alignment
+requests retain checked validation. `Allocate` reports insufficient capacity
+through the checked failure policy. Zero-length slices still retain backing
+and access dependencies; no arbitrary typed values are constructed from
+these bytes.
+
+`Reset` reuses the backing only after every allocated-slice loan has ended.
+It resets allocation state, not byte contents. `Dispose` likewise requires
+the loans to end and releases the captured storage access, not the caller's
+allocation. Additional allocations may coexist with earlier disjoint slices
+only under a checked backing/region contract; a mutable receiver alone does
+not establish that authority. Exact slice/arena dependency metadata,
+alignment profiles and zero-length placement remain **OPEN**.
+
+`TryRent` distinguishes resource refusal from invalid requests: false
+publishes no rental; true publishes its complete return responsibility.
+Size products, alignment and required tracing/barrier support are validated
+for `T`, as for `Buffer<T>`. Reused storage does not expose the previous
+renter's live elements or manufacture initialized `T` with `default(T)`.
+`Initialize` extends the prefix at exactly `Count`, while `GetWriteAccess`
+lends only existing elements. `Clear` cleans the prefix but keeps the rental.
+
+Rental disposal requires its element/view loans to have ended, cleans
+initialized elements and returns its allocation once; no public `Return(owner)`
+path duplicates that responsibility. Pool disposal requires all rentals to
+have been returned before releasing its retained allocations and provider.
+Merely clearing a rental, including an empty rental, does not return it.
+Outstanding rental dependencies must block pool disposal through every
+alias, not by silently invalidating an owner. This proposes no concurrent
+pool safety, automatic zeroing guarantee, unrestricted raw capacity view or
+affine-element storage. Exact retained-provider/return metadata, release
+failure transport and implicit cleanup registration remain **OPEN**.
+
 ### `MemoryPrimitives`
 
 One flat static type on existing storage is accepted. Family prefixes are semantic; there are no separate `Atomic`, `Interlocked`, `Streaming` or `Cache` roots. `location` below means checked access path, not unqualified raw pointer. `T` must be an eligible representation/width for the operation and target.
@@ -670,12 +755,12 @@ need collector roots/barriers independently of memory order.
 | `AllocatorContext` / `Terrum.Collections` | `Allocate(bytes, alignment) -> AllocationLease`, `Dispose()`; `TryAllocate(..., init ref<AllocationLease>) -> bool` | Provider must outlive outstanding allocations or explicitly transfer release capability |
 | `Buffer<T>` / `Terrum.Collections` | `Capacity`, `Count`, `Adopt`, `Initialize`, `AsSpan`, `GetWriteAccess`, `Clear`, `Dispose` | Initialized prefix versus vacant capacity; unique owner and trace/barrier policy |
 | `Vector<T>` / `Terrum.Collections` | `Create`, `Count`, `Capacity`, `Add`, `Reserve`, `AsSpan`, `GetWriteAccess`, `Clear`, `Dispose` | Growth retains allocator context, replaces lease transactionally; views prevent relocation |
-| `Arena` / `Terrum.Collections`, **OPEN** | `Allocate(bytes, alignment) -> Span<uint8>`, `Reset()`, `Dispose()` | Borrowed slices block reset/disposal; arena does not independently own every returned slice |
-| `MemoryPool<T>` / `Terrum.Collections`, **OPEN** | `Rent(length) -> unique MemoryOwner<T>`; owner `AsSpan`, `Dispose` | Return/reuse only after all loans end; pooled bytes do not imply initialized `T` |
+| `ByteArena` / `Terrum.Collections` | Borrowed-backing constructor, `Capacity`, `Used`, `Allocate`, `TryAllocate`, `Reset`, `Dispose` | Fixed initialized byte backing; disjoint-slice, alignment and reset/disposal loan checks; owned/growable arena remains OPEN |
+| `MemoryPool<T>`, `MemoryOwner<T>` / `Terrum.Collections` | Explicit-provider `Create`, `Rent`/`TryRent`; rental `Capacity`, `Count`, `Initialize`, span access, `Clear`, `Dispose` | Unique rental/return responsibility; initialized prefix versus pooled capacity; pool disposal requires all rentals returned |
 | `MemoryPrimitives` / `Terrum` | `AtomicRead/Write`, RMW families, strong CAS/observation, `Fence`, `CompilerFence`, non-temporal read/write/copy/complete, cache writeback/invalidate | See the complete proposed member set and strict representation/order/range constraints above |
 
-The added arena/pool rows are coverage candidates, **not** exports in the
-current `foundation.api.terrum`. In particular, neither allocator nor GC
+The arena/pool declarations and rows are coverage candidates, **not** exports
+in the current `foundation.api.terrum`. Neither allocator nor GC
 provider is silently global. Native `T` storage is permitted only if its
 initialization, alignment, move/copy, cleanup and any tracing requirements
 can be met; a `Span<uint8>` is not an arbitrary typed allocation.
@@ -2078,6 +2163,7 @@ The following distinctions and signature questions remain open:
 - [Binary values and fixed codecs](#proposed-binary-values-and-fixed-codecs) propose explicit byte-order operations and a bounded fixed-length witness. Review wire profiles, permitted codec effects and conditional publication; fixed-size encoding does not settle incremental schema registration, reflection or general object serialization.
 - [Globalization and civil-time providers](#proposed-globalization-and-civil-time-providers) propose immutable versioned data, explicit culture-sensitive formatting and inspectable local-time mappings. Review locale identifiers/fallback, calendar/range/leap-second profiles, zone rule versions and ambiguity policy; these do not alter invariant Core text or clock contracts.
 - [Borrowed byte-stream storage](#proposed-borrowed-byte-stream-storage) proposes a fixed-capacity memory stream over an exclusive backing loan. [Progress-aware stream operations](#proposed-progress-aware-stream-operations) propose richer terminal results and exact-read/write-all helpers; review cancellation reporting, provider guarantees and capture metadata. Buffered owning wrappers and two-stream copy recovery remain open.
+- [Arena and rental storage](#proposed-borrowed-arena-and-typed-rental-storage) proposes fixed borrowed bytes and explicit-provider Copy-element pooling. Review disjoint slice authority, alignment/zero-length placement, rental/provider dependencies and release metadata; no pooled capacity is implicitly initialized.
 
 ## 11. Scoped proposed signatures: random and `uint32`
 
