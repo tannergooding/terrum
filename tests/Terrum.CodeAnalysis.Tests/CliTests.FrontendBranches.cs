@@ -141,9 +141,10 @@ public sealed partial class CliTests
         {
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
-                var (exit, _, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
                     "frontend-build", frontend, "-", "-o", path, "--runtime", policy, "--json");
-                Assert.Equal(0, exit);
+                Assert.True(exit == 0,
+                    $"frontend-build failed under {policy} with exit {exit}.{Environment.NewLine}{output}{error}");
                 Assert.Empty(error);
                 Assert.Equal(expectedExit, await ExecuteNativeImageAsync(path));
             }
