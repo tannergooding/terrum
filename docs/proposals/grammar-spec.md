@@ -384,6 +384,13 @@ exactly one applicable target, and placements share multiplicity and partial
 merge rules. An untargeted callable attribute applies to the callable, not
 its result; result attributes use `[return: Attr]`. No selector performs
 overload guessing.
+`[Iterator]` is a compiler-recognized semantic attribute selecting a producer
+implementation on a callable with a body and an eligible declared producer
+result contract. Recognition follows the resolved attribute identity, not
+arbitrary same-named library attributes. It introduces no `iterator` keyword
+and does not infer a result type, item type or stronger lifetime contract
+from the body. Producer statements and remaining protocol boundaries are
+described in §5.12.
 Core's privileged primitive declaration uses `StructDecl` and `FieldDecl`
 without a separate grammar production; its binding and representation
 restrictions are semantic checks, not lexical exceptions.
@@ -1530,9 +1537,16 @@ evaluates once under the selected element contract. Emission does not imply
 an ownership transfer or extend a borrowed element's lifetime beyond its
 checked dependencies. A nested callable does not inherit producer eligibility
 from its enclosing body. This `yield` is not the scheduling operation
-`Yield()` and does not promise a thread switch. Producer declaration
-marking, start/resumption timing, element-loan contracts, abandonment cleanup
-and representation remain separate design work.
+`Yield()` and does not promise a thread switch. Producer
+start/resumption timing, element-loan contracts, abandonment cleanup and
+representation remain separate design work. `[Iterator]` marks the
+implementation; it is not a traversal-direction or element-access flag.
+Reverse traversal and readonly/writable items belong to the selected
+sequence/item contracts. Whether variations are exposed as adapters or
+explicitly declared policies remains library design. Any selection must
+publish the relevant ordering, access, ownership and lifetime guarantees;
+it cannot upgrade readonly backing or make readonly item access imply
+deep immutability of referenced objects.
 `unsafe` has block and
 parenthesized-expression forms; default arithmetic remains checked.
 `defer` registers an
@@ -1746,7 +1760,7 @@ appears in §2.
 | Reference access | §§3.2 and 5.12 sketch loans and reference qualifications. | Complete legality of `pin`, `write` and other qualifier combinations. |
 | Parameters | §§3.2, 5.1–5.2 give modes, final `params`, eligible Copy defaults and direct/named attribute targets. | Complete qualifier legality and output/loan metadata. |
 | Arguments | §§3.2 and 5.1 give labels, source-order evaluation and position-preserving named/positional mixtures. | Complete passing-mode/place and overload contracts. |
-| Statements | §3.3 gives blocks, transfers, standalone discard and `yield expression;` / producer `return;`; §3.4 permits await expressions in async bodies. | Statement-place checks and producer declaration/lifetime contracts. |
+| Statements | §3.3 gives blocks, transfers, standalone discard and `yield expression;` / producer `return;`; §§3.1 and 5.12 give the `[Iterator]` marker; §3.4 permits await expressions in async bodies. | Statement-place checks and producer protocol/lifetime contracts. |
 | Iteration | §3.3 sketches by-value and `ref`/`mut ref` `for (... in ...)`; §5.12 names `do`. | Iterator loan/backing contracts and post-test loop production. |
 | Expressions | §3.4 gives conditional/coalescing/optional access, tuples, target-directed static/async lambdas, await and collection spreads. | Callable capture/representation, awaiter registration and collection-fragment contracts; comprehensions/repetition deferred for library/tensor design. |
 | Patterns | §3.3 gives shared switch arms, guarded matching, compatible `or` bindings and explicit constant/wildcard transfers. | Full nominal-case, relational and destructuring patterns. |
