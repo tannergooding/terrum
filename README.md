@@ -46,7 +46,7 @@ substitutions preserve readonly/write and supported optional qualification;
 they do not grant member, null-test or operator capabilities absent from the
 function's constraints. See the [bounded generic contract](docs/implementation.md#bounded-generic-functions)
 for inference, results, outputs, rooting and remaining limits.
-The current parser version is syntax-34. Standalone `init T name;` and
+The current parser version is syntax-35. Standalone `init T name;` and
 `init var name;` declare readonly vacant locals, published only by checked
 initialization; semantic v40 is selected when these declarations are retained.
 Syntax-31 adds target-checked conditional expressions: evaluate the condition
@@ -58,13 +58,26 @@ v42 persistence. The native scalar component separately supports `?:` through
 projections v24–27, including local and numeric-conversion combinations; it
 still uses the shared hosted verifier/emitter.
 Syntax-33 adds checked prefix/postfix integer updates on supported writable
-places, with single evaluation and no replacement on failure; retained updates
-select semantic v43. Native scalar projections v28–31 add bounded assignment
-and nested-while bodies; v32–39 add braced `if`/`else` bodies and combinations
-with loops/conversions/conditional expressions while retaining the shared
-backend and older payloads. Static operator requirements use bodyless `static`
-declarations, optionally with a first `<this T>` formal bound by conformance.
-This remains a compilation-local witness subset, not a public generic ABI.
+integer places, with single evaluation and no replacement on failure;
+retained primitive updates select semantic v43. Syntax-35 adds nominal static
+`++`/`--` calls for the existing eligible writable `Copy`-struct place
+envelope. These evaluate the place once and preserve the old value for postfix
+or replacement for prefix; a failing operator does not write back, and earlier
+effects are not rolled back. The result type must equal the operand type,
+unlike other unary operators. This does not add instance mutation, owning-value
+updates, arbitrary `char16` arithmetic or new witness ABI. Retained nominal
+update calls select semantic v44; private operator bodies and closed generic
+specializations can change behind unchanged semantic/native consumers.
+Nominal updates are outside the scalar-only ConstEval interpreter.
+Native scalar projections v28–31 add bounded assignment and nested-while
+bodies; v32–39 add braced `if`/`else` bodies and combinations with loops,
+conversions and conditional expressions. Projections v40–43 add nearest-while
+`break`/`continue` transfers to loop bodies without branches; v44–47 add
+branches as well, with conversions and conditional expressions selected by
+the same offsets in each group. The shared backend and projections v1–39 are
+retained. Static operator requirements use bodyless `static` declarations,
+optionally with a first `<this T>` formal bound by conformance. This remains a
+compilation-local witness subset, not a public generic ABI.
 Syntax-18 recognizes qualified generic
 type arguments such as `write Record` and `write Record?`; managed generic
 producer examples use the existing semantic v24 managed contracts; other

@@ -26,6 +26,8 @@ modifier. Its retired slot 77 remains reserved; `operator`, `where` and all
 other token identities retain their values. The interface self marker `this`
 uses its existing contextual identifier spelling. Scanner-5 records and the
 syntax-protocol schema are unchanged.
+Syntax-35 nominal static `++`/`--` calls reuse token identities 86 and 87;
+there are no new scanner identities, record fields or schema changes.
 Compiled-scanner input and hosted lexing produce the same checked lowering.
 
 The shared operator catalog includes syntax-28's `=>` token for expression

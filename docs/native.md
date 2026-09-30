@@ -79,7 +79,7 @@ ABI changes; imported functions cannot satisfy required constant calls.
 Syntax-26 adds scalar `const expression` requirements in nested executable
 expressions, with the same limits and deferred constant substitution; no new
 native or semantic wire representation is emitted. The current parser version
-is syntax-34. Conditional expressions evaluate one Boolean condition and only
+is syntax-35. Conditional expressions evaluate one Boolean condition and only
 the selected target-checked arm, with existing cleanup and rooting behavior.
 Retained conditional nodes select semantic v41, not a new native ABI.
 Managed-handle `??` and statement-form `??=` use a single value/place evaluation
@@ -92,9 +92,24 @@ Prefix/postfix integer updates save the old value and commit a checked
 replacement only on success. Supported mutable local, compact-field,
 writable class-field and host-buffer places retain receiver/index
 single evaluation, access checks and managed-root cleanup. Prefix returns
-the replacement; postfix returns the saved value. Retained nodes select
-semantic v43 without changing the native ABI. Nominal operators, `char16`,
-unique-value updates and nested owning-child paths are not implemented.
+the replacement; postfix returns the saved value. Primitive update nodes
+select semantic v43 without changing the native ABI.
+Syntax-35 additionally supports nominal static `++`/`--` calls for the
+eligible writable `Copy`-struct place envelope. These preserve the same
+single-evaluation and checked-writeback behavior: operator failure prevents
+writeback but does not roll back earlier effects. The exact result type must
+equal the operand type, unlike other unary operators. Existing static
+requirements, self/no-self protocols, constrained generic definition proofs
+and witness identity apply; there is no C# instance mutation, owning-value
+update, arbitrary `char16` arithmetic, equality/default protocol or witness
+ABI. Retained nominal calls select semantic v44 while primitive updates
+retain v43. Private operator bodies and closed generic specializations can
+be replaced behind unchanged semantic/native consumers. Cross-module
+source-operator discovery and public generic witnesses are not added.
+Nominal updates diagnose in required constant work: the ConstEval interpreter
+still admits only scalar values, not struct construction/operator calls.
+`char16` primitive updates, unique-value updates and nested owning-child paths
+remain unsupported.
 Standalone `init T name;` and `init var name;` declare vacant
 readonly local slots without a default value. Existing checked initialization
 controls publication, owner cleanup and managed-root activation. Semantic v40
@@ -760,7 +775,7 @@ only with another fail-fast package.
 | Types | `int32`, `uint32`, `int64`, `uint64`, `char16`, `bool`, `void` results; compact reference-free structs |
 | Literals/constants | Context-typed decimal, hexadecimal and binary integers without a fallback type; digit separators; based literals construct target-width bit patterns; primitive `MinValue`/`MaxValue`; booleans; unit `()` |
 | Variables | Initialized typed/inferred locals; immutable bindings by default, explicit `mut` assignments; lexical scopes |
-| Expressions | Direct calls, forward calls/recursion, constructors, field reads, checked numeric type-call conversions to `int32`, `uint32`, `int64`, `uint64` and `char16`; unary `+`, signed checked `-`, `~`, `!` |
+| Expressions | Direct calls, forward calls/recursion, constructors, field reads, checked numeric type-call conversions to `int32`, `uint32`, `int64`, `uint64` and `char16`; unary `+`, signed checked `-`, `~`, `!`; nominal static `++`/`--` updates on the eligible writable `Copy`-struct place envelope, with exact operand/result type equality |
 | Operators | Checked signed/unsigned `+ - * / %`, bitwise operations, signed/unsigned comparisons, same-type scalar equality, boolean operations; code-unit comparison but no `char16` arithmetic |
 | Flow | Blocks, `if`/`else`, `while`, scoped `for`, return, boolean `require`; left-to-right argument/operand evaluation and short-circuit `&&`/`||` |
 | Outputs | Bool/out true-only publication and definite assignment through branches, `!`, `&&`, `||` and `require` |
