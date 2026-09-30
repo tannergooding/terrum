@@ -693,8 +693,9 @@ Statement       = Block | IfStatement | LoopStatement | SwitchStatement
 IfStatement     = "if", "(", Expression, ")", Block,
                   [ "else", ( Block | IfStatement ) ] ;
 WhileStatement  = "while", "(", Expression, ")", Block ;
+DoStatement     = "do", Block, "while", "(", Expression, ")", ";" ;
 LoopStatement   = [ Identifier, ":" ],
-                  ( WhileStatement | ForStatement | ForEachStatement
+                  ( WhileStatement | DoStatement | ForStatement | ForEachStatement
                   | AsyncForEachStatement ) ;
 ForStatement    = "for", "(", [ ForInit ], ";", [ Expression ], ";",
                   [ ForStep ], ")", Block ;
@@ -791,7 +792,12 @@ destruction to suspend. Backing, ownership, loans and affinity remain valid
 through close completion; a cancellation request alone does not discharge
 them. Close failures use ordinary cleanup/failure chaining without silent
 suppression.
-Blocks are required after `if`, `while`, `for`, `try`, `catch`,
+`do { ... } while (condition);` executes its body before the first condition
+check. Normal body completion and `continue` proceed to the condition;
+`break` exits the loop. Named-loop transfers and ordinary scope cleanup
+apply. The condition uses the ordinary checked Boolean contract, and body
+locals do not escape their block into the condition.
+Blocks are required after `if`, `while`, `do`, `for`, `try`, `catch`,
 `finally`, and `unsafe`; a single unbraced statement is not part of this
 candidate. Assignment is a
 statement-level form, not a general right-associative expression; its left
@@ -1758,8 +1764,7 @@ duplicates, conflicting visibility and illegal modifier/declaration pairs
 reject. Context-specific callable clauses, once specified, follow the
 parameter list; result types remain in prefix position.
 
-**Proposed vocabulary:** `do` introduces a post-tested loop;
-`extern` an externally implemented declaration; and
+**Proposed vocabulary:** `extern` introduces an externally implemented declaration; and
 `extension` a scoped extension declaration. Their productions, restrictions,
 effects and lowering remain open. Accessors and `when` guards have bounded
 productions above without implying complete effect/representation contracts.
@@ -2020,7 +2025,7 @@ appears in §2.
 | Parameters | §§3.2, 5.1–5.2 give modes, final `params`, eligible Copy defaults and direct/named attribute targets. | Complete qualifier legality and output/loan metadata. |
 | Arguments | §§3.2 and 5.1 give labels, source-order evaluation and position-preserving named/positional mixtures. | Complete passing-mode/place and overload contracts. |
 | Statements | §3.3 gives blocks, transfers, standalone discard and `yield expression;` / producer `return;`; §§3.1 and 5.12 give the `[Iterator]` marker; §3.4 permits await expressions in async bodies. | Statement-place checks and producer protocol/lifetime contracts. |
-| Iteration | §3.3 gives by-value and `ref`/`mut ref` iteration, including `await for` and structured close; §5.12 gives producer unwind and names `do`. | Iterator loan/backing, protocol identities, cancellation integration and post-test loop production. |
+| Iteration | §3.3 gives post-tested `do` loops and by-value/`ref`/`mut ref` iteration, including `await for` and structured close; §5.12 gives producer unwind. | Iterator loan/backing, protocol identities and cancellation integration. |
 | Expressions | §3.4 gives conditional/coalescing/optional access, half-open slicing, end-relative bounds, tuples, target-directed static/async lambdas, await and collection spreads. | Slice/first-class index/range protocols, callable capture/representation, awaiter registration and collection-fragment contracts; comprehensions/repetition deferred for library/tensor design. |
 | Patterns | §3.3 gives shared switch arms, guarded matching, compatible `or` bindings and explicit constant/wildcard transfers. | Full nominal-case, relational and destructuring patterns. |
 | Policies | §§3.3–3.4 and 5.12 describe lexical preferences, strict selection and constant-formal forwarding. | Variant-declaration syntax and compile-time queries. |
