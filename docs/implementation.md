@@ -1,6 +1,28 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-37, semantic v43–v45 updates, native-10 through native-20
+## Current boundary: syntax-38, semantic v43–v45 updates, native-10 through native-20
+
+Syntax-38/scanner-7 adopts the approved contiguous `@keyword` identifiers.
+The closed ordinal escape catalog is exactly the vocabulary and contextual
+table in grammar §2, including future unsupported constructs. Primitive
+spellings, `_`, arbitrary names and legacy-only `out`, `foreach`, `abstract`
+are not escapable. Their existing unescaped classification is unchanged;
+this is not the complete canonical reservation/contextual migration.
+Escaping suppresses keyword recognition at that occurrence. Hosted declaration,
+lookup, generic/protocol and label routes use the underlying name, as do
+native scalar parameter/local identity and reconstructed exports. Tokens,
+trivia, CST and diagnostic coordinates retain raw source spelling.
+Scanner-7 appends a read-only `EscapeKeywords` host catalog after the existing
+nine grants; the frontend output grant consequently has index 10. Native
+scanning consults that catalog rather than re-lexing through the host.
+Token/diagnostic/trivia/integer widths, frontend projections 1–51 and
+16K-source/64-token/eight-local/twelve-record/thirty-two-node/three-parameter
+limits are unchanged. Raw historical records remain readable where compatible;
+current parser/snapshot adapters reject invalid identifier escapes, and the
+current lossless scanner adapter rejects conflicting historical classification.
+No semantic, ISA, Contract or native format/ABI revision follows from a
+source spelling escape. The wider approved grammar remains a target, not
+additional implemented constructs.
 
 Syntax-37 adopts generalized ordinary and documentation comment fences in the
 host lexer/CST and executable scanner-6/schema-6. Maximal opening star runs
@@ -563,7 +585,7 @@ not a general unsafe escape hatch. Their consistency work is ordered in the
 | Surface | Implemented | Not yet implemented |
 |---|---|---|
 | Text | Immutable UTF-16 source, half-open ranges, line mapping, exact malformed-editor-input preservation | Rope storage, byte maps, generated-source maps |
-| Lexing | Pinned Unicode identifiers with standalone `_` reserved, ASCII decimal, `0x`/`0X` hexadecimal and `0b`/`0B` binary numeric tokens, digit separators, decimal fractional/exponent token boundaries, generalized ordinary/documentation comment fences, leading trivia, strings, diagnostics including `TRM0006`–`TRM0009` for numeric suffixes, missing based digits and malformed separators, `TRM0010` for overlong comment closers, EOF; the scanner-6 integer record retains suffix metadata only for diagnostic-bearing tokens | Interpolation, raw/character/native literals, directives |
+| Lexing | Pinned Unicode identifiers with standalone `_` reserved and closed-catalog `@keyword` escapes, ASCII decimal, `0x`/`0X` hexadecimal and `0b`/`0B` binary numeric tokens, digit separators, decimal fractional/exponent token boundaries, generalized ordinary/documentation comment fences, leading trivia, strings, diagnostics including `TRM0006`–`TRM0009` for numeric suffixes, missing based digits and malformed separators, `TRM0010` for overlong comment closers, EOF; the scanner-7 integer record retains suffix metadata only for diagnostic-bearing tokens | Complete canonical unescaped reservation/context migration; interpolation, raw/character/native literals, directives |
 | Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, bounded source classes including `mut class`, readonly default and writable `mut` class receivers, non-owning compact-struct `mut` methods with named mutable-local receiver writeback, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Inheritance, unique/inline classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes and generic classes/structs (struct and field attributes diagnose `TRM3001`), parameter-only `implicit ref<T>` binding and ordinary reference-lifetime contracts, public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; source-class and `ManagedNode` optional handles with `write` capability preserved through fields, parameters, results and inference; repeated `?` diagnoses | `pin ref<T>`, scalar options, general generic optional normalization after substitution, family defaults/conditional conformance, general ownership/form qualifiers and general borrowed references, transparent-wrapper ABI contracts |
 | Statements | Initialized typed/inferred locals, standalone vacant locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, post-tested `do`, nearest/named enclosing-loop `break`/`continue`, return, statement-form `require`, bounded constant-only body `static require`/outer-body `static ensure`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment, primitive integer compound assignment, managed optional `??=` and expression statements, standalone `_ = expression;` with statement-end owning cleanup | `defer`, policy blocks/expressions and variants, `unsafe(expr)`, `for (... in ...)`, general switch/patterns and wildcard patterns, other context-specific discard destinations, declaration pre/postconditions and symbolic static proofs, typed requirement-failure selection, general exception objects/throw, async, nominal compound assignment |

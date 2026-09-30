@@ -156,7 +156,7 @@ internal static partial class Program
                     image = buildExecutable
                         ? NativeEmitter.Emit(library with { EntryPoint = 0 }, policy)
                         : NativeEmitter.EmitLibrary(library,
-                            [source.Text.Substring(result.Name.Start, result.Name.Length)], policy);
+                            [IdentifierName.GetName(source.Text.Substring(result.Name.Start, result.Name.Length))], policy);
                 }
                 catch (NotSupportedException exception)
                 {

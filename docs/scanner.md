@@ -40,7 +40,7 @@ closing tokens in the CST, retaining leading trivia on the first part.
 CST stream. The scanner's internal packed match reserves three width bits
 for the four-code-unit `>>>=` spelling; published token records are unchanged.
 
-Syntax-37 advances the current component to scanner-6/schema-6 for generalized
+Syntax-37 advances the component to scanner-6/schema-6 for generalized
 ordinary and documentation comment fences. Maximal opening star runs select
 whole equal-length closing runs with one slash for ordinary blocks and two
 for documentation blocks. Shorter runs and missing slash suffixes are payload;
@@ -49,6 +49,22 @@ not nested, and extra closer slashes remain for later lexing.
 Trivia IDs 0–3 retain their meanings; 4/5 append documentation line/block
 comments. Diagnostic 10 is added without changing any record width, token ID,
 source/token budget or native/semantic protocol.
+
+Syntax-38 advances the current component to scanner-7/schema-7 for contiguous
+`@keyword` identifiers. The escape catalog is grammar §2's exact reserved and
+contextual vocabulary, independent of legacy unescaped classification.
+It includes future unsupported words without implementing their constructs,
+and excludes `_`, primitive spellings and legacy-only `out`, `foreach`,
+`abstract`. Names are ordinal, case-sensitive and not normalized; `@await`
+is an identifier named `await`, while `@Await`, `@ordinaryName`, `@_`,
+`@int32` and `@ await` reject. A contiguous invalid identifier candidate is
+one Bad token with `TRM0001` over its entire raw extent. An incomplete `@`
+is a one-unit Bad token and does not consume following trivia.
+Raw token text, spans and trivia retain `@`. Name lookup uses the shared
+identifier identity; escaping suppresses syntactic contextual recognition.
+The compiled scanner consults a separate read-only host escape catalog,
+not a host re-lexing fallback. No token IDs, record widths, integer magnitudes,
+frontend projection versions or resource budgets change.
 
 The shared operator catalog includes syntax-28's `=>` token for expression
 bodies; no scanner record or schema revision is needed. Syntax-16 rejects attached
@@ -74,7 +90,7 @@ Both are execution-worker commands: compiled scanner code runs inside that CLI
 process. Supervising clients must launch a bounded subprocess and treat abnormal
 termination as a runtime failure. Ordinary `build` still uses the host lexer.
 When `scan-component`
-scanning completes, JSON uses `schemaVersion: 6`, `component: "scanner-6"`,
+scanning completes, JSON uses `schemaVersion: 7`, `component: "scanner-7"`,
 `coordinateSystem: "utf-16"`, the pinned `unicodeVersion`, `sourceLength`,
 `success`, and arrays of `tokens`, `integerValues`, and `diagnostics`. Each token has an exact
 lexical `kind`, `start`, `length` and its ordered `leadingTrivia` array.
@@ -88,7 +104,7 @@ return `success: false` and exit code 1 but still publish the full token stream
 and diagnostics on stdout. Without `--json`, token rows go to stdout and
 diagnostic code/spans go to stderr. Input, compilation, or invalid-result
 failures retain the standard schema-1 error response rather than producing a
-scanner-6 token response.
+scanner-7 token response.
 
 `build-component` instead adapts the native records to `LexResult`, pairs the
 validated integer values with that same source and token stream, feeds them
@@ -114,8 +130,11 @@ record-validation failures leave an existing output artifact unchanged.
 standard diagnostic objects from validated buffer records. `SyntaxTree.Parse`
 accepts this lexical result and its complete integer-value records without
 invoking the host lexer. These boundaries validate shape, source coverage,
-record ordering, suffixes and integer-token coverage, not the supplied
-scanner's classification or arithmetic. A record with a valid shape but an
+record ordering, suffixes, keyword escape spelling/extents/classification,
+current comment rules and integer-token coverage, not every supplied
+scanner classification or its arithmetic. Raw historical records remain
+readable, but a historical split `@`/keyword or contradictory escape identifier
+cannot masquerade as current parser input. A record with a valid shape but an
 incorrect magnitude would affect binding. Use a trusted compiler component;
 host/component differential fixtures check actual numeric behavior, while
 shape validation alone cannot establish that an arbitrary replacement scanner
@@ -139,6 +158,11 @@ The compilation host explicitly grants named fixed-buffer capabilities through
 | `Host.Keywords` | `int32` | Read-only | Keyword spellings and exact `TokenKind` values generated from the host catalog |
 | `Host.Operators` | `int32` | Read-only | Punctuation/operator spellings and exact `TokenKind` values |
 | `Host.IntegerValues` | `int32` | Read/write | Initialized count and unsigned integer-magnitude decoder records |
+| `Host.EscapeKeywords` | `int32` | Read-only | Closed canonical escape spellings, packed in the same kind/length/code-unit format with Identifier kind |
+
+The first nine grants retain their indices; the appended escape catalog is
+grant 9. The scalar frontend output grant follows at index 10, without changing
+its 392-word projection or historical payload versions.
 
 An index is evaluated once, must be `int32`, and is checked against the fixed
 length before access. Negative indices fail as well as indices past the end.
@@ -225,7 +249,7 @@ classification and numeric decoding remain native results. Historical
 scanner-5 records keep their numeric identities and raw readers, and historical
 compiled scanners still execute. Compatible outputs can feed the current
 adapter, but old fixed-fence or documentation classifications that disagree
-with syntax-37 reject as `TRM5001` in CLI adaptation rather than being relabeled.
+with syntax-38 reject as `TRM5001` in CLI adaptation rather than being relabeled.
 A malformed token remains a `Bad`, `NumericLiteral`, or `StringLiteral` token
 with its raw source span; diagnostics do not replace source characters.
 

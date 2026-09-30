@@ -210,6 +210,13 @@ public sealed class Lexer
         }
 
         var start = _position;
+        var escaped = Current == '@';
+        if (escaped && _position + 1 < _source.Length
+            && TryScalar(_position + 1, out var escapedScalar, out _)
+            && (escapedScalar == '_' || UnicodeXid.IsStart(escapedScalar)))
+        {
+            _position++;
+        }
         if (TryScalar(_position, out var scalar, out var width) && (scalar == '_' || UnicodeXid.IsStart(scalar)))
         {
             _position += width;
@@ -220,7 +227,17 @@ public sealed class Lexer
                 _position += width;
             }
 
-            return Keyword(_source.Text.AsSpan(start, _position - start));
+            var text = _source.Text.AsSpan(start, _position - start);
+            if (escaped)
+            {
+                if (IdentifierName.IsEscape(text))
+                {
+                    return TokenKind.Identifier;
+                }
+                Report("TRM0001", "Invalid keyword escape.", start, _position - start);
+                return TokenKind.Bad;
+            }
+            return Keyword(text);
         }
 
         if (IsDigit(Current))

@@ -12,6 +12,26 @@ bool IsValidScannerToken(int32 index, int32 count, int32 previousEnd,
     {
         return kind == 0 && start == Host.Source.Length && length == 0;
     }
+    if (length > 0 && Host.Source[start] == char16(64))
+    {
+        return kind == 2 && IsEscapeKeyword(start + 1, length - 1)
+            && (start + length == Host.Source.Length
+                || !IsIdentifierContinue(ReadScalar(start + length)));
+    }
+    if (kind == 2 && length == 1 && Host.Source[start] == char16(95))
+    {
+        return false;
+    }
+    if (kind == 2)
+    {
+        for (mut int32 offset = 1; offset < length; offset = offset + 1)
+        {
+            if (Host.Source[start + offset] == char16(64))
+            {
+                return false;
+            }
+        }
+    }
     return kind > 0;
 }
 

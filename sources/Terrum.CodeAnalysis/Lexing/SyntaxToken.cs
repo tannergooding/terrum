@@ -26,6 +26,8 @@ public sealed class SyntaxToken
     public TokenKind Kind { get; }
     /// <summary>Gets the exact token text; missing tokens have empty text.</summary>
     public string Text { get; }
+    /// <summary>Gets identifier identity without a valid keyword escape prefix; other tokens retain their text.</summary>
+    public string Name => Kind == TokenKind.Identifier ? IdentifierName.GetName(Text) : Text;
     /// <summary>Gets the half-open UTF-16 range of the token text, excluding leading trivia.</summary>
     public TextSpan Span { get; }
     /// <summary>Gets the range spanning leading trivia and token text.</summary>

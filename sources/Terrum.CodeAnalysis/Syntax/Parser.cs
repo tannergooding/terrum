@@ -313,7 +313,7 @@ internal sealed class Parser
             while (Current.Kind is not (TokenKind.CloseBrace or TokenKind.EndOfFile))
             {
                 var start = _position;
-                children.Add(ParseDeclaration(name.Token.Text));
+                children.Add(ParseDeclaration(name.Token.Name));
                 EnsureProgress(start, children);
             }
 
@@ -336,7 +336,7 @@ internal sealed class Parser
             kind = SyntaxKind.InterfaceDeclaration;
         }
         else if (containingType is not null && Current.Kind == TokenKind.Identifier
-            && Current.Text == containingType && Peek(1).Kind == TokenKind.OpenParen)
+            && Current.Name == containingType && Peek(1).Kind == TokenKind.OpenParen)
         {
             children.Add(Take());
             children.Add(ParseParameters());

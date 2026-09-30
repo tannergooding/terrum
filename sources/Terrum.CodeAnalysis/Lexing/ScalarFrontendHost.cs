@@ -13,7 +13,7 @@ namespace Terrum.CodeAnalysis.Lexing;
 public static class ScalarFrontendHost
 {
     public const int WordCount = 392;
-    public const int BufferIndex = 9;
+    public const int BufferIndex = 10;
 
     public static ImmutableArray<HostBuffer> CreateBuffers(SourceText source)
     {
@@ -377,9 +377,9 @@ public static class ScalarFrontendHost
             {
                 throw InvalidResult();
             }
-            if (count > 0) { seenNames.Add(source.Text.Substring(firstName.Start, firstName.Length)); }
-            if (count > 1) { seenNames.Add(source.Text.Substring(secondName.Start, secondName.Length)); }
-            if (count > 2) { seenNames.Add(source.Text.Substring(thirdName.Start, thirdName.Length)); }
+            if (count > 0) { seenNames.Add(SourceName(source, firstName)); }
+            if (count > 1) { seenNames.Add(SourceName(source, secondName)); }
+            if (count > 2) { seenNames.Add(SourceName(source, thirdName)); }
             if (words[41] == 1)
             {
                 if (!Take(TokenKind.Arrow) || !TakeTree(trueRoot)
@@ -480,8 +480,7 @@ public static class ScalarFrontendHost
                 for (var i = 0; i < activeLocals; i++)
                 {
                     if ((visibleLocals & (1 << i)) != 0
-                        && source.Text.AsSpan(declaredLocals[i].Name.Start,
-                            declaredLocals[i].Name.Length).SequenceEqual(spelling.AsSpan()))
+                        && SourceName(source, declaredLocals[i].Name) == spelling)
                     {
                         return true;
                     }
@@ -617,8 +616,8 @@ public static class ScalarFrontendHost
                         if (!inferred && tokens[at - 1].Text != TypeName(local.Type)
                             || !Take(TokenKind.Identifier)
                             || tokens[at - 1].Span != local.Name
-                            || seenNames.Contains(tokens[at - 1].Text)
-                            || VisibleName(tokens[at - 1].Text)
+                            || seenNames.Contains(tokens[at - 1].Name)
+                            || VisibleName(tokens[at - 1].Name)
                             || !Take(TokenKind.Equals)
                             || tree[entry.Root].Type != local.Type
                             || inferred && intrinsicTypes[entry.Root] == 0
@@ -636,7 +635,7 @@ public static class ScalarFrontendHost
                         var local = declaredLocals[entry.Slot - count - 1];
                         if (!Visible(entry.Slot) || !local.IsMutable
                             || !Take(TokenKind.Identifier)
-                            || tokens[at - 1].Text != source.Text.Substring(local.Name.Start, local.Name.Length)
+                            || tokens[at - 1].Name != SourceName(source, local.Name)
                             || !Take(TokenKind.Equals) || tree[entry.Root].Type != local.Type
                             || !TakeTree(entry.Root)
                             || clause == 0 && !Take(TokenKind.Semicolon))
@@ -736,9 +735,9 @@ public static class ScalarFrontendHost
                 {
                     if (!Take(TokenKind.Identifier)
                         || tokens[at - 1].Text != TypeName(node.Type)
-                        || tokens[at - 1].Text == source.Text.Substring(name.Start, name.Length)
-                        || seenNames.Contains(tokens[at - 1].Text)
-                        || VisibleName(tokens[at - 1].Text)
+                        || tokens[at - 1].Name == SourceName(source, name)
+                        || seenNames.Contains(tokens[at - 1].Name)
+                        || VisibleName(tokens[at - 1].Name)
                         || !Take(TokenKind.OpenParen) || !TakeTree(node.Left)
                         || !Take(TokenKind.CloseParen))
                     {
@@ -798,7 +797,7 @@ public static class ScalarFrontendHost
                             1 => firstName, 2 => secondName, _ => thirdName,
                         };
                     if (!Take(TokenKind.Identifier)
-                        || tokens[at - 1].Text != source.Text.Substring(spelling.Start, spelling.Length))
+                        || tokens[at - 1].Name != SourceName(source, spelling))
                     {
                         return false;
                     }
@@ -909,14 +908,14 @@ public static class ScalarFrontendHost
                     && tokens[offset + 6].Text == TypeName(words[8])
                     && tokens[offset + 7].Kind == TokenKind.Identifier
                     && tokens[offset + 7].Span == secondName
-                    && tokens[offset + 4].Text != tokens[offset + 7].Text
+                    && tokens[offset + 4].Name != tokens[offset + 7].Name
                     && (count == 2 || (tokens[offset + 8].Kind == TokenKind.Comma
                         && tokens[offset + 9].Kind == TokenKind.Identifier
                         && tokens[offset + 9].Text == TypeName(words[34])
                         && tokens[offset + 10].Kind == TokenKind.Identifier
                         && tokens[offset + 10].Span == thirdName
-                        && tokens[offset + 4].Text != tokens[offset + 10].Text
-                        && tokens[offset + 7].Text != tokens[offset + 10].Text))))));
+                        && tokens[offset + 4].Name != tokens[offset + 10].Name
+                        && tokens[offset + 7].Name != tokens[offset + 10].Name))))));
         }
 
         bool ValidBody()
@@ -1042,7 +1041,7 @@ public static class ScalarFrontendHost
                 var name = ParameterName(left);
                 return right == 0 && left >= 1 && left <= parameters && leftType == 5
                     && tokens[operandIndex].Kind == TokenKind.Identifier
-                    && tokens[operandIndex].Text == source.Text.Substring(name.Start, name.Length);
+                    && tokens[operandIndex].Name == SourceName(source, name);
             }
             if (operation is 63 or 163)
             {
@@ -1068,7 +1067,7 @@ public static class ScalarFrontendHost
                 var name = ParameterName(left);
                 return right == 0 && left >= 1 && left <= parameters && leftType == type
                     && tokens[operandIndex].Kind == TokenKind.Identifier
-                    && tokens[operandIndex].Text == source.Text.Substring(name.Start, name.Length);
+                    && tokens[operandIndex].Name == SourceName(source, name);
             }
             if (operation is 57 or 58 && right == 0)
             {
@@ -1090,7 +1089,7 @@ public static class ScalarFrontendHost
                 }
                 return tokens[operandIndex].Kind == TokenKind.Identifier
                     && right == 0 && left >= 1 && left <= parameters && leftType == type
-                    && tokens[operandIndex].Text == source.Text.Substring(name.Start, name.Length);
+                    && tokens[operandIndex].Name == SourceName(source, name);
             }
             if (operation is 657 or 658)
             {
@@ -1238,11 +1237,11 @@ public static class ScalarFrontendHost
                     && TryBinaryOperandTokens(tokens, (TokenKind)(operation % 100),
                         expression.Span.Length, out var first, out var second)
                     && tokens[first].Kind == (literalFirst ? (TokenKind)right : TokenKind.Identifier)
-                    && (literalFirst || tokens[first].Text
-                        == source.Text.Substring(name.Start, name.Length))
+                    && (literalFirst || tokens[first].Name
+                        == SourceName(source, name))
                     && tokens[second].Kind == (literalFirst ? TokenKind.Identifier : (TokenKind)right)
-                    && (!literalFirst || tokens[second].Text
-                        == source.Text.Substring(name.Start, name.Length));
+                    && (!literalFirst || tokens[second].Name
+                        == SourceName(source, name));
             }
             if (operation / 100 == 11
                 && operation % 100 is 65 or 66 or >= 71 and <= 75)
@@ -1310,8 +1309,8 @@ public static class ScalarFrontendHost
                         positiveLiteral ? TokenKind.Plus
                             : negativeLiteral ? TokenKind.Minus : TokenKind.EndOfFile)
                     && tokens[literalFirst ? second : first].Kind == TokenKind.Identifier
-                    && tokens[literalFirst ? second : first].Text
-                        == source.Text.Substring(name.Start, name.Length)
+                    && tokens[literalFirst ? second : first].Name
+                        == SourceName(source, name)
                     && tokens[literalFirst ? first : second].Kind == TokenKind.NumericLiteral
                     && ValidMagnitude(tokens[literalFirst ? first : second].Text.AsSpan(),
                         parameterType, negativeLiteral, left, right);
@@ -1362,19 +1361,27 @@ public static class ScalarFrontendHost
         {
             var leftName = ParameterName(left);
             var span = expression.Span;
-            var groupedLeft = source.Text[span.Start] == '(';
-            if (span.Length < leftName.Length
-                || (!groupedLeft && !source.Text.AsSpan(span.Start, leftName.Length)
-                    .SequenceEqual(source.Text.AsSpan(leftName.Start, leftName.Length))))
+            if (span.Length == 0)
             {
                 return false;
             }
             if (expression.Operation == 0)
             {
-                return !groupedLeft && span.Length == leftName.Length;
+                if (span.Length == leftName.Length
+                    && source.Text.AsSpan(span.Start, span.Length)
+                        .SequenceEqual(source.Text.AsSpan(leftName.Start, leftName.Length)))
+                {
+                    return true;
+                }
+                var single = Lexer.Lex(SourceText.From(source.Text.Substring(span.Start, span.Length)));
+                return single.Diagnostics.IsEmpty && single.Tokens.Length == 2
+                    && single.Tokens[0].Kind == TokenKind.Identifier
+                    && single.Tokens[0].Span.Length == span.Length
+                    && single.Tokens[0].Name == SourceName(source, leftName);
             }
 
             var rightName = ParameterName(right);
+            var groupedLeft = source.Text[span.Start] == '(';
             var middleLength = span.Length - leftName.Length - rightName.Length;
             var spelling = expression.Operation switch {
                 57 => "+", 58 => "-", 59 => "*", 60 => "/", 61 => "%",
@@ -1382,7 +1389,10 @@ public static class ScalarFrontendHost
                 68 => "<=", 69 => ">", 70 => ">=", 71 => "&", 73 => "|",
                 72 => "&&", 74 => "||", 75 => "^", _ => throw InvalidResult(),
             };
-            if (!groupedLeft && middleLength >= 1 && source.Text.AsSpan(span.End - rightName.Length,
+            if (!groupedLeft && middleLength >= 1
+                && source.Text.AsSpan(span.Start, leftName.Length)
+                    .SequenceEqual(source.Text.AsSpan(leftName.Start, leftName.Length))
+                && source.Text.AsSpan(span.End - rightName.Length,
                     rightName.Length).SequenceEqual(source.Text.AsSpan(
                         rightName.Start, rightName.Length)))
             {
@@ -1416,8 +1426,7 @@ public static class ScalarFrontendHost
             var operationIndex = leftIndex + leftGroups + 1;
             if (operationIndex >= tokens.Length - 1
                 || tokens[leftIndex].Kind != TokenKind.Identifier
-                || tokens[leftIndex].Text != source.Text.Substring(
-                    leftName.Start, leftName.Length)
+                || tokens[leftIndex].Name != SourceName(source, leftName)
                 || tokens[operationIndex].Kind != (TokenKind)expression.Operation)
             {
                 return false;
@@ -1438,8 +1447,7 @@ public static class ScalarFrontendHost
             var groups = operandIndex - operationIndex - 1;
             if (tokens.Length != operandIndex + groups + 2
                 || tokens[operandIndex].Kind != TokenKind.Identifier
-                || tokens[operandIndex].Text != source.Text.Substring(
-                    rightName.Start, rightName.Length)
+                || tokens[operandIndex].Name != SourceName(source, rightName)
                 || tokens[tokens.Length - 2].Span.End != span.Length)
             {
                 return false;
@@ -1701,6 +1709,9 @@ public static class ScalarFrontendHost
         return new TextSpan(expression.Start + tokens[1].Span.Start, tokens[1].Span.Length);
     }
 
+    private static string SourceName(SourceText source, TextSpan span)
+        => IdentifierName.GetName(source.Text.Substring(span.Start, span.Length));
+
     private static string TypeName(int code) => code switch {
         1 => "int32", 2 => "uint32", 3 => "int64", 4 => "uint64",
         5 => "bool", 6 => "char16", _ => throw InvalidResult(),
@@ -1802,8 +1813,8 @@ public static class ScalarFrontendHost
                         && result.Nodes[node.Left].Operation == 3
                         && ScannerHost.IntegerRadix(source.Text.AsSpan(
                             operand.Span.Start, operand.Span.Length)) == 10
-                        && ((node.Type == 1 && (uint)result.Nodes[node.Left].Low == (ulong)int.MaxValue + 1)
-                            || (node.Type == 3 && ((ulong)(uint)result.Nodes[node.Left].High << 32
+                        && ((node.Type == 1 && unchecked((uint)result.Nodes[node.Left].Low) == (ulong)int.MaxValue + 1)
+                            || (node.Type == 3 && unchecked((ulong)(uint)result.Nodes[node.Left].High << 32
                                 | (uint)result.Nodes[node.Left].Low) == (ulong)long.MaxValue + 1)))
                     {
                         bound = new BoundConstant(node.Type == 1 ? int.MinValue : long.MinValue,
@@ -1947,7 +1958,7 @@ public static class ScalarFrontendHost
         SemanticVerifier.VerifyLibrary(program);
         return program;
 
-        string Name(TextSpan span) => source.Text.Substring(span.Start, span.Length);
+        string Name(TextSpan span) => SourceName(source, span);
 
         BoundReturn Return(ScalarFrontendExpression expression)
             => treeExpressions is null
@@ -2248,8 +2259,8 @@ public static class ScalarFrontendHost
                 {
                     var signedSpan = new TextSpan(expression.Span.Start + tokens[numberIndex - 1].Span.Start,
                         tokens[numberIndex].Span.End - tokens[numberIndex - 1].Span.Start);
-                    var magnitude = (ulong)(uint)expression.RightParameter << 32
-                        | (uint)expression.LeftParameter;
+                    var magnitude = unchecked((ulong)(uint)expression.RightParameter << 32
+                        | (uint)expression.LeftParameter);
                     var minimum = parameterType == PrimitiveType.Int32
                         ? (ulong)int.MaxValue + 1 : (ulong)long.MaxValue + 1;
                     literal = negativeLiteral
@@ -2278,8 +2289,8 @@ public static class ScalarFrontendHost
                 }
                 var minimum = expression.Type == 1 ? (ulong)int.MaxValue + 1
                     : (ulong)long.MaxValue + 1;
-                var magnitude = (ulong)(uint)expression.RightParameter << 32
-                    | (uint)expression.LeftParameter;
+                var magnitude = unchecked((ulong)(uint)expression.RightParameter << 32
+                    | (uint)expression.LeftParameter);
                 var operandSpan = NumericSpan(source, expression.Span);
                 var digits = source.Text.AsSpan(operandSpan.Start, operandSpan.Length);
                 if (ScannerHost.IntegerRadix(digits) == 10 && magnitude == minimum)
@@ -2296,18 +2307,21 @@ public static class ScalarFrontendHost
                 return new BoundConstant(operation == 20 ? 1 : 0,
                     PrimitiveType.Bool, expression.Span);
             }
-            var leftName = expression.LeftParameter == 1 ? result.FirstName : result.SecondName;
-            var left = new BoundRead(expression.LeftParameter - 1,
-                types[expression.LeftParameter - 1].Type,
-                new TextSpan(expression.Span.Start, leftName.Length));
             if (operation == 0)
             {
-                return left;
+                return new BoundRead(expression.LeftParameter - 1,
+                    types[expression.LeftParameter - 1].Type, expression.Span);
             }
-            var rightName = expression.RightParameter == 1 ? result.FirstName : result.SecondName;
+            var operands = Lexer.Lex(SourceText.From(source.Text.Substring(
+                expression.Span.Start, expression.Span.Length))).Tokens;
+            var firstOperand = operands.First(static token => token.Kind == TokenKind.Identifier).Span;
+            var secondOperand = operands.Last(static token => token.Kind == TokenKind.Identifier).Span;
+            var left = new BoundRead(expression.LeftParameter - 1,
+                types[expression.LeftParameter - 1].Type,
+                new TextSpan(expression.Span.Start + firstOperand.Start, firstOperand.Length));
             var right = new BoundRead(expression.RightParameter - 1,
                 types[expression.RightParameter - 1].Type,
-                new TextSpan(expression.Span.End - rightName.Length, rightName.Length));
+                new TextSpan(expression.Span.Start + secondOperand.Start, secondOperand.Length));
             return new BoundBinary((TokenKind)operation, left, right,
                 Type(expression.Type), expression.Span);
         }

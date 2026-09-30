@@ -273,6 +273,30 @@ int32 SkipTrivia(int32 initial, int32 owner)
     return at;
 }
 
+bool IsEscapeKeyword(int32 start, int32 length)
+{
+    mut int32 entry = 0;
+    while (Host.EscapeKeywords[entry] != -1)
+    {
+        int32 size = Host.EscapeKeywords[entry + 1];
+        if (size == length)
+        {
+            mut int32 offset = 0;
+            while (offset < size
+                && int32(Host.Source[start + offset]) == Host.EscapeKeywords[entry + 2 + offset])
+            {
+                offset = offset + 1;
+            }
+            if (offset == size)
+            {
+                return true;
+            }
+        }
+        entry = entry + 2 + size;
+    }
+    return false;
+}
+
 int32 KeywordKind(int32 start, int32 length)
 {
     mut int32 entry = 0;
@@ -805,7 +829,24 @@ int32 Scan()
             int32 scalar = ReadScalar(position);
             mut int32 kind = 1;
             position = position + ScalarWidth(scalar);
-            if (IsIdentifierStart(scalar))
+            if (scalar == 64 && position < Host.Source.Length
+                && IsIdentifierStart(ReadScalar(position)))
+            {
+                position = position + ScalarWidth(ReadScalar(position));
+                while (position < Host.Source.Length && IsIdentifierContinue(ReadScalar(position)))
+                {
+                    position = position + ScalarWidth(ReadScalar(position));
+                }
+                if (IsEscapeKeyword(start + 1, position - start - 1))
+                {
+                    kind = 2;
+                }
+                else
+                {
+                    Report(1, start, position - start);
+                }
+            }
+            else if (IsIdentifierStart(scalar))
             {
                 kind = 2;
                 while (position < Host.Source.Length)

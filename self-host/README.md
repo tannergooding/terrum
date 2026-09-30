@@ -37,7 +37,21 @@ without widening them. The native snapshots/frontend consume those records
 within unchanged bounds and projection versions; historical fixed-fence
 outputs cannot masquerade as current parser input. No extraction schema,
 other punctuation adoption, semantic format or native ABI is added.
-The host parser's current language version is syntax-37. Syntax-18's qualified
+Syntax-38/scanner-7 adds approved contiguous `@keyword` identifiers, preserving
+raw token/trivia ranges but using the underlying ordinal name for identity.
+Its separate shared `EscapeKeywords` catalog is closed over grammar §2's
+reserved/contextual vocabulary, including currently unsupported constructs;
+it excludes arbitrary names, `_`, primitives and legacy-only `out`, `foreach`,
+`abstract`. The existing unescaped keyword behavior remains bounded and
+unchanged. Scanner code recognizes escapes using the catalog, and typed
+snapshot adapters reject contradictory identifier records. Native scalar
+parameter/local comparisons and host reconstruction normalize the same name,
+without changing projections 1–51, record widths or resource budgets.
+The read-only catalog appends host grant 9, moving the frontend output grant
+to index 10; the earlier nine scanner grants retain their indices.
+This is source-profile adoption, not future construct support, a self-hosting
+claim or a semantic/native/Contract format revision.
+The host parser's current language version is syntax-38. Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle
 specializations described below. These reuse existing, feature-selected
 semantic contracts without changing the scanner record/schema, native profile
@@ -92,7 +106,7 @@ Compilation-local constrained functions support bounded closed helper compositio
 Copy-only selection and numeric algorithms with scalar control flow, but not the
 generic spans, stored dependencies or host interfaces
 required by those sketches. The scanner consumes the shared host keyword catalog,
-including `operator` and `where`, without a second keyword table. `abstract`
+including `operator` and `where`, without a second unescaped keyword table. `abstract`
 is an ordinary identifier; its retired token slot is not reused.
 Eligible top-level templates support multiple independently constrained type
 parameters over `Copy` structs, scalar value types, and existing

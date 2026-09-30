@@ -26,7 +26,7 @@ internal sealed partial class Binder
             Report("TRM3003", $"The primitive type '{name.Text}' cannot be declared as a class.", declaration.Span);
             return;
         }
-        var qualified = Qualify(name.Text);
+        var qualified = Qualify(name.Name);
         if (_classes.Count >= SemanticVerifier.MaximumVariables
             || !_classNames.TryAdd(qualified, (PrimitiveType)(ManagedClassTypes.First + _classes.Count))
             || _structNames.ContainsKey(qualified)
@@ -206,7 +206,7 @@ internal sealed partial class Binder
             var alignment = width == 0 ? 1 : ValueLayout.Alignment(type, _structs);
             offset = (offset + alignment - 1) & -alignment;
             if (width is < 1 or > ValueLayout.MaximumSize || offset + width > ManagedClassTypes.MaximumPayload
-                || !names.Add(fieldToken.Token.Text))
+                || !names.Add(fieldToken.Token.Name))
             {
                 Report("TRM3005", "Managed fields must have distinct names and fit the bounded payload.", child.Span);
                 continue;
@@ -231,7 +231,7 @@ internal sealed partial class Binder
             {
                 Report("TRM3008", "Mutable fields require a mut class declaration.", child.Span);
             }
-            fields.Add(new BoundStructField(fieldToken.Token.Text, type, offset, width) {
+            fields.Add(new BoundStructField(fieldToken.Token.Name, type, offset, width) {
                 IsMutable = mutable,
                 IsPrivate = !isPublic && !isInternal,
                 IsInternal = isInternal,

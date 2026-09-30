@@ -18,10 +18,10 @@ public static class ScannerHost
     public const int MaximumSourceLength = 16_384;
 
     /// <summary>The version of the lossless scanner and integer-decoder interchange.</summary>
-    public const int SchemaVersion = 6;
+    public const int SchemaVersion = 7;
 
     /// <summary>The component identity for the lossless scanner and integer-decoder protocol.</summary>
-    public const string ComponentName = "scanner-6";
+    public const string ComponentName = "scanner-7";
 
     // Lexemes are packed as (kind, UTF-16 length, code units...) and terminated by kind -1.
     private static readonly (TokenKind Kind, string Text)[] s_operatorSpellings =
@@ -53,11 +53,12 @@ public static class ScannerHost
     ];
 
     private static readonly ImmutableArray<int> s_keywords = CreateKeywords();
+    private static readonly ImmutableArray<int> s_escapeKeywords = CreateEscapeKeywords();
     private static readonly ImmutableArray<int> s_operators = CreateOperators();
 
     /// <summary>Creates fixed buffers containing source code units, shared pinned tables and vacant token records.</summary>
     /// <param name="source">The immutable source snapshot, including any malformed UTF-16 units.</param>
-    /// <returns>Initialized buffers exposed as Host.Source, Host.XidStart, Host.XidContinue, Host.Tokens, Host.Diagnostics, Host.Trivia, Host.Keywords, Host.Operators and Host.IntegerValues.</returns>
+    /// <returns>Initialized buffers exposed as Host.Source, Host.XidStart, Host.XidContinue, Host.Tokens, Host.Diagnostics, Host.Trivia, Host.Keywords, Host.EscapeKeywords, Host.Operators and Host.IntegerValues.</returns>
     /// <exception cref="ArgumentNullException">The source is null.</exception>
     /// <exception cref="ArgumentException">The source exceeds this component's resource limit.</exception>
     public static ImmutableArray<HostBuffer> CreateBuffers(SourceText source)
@@ -78,6 +79,7 @@ public static class ScannerHost
             new HostBuffer("Keywords", PrimitiveType.Int32, s_keywords, false),
             new HostBuffer("Operators", PrimitiveType.Int32, s_operators, false),
             new HostBuffer("IntegerValues", PrimitiveType.Int32, [.. new int[1 + (source.Length * 5)]], true),
+            new HostBuffer("EscapeKeywords", PrimitiveType.Int32, s_escapeKeywords, false),
         ];
     }
 
@@ -106,6 +108,17 @@ public static class ScannerHost
             AddLexeme(words, kind, text);
         }
 
+        words.Add(-1);
+        return words.ToImmutable();
+    }
+
+    private static ImmutableArray<int> CreateEscapeKeywords()
+    {
+        var words = ImmutableArray.CreateBuilder<int>();
+        foreach (var text in IdentifierName.EscapableKeywords)
+        {
+            AddLexeme(words, TokenKind.Identifier, text);
+        }
         words.Add(-1);
         return words.ToImmutable();
     }
@@ -153,6 +166,14 @@ public static class ScannerHost
             }
 
             tokens.Add(new ScannerToken((TokenKind)kind, new TextSpan(start, length)));
+            if ((TokenKind)kind == TokenKind.Identifier
+                && (source.Text.AsSpan(start, length).SequenceEqual("_")
+                    || (source.Text.AsSpan(start, length).Contains('@')
+                        && (!IdentifierName.IsEscape(source.Text.AsSpan(start, length))
+                            || length != IdentifierName.EscapeLength(source.Text.AsSpan(start))))))
+            {
+                throw new ArgumentException("Invalid scanner identifier spelling.", nameof(bytes));
+            }
             previousEnd = start + length;
         }
 
@@ -545,7 +566,38 @@ public static class ScannerHost
         }
         var result = new LexResult(source, tokens.MoveToImmutable(), diagnostics.MoveToImmutable());
         ValidateTriviaProfile(result, cancellationToken);
+        ValidateEscapeProfile(result);
         return result;
+    }
+
+    private static void ValidateEscapeProfile(LexResult result)
+    {
+        foreach (var token in result.Tokens)
+        {
+            if (!token.Text.StartsWith('@'))
+            {
+                continue;
+            }
+            var valid = IdentifierName.IsEscape(token.Text);
+            if (token.Span.Length != IdentifierName.EscapeLength(result.Source.Text.AsSpan(token.Span.Start))
+                || token.Kind != (valid ? TokenKind.Identifier : TokenKind.Bad)
+                || (!valid && !HasEscapeDiagnostic(token.Span)))
+            {
+                throw new ArgumentException("Scanner records contradict the keyword escape profile.", nameof(result));
+            }
+        }
+
+        bool HasEscapeDiagnostic(TextSpan span)
+        {
+            foreach (var diagnostic in result.Diagnostics)
+            {
+                if (diagnostic.Code == "TRM0001" && diagnostic.Span == span)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 
     // The record shape alone cannot distinguish a historical fixed-fence scanner

@@ -225,7 +225,7 @@ internal sealed partial class Binder
                 }
                 if (child is SyntaxNode { Kind: SyntaxKind.StructDeclaration } structure)
                 {
-                    var name = StructName(structure).Text;
+                    var name = StructName(structure).Name;
                     var qualified = string.IsNullOrEmpty(_namespace) ? name : _namespace + "." + name;
                     if (TryPrimitiveType(name, out var primitive))
                     {
@@ -301,7 +301,7 @@ internal sealed partial class Binder
                 }
                 if (node.Kind is SyntaxKind.StructDeclaration or SyntaxKind.ClassDeclaration)
                 {
-                    var structName = StructName(node).Text;
+                    var structName = StructName(node).Name;
                     if (TryPrimitiveType(structName, out _)
                         && (node.Kind != SyntaxKind.StructDeclaration
                             || !_acceptedPrimitiveDeclarations.Contains(node)))
@@ -572,7 +572,7 @@ internal sealed partial class Binder
         var builder = new StringBuilder();
         for (var index = 1; index < directive.Children.Length - 1; index++)
         {
-            _ = builder.Append(((SyntaxTokenElement)directive.Children[index]).Token.Text);
+            _ = builder.Append(((SyntaxTokenElement)directive.Children[index]).Token.Name);
         }
         return builder.ToString();
     }
@@ -582,7 +582,7 @@ internal sealed partial class Binder
         var builder = new StringBuilder();
         foreach (var token in node.DescendantTokens())
         {
-            _ = builder.Append(token.Text);
+            _ = builder.Append(token.Name);
         }
         return builder.ToString();
     }
@@ -612,7 +612,7 @@ internal sealed partial class Binder
                 fields++;
                 if (field.Children[^2] is SyntaxTokenElement { Token.Kind: TokenKind.Identifier } backing)
                 {
-                    _primitiveBackingFields[name] = backing.Token.Text;
+                    _primitiveBackingFields[name] = backing.Token.Name;
                 }
                 if (field.Children[^2] is not SyntaxTokenElement { Token.Kind: TokenKind.Identifier }
                     || NameText((SyntaxNode)field.Children[^3]) != name
@@ -658,7 +658,7 @@ internal sealed partial class Binder
             return;
         }
         var name = StructName(declaration);
-        var qualified = string.IsNullOrEmpty(_namespace) ? name.Text : _namespace + "." + name.Text;
+        var qualified = string.IsNullOrEmpty(_namespace) ? name.Name : _namespace + "." + name.Name;
         var isPublic = false;
         var isUnique = false;
         var isTransparent = false;
@@ -737,7 +737,7 @@ internal sealed partial class Binder
             var duplicate = false;
             foreach (var previous in fields)
             {
-                duplicate |= previous.Name == fieldName.Text;
+                duplicate |= previous.Name == fieldName.Name;
             }
             var offset = (size + fieldAlignment - 1) & -fieldAlignment;
             if (width == 0 || offset + width > ValueLayout.MaximumSize || duplicate)
@@ -775,7 +775,7 @@ internal sealed partial class Binder
             {
                 Report("TRM3001", "A field can declare only one mut modifier.", field.Span);
             }
-            fields.Add(new BoundStructField(fieldName.Text, type, offset, width) {
+            fields.Add(new BoundStructField(fieldName.Name, type, offset, width) {
                 IsMutable = mutableModifiers != 0,
                 IsPrivate = !fieldIsPublic && !fieldIsInternal,
                 IsInternal = fieldIsInternal,
@@ -922,7 +922,7 @@ internal sealed partial class Binder
         var operatorKey = new StaticOperatorKey(nameToken.Kind, parameters?.Children.OfType<SyntaxNode>().Count() ?? 0);
         var validOperator = (operatorKey.Arity == 1 && IsStaticUnaryOperator(nameToken.Kind))
             || (operatorKey.Arity == 2 && IsStaticBinaryOperator(nameToken.Kind));
-        var nameText = operatorDeclaration && validOperator ? OperatorName(operatorKey) : nameToken.Text;
+        var nameText = operatorDeclaration && validOperator ? OperatorName(operatorKey) : nameToken.Name;
         var getter = property && !directGetter ? (SyntaxNode)declaration.Children[^2] : null;
         var body = getter is SyntaxNode accessor ? (SyntaxNode)accessor.Children[^1]
             : (SyntaxNode)declaration.Children[^1];
@@ -945,10 +945,10 @@ internal sealed partial class Binder
                     && !TryResolveClass(Qualify(containingType), out propertyOwner)
                     && !_primitiveDeclarations.Contains(containingType))
                 || (IsStruct(propertyOwner) && IsUnique(propertyOwner))
-                || TryFindField(propertyOwner, nameToken.Text, out _)
+                || TryFindField(propertyOwner, nameToken.Name, out _)
                 || containingType is not null
                     && _primitiveBackingFields.TryGetValue(containingType, out var backing)
-                    && backing == nameToken.Text)
+                    && backing == nameToken.Name)
             {
                 Report("TRM3001", "Getter-only properties require a distinct member on a Copy struct, source class or Core primitive with a readonly receiver.",
                     declaration.Span);
@@ -1048,12 +1048,12 @@ internal sealed partial class Binder
                 Report("TRM3024", "ConstEval parameters must be non-output scalar values.", parameter.Span);
             }
 
-            if (!names.Add(token.Text))
+            if (!names.Add(token.Name))
             {
                 Report("TRM3004", $"Duplicate parameter '{token.Text}'.", token.Span);
             }
 
-            declared.Add(new Parameter(token.Text, type, token.Span, isOut || isInit, isInit));
+            declared.Add(new Parameter(token.Name, type, token.Span, isOut || isInit, isInit));
         }
         if (operatorDeclaration && operatorKey.Arity == 1
             && (containingType is null || !TryResolveStruct(Qualify(containingType), out var ownerType)
@@ -1167,7 +1167,7 @@ internal sealed partial class Binder
             receiver = (SyntaxNode)receiver.Children[1];
         }
         if (receiver.Kind == SyntaxKind.NameExpression
-            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token.Text, out var slot)
+            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token.Name, out var slot)
             && _variables[slot].Type == type)
         {
             return new BoundReceiverLoan(slot, type, receiver.Span);
@@ -1189,7 +1189,7 @@ internal sealed partial class Binder
             receiver = (SyntaxNode)receiver.Children[1];
         }
         if (receiver.Kind == SyntaxKind.NameExpression
-            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token.Text, out var slot)
+            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token.Name, out var slot)
             && _variables[slot].Type == type && _variables[slot].IsMutable)
         {
             return new BoundMutableReceiverLoan(slot, type, span);
@@ -1233,7 +1233,7 @@ internal sealed partial class Binder
             Report("TRM3023", writable
                 ? "A mutable native buffer view requires a mut local initialized by owner.SliceMutable(start, length)."
                 : "A readonly native buffer view requires a readonly local initialized by owner.Slice(start, length).", span);
-            var invalid = AddVariable(name.Text, viewType, isMutable, name.Span);
+            var invalid = AddVariable(name.Name, viewType, isMutable, name.Span);
             return new BoundViewScope(invalid, ErrorExpression(span), ErrorExpression(span), ErrorExpression(span),
                 new BoundBlock([], span), span) { IsMutable = writable };
         }
@@ -1243,7 +1243,7 @@ internal sealed partial class Binder
             argument.Children.Length != 1 || argument.Children[0] is not SyntaxNode))
         {
             Report("TRM3011", "Slice requires two positional int32 arguments.", initializer.Span);
-            var invalid = AddVariable(name.Text, viewType, isMutable, name.Span);
+            var invalid = AddVariable(name.Name, viewType, isMutable, name.Span);
             return new BoundViewScope(invalid, ErrorExpression(span), ErrorExpression(span), ErrorExpression(span),
                 new BoundBlock([], span), span) { IsMutable = writable };
         }
@@ -1253,7 +1253,7 @@ internal sealed partial class Binder
             : BindReceiverLoan((SyntaxNode)callee.Children[0], PrimitiveType.OwnedInt32Buffer);
         var start = BindExpression((SyntaxNode)arguments[0].Children[0], PrimitiveType.Int32);
         var length = BindExpression((SyntaxNode)arguments[1].Children[0], PrimitiveType.Int32);
-        var variable = AddVariable(name.Text, viewType, isMutable, name.Span);
+        var variable = AddVariable(name.Name, viewType, isMutable, name.Span);
         return new BoundViewScope(variable, owner, start, length, new BoundBlock([], span), span) {
             IsMutable = writable,
         };
@@ -1266,7 +1266,7 @@ internal sealed partial class Binder
             receiver = (SyntaxNode)receiver.Children[1];
         }
         if (receiver.Kind == SyntaxKind.NameExpression
-            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token.Text, out var slot)
+            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token.Name, out var slot)
             && _variables[slot].Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
         {
             return slot;
@@ -1481,7 +1481,7 @@ internal sealed partial class Binder
                 }
 
                 // Locals enter scope only after their initializer, including in nested blocks.
-                var slot = AddVariable(name.Text, declaredType ?? initializer.Type, isMutable, name.Span);
+                var slot = AddVariable(name.Name, declaredType ?? initializer.Type, isMutable, name.Span);
                 return new BoundLocal(slot, initializer, node.Span);
             }
 
@@ -1495,7 +1495,7 @@ internal sealed partial class Binder
                 {
                     Report("TRM3023", "Native buffer views require an initialized lexical owner loan.", node.Span);
                 }
-                var slot = AddVariable(name.Text, type, false, name.Span);
+                var slot = AddVariable(name.Name, type, false, name.Span);
                 if (inferred)
                 {
                     _ = _unresolvedVacantLocals.Add(slot);
@@ -1555,10 +1555,10 @@ internal sealed partial class Binder
                 }
 
                 var token = ((SyntaxTokenElement)target.Children[0]).Token;
-                if (!TryFindVariable(token.Text, out var slot))
+                if (!TryFindVariable(token.Name, out var slot))
                 {
                     if (_hasReceiver && _currentStruct is not null
-                        && TryFindField(ResolveDeclaredType(_currentStruct), token.Text, out var ownField))
+                        && TryFindField(ResolveDeclaredType(_currentStruct), token.Name, out var ownField))
                     {
                         if (!_variables[0].IsMutable && !IsClass(_variables[0].Type))
                         {
@@ -1764,7 +1764,7 @@ internal sealed partial class Binder
             case SyntaxKind.LabeledLoopStatement:
             {
                 var labelToken = ((SyntaxTokenElement)node.Children[0]).Token;
-                var label = labelToken.Text;
+                var label = labelToken.Name;
                 if (_loops.Exists(loop => loop.Name == label))
                 {
                     Report("TRM3004", $"Loop label '{label}' already exists in an enclosing loop.",
@@ -1777,7 +1777,7 @@ internal sealed partial class Binder
             case SyntaxKind.ContinueStatement:
             {
                 var label = node.Children.Length == 3
-                    ? ((SyntaxTokenElement)node.Children[1]).Token.Text : null;
+                    ? ((SyntaxTokenElement)node.Children[1]).Token.Name : null;
                 var target = label is null ? _loops.Count - 1
                     : _loops.FindLastIndex(loop => loop.Name == label);
                 if (target < 0)
@@ -1947,9 +1947,9 @@ internal sealed partial class Binder
         if (root.Kind == SyntaxKind.NameExpression)
         {
             var name = ((SyntaxTokenElement)root.Children[0]).Token;
-            if (!TryFindVariable(name.Text, out variable)
+            if (!TryFindVariable(name.Name, out variable)
                 && _hasReceiver && _currentStruct is not null
-                && TryFindField(ResolveDeclaredType(_currentStruct), name.Text, out var ownField))
+                && TryFindField(ResolveDeclaredType(_currentStruct), name.Name, out var ownField))
             {
                 variable = 0;
                 fields.Add(ownField);
@@ -1973,7 +1973,7 @@ internal sealed partial class Binder
         var remainingMembers = members.Count;
         foreach (var member in members)
         {
-            if (!TryFindField(type, member.Text, out var field))
+            if (!TryFindField(type, member.Name, out var field))
             {
                 Report("TRM3008", $"Unknown field '{member.Text}' in assignment target.", member.Span);
                 _ = BindExpression(value, null);
@@ -2202,32 +2202,32 @@ internal sealed partial class Binder
                 var name = ((SyntaxTokenElement)node.Children[3]).Token;
                 var payload = ManagedClassTypes.IsOptional(source.Type)
                     ? ManagedClassTypes.Required(source.Type) : PrimitiveType.Int32;
-                var patternSlot = AddVariable(name.Text, payload, false, name.Span);
+                var patternSlot = AddVariable(name.Name, payload, false, name.Span);
                 expression = new BoundIsSome(source, patternSlot, node.Span);
                 break;
 
             case SyntaxKind.NameExpression:
             {
                 var token = ((SyntaxTokenElement)node.Children[0]).Token;
-                if (TryFindVariable(token.Text, out var slot))
+                if (TryFindVariable(token.Name, out var slot))
                 {
                     expression = new BoundRead(slot, _variables[slot].Type, node.Span);
                 }
                 else if (_hasReceiver && _currentStruct is not null
                     && _primitiveBackingFields.TryGetValue(_currentStruct, out var backing)
-                    && token.Text == backing)
+                    && token.Name == backing)
                 {
                     expression = new BoundRead(0, _variables[0].Type, node.Span);
                 }
                 else if (_hasReceiver && _currentStruct is not null
-                    && TryFindField(ResolveDeclaredType(_currentStruct), token.Text, out var field))
+                    && TryFindField(ResolveDeclaredType(_currentStruct), token.Name, out var field))
                 {
                     var structure = ResolveDeclaredType(_currentStruct);
                     expression = new BoundFieldRead(new BoundRead(0, _variables[0].Type, node.Span),
                         field, GetField(structure, field).Type, node.Span);
                 }
                 else if (_hasReceiver && _currentStruct is not null
-                    && TryFindGetter(ResolveDeclaredType(_currentStruct), token.Text, out var getter))
+                    && TryFindGetter(ResolveDeclaredType(_currentStruct), token.Name, out var getter))
                 {
                     expression = BindArguments(node, new SyntaxNode(SyntaxKind.ArgumentList, [], node.Span.End),
                         getter, null);
@@ -2249,7 +2249,7 @@ internal sealed partial class Binder
                     expression = new BoundConstant(_buffers[buffer].Values.Length, PrimitiveType.Int32, node.Span);
                     break;
                 }
-                var member = ((SyntaxTokenElement)node.Children[2]).Token.Text;
+                var member = ((SyntaxTokenElement)node.Children[2]).Token.Name;
                 var receiverNode = (SyntaxNode)node.Children[0];
                 var receiverType = KnownType(receiverNode);
                 if (_currentStruct is not null
@@ -2336,7 +2336,7 @@ internal sealed partial class Binder
                         operandNode = (SyntaxNode)operandNode.Children[1];
                     }
                     if (operandNode.Kind == SyntaxKind.NameExpression
-                        && TryFindVariable(((SyntaxTokenElement)operandNode.Children[0]).Token.Text, out var owner)
+                        && TryFindVariable(((SyntaxTokenElement)operandNode.Children[0]).Token.Name, out var owner)
                         && IsUnique(_variables[owner].Type) && (!_constructor || owner != 0))
                     {
                         expression = new BoundMove(owner, _variables[owner].Type, node.Span);
@@ -2734,13 +2734,13 @@ internal sealed partial class Binder
         if (callee.Kind == SyntaxKind.NameExpression)
         {
             var name = ((SyntaxTokenElement)callee.Children[0]).Token;
-            if (TryFindVariable(name.Text, out _))
+            if (TryFindVariable(name.Name, out _))
             {
                 Report("TRM3011", $"'{name.Text}' is a variable, not a function.", name.Span);
             }
-            else if (!TryFindFunction(name.Text, out function))
+            else if (!TryFindFunction(name.Name, out function))
             {
-                if (FindGenericTemplate(name.Text) is not null)
+                if (FindGenericTemplate(name.Name) is not null)
                 {
                     function = InstantiateGeneric(callee, (SyntaxNode)node.Children[1], expected);
                 }
@@ -2761,7 +2761,7 @@ internal sealed partial class Binder
         else if (callee.Kind == SyntaxKind.MemberAccessExpression)
         {
             var left = (SyntaxNode)callee.Children[0];
-            var member = ((SyntaxTokenElement)callee.Children[2]).Token.Text;
+            var member = ((SyntaxTokenElement)callee.Children[2]).Token.Name;
             var type = KnownType(left);
             if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
             {
@@ -2837,7 +2837,7 @@ internal sealed partial class Binder
         {
             return false;
         }
-        var name = ((SyntaxTokenElement)callee.Children[0]).Token.Text;
+        var name = ((SyntaxTokenElement)callee.Children[0]).Token.Name;
         if (TryFindVariable(name, out _) || TryFindFunction(name, out _))
         {
             return false;
@@ -2960,8 +2960,8 @@ internal sealed partial class Binder
                     bound.Add(ErrorExpression(argument.Span));
                     continue;
                 }
-                var slot = declares ? AddVariable(outName.Text, expectedParameter.Type, false, outName.Span)
-                    : TryFindVariable(outName.Text, out var existing) ? existing : -1;
+                var slot = declares ? AddVariable(outName.Name, expectedParameter.Type, false, outName.Span)
+                    : TryFindVariable(outName.Name, out var existing) ? existing : -1;
                 if (slot >= 0 && _unresolvedVacantLocals.Contains(slot) && isInit)
                 {
                     _variables[slot] = _variables[slot] with { Type = expectedParameter.Type };
@@ -3021,7 +3021,7 @@ internal sealed partial class Binder
             && ((SyntaxNode)node.Children[0]).Kind == SyntaxKind.NameExpression
             && ((SyntaxTokenElement)((SyntaxNode)node.Children[0]).Children[0]).Token.Text == "Host")
         {
-            var name = ((SyntaxTokenElement)node.Children[2]).Token.Text;
+            var name = ((SyntaxTokenElement)node.Children[2]).Token.Name;
             for (var i = 0; i < _buffers.Length; i++)
             {
                 if (_buffers[i].Name == name)
@@ -3201,7 +3201,7 @@ internal sealed partial class Binder
                 return PrimitiveType.Void;
             case SyntaxKind.NameExpression:
             {
-                var name = ((SyntaxTokenElement)node.Children[0]).Token.Text;
+                var name = ((SyntaxTokenElement)node.Children[0]).Token.Name;
                 if (TryFindVariable(name, out var slot))
                 {
                     return _unresolvedVacantLocals.Contains(slot) ? null : _variables[slot].Type;
@@ -3240,7 +3240,7 @@ internal sealed partial class Binder
                 }
                 if (callee.Kind == SyntaxKind.NameExpression)
                 {
-                    var name = ((SyntaxTokenElement)callee.Children[0]).Token.Text;
+                    var name = ((SyntaxTokenElement)callee.Children[0]).Token.Name;
                     if (!TryFindVariable(name, out _) && TryFindFunction(name, out var index))
                     {
                         return _signatures[index].ReturnType;
@@ -3258,7 +3258,7 @@ internal sealed partial class Binder
                 if (callee.Kind == SyntaxKind.MemberAccessExpression)
                 {
                     var left = (SyntaxNode)callee.Children[0];
-                    var member = ((SyntaxTokenElement)callee.Children[2]).Token.Text;
+                    var member = ((SyntaxTokenElement)callee.Children[2]).Token.Name;
                     var receiverType = KnownType(left);
                     if (receiverType == PrimitiveType.OwnedInt32Buffer && member is "Slice" or "SliceMutable")
                     {
@@ -3296,7 +3296,7 @@ internal sealed partial class Binder
                     return PrimitiveType.Int32;
                 }
                 var receiver = (SyntaxNode)node.Children[0];
-                var member = ((SyntaxTokenElement)node.Children[2]).Token.Text;
+                var member = ((SyntaxTokenElement)node.Children[2]).Token.Name;
                 var receiverType = KnownType(receiver);
                 if (_currentStruct is not null
                     && _primitiveBackingFields.TryGetValue(_currentStruct, out var backing)

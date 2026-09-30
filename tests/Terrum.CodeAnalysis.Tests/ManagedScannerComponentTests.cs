@@ -21,6 +21,42 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class ManagedScannerComponentTests
 {
     [Theory]
+    [InlineData("@await", true)]
+    [InlineData("@union", true)]
+    [InlineData("@ordinaryName", false)]
+    [InlineData("@int32", false)]
+    [InlineData("@out", false)]
+    [InlineData("x@await", false)]
+    [InlineData("@await_", false)]
+    [InlineData("@ await", false)]
+    [InlineData("@_", false)]
+    [InlineData("_", false)]
+    public async Task KeywordEscapeSnapshotsAuditHandAuthoredRecordsAsync(string text, bool valid)
+    {
+        var entry = $$"""
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                Host.Diagnostics[0] = 0;
+                Host.Tokens[0] = 2;
+                Host.Tokens[1] = 0;
+                Host.Tokens[2] = {{text.Length}};
+                Host.Tokens[3] = 0;
+                Host.Tokens[4] = {{text.Length}};
+                Host.Tokens[5] = 0;
+                if (TokenSnapshot.TryBuild(2, init var owned) != {{(valid ? "true" : "false")}}) { return 1; }
+                if (TryBuildManagedTokenChain(2, init var managed) != {{(valid ? "true" : "false")}}) { return 2; }
+                return 42;
+            }
+            """;
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var program = await CompileAsync(text, entry, (BoundRuntimePolicy)policy);
+            Assert.Equal(42, NativeJit.Execute(program, policy));
+            await ExecuteAotAsync(program, policy);
+        }
+    }
+
+    [Theory]
     [InlineData("", false)]
     [InlineData("// trivia\r\nalpha 42", false)]
     [InlineData("//* *// /// heading\nalpha", false)]

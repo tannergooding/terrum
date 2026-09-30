@@ -59,15 +59,30 @@ bool TryGetScalarType(Token type, out int32 scalarType)
 
 bool SameTokenSpelling(Token first, Token second)
 {
-    if (first.Kind != 2 || second.Kind != 2
-        || first.Range.Length != second.Range.Length)
+    // Snapshot validation already establishes valid escapes. Compare identity
+    // without changing the source-owned token ranges used by the projection.
+    if (first.Kind != 2 || second.Kind != 2)
     {
         return false;
     }
-    for (mut int32 index = 0; index < first.Range.Length; index = index + 1)
+    mut int32 firstStart = first.Range.Start;
+    mut int32 secondStart = second.Range.Start;
+    if (first.Range.Length > 0 && Host.Source[firstStart] == char16(64))
     {
-        if (Host.Source[first.Range.Start + index]
-            != Host.Source[second.Range.Start + index])
+        firstStart = firstStart + 1;
+    }
+    if (second.Range.Length > 0 && Host.Source[secondStart] == char16(64))
+    {
+        secondStart = secondStart + 1;
+    }
+    int32 length = first.Range.End - firstStart;
+    if (length != second.Range.End - secondStart)
+    {
+        return false;
+    }
+    for (mut int32 index = 0; index < length; index = index + 1)
+    {
+        if (Host.Source[firstStart + index] != Host.Source[secondStart + index])
         {
             return false;
         }

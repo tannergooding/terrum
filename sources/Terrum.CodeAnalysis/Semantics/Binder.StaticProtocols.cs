@@ -266,7 +266,7 @@ internal sealed partial class Binder
                     continue;
                 }
                 var name = ((SyntaxTokenElement)node.Children.First(element =>
-                    element is SyntaxTokenElement { Token.Kind: TokenKind.Identifier })).Token.Text;
+                    element is SyntaxTokenElement { Token.Kind: TokenKind.Identifier })).Token.Name;
                 if (TryPrimitiveType(name, out _))
                 {
                     Report("TRM3003", $"The primitive type '{name}' cannot be declared as an interface.", node.Span);
@@ -283,7 +283,7 @@ internal sealed partial class Binder
                 var variables = formalTokens
                     .Where(static child => child.Token.Kind == TokenKind.Identifier)
                     .Where(static child => child.Token.Text != "this")
-                    .Select(static child => child.Token.Text).ToArray();
+                    .Select(static child => child.Token.Name).ToArray();
                 if (variables.Any(static variable => TryPrimitiveType(variable, out _)))
                 {
                     Report("TRM3003", "Primitive type names cannot be used as interface type parameters.",
@@ -385,7 +385,7 @@ internal sealed partial class Binder
                 var protocolName = shape ? FindProtocol(head) : null;
                 if (protocolName is null
                     || !MatchesProtocolArguments(_protocols[protocolName], parts,
-                        StructName(declaration).Text, typeName))
+                        StructName(declaration).Name, typeName))
                 {
                     Report("TRM3007", "Conformance requires a distinct declared local protocol with exact operand and result types.", name.Span);
                     continue;
@@ -443,7 +443,7 @@ internal sealed partial class Binder
         var typeParameters = children.First(static child => child.Kind == SyntaxKind.TypeParameterList);
         var typeNames = typeParameters.Children.OfType<SyntaxTokenElement>()
             .Where(static child => child.Token.Kind == TokenKind.Identifier)
-            .Select(static child => child.Token.Text).ToArray();
+            .Select(static child => child.Token.Name).ToArray();
         if (typeNames.Any(static name => TryPrimitiveType(name, out _)))
         {
             Report("TRM3003", "Primitive type names cannot be used as type parameters.",
@@ -457,7 +457,7 @@ internal sealed partial class Binder
         var body = children.LastOrDefault(static child => child.Kind is SyntaxKind.Block or SyntaxKind.ExpressionBody);
         var nameToken = ((SyntaxTokenElement)declaration.Children.First(element =>
             element is SyntaxTokenElement { Token.Kind: TokenKind.Identifier })).Token;
-        var qualified = Qualify(nameToken.Text);
+        var qualified = Qualify(nameToken.Name);
         var arguments = parameters?.Children.OfType<SyntaxNode>().ToArray() ?? [];
         var parameterNames = new HashSet<string>(StringComparer.Ordinal);
         var templateParameters = ImmutableArray.CreateBuilder<GenericParameter>(arguments.Length);
@@ -495,7 +495,7 @@ internal sealed partial class Binder
                 || argumentType is null
                 || argument.Children[^1] is not SyntaxTokenElement argumentName
                 || argumentType.Kind != SyntaxKind.TypeName
-                || !parameterNames.Add(argumentName.Token.Text))
+                || !parameterNames.Add(argumentName.Token.Name))
             {
                 valid = false;
             }
@@ -508,19 +508,19 @@ internal sealed partial class Binder
                 {
                     valid = false;
                 }
-                templateParameters.Add(new GenericParameter(argumentName.Token.Text,
+                templateParameters.Add(new GenericParameter(argumentName.Token.Name,
                     index < 0 ? scalar : null, index, isOut || isInit, isInit));
             }
         }
         foreach (var constraint in children.Where(static child => child.Kind == SyntaxKind.ConstraintClause))
         {
             if (constraint.Children[1] is not SyntaxTokenElement formal
-                || !constrained.Add(formal.Token.Text))
+                || !constrained.Add(formal.Token.Name))
             {
                 valid = false;
                 continue;
             }
-            var index = Array.IndexOf(typeNames, formal.Token.Text);
+            var index = Array.IndexOf(typeNames, formal.Token.Name);
             if (index < 0)
             {
                 valid = false;
@@ -540,7 +540,7 @@ internal sealed partial class Binder
                 var shape = TryProtocolApplication(item, out var head, out var parts);
                 var protocol = shape ? FindProtocol(head) : null;
                 if (protocol is null || !MatchesProtocolArguments(_protocols[protocol], parts,
-                        formal.Token.Text)
+                        formal.Token.Name)
                     || operations[index].ContainsKey(_protocols[protocol].Key))
                 {
                     valid = false;
@@ -593,7 +593,7 @@ internal sealed partial class Binder
 
     private PrimitiveType? GenericCallType(SyntaxNode callee, SyntaxNode? callArguments = null)
     {
-        var name = ((SyntaxTokenElement)callee.Children[0]).Token.Text;
+        var name = ((SyntaxTokenElement)callee.Children[0]).Token.Name;
         if (TryFindVariable(name, out _) || FindGenericTemplate(name) is not GenericTemplate template)
         {
             return null;
@@ -709,7 +709,7 @@ internal sealed partial class Binder
     private int InstantiateGeneric(SyntaxNode callee, SyntaxNode? callArguments = null, PrimitiveType? expected = null)
     {
         _cancellationToken.ThrowIfCancellationRequested();
-        var name = ((SyntaxTokenElement)callee.Children[0]).Token.Text;
+        var name = ((SyntaxTokenElement)callee.Children[0]).Token.Name;
         if (TryFindVariable(name, out _))
         {
             Report("TRM3011", $"'{name}' is a variable, not a function.", callee.Span);
@@ -1007,7 +1007,7 @@ internal sealed partial class Binder
         var writable = tokens[0].Kind == TokenKind.WriteKeyword;
         var optional = tokens[^1].Kind == TokenKind.Question;
         var name = string.Join(".", tokens.Where(static token => token.Kind == TokenKind.Identifier)
-            .Select(static token => token.Text));
+            .Select(static token => token.Name));
         if (name.Length == 0)
         {
             return false;
@@ -1081,7 +1081,7 @@ internal sealed partial class Binder
         arguments = [.. type.Children.OfType<SyntaxNode>()];
         var tokens = type.Children.OfType<SyntaxTokenElement>().Select(static child => child.Token).ToArray();
         var open = Array.FindIndex(tokens, static token => token.Kind == TokenKind.Less);
-        head = open > 0 ? string.Concat(tokens.Take(open).Select(static token => token.Text)) : "";
+        head = open > 0 ? string.Concat(tokens.Take(open).Select(static token => token.Name)) : "";
         return type.Kind == SyntaxKind.TypeName && open > 0 && arguments.Length is 1 or 2 or 3
             && tokens[^1].Kind == TokenKind.Greater
             && NameText(type) == head + "<" + string.Join(",", arguments.Select(NameText)) + ">";

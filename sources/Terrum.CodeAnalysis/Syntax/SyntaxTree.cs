@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Syntax;
 public sealed class SyntaxTree
 {
     /// <summary>Identifies the syntax contract used by this parser.</summary>
-    public const string LanguageVersion = "syntax-37";
+    public const string LanguageVersion = "syntax-38";
 
     private readonly Dictionary<SyntaxToken, ScannerIntegerValue>? _decodedIntegers;
 
@@ -172,7 +172,8 @@ public sealed class SyntaxTree
             var token = lexResult.Tokens[index];
             if (token is null || token.IsMissing || !Enum.IsDefined(token.Kind) || token.LeadingTrivia.IsDefault
                 || token.Text is null
-                || (token.Kind == TokenKind.Identifier && token.Text == "_")
+                || (token.Kind == TokenKind.Identifier && (token.Text == "_"
+                    || (token.Text.Contains('@') && !IdentifierName.IsEscape(token.Text))))
                 || (token.Kind == TokenKind.Underscore && token.Text != "_"))
             {
                 throw new ArgumentException("Invalid lexical token.", nameof(lexResult));
@@ -201,6 +202,12 @@ public sealed class SyntaxTree
                 throw new ArgumentException("Invalid lexical token or source coverage.", nameof(lexResult));
             }
 
+            if (token.Text.StartsWith('@')
+                && (token.Span.Length != IdentifierName.EscapeLength(source.Text.AsSpan(position))
+                    || token.Kind != (IdentifierName.IsEscape(token.Text) ? TokenKind.Identifier : TokenKind.Bad)))
+            {
+                throw new ArgumentException("Lexical token contradicts the keyword escape profile.", nameof(lexResult));
+            }
             position = token.Span.End;
         }
 
