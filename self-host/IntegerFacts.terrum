@@ -47,3 +47,39 @@ bool CanNegateInt32(int32 value)
 {
     return value != int32.MinValue;
 }
+
+[ConstEval]
+bool CanAbsoluteInt32(int32 value)
+{
+    return value != int32.MinValue;
+}
+
+[ConstEval]
+bool CanAddUInt32(uint32 left, uint32 right)
+{
+    return left <= uint32.MaxValue - right;
+}
+
+[ConstEval]
+bool CanSubtractUInt32(uint32 left, uint32 right)
+{
+    return left >= right;
+}
+
+[ConstEval]
+bool CanMultiplyUInt32(uint32 left, uint32 right)
+{
+    return left == 0 || right <= uint32.MaxValue / left;
+}
+
+[ConstEval]
+bool CanDivideUInt32(uint32 left, uint32 right)
+{
+    return right != 0;
+}
+
+[ConstEval]
+bool CanRemainderUInt32(uint32 left, uint32 right)
+{
+    return right != 0;
+}
