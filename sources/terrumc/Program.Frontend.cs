@@ -233,7 +233,8 @@ internal static partial class Program
                     WriteFrontendExpression(writer, "whenTrue", frontend.WhenTrue);
                     if (!frontend.Nodes.IsDefault)
                     {
-                        writer.WriteNumber("projectionVersion", 20);
+                        writer.WriteNumber("projectionVersion",
+                            frontend.Statements.IsDefaultOrEmpty ? 20 : 21);
                         writer.WriteBoolean("expressionBody", frontend.IsExpressionBody);
                         writer.WriteNumber("conditionRoot", frontend.ConditionRoot);
                         writer.WriteNumber("trueRoot", frontend.TrueRoot);
@@ -252,6 +253,30 @@ internal static partial class Program
                             writer.WriteEndObject();
                         }
                         writer.WriteEndArray();
+                        if (!frontend.Statements.IsDefaultOrEmpty)
+                        {
+                            writer.WriteStartArray("locals");
+                            foreach (var local in frontend.Locals)
+                            {
+                                writer.WriteStartObject();
+                                writer.WriteNumber("type", local.Type);
+                                writer.WriteBoolean("mutable", local.IsMutable);
+                                WriteFrontendSpan(writer, "name", local.Name);
+                                writer.WriteEndObject();
+                            }
+                            writer.WriteEndArray();
+                            writer.WriteStartArray("statements");
+                            foreach (var statement in frontend.Statements)
+                            {
+                                writer.WriteStartObject();
+                                writer.WriteNumber("kind", statement.Kind);
+                                writer.WriteNumber("slot", statement.Slot);
+                                writer.WriteNumber("root", statement.Root);
+                                WriteFrontendSpan(writer, "span", statement.Span);
+                                writer.WriteEndObject();
+                            }
+                            writer.WriteEndArray();
+                        }
                     }
                 }
                 writer.WriteEndObject();

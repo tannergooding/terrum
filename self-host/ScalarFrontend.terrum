@@ -117,6 +117,8 @@ mut class ScalarFrontendState
     private mut int32 _thirdType;
     private mut int32 _parameterCount;
     private mut bool _isPublic;
+    private mut int32 _localCount;
+    private mut int32 _statementCount;
 
     public ScalarFrontendState(ManagedTokenChain tokens, SourceRange empty)
     {
@@ -132,6 +134,8 @@ mut class ScalarFrontendState
         _thirdType = 0;
         _parameterCount = 0;
         _isPublic = false;
+        _localCount = 0;
+        _statementCount = 0;
     }
 
     private mut void FailAt(int32 code, SourceRange span)
@@ -265,6 +269,19 @@ mut class ScalarFrontendState
             index = 3;
             type = _thirdType;
             return true;
+        }
+        for (mut int32 local = 0; local < _localCount; local = local + 1)
+        {
+            int32 offset = 300 + local * 4;
+            require SourceRange.TryCreate(Host.Frontend[offset + 2],
+                Host.Frontend[offset + 3], out var name);
+            Token candidate = new Token(2, name);
+            if (SameTokenSpelling(candidate, token))
+            {
+                index = _parameterCount + local + 1;
+                type = Host.Frontend[offset];
+                return true;
+            }
         }
         FailAt(3, token.Range);
         return false;
@@ -1437,6 +1454,133 @@ mut class ScalarFrontendState
         return true;
     }
 
+    private mut bool AddTreeStatement(int32 kind, int32 slot, int32 root,
+        int32 start, int32 end)
+    {
+        if (_statementCount >= 12)
+        {
+            Fail(1);
+            return false;
+        }
+        int32 offset = 332 + _statementCount * 5;
+        Host.Frontend[offset] = kind;
+        Host.Frontend[offset + 1] = slot;
+        Host.Frontend[offset + 2] = root;
+        Host.Frontend[offset + 3] = start;
+        Host.Frontend[offset + 4] = end - start;
+        _statementCount = _statementCount + 1;
+        Host.Frontend[298] = _statementCount;
+        return true;
+    }
+
+    private mut bool ParseTreeStatement()
+    {
+        require _tokens.TryGet(_at, out var first);
+        if (first.Kind == 2
+            && _tokens.TryGet(_at + 1, out var equals)
+            && equals.Kind == 64)
+        {
+            if (!TryResolveParameter(first, out var slot, out var type))
+            {
+                return false;
+            }
+            if (slot <= _parameterCount
+                || Host.Frontend[300 + (slot - _parameterCount - 1) * 4 + 1] == 0)
+            {
+                FailAt(2, first.Range);
+                return false;
+            }
+            _at = _at + 2;
+            if (!ParseTreeExpression(type, 1, 0, out var value)
+                || !ResolveTreeLiteral(value, type, false)
+                || !Take(52, out var end))
+            {
+                return false;
+            }
+            return AddTreeStatement(2, slot, value, first.Range.Start, end.Range.End);
+        }
+
+        mut bool mutable = false;
+        if (first.Kind == 13)
+        {
+            mutable = true;
+            _at = _at + 1;
+        }
+        require _tokens.TryGet(_at, out var declaredType);
+        mut int32 type = 0;
+        if (declaredType.Kind == 12)
+        {
+            _at = _at + 1;
+        }
+        else if (declaredType.Kind != 2)
+        {
+            FailAt(1, declaredType.Range);
+            return false;
+        }
+        else if (!TryGetScalarType(declaredType, out type))
+        {
+            FailAt(2, declaredType.Range);
+            return false;
+        }
+        else
+        {
+            _at = _at + 1;
+        }
+        if (!Take(2, out var name))
+        {
+            return false;
+        }
+        if (_parameterCount > 0 && SameTokenSpelling(_first, name)
+            || _parameterCount > 1 && SameTokenSpelling(_second, name)
+            || _parameterCount > 2 && SameTokenSpelling(_third, name))
+        {
+            FailAt(4, name.Range);
+            return false;
+        }
+        for (mut int32 local = 0; local < _localCount; local = local + 1)
+        {
+            int32 offset = 300 + local * 4;
+            require SourceRange.TryCreate(Host.Frontend[offset + 2],
+                Host.Frontend[offset + 3], out var oldName);
+            Token previous = new Token(2, oldName);
+            if (SameTokenSpelling(previous, name))
+            {
+                FailAt(4, name.Range);
+                return false;
+            }
+        }
+        if (_localCount >= 8)
+        {
+            FailAt(1, name.Range);
+            return false;
+        }
+        if (!Take(64, out var assignment)
+            || !ParseTreeExpression(type, 1, 0, out var initializer))
+        {
+            return false;
+        }
+        if (type == 0) { type = TreeWord(initializer, 1); }
+        if (type == 0)
+        {
+            return FailTreeType(initializer);
+        }
+        if (!ResolveTreeLiteral(initializer, type, false)
+            || !Take(52, out var endDeclaration))
+        {
+            return false;
+        }
+        int32 index = _localCount;
+        int32 offset = 300 + index * 4;
+        Host.Frontend[offset] = type;
+        if (mutable) { Host.Frontend[offset + 1] = 1; }
+        Host.Frontend[offset + 2] = name.Range.Start;
+        Host.Frontend[offset + 3] = name.Range.Length;
+        _localCount = index + 1;
+        Host.Frontend[299] = _localCount;
+        return AddTreeStatement(1, _parameterCount + index + 1, initializer,
+            first.Range.Start, endDeclaration.Range.End);
+    }
+
     private int32 TreePrecedence(int32 kind)
     {
         if (kind >= 59 && kind <= 61) { return 10; }
@@ -1778,8 +1922,19 @@ mut class ScalarFrontendState
             }
             else if (Take(48, out var openBody))
             {
-                require _tokens.TryGet(_at, out var next);
-                if (next.Kind == 16)
+                require _tokens.TryGet(_at, out var firstStatement);
+                mut Token next = firstStatement;
+                while ((next.Kind == 12 || next.Kind == 13
+                    || next.Kind == 2)
+                    && _error == 0)
+                {
+                    if (!ParseTreeStatement())
+                    {
+                        break;
+                    }
+                    require _tokens.TryGet(_at, out next);
+                }
+                if (_error == 0 && next.Kind == 16)
                 {
                     hasCondition = true;
                     _at = _at + 1;
@@ -1818,7 +1973,7 @@ mut class ScalarFrontendState
                         }
                     }
                 }
-                else if (ParseTreeReturn(returnType, out var found))
+                else if (_error == 0 && ParseTreeReturn(returnType, out var found))
                 {
                     whenTrue = found;
                 }
@@ -1988,7 +2143,8 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     for (mut int32 index = 0; index < count; index = index + 1)
     {
         require chain.TryGet(index, out var token);
-        if (token.Kind == 82)
+        if (token.Kind == 82 || token.Kind == 12 || token.Kind == 13
+            || token.Kind == 64)
         {
             result = modern;
             return true;

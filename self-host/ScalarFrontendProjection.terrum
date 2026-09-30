@@ -4,6 +4,9 @@ namespace Terrum.CodeAnalysis;
 // condition/true/false roots (-1 when absent), and expression-body flag.
 // Each of 32 postorder nodes uses eight words: opcode, type, span start/length,
 // child/parameter, right child, and contextual magnitude low/high.
+// Version 21 adds 12 ordered statement records and eight local declarations:
+// words 298/299 count statements/locals; 300..331 hold (type, mut, name start,
+// name length); 332..391 hold (kind, slot, root, span start, span length).
 void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expression)
 {
     Host.Frontend[offset] = expression.Type;
@@ -16,7 +19,7 @@ void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expres
 
 bool TryPublishScalarFrontend()
 {
-    if (Host.Frontend.Length != 298 || !TryScanScalarFrontend(out var result))
+    if (Host.Frontend.Length != 392 || !TryScanScalarFrontend(out var result))
     {
         return false;
     }
@@ -35,6 +38,7 @@ bool TryPublishScalarFrontend()
     if (Host.Frontend[37] != 0)
     {
         Host.Frontend[0] = 20;
+        if (Host.Frontend[298] != 0) { Host.Frontend[0] = 21; }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {
