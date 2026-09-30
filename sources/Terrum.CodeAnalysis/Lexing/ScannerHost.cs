@@ -42,6 +42,14 @@ public static class ScannerHost
         (TokenKind.GreaterEquals, ">="), (TokenKind.Ampersand, "&"),
         (TokenKind.AmpersandAmpersand, "&&"), (TokenKind.Pipe, "|"),
         (TokenKind.PipePipe, "||"), (TokenKind.Caret, "^"),
+        (TokenKind.ShiftLeft, "<<"), (TokenKind.ShiftRight, ">>"),
+        (TokenKind.ShiftRightUnsigned, ">>>"),
+        (TokenKind.PlusEquals, "+="), (TokenKind.MinusEquals, "-="),
+        (TokenKind.StarEquals, "*="), (TokenKind.SlashEquals, "/="),
+        (TokenKind.PercentEquals, "%="), (TokenKind.AmpersandEquals, "&="),
+        (TokenKind.PipeEquals, "|="), (TokenKind.CaretEquals, "^="),
+        (TokenKind.ShiftLeftEquals, "<<="), (TokenKind.ShiftRightEquals, ">>="),
+        (TokenKind.ShiftRightUnsignedEquals, ">>>="),
     ];
 
     private static readonly ImmutableArray<int> s_keywords = CreateKeywords();

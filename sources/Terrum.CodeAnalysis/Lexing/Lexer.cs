@@ -213,19 +213,29 @@ public sealed class Lexer
                 }
                 return TokenKind.Question;
             case '+':
-                return Compound('+', TokenKind.PlusPlus, TokenKind.Plus);
+                if (!AtEnd && Current == '+')
+                {
+                    _position++;
+                    return TokenKind.PlusPlus;
+                }
+                return Compound('=', TokenKind.PlusEquals, TokenKind.Plus);
             case '-':
-                return Compound('-', TokenKind.MinusMinus, TokenKind.Minus);
+                if (!AtEnd && Current == '-')
+                {
+                    _position++;
+                    return TokenKind.MinusMinus;
+                }
+                return Compound('=', TokenKind.MinusEquals, TokenKind.Minus);
             case '*':
-                return TokenKind.Star;
+                return Compound('=', TokenKind.StarEquals, TokenKind.Star);
             case '/':
-                return TokenKind.Slash;
+                return Compound('=', TokenKind.SlashEquals, TokenKind.Slash);
             case '%':
-                return TokenKind.Percent;
+                return Compound('=', TokenKind.PercentEquals, TokenKind.Percent);
             case '~':
                 return TokenKind.Tilde;
             case '^':
-                return TokenKind.Caret;
+                return Compound('=', TokenKind.CaretEquals, TokenKind.Caret);
             case '!':
                 return Compound('=', TokenKind.BangEquals, TokenKind.Bang);
             case '=':
@@ -236,13 +246,38 @@ public sealed class Lexer
                 }
                 return Compound('=', TokenKind.EqualsEquals, TokenKind.Equals);
             case '<':
+                if (!AtEnd && Current == '<')
+                {
+                    _position++;
+                    return Compound('=', TokenKind.ShiftLeftEquals, TokenKind.ShiftLeft);
+                }
                 return Compound('=', TokenKind.LessEquals, TokenKind.Less);
             case '>':
+                if (!AtEnd && Current == '>')
+                {
+                    _position++;
+                    if (!AtEnd && Current == '>')
+                    {
+                        _position++;
+                        return Compound('=', TokenKind.ShiftRightUnsignedEquals, TokenKind.ShiftRightUnsigned);
+                    }
+                    return Compound('=', TokenKind.ShiftRightEquals, TokenKind.ShiftRight);
+                }
                 return Compound('=', TokenKind.GreaterEquals, TokenKind.Greater);
             case '&':
-                return Compound('&', TokenKind.AmpersandAmpersand, TokenKind.Ampersand);
+                if (!AtEnd && Current == '&')
+                {
+                    _position++;
+                    return TokenKind.AmpersandAmpersand;
+                }
+                return Compound('=', TokenKind.AmpersandEquals, TokenKind.Ampersand);
             case '|':
-                return Compound('|', TokenKind.PipePipe, TokenKind.Pipe);
+                if (!AtEnd && Current == '|')
+                {
+                    _position++;
+                    return TokenKind.PipePipe;
+                }
+                return Compound('=', TokenKind.PipeEquals, TokenKind.Pipe);
             default:
                 if (char.IsHighSurrogate(_source[start]) && !AtEnd && char.IsLowSurrogate(Current))
                 {

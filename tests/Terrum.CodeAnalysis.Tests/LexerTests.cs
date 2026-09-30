@@ -248,10 +248,10 @@ public sealed class LexerTests
     }
 
     [Fact]
-    public void RecognizesOperatorsWithoutMergingGenericClosers()
+    public void RecognizesOperatorsBeforeContextualGenericCloserSplitting()
     {
         var result = Lexer.Lex(SourceText.From(">> >= && & || | == = != !"));
-        Assert.Equal(new[] { TokenKind.Greater, TokenKind.Greater, TokenKind.GreaterEquals,
+        Assert.Equal(new[] { TokenKind.ShiftRight, TokenKind.GreaterEquals,
                              TokenKind.AmpersandAmpersand, TokenKind.Ampersand, TokenKind.PipePipe,
                              TokenKind.Pipe, TokenKind.EqualsEquals, TokenKind.Equals,
                              TokenKind.BangEquals, TokenKind.Bang, TokenKind.EndOfFile },

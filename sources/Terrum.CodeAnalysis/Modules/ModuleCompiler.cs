@@ -50,6 +50,7 @@ public static partial class ModuleCompiler
     private const int CoalescingVersion = 42;
     private const int UpdateVersion = 43;
     private const int NominalUpdateVersion = 44;
+    private const int CompoundAssignmentVersion = 45;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -831,7 +832,8 @@ public static partial class ModuleCompiler
         Action<BoundMutableFieldLoan>? visitMutableFieldLoan = null,
         Action<BoundStatement>? visitStructuredLoop = null, Action<BoundVacantLocal>? visitVacantLocal = null,
         Action<BoundConditional>? visitConditional = null, Action? visitCoalesce = null,
-        Action? visitUpdate = null, Action? visitNominalUpdate = null)
+        Action? visitUpdate = null, Action? visitNominalUpdate = null,
+        Action? visitCompoundAssignment = null)
     {
         var calls = new List<int>();
         VisitStatement(body);
@@ -961,6 +963,11 @@ public static partial class ModuleCompiler
                     visitUpdate?.Invoke();
                     VisitExpression(update.Place);
                     break;
+                case BoundCompoundAssignment compound:
+                    visitCompoundAssignment?.Invoke();
+                    VisitExpression(compound.Place);
+                    VisitExpression(compound.Right);
+                    break;
                 case BoundNominalUpdate update:
                     visitNominalUpdate?.Invoke();
                     calls.Add(update.Function);
@@ -971,6 +978,10 @@ public static partial class ModuleCompiler
                     VisitExpression(update.Place);
                     break;
                 case BoundBinary binary:
+                    if (binary.Operator is TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned)
+                    {
+                        visitCompoundAssignment?.Invoke();
+                    }
                     VisitExpression(binary.Left);
                     VisitExpression(binary.Right);
                     break;
@@ -1065,6 +1076,13 @@ public static partial class ModuleCompiler
     {
         var found = false;
         _ = Calls(body, visitNominalUpdate: () => found = true);
+        return found;
+    }
+
+    private static bool HasCompoundAssignment(BoundStatement body)
+    {
+        var found = false;
+        _ = Calls(body, visitCompoundAssignment: () => found = true);
         return found;
     }
 
@@ -1391,6 +1409,11 @@ public static partial class ModuleCompiler
                 Type = RemapType(update.Type, source, destination, classOffset),
                 Place = RemapExpression(update.Place, source, destination, classOffset),
             },
+            BoundCompoundAssignment compound => compound with {
+                Type = RemapType(compound.Type, source, destination, classOffset),
+                Place = RemapExpression(compound.Place, source, destination, classOffset),
+                Right = RemapExpression(compound.Right, source, destination, classOffset),
+            },
             BoundNominalUpdate update => update with {
                 Type = RemapType(update.Type, source, destination, classOffset),
                 Place = RemapExpression(update.Place, source, destination, classOffset),
@@ -1608,6 +1631,11 @@ public static partial class ModuleCompiler
             && HasNominalUpdate(function.Body)))
         {
             version = Math.Max(version, NominalUpdateVersion);
+        }
+        if (module.Functions.Any(item => item.Function is BoundFunction function
+            && HasCompoundAssignment(function.Body)))
+        {
+            version = Math.Max(version, CompoundAssignmentVersion);
         }
         writer.Write(Magic);
         writer.Write(version);
@@ -1845,6 +1873,13 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Nominal update expressions require semantic module version 44.");
             }
+            if (version < CompoundAssignmentVersion && items.Any(item => item.Function is BoundFunction function
+                && HasCompoundAssignment(function.Body))
+                || version == CompoundAssignmentVersion && !items.Any(item => item.Function is BoundFunction function
+                    && HasCompoundAssignment(function.Body)))
+            {
+                throw new ModuleFormatException("Compound assignments and shifts require semantic module version 45.");
+            }
             if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
                 || !items.Any(static item => item.Import && item.Function is BoundFunction function
                     && !ManagedExportShape.ScalarOnly(function))))
@@ -1899,7 +1934,7 @@ public static partial class ModuleCompiler
             or ManagedGraphParticipantVersion or PrivateInitReferenceVersion or ExplicitGetterVersion
             or TransparentLayoutVersion or WideClassFieldsVersion or CorePrimitiveVersion
             or CorePrimitiveGetterVersion or StructuredLoopVersion or VacantLocalVersion or ConditionalVersion
-            or CoalescingVersion or UpdateVersion or NominalUpdateVersion))
+            or CoalescingVersion or UpdateVersion or NominalUpdateVersion or CompoundAssignmentVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -2567,6 +2602,7 @@ public static partial class ModuleCompiler
             BoundUnary => (byte)3,
             BoundUpdate => (byte)24,
             BoundNominalUpdate => (byte)25,
+            BoundCompoundAssignment => (byte)26,
             BoundBinary => (byte)4,
             BoundConditional => (byte)22,
             BoundCoalesce => (byte)23,
@@ -2644,6 +2680,11 @@ public static partial class ModuleCompiler
                 writer.Write((int)update.Operator);
                 writer.Write(update.IsPrefix);
                 PutExpression(writer, update.Place, names, ref remaining, depth + 1);
+                break;
+            case BoundCompoundAssignment compound:
+                writer.Write((int)compound.Operator);
+                PutExpression(writer, compound.Place, names, ref remaining, depth + 1);
+                PutExpression(writer, compound.Right, names, ref remaining, depth + 1);
                 break;
             case BoundNominalUpdate update:
                 writer.Write((int)update.Operator);
@@ -2723,6 +2764,11 @@ public static partial class ModuleCompiler
                 var prefix = reader.ReadBoolean();
                 return new BoundUpdate(updateOperator, GetExpression(reader, ref remaining, depth + 1, version),
                     prefix, type, span);
+            case 26 when version >= CompoundAssignmentVersion:
+                var compoundOperator = (TokenKind)reader.ReadInt32();
+                var compoundPlace = GetExpression(reader, ref remaining, depth + 1, version);
+                return new BoundCompoundAssignment(compoundOperator, compoundPlace,
+                    GetExpression(reader, ref remaining, depth + 1, version), type, span);
             case 25 when version >= NominalUpdateVersion:
                 var nominalOperator = (TokenKind)reader.ReadInt32();
                 var nominalPrefix = reader.ReadBoolean();
@@ -2858,6 +2904,10 @@ public static partial class ModuleCompiler
             : throw new ModuleContractException($"Unresolved call target '{call.Name}'."),
         BoundUnary unary => unary with { Operand = ResolveExpression(unary.Operand, names) },
         BoundUpdate update => update with { Place = ResolveExpression(update.Place, names) },
+        BoundCompoundAssignment compound => compound with {
+            Place = ResolveExpression(compound.Place, names),
+            Right = ResolveExpression(compound.Right, names),
+        },
         SymbolicNominalUpdate update => names.TryGetValue(update.Name, out var method)
             ? new BoundNominalUpdate(update.Operator, ResolveExpression(update.Place, names),
                 update.IsPrefix, method, update.Type, update.Span)

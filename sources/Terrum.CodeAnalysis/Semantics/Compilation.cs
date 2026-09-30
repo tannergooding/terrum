@@ -230,6 +230,10 @@ public sealed class Compilation
                         case BoundUpdate update:
                             expressions.Push(update.Place);
                             break;
+                        case BoundCompoundAssignment compound:
+                            expressions.Push(compound.Place);
+                            expressions.Push(compound.Right);
+                            break;
                         case BoundNominalUpdate update:
                             expressions.Push(update.Place);
                             break;

@@ -1585,6 +1585,33 @@ internal sealed partial class Binder
                 return new BoundAssignment(slot, BindExpression(valueNode, _variables[slot].Type), node.Span);
             }
 
+            case SyntaxKind.CompoundAssignmentStatement:
+            {
+                var target = (SyntaxNode)node.Children[0];
+                while (target.Kind == SyntaxKind.ParenthesizedExpression)
+                {
+                    target = (SyntaxNode)target.Children[1];
+                }
+                var op = ((SyntaxTokenElement)node.Children[1]).Token;
+                var place = BindExpression(target, null);
+                if (place.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32
+                    or PrimitiveType.Int64 or PrimitiveType.UInt64))
+                {
+                    Report("TRM3007", "Built-in compound assignment requires an integer place; nominal compound operators are unsupported.", op.Span);
+                }
+                CheckWritableUpdatePlace(place, target.Span);
+                var right = BindExpression((SyntaxNode)node.Children[2],
+                    op.Kind is TokenKind.ShiftLeftEquals or TokenKind.ShiftRightEquals or TokenKind.ShiftRightUnsignedEquals
+                        ? PrimitiveType.Int32 : place.Type);
+                if (right.Type != (op.Kind is TokenKind.ShiftLeftEquals or TokenKind.ShiftRightEquals
+                    or TokenKind.ShiftRightUnsignedEquals ? PrimitiveType.Int32 : place.Type))
+                {
+                    Report("TRM3007", "Compound assignment requires an exact operand type.", op.Span);
+                }
+                return new BoundExpressionStatement(
+                    new BoundCompoundAssignment(op.Kind, place, right, place.Type, node.Span), node.Span);
+            }
+
             case SyntaxKind.ExpressionStatement:
             {
                 var expressionNode = (SyntaxNode)node.Children[0];
@@ -1985,6 +2012,31 @@ internal sealed partial class Binder
         };
     }
 
+    private void CheckWritableUpdatePlace(BoundExpression place, TextSpan span)
+    {
+        switch (place)
+        {
+            case BoundRead local:
+                if (!_variables[local.Variable].IsMutable || local.Variable == 0 && _hasReceiver)
+                {
+                    Report("TRM3008", "Update requires a mutable local, not a receiver or immutable slot.", span);
+                }
+                break;
+            case BoundFieldRead field:
+                CheckUpdateFieldPlace(field);
+                break;
+            case BoundBufferRead buffer:
+                if (!_buffers[buffer.Buffer].IsWritable)
+                {
+                    Report("TRM3008", "Update requires a writable host buffer.", span);
+                }
+                break;
+            default:
+                Report("TRM3008", "Update requires an initialized writable place, not a getter or temporary.", span);
+                break;
+        }
+    }
+
     private void CheckUpdateFieldPlace(BoundFieldRead place)
     {
         var receiver = place.Receiver;
@@ -2373,27 +2425,7 @@ internal sealed partial class Binder
                 {
                     Report("TRM3007", "Increment and decrement require a Copy integer or Copy struct place.", updateTarget.Span);
                 }
-                switch (place)
-                {
-                    case BoundRead local:
-                        if (!_variables[local.Variable].IsMutable || local.Variable == 0 && _hasReceiver)
-                        {
-                            Report("TRM3008", "Update requires a mutable local, not a receiver or immutable slot.", updateTarget.Span);
-                        }
-                        break;
-                    case BoundFieldRead field:
-                        CheckUpdateFieldPlace(field);
-                        break;
-                    case BoundBufferRead buffer:
-                        if (!_buffers[buffer.Buffer].IsWritable)
-                        {
-                            Report("TRM3008", "Update requires a writable host buffer.", updateTarget.Span);
-                        }
-                        break;
-                    default:
-                        Report("TRM3008", "Update requires an initialized writable place, not a getter or temporary.", updateTarget.Span);
-                        break;
-                }
+                CheckWritableUpdatePlace(place, updateTarget.Span);
                 if (nominal)
                 {
                     var operatorName = _structs[(int)place.Type - 100].Name + "."
@@ -2623,6 +2655,19 @@ internal sealed partial class Binder
                 }
                 break;
 
+            case TokenKind.ShiftLeft:
+            case TokenKind.ShiftRight:
+            case TokenKind.ShiftRightUnsigned:
+                operandType = leftKnown ?? (expected is PrimitiveType.Int32 or PrimitiveType.UInt32
+                    or PrimitiveType.Int64 or PrimitiveType.UInt64 ? expected : null);
+                resultType = operandType ?? PrimitiveType.Int32;
+                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32
+                    or PrimitiveType.Int64 or PrimitiveType.UInt64))
+                {
+                    Report("TRM3007", "Shifts require a known integer left operand.", op.Span);
+                }
+                break;
+
             case TokenKind.Less:
             case TokenKind.LessEquals:
             case TokenKind.Greater:
@@ -2670,8 +2715,10 @@ internal sealed partial class Binder
         }
 
         var left = BindExpression(leftNode, operandType);
-        var right = BindExpression(rightNode, operandType);
-        if (operandType is null || left.Type != right.Type || operandType == PrimitiveType.Void)
+        var shift = op.Kind is TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned;
+        var right = BindExpression(rightNode, shift ? PrimitiveType.Int32 : operandType);
+        if (operandType is null || left.Type != operandType
+            || right.Type != (shift ? PrimitiveType.Int32 : operandType) || operandType == PrimitiveType.Void)
         {
             Report("TRM3007", "Binary operands must have the same supported type.", op.Span);
         }

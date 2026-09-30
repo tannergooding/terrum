@@ -156,6 +156,20 @@ public sealed class PrelexedSyntaxTests
         _ = Assert.Throws<OperationCanceledException>(() => SyntaxTree.Parse(lexResult, cancellation.Token));
     }
 
+    [Fact]
+    public void SuppliedShiftClassificationWithDifferentTextDoesNotSplitSource()
+    {
+        var lex = Lexer.Lex(SourceText.From("void F(Box<Box<int32 x value) {}"));
+        var index = Enumerable.Range(0, lex.Tokens.Length).Single(i => lex.Tokens[i].Text == "x");
+        var token = lex.Tokens[index];
+        var classified = ForgeToken(TokenKind.ShiftRight, token.Text, token.Span, token.LeadingTrivia);
+        var tree = SyntaxTree.Parse(lex with { Tokens = lex.Tokens.SetItem(index, classified) });
+        Assert.True(tree.HasErrors);
+        Assert.Equal(lex.Source.Text, tree.Root.ToFullString());
+        Assert.Same(classified, tree.Tokens[index]);
+        Assert.Contains(classified, tree.Root.DescendantTokens());
+    }
+
     private static LexResult WithFirstToken(LexResult result, SyntaxToken token)
         => result with { Tokens = result.Tokens.SetItem(0, token) };
 

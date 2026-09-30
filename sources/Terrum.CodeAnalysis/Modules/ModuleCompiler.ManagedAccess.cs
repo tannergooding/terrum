@@ -136,6 +136,10 @@ public static partial class ModuleCompiler
             },
             BoundUnary unary => unary with { Type = type, Operand = LegacyExpression(unary.Operand) },
             BoundUpdate update => update with { Type = type, Place = LegacyExpression(update.Place) },
+            BoundCompoundAssignment compound => compound with {
+                Type = type, Place = LegacyExpression(compound.Place),
+                Right = LegacyExpression(compound.Right),
+            },
             BoundNominalUpdate update => update with { Type = type, Place = LegacyExpression(update.Place) },
             SymbolicNominalUpdate update => update with { Type = type, Place = LegacyExpression(update.Place) },
             BoundBinary binary => binary with {

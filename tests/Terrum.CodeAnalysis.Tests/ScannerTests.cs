@@ -136,7 +136,8 @@ public sealed class ScannerTests
     [Fact]
     public async Task EveryOperatorAndTriviaFormExecutesNativelyAsync()
     {
-        const string Operators = "_ ( ) { } [ ] ; , . : ? ?? ??= + - ++ -- * / % ! ~ = == => != < <= > >= & && | || ^";
+        const string Operators = "_ ( ) { } [ ] ; , . : ? ?? ??= + - ++ -- * / % ! ~ = == => != < <= > >= & && | || ^"
+            + " << >> >>> += -= *= /= %= &= |= ^= <<= >>= >>>=";
         var lexed = Lexer.Lex(SourceText.From(Operators));
         var actual = lexed.Tokens.Select(token => token.Kind).ToHashSet();
         foreach (var kind in Enum.GetValues<TokenKind>())
@@ -274,7 +275,7 @@ public sealed class ScannerTests
 
     [Theory]
     [InlineData(0, 0, 0)]
-    [InlineData(100, 0, 1)]
+    [InlineData(int.MaxValue, 0, 1)]
     [InlineData(1, -1, 1)]
     [InlineData(1, 0, 2)]
     [InlineData(1, 0, 0)]

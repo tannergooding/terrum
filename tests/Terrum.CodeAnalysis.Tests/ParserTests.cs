@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Text;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -17,7 +18,7 @@ public sealed class ParserTests
         const string Source = "int32 Main() { _ /* destination */ = int32(42); return 42; }";
         var tree = SyntaxTree.Parse(Source);
         Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal("syntax-35", SyntaxTree.LanguageVersion);
+        Assert.Equal("syntax-36", SyntaxTree.LanguageVersion);
         var discard = Assert.Single(tree.Root.DescendantNodes(), static node => node.Kind == SyntaxKind.DiscardStatement);
         Assert.Equal(TokenKind.Underscore, Assert.IsType<SyntaxTokenElement>(discard.Children[0]).Token.Kind);
         Assert.Equal(TokenKind.Equals, Assert.IsType<SyntaxTokenElement>(discard.Children[1]).Token.Kind);
@@ -201,6 +202,9 @@ public sealed class ParserTests
     [InlineData("List<int32?>?")]
     [InlineData("Map<T?, List<int32?>?>?")]
     [InlineData("Option<Option<int32>>")]
+    [InlineData("Option<Option<Option<int32>>>")]
+    [InlineData("Option<Option<Option<Option<int32>>>>")]
+    [InlineData("Option<Option<int32 /* close */ >>")]
     public void AllowsOptionalModifiersAtSeparateNestingLevels(string type)
     {
         var tree = SyntaxTree.Parse("void F(" + type + " value) {}");
@@ -328,7 +332,28 @@ public sealed class ParserTests
     private static void AssertLossless(SyntaxTree tree)
     {
         Assert.Equal(tree.Source.Text, tree.Root.ToFullString());
-        Assert.Equal(tree.Tokens.ToArray(), [.. tree.Root.DescendantTokens().Where(token => !token.IsMissing)]);
+        var parsed = tree.Root.DescendantTokens().Where(token => !token.IsMissing).ToArray();
+        var at = 0;
+        foreach (var lexical in tree.Tokens)
+        {
+            if (lexical.Kind is TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned
+                && parsed[at].Kind == TokenKind.Greater)
+            {
+                for (var part = 0; part < lexical.Text.Length; part++)
+                {
+                    var token = parsed[at++];
+                    Assert.Equal(TokenKind.Greater, token.Kind);
+                    Assert.Equal(">", token.Text);
+                    Assert.Equal(new TextSpan(lexical.Span.Start + part, 1), token.Span);
+                    Assert.Equal(part == 0 ? lexical.LeadingTrivia : [], token.LeadingTrivia);
+                }
+            }
+            else
+            {
+                Assert.Same(lexical, parsed[at++]);
+            }
+        }
+        Assert.Equal(parsed.Length, at);
         Assert.Equal(0, tree.Root.FullSpan.Start);
         Assert.Equal(tree.Source.Length, tree.Root.FullSpan.End);
 

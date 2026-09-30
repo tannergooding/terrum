@@ -19,6 +19,7 @@ internal sealed class Parser
     private readonly List<Diagnostic> _diagnostics = [];
     private int _position;
     private int _depth;
+    private int _pendingGreater;
 
     internal Parser(ImmutableArray<SyntaxToken> tokens, CancellationToken cancellationToken)
     {
@@ -122,6 +123,21 @@ internal sealed class Parser
                 {
                     return Peek(offset + 1).Kind == TokenKind.OpenParen;
                 }
+            }
+            else if (kind is TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned)
+            {
+                var count = kind == TokenKind.ShiftRight ? 2 : 3;
+                if (depth < count || previous is not (TokenKind.Identifier or TokenKind.VoidKeyword
+                    or TokenKind.Greater or TokenKind.Question or TokenKind.QuestionQuestion))
+                {
+                    return false;
+                }
+                depth -= count;
+                if (depth == 0)
+                {
+                    return Peek(offset + 1).Kind == TokenKind.OpenParen;
+                }
+                kind = TokenKind.Greater;
             }
             else if (kind is TokenKind.Identifier or TokenKind.VoidKeyword)
             {
@@ -803,7 +819,12 @@ internal sealed class Parser
     private SyntaxNode ParseExpressionStatement(bool semicolon = true)
     {
         var children = new List<SyntaxElement> { ParseExpression() };
-        var assignment = Current.Kind is TokenKind.Equals or TokenKind.QuestionQuestionEquals;
+        var assignment = Current.Kind is TokenKind.Equals or TokenKind.QuestionQuestionEquals
+            or TokenKind.PlusEquals or TokenKind.MinusEquals or TokenKind.StarEquals
+            or TokenKind.SlashEquals or TokenKind.PercentEquals or TokenKind.AmpersandEquals
+            or TokenKind.PipeEquals or TokenKind.CaretEquals or TokenKind.ShiftLeftEquals
+            or TokenKind.ShiftRightEquals or TokenKind.ShiftRightUnsignedEquals;
+        var compound = assignment && Current.Kind is not (TokenKind.Equals or TokenKind.QuestionQuestionEquals);
 
         if (assignment)
         {
@@ -816,7 +837,8 @@ internal sealed class Parser
             children.Add(Expect(TokenKind.Semicolon));
         }
 
-        return Node(assignment ? SyntaxKind.AssignmentStatement : SyntaxKind.ExpressionStatement, children);
+        return Node(compound ? SyntaxKind.CompoundAssignmentStatement
+            : assignment ? SyntaxKind.AssignmentStatement : SyntaxKind.ExpressionStatement, children);
     }
 
     private SyntaxNode ParseLocal(bool semicolon = true)
@@ -897,6 +919,14 @@ internal sealed class Parser
                 {
                     nesting--;
                 }
+                else if (kind is TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned)
+                {
+                    nesting -= kind == TokenKind.ShiftRight ? 2 : 3;
+                    if (nesting < 0)
+                    {
+                        return false;
+                    }
+                }
                 else if (kind is not (TokenKind.Identifier or TokenKind.VoidKeyword or TokenKind.Comma or TokenKind.Dot or TokenKind.Question or TokenKind.QuestionQuestion))
                 {
                     return false;
@@ -920,13 +950,13 @@ internal sealed class Parser
         var unaryPrecedence = UnaryPrecedence(Current.Kind);
 
         if (Current.Kind == TokenKind.Identifier && Current.Text == "const"
-            && 12 >= parentPrecedence && (Peek(1).Kind is TokenKind.Identifier
+            && 13 >= parentPrecedence && (Peek(1).Kind is TokenKind.Identifier
                 or TokenKind.NumericLiteral or TokenKind.StringLiteral
                 or TokenKind.TrueKeyword or TokenKind.FalseKeyword or TokenKind.NullKeyword
                 or TokenKind.NewKeyword or TokenKind.MoveKeyword or TokenKind.Bang or TokenKind.Tilde
                 || (Peek(1).Kind == TokenKind.OpenParen && Peek(1).Span.Start > Current.Span.End)))
         {
-            left = Node(SyntaxKind.ConstExpression, [Take(), ParseExpression(12)]);
+            left = Node(SyntaxKind.ConstExpression, [Take(), ParseExpression(13)]);
         }
         else if (unaryPrecedence != 0 && unaryPrecedence >= parentPrecedence)
         {
@@ -1145,6 +1175,12 @@ internal sealed class Parser
 
     private SyntaxTokenElement Expect(TokenKind kind)
     {
+        if (kind == TokenKind.Greater && _pendingGreater == 0
+            && Current.Kind is TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned
+            && Current.Text == (Current.Kind == TokenKind.ShiftRight ? ">>" : ">>>"))
+        {
+            _pendingGreater = Current.Kind == TokenKind.ShiftRight ? 2 : 3;
+        }
         if (Current.Kind == kind)
         {
             return Take();
@@ -1162,7 +1198,15 @@ internal sealed class Parser
         _cancellationToken.ThrowIfCancellationRequested();
         var token = Current;
 
-        if (_position < _tokens.Length - 1)
+        if (_pendingGreater > 0)
+        {
+            _pendingGreater--;
+            if (_pendingGreater == 0)
+            {
+                _position++;
+            }
+        }
+        else if (_position < _tokens.Length - 1)
         {
             _position++;
         }
@@ -1170,7 +1214,22 @@ internal sealed class Parser
         return new SyntaxTokenElement(token);
     }
 
-    private SyntaxToken Peek(int offset) => _tokens[Math.Min(_position + offset, _tokens.Length - 1)];
+    private SyntaxToken Peek(int offset)
+    {
+        if (_pendingGreater > 0)
+        {
+            if (offset < _pendingGreater)
+            {
+                var original = _tokens[_position];
+                var index = original.Text.Length - _pendingGreater + offset;
+                return new SyntaxToken(TokenKind.Greater, ">", new TextSpan(original.Span.Start + index, 1),
+                    index == 0 ? original.LeadingTrivia : []);
+            }
+            offset -= _pendingGreater;
+            return _tokens[Math.Min(_position + 1 + offset, _tokens.Length - 1)];
+        }
+        return _tokens[Math.Min(_position + offset, _tokens.Length - 1)];
+    }
 
     private bool IsStaticProofStart() => Current.Kind == TokenKind.StaticKeyword
         && (Peek(1).Kind == TokenKind.RequireKeyword
@@ -1197,12 +1256,13 @@ internal sealed class Parser
         or TokenKind.WriteKeyword;
 
     private static int UnaryPrecedence(TokenKind kind) => kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Bang
-        or TokenKind.Tilde or TokenKind.MoveKeyword or TokenKind.PlusPlus or TokenKind.MinusMinus ? 12 : 0;
+        or TokenKind.Tilde or TokenKind.MoveKeyword or TokenKind.PlusPlus or TokenKind.MinusMinus ? 13 : 0;
 
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Non-operator tokens have zero precedence.")]
     private static int BinaryPrecedence(TokenKind kind) => kind switch {
-        TokenKind.Star or TokenKind.Slash or TokenKind.Percent => 11,
-        TokenKind.Plus or TokenKind.Minus => 10,
+        TokenKind.Star or TokenKind.Slash or TokenKind.Percent => 12,
+        TokenKind.Plus or TokenKind.Minus => 11,
+        TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned => 10,
         TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals => 8,
         TokenKind.EqualsEquals or TokenKind.BangEquals => 7,
         TokenKind.Ampersand => 6,

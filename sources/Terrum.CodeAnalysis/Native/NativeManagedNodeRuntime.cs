@@ -181,6 +181,15 @@ internal sealed partial class PeCompiler
                     CollectExpression(update.Place is BoundFieldRead receiver ? receiver.Receiver
                         : update.Place is BoundBufferRead updateBuffer ? updateBuffer.Index : update.Place, spill);
                     break;
+                case BoundCompoundAssignment compound:
+                    if (compound.Place is BoundFieldRead)
+                    {
+                        _ = slots.Add(spill);
+                    }
+                    CollectExpression(compound.Place is BoundFieldRead compoundReceiver ? compoundReceiver.Receiver
+                        : compound.Place is BoundBufferRead compoundBuffer ? compoundBuffer.Index : compound.Place, spill);
+                    CollectExpression(compound.Right, spill + 4);
+                    break;
                 case BoundNominalUpdate update:
                     if (update.Place is BoundFieldRead)
                     {

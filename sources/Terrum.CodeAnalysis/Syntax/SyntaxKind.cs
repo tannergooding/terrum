@@ -135,4 +135,6 @@ public enum SyntaxKind
     ConditionalExpression,
     /// <summary>A prefix or postfix update of an initialized writable Copy place.</summary>
     UpdateExpression,
+    /// <summary>A built-in integer compound assignment statement.</summary>
+    CompoundAssignmentStatement,
 }

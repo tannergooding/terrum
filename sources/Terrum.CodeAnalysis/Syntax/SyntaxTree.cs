@@ -17,7 +17,7 @@ namespace Terrum.CodeAnalysis.Syntax;
 public sealed class SyntaxTree
 {
     /// <summary>Identifies the syntax contract used by this parser.</summary>
-    public const string LanguageVersion = "syntax-35";
+    public const string LanguageVersion = "syntax-36";
 
     private readonly Dictionary<SyntaxToken, ScannerIntegerValue>? _decodedIntegers;
 
@@ -42,7 +42,7 @@ public sealed class SyntaxTree
     /// <summary>Gets the source snapshot represented by this tree.</summary>
     public SourceText Source { get; }
 
-    /// <summary>The lexical stream, including EOF; parser-inserted missing tokens occur only in Root.</summary>
+    /// <summary>The lexical stream, including EOF; missing tokens and context-split generic closers occur only in Root.</summary>
     public ImmutableArray<SyntaxToken> Tokens { get; }
 
     /// <summary>Gets the parsed compilation-unit node, including any recovery syntax.</summary>

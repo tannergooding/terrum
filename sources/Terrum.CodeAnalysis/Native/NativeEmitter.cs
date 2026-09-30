@@ -1022,6 +1022,13 @@ internal sealed partial class PeCompiler
                     BoundBufferRead buffer => ExpressionSpills(buffer.Index, ref maximumArguments),
                     _ => 0,
                 });
+            case BoundCompoundAssignment compound:
+                return Math.Max(4 + ExpressionSpills(compound.Right, ref maximumArguments),
+                    Math.Max(3, compound.Place switch {
+                        BoundFieldRead field => ExpressionSpills(field.Receiver, ref maximumArguments),
+                        BoundBufferRead buffer => ExpressionSpills(buffer.Index, ref maximumArguments),
+                        _ => 0,
+                    }));
             case BoundNominalUpdate update:
                 maximumArguments = Math.Max(maximumArguments, IsIndirect(update.Type) ? 2 : 1);
                 return Math.Max(4, update.Place is BoundFieldRead nominalField
@@ -2335,6 +2342,49 @@ internal sealed partial class PeCompiler
                     LoadValue(Spill(spill + 2), update.Type);
                 }
                 break;
+            case BoundCompoundAssignment compound:
+            {
+                var rooted = UpdateAddress(compound.Place, spill);
+                _code.Store64(Spill(spill + 1));
+                _code.LoadPointerField(0, IsWide(compound.Type) ? 8 : 4);
+                StoreValue(Spill(spill + 2), compound.Type);
+                var begin = _code.Position;
+                var funclet = -1;
+                if (rooted && _checkedExceptions && !_emittingFunclet)
+                {
+                    funclet = _funclets.Count;
+                    _funclets.Add((new BoundBlock([], compound.Span), _currentFunction, 0, 0));
+                    _managedStagedRoots.Add(funclet, [Spill(spill)]);
+                }
+                Expression(compound.Right, spill + 4);
+                if (IsWide(compound.Right.Type))
+                {
+                    _code.Bytes(0x48, 0x89, 0xC1);
+                }
+                else
+                {
+                    _code.Bytes(0x89, 0xC1);
+                }
+                LoadValue(Spill(spill + 2), compound.Type);
+                Binary(CompoundOperators.Binary(compound.Operator), compound.Type);
+                _code.Load64(Spill(spill + 1), destinationRegister: true);
+                if (IsWide(compound.Type))
+                {
+                    _code.Byte(0x48);
+                }
+                _code.Bytes(0x89, 0x02);
+                if (funclet >= 0)
+                {
+                    _code.Byte(0x90);
+                    _scopes[_currentFunction].Add(new NativeExceptionScope(begin, _code.Position,
+                        -funclet - 1, 0));
+                }
+                if (rooted)
+                {
+                    SetManagedRoot(Spill(spill), active: false);
+                }
+                break;
+            }
             case BoundNominalUpdate update:
             {
                 var rooted = UpdateAddress(update.Place, spill);
@@ -2843,6 +2893,14 @@ internal sealed partial class PeCompiler
         var unsigned = type is PrimitiveType.UInt32 or PrimitiveType.Char16;
         switch (op)
         {
+            case TokenKind.ShiftLeft:
+            case TokenKind.ShiftRight:
+            case TokenKind.ShiftRightUnsigned:
+                _code.Bytes(0x83, 0xF9, 0x20); // cmp ecx,32; unsigned comparison rejects negative counts
+                RuntimeBranch(0x83, 0);
+                _code.Bytes(0xD3, op == TokenKind.ShiftLeft ? (byte)0xE0
+                    : op == TokenKind.ShiftRight && !unsigned ? (byte)0xF8 : (byte)0xE8);
+                break;
             case TokenKind.Plus:
                 _code.Bytes(0x01, 0xC8);
                 RuntimeBranch(unsigned ? (byte)0x82 : (byte)0x80, 0);
@@ -2932,6 +2990,14 @@ internal sealed partial class PeCompiler
     {
         switch (op)
         {
+            case TokenKind.ShiftLeft:
+            case TokenKind.ShiftRight:
+            case TokenKind.ShiftRightUnsigned:
+                _code.Bytes(0x83, 0xF9, 0x40); // cmp ecx,64
+                RuntimeBranch(0x83, 0);
+                _code.Bytes(0x48, 0xD3, op == TokenKind.ShiftLeft ? (byte)0xE0
+                    : op == TokenKind.ShiftRight && !unsigned ? (byte)0xF8 : (byte)0xE8);
+                break;
             case TokenKind.Plus:
             case TokenKind.Minus:
                 _code.Bytes(0x48, op == TokenKind.Plus ? (byte)0x01 : (byte)0x29, 0xC8);

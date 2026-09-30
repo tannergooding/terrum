@@ -657,6 +657,10 @@ public static class SemanticVerifier
                 case BoundUpdate update:
                     Expression(update.Place, scope, depth + 1);
                     break;
+                case BoundCompoundAssignment compound:
+                    Expression(compound.Place, scope, depth + 1);
+                    Expression(compound.Right, scope, depth + 1);
+                    break;
                 case BoundNominalUpdate update:
                     Expression(update.Place, scope, depth + 1);
                     break;
@@ -1121,6 +1125,10 @@ public static class SemanticVerifier
                     break;
                 case BoundUpdate update:
                     Expression(update.Place, depth + 1, acquiringRoot);
+                    break;
+                case BoundCompoundAssignment compound:
+                    Expression(compound.Place, depth + 1, acquiringRoot);
+                    Expression(compound.Right, depth + 1, acquiringRoot);
                     break;
                 case BoundNominalUpdate update:
                     Expression(update.Place, depth + 1, acquiringRoot);
@@ -1767,7 +1775,7 @@ public static class SemanticVerifier
                 return false;
             case BoundExpressionStatement expressionStatement:
                 if (expressionStatement.Expression is not (BoundCall or BoundViewRead or BoundUpdate
-                    or BoundNominalUpdate))
+                    or BoundNominalUpdate or BoundCompoundAssignment))
                 {
                     throw Invalid();
                 }
@@ -1775,7 +1783,8 @@ public static class SemanticVerifier
                 {
                     throw InvalidEffect(expressionStatement.Span, "Ownership");
                 }
-                Expression(expressionStatement.Expression, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                Expression(expressionStatement.Expression, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures, statementCompound: expressionStatement.Expression is BoundCompoundAssignment);
                 return expressionStatement.Expression is BoundCall statementCall
                     && program.Functions[statementCall.Function].DoesNotReturn;
             case BoundIf conditional:
@@ -2503,7 +2512,8 @@ public static class SemanticVerifier
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Unsupported token kinds must remain invalid rather than becoming accepted operators.")]
     private static void Expression(BoundExpression expression, bool[] initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function,
-        BoundProgram program, ref int remaining, int depth, FailureEdges? failures = null)
+        BoundProgram program, ref int remaining, int depth, FailureEdges? failures = null,
+        bool statementCompound = false)
     {
         Count(ref remaining, depth);
         if (expression is null || !ValidType(expression.Type, allowVoid: expression is BoundCall, program))
@@ -2831,6 +2841,44 @@ public static class SemanticVerifier
                     ref remaining, depth + 1, failures);
                 failures?.Add(initialized, fieldMasks);
                 break;
+            case BoundCompoundAssignment compound:
+                if (!statementCompound || compound.Place is null || compound.Right is null
+                    || !CompoundOperators.IsSupported(compound.Operator)
+                    || compound.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32
+                        or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                    || compound.Place.Type != compound.Type
+                    || compound.Right.Type != (CompoundOperators.IsShift(compound.Operator)
+                        ? PrimitiveType.Int32 : compound.Type)
+                    || compound.Place is BoundRead { Variable: 0 } && function.DeclaringStruct is not null
+                        && !function.IsStatic)
+                {
+                    throw InvalidEffect(compound.Span);
+                }
+                VerifyUpdatePlace(compound.Place, function, program, ref remaining, depth + 1);
+                Expression(compound.Place, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+                var root = UpdateRoot(compound.Place, ref remaining, depth + 1);
+                if (root >= 0 && IsUnique(program, function.Variables[root].Type)
+                    && InvalidatesReservedOwner(compound.Right, root, ref remaining, depth + 1))
+                {
+                    throw InvalidEffect(compound.Right.Span, "Ownership");
+                }
+                Expression(compound.Right, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+                if (root >= 0 && !initialized[root])
+                {
+                    throw InvalidEffect(compound.Right.Span, "Ownership");
+                }
+                if (CompoundOperators.Binary(compound.Operator) is not (TokenKind.Ampersand
+                    or TokenKind.Pipe or TokenKind.Caret))
+                {
+                    if (function.IsNoThrow)
+                    {
+                        throw InvalidEffect(compound.Span);
+                    }
+                    failures?.Add(initialized, fieldMasks);
+                }
+                break;
             case BoundBinary binary:
                 var beforeLeft = (bool[])initialized.Clone();
                 Expression(binary.Left, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
@@ -2864,6 +2912,10 @@ public static class SemanticVerifier
                     TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent =>
                         operands && binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
                             && binary.Type == binary.Left.Type,
+                    TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned =>
+                        binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
+                            or PrimitiveType.Int64 or PrimitiveType.UInt64
+                            && binary.Right.Type == PrimitiveType.Int32 && binary.Type == binary.Left.Type,
                     TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals =>
                         operands && binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16
                             && binary.Type == PrimitiveType.Bool,
@@ -2882,11 +2934,14 @@ public static class SemanticVerifier
                     throw Invalid();
                 }
                 if (function.IsNoThrow && binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star
-                    or TokenKind.Slash or TokenKind.Percent)
+                    or TokenKind.Slash or TokenKind.Percent or TokenKind.ShiftLeft
+                    or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned)
                 {
                     throw InvalidEffect(binary.Span);
                 }
-                if (binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent)
+                if (binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash
+                    or TokenKind.Percent or TokenKind.ShiftLeft or TokenKind.ShiftRight
+                    or TokenKind.ShiftRightUnsigned)
                 {
                     failures?.Add(initialized, fieldMasks);
                 }
@@ -3198,6 +3253,9 @@ public static class SemanticVerifier
                 || InvalidatesReservedOwner(update.Place, variable, ref remaining, depth + 1),
             BoundNominalUpdate update => WritesUpdateRoot(update.Place, variable, ref remaining, depth + 1)
                 || InvalidatesReservedOwner(update.Place, variable, ref remaining, depth + 1),
+            BoundCompoundAssignment compound => WritesUpdateRoot(compound.Place, variable, ref remaining, depth + 1)
+                || InvalidatesReservedOwner(compound.Place, variable, ref remaining, depth + 1)
+                || InvalidatesReservedOwner(compound.Right, variable, ref remaining, depth + 1),
             BoundCast cast => InvalidatesReservedOwner(cast.Operand, variable, ref remaining, depth + 1),
             BoundOptionalLift lift => InvalidatesReservedOwner(lift.Value, variable, ref remaining, depth + 1),
             BoundReadonlyProjection projection => InvalidatesReservedOwner(projection.Value, variable, ref remaining, depth + 1),
@@ -3224,6 +3282,17 @@ public static class SemanticVerifier
             BoundRead read => read.Variable == variable,
             BoundFieldRead field => WritesUpdateRoot(field.Receiver, variable, ref remaining, depth + 1),
             _ => false,
+        };
+    }
+
+    private static int UpdateRoot(BoundExpression place, ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        return place switch {
+            BoundRead read => read.Variable,
+            BoundFieldRead field when !ManagedClassTypes.IsClass(field.Receiver.Type) =>
+                UpdateRoot(field.Receiver, ref remaining, depth + 1),
+            _ => -1,
         };
     }
 
@@ -3397,6 +3466,10 @@ public static class SemanticVerifier
                 break;
             case BoundUpdate update:
                 VacateNestedOutputs(update.Place, state, ref remaining);
+                break;
+            case BoundCompoundAssignment compound:
+                VacateNestedOutputs(compound.Place, state, ref remaining);
+                VacateNestedOutputs(compound.Right, state, ref remaining);
                 break;
             case BoundNominalUpdate update:
                 VacateNestedOutputs(update.Place, state, ref remaining);

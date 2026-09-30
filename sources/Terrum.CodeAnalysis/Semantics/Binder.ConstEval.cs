@@ -116,6 +116,8 @@ internal sealed partial class Binder
                 return CheckConstExpression(unary.Operand, out unsupported);
             case BoundUpdate { Place: BoundRead }:
                 return true;
+            case BoundCompoundAssignment { Place: BoundRead } compound:
+                return CheckConstExpression(compound.Right, out unsupported);
             case BoundBinary binary:
                 return CheckConstExpression(binary.Left, out unsupported)
                     && CheckConstExpression(binary.Right, out unsupported);
@@ -307,6 +309,11 @@ internal sealed partial class Binder
                 return unary with { Operand = ResolveConstExpression(unary.Operand, locals, functions, variableCount) };
             case BoundUpdate update:
                 return update with { Place = ResolveConstExpression(update.Place, locals, functions, variableCount) };
+            case BoundCompoundAssignment compound:
+                return compound with {
+                    Place = ResolveConstExpression(compound.Place, locals, functions, variableCount),
+                    Right = ResolveConstExpression(compound.Right, locals, functions, variableCount),
+                };
             case BoundNominalUpdate update:
                 return update with { Place = ResolveConstExpression(update.Place, locals, functions, variableCount) };
             case BoundBinary binary:
@@ -389,6 +396,15 @@ internal sealed partial class Binder
                     as BoundConstant ?? throw new ConstEvalFailure("ConstEval checked update overflowed.");
                 slots[read.Variable] = next;
                 return update.IsPrefix ? next : old;
+            }
+            case BoundCompoundAssignment { Place: BoundRead read } compound when slots[read.Variable] is BoundConstant old:
+            {
+                var right = EvaluateConstExpression(compound.Right, slots, functions, depth, state);
+                var next = FoldScalarConstant(new BoundBinary(CompoundOperators.Binary(compound.Operator),
+                    old, right, compound.Type, compound.Span)) as BoundConstant
+                    ?? throw new ConstEvalFailure("ConstEval checked compound assignment failed.");
+                slots[read.Variable] = next;
+                return next;
             }
             case BoundUnary unary:
             {

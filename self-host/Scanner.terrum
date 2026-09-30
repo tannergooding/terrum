@@ -253,7 +253,7 @@ int32 KeywordKind(int32 start, int32 length)
     return 2;
 }
 
-// A matched operator packs kind and width, retaining the longest match.
+// Three low bits hold widths through four code units (>>>=); retain the longest match.
 int32 OperatorMatch(int32 start)
 {
     mut int32 entry = 0;
@@ -273,7 +273,7 @@ int32 OperatorMatch(int32 start)
             if (offset == size)
             {
                 width = size;
-                best = kind * 4 + size;
+                best = kind * 8 + size;
             }
         }
         entry = entry + size + 2;
@@ -793,8 +793,8 @@ int32 Scan()
                 int32 matched = OperatorMatch(start);
                 if (matched != -1)
                 {
-                    kind = matched / 4;
-                    position = start + matched % 4;
+                    kind = matched / 8;
+                    position = start + matched % 8;
                 }
                 else
                 {

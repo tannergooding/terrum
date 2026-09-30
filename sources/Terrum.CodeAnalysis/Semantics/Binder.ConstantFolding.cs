@@ -94,6 +94,28 @@ internal sealed partial class Binder
                 }
                 break;
 
+            case BoundBinary { Left: BoundConstant left, Right: BoundConstant { Type: PrimitiveType.Int32 } count } shift
+                when shift.Operator is TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned
+                    && shift.Type == left.Type && TryScalarValue(left, out var shifted):
+            {
+                var width = shift.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 ? 32 : 64;
+                if (count.Value < 0 || count.Value >= width)
+                {
+                    return expression;
+                }
+                value = shift.Operator switch {
+                    TokenKind.ShiftLeft => (shifted << (int)count.Value) & ((BigInteger.One << width) - 1),
+                    TokenKind.ShiftRightUnsigned => (shifted & ((BigInteger.One << width) - 1)) >> (int)count.Value,
+                    _ => shifted >> (int)count.Value,
+                };
+                if (shift.Type is PrimitiveType.Int32 or PrimitiveType.Int64
+                    && value >= (BigInteger.One << (width - 1)))
+                {
+                    value -= BigInteger.One << width;
+                }
+                break;
+            }
+
             case BoundBinary { Left: BoundConstant left, Right: BoundConstant right } binary
                 when left.Type == right.Type && binary.Type == left.Type
                     && TryScalarValue(left, out var first) && TryScalarValue(right, out var second):

@@ -181,4 +181,32 @@ public enum TokenKind
     PlusPlus,
     /// <summary>The decrement operator (<c>--</c>).</summary>
     MinusMinus,
+    /// <summary>Left shift.</summary>
+    ShiftLeft,
+    /// <summary>Arithmetic right shift.</summary>
+    ShiftRight,
+    /// <summary>Logical right shift.</summary>
+    ShiftRightUnsigned,
+    /// <summary>Checked integer addition assignment.</summary>
+    PlusEquals,
+    /// <summary>Checked integer subtraction assignment.</summary>
+    MinusEquals,
+    /// <summary>Checked integer multiplication assignment.</summary>
+    StarEquals,
+    /// <summary>Checked integer division assignment.</summary>
+    SlashEquals,
+    /// <summary>Checked integer remainder assignment.</summary>
+    PercentEquals,
+    /// <summary>Integer bitwise AND assignment.</summary>
+    AmpersandEquals,
+    /// <summary>Integer bitwise OR assignment.</summary>
+    PipeEquals,
+    /// <summary>Integer bitwise XOR assignment.</summary>
+    CaretEquals,
+    /// <summary>Checked-count truncating left shift assignment.</summary>
+    ShiftLeftEquals,
+    /// <summary>Checked-count arithmetic right shift assignment.</summary>
+    ShiftRightEquals,
+    /// <summary>Checked-count zero-filling right shift assignment.</summary>
+    ShiftRightUnsignedEquals,
 }
