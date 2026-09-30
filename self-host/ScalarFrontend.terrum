@@ -1584,6 +1584,89 @@ mut class ScalarFrontendState
             first.Range.Start, endDeclaration.Range.End);
     }
 
+    private mut bool ParseTreeStructuredBody(int32 depth)
+    {
+        require _tokens.TryGet(_at, out var first);
+        mut Token next = first;
+        while (next.Kind != 49 && _error == 0)
+        {
+            if (next.Kind == 18)
+            {
+                if (!ParseTreeWhile(depth)) { return false; }
+            }
+            else if (next.Kind == 16)
+            {
+                if (!ParseTreeIf(depth)) { return false; }
+            }
+            else if (next.Kind == 2
+                && _tokens.TryGet(_at + 1, out var equals)
+                && equals.Kind == 64)
+            {
+                if (!ParseTreeStatement()) { return false; }
+            }
+            else
+            {
+                FailAt(1, next.Range);
+                return false;
+            }
+            require _tokens.TryGet(_at, out next);
+        }
+        return true;
+    }
+
+    private mut bool ParseTreeIf(int32 depth)
+    {
+        if (depth >= 6 || _statementCount >= 12)
+        {
+            Fail(1);
+            return false;
+        }
+        if (!Take(16, out var keyword) || !Take(46, out var open)
+            || !ParseTreeExpression(5, 1, 0, out var condition))
+        {
+            return false;
+        }
+        if (TreeWord(condition, 1) != 5)
+        {
+            return FailTreeType(condition);
+        }
+        if (!Take(47, out var close) || !Take(48, out var body))
+        {
+            return false;
+        }
+        int32 header = _statementCount;
+        if (!AddTreeStatement(4, 0, condition, keyword.Range.Start, body.Range.End)
+            || !ParseTreeStructuredBody(depth + 1)
+            || !Take(49, out var endTrue))
+        {
+            return false;
+        }
+        Host.Frontend[332 + header * 5 + 1] = _statementCount;
+        mut int32 end = endTrue.Range.End;
+        require _tokens.TryGet(_at, out var next);
+        if (next.Kind == 17)
+        {
+            if (_statementCount >= 12 || !Take(17, out var otherwise)
+                || !Take(48, out var openFalse))
+            {
+                Fail(1);
+                return false;
+            }
+            int32 marker = _statementCount;
+            if (!AddTreeStatement(5, 0, -1, otherwise.Range.Start, openFalse.Range.End)
+                || !ParseTreeStructuredBody(depth + 1)
+                || !Take(49, out var endFalse))
+            {
+                return false;
+            }
+            Host.Frontend[332 + marker * 5 + 1] = _statementCount;
+            Host.Frontend[332 + marker * 5 + 4] = endFalse.Range.End - otherwise.Range.Start;
+            end = endFalse.Range.End;
+        }
+        Host.Frontend[332 + header * 5 + 4] = end - keyword.Range.Start;
+        return true;
+    }
+
     private mut bool ParseTreeWhile(int32 depth)
     {
         if (depth >= 6 || _statementCount >= 12)
@@ -1609,28 +1692,10 @@ mut class ScalarFrontendState
         {
             return false;
         }
-        require _tokens.TryGet(_at, out var first);
-        mut Token next = first;
-        while (next.Kind != 49 && _error == 0)
+        if (!ParseTreeStructuredBody(depth + 1) || !Take(49, out var end))
         {
-            if (next.Kind == 18)
-            {
-                if (!ParseTreeWhile(depth + 1)) { return false; }
-            }
-            else if (next.Kind == 2
-                && _tokens.TryGet(_at + 1, out var equals)
-                && equals.Kind == 64)
-            {
-                if (!ParseTreeStatement()) { return false; }
-            }
-            else
-            {
-                FailAt(1, next.Range);
-                return false;
-            }
-            require _tokens.TryGet(_at, out next);
+            return false;
         }
-        if (!Take(49, out var end)) { return false; }
         Host.Frontend[332 + header * 5 + 1] = _statementCount;
         Host.Frontend[332 + header * 5 + 4] = end.Range.End - keyword.Range.Start;
         return true;
@@ -2087,10 +2152,31 @@ mut class ScalarFrontendState
                 require _tokens.TryGet(_at, out var firstStatement);
                 mut Token next = firstStatement;
                 while ((next.Kind == 12 || next.Kind == 13
-                    || next.Kind == 2 || next.Kind == 18)
+                    || next.Kind == 2 || next.Kind == 18 || next.Kind == 16)
                     && _error == 0)
                 {
-                    if (!(next.Kind == 18 ? ParseTreeWhile(0) : ParseTreeStatement()))
+                    if (next.Kind == 16)
+                    {
+                        mut int32 cursor = _at + 1;
+                        require _tokens.TryGet(cursor, out var firstProbe);
+                        mut Token probe = firstProbe;
+                        while (probe.Kind != 0 && probe.Kind != 48)
+                        {
+                            cursor = cursor + 1;
+                            require _tokens.TryGet(cursor, out probe);
+                        }
+                        if (probe.Kind == 48
+                            && _tokens.TryGet(cursor + 1, out var arm)
+                            && arm.Kind == 19)
+                        {
+                            break;
+                        }
+                    }
+                    mut bool parsed = false;
+                    if (next.Kind == 18) { parsed = ParseTreeWhile(0); }
+                    else if (next.Kind == 16) { parsed = ParseTreeIf(0); }
+                    else { parsed = ParseTreeStatement(); }
+                    if (!parsed)
                     {
                         break;
                     }
@@ -2306,7 +2392,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     {
         require chain.TryGet(index, out var token);
         if (token.Kind == 82 || token.Kind == 12 || token.Kind == 13
-            || token.Kind == 18
+            || token.Kind == 18 || token.Kind == 16
             || token.Kind == 64 || token.Kind == 56)
         {
             result = modern;

@@ -180,7 +180,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { return x; } return x; }")]
     [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { break; } return x; }")]
     [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { continue; } return x; }")]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { if (true) { x = x + 1; } } return x; }")]
+    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { if (true) { mut int32 y = x; } } return x; }")]
     [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { x = x + 1; } mut var x = 3; return x; }")]
     public async Task FrontendWhileInvalidSourceRetainsOutputAsync(string source)
     {

@@ -17,6 +17,11 @@ namespace Terrum.CodeAnalysis;
 // condition and span covers the entire loop; +1 selects conversion, +2
 // selects conditional expressions. Nested bodies follow headers in preorder;
 // the parser admits at most six nested loop headers.
+// Versions 32..35 require kind-4 branch headers: slot is the exclusive
+// true-arm end, root the Boolean predicate, span the whole if. An optional
+// kind-5 else marker at that index has slot at the exclusive else-arm end,
+// root -1, and span covering the else keyword and braced body. Versions
+// 36..39 additionally require kind-3 loops; +1/+2 select conversion/?:.
 void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expression)
 {
     Host.Frontend[offset] = expression.Type;
@@ -77,6 +82,25 @@ bool TryPublishScalarFrontend()
                 if (Host.Frontend[42 + node * 8] == 83) { conversion = true; }
             }
             if (conversion) { Host.Frontend[0] = Host.Frontend[0] + 1; }
+            if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 2; }
+        }
+        mut bool hasBranch = false;
+        for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
+        {
+            if (Host.Frontend[332 + statement * 5] == 4) { hasBranch = true; }
+        }
+        if (hasBranch)
+        {
+            Host.Frontend[0] = 32;
+            if (hasWhile) { Host.Frontend[0] = 36; }
+            for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
+            {
+                if (Host.Frontend[42 + node * 8] == 83)
+                {
+                    Host.Frontend[0] = Host.Frontend[0] + 1;
+                    break;
+                }
+            }
             if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 2; }
         }
         Host.Frontend[15] = 0;
