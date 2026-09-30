@@ -1538,8 +1538,16 @@ an ownership transfer or extend a borrowed element's lifetime beyond its
 checked dependencies. A nested callable does not inherit producer eligibility
 from its enclosing body. This `yield` is not the scheduling operation
 `Yield()` and does not promise a thread switch. Producer
-start/resumption timing, element-loan contracts, abandonment cleanup and
-representation remain separate design work. `[Iterator]` marks the
+execution starts lazily: invocation evaluates arguments and establishes
+captured ownership/loan obligations, but neither creating the producer nor
+obtaining its iterator runs its body. The first advance starts the body and
+runs until an element is yielded, the producer completes, or a failure
+propagates. Subsequent advances resume after the previous yield. Argument
+evaluation and producer construction can fail at invocation; body effects
+and failures occur during advancement. Captured loans retain their permitted
+backing lifetimes even if advancement is delayed or never occurs. Protocol
+method names, element-loan contracts, abandonment cleanup and representation
+remain separate design work. `[Iterator]` marks the
 implementation; it is not a traversal-direction or element-access flag.
 Reverse traversal and readonly/writable items belong to the selected
 sequence/item contracts. Whether variations are exposed as adapters or
