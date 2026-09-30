@@ -79,7 +79,7 @@ ABI changes; imported functions cannot satisfy required constant calls.
 Syntax-26 adds scalar `const expression` requirements in nested executable
 expressions, with the same limits and deferred constant substitution; no new
 native or semantic wire representation is emitted. The current parser version
-is syntax-35. Conditional expressions evaluate one Boolean condition and only
+is syntax-36. Conditional expressions evaluate one Boolean condition and only
 the selected target-checked arm, with existing cleanup and rooting behavior.
 Retained conditional nodes select semantic v41, not a new native ABI.
 Managed-handle `??` and statement-form `??=` use a single value/place evaluation
@@ -110,6 +110,36 @@ Nominal updates diagnose in required constant work: the ConstEval interpreter
 still admits only scalar values, not struct construction/operator calls.
 `char16` primitive updates, unique-value updates and nested owning-child paths
 remain unsupported.
+Syntax-36 adds primitive binary `<<`, `>>` and `>>>`, plus statement-form
+`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=` and `>>>=`
+for initialized writable `int32`, `uint32`, `int64` and `uint64` places.
+Binary shifts take one of those four integer types as the left operand.
+Arithmetic and bitwise right operands must match the place type; shift counts
+are `int32` and follow the existing checked shift-count rules. The destination
+address and old value are captured before the right operand runs once, and
+checked computation completes before writeback. Earlier place/right-operand
+effects are not rolled back on failure. These operations reuse existing
+update-place/root machinery; they introduce no destination-loan form.
+Primitive scalar-slot compound assignments are available in bounded ConstEval.
+Nominal compounds are rejected despite binary operator support; `char16` and
+unique-value update destinations remain unsupported. Shift and
+compound-assignment nodes select semantic v45 (compound expression tag 26,
+admitted only in statement position).
+This adds no native ABI or profile version.
+
+The native scalar frontend's provisional projection v48 represents scalar
+returns as structured body statements: kind 8, slot 0, a typed result root and
+the keyword-through-semicolon span. Header words 38–40 are `-1`; the source
+reader consumes every expression root and uses verifier continuation rules to
+reject reachable non-void fallthrough. Structured returns are available in
+branches and loops. Projections v1–47 retain their existing terminal return
+shapes, and v48 does not use hosted-parser fallback or synthesize a terminal
+return. It adds no body-local declarations, general calls or native updates.
+Its 392-word buffer and limits of 64 tokens, 32 expression nodes, 12
+statements, eight locals and six structural levels are unchanged, as is the
+16-level expression-recursion limit. It still lowers through the shared
+hosted verifier/emitter; it is a compiler component, not a standalone
+self-hosted compiler.
 Standalone `init T name;` and `init var name;` declare vacant
 readonly local slots without a default value. Existing checked initialization
 controls publication, owner cleanup and managed-root activation. Semantic v40
@@ -828,7 +858,7 @@ depths, while programs without those retained operations continue to select
 their earlier formats. Older headers reject the new nodes. Native calling
 conventions, cleanup funclets and public ABI do not change.
 
-Other integer widths, floating point, character/text literals, shifts, classes,
+Other integer widths, floating point, character/text literals, classes,
 optional/generic/family binding, general borrowed references, ownership/cleanup,
 exceptions, GC, async, arbitrary interop and the standard library are outside the
 profile. Their syntax may be inspectable, but a build

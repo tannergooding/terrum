@@ -13,7 +13,7 @@ compiler-primitives library exports `Terrum.CodeAnalysis.IsAsciiDigit`,
 `Terrum.CodeAnalysis.IsLineBreak` and `Terrum.CodeAnalysis.GetDecimalDigit`;
 it is not a self-host compiler or an executable scanner/parser.
 The host test runner remains C#, even when it compiles and executes a candidate.
-The host parser's current language version is syntax-35. Syntax-18's qualified
+The host parser's current language version is syntax-36. Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle
 specializations described below. These reuse existing, feature-selected
 semantic contracts without changing the scanner record/schema, native profile
@@ -92,9 +92,10 @@ nominal constraints. Syntax-19 also implements six separately constrained
 nominal comparison protocols over homogeneous Copy structs with `bool`
 results; see the [bounded generic contract](../docs/implementation.md#bounded-generic-functions).
 No comparison law or universal equality/hash behavior is inferred. Unary
-protocols have independent `Copy` results, including non-`bool` `!`;
-heterogeneous binary, shift, `++`/`--` and `true`/`false` protocols remain
-unsupported.
+protocols have independent `Copy` results, including non-`bool` `!`; these
+protocol sets still exclude heterogeneous binary, shift and `true`/`false`
+witnesses. Syntax-35's nominal `++`/`--` calls are a separate update contract,
+not an addition to those protocol sets.
 `build-component` uses the compiled scanner's records as the lexical input to
 the official host parser, binder and native emitter; the binder also consumes
 its decoded integer magnitudes. It does not re-lex or decode integer magnitudes
@@ -182,8 +183,8 @@ native emitter or compiler self-build.
 | [TokenIntegerSnapshot](TokenIntegerSnapshot.terrum) | Separately owned scanner-5 numeric-token indices and raw unsigned magnitude words, published with tokens and trivia by `TryScanCompilerInput` | AOT/JIT full-`uint64`, radix and overflow fixtures, indexed token lookup, invalid index/status/tag/owner rejection and atomic failure; shape checks do not prove a producer's arithmetic, and general binding remains hosted |
 | [TokenDiagnosticSnapshot](TokenDiagnosticSnapshot.terrum) | Independently owned lexical diagnostic codes and source ranges, available after a scan with errors even when token snapshots cannot publish | AOT/JIT host diagnostic parity under both policies, invalid buffer rejection, stable reads after host mutation and no success-shaped empty token stream on lexical failure |
 | [ScalarParserTypes](ScalarParserTypes.terrum) | Shared scalar type recognition, token-name equality, scalar comparison and scanner-integer decoding for separately compiled bounded parser probes | Scanner-owned source ranges, UTF-16 spelling and integer records, with no independent syntax or semantic ABI |
-| [ScalarFrontend](ScalarFrontend.terrum) | Reusable bounded frontend phase over a successful scanner snapshot: one scalar function with zero to three named parameters, parameter references, Boolean literals or unary `!` over a Boolean literal/parameter (including grouped operands), `~` over a contextual integer literal/parameter (including grouped operands), `+` over a contextual integer literal/parameter or named parameter (including grouped operands), or signed `-` over a named integer parameter (including grouped operands), contextual unsuffixed integer literals (including unary signed minus and decimal minima), either order of parameter/literal integer arithmetic or bitwise operations and integer/`char16` comparisons (including unary `+` or `-` on supported literal operands), two contextual 32-bit integer literals in arithmetic or bitwise operations, Boolean equality, bitwise or short-circuit operations between parameters and/or literals, optional `if`/`else` returns or a trailing fallthrough return, whole-expression grouping, and explicit `public`/`internal` visibility | AOT/JIT typed parameter, expression, branch and UTF-16 span facts under both policies; scanner integer records and destination bounds determine integer constants without rescanning digit text; unsupported or invalid shapes publish only a code/span, lexical failure publishes no artifact. Uses `Host.Source` and managed tokens, so neither the persisted primitives DLL nor `build-component` consumes its typed result yet |
-| [ScalarFrontendProjection](ScalarFrontendProjection.terrum) | Provisional 392-word host-owned buffer with completion status written last. Version 21 adds initialized locals after v20 trees; v22/v23 add checked numeric conversions without/with locals; v24–27 add conditional trees; v28–31 add assignment/nested-while bodies; v32–39 add braced if/else bodies and combinations with loops/conversions/conditional expressions; v40–43 add nearest-while transfers without branches; v44–47 add transfers with branches. Earlier payloads remain supported and unused extensions are zero | `ScalarFrontendHost` checks source anchors, scalar types, literal context/bits, node order, precedence, conditional children, roots, sequential local binding, loop/branch-body extents, transfer source/type/nearest target, mutability and conversion shadowing before lowering to verified `BoundProgram` without the hosted parser/binder pass. Acceptance includes both-policy AOT/JIT/EXE execution, exported DLL byte parity and malformed projections. The 392-word buffer, eight locals, twelve statement records, thirty-two nodes, sixteen expression-recursion levels and six shared structural levels remain fixed; no standalone native compiler or machine-code encoder |
+| [ScalarFrontend](ScalarFrontend.terrum) | Reusable bounded frontend phase over a successful scanner snapshot: one scalar function with zero to three named parameters, parameter references, Boolean literals or unary `!` over a Boolean literal/parameter (including grouped operands), `~` over a contextual integer literal/parameter (including grouped operands), `+` over a contextual integer literal/parameter or named parameter (including grouped operands), or signed `-` over a named integer parameter (including grouped operands), contextual unsuffixed integer literals (including unary signed minus and decimal minima), either order of parameter/literal integer arithmetic or bitwise operations and integer/`char16` comparisons (including unary `+` or `-` on supported literal operands), two contextual 32-bit integer literals in arithmetic or bitwise operations, Boolean equality, bitwise or short-circuit operations between parameters and/or literals, conditional returns or trailing fallthrough where valid, whole-expression grouping, and explicit `public`/`internal` visibility; projection v48 also supports structured returns in branches and loops subject to all-path completion | Bounded scalar type, expression, source-span and control-flow projection consumed by the shared host verifier/emitter; scanner integer records and destination bounds determine integer constants without rescanning digit text. Uses `Host.Source` and managed tokens, so neither the persisted primitives DLL nor `build-component` consumes its typed result yet |
+| [ScalarFrontendProjection](ScalarFrontendProjection.terrum) | Provisional 392-word host-owned buffer with completion status written last. Version 21 adds initialized locals after v20 trees; v22/v23 add checked numeric conversions without/with locals; v24–27 add conditional trees; v28–31 add assignment/nested-while bodies; v32–39 add braced if/else bodies and combinations with loops/conversions/conditional expressions; v40–43 add nearest-while transfers without branches; v44–47 add transfers with branches; v48 adds structured returns to branch/loop bodies. Earlier payloads remain supported and unused extensions are zero | `ScalarFrontendHost` checks source anchors, scalar types, literal context/bits, node order, precedence, conditional children, roots, sequential local binding, loop/branch-body extents, transfer/return source, type and target, mutability and conversion shadowing before lowering to verified `BoundProgram` without the hosted parser/binder pass. Reachable non-void fallthrough is rejected. The 392-word buffer, 64-token input, eight locals, twelve statement records, thirty-two nodes, sixteen expression-recursion levels and six shared structural levels remain fixed; no standalone native compiler or machine-code encoder |
 | [ScalarFunctionParser](ScalarFunctionParser.terrum) | Provisional scalar function probe: grouped/unary literals, two-literal checked arithmetic and bitwise operations, typed integer/`char16` comparisons, and one named scalar parameter in comparisons or integer checked addition | Hosted-span and executed-value parity with AOT/JIT at decimal/based boundaries across all four integer widths and `char16` comparisons; names bind to declarations, invalid magnitudes and checked addition overflow reject; requires `ScalarParserTypes`; other declarations still require the host parser |
 | [ScalarParameterPairParser](ScalarParameterPairParser.terrum) | Separate bounded probe of two named scalar parameters returned through checked integer addition/subtraction, `x + y + literal` with both checked steps, or a Boolean comparison (including `char16`) | AOT/JIT under both policies across signed/unsigned 32-/64-bit extrema, code-unit comparisons and decimal/based literal boundaries; both identifiers bind to distinct declarations, either overflow or unsigned subtraction underflow rejects; requires `ScalarParserTypes`, not a bootstrap compiler |
 | [ScalarConditionalParser](ScalarConditionalParser.terrum) | Separately compiled probe of a `bool` parameter selecting between two named, same-typed scalar parameters with explicit `if`/`else` returns | AOT/JIT under both policies check both reachable arms across six scalar types and reject swapped/unbound names and missing branches; uses scanner-owned tokens and `ScalarParserTypes`, not the general hosted parser or a bootstrap compiler |
@@ -195,9 +196,10 @@ native emitter or compiler self-build.
 
 The scalar frontend now also parses and binds bounded expression trees in
 Terrum, including `=>` scalar functions and nested arithmetic, bitwise,
-comparison and Boolean expressions with grouping and short-circuiting. It
-retains the six scalar types and zero-to-three-parameter function envelope;
-shifts, calls, general statements and floating values are not added.
+comparison and Boolean expressions with grouping and short-circuiting.
+It retains the six scalar types and zero-to-three-parameter function envelope;
+calls, compound/update statements and floating values remain outside this
+expression subset.
 Projection v21 adds up to eight initialized typed/inferred scalar locals and
 twelve ordered declaration/assignment statements before the terminal return
 envelope. Only `mut` locals permit reassignment; forward/self references and
@@ -229,9 +231,9 @@ the full approved expression grammar or a standalone native compiler.
 
 Projections v28–31 add ordinary `while` loops with assignment-only bodies,
 including up to six nested loops. Outer initialized declarations and
-assignments may precede/follow loops before the terminal return envelope;
-loop-local declarations, `break`/`continue` and early returns remain
-unsupported. Existing limits remain eight locals,
+assignments may precede/follow loops before the prior terminal return
+envelope; loop-local declarations, `break`/`continue` and early returns
+remain unsupported in v28–31. Existing limits remain eight locals,
 twelve statement records (including loop headers), thirty-two expression
 nodes and a 392-word buffer. A zero-local empty loop is valid.
 New statement kind 3 carries a Boolean condition root, a full-loop source span
@@ -266,11 +268,22 @@ nearest while header, root is `-1`, and the source span is exactly the keyword
 and semicolon. The source reader independently checks nesting, target, type
 and source before lowering the existing verified transfer nodes. Each
 projection admits exactly its listed additions and leaves unused extensions
-zero. Named transfers, loop-body declarations, early returns, general calls
-and native updates remain unsupported. Transfers, loop headers and else
-markers count toward the twelve statement records; all versions retain the
-392-word buffer, eight locals, thirty-two expression nodes, sixteen
-expression-recursion levels and six shared structural levels.
+zero. Named transfers, loop-body declarations, early returns in v40–47,
+general calls and native updates remain unsupported in v40–47. Transfers,
+loop headers and else markers count toward the twelve statement records; all
+versions retain the 392-word buffer, eight locals, thirty-two expression
+nodes, sixteen expression-recursion levels and six shared structural levels.
+
+Projection v48 adds structured scalar returns to branch and loop bodies.
+Statement kind 8 carries slot 0, a typed result root and the
+keyword-through-semicolon span; header words 38–40 are `-1`. The independent
+reader consumes every expression root and applies the verifier's continuation
+rules to reject reachable non-void fallthrough. Earlier projections keep their
+existing return shapes. There is no hosted-parser fallback or synthesized
+terminal return. The input bound is 64 tokens; the 392-word buffer, 32 nodes,
+12 statements, eight locals, 16 expression-recursion levels and six
+structural levels remain fixed. Branch/loop-local declarations, general calls
+and native updates are not added.
 
 The host's syntax-29 post-tested loops and named enclosing-loop transfers
 also execute through existing checked lowering; semantic v39 is selected
@@ -307,6 +320,19 @@ unchanged semantic/native consumers. This does not add public generic witnesses
 or cross-module source-operator discovery. Nominal updates are outside the
 scalar-only ConstEval interpreter and remain unsupported in this native
 scalar frontend.
+Host syntax-36 adds primitive `<<`, `>>` and `>>>`, and statement-form
+`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=` and `>>>=`
+for initialized writable `int32`, `uint32`, `int64` and `uint64` places.
+Arithmetic and bitwise operands match the destination type; shift counts are
+`int32`. The place and old value are captured once before the right-hand side,
+which runs once; checked computation precedes writeback, while earlier effects
+remain on failure. Primitive scalar-slot compounds are supported by bounded
+ConstEval. These operations reuse existing update-place/root machinery;
+nominal compounds, `char16`, unique-value update destinations and new
+destination loans remain unsupported. Shift and compound-assignment features
+select semantic v45; compound statements use tag 26. The shared scanner
+catalog appends their token identities without changing scanner-5 records or
+schema-5.
 
 `SourceRange` deliberately mirrors the current host's signed 32-bit UTF-16
 coordinates, including the checked end bound. This is an interchange limit for

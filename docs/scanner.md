@@ -29,6 +29,16 @@ syntax-protocol schema are unchanged.
 Syntax-35 nominal static `++`/`--` calls reuse token identities 86 and 87;
 there are no new scanner identities, record fields or schema changes.
 Compiled-scanner input and hosted lexing produce the same checked lowering.
+Syntax-36 appends token identities for primitive `<<`, `>>`, `>>>` and
+`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=` and `>>>=`,
+without renumbering earlier tokens. The hosted lexer and compiled scanner use
+the shared operator catalog and longest-match selection. Scanner-5 records,
+schema-5 and the integer record layout do not change.
+In generic type context the parser splits `>>`/`>>>` into source-partitioning
+closing tokens in the CST, retaining leading trivia on the first part.
+`SyntaxTree.Tokens` retains the original lexical stream; tree JSON uses the
+CST stream. The scanner's internal packed match reserves three width bits
+for the four-code-unit `>>>=` spelling; published token records are unchanged.
 
 The shared operator catalog includes syntax-28's `=>` token for expression
 bodies; no scanner record or schema revision is needed. Syntax-16 rejects attached

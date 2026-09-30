@@ -46,7 +46,7 @@ substitutions preserve readonly/write and supported optional qualification;
 they do not grant member, null-test or operator capabilities absent from the
 function's constraints. See the [bounded generic contract](docs/implementation.md#bounded-generic-functions)
 for inference, results, outputs, rooting and remaining limits.
-The current parser version is syntax-35. Standalone `init T name;` and
+The current parser version is syntax-36. Standalone `init T name;` and
 `init var name;` declare readonly vacant locals, published only by checked
 initialization; semantic v40 is selected when these declarations are retained.
 Syntax-31 adds target-checked conditional expressions: evaluate the condition
@@ -69,12 +69,27 @@ updates, arbitrary `char16` arithmetic or new witness ABI. Retained nominal
 update calls select semantic v44; private operator bodies and closed generic
 specializations can change behind unchanged semantic/native consumers.
 Nominal updates are outside the scalar-only ConstEval interpreter.
+Syntax-36 adds primitive binary `<<`, `>>` and `>>>`, plus statement-form
+`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=` and `>>>=`
+for initialized writable `int32`, `uint32`, `int64` and `uint64` places.
+Arithmetic and bitwise operands must match the place type; binary shifts use
+one of those four integer types as the left operand and an `int32` count. The
+place and old value are captured once before the right-hand
+side, which runs once; checked computation precedes writeback, and earlier
+effects are not rolled back. Primitive scalar-slot compound assignments are
+available to bounded ConstEval. Nominal compounds, `char16`, unique-value
+updates and new destination loans are not added. Shift and compound-assignment
+nodes select semantic v45; compound statements use tag 26.
+Native scalar projection v48 adds structured scalar returns to branch/loop
+bodies and rejects reachable non-void fallthrough. It retains the
+source-validated 392-word interface and shared verifier/emitter; it is not a
+standalone compiler. Earlier projections retain their prior return shapes.
 Native scalar projections v28–31 add bounded assignment and nested-while
 bodies; v32–39 add braced `if`/`else` bodies and combinations with loops,
 conversions and conditional expressions. Projections v40–43 add nearest-while
 `break`/`continue` transfers to loop bodies without branches; v44–47 add
 branches as well, with conversions and conditional expressions selected by
-the same offsets in each group. The shared backend and projections v1–39 are
+the same offsets in each group. The shared backend and projections v1–47 are
 retained. Static operator requirements use bodyless `static` declarations,
 optionally with a first `<this T>` formal bound by conformance. This remains a
 compilation-local witness subset, not a public generic ABI.

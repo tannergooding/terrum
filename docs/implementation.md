@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-35, semantic v43/v44 updates, native-10 through native-20
+## Current boundary: syntax-36, semantic v43–v45 updates, native-10 through native-20
 
 The approved [source grammar](grammar-spec.md) is broader than this
 implementation. Syntax-28 adds `=>` bodies to supported top-level functions
@@ -119,11 +119,29 @@ Nominal updates and struct construction remain outside the scalar-only
 ConstEval interpreter and diagnose as unsupported required constant work.
 No native ABI/profile change is required.
 
+Syntax-36 adds primitive binary shifts `<<`, `>>` and `>>>`, plus the
+statement-form compound assignments `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`,
+`^=`, `<<=`, `>>=` and `>>>=`. The destination must be an initialized writable
+`int32`, `uint32`, `int64` or `uint64` place. Binary shifts take one of those
+four integer types as the left operand. Arithmetic and bitwise right-hand
+operands have the exact destination type; shift counts are `int32`, using the
+existing checked shift-count rules. The destination address and old value are
+captured before evaluating the right-hand side exactly once. Checked
+computation must succeed before writeback; effects from evaluating the place
+or right-hand side are not rolled back on failure. These operations reuse the
+existing update-place/root machinery and add no destination-loan form.
+Primitive scalar-slot compound assignments are supported in bounded ConstEval.
+Nominal compounds are rejected even where a binary operator witness exists;
+`char16` and unique-value update destinations are not added. Syntax-36 shift
+and compound-assignment nodes select semantic v45, and compound statements
+use expression tag 26 within an expression statement. This does not change
+the native ABI or profile.
+
 The executable Terrum scalar frontend additionally supports bounded nested
 expression trees and expression-bodied scalar functions through provisional
 projection v20, plus initialized scalar locals and assignments in v21.
 Up to eight typed or inferred locals and twelve ordered declaration/assignment
-statements may precede its terminal return/conditional-return envelope.
+statements may precede the return envelope used by projections through v47.
 Only `mut` locals can be reassigned; names bind sequentially, and inferred
 numeric literals have no fallback type. Ordinary calls and vacant locals remain
 outside this native component. It retains existing v1–20 projections for their supported
@@ -194,11 +212,27 @@ root `-1`, and the exact keyword-through-semicolon source span. The source
 reader independently validates nesting, target, type and source, then lowers
 the existing verified transfer nodes. Each projection admits exactly its
 listed features and leaves unused extensions zero. Named transfers, loop-local
-declarations, early returns, general calls and native update expressions
-remain unsupported. The 392-word buffer, eight locals, twelve statement
+declarations, early returns in v40–47, general calls and native update expressions
+remain unsupported in v40–47. The 392-word buffer, eight locals, twelve statement
 records (including transfers, headers and else markers), thirty-two
 expression nodes, sixteen expression-recursion levels and six shared
 structural nesting levels remain fixed; v1–39 payloads remain unchanged.
+
+Projection v48 adds structured scalar returns to these branch/loop bodies.
+Return statement kind 8 has slot 0, the typed result root and the
+keyword-through-semicolon source span; header words 38–40 are `-1` because
+the return statements, rather than terminal return roots, represent results.
+The independent reader validates every root and source construct, then uses
+the verifier's continuation rules to reject reachable non-void fallthrough.
+At least one return record selects v48; provably non-fallthrough loops retain
+the existing verifier treatment rather than requiring every execution to end.
+Earlier projections retain their prior terminal-return and terminal-if-return
+shapes. The component does not fall back to the hosted parser or synthesize a
+terminal return. It adds no body-local declarations, general calls or native
+updates. It keeps the 392-word buffer, 64-token input bound, 32 expression
+nodes, 12 statement records, eight locals and six structural levels; the
+existing 16-level expression-recursion limit also remains. It continues to
+lower through the shared verifier/emitter and is not a standalone compiler.
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
