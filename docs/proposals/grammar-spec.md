@@ -348,7 +348,7 @@ context.
 | Results | `return` | Complete a call. |
 | Producers | `yield` | Emit an element from a producer; ordinary `return;` finishes it. |
 | Asynchrony | `async`, `await` | Mark an async callable implementation and await a checked completion. |
-| Contracts | `require`, `ensure` | Check preconditions or postconditions; declaration grammar remains open. |
+| Contracts | `require`, `ensure` | Check preconditions or postconditions; `return` names the result within a declaration postcondition. |
 | Exception flow | `try`, `catch`, `finally`, `throw` | Handle or propagate failures under their checked transport contracts. |
 | Deferred cleanup | `defer` | Register lexical-block-exit actions. |
 | Unsafe authorization | `unsafe` | Scope operations that require caller authorization. |
@@ -439,6 +439,7 @@ ConstantExpression = Expression ;
 MemberName      = Identifier | Type, ".", Identifier ;
 ConstructorDecl = Identifier, ParameterList, { PostconditionClause }, CallableBody ;
 PostconditionClause = "ensure", Expression ;
+ReturnValueReference = "return" ;
 FunctionDefinition = Type, MemberName, [ TypeParameterList ], ParameterList,
                      { ConstraintClause }, { PostconditionClause },
                      ( CallableBody | ";" ) ;
@@ -932,7 +933,7 @@ Primary         = "(", [ Expression ], ")" | TupleExpression
                 | "new", Type, Arguments,
                   [ ObjectInitializer ]
                 | Number | String | RawText | InterpolatedText | InterpolatedRawText
-                | Character | Boolean | Null | "field"
+                | Character | Boolean | Null | "field" | "this" | ReturnValueReference
                 | Identifier, [ TypeArguments, Arguments ]
                 | "unsafe", "(", Expression, ")"
                 | [ "require" ], "policy", PolicyCases, "(", Expression, ")"
@@ -1537,6 +1538,23 @@ checked correlation with a discriminator and cannot access or clean up a
 vacant arm. Do not add a special `ensure-if` statement or equivalent routine
 output attributes as a parallel authoring mechanism.
 
+Within a declaration postcondition, contextual `return` denotes the result
+of the declaration owning that clause, not a symbol named `result`.
+For example, `int32 Clamp(int32 value) ensure return >= 0 { ... }`
+states a guarantee over its returned value. Ordinary `return` statements
+retain their control-flow meaning; the result reference is not available
+in ordinary body expressions or preconditions. A nested lambda does not
+rebind the reference to its own result, and any capture must obey ordinary
+ownership and lifetime rules. The result is observed through its live
+destination, not a consumed body source, with no implicit move or entry
+snapshot. It must remain valid for publication.
+For an ordinary async callable, the reference denotes the completed payload,
+not the returned task handle, at the established completion postcondition
+phase. Constructors use their current receiver and initialization guarantees,
+not an invented result reference. Producer creation/advance/completion
+postcondition mapping still requires a declared protocol; `return` does
+not implicitly make an `ensure` clause a per-yield check.
+
 The language-versioned default initializes a boolean-success output on `true`
 and leaves it uninitialized on `false`; for other result types, an output is
 initialized on every normal return unless an explicit declaration postcondition
@@ -1565,8 +1583,9 @@ ordinary failure/unwinding; completed body `finally` blocks are not rerun and
 body side effects are not rolled back. This does not add a separate output
 publication transaction.
 
-**Open:** exact `ensure` clause placement/grammar and the
-source-to-metadata mapping for correlated initialization facts. There is no
+§3.1 gives constructor/function `ensure` placement and the contextual result
+reference. Clause placement on other callable forms and the source-to-metadata
+mapping for correlated initialization facts remain open. There is no
 special conditional postcondition block grammar. See the canonical
 [conditional output contract](../language-contracts.md#2-outcome-initialization-and-nullability-are-separate).
 
@@ -2029,7 +2048,7 @@ appears in §2.
 | Expressions | §3.4 gives conditional/coalescing/optional access, half-open slicing, end-relative bounds, tuples, target-directed static/async lambdas, await and collection spreads. | Slice/first-class index/range protocols, callable capture/representation, awaiter registration and collection-fragment contracts; comprehensions/repetition deferred for library/tensor design. |
 | Patterns | §3.3 gives shared switch arms, guarded matching, compatible `or` bindings and explicit constant/wildcard transfers. | Full nominal-case, relational and destructuring patterns. |
 | Policies | §§3.3–3.4 and 5.12 describe lexical preferences, strict selection and constant-formal forwarding. | Variant-declaration syntax and compile-time queries. |
-| Contracts | §§3.3 and 5.8 describe `require` and `ensure` direction. | Declaration clauses and correlated output facts. |
+| Contracts | §§3.1, 3.3 and 5.8 give bounded `ensure` placement, contextual result `return` and ordinary contract checks. | Remaining callable/precondition clauses, producer phases and correlated-output metadata. |
 | Static proof | §5.9 describes the portable static-proof floor. | Constant-evaluation and symbolic source forms. |
 | Exceptions | §§3.3–3.4 give typed/bare catches, filters, throw expressions, rethrow and explicit captured-failure propagation. | Catch eligibility, capture APIs, transport, unwind phase and chaining metadata. |
 | Cleanup | §§3.3 and 5.12 distinguish lexical `defer` from `[Cleanup]`. | Defer action validation and attribute placement. |
