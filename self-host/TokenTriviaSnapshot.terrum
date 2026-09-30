@@ -1,6 +1,6 @@
 namespace Terrum.CodeAnalysis;
 
-// Trivia records retain scanner-5 kind/start/length/leading-token-index words.
+// Trivia records retain scanner-6 kind/start/length/leading-token-index words.
 public unique struct TokenTriviaSnapshot
 {
     private OwnedInt32Buffer _records;
@@ -71,7 +71,7 @@ public unique struct TokenTriviaSnapshot
                 int32 kind = Host.Trivia[offset];
                 int32 start = Host.Trivia[offset + 1];
                 int32 length = Host.Trivia[offset + 2];
-                if (kind < 0 || kind > 3 || length <= 0 || start != position
+                if (kind < 0 || kind > 5 || length <= 0 || start != position
                     || length > tokenStart - start)
                 {
                     return false;

@@ -18,10 +18,10 @@ public static class ScannerHost
     public const int MaximumSourceLength = 16_384;
 
     /// <summary>The version of the lossless scanner and integer-decoder interchange.</summary>
-    public const int SchemaVersion = 5;
+    public const int SchemaVersion = 6;
 
     /// <summary>The component identity for the lossless scanner and integer-decoder protocol.</summary>
-    public const string ComponentName = "scanner-5";
+    public const string ComponentName = "scanner-6";
 
     // Lexemes are packed as (kind, UTF-16 length, code units...) and terminated by kind -1.
     private static readonly (TokenKind Kind, string Text)[] s_operatorSpellings =
@@ -478,7 +478,7 @@ public static class ScannerHost
             var code = BinaryPrimitives.ReadInt32LittleEndian(record);
             var start = BinaryPrimitives.ReadInt32LittleEndian(record[4..]);
             var length = BinaryPrimitives.ReadInt32LittleEndian(record[8..]);
-            if (code is < 1 or > 9 || start < 0 || start > source.Length
+            if (code is < 1 or > 10 || start < 0 || start > source.Length
                 || length <= 0 || length > source.Length - start)
             {
                 throw new ArgumentException("Invalid scanner diagnostic record.", nameof(bytes));
@@ -490,7 +490,7 @@ public static class ScannerHost
         return diagnostics.MoveToImmutable();
     }
 
-    /// <summary>Adapts a completed native scan into the lexical input consumed by the official parser, without re-lexing.</summary>
+    /// <summary>Adapts a completed native scan into parser input, checking current trivia rules without re-lexing tokens.</summary>
     /// <param name="source">The exact source snapshot used by the scanner.</param>
     /// <param name="count">The scanner's token count, including EOF.</param>
     /// <param name="tokenBytes">The copied token buffer.</param>
@@ -499,7 +499,7 @@ public static class ScannerHost
     /// <param name="cancellationToken">A token to cancel record materialization.</param>
     /// <returns>A lossless lexical result with source-owned text and scanner-supplied classification.</returns>
     /// <exception cref="ArgumentNullException">The source is null.</exception>
-    /// <exception cref="ArgumentException">The records violate the scanner interchange contract.</exception>
+    /// <exception cref="ArgumentException">The records violate the scanner interchange or current source lexical profile.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
     public static LexResult ReadLexResult(SourceText source, int count, ReadOnlySpan<byte> tokenBytes,
         ReadOnlySpan<byte> triviaBytes, ReadOnlySpan<byte> diagnosticBytes, CancellationToken cancellationToken = default)
@@ -538,11 +538,60 @@ public static class ScannerHost
                 "TRM0007" => "Hexadecimal prefix requires an ASCII hex digit.",
                 "TRM0008" => "Binary prefix requires an ASCII binary digit.",
                 "TRM0009" => "Digit separators must appear between digits.",
+                "TRM0010" => "Block comment closing fence has too many stars.",
                 _ => throw new ArgumentException("Unknown scanner diagnostic.", nameof(diagnosticBytes)),
             };
             diagnostics.Add(new Diagnostic(diagnostic.Code, DiagnosticSeverity.Error, message, diagnostic.Span));
         }
-        return new LexResult(source, tokens.MoveToImmutable(), diagnostics.MoveToImmutable());
+        var result = new LexResult(source, tokens.MoveToImmutable(), diagnostics.MoveToImmutable());
+        ValidateTriviaProfile(result, cancellationToken);
+        return result;
+    }
+
+    // The record shape alone cannot distinguish a historical fixed-fence scanner
+    // from one implementing this source profile.
+    private static void ValidateTriviaProfile(LexResult result, CancellationToken cancellationToken)
+    {
+        var position = 0;
+        var diagnosticIndex = 0;
+        foreach (var token in result.Tokens)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var expected = Lexer.LexTrivia(result.Source, position, cancellationToken);
+            if (expected.End != token.Span.Start || expected.Trivia.Length != token.LeadingTrivia.Length)
+            {
+                throw new ArgumentException("Scanner records do not match the current source lexical profile.", nameof(result));
+            }
+            for (var index = 0; index < expected.Trivia.Length; index++)
+            {
+                if (expected.Trivia[index].Kind != token.LeadingTrivia[index].Kind
+                    || expected.Trivia[index].Span != token.LeadingTrivia[index].Span)
+                {
+                    throw new ArgumentException("Scanner records do not match the current source lexical profile.", nameof(result));
+                }
+            }
+            foreach (var diagnostic in expected.Diagnostics)
+            {
+                if (diagnosticIndex >= result.Diagnostics.Length
+                    || diagnostic.Code != result.Diagnostics[diagnosticIndex].Code
+                    || diagnostic.Span != result.Diagnostics[diagnosticIndex].Span)
+                {
+                    throw new ArgumentException("Scanner records do not match the current source lexical profile.", nameof(result));
+                }
+                diagnosticIndex++;
+            }
+            if (diagnosticIndex < result.Diagnostics.Length
+                && result.Diagnostics[diagnosticIndex].Span.Start < token.Span.Start)
+            {
+                throw new ArgumentException("Scanner records do not match the current source lexical profile.", nameof(result));
+            }
+            position = token.Span.End;
+            while (diagnosticIndex < result.Diagnostics.Length
+                && result.Diagnostics[diagnosticIndex].Span.Start < position)
+            {
+                diagnosticIndex++;
+            }
+        }
     }
 }
 

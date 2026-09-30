@@ -153,6 +153,52 @@ void AdvanceCommentScalar(int32 at)
     }
 }
 
+int32 SkipBlockComment(int32 start, int32 slashes)
+{
+    mut int32 at = start + slashes;
+    while (PeekUnit(at) == 42)
+    {
+        at = at + 1;
+    }
+    int32 stars = at - start - slashes;
+    while (at < Host.Source.Length)
+    {
+        if (PeekUnit(at) != 42)
+        {
+            AdvanceCommentScalar(at);
+            at = at + ScalarWidth(ReadScalar(at));
+            continue;
+        }
+
+        int32 fence = at;
+        while (PeekUnit(at) == 42)
+        {
+            at = at + 1;
+        }
+        mut bool suffix = true;
+        for (mut int32 index = 0; index < slashes; index = index + 1)
+        {
+            if (PeekUnit(at + index) != 47)
+            {
+                suffix = false;
+            }
+        }
+        if (suffix && at - fence == stars)
+        {
+            return at + slashes;
+        }
+        if (suffix && at - fence > stars)
+        {
+            Report(10, fence, at - fence + slashes);
+            // Keep the rejected whole fence opaque; its suffix cannot restart a closer.
+            at = at + slashes;
+        }
+    }
+
+    Report(3, start, at - start);
+    return at;
+}
+
 void PublishTrivia(int32 kind, int32 start, int32 end, int32 owner)
 {
     int32 count = Host.Trivia[0];
@@ -189,34 +235,32 @@ int32 SkipTrivia(int32 initial, int32 owner)
             }
             PublishTrivia(0, start, at, owner);
         }
+        else if (current == 47 && PeekUnit(at + 1) == 47 && PeekUnit(at + 2) == 42)
+        {
+            at = SkipBlockComment(start, 2);
+            PublishTrivia(5, start, at, owner);
+        }
         else if (current == 47 && PeekUnit(at + 1) == 47)
         {
+            bool documentation = PeekUnit(at + 2) == 47;
             at = at + 2;
             while (at < Host.Source.Length && !IsNewline(PeekUnit(at)))
             {
                 AdvanceCommentScalar(at);
                 at = at + ScalarWidth(ReadScalar(at));
             }
-            PublishTrivia(2, start, at, owner);
-        }
-        else if (current == 47 && PeekUnit(at + 1) == 42)
-        {
-            at = at + 2;
-            while (at < Host.Source.Length
-                && !(PeekUnit(at) == 42 && PeekUnit(at + 1) == 47))
+            if (documentation)
             {
-                AdvanceCommentScalar(at);
-                at = at + ScalarWidth(ReadScalar(at));
-            }
-
-            if (at == Host.Source.Length)
-            {
-                Report(3, start, at - start);
+                PublishTrivia(4, start, at, owner);
             }
             else
             {
-                at = at + 2;
+                PublishTrivia(2, start, at, owner);
             }
+        }
+        else if (current == 47 && PeekUnit(at + 1) == 42)
+        {
+            at = SkipBlockComment(start, 1);
             PublishTrivia(3, start, at, owner);
         }
 

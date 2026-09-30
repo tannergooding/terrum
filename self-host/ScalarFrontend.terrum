@@ -1,6 +1,6 @@
 namespace Terrum.CodeAnalysis;
 
-// Scanner-5 token ordinals. Invalid results publish no partial artifact:
+// Scanner-6 token ordinals. Invalid results publish no partial artifact:
 // 1 = unsupported syntax/bound, 2 = type, 3 = unresolved name, 4 = duplicate name.
 // Expressions preserve operator identities; later lowering must retain checked arithmetic.
 // This in-process contract uses UTF-16 SourceRange values against the input source.

@@ -13,4 +13,8 @@ public enum TriviaKind
     SingleLineComment,
     /// <summary>A delimited block comment.</summary>
     MultiLineComment,
+    /// <summary>A documentation comment ending at a line break or end of file.</summary>
+    DocumentationLineComment,
+    /// <summary>A delimited documentation block comment.</summary>
+    DocumentationBlockComment,
 }

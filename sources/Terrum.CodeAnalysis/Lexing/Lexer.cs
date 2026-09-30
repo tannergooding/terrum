@@ -58,6 +58,14 @@ public sealed class Lexer
         return new LexResult(source, tokens.ToImmutable(), lexer._diagnostics.ToImmutable());
     }
 
+    internal static (ImmutableArray<SyntaxTrivia> Trivia, ImmutableArray<Diagnostic> Diagnostics, int End)
+        LexTrivia(SourceText source, int position, CancellationToken cancellationToken)
+    {
+        Lexer lexer = new(source, cancellationToken) { _position = position };
+        var trivia = lexer.ReadTrivia();
+        return (trivia, lexer._diagnostics.ToImmutable(), lexer._position);
+    }
+
     private bool AtEnd => _position == _source.Length;
     private char Current => AtEnd ? '\0' : _source[_position];
     private char Peek(int offset) => offset < _source.Length - _position ? _source[_position + offset] : '\0';
@@ -98,9 +106,14 @@ public sealed class Lexer
                 kind = TriviaKind.NewLine;
                 _position += Current == '\r' && Peek(1) == '\n' ? 2 : 1;
             }
+            else if (Current == '/' && Peek(1) == '/' && Peek(2) == '*')
+            {
+                kind = TriviaKind.DocumentationBlockComment;
+                ReadBlockComment(start, 2);
+            }
             else if (Current == '/' && Peek(1) == '/')
             {
-                kind = TriviaKind.SingleLineComment;
+                kind = Peek(2) == '/' ? TriviaKind.DocumentationLineComment : TriviaKind.SingleLineComment;
                 _position += 2;
                 while (!AtEnd && !IsNewline(Current))
                 {
@@ -111,20 +124,7 @@ public sealed class Lexer
             else if (Current == '/' && Peek(1) == '*')
             {
                 kind = TriviaKind.MultiLineComment;
-                _position += 2;
-                while (!AtEnd && !(Current == '*' && Peek(1) == '/'))
-                {
-                    _cancellationToken.ThrowIfCancellationRequested();
-                    AdvanceCommentScalar();
-                }
-                if (AtEnd)
-                {
-                    Report("TRM0003", "Unterminated block comment.", start, _position - start);
-                }
-                else
-                {
-                    _position += 2;
-                }
+                ReadBlockComment(start, 1);
             }
             else
             {
@@ -136,6 +136,57 @@ public sealed class Lexer
         }
 
         return trivia.ToImmutable();
+    }
+
+    private void ReadBlockComment(int start, int slashCount)
+    {
+        _position += slashCount;
+        var starStart = _position;
+        while (!AtEnd && Current == '*')
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            _position++;
+        }
+        var starCount = _position - starStart;
+        while (!AtEnd)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (Current != '*')
+            {
+                AdvanceCommentScalar();
+                continue;
+            }
+
+            starStart = _position;
+            while (!AtEnd && Current == '*')
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                _position++;
+            }
+            var closingStars = _position - starStart;
+            var hasSuffix = true;
+            for (var index = 0; index < slashCount; index++)
+            {
+                if (Peek(index) != '/')
+                {
+                    hasSuffix = false;
+                    break;
+                }
+            }
+            if (hasSuffix && closingStars == starCount)
+            {
+                _position += slashCount;
+                return;
+            }
+            if (hasSuffix && closingStars > starCount)
+            {
+                Report("TRM0010", "Block comment closing fence has too many stars.", starStart, closingStars + slashCount);
+                // Keep the rejected whole fence opaque; its suffix cannot restart a closer.
+                _position += slashCount;
+            }
+        }
+
+        Report("TRM0003", "Unterminated block comment.", start, _position - start);
     }
 
     private void AdvanceCommentScalar()

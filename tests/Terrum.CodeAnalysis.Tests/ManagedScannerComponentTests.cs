@@ -23,6 +23,9 @@ public sealed class ManagedScannerComponentTests
     [Theory]
     [InlineData("", false)]
     [InlineData("// trivia\r\nalpha 42", false)]
+    [InlineData("//* *// /// heading\nalpha", false)]
+    [InlineData("//* */", true)]
+    [InlineData("/* **/ */", true)]
     [InlineData("\U00010400 42", false)]
     [InlineData("\uD800", true)]
     [InlineData("a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a", true)]
@@ -91,6 +94,7 @@ public sealed class ManagedScannerComponentTests
     [InlineData("0x")]
     [InlineData("\uD800")]
     [InlineData("\"unterminated\n\"\\q\"")]
+    [InlineData("/* **/ */")]
     public async Task OwnedDiagnosticsRemainAvailableOnLexicalFailureAsync(string text)
     {
         var expected = Lexer.Lex(SourceText.From(text)).Diagnostics;
@@ -128,7 +132,7 @@ public sealed class ManagedScannerComponentTests
     [InlineData(0, -1)]
     [InlineData(0, int.MaxValue)]
     [InlineData(1, 0)]
-    [InlineData(1, 10)]
+    [InlineData(1, 11)]
     [InlineData(2, -1)]
     [InlineData(2, 2)]
     [InlineData(3, -1)]
@@ -269,6 +273,7 @@ public sealed class ManagedScannerComponentTests
     [InlineData("")]
     [InlineData("  // leading\r\nalpha /* block */ beta\t")]
     [InlineData("alpha\u2028beta // trailing")]
+    [InlineData("/// heading\nalpha //** body **// beta /** tail **/")]
     public async Task OwnedTriviaSnapshotMatchesHostedLeadingTriviaAsync(string text)
     {
         var expected = Lexer.Lex(SourceText.From(text)).Tokens

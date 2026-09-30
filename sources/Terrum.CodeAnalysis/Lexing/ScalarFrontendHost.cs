@@ -1681,7 +1681,7 @@ public static class ScalarFrontendHost
             4 => ulong.MaxValue,
             _ => ushort.MaxValue,
         };
-        return magnitude <= max && magnitude == ((ulong)(uint)high << 32 | (uint)low);
+        return magnitude <= max && magnitude == unchecked((ulong)(uint)high << 32 | (uint)low);
     }
 
     private static TextSpan NumericSpan(SourceText source, TextSpan expression)

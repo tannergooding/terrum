@@ -53,7 +53,7 @@ public unique struct TokenDiagnosticSnapshot
             int32 code = Host.Diagnostics[offset];
             int32 start = Host.Diagnostics[offset + 1];
             int32 length = Host.Diagnostics[offset + 2];
-            if (code < 1 || code > 9 || start < 0 || length < 0
+            if (code < 1 || code > 10 || start < 0 || length < 0
                 || start > Host.Source.Length || length > Host.Source.Length - start)
             {
                 return false;

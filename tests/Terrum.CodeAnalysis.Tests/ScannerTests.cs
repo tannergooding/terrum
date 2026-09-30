@@ -291,7 +291,7 @@ public sealed class ScannerTests
 
     [Theory]
     [InlineData(2, 0, 0, 1, 0)]
-    [InlineData(1, 4, 0, 1, 0)]
+    [InlineData(1, 6, 0, 1, 0)]
     [InlineData(1, 0, 1, 0, 0)]
     [InlineData(1, 0, 0, 3, 0)]
     [InlineData(1, 0, 0, 2, 0)]
@@ -316,7 +316,7 @@ public sealed class ScannerTests
     [Theory]
     [InlineData(2, 1, 0, 1)]
     [InlineData(1, 0, 0, 1)]
-    [InlineData(1, 10, 0, 1)]
+    [InlineData(1, 11, 0, 1)]
     [InlineData(1, 1, -1, 1)]
     [InlineData(1, 1, 0, 0)]
     [InlineData(1, 1, 0, 2)]
@@ -419,7 +419,7 @@ public sealed class ScannerTests
             Assert.Single(ScannerHost.ReadIntegerValues(source, tokens, bytes)));
     }
 
-    private static async Task CheckScannerAsync(string source, bool repeat = false)
+    internal static async Task CheckScannerAsync(string source, bool repeat = false)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
         var scanner = await File.ReadAllTextAsync(Path.Combine(root, "self-host", "Scanner.terrum")).ConfigureAwait(true);
