@@ -9,6 +9,9 @@ namespace Terrum.CodeAnalysis;
 // name length); 332..391 hold (kind, slot, root, span start, span length).
 // Versions 22/23 add unary operation 83 for checked numeric conversion,
 // respectively without/with local records; its type is the destination.
+// Versions 24/25 add conditional operation 84 without/with local records;
+// its left and right are condition and true-arm nodes, and its low word is
+// the false-arm node index. Versions 26/27 combine it with operation 83.
 void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expression)
 {
     Host.Frontend[offset] = expression.Type;
@@ -49,6 +52,12 @@ bool TryPublishScalarFrontend()
                 else { Host.Frontend[0] = 23; }
             }
         }
+        mut bool conditional = false;
+        for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
+        {
+            if (Host.Frontend[42 + node * 8] == 84) { conditional = true; }
+        }
+        if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 4; }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {

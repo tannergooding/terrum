@@ -1602,6 +1602,16 @@ mut class ScalarFrontendState
     {
         int32 offset = 42 + node * 8;
         int32 operation = TreeWord(node, 0);
+        if (operation == 84 && TreeWord(node, 1) == 0)
+        {
+            if (!ResolveTreeLiteral(TreeWord(node, 5), type, false)
+                || !ResolveTreeLiteral(TreeWord(node, 6), type, false))
+            {
+                return false;
+            }
+            Host.Frontend[offset + 1] = type;
+            return true;
+        }
         if (operation == 3)
         {
             int32 start = TreeWord(node, 2);
@@ -1718,45 +1728,9 @@ mut class ScalarFrontendState
                 }
             }
             _at = _at + 2;
-            mut int32 operandContext = target;
-            mut int32 parens = 0;
-            mut int32 cursor = _at;
-            while (_tokens.TryGet(cursor, out var part))
-            {
-                if (part.Kind == 47)
-                {
-                    if (parens == 0) { break; }
-                    parens = parens - 1;
-                }
-                if (part.Kind == 46) { parens = parens + 1; }
-                if (part.Kind == 2
-                    && ((_parameterCount > 0 && SameTokenSpelling(_first, part))
-                        || (_parameterCount > 1 && SameTokenSpelling(_second, part))
-                        || (_parameterCount > 2 && SameTokenSpelling(_third, part))))
-                {
-                    operandContext = 0;
-                }
-                if (part.Kind == 2
-                    && _tokens.TryGet(cursor + 1, out var next)
-                    && next.Kind == 46
-                    && TryGetScalarType(part, out var nestedType))
-                {
-                    operandContext = 0;
-                }
-                for (mut int32 local = 0; local < _localCount; local = local + 1)
-                {
-                    int32 offset = 300 + local * 4;
-                    require SourceRange.TryCreate(Host.Frontend[offset + 2],
-                        Host.Frontend[offset + 3], out var name);
-                    if (part.Kind == 2
-                        && SameTokenSpelling(new Token(2, name), part))
-                    {
-                        operandContext = 0;
-                    }
-                }
-                cursor = cursor + 1;
-            }
-            if (!ParseTreeExpression(operandContext, 1, depth + 1, out var operand)
+            // Resolve destination context only after the operand's own type is known.
+            // A conditional predicate does not establish the type of its result arms.
+            if (!ParseTreeExpression(0, 1, depth + 1, out var operand)
                 || (TreeWord(operand, 1) == 0
                     && !ResolveTreeLiteral(operand, target, false))
                 || !Take(47, out var close))
@@ -1947,6 +1921,55 @@ mut class ScalarFrontendState
                 return false;
             }
             left = binary;
+        }
+        if (precedence == 1 && _tokens.TryGet(_at, out var question)
+            && question.Kind == 56)
+        {
+            if (TreeWord(left, 1) != 5)
+            {
+                FailTreeType(left);
+                return false;
+            }
+            _at = _at + 1;
+            mut int32 armContext = expected;
+            if (armContext == 5) { armContext = 0; }
+            if (!ParseTreeExpression(armContext, 1, depth + 1, out var whenTrue)
+                || !Take(55, out var colon))
+            {
+                return false;
+            }
+            int32 trueType = TreeWord(whenTrue, 1);
+            mut int32 falseContext = armContext;
+            if (falseContext == 0) { falseContext = trueType; }
+            if (!ParseTreeExpression(falseContext, 1, depth + 1, out var whenFalse))
+            {
+                return false;
+            }
+            int32 falseType = TreeWord(whenFalse, 1);
+            mut int32 resultType = armContext;
+            if (resultType == 0)
+            {
+                if (trueType != 0 && falseType != 0 && trueType != falseType)
+                {
+                    FailTreeType(whenFalse);
+                    return false;
+                }
+                if (trueType != 0) { resultType = trueType; }
+                else { resultType = falseType; }
+            }
+            if (resultType != 0
+                && (!ResolveTreeLiteral(whenTrue, resultType, false)
+                    || !ResolveTreeLiteral(whenFalse, resultType, false)))
+            {
+                return false;
+            }
+            if (!AddTreeNode(84, resultType, TreeWord(left, 2),
+                TreeWord(whenFalse, 2) + TreeWord(whenFalse, 3),
+                left, whenTrue, whenFalse, 0, out var conditional))
+            {
+                return false;
+            }
+            left = conditional;
         }
         node = left;
         return true;
@@ -2231,7 +2254,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     {
         require chain.TryGet(index, out var token);
         if (token.Kind == 82 || token.Kind == 12 || token.Kind == 13
-            || token.Kind == 64)
+            || token.Kind == 64 || token.Kind == 56)
         {
             result = modern;
             return true;
