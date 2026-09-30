@@ -86,7 +86,7 @@ The proposed allow list is:
 | Allowed adjacency | Scope and example |
 |---|---|
 | One defined operator/punctuator spelling | Exactly a spelling assigned by the grammar, such as `++`, `+=`, `<<`, `??`, `?.`, `=>` or `..`; not concatenated operators. |
-| Grouping and list delimiters | `(`, `)`, `[`, `]`, `{`, `}`, `,` and `;` bound separate tokens, as in `x * (-y)` or `f(a[i])`; delimiter-specific spacing remains to settle. |
+| Grouping and list delimiters | `(`, `)`, `[`, `]`, `{`, `}`, `,` and `;` bound separate tokens, as in `x * (-y)` or `f(a[i])`; ordinary interior/separator trivia is flexible, with receiver attachment required for calls/indexing. |
 | Comment boundaries | Recognize ordinary `//`/`/*` and selected documentation `///`/`//*` openers before operator-run validation outside literals/comments; documentation-block recognition precedes ordinary line comments. |
 | Type-context punctuation | Optional `?` followed by generic closers and consecutive generic closers, as in `List<T?>` and `List<List<T>>`; only when required by the type/argument grammar. |
 | Range/from-end punctuator | Candidate named composite `..^` introduces an end-relative upper slice bound, as in `items[start..^1]`; not a freely concatenated `..` and `^` or a general arithmetic operator. |
@@ -152,13 +152,12 @@ boundaries, so interior padding does not undermine operator-run evolution.
 Receiver attachment and operator spacing still apply independently:
 `f (x)` and `f(- x)` reject. **C# model:** This follows C#'s flexible
 interior trivia, not a prescribed formatter style. Literal/interpolation
-delimiters retain their own rules. Comma/semicolon spacing remains a separate
-question. This includes multiline arguments, with the call opener attached
+delimiters retain their own rules. Separators follow the rule below.
+This includes multiline arguments, with the call opener attached
 to the callee and the arguments/closing delimiter on subsequent lines.
 
-**Separator spacing question (awaiting review):** Should commas and
-semicolons impose additional spacing or attachment requirements?
-**Recommendation:** Treat them as fixed structural separators with flexible
+**Accepted separator spacing:** Treat commas and semicolons as fixed
+structural separators, not postfix operators, with flexible
 trivia: `f(x,y)`, `f(x, y)` and `f(x , y)` are valid forms, as are
 `return x;` and `return x ;`. They already establish explicit boundaries
 and are excluded from operator runs, so this does not weaken the operator
@@ -166,7 +165,22 @@ spacing/evolution rules. A formatter may prefer attached separators followed
 by spaces or line breaks without making that style mandatory.
 **C# model:** This follows C#'s trivia-insensitive separator spacing.
 It does not change where separators, trailing commas or empty statements
-are permitted. This recommendation has not been accepted.
+are permitted. Leading-comma alignment across lines is also valid;
+spacing around a comma is not a formatter mandate.
+
+**Generic opener attachment question (awaiting review):** Should generic
+argument and declaration parameter lists' `<` attach directly to the
+preceding name?
+**Recommendation:** Require `List<T>` and `F<T>(x)`, rejecting
+`List <T>` and `F <T>(x)`. Generic application is a delimited construct,
+whereas comparison remains a spaced binary operation, as in `x < y`.
+This supplies a grammatical boundary without consulting operand types or
+trying another interpretation after a binding failure.
+Apply the same attachment rule to generic parameter lists in declarations.
+**C# model:** Generic syntax is C#-inspired, but requiring opener attachment
+deviates from C#'s trivia-insensitive generic delimiters. Interior trivia,
+keyword-selected angle lists and optional-type punctuation remain separate
+decisions. This recommendation has not been accepted.
 
 **Comment-fence question:** Should a block comment select its closing fence
 from the opening star count, analogously to the selected delimiter length of

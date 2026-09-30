@@ -157,6 +157,10 @@ and line breaks around enclosed tokens. Multiline calls keep the opening
 `(` attached to the callee while permitting arguments and the closing `)`
 on subsequent lines. Receiver/operator attachment remains independent of
 interior padding, and literal/interpolation delimiters retain their own rules.
+Commas and semicolons are fixed structural separators with flexible trivia
+on either side, not postfix operators or parts of operator runs. Leading-comma
+multiline alignment is valid. Spacing does not change where a separator,
+trailing comma or empty statement is allowed.
 Keyword operators retain word boundaries. Grouping/list delimiters, generic
 delimiters and range syntax retain their own grammatical rules; their exact
 remaining spacing requirements are separate design work.

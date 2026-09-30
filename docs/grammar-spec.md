@@ -1123,6 +1123,24 @@ Receiver attachment and operator spacing still apply independently:
 `f (x)` and `f(- x)` reject. Literal/interpolation delimiters retain their
 own rules; interior trivia is not permission to alter literal contents.
 
+Commas and semicolons are fixed structural separators, not postfix operators.
+They impose no spacing or attachment requirement of their own: `f(x,y)`,
+`f(x, y)` and `f(x , y)` are valid forms, as are `return x;` and
+`return x ;`. Whitespace, comments and line breaks around separators remain
+ordinary trivia. Leading-comma alignment is therefore also valid:
+
+```terrum
+F(
+    x
+  , y
+  , z
+)
+```
+
+This does not change where separators, trailing commas or empty statements
+are allowed. Commas and semicolons delimit operator runs rather than becoming
+part of future operator spellings.
+
 Generic argument parsing uses the selected declaration's formal kinds to
 distinguish type arguments from constant-value expressions; the broad
 alternatives above do not permit arbitrary runtime expressions as constants.
