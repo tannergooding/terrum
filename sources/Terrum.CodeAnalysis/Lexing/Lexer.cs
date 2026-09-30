@@ -485,6 +485,7 @@ public sealed class Lexer
         "if" => TokenKind.IfKeyword,
         "else" => TokenKind.ElseKeyword,
         "while" => TokenKind.WhileKeyword,
+        "do" => TokenKind.DoKeyword,
         "return" => TokenKind.ReturnKeyword,
         "true" => TokenKind.TrueKeyword,
         "false" => TokenKind.FalseKeyword,

@@ -1861,9 +1861,13 @@ internal sealed partial class PeCompiler
                 break;
             case BoundWhile loop:
                 var start = _code.Position;
-                Expression(loop.Condition, 0);
-                _code.Bytes(0x85, 0xC0);
-                var exit = _code.JumpIf(0x84);
+                var exit = -1;
+                if (!loop.IsPostTested)
+                {
+                    Expression(loop.Condition, 0);
+                    _code.Bytes(0x85, 0xC0);
+                    exit = _code.JumpIf(0x84);
+                }
                 var loopTarget = new LoopTarget(_normalExits.Count);
                 _loopTargets.Add(loopTarget);
                 Statement(loop.Body);
@@ -1872,9 +1876,17 @@ internal sealed partial class PeCompiler
                 {
                     Statement(loop.Iterator);
                 }
+                var conditionStart = _code.Position;
+                if (loop.IsPostTested)
+                {
+                    Expression(loop.Condition, 0);
+                    _code.Bytes(0x85, 0xC0);
+                    exit = _code.JumpIf(0x84);
+                }
                 foreach (var jump in loopTarget.Continues)
                 {
-                    _code.PatchRelative(jump, loop.Iterator is null ? start : iteratorStart);
+                    _code.PatchRelative(jump, loop.IsPostTested ? conditionStart
+                        : loop.Iterator is null ? start : iteratorStart);
                 }
                 _loopTargets.RemoveAt(_loopTargets.Count - 1);
                 _code.PatchRelative(_code.Jump(), start);
@@ -1889,7 +1901,13 @@ internal sealed partial class PeCompiler
                 {
                     throw new ArgumentException("Loop transfer has no verified target.", nameof(statement));
                 }
-                var target = _loopTargets[^1];
+                var targetDepth = statement is BoundBreak exitLoop ? exitLoop.TargetDepth
+                    : ((BoundContinue)statement).TargetDepth;
+                if (targetDepth <= 0 || targetDepth > _loopTargets.Count)
+                {
+                    throw new ArgumentException("Loop transfer has no verified target.", nameof(statement));
+                }
+                var target = _loopTargets[^targetDepth];
                 for (var index = _normalExits.Count - 1; index >= target.ExitDepth; index--)
                 {
                     var normalExit = _normalExits[index];

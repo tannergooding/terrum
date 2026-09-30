@@ -638,6 +638,13 @@ internal sealed class Parser
                 node = Node(isIf ? SyntaxKind.IfStatement : SyntaxKind.WhileStatement, children);
                 break;
             }
+            case TokenKind.DoKeyword:
+            {
+                node = Node(SyntaxKind.DoStatement,
+                    [Take(), ParseBlock(), Expect(TokenKind.WhileKeyword), Expect(TokenKind.OpenParen),
+                        ParseExpression(), Expect(TokenKind.CloseParen), Expect(TokenKind.Semicolon)]);
+                break;
+            }
             case TokenKind.RequireKeyword:
             {
                 node = Node(SyntaxKind.RequireStatement, [Take(), ParseExpression(), Expect(TokenKind.Semicolon)]);
@@ -721,7 +728,13 @@ internal sealed class Parser
             case TokenKind.ContinueKeyword:
             {
                 var kind = Current.Kind == TokenKind.BreakKeyword ? SyntaxKind.BreakStatement : SyntaxKind.ContinueStatement;
-                node = Node(kind, [Take(), Expect(TokenKind.Semicolon)]);
+                var children = new List<SyntaxElement> { Take() };
+                if (Current.Kind == TokenKind.Identifier)
+                {
+                    children.Add(Take());
+                }
+                children.Add(Expect(TokenKind.Semicolon));
+                node = Node(kind, children);
                 break;
             }
             case TokenKind.Semicolon:
@@ -737,7 +750,12 @@ internal sealed class Parser
             }
             default:
             {
-                if (Current.Kind == TokenKind.Identifier && Current.Text == "const"
+                if (Current.Kind == TokenKind.Identifier && Peek(1).Kind == TokenKind.Colon
+                    && Peek(2).Kind is TokenKind.WhileKeyword or TokenKind.ForKeyword or TokenKind.DoKeyword)
+                {
+                    node = Node(SyntaxKind.LabeledLoopStatement, [Take(), Take(), ParseStatement()]);
+                }
+                else if (Current.Kind == TokenKind.Identifier && Current.Text == "const"
                     && LooksLikeLocal(1))
                 {
                     var keyword = Take();

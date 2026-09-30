@@ -10,6 +10,93 @@ public sealed partial class JitTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public Task PostTestedAndNamedTransfersKeepConditionAndIteratorOrderAsync(bool checkedExceptions)
+    {
+        const string Source = """
+            int32 Main() {
+                mut int32 result = 0;
+                outer: for (mut int32 i = 0; i < 5; i = i + 1) {
+                    do {
+                        if (i == 0) { continue outer; }
+                        if (i == 3) { break outer; }
+                        result = result + 20;
+                        break;
+                    } while (true);
+                }
+                return result + 2;
+            }
+            """;
+        return checkedExceptions ? AssertCheckedExecutionAsync(Source, 42) : AssertFailFastExecutionAsync(Source, 42);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task ContinueInPostTestedLoopChecksConditionAndUnwindsCleanupAsync(bool checkedExceptions)
+    {
+        const string Source = """
+            int32 Main() {
+                mut int32 value = 0;
+                outer: do {
+                    try { value = value + 1; continue outer; }
+                    finally {
+                        if (value == 1) { value = 11; }
+                        else if (value == 12) { value = 22; }
+                        else if (value == 23) { value = 33; }
+                        else { value = 44; }
+                    }
+                } while (value < 42);
+                return value - 2;
+            }
+            """;
+        return checkedExceptions ? AssertCheckedExecutionAsync(Source, 42) : AssertFailFastExecutionAsync(Source, 42);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task NamedOuterTransferRetiresInnerManagedRootsAsync(bool checkedExceptions)
+    {
+        const string Source = """
+            class Leaf { public int32 Value; public Leaf(int32 value) { Value = value; } }
+            int32 Main() {
+                outer: for (mut int32 i = 0; i < 3; i = i + 1) {
+                    do {
+                        require Leaf.TryCreate(i, out var leaf);
+                        if (i == 0) { continue outer; }
+                        if (leaf.Value == 1) { break outer; }
+                    } while (false);
+                }
+                if (ManagedHeap.Collect() != 2) { return 1; }
+                return 42;
+            }
+            """;
+        return checkedExceptions ? AssertCheckedExecutionAsync(Source, 42) : AssertFailFastExecutionAsync(Source, 42);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task NamedBreakUnwindsNestedFinallyBeforeOuterExitAsync(bool checkedExceptions)
+    {
+        const string Source = """
+            int32 Main() {
+                mut int32 result = 0;
+                outer: while (true) {
+                    do {
+                        try { result = 1; break outer; }
+                        finally { if (result == 1) { result = 42; } }
+                    } while (true);
+                }
+                return result;
+            }
+            """;
+        return checkedExceptions ? AssertCheckedExecutionAsync(Source, 42) : AssertFailFastExecutionAsync(Source, 42);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public Task ForContinueRunsIteratorAndBreakSkipsItAsync(bool checkedExceptions)
     {
         const string Source = """

@@ -171,4 +171,6 @@ public enum TokenKind
     Underscore,
     /// <summary>The expression-body arrow (<c>=&gt;</c>).</summary>
     Arrow,
+    /// <summary>The <c>do</c> keyword.</summary>
+    DoKeyword,
 }

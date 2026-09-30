@@ -1686,7 +1686,8 @@ public static class SemanticVerifier
                 }
                 return (!thenReachable || thenReturns) && (!elseReachable || elseReturns);
             case BoundWhile loop:
-                if (loop.Iterator is not (null or BoundAssignment or BoundExpressionStatement
+                if ((loop.IsPostTested && loop.Iterator is not null)
+                    || loop.Iterator is not (null or BoundAssignment or BoundExpressionStatement
                     or BoundBlock { Statements.IsEmpty: true, IsManagedLexicalScope: false, RetiredManagedLocals.IsEmpty: true }))
                 {
                     throw Invalid(loop.Span);
@@ -1702,15 +1703,20 @@ public static class SemanticVerifier
                     var conditionState = (bool[])headState.Clone();
                     var conditionMasks = (uint[])headMasks.Clone();
                     var iterationDeclarations = new HashSet<int>(priorDeclarations);
-                    Expression(loop.Condition, conditionState, conditionMasks, iterationDeclarations, function, program, ref remaining, depth + 1, failures);
+                    if (!loop.IsPostTested)
+                    {
+                        Expression(loop.Condition, conditionState, conditionMasks, iterationDeclarations,
+                            function, program, ref remaining, depth + 1, failures);
+                    }
                     if (loop.Condition.Type != PrimitiveType.Bool || loop.Body is null)
                     {
                         throw Invalid();
                     }
-                    var bodyState = Outcome(loop.Condition, conditionInput, true, ref remaining);
+                    var bodyState = loop.IsPostTested ? (bool[])headState.Clone()
+                        : Outcome(loop.Condition, conditionInput, true, ref remaining);
                     var bodyMasks = (uint[])conditionMasks.Clone();
                     MarkOutMasks(bodyState, bodyMasks, function, program);
-                    var bodyReachable = CanBe(loop.Condition, true, ref remaining);
+                    var bodyReachable = loop.IsPostTested || CanBe(loop.Condition, true, ref remaining);
                     var exitReachable = CanBe(loop.Condition, false, ref remaining);
                     var iteratorDeclarations = new HashSet<int>(iterationDeclarations);
                     var loopScope = new LoopScope(cleanups.Count);
@@ -1718,7 +1724,8 @@ public static class SemanticVerifier
                     var bodyReturns = Statement(loop.Body, bodyState, bodyMasks, iterationDeclarations, function, program, ref remaining, depth + 1,
                         reachable && bodyReachable, cleanups, inCleanup, inUnsafe, failures, loops);
                     loops.RemoveAt(loops.Count - 1);
-                    var exitState = Outcome(loop.Condition, conditionInput, false, ref remaining);
+                    var exitState = loop.IsPostTested ? (bool[])conditionState.Clone()
+                        : Outcome(loop.Condition, conditionInput, false, ref remaining);
                     var exitMasks = (uint[])conditionMasks.Clone();
                     MarkOutMasks(exitState, exitMasks, function, program);
                     var backEdges = new FailureEdges();
@@ -1753,6 +1760,40 @@ public static class SemanticVerifier
                             backEdges.Add(iteratorState, iteratorMasks);
                         }
                     }
+                    if (loop.IsPostTested)
+                    {
+                        var conditionInputState = backEdges.HasEdges ? backEdges.State : (bool[])bodyState.Clone();
+                        var conditionInputMasks = backEdges.HasEdges ? backEdges.Masks : (uint[])bodyMasks.Clone();
+                        var conditionDeclarations = new HashSet<int>(iterationDeclarations);
+                        for (var slot = function.ParameterCount + (function.IsConstructor ? 1 : 0);
+                            slot < conditionInputState.Length; slot++)
+                        {
+                            if (!priorDeclarations.Contains(slot))
+                            {
+                                conditionInputState[slot] = false;
+                                conditionInputMasks[slot] = 0;
+                            }
+                        }
+                        var evaluatedState = (bool[])conditionInputState.Clone();
+                        var evaluatedMasks = (uint[])conditionInputMasks.Clone();
+                        Expression(loop.Condition, evaluatedState, evaluatedMasks, conditionDeclarations,
+                            function, program, ref remaining, depth + 1, failures);
+                        var falseState = Outcome(loop.Condition, conditionInputState, false, ref remaining);
+                        var trueState = Outcome(loop.Condition, conditionInputState, true, ref remaining);
+                        var trueMasks = (uint[])evaluatedMasks.Clone();
+                        MarkOutMasks(falseState, evaluatedMasks, function, program);
+                        MarkOutMasks(trueState, trueMasks, function, program);
+                        exitState = falseState;
+                        exitMasks = evaluatedMasks;
+                        backEdges = new FailureEdges();
+                        if (bodyReachable && (loopScope.Continues.HasEdges || !bodyReturns)
+                            && CanBe(loop.Condition, true, ref remaining))
+                        {
+                            backEdges.Add(trueState, trueMasks);
+                        }
+                        exitReachable &= bodyReachable && (loopScope.Continues.HasEdges || !bodyReturns);
+                        iterationDeclarations.UnionWith(conditionDeclarations);
+                    }
                     var exits = new FailureEdges();
                     if (exitReachable)
                     {
@@ -1786,11 +1827,13 @@ public static class SemanticVerifier
                 }
                 throw Limit();
             case BoundBreak or BoundContinue:
-                if (loops.Count == 0)
+                var targetDepth = statement is BoundBreak exit ? exit.TargetDepth
+                    : ((BoundContinue)statement).TargetDepth;
+                if (targetDepth <= 0 || targetDepth > loops.Count)
                 {
                     throw InvalidEffect(statement.Span, inCleanup ? "FinallyReturn" : "LoopTransfer");
                 }
-                var target = loops[^1];
+                var target = loops[^targetDepth];
                 var transferState = (bool[])initialized.Clone();
                 var transferMasks = (uint[])fieldMasks.Clone();
                 var transferDeclarations = new HashSet<int>(declarations);
@@ -2186,7 +2229,7 @@ public static class SemanticVerifier
                     || (conditional.Else is not null && CanBe(conditional.Condition, false, ref remaining)
                         && HasUnsupportedCleanupFlow(conditional.Else, program, ref remaining, depth + 1));
             case BoundWhile loop:
-                return CanBe(loop.Condition, true, ref remaining)
+                return (loop.IsPostTested || CanBe(loop.Condition, true, ref remaining))
                     && loop is not {
                         Condition: BoundConstant { Type: PrimitiveType.Bool, Value: 1 },
                         Body: BoundBlock { Statements: [BoundBreak] },

@@ -44,6 +44,7 @@ public static partial class ModuleCompiler
     private const int WideClassFieldsVersion = 36;
     private const int CorePrimitiveVersion = 37;
     private const int CorePrimitiveGetterVersion = 38;
+    private const int StructuredLoopVersion = 39;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -822,7 +823,8 @@ public static partial class ModuleCompiler
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Only nodes with nested expressions or statements need traversal.")]
     private static List<int> Calls(BoundStatement body, Action<PrimitiveType>? visitType = null,
         Action<BoundViewScope>? visitView = null, Action? visitLoopTransfer = null,
-        Action<BoundMutableFieldLoan>? visitMutableFieldLoan = null)
+        Action<BoundMutableFieldLoan>? visitMutableFieldLoan = null,
+        Action<BoundStatement>? visitStructuredLoop = null)
     {
         var calls = new List<int>();
         VisitStatement(body);
@@ -859,6 +861,10 @@ public static partial class ModuleCompiler
                     }
                     break;
                 case BoundWhile loop:
+                    if (loop.IsPostTested)
+                    {
+                        visitStructuredLoop?.Invoke(loop);
+                    }
                     VisitExpression(loop.Condition);
                     VisitStatement(loop.Body);
                     if (loop.Iterator is not null)
@@ -869,6 +875,11 @@ public static partial class ModuleCompiler
                     break;
                 case BoundBreak or BoundContinue:
                     visitLoopTransfer?.Invoke();
+                    if ((statement is BoundBreak exit && exit.TargetDepth != 1)
+                        || (statement is BoundContinue next && next.TargetDepth != 1))
+                    {
+                        visitStructuredLoop?.Invoke(statement);
+                    }
                     break;
                 case BoundTryFinally cleanup:
                     VisitStatement(cleanup.Body);
@@ -980,6 +991,13 @@ public static partial class ModuleCompiler
                 _ = Calls(function.Body, visitLoopTransfer: () => found = true);
             }
         }
+        return found;
+    }
+
+    private static bool HasStructuredLoops(BoundStatement body)
+    {
+        var found = false;
+        _ = Calls(body, visitStructuredLoop: _ => found = true);
         return found;
     }
 
@@ -1460,6 +1478,11 @@ public static partial class ModuleCompiler
             : module.Classes.IsEmpty ? ManagedNodeVersion
             : module.Classes.Any(static @class => @class.Fields.Any(
                 static field => IsInlineClassField(field.Type))) ? Version : ManagedClassVersion;
+        if (module.Functions.Any(item => item.Function is BoundFunction function
+            && HasStructuredLoops(function.Body)))
+        {
+            version = Math.Max(version, StructuredLoopVersion);
+        }
         writer.Write(Magic);
         writer.Write(version);
         PutString(writer, RetainedNativeProfile(module));
@@ -1654,6 +1677,13 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Primitive-owned properties require semantic module version 38.");
             }
+            if (version < StructuredLoopVersion && items.Any(item => item.Function is BoundFunction function
+                && HasStructuredLoops(function.Body))
+                || version == StructuredLoopVersion && !items.Any(item => item.Function is BoundFunction function
+                    && HasStructuredLoops(function.Body)))
+            {
+                throw new ModuleFormatException("Post-tested or named loop transfers require semantic module version 39.");
+            }
             if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
                 || !items.Any(static item => item.Import && item.Function is BoundFunction function
                     && !ManagedExportShape.ScalarOnly(function))))
@@ -1707,7 +1737,7 @@ public static partial class ModuleCompiler
             or MutableBufferFieldReceiverVersion or MutableBufferFieldViewVersion or ManagedValueExportVersion
             or ManagedGraphParticipantVersion or PrivateInitReferenceVersion or ExplicitGetterVersion
             or TransparentLayoutVersion or WideClassFieldsVersion or CorePrimitiveVersion
-            or CorePrimitiveGetterVersion))
+            or CorePrimitiveGetterVersion or StructuredLoopVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -2063,6 +2093,7 @@ public static partial class ModuleCompiler
             BoundAssignment => (byte)3,
             BoundExpressionStatement => (byte)4,
             BoundIf => (byte)5,
+            BoundWhile { IsPostTested: true, Iterator: null } when version >= StructuredLoopVersion => (byte)21,
             BoundWhile { Iterator: not null } when version >= LoopTransferVersion => (byte)20,
             BoundWhile { Iterator: null } => (byte)6,
             BoundRequire => (byte)7,
@@ -2076,6 +2107,8 @@ public static partial class ModuleCompiler
             BoundDropConstructedFields => (byte)15,
             BoundViewScope => (byte)16,
             BoundViewSet => (byte)17,
+            BoundBreak { TargetDepth: not 1 } when version >= StructuredLoopVersion => (byte)22,
+            BoundContinue { TargetDepth: not 1 } when version >= StructuredLoopVersion => (byte)23,
             BoundBreak when version >= LoopTransferVersion => (byte)18,
             BoundContinue when version >= LoopTransferVersion => (byte)19,
             _ => throw new ModuleFormatException("Unknown statement kind."),
@@ -2160,6 +2193,12 @@ public static partial class ModuleCompiler
                 {
                     PutStatement(writer, loop.Iterator, names, ref remaining, depth + 1, version);
                 }
+                break;
+            case BoundBreak { TargetDepth: not 1 } exit:
+                writer.Write(exit.TargetDepth);
+                break;
+            case BoundContinue { TargetDepth: not 1 } next:
+                writer.Write(next.TargetDepth);
                 break;
             case BoundBreak or BoundContinue:
                 break;
@@ -2329,6 +2368,13 @@ public static partial class ModuleCompiler
                 var loopBody = GetStatement(reader, ref remaining, depth + 1, version);
                 var iterator = GetStatement(reader, ref remaining, depth + 1, version);
                 return new BoundWhile(loopCondition, loopBody, span) { Iterator = iterator };
+            case 21 when version >= StructuredLoopVersion:
+                return new BoundWhile(GetExpression(reader, ref remaining, depth + 1, version),
+                    GetStatement(reader, ref remaining, depth + 1, version), span) { IsPostTested = true };
+            case 22 when version >= StructuredLoopVersion:
+                return new BoundBreak(span) { TargetDepth = reader.ReadInt32() };
+            case 23 when version >= StructuredLoopVersion:
+                return new BoundContinue(span) { TargetDepth = reader.ReadInt32() };
             default:
                 throw new ModuleFormatException("Unknown statement kind.");
         }

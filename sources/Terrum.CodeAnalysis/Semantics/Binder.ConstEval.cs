@@ -428,8 +428,11 @@ internal sealed partial class Binder
                     : conditional.Else is not null
                         ? EvaluateConstStatement(conditional.Else, slots, functions, depth, state) : default;
             case BoundWhile loop:
-                while (EvaluateConstExpression(loop.Condition, slots, functions, depth, state).Value != 0)
+                var firstIteration = true;
+                while ((firstIteration && loop.IsPostTested)
+                    || EvaluateConstExpression(loop.Condition, slots, functions, depth, state).Value != 0)
                 {
+                    firstIteration = false;
                     var result = EvaluateConstStatement(loop.Body, slots, functions, depth, state);
                     if (result.Flow is ConstFlow.Return)
                     {
@@ -437,7 +440,15 @@ internal sealed partial class Binder
                     }
                     if (result.Flow is ConstFlow.Break)
                     {
+                        if (result.TargetDepth > 1)
+                        {
+                            return result with { TargetDepth = result.TargetDepth - 1 };
+                        }
                         break;
+                    }
+                    if (result.Flow is ConstFlow.Continue && result.TargetDepth > 1)
+                    {
+                        return result with { TargetDepth = result.TargetDepth - 1 };
                     }
                     if (loop.Iterator is not null)
                     {
@@ -456,10 +467,10 @@ internal sealed partial class Binder
             case BoundReturn { Value: BoundExpression value }:
                 return new ConstResult(ConstFlow.Return,
                     EvaluateConstExpression(value, slots, functions, depth, state));
-            case BoundBreak:
-                return new ConstResult(ConstFlow.Break, null);
-            case BoundContinue:
-                return new ConstResult(ConstFlow.Continue, null);
+            case BoundBreak transfer:
+                return new ConstResult(ConstFlow.Break, null, transfer.TargetDepth);
+            case BoundContinue transfer:
+                return new ConstResult(ConstFlow.Continue, null, transfer.TargetDepth);
             default:
                 throw new ConstEvalFailure("Unsupported ConstEval statement.");
         }
@@ -467,7 +478,7 @@ internal sealed partial class Binder
 
     private enum ConstFlow { Next, Return, Break, Continue }
 
-    private readonly record struct ConstResult(ConstFlow Flow, BoundConstant? Value);
+    private readonly record struct ConstResult(ConstFlow Flow, BoundConstant? Value, int TargetDepth = 0);
 
     private sealed class ConstEvalState(CancellationToken cancellationToken)
     {

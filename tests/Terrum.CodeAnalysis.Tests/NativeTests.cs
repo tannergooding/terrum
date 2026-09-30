@@ -51,6 +51,8 @@ public sealed class NativeTests
     [InlineData("int32 Main() { mut int32 n = 0; while (n < 4) { int32 value = n * 2; n = n + 1; if (value == 6) { return value; } } return 0; }", 6)]
     [InlineData("int32 Main() { if (Equal(2, 2)) { return 1; } else { return 0; } } bool Equal(int32 a, int32 b) { return a == b; }", 1)]
     [InlineData("int32 Main() { mut int32 n = 0; while (n < 3) { require Valid(n); n = n + 1; } return n; } bool Valid(int32 n) { return n >= 0; }", 3)]
+    [InlineData("int32 Main() { mut int32 n = 0; do { n = n + 1; if (n < 2) { continue; } } while (n < 3); return n + 39; }", 42)]
+    [InlineData("int32 Main() { mut int32 n = 0; outer: while (true) { do { n = n + 42; break outer; } while (true); } return n; }", 42)]
     public async Task ExecutesNativeFunctionsAndStructuredControlFlowAsync(string source, int expected)
     {
         Assert.Equal(expected, await ExecuteAsync(Emit(source)));

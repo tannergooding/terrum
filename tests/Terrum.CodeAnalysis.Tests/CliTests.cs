@@ -586,6 +586,31 @@ public sealed partial class CliTests
 
     [Theory]
     [InlineData("check")]
+    [InlineData("analyze")]
+    public async Task CliAcceptsPostTestedAndNamedLoopsAsync(string command)
+    {
+        const string source = """
+            int32 Main() {
+                mut int32 value = 0;
+                outer: do {
+                    do { value = value + 42; break outer; } while (true);
+                } while (false);
+                return value;
+            }
+            """;
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), command, "-", "--json");
+        Assert.Equal(0, exit);
+        Assert.Empty(error);
+        using var document = JsonDocument.Parse(output);
+        Assert.True(document.RootElement.GetProperty("success").GetBoolean());
+        if (command == "check")
+        {
+            Assert.Equal(SyntaxTree.LanguageVersion, document.RootElement.GetProperty("languageVersion").GetString());
+        }
+    }
+
+    [Theory]
+    [InlineData("check")]
     [InlineData("tree")]
     public async Task RepeatedOptionalReportsPreciseStructuredDiagnosticAsync(string command)
     {

@@ -388,7 +388,7 @@ public sealed record BoundExpressionStatement(BoundExpression Expression, TextSp
 /// <param name="Span">The source range.</param>
 public sealed record BoundIf(BoundExpression Condition, BoundStatement Then, BoundStatement? Else, TextSpan Span) : BoundStatement(Span);
 
-/// <summary>A loop whose condition is evaluated before each iteration.</summary>
+/// <summary>A structured loop with a checked condition.</summary>
 /// <param name="Condition">A boolean condition.</param>
 /// <param name="Body">The loop body.</param>
 /// <param name="Span">The source range.</param>
@@ -396,13 +396,24 @@ public sealed record BoundWhile(BoundExpression Condition, BoundStatement Body, 
 {
     /// <summary>The scoped for-loop iterator, evaluated after body fallthrough or continue, before the next condition.</summary>
     public BoundStatement? Iterator { get; init; }
+
+    /// <summary>Whether the first condition follows the first body execution.</summary>
+    public bool IsPostTested { get; init; }
 }
 
-/// <summary>Exits the nearest enclosing loop after leaving its nested lexical regions.</summary>
-public sealed record BoundBreak(TextSpan Span) : BoundStatement(Span);
+/// <summary>Exits an enclosing loop after leaving its nested lexical regions.</summary>
+public sealed record BoundBreak(TextSpan Span) : BoundStatement(Span)
+{
+    /// <summary>One-based lexical loop depth, with one denoting the nearest loop.</summary>
+    public int TargetDepth { get; init; } = 1;
+}
 
-/// <summary>Continues the nearest enclosing loop after leaving its nested lexical regions.</summary>
-public sealed record BoundContinue(TextSpan Span) : BoundStatement(Span);
+/// <summary>Continues an enclosing loop after leaving its nested lexical regions.</summary>
+public sealed record BoundContinue(TextSpan Span) : BoundStatement(Span)
+{
+    /// <summary>One-based lexical loop depth, with one denoting the nearest loop.</summary>
+    public int TargetDepth { get; init; } = 1;
+}
 
 /// <summary>A cleanup region for normal exits and checked exceptional unwinding, but not fail-fast termination.</summary>
 public sealed record BoundTryFinally(BoundBlock Body, BoundBlock Finally, TextSpan Span) : BoundStatement(Span);

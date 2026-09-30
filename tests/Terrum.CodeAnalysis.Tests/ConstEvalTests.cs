@@ -10,6 +10,31 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class ConstEvalTests
 {
+    [Fact]
+    public void PostTestedConstEvalTransfersToNamedOuterLoop()
+    {
+        const string source = """
+            [ConstEval] int32 Value() {
+                mut int32 count = 0;
+                outer: do {
+                    count = count + 1;
+                    do {
+                        if (count < 3) { continue outer; }
+                        break outer;
+                    } while (false);
+                } while (true);
+                return count + 39;
+            }
+            int32 Main() { const int32 answer = Value(); return answer; }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var main = Assert.Single(Assert.IsType<BoundProgram>(compilation.Program).Functions,
+            function => function.Name == "Main");
+        Assert.Equal(42, Assert.IsType<BoundConstant>(
+            Assert.IsType<BoundLocal>(main.Body.Statements[0]).Initializer).Value);
+    }
+
     private const string Source = """
         int32 Main() {
             const int32 total = Sum(4);

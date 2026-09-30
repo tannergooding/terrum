@@ -119,10 +119,14 @@ public enum SyntaxKind
     IsNullExpression,
     /// <summary>A test that binds a non-null managed-handle snapshot on success.</summary>
     IsSomeExpression,
-    /// <summary>Exits the nearest enclosing loop.</summary>
+    /// <summary>Exits an enclosing loop.</summary>
     BreakStatement,
-    /// <summary>Continues the nearest enclosing loop.</summary>
+    /// <summary>Continues an enclosing loop.</summary>
     ContinueStatement,
     /// <summary>A single-statement callable body introduced by <c>=&gt;</c>.</summary>
     ExpressionBody,
+    /// <summary>A post-tested loop.</summary>
+    DoStatement,
+    /// <summary>A loop with an explicitly named transfer target.</summary>
+    LabeledLoopStatement,
 }

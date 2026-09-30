@@ -56,6 +56,7 @@ internal sealed partial class Binder
 
     private sealed class LoopBinding
     {
+        internal string? Name { get; init; }
         internal bool HasContinue { get; set; }
     }
 
@@ -1375,7 +1376,7 @@ internal sealed partial class Binder
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unsupported syntax kinds are rejected by the default branch.")]
-    private BoundStatement BindStatement(SyntaxNode node)
+    private BoundStatement BindStatement(SyntaxNode node, string? loopLabel = null)
     {
         _cancellationToken.ThrowIfCancellationRequested();
 
@@ -1674,26 +1675,56 @@ internal sealed partial class Binder
             case SyntaxKind.WhileStatement:
             {
                 var condition = BindExpression((SyntaxNode)node.Children[2], PrimitiveType.Bool);
-                _loops.Add(new LoopBinding());
+                _loops.Add(new LoopBinding { Name = loopLabel });
                 var body = BindBlock((SyntaxNode)node.Children[4]);
                 _loops.RemoveAt(_loops.Count - 1);
                 return new BoundWhile(condition, body, node.Span);
             }
 
+            case SyntaxKind.DoStatement:
+            {
+                _loops.Add(new LoopBinding { Name = loopLabel });
+                var body = BindBlock((SyntaxNode)node.Children[1]);
+                _loops.RemoveAt(_loops.Count - 1);
+                var condition = BindExpression((SyntaxNode)node.Children[4], PrimitiveType.Bool);
+                return new BoundWhile(condition, body, node.Span) { IsPostTested = true };
+            }
+
+            case SyntaxKind.LabeledLoopStatement:
+            {
+                var labelToken = ((SyntaxTokenElement)node.Children[0]).Token;
+                var label = labelToken.Text;
+                if (_loops.Exists(loop => loop.Name == label))
+                {
+                    Report("TRM3004", $"Loop label '{label}' already exists in an enclosing loop.",
+                        labelToken.Span);
+                }
+                return BindStatement((SyntaxNode)node.Children[2], label);
+            }
+
             case SyntaxKind.BreakStatement:
             case SyntaxKind.ContinueStatement:
             {
-                if (_loops.Count <= _finallyLoopDepth)
+                var label = node.Children.Length == 3
+                    ? ((SyntaxTokenElement)node.Children[1]).Token.Text : null;
+                var target = label is null ? _loops.Count - 1
+                    : _loops.FindLastIndex(loop => loop.Name == label);
+                if (target < 0)
                 {
-                    Report(_loops.Count == 0 ? "TRM3008" : "TRM3019",
-                        _loops.Count == 0 ? "Loop transfer requires an enclosing loop."
-                            : "A finally block cannot transfer control out of cleanup.", node.Span);
+                    Report("TRM3008", label is null ? "Loop transfer requires an enclosing loop."
+                        : "Loop transfer requires an enclosing loop with the specified label.", node.Span);
+                }
+                else if (target < _finallyLoopDepth)
+                {
+                    Report("TRM3019", "A finally block cannot transfer control out of cleanup.", node.Span);
                 }
                 else if (node.Kind == SyntaxKind.ContinueStatement)
                 {
-                    _loops[^1].HasContinue = true;
+                    _loops[target].HasContinue = true;
                 }
-                return node.Kind == SyntaxKind.BreakStatement ? new BoundBreak(node.Span) : new BoundContinue(node.Span);
+                var depth = target < 0 ? 1 : _loops.Count - target;
+                return node.Kind == SyntaxKind.BreakStatement ? new BoundBreak(node.Span) { TargetDepth = depth }
+                    : new BoundContinue(node.Span) { TargetDepth = depth };
             }
 
             case SyntaxKind.ForStatement:
@@ -1711,7 +1742,7 @@ internal sealed partial class Binder
                     ? new BoundConstant(1, PrimitiveType.Bool, conditionNode.Span)
                     : BindExpression(conditionNode, PrimitiveType.Bool);
                 var iterator = BindStatement((SyntaxNode)node.Children[6]);
-                var loopBinding = new LoopBinding();
+                var loopBinding = new LoopBinding { Name = loopLabel };
                 _loops.Add(loopBinding);
                 var body = BindBlock((SyntaxNode)node.Children[8]);
                 _loops.RemoveAt(_loops.Count - 1);

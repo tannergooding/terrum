@@ -15,6 +15,60 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed class NativeLoopTransferModuleTests
 {
+    private const string StructuredLeaf = """
+        public int32 Leaf() {
+            mut int32 sum = 0;
+            outer: for (mut int32 i = 0; i < 5; i = i + 1) {
+                do {
+                    if (i == 0) { continue outer; }
+                    if (i == 3) { break outer; }
+                    sum = sum + 20;
+                    break;
+                } while (true);
+            }
+            return sum + 2;
+        }
+        """;
+
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task Version39RoundTripsAndServicesPostTestedNamedLoopsAsync(NativeRuntimePolicy policy)
+    {
+        var previous = NativeModuleCompiler.CreateProducer(Compile("public int32 Leaf() { return 1; }", policy),
+            ["Leaf"], "NodeB", policy);
+        var replacementProgram = Compile(StructuredLeaf, policy);
+        var semantic = ModuleCompiler.CreateProducer(replacementProgram, ["Leaf"]);
+        Assert.Equal(39, VersionOf(semantic));
+        var reference = ModuleCompiler.CreateReference(semantic);
+        var consumer = ModuleCompiler.CreateConsumer(Compile("""
+            int32 Main() {
+                mut int32 answer = 0;
+                do { answer = Leaf(); } while (false);
+                return answer;
+            }
+            """, policy, reference, library: false), semantic);
+        Assert.Equal(39, VersionOf(consumer));
+        SemanticVerifier.Verify(ModuleCompiler.Link(consumer, semantic));
+        var downgraded = (byte[])semantic.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(downgraded.AsSpan(4, 4), 21);
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(downgraded));
+        var replacement = NativeModuleCompiler.CreateProducer(replacementProgram, ["Leaf"], "NodeB", policy);
+        var middle = NativeModuleCompiler.CreateGraphProducer(Compile(
+            "public int32 Middle() { return Leaf(); }", policy,
+            NativeModuleCompiler.CreateGraphReference([previous])), ["Middle"], "NodeA", [previous], policy);
+        var root = NativeModuleCompiler.CreateGraphConsumer(Compile(
+            "int32 Main() { return Middle(); }", policy,
+            NativeModuleCompiler.CreateGraphReference([middle]), library: false), [middle], policy);
+        NativeModuleCompiler.ValidateGraph(root, [middle, replacement]);
+        Assert.Equal(1, await NativeModuleCompiler.RunGraphAsync(root, [middle, previous],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [middle, replacement],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [middle, replacement],
+            Apphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+    }
+
     private const string Leaf = """
         int32 Advance(int32 value) { return value + 1; }
         public int32 Leaf() {

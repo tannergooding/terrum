@@ -321,7 +321,8 @@ public static partial class ModuleCompiler
             var (structures, names) = ReadStructures(reader, version);
             if (version is >= ManagedClassVersion and not
                 (LoopTransferVersion or ManagedGraphParticipantVersion or PrivateInitReferenceVersion
-                    or ExplicitGetterVersion or TransparentLayoutVersion or WideClassFieldsVersion))
+                    or ExplicitGetterVersion or TransparentLayoutVersion or WideClassFieldsVersion
+                    or StructuredLoopVersion))
             {
                 throw new ModuleFormatException("Graph libraries cannot use the private class module version.");
             }
