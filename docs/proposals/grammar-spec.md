@@ -913,10 +913,12 @@ IsTest          = "is", ( "null" | "some", Identifier | "init" ) ;
 Postfix         = Primary, { PostfixPart } ;
 PostfixPart     = ".", Identifier, [ TypeArguments ]
                 | ".", "via", "<", Type, ">"
-                | Arguments | "[", Expression, { ",", Expression }, "]"
+                | Arguments | "[", IndexArgument, { ",", IndexArgument }, "]"
                 | "?.", Identifier, [ TypeArguments ]
-                | "?[", Expression, { ",", Expression }, "]"
+                | "?[", IndexArgument, { ",", IndexArgument }, "]"
                 | "++" | "--" ;
+IndexArgument   = Expression | SliceRange ;
+SliceRange      = [ Expression ], "..", [ Expression ] ;
 Primary         = "(", [ Expression ], ")" | TupleExpression
                 | SwitchExpression | CollectionExpression
                 | "new", Type, Arguments,
@@ -960,7 +962,7 @@ distinguish type arguments from constant-value expressions; the broad
 alternatives above do not permit arbitrary runtime expressions as constants.
 The grammar includes explicit `_` inference holes and `default` selectors,
 not source type packs or unresolved exported holes. Constructor-specific
-inference, general range, full type-test and prefix-cast forms remain
+inference, first-class range values, full type-test and prefix-cast forms remain
 separate work; assignment remains a statement. `T(expression)` is an
 ordinary type-call-shaped expression; its checked-conversion interpretation
 is semantic.
@@ -989,6 +991,23 @@ Results are lifted to normalized optionals; bounds errors and invoked
 member failures remain ordinary failures. Optional-access chains are not
 assignment destinations, but permitted method calls still obey their
 ordinary receiver and effect contracts.
+
+Inside an index argument, `start..end` selects a half-open slice, including
+the start and excluding the end. Either endpoint may be omitted:
+`items[..end]`, `items[start..]`, and `items[..]`. A standard zero-based
+sequence uses zero and length for omitted bounds and checks
+`0 <= start <= end <= length`; empty/end slices retain their backing
+dependencies. Bounds are not silently clamped.
+The receiver evaluates once, then supplied endpoint expressions evaluate
+once in source order under the selected index-domain contract. Optional
+indexing skips those expressions when its receiver is null.
+Slicing requires a declared checked contract, not a method discovered by
+the name `Slice`. The contract determines the result's type, copy/view
+behavior, access and ownership/lifetime dependencies. Text slices must
+preserve scalar boundaries; slicing does not silently project validated
+text into unchecked raw units. Syntax does not grant heterogeneous tuple
+slicing, tensor rank changes or arbitrary indexer range support without
+their own eligible contracts. First-class range values remain separate work.
 
 Prefix/postfix `++` and `--` initially apply to writable `Copy` places.
 The place evaluates once, a checked operator produces its replacement,
@@ -1985,7 +2004,7 @@ appears in §2.
 | Arguments | §§3.2 and 5.1 give labels, source-order evaluation and position-preserving named/positional mixtures. | Complete passing-mode/place and overload contracts. |
 | Statements | §3.3 gives blocks, transfers, standalone discard and `yield expression;` / producer `return;`; §§3.1 and 5.12 give the `[Iterator]` marker; §3.4 permits await expressions in async bodies. | Statement-place checks and producer protocol/lifetime contracts. |
 | Iteration | §3.3 gives by-value and `ref`/`mut ref` iteration, including `await for` and structured close; §5.12 gives producer unwind and names `do`. | Iterator loan/backing, protocol identities, cancellation integration and post-test loop production. |
-| Expressions | §3.4 gives conditional/coalescing/optional access, tuples, target-directed static/async lambdas, await and collection spreads. | Callable capture/representation, awaiter registration and collection-fragment contracts; comprehensions/repetition deferred for library/tensor design. |
+| Expressions | §3.4 gives conditional/coalescing/optional access, half-open slicing, tuples, target-directed static/async lambdas, await and collection spreads. | Slice/first-class range protocols, callable capture/representation, awaiter registration and collection-fragment contracts; comprehensions/repetition deferred for library/tensor design. |
 | Patterns | §3.3 gives shared switch arms, guarded matching, compatible `or` bindings and explicit constant/wildcard transfers. | Full nominal-case, relational and destructuring patterns. |
 | Policies | §§3.3–3.4 and 5.12 describe lexical preferences, strict selection and constant-formal forwarding. | Variant-declaration syntax and compile-time queries. |
 | Contracts | §§3.3 and 5.8 describe `require` and `ensure` direction. | Declaration clauses and correlated output facts. |
