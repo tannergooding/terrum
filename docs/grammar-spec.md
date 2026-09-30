@@ -252,19 +252,31 @@ separate lexical design work.
 Both interpolated forms use the same checked target-directed handler and
 capture/drain contracts in §3.4.
 
-Trivia separates tokens but does not impose a style rule on otherwise
-unambiguous token sequences: `x+y` and `x + y` have the same meaning, as do
-`Foo.Bar`, `Foo. Bar` and `Foo . Bar`. A formatter may canonicalize spacing
-without making its output the only valid source. Spacing can still change
-which tokens are formed under lexical longest-match and identifier-boundary
-rules; whitespace is not permission to split or merge token spellings after
-lexing. Comments and line breaks follow their documented trivia rules,
-not an arbitrary mandatory space-around-operator policy.
+Symbolic expression operators have role-specific spacing requirements.
+Binary arithmetic, shift, comparison, bitwise, Boolean and coalescing
+operators require trivia separating the operator from each operand:
+`x + y` is valid, but `x+y`, `x+ y` and `x +y` reject. Symbolic prefix
+operators attach directly to the following operand token, and symbolic
+postfix operators attach directly to the preceding operand token:
+`-x`, `-(expr)`, `++x` and `x++` are valid; `- x`, `++ x` and `x ++` reject.
+Member-access `.` and `?.` attach directly to the receiver's final token
+or the following member's first token, or both: `Foo.Bar`, `Foo. Bar` and
+`Foo .Bar` are valid, but `Foo . Bar` rejects. Whitespace, line breaks and
+comments supply separation and break attachment on that side.
+Operator roles are determined by grammar before type checking; an invalid
+spacing or type does not trigger another interpretation. Keyword operators
+retain their word-boundary requirements. Other punctuation, including
+grouping/list delimiters, generic delimiters and range syntax, follows its
+own grammatical rules; it is not automatically classified as an expression
+operator. Exact remaining punctuation requirements are separate design work.
+These are source validity requirements, not merely formatter preferences.
+Trivia does not permit splitting or merging a token spelling after lexing.
 Punctuation adjacency follows an allow list, not a list of forbidden runs.
 A contiguous run of operator glyphs must be one defined operator, not an
 implicit concatenation of separate operators. Thus `x+++y` rejects, while
-`x++ +y` and `x+ ++y` separate the operators explicitly. Whitespace or a
-comment can separate operators; ordinary grouping delimiters, commas and
+`x++ + y` and `x + ++y` separate and attach operators according to their
+roles. Whitespace or a comment can separate operators; ordinary grouping
+delimiters, commas and
 semicolons are not part of the run. Nested generic closing delimiters are
 recognized in type-argument context, so `List<List<T>>` does not require
 spaces. Exact glyph membership and contextual boundary rules, including

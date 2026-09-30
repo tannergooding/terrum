@@ -62,11 +62,21 @@ remains a tooling contract, not an implicit library-dependent language mode.
 split it: comment openers, optional/type punctuation, generic delimiters,
 range punctuation and adjacent prefix operators. The rejection of `x+++y`
 as concatenated operators is already settled.
+**Accepted operator spacing:** Symbolic binary arithmetic, shift, comparison,
+bitwise, Boolean and coalescing expression operators require separation on
+both sides; symbolic prefix/postfix operators attach to their operand on
+the appropriate side. Member access attaches on at least one side.
+Whitespace, line breaks and comments separate tokens and break attachment.
+Determine operator roles from grammar before type checking, without
+reinterpreting an invalid expression. This replaces the earlier allowance
+of unspaced binary arithmetic; the remaining punctuation categories below
+are still under review.
 **Example:** `items[start.. ^1]` deliberately separates range and end-relative
 punctuation; `List<List<int32>>` uses type-context closers.
 
 **C# model:** Not C# maximal-munch operator concatenation. Terrum requires one
 defined operator per contiguous run except explicit contextual exceptions.
+Unlike C#, operator-role spacing and attachment are source validity rules.
 
 **Recommendation (under review):** Use an explicit allow list, not a deny
 list or backtracking over possible expressions. Separate punctuation tokens
@@ -76,7 +86,7 @@ The proposed allow list is:
 | Allowed adjacency | Scope and example |
 |---|---|
 | One defined operator/punctuator spelling | Exactly a spelling assigned by the grammar, such as `++`, `+=`, `<<`, `??`, `?.`, `=>` or `..`; not concatenated operators. |
-| Grouping and list delimiters | `(`, `)`, `[`, `]`, `{`, `}`, `,` and `;` bound separate tokens, as in `x*(-y)` or `f(a[i])`. |
+| Grouping and list delimiters | `(`, `)`, `[`, `]`, `{`, `}`, `,` and `;` bound separate tokens, as in `x * (-y)` or `f(a[i])`; delimiter-specific spacing remains to settle. |
 | Comment boundaries | Recognize ordinary `//`/`/*` and selected documentation `///`/`//*` openers before operator-run validation outside literals/comments; documentation-block recognition precedes ordinary line comments. |
 | Type-context punctuation | Optional `?` followed by generic closers and consecutive generic closers, as in `List<T?>` and `List<List<T>>`; only when required by the type/argument grammar. |
 | Range/from-end punctuator | Candidate named composite `..^` introduces an end-relative upper slice bound, as in `items[start..^1]`; not a freely concatenated `..` and `^` or a general arithmetic operator. |
@@ -98,10 +108,11 @@ closers adjoining assignment, as in `alias A<T>=T;`, are not a listed
 exception: use `alias A<T> = T;`. Group constant-generic expressions containing
 comparison/shift punctuation when needed to make their boundary explicit.
 The `..^` proposal does not permit arbitrary range/spread-plus-prefix runs.
-Prefix chains such as `!!x`, `&*p` and `*&x` likewise need separation or
-grouping unless a distinct spelling is deliberately defined.
+Prefix chains such as `!!x`, `&*p` and `*&x` need grouping unless a distinct
+spelling or adjacency boundary is deliberately defined. Separating two
+symbolic prefix operators with trivia does not satisfy operand attachment.
 
-**Access-attachment direction:** Add an operator-specific attachment rule,
+**Accepted access attachment:** Apply an operator-specific attachment rule,
 separate from punctuation-run recognition. Member-access `.` and `?.` must
 directly adjoin the receiver's final token or the following member's first
 token, or both. Thus `x.y`, `x. y`, `x .y` and a fluent chain continuing with

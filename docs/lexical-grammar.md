@@ -135,12 +135,27 @@ do not become valid member accesses through an alternate tokenization.
 
 ## Punctuation boundaries
 
+Symbolic binary arithmetic, shift, comparison, bitwise, Boolean and
+coalescing expression operators require separating trivia on both sides.
+Symbolic prefix operators attach directly to their following operand token;
+symbolic postfix operators attach directly to their preceding operand token.
+Member-access `.` and `?.` must adjoin the receiver's final token or the
+following member's first token, or both. Whitespace, line breaks and comments
+provide separation and break attachment. Thus `x + y`, `x + ++y`, `-x`,
+`x++`, `x.y`, `x. y` and `x .y` are valid forms, while `x+y`, `- x`,
+`x ++` and `x . y` reject. Operator roles come from grammar before type
+checking, not from an operand's type or a spacing-driven reinterpretation.
+Keyword operators retain word boundaries. Grouping/list delimiters, generic
+delimiters and range syntax retain their own grammatical rules; their exact
+remaining spacing requirements are separate design work.
+
 Punctuation adjacency follows an allow list: one defined spelling or an
 explicit grammatical boundary, not an enumeration of forbidden combinations.
 A contiguous run of operator glyphs must be one defined operator, not
-implicitly concatenated operators: `x+++y` rejects, whereas `x++ +y` and
-`x+ ++y` separate their operators. Trivia can separate operators; grouping
-delimiters, commas and semicolons are not part of such a run. Nested generic
+implicitly concatenated operators: `x+++y` rejects, whereas `x++ + y` and
+`x + ++y` satisfy the operator-role spacing rules. Trivia can separate
+operators; grouping delimiters, commas and semicolons are not part of such a
+run. Nested generic
 closing delimiters are recognized in type-argument context. Exact glyph
 membership and contextual exceptions, including optional/type punctuation
 and comment openers, remain to specify. Neither recovery nor a formatter may
