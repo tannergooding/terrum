@@ -80,6 +80,9 @@ Digit            = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
 HexDigit         = Digit | "a".."f" | "A".."F" ;
 BinaryDigit      = "0" | "1" ;
 String           = '"', { StringCharacter | Escape }, '"' ;
+RawText          = RawDelimiter, RawContent, RawDelimiter ;
+RawDelimiter     = '"""', { '"' } ;
+RawContent       = lexer-raw-text-content ;
 InterpolatedText = "$", '"',
                    { InterpolatedTextCharacter | Escape | LiteralBrace
                    | InterpolationHole }, '"' ;
@@ -109,8 +112,19 @@ parsing, including nested delimiters and their own quoted literals, not a
 scan that terminates at the first `}` regardless of nesting.
 Brace doubling applies only in text segments, not while parsing a hole's
 expression and its nested delimiters or literals.
-Ordinary strings retain literal braces. Format/alignment suffixes, raw
-multiline forms and exact interpolation recovery remain separate work.
+Ordinary strings retain literal braces. Format/alignment suffixes and exact
+interpolation recovery remain separate work.
+
+Raw text uses matching opening and closing quote fences of length three or
+greater. Their lengths must agree, and content quote runs must be shorter
+than the selected fence. Backslashes and braces are literal content, without
+escape decoding, interpolation or brace doubling. Increasing the fence
+length accommodates quote runs in the content, as in
+`""""He wrote """ literally.""""`. Raw text retains ordinary target-directed
+text typing; rawness does not select an allocating string type.
+`lexer-raw-text-content` denotes content bounded by that selected fence, not
+an identifier token. Exact single-line boundary handling, multiline framing,
+indentation and raw interpolation remain separate lexical design work.
 
 Trivia separates tokens but does not impose a style rule on otherwise
 unambiguous token sequences: `x+y` and `x + y` have the same meaning, as do
@@ -800,7 +814,8 @@ Primary         = "(", [ Expression ], ")" | TupleExpression
                 | SwitchExpression | CollectionExpression
                 | "new", Type, Arguments,
                   [ ObjectInitializer ]
-                | Number | String | InterpolatedText | Character | Boolean | Null | "field"
+                | Number | String | RawText | InterpolatedText
+                | Character | Boolean | Null | "field"
                 | Identifier, [ TypeArguments, Arguments ]
                 | "unsafe", "(", Expression, ")"
                 | [ "require" ], "policy", PolicyCases, "(", Expression, ")"
@@ -1824,7 +1839,7 @@ appears in §2.
 | Concept | Defined direction | Still to specify |
 |---|---|---|
 | Lexical tokens | §2 gives identifier and reserved-word forms; primitive names are identifiers with reserved bindings. | Exact contextual-word classification and `HexFloat` token boundaries/diagnostics. |
-| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §3.4 gives target-directed `$"..."` interpolation with doubled literal braces. | Complete floating token recovery, character diagnostics, raw forms, format/alignment spelling and registered text APIs. |
+| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw quote fences and `$"..."` interpolation with doubled literal braces. | Complete floating token recovery, character diagnostics, raw boundary/multiline/interpolation rules, format/alignment spelling and registered text APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or block namespaces, without mixing. | Nested namespace blocks and namespace-local imports. |
 | Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
