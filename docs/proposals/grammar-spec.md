@@ -91,7 +91,9 @@ InterpolatedText = "$", '"',
                    { InterpolatedTextCharacter | Escape | LiteralBrace
                    | InterpolationHole }, '"' ;
 LiteralBrace     = "{{" | "}}" ;
-InterpolationHole = "{", Expression, "}" ;
+InterpolationHole = "{", InterpolationContents, "}" ;
+InterpolationContents = Expression, [ ",", Expression ], [ ":", FormatText ] ;
+FormatText       = lexer-interpolation-format-text ;
 Character        = "'", ( CharacterScalar | Escape | "\'" ), "'" ;
 Escape           = "\n" | "\r" | "\t" | "\\" | '\"' | "\0"
                  | "\u", HexDigit, HexDigit, HexDigit, HexDigit
@@ -117,8 +119,14 @@ parsing, including nested delimiters and their own quoted literals, not a
 scan that terminates at the first `}` regardless of nesting.
 Brace doubling applies only in text segments, not while parsing a hole's
 expression and its nested delimiters or literals.
-Ordinary strings retain literal braces. Format/alignment suffixes and exact
-interpolation recovery remain separate work.
+Ordinary strings retain literal braces. A hole may specify alignment, format,
+or both: `{value}`, `{value:X8}`, `{value,12}`, and `{value,-12:X8}`.
+Parse a full ordinary expression before recognizing a suffix; conditionals
+need no parentheses merely to protect their colon. Thus
+`{flag ? left : right}` is a conditional hole, and
+`{flag ? left : right:X8}` formats its result. The alignment expression uses
+the same expression-aware parsing. Format-text boundaries, escaping and
+exact interpolation recovery remain separate lexical work.
 
 Raw text uses matching opening and closing quote fences of length three or
 greater. Their lengths must agree, and content quote runs must be shorter
@@ -186,7 +194,8 @@ library design.
 
 Interpolated raw text prefixes its quote fence with one or more contiguous
 `$` characters. With `N` dollar signs, a hole uses `N` opening and `N` closing
-braces around an ordinary expression; text brace runs shorter than `N` are
+braces around the same `InterpolationContents`, including optional alignment
+and format; text brace runs shorter than `N` are
 literal. For example, `$$"""{ "count": {{count}} }"""` preserves the single
 JSON braces and interpolates `count`. Quote-fence length and brace-delimiter
 length are independent. Raw text segments perform neither backslash escape
@@ -194,7 +203,7 @@ decoding nor brace doubling. Hole expressions retain ordinary lexical and
 parsing rules; their nested literals and delimiters are not outer text
 segments. In text mode, an opening brace run of length `R`, with
 `N <= R < 2N`, emits its first `R - N` braces literally and uses its final
-`N` braces to open a hole. After parsing the hole expression, a closing
+`N` braces to open a hole. After parsing the hole contents, a closing
 run of that range uses its first `N` braces to close the hole and emits the
 remaining braces literally. Expression-owned nested delimiters are parsed
 as expression syntax before identifying the hole closer. A closing run
@@ -1022,7 +1031,19 @@ and completion representation remain separate specification work.
 Interpolated text is target-directed through a registered checked text
 handler, not an implicit allocating string type or arbitrary same-named
 builder methods. Hole expressions evaluate once, left-to-right into typed
-captures before segments drain. Named unique transfers require explicit
+captures before segments drain. An alignment expression may be an ordinary
+checked runtime expression, not just a compile-time constant. Evaluate the
+value first, then its supplied alignment once, then proceed to the next
+hole; no width expression is deferred until output draining.
+Alignment is checked in the handler's declared signed integral width domain,
+without inventing an independent numeric literal type. Positive width means
+right alignment, negative means left, and zero requires no padding. Width is
+a minimum, not a truncation limit; longer formatted content remains intact.
+Width bounds, magnitude computation and text measurement obey the checked
+handler contract, not unchecked negation or an implicit bytes/code-units/
+terminal-columns choice. Format text and the value are passed to that
+contract without obligatory `ToString` conversion or temporary strings.
+Named unique transfers require explicit
 `move`; borrowed captures retain their backing and lifetime dependencies.
 Formatting forwards the same writer for nested values without obligatory
 temporary strings or boxing. Handler refusal stops future writes, not prior
@@ -1869,8 +1890,8 @@ they are not ordinary overloads merely because they use operator punctuation.
 
 Still **OPEN** for a full source grammar: nominal safe union cases and complete
 patterns, associated equality and family/adapter declarations,
-conditional/default conformance, text-target fragments, interpolation
-format/alignment forms,
+conditional/default conformance, text-target fragments and complete
+interpolation format-text lexical rules,
 general `const` declarations/expressions, full contract-clause placement,
 general ownership/reference results, constructor inference, async completion
 and scheduling protocols, producers, capture/exception transport, and registered collection-fragment
@@ -1924,7 +1945,7 @@ appears in §2.
 | Concept | Defined direction | Still to specify |
 |---|---|---|
 | Lexical tokens | §2 gives identifier and reserved-word forms; primitive names are identifiers with reserved bindings. | Exact contextual-word classification and `HexFloat` token boundaries/diagnostics. |
-| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give whole-run raw fences, framing/dedenting, preserve/default or explicit newline headers, `$"..."` interpolation and deterministic `$`-count raw interpolation. | Complete floating token recovery, character diagnostics, raw/interpolation recovery, format/alignment spelling and registered text/whole-output normalization APIs. |
+| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw framing/headers, deterministic interpolation, format suffixes and runtime alignment. | Complete floating token recovery, character diagnostics, raw/interpolation recovery, format-text boundaries/escaping and registered text/whole-output normalization APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or block namespaces, without mixing. | Nested namespace blocks and namespace-local imports. |
 | Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
