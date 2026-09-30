@@ -161,9 +161,14 @@ Commas and semicolons are fixed structural separators with flexible trivia
 on either side, not postfix operators or parts of operator runs. Leading-comma
 multiline alignment is valid. Spacing does not change where a separator,
 trailing comma or empty statement is allowed.
-Keyword operators retain word boundaries. Grouping/list delimiters, generic
-delimiters and range syntax retain their own grammatical rules; their exact
-remaining spacing requirements are separate design work.
+Generic argument and declaration parameter lists require their opening `<`
+to adjoin the preceding name. Interior trivia remains optional, including
+comments and multiline arguments/closers. A constructed type remains a
+sequence of lexical tokens; generic delimiters are recognized by grammatical
+role, distinct from spaced binary comparisons.
+Keyword operators retain word boundaries. Other delimiter roles,
+optional-type punctuation and range syntax retain their own grammatical
+rules; their exact remaining spacing requirements are separate design work.
 
 Punctuation adjacency follows an allow list: one defined spelling or an
 explicit grammatical boundary, not an enumeration of forbidden combinations.

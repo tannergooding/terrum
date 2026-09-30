@@ -271,6 +271,14 @@ own grammatical rules; it is not automatically classified as an expression
 operator. Exact remaining punctuation requirements are separate design work.
 These are source validity requirements, not merely formatter preferences.
 Trivia does not permit splitting or merging a token spelling after lexing.
+Receiver/name-attached delimited constructs share a boundary rule:
+the opener attaches to its receiver or introducing name, the interior
+follows its ordinary grammar/trivia rules, and a matching delimiter closes
+the construct. Calls `x(...)`, indexing `x[...]` and generic application
+`x<...>` follow this pattern. Calls/indexing may attach to the final token
+of a compound receiver, not only an identifier; generic lists attach to
+their introducing name. Interior trivia does not relax operator spacing,
+nesting, argument or other content requirements.
 Punctuation adjacency follows an allow list, not a list of forbidden runs.
 A contiguous run of operator glyphs must be one defined operator, not an
 implicit concatenation of separate operators. Thus `x+++y` rejects, while
@@ -748,6 +756,24 @@ Arguments       = "(", [ Argument, { ",", Argument } ], ")" ;
 Argument        = [ Identifier, ":" ],
                   ( [ PassingMode ], Expression | "init", Expression ) ;
 ```
+
+Generic argument lists and declaration parameter lists attach their opening
+`<` directly to the preceding name. Use `List<T>` and `F<T>(x)`, not
+`List <T>` or `F <T>(x)`. A constructed generic type is one type expression,
+not one lexical token. Interior trivia remains optional, including comments
+and line breaks before/after arguments and before the closing delimiter:
+
+```terrum
+List<
+    T,
+    U
+>
+```
+
+Argument count and formal kinds still have to match the selected declaration.
+Nested generic closing delimiters retain their type-context recognition, so
+`List<List<T>>` does not require separating its closers. Comparison `<` and
+`>` remain spaced binary expression operators, not generic delimiters.
 
 Repeated optional markers such as `T??` are not a valid source form.
 Optional normalization such as `T?` with an already-optional substitution is a

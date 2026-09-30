@@ -168,19 +168,37 @@ It does not change where separators, trailing commas or empty statements
 are permitted. Leading-comma alignment across lines is also valid;
 spacing around a comma is not a formatter mandate.
 
-**Generic opener attachment question (awaiting review):** Should generic
-argument and declaration parameter lists' `<` attach directly to the
-preceding name?
-**Recommendation:** Require `List<T>` and `F<T>(x)`, rejecting
+**Accepted generic opener attachment and interior trivia:** Require generic
+argument and declaration parameter lists' `<` to attach directly to the
+preceding name. Use `List<T>` and `F<T>(x)`, rejecting
 `List <T>` and `F <T>(x)`. Generic application is a delimited construct,
 whereas comparison remains a spaced binary operation, as in `x < y`.
 This supplies a grammatical boundary without consulting operand types or
 trying another interpretation after a binding failure.
 Apply the same attachment rule to generic parameter lists in declarations.
+Interior trivia is flexible, including comments, multiline arguments and
+a closing `>` on its own line. A constructed generic type is one type
+expression, not one lexical token; argument counts and formal kinds remain
+checked against its declaration.
 **C# model:** Generic syntax is C#-inspired, but requiring opener attachment
-deviates from C#'s trivia-insensitive generic delimiters. Interior trivia,
-keyword-selected angle lists and optional-type punctuation remain separate
-decisions. This recommendation has not been accepted.
+deviates from C#'s trivia-insensitive generic delimiters. Flexible interior
+trivia follows C#.
+Keyword-selected angle lists and optional-type punctuation remain separate
+decisions.
+
+**Optional-type suffix question (awaiting review):** Should type suffix `?`
+attach directly to the type's final token?
+**Recommendation:** Require `T?`, `(T, U)?` and `List<T>?`, rejecting
+`T ?` and `List<T> ?`. In type context, explicitly permit optional markers
+next to generic closers, as in `List<T?>`, `List<T>?` and
+`List<List<T?>>`. These are grammatical type boundaries, not concatenated
+expression operators or permission to split arbitrary operator runs.
+Repeated source markers such as `T??` remain invalid; `a ?? b` remains
+the distinct spaced coalescing expression operator.
+**C# model:** Optional-type suffix syntax resembles C# nullable syntax,
+but mandatory attachment differs from C#'s trivia-insensitive spelling,
+and Terrum's optional semantics remain its own contract.
+This recommendation has not been accepted.
 
 **Comment-fence question:** Should a block comment select its closing fence
 from the opening star count, analogously to the selected delimiter length of
