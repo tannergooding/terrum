@@ -237,16 +237,24 @@ C#-inspired; mandatory from-end offset attachment deviates from C#'s
 trivia-insensitive unary prefix syntax. Bounds/lifetime and once-only
 evaluation contracts do not change.
 
-**Assignment/binding spacing question (awaiting review):** Should assignment
-and binding operators require separating trivia on both sides, including
-declaration initializers/defaults and alias/associated bindings?
-**Recommendation:** Yes: require `x = value`, `x += value`,
+**Accepted assignment/binding spacing:** Require separating trivia on
+both sides, including declaration initializers/defaults and alias/associated
+bindings. Use `x = value`, `x += value`,
 `int32 x = 1`, `T = void` in a defaulted formal, and `alias A<T> = T`.
 Reject their squashed counterparts. Treat the complete compound spelling
 as one operator and retain each context's existing type/constant/ownership
 rules; spacing does not turn assignment into an expression.
 **C# model:** Assignment/binding spellings are C#-inspired, but mandatory
 separation differs from C#'s trivia-insensitive operators.
+
+**Arrow spacing question (awaiting review):** Should `=>` require separating
+trivia on both sides in expression bodies, lambdas and switch arms?
+**Recommendation:** Yes: use `int32 F() => 1;`, `x => x + 1`
+and `0 => 1`, not `F()=>1`, `x=>x + 1` or `0=>1`.
+The complete arrow remains one defined spelling; spaces inside `= >` do
+not form an arrow. Its callable/arm semantics and delimiter roles remain
+unchanged. **C# model:** Arrow syntax is C#-inspired, but mandatory outer
+separation deliberately differs from C#'s trivia-insensitive spelling.
 This recommendation has not been accepted.
 
 **Comment-fence question:** Should a block comment select its closing fence

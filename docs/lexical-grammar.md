@@ -137,6 +137,10 @@ do not become valid member accesses through an alternate tokenization.
 
 Symbolic binary arithmetic, shift, comparison, bitwise, Boolean and
 coalescing expression operators require separating trivia on both sides.
+Assignment/binding operators require the same separation, including complete
+compound spellings, declaration initializers/defaults, enum values, aliases
+and associated bindings. Thus `x = value` and `x += value` are valid forms,
+while `x=value` and `x+=value` reject regardless of the types involved.
 Symbolic prefix operators attach directly to their following operand token;
 symbolic postfix operators attach directly to their preceding operand token.
 Member-access `.` and `?.` must adjoin the receiver's final token or the

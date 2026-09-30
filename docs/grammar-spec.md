@@ -270,6 +270,13 @@ grouping/list delimiters, generic delimiters and range syntax, follows its
 own grammatical rules; it is not automatically classified as an expression
 operator. Exact remaining punctuation requirements are separate design work.
 These are source validity requirements, not merely formatter preferences.
+Assignment and binding operators also require separating trivia on both
+sides, including `=`, complete compound-assignment spellings, declaration
+initializers, parameter/generic defaults, enum values, aliases and associated
+type/constant bindings. Use `x = value`, `x += value`, `int32 x = 1`,
+`T = void` and `alias A<T> = T`, not their squashed counterparts.
+Each context retains its type, constant and ownership checks; spacing does
+not make assignment an expression.
 Trivia does not permit splitting or merging a token spelling after lexing.
 Receiver/name-attached delimited constructs share a boundary rule:
 the opener attaches to its receiver or introducing name, the interior
