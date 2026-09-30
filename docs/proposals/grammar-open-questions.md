@@ -217,9 +217,15 @@ falls back to a default.
 **C# model:** Not C# generic parameter defaults or constant generic parameters;
 neither is part of the C# generic declaration model.
 
-**Recommendation:** Initially allow explicit, structurally bounded domains and
-defaults depending on earlier formals only. This supports widths/policies
-without a cyclic solver or an unbounded compile-time object identity model.
+**Recommendation:** Beyond the named policy enums already contemplated by the
+grammar, initially permit fixed-width integer, Boolean and nominal enum
+constants, but not floating values, arbitrary structs, references or allocated
+object identities. For example, the candidate
+`struct Tile<T, const uint32 Width, const uint32 Height = Width> { }`
+would allow a width-dependent default. A default may depend only on earlier
+formals; self, forward and cyclic dependencies reject. These proposed domain
+and dependency restrictions support widths/policies without a cyclic solver
+or an unbounded compile-time object identity model.
 
 ### Q13. Remaining overload specificity and constructor inference
 
@@ -399,10 +405,16 @@ expand to `counter = counter + increment`.
 compound operators; older C# derives compound assignment from binary
 operators. Neither defines Terrum's destination-loan form.
 
-**Recommendation:** Use one explicit destination-loan declaration shape across
-the compound family and evaluate the place once. Keep static `++`/`--`
-operand-shaped results distinct; do not add C# instance mutation operators
-by analogy.
+**Recommendation:** Use a static, void-returning destination-loan candidate,
+for example `public static void operator +=(write ref<Counter> destination, int32 increment)`
+with an ordinary body. Extend the same shape to the eligible compound family,
+but not the built-in `??=` operation. The assignment is a statement: it does
+not produce a copied replacement value or infer an owning transfer. Evaluate
+the destination and operand once under the ordinary access/effect/loan rules;
+the declaration must state its effects, without an inferred `NoThrow` or
+transactional rollback promise. This declaration form is proposed, not
+accepted. Keep static `++`/`--` operand-shaped results distinct; do not add
+C# instance mutation operators by analogy.
 
 ### Q24. Constructor and conversion eligibility/ranking
 
@@ -703,13 +715,23 @@ not be altered by this syntax choice.
 **Example:** `[Layout(LayoutKind.Sequential)] struct Pair { int32 First; int32 Second; }`
 establishes field order, but does not select packing or over-alignment.
 
-**C# model:** C#/.NET layout attributes are comparative prior art. Terrum's
-aggregate over-alignment and explicitly checked `Blittable` boundary do not
-follow from CLR packing or sequential layout.
+**C# model:** C#/.NET layout attributes are comparative prior art; the
+`StructLayoutAttribute.Pack` field limits member/derived type alignment.
+The candidate below instead uses positional constant arguments and adds a
+separate aggregate-alignment control. Terrum's aggregate over-alignment and
+explicitly checked `Blittable` boundary do not follow from CLR packing or
+sequential layout.
 
-**Recommendation:** Use distinct constant arguments for the two controls,
-reject unsupported target combinations explicitly, and retain separate
-published-layout eligibility. Target limits and wire encoding remain ABI work.
+**Recommendation:** Use candidate positional arguments in the order
+kind, member-packing limit, aggregate alignment:
+`[Layout(LayoutKind.Sequential, 1, 16)]` would request one-byte member packing
+and 16-byte aggregate alignment. This fits the existing constant-argument
+production without presuming a decision on named attribute arguments. The
+argument contract is unapproved; it must preserve the selected packing,
+over-alignment, tail-padding and array-stride semantics. Neither extra argument
+freezes layout or grants `Blittable`. Reject unsupported target combinations,
+including custom controls on `Transparent`, and retain separate published-
+layout eligibility. Target limits and wire encoding remain ABI work.
 
 ## Boundaries that are not unanswered source decisions
 
@@ -737,4 +759,5 @@ C# release than the standardized chapter; their differing scopes are explicit.
 - [C# exception handling](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/statements/exception-handling-statements): filter selection.
 - [.NET user-filtered handlers](https://learn.microsoft.com/en-us/dotnet/standard/exceptions/using-user-filtered-exception-handlers): explicitly specifies discarded filter exceptions and a false filter result for C#/VB.
 - [C# attributes](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/attributes): attribute identity, placement and arguments.
+- [.NET member packing](https://learn.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.structlayoutattribute.pack): `StructLayoutAttribute.Pack` and its member/derived type alignment limit, not Terrum aggregate over-alignment.
 - [C# documentation comments](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/documentation-comments): XML documentation and member references, not Terrum's GFM source model.
