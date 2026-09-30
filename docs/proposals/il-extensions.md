@@ -50,6 +50,14 @@ alias. This avoids the TypeSpec dereference, not the map lookup.
 Adoption needs a format revision and updated readers/writers; current
 readers must reject these candidate words.
 
+### Decisions before adoption
+
+| Open decision | Evidence required |
+|---|---|
+| Revision and negotiation | Specify the schema revision and whether a required feature additionally gates kind `0xFE` in every eligible typed-reference field; a feature alone cannot change the `(1, 0)` schema. An `(1, 0)` reader must continue to reject it; a new reader must not interpret an unknown inline code as an indexed TypeSpec or silently drop its qualifiers. Determine when a writer can rewrite an artifact to an earlier revision by expanding every inline reference into valid TypeSpec rows. |
+| Canonical identity | Specify resolved-type equality across inline words and indexed TypeSpec rows, including outer versus argument `write` and field-specific restrictions. Test that a Body map rejects duplicate resolved types even when one spelling is inline and the other indexed; raw-word equality is insufficient. |
+| Measured benefit | Compare emitted bytes, TypeSpec row count, cold decode and selective-import cost on representative scalar and generic-heavy artifacts. Count rows still needed as operands of nested TypeSpec forms; an inline word is not evidence that all corresponding TypeSpec rows disappear. |
+
 ## Compact-profile selection and follow-up
 
 The two compact tags and their bytes in the approved instruction design
