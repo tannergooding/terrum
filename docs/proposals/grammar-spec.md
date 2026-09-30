@@ -60,7 +60,7 @@ syntax boundaries:
 - Source positions and token lengths count UTF-16 code units. Identifier starts/continues follow the pinned Unicode 17.0.0 XID properties plus `_`; spelling is ordinal, case-sensitive, and not normalized. Keywords are lower-case ASCII token spellings. Primitive names such as `int32` are ordinary identifiers.
 - Whitespace and comments are leading trivia; line breaks include CRLF, CR, LF, NEL, LS, PS. Line/block comments do not nest. EOF owns trailing trivia.
 - Unsuffixed decimal, hexadecimal (`0x`/`0X`), binary (`0b`/`0B`) and proposed hexadecimal floating-point forms are described below. Separators may occur between digits and, for based values, immediately after the prefix. Signs are separate operators except an exponent sign. Width suffixes are invalid; `10i32` is not a typed literal. `_123` is an identifier.
-- Strings use `"..."` with the documented escapes; interpolation syntax remains open. Single-quoted character literals denote one decoded Unicode scalar; numeric width suffixes are invalid.
+- Strings use `"..."` with the documented escapes. Interpolated text uses `$"..."` with `{expression}` holes; ordinary strings do not interpolate. Single-quoted character literals denote one decoded Unicode scalar; numeric width suffixes are invalid.
 - Lexical diagnostics preserve malformed source spelling; bad characters/surrogates, invalid escapes, unterminated literals/comments, bad prefixes, separators, and attached width suffixes have distinct diagnostic codes in the lexical reference.
 
 The schematic lexical terminals used below are:
@@ -80,6 +80,9 @@ Digit            = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
 HexDigit         = Digit | "a".."f" | "A".."F" ;
 BinaryDigit      = "0" | "1" ;
 String           = '"', { StringCharacter | Escape }, '"' ;
+InterpolatedText = "$", '"',
+                   { InterpolatedTextCharacter | Escape | InterpolationHole }, '"' ;
+InterpolationHole = "{", Expression, "}" ;
 Character        = "'", ( CharacterScalar | Escape | "\'" ), "'" ;
 Escape           = "\n" | "\r" | "\t" | "\\" | '\"' | "\0"
                  | "\u", HexDigit, HexDigit, HexDigit, HexDigit
@@ -93,6 +96,14 @@ Trivia           = whitespace | line-comment | non-nesting-block-comment ;
 `lexer-identifier-token` denotes the single lexical Identifier token, excluding
 keywords and the standalone reserved `_`; it is not three grammar symbols.
 `StringCharacter` excludes an unescaped quote, backslash, or line break; `\U` must decode to a Unicode scalar. Separators may repeat between digits and after a based prefix, but not at the end of a run or beside a decimal point/exponent marker/sign. The lexical reference defines malformed-token recovery and exact diagnostics.
+
+The `$"` interpolation opener is contiguous. `InterpolatedTextCharacter`
+excludes an unescaped quote, backslash, line break or brace; literal-brace
+spelling remains to specify. Hole expressions use ordinary expression
+parsing, including nested delimiters and their own quoted literals, not a
+scan that terminates at the first `}` regardless of nesting.
+Ordinary strings retain literal braces. Format/alignment suffixes, raw
+multiline forms and exact interpolation recovery remain separate work.
 
 Trivia separates tokens but does not impose a style rule on otherwise
 unambiguous token sequences: `x+y` and `x + y` have the same meaning, as do
@@ -782,7 +793,7 @@ Primary         = "(", [ Expression ], ")" | TupleExpression
                 | SwitchExpression | CollectionExpression
                 | "new", Type, Arguments,
                   [ ObjectInitializer ]
-                | Number | String | Character | Boolean | Null | "field"
+                | Number | String | InterpolatedText | Character | Boolean | Null | "field"
                 | Identifier, [ TypeArguments, Arguments ]
                 | "unsafe", "(", Expression, ")"
                 | [ "require" ], "policy", PolicyCases, "(", Expression, ")"
@@ -900,6 +911,18 @@ suspension preserves ownership, loan, cleanup and affinity obligations.
 A separately declared non-async lambda is not an async body merely because
 it occurs inside one. Awaiter registration, executor APIs, affinity annotations
 and completion representation remain separate specification work.
+
+Interpolated text is target-directed through a registered checked text
+handler, not an implicit allocating string type or arbitrary same-named
+builder methods. Hole expressions evaluate once, left-to-right into typed
+captures before segments drain. Named unique transfers require explicit
+`move`; borrowed captures retain their backing and lifetime dependencies.
+Formatting forwards the same writer for nested values without obligatory
+temporary strings or boxing. Handler refusal stops future writes, not prior
+hole effects or output; it provides no rollback or replay guarantee.
+Owning text publishes only after full validation/freeze, with partial-state
+and refused-capture cleanup under the declared contracts. Handler APIs and
+resumable async formatting remain separate library design.
 
 Collection expressions are target-typed and use only a registered, checked
 construction contract; `[]` is empty and no default array/List or numeric
@@ -1739,7 +1762,8 @@ they are not ordinary overloads merely because they use operator punctuation.
 
 Still **OPEN** for a full source grammar: nominal safe union cases and complete
 patterns, associated equality and family/adapter declarations,
-conditional/default conformance, text-target fragments and interpolation,
+conditional/default conformance, text-target fragments, interpolation
+literal-brace spelling and format/alignment forms,
 general `const` declarations/expressions, full contract-clause placement,
 general ownership/reference results, constructor inference, async completion
 and scheduling protocols, producers, capture/exception transport, and registered collection-fragment
@@ -1793,7 +1817,7 @@ appears in §2.
 | Concept | Defined direction | Still to specify |
 |---|---|---|
 | Lexical tokens | §2 gives identifier and reserved-word forms; primitive names are identifiers with reserved bindings. | Exact contextual-word classification and `HexFloat` token boundaries/diagnostics. |
-| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding. | Complete floating token recovery, character diagnostics and registered text forms. |
+| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §3.4 gives target-directed `$"..."` interpolation. | Complete floating token recovery, character diagnostics, literal-brace and format/alignment spelling and registered text APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or block namespaces, without mixing. | Nested namespace blocks and namespace-local imports. |
 | Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
