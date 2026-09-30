@@ -37,8 +37,18 @@ contextual or default-ignorable exclusion: such characters remain significant
 in ordinal spelling, even when visually invisible. A disallowed
 scalar is an error token, including Unicode digits at identifier start.
 Keywords are the lower-case ASCII reserved spellings designated by the
-source grammar; primitive type names remain identifiers. All other admissible
-spellings are identifiers. `_name` and `_123` remain identifiers.
+source grammar; its context table identifies words recognized as keywords
+only in designated syntactic positions. Primitive type names remain identifiers.
+All other admissible spellings are identifiers. `_name` and `_123` remain identifiers.
+A contiguous `@` followed by an exact reserved or contextual keyword spelling
+forms an escaped identifier. Its name is the keyword spelling without `@`;
+the escape suppresses keyword recognition but does not normalize the name
+or grant primitive-definition authority. Thus `@await` is an identifier,
+while `@ordinaryName`, `@_` and `@ await` are not valid keyword escapes.
+The `@` escape does not admit arbitrary-string identifiers.
+Future keyword reservations and contextual recognition must preserve the
+interpretation of valid source within its specified source-language version;
+breaking recognition changes require a version boundary.
 The standalone `_ = expression;` statement evaluates the bound expression
 once, with its effects and failures, and cleans up an owning result at statement
 exit. It does not name a destination or infer a type for a context-free literal.

@@ -73,7 +73,8 @@ syntax boundaries:
 The schematic lexical terminals used below are:
 
 ```ebnf
-Identifier       = lexer-identifier-token ;
+Identifier       = lexer-identifier-token | EscapedKeyword ;
+EscapedKeyword   = "@", KeywordSpelling ;
 Number           = DecimalNumber | HexFloat | HexInteger | BinaryInteger ;
 DecimalNumber    = DecimalDigits, [ ".", DecimalDigits ],
                    [ ( "e" | "E" ), [ "+" | "-" ], DecimalDigits ] ;
@@ -113,7 +114,12 @@ Trivia           = whitespace | line-comment | non-nesting-block-comment ;
 ```
 
 `lexer-identifier-token` denotes the single lexical Identifier token, excluding
-keywords and the standalone reserved `_`; it is not three grammar symbols.
+reserved keywords and the standalone reserved `_`; it is not three grammar
+symbols. `EscapedKeyword` is one contiguous token: `KeywordSpelling` is an
+exact reserved or contextual spelling in the vocabulary below. Its identifier
+identity excludes `@`, and escaping suppresses keyword recognition at that
+occurrence. It does not admit arbitrary text, whitespace after `@`, a
+non-keyword spelling, or the standalone `_`.
 `StringCharacter` excludes an unescaped quote, backslash, or line break; `\U` must decode to a Unicode scalar. Separators may repeat between digits and after a based prefix, but not at the end of a run or beside a decimal point/exponent marker/sign. The lexical reference defines malformed-token recovery and exact diagnostics.
 
 The `$"` interpolation opener is contiguous. `InterpolatedTextCharacter`
@@ -294,12 +300,13 @@ ordinary code from using primitive types. The proposed width-explicit integer,
 floating, character, vector and decimal families are listed in the
 [language design](language.md#primitives-strict-arithmetic-and-text);
 the set of reserved bindings follows the primitives actually selected by the
-language, not every candidate in this grammar. Neither `@identifier` nor
-backtick-delimited identifiers have a production here, so reserved words
-cannot be used as names. A narrow `@identifier`
-keyword escape remains an open alternative, not an adopted arbitrary-string
-delimiter. Core does not need an escape to declare `int32`: escaping a token
-would not confer the right to define a compiler-owned binding.
+language, not every candidate in this grammar. A reserved or contextual
+keyword can be used as an identifier through the narrow `@` escape, as in
+`alias @await = Task<int32>;`. The escape changes token interpretation, not
+name identity or binding authority. Backtick-delimited and arbitrary-string
+identifiers are not source forms. Core does not need an escape to declare
+`int32`: primitive names are ordinary identifiers, and escaping a keyword
+does not confer the right to define a compiler-owned binding.
 
 **Core bootstrap contract:** A designated Core-library compilation has no
 implicit prebuilt standard-library reference and has explicit permission to
@@ -320,10 +327,10 @@ artifact identity, full permitted member forms and enforcement across
 separate compilation remain open design work.
 
 `void` is a distinct keyword; primitive type spellings are not keyword
-tokens. The following is the intended vocabulary, grouped by source role;
-the exact keyword-versus-contextual-token classification and the productions
-for some words remain open. Listing a word does not permit it in an arbitrary
-context.
+tokens. The following vocabulary is grouped by source role. Words in the
+context table below are contextual; the remaining words in this vocabulary
+are reserved. Productions for some words remain open. Listing a word does not
+permit it in an arbitrary context.
 
 | Concept | Intended words | Source role |
 |---|---|---|
@@ -362,6 +369,34 @@ context.
 | Literal values | `true`, `false`, `null` | Form Boolean and optional values. |
 | Construction | `new` | Begin ordinary construction. |
 
+Contextual words are identifiers outside their designated grammatical
+positions. Recognition is syntactic, not dependent on a library declaration
+or the outcome of overload resolution. Escaping a contextual word suppresses
+that recognition even in its designated position.
+
+| Contextual spelling | Keyword position |
+|---|---|
+| `type` | Associated-type requirement or binding introducer; the `type` attribute target. |
+| `field` | Property-local backing-place expression; the `field` attribute target. |
+| `const` | Compile-time value declaration or generic value formal introducer; required-constant expression prefix. |
+| `policy` | Policy-selection scope after its optional `require` marker. |
+| `via` | Witness selection after `.` with its interface argument list. |
+| `some` | Optional-presence pattern introducer. |
+| `when` | Pattern-arm guard introducer. |
+| `and`, `or`, `not` | Pattern combinators, not ordinary Boolean expression operators. |
+
+Attribute-target spellings such as `module`, `assembly`, `property`,
+`method`, `param` and `typeparam` likewise have meaning only in their target
+positions; they are not additional reserved keywords. Reserved `return`
+also has the designated result-reference meaning in a postcondition; that
+does not make it an ordinary identifier elsewhere.
+
+Future additions must consider both ordinary name use and ambiguities in
+real source. A new reservation or contextual recognition that changes the
+meaning of previously valid source requires a source-language version
+boundary, not silent reclassification within that source version. Exact
+source-version selection is a separate tooling contract.
+
 `_` is a distinct nonbinding token, not an identifier. Vacant initialization
 uses `init ref<T>`; arithmetic selection uses policy cases rather than a
 separate arithmetic-toggle source form.
@@ -382,13 +417,14 @@ modifiers may be permuted; duplicate or conflicting modifiers reject.
 
 ```ebnf
 CompilationUnit  = { FileAttribute }, { UsingDirective },
-                   ( FileNamespace, { TopDeclaration }
+                   ( FileNamespace, { UsingDirective }, { TopDeclaration }
                    | { TopDeclaration | NamespaceDecl } ), EOF ;
 FileAttribute    = "[", ( "module" | "assembly" ), ":", AttributeName,
                    [ AttributeArguments ], "]" ;
 UsingDirective  = "using", DottedIdentifier, ";" ;
 FileNamespace   = "namespace", DottedIdentifier, ";" ;
-NamespaceDecl   = "namespace", DottedIdentifier, "{", { TopDeclaration }, "}" ;
+NamespaceDecl   = "namespace", DottedIdentifier, "{", NamespaceBody, "}" ;
+NamespaceBody   = { UsingDirective }, { TopDeclaration | NamespaceDecl } ;
 DottedIdentifier = Identifier, { ".", Identifier } ;
 
 TopDeclaration = TopPrefix, ( StructDecl | ClassDecl | InterfaceDecl
@@ -506,8 +542,14 @@ OperatorSymbol  = "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^"
 
 The source file permits one file-scoped namespace or namespace blocks, without
 mixing those forms in a file. Namespace blocks may coexist with root
-declarations; nested namespace blocks and namespace-local imports remain
-separate grammar work. Declarations retain source order within compiler file
+declarations and contain nested namespace blocks. A nested qualified name
+extends its enclosing namespace: `namespace A { namespace B.C { ... } }`
+declares `A.B.C`. A file-scoped namespace cannot contain namespace blocks.
+Imports precede declarations in their own scope. File imports apply to that
+file; imports after a file-scoped namespace apply to its remaining body.
+An import in a namespace block applies to that lexical block and its nested
+blocks, not other blocks of the same namespace or other files. Namespace
+identity does not merge import scopes. Declarations retain source order within compiler file
 order. Fields and constructors occur in class/struct bodies;
 interface members do not include fields or constructors. An interface
 constant with an initializer is fixed by its declaration; one without an

@@ -1,12 +1,15 @@
 # Remaining source-language decisions
 
 > [!IMPORTANT]
-> Proposal only. Recommendations below are review inputs, not adopted rules.
+> Open recommendations are review inputs, not adopted rules. Entries marked
+> **Accepted** record decisions incorporated into the source grammar.
 > The [source grammar](../grammar-spec.md) remains authoritative for settled
 > forms. This inventory does not reopen those choices or authorize a compiler
 > to choose new semantics on the user's behalf.
 
-This is a decision inventory, not a compiler backlog. Questions are grouped
+This is a decision inventory, not a compiler backlog. Stable question numbers
+are retained after a decision so related review references remain usable.
+Questions are grouped
 by the source contract a user must choose, rather than by missing parser
 productions or implementation files. The number of questions is not a target.
 Examples use approved Terrum syntax where possible to expose the issue;
@@ -20,37 +23,38 @@ examples are not a new bodyless-concrete-declaration rule.
 
 ### Q01. Escaping reserved words in identifiers
 
-**Question:** Should a narrowly scoped keyword escape be available for imported
-names and generated source? Arbitrary-string identifiers are not an approved
-alternative. **Example:** `alias AwaitedValue = Task<int32>;` currently avoids
-using the reserved spelling `await` as an alias name. The proposed escape would
-instead permit `alias @await = Task<int32>;` and a type use `@await pending;`.
-These escaped spellings are candidates, not accepted identifiers.
+**Accepted:** Permit contiguous `@` followed by a reserved or contextual
+keyword spelling, preserving the underlying identifier name and suppressing
+keyword recognition at that occurrence. It does not permit arbitrary-string
+identifiers or confer primitive-definition authority.
+**Example:** `alias @await = Task<int32>;` and `@await pending;`.
 
 **C# model:** A narrow escape would be modeled on C# `@identifier`, not its
 Unicode identifier normalization rules. Terrum retains ordinal, unnormalized
 Unicode 17 spelling; an escape must not authorize defining a reserved primitive.
 See [C# lexical structure](#official-comparison-sources).
 
-**Recommendation:** Permit `@` only to escape a keyword while preserving the
-same underlying identifier spelling. It supports generated/imported names
-without creating a second arbitrary-text name or changing primitive authority.
+**Rationale:** Supports generated/imported names without creating a second
+arbitrary-text name or changing primitive authority. See the adopted
+[lexical notation](../grammar-spec.md#2-lexical-notation).
 
 ### Q02. Reserved versus contextual words
 
-**Question:** Complete the context table for vocabulary not already assigned a
-token role. In particular, clarify where `field`, `some`, `when`, `type`,
-`policy` and `const` can remain ordinary names. `via` after `.` and contextual
-postcondition `return` already have selected roles.
+**Accepted:** Use contextual recognition for narrowly placed words and publish
+their context table. Reserve a spelling globally only where its grammar
+requires that treatment. Future reservations and contextual recognition must
+consider ordinary source use; meaning-changing additions require a
+source-language version boundary. The adopted table covers `field`, `some`,
+`when`, `type`, `policy`, `const`, `via` and pattern combinators.
 **Example:** `int32 Read(int32 some) => some;`
 
 **C# model:** Modeled on C# contextual keywords as a technique, not its keyword
 list. Terrum's `init` loan, `some` pattern, associated `type`, and policy scopes
 have different contexts.
 
-**Recommendation:** Use contextual recognition for narrowly placed words and
-publish a complete context table. Reserve a spelling globally only when its
-grammar needs it; this avoids accidental source breakage from a library name.
+**Rationale:** Avoids accidental source breakage from ordinary names without
+making recognition depend on library lookup. Exact source-version selection
+remains a tooling contract, not an implicit library-dependent language mode.
 
 ### Q03. Exact operator-run boundaries
 
@@ -64,9 +68,16 @@ punctuation; `List<List<int32>>` uses type-context closers.
 **C# model:** Not C# maximal-munch operator concatenation. Terrum requires one
 defined operator per contiguous run except explicit contextual exceptions.
 
-**Recommendation:** Use a finite lexical/context table, not backtracking over
-possible expressions. Treat comment openers before operator-run validation and
-document type-context exceptions. This keeps diagnostics deterministic.
+**Recommendation (under review):** Use a finite lexical/context table, not
+backtracking over possible expressions. Permit contiguous `..^` specifically
+at an index/slice-bound boundary, as in `items[start..^1]`; this is two
+contextual tokens, not a new general operator. Retain comment, grouping and
+type-delimiter boundaries explicitly. Unknown arithmetic runs such as `+++`
+and `**` reject rather than being split into currently legal operators;
+future revisions can introduce a single operator spelling without changing
+an existing concatenation's meaning. Parentheses or trivia separate other
+operator combinations. This keeps common indexing concise and future
+operator introduction deterministic. The exact exception table remains open.
 
 ### Q04. Hex-float versus member-access token boundaries
 
@@ -82,15 +93,24 @@ required for the latter spelling when a target type provides that member.
 tokens but no corresponding hex-float literal. Decimal recovery offers only
 comparative lexer practice.
 
-**Recommendation:** Commit the dotted based spelling to a hex-float only when
-its fraction is followed by an exponent marker; retain ordinary member access
-otherwise. Once introduced, keep an incomplete exponent in one malformed
-token. Exact diagnostic text/recovery remains tooling work, not another vote.
+**Recommendation (under review):** Require a bare numeric literal to be
+parenthesized before member access, for every numeric radix and format.
+`(0x1).face` is a syntactic member access (still needing a valid numeric target);
+`float32(0x1.fp+2).Foo` has an explicit receiver type. Reject unparenthesized
+numeric/member spellings rather than making them depend on whether the
+following name resembles fractional or exponent digits. Strings and other
+delimited literals do not need this numeric-only restriction. Valid numeric
+fraction/exponent syntax remains unchanged; incomplete numeric forms retain
+malformed-token diagnostics. This trades a small grouping requirement for
+stable literal/member boundaries and avoids future reinterpretation.
 
 ### Q05. Namespace nesting and local imports
 
-**Question:** Should block namespaces permit nested namespace blocks and local
-imports, and what is the lookup scope of each import?
+**Accepted:** Allow nested block namespaces and lexically scoped imports
+before declarations in each scope. Nested qualified names extend their
+enclosing namespace. Imports apply to their lexical scope and nested blocks,
+not other blocks of the same namespace or other source files. Preserve the
+prohibition on mixing file-scoped and block namespaces in one file.
 **Example:** `namespace A.B { struct Value { } }` expresses a qualified
 namespace without requiring nested blocks.
 
@@ -98,9 +118,9 @@ namespace without requiring nested blocks.
 directives. Terrum already permits file-scoped or block form without mixing
 them in one file; adopting local imports need not add global/static imports.
 
-**Recommendation:** Allow nested blocks and lexically scoped imports while
-keeping their placement before declarations in that scope. This permits
-generated and hand-authored namespace grouping without import-order lookup.
+**Rationale:** Permits generated and hand-authored namespace grouping without
+import-order lookup or merging the imports of separately authored blocks.
+See the adopted [source-file structure](../grammar-spec.md#31-source-file-structure-and-declarations).
 
 ### Q06. Visibility and modifier applicability
 
@@ -115,14 +135,15 @@ visibility domain; `mut class Counter { }` does not answer it.
 `protected`, friend assemblies, stateful class inheritance, or C#'s different
 top-level-private restrictions.
 
-**Recommendation:** For namespace-level declarations, make `private` visible
-only in the same fully qualified namespace within the current module, across
-its source files but not implicitly in child namespaces or another module.
-For example, a private `App.Helper` is available in another `namespace App`
-block of that module, but not in `namespace App.Tools`. This is a proposed
-visibility domain, not a selected rule. Type-member `private` remains a
-separate applicability question; a declaration-kind matrix should state each
-legal modifier without coupling access to ownership, layout or effects.
+**Recommendation (under review):** Allow `public` and module-scoped `internal`
+on namespace-level declarations; reject `private` there rather than making it
+an alias for `internal`. Reserve `private` for declaring-type members. A
+same-namespace-only rule would be observably narrower than `internal`, but adds
+a separate access domain without a selected need; namespace organization
+should not impose that extra visibility boundary. No friend-module mechanism
+is implied. Interface-member access and the remaining declaration-kind
+modifier matrix still need separate decisions; neither access choice changes
+ownership, layout or effects.
 
 ### Q07. Attribute arguments and multiplicity
 
