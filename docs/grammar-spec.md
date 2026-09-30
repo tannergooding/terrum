@@ -1093,6 +1093,20 @@ When `Primary` is a bare `Number`, its first `PostfixPart` cannot be member
 access (`.`, `?.`, or `.via<I>`); parenthesized or explicitly typed receivers
 use the ordinary postfix grammar.
 
+Calls and indexing are delimited postfix operators, not grouping constructs:
+`f(...)` and `f[...]` take the preceding expression as their receiver.
+Their grammatical role, not the delimiter characters alone, determines
+attachment. Call argument openers attach directly to the callee's final
+token, including type and constructor calls. Index openers `[` and `?[` likewise attach to
+the receiver's final token. Use `f(x)`, `int32(value)`, `new Widget(value)`,
+`items[i]` and `items?[i]`, not `f (x)` or `items [i]`.
+Whitespace, comments and line breaks between the receiver and opener reject.
+A generic call attaches after its type-argument closing delimiter, as in
+`f<T>(x)`; a parenthesized receiver attaches after its closing parenthesis.
+Grouping and control-flow parentheses have no receiver and do not acquire
+this requirement: `(x + y)` and `if (ready)` remain valid.
+This outer attachment rule does not impose padding rules inside delimiters.
+
 Generic argument parsing uses the selected declaration's formal kinds to
 distinguish type arguments from constant-value expressions; the broad
 alternatives above do not permit arbitrary runtime expressions as constants.

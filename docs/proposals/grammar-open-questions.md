@@ -127,9 +127,11 @@ This attachment restriction deviates from C#'s trivia-insensitive member
 access and prefix dereference; it does not make arbitrary punctuation runs
 valid or select pointer-expression syntax by itself.
 
-**Call/index attachment question (awaiting review):** Should postfix call
-and index opening delimiters attach directly to their receiver?
-**Recommendation:** Require `f(x)`, `int32(value)`, `items[i]` and
+**Accepted call/index attachment:** Require call
+and index opening delimiters to attach directly to their receiver.
+Calls `f(...)` and indexing `f[...]` are delimited postfix operators, not
+grouping constructs; their grammatical role selects the attachment rule.
+Use `f(x)`, `int32(value)`, `new Widget(value)`, `items[i]` and
 `items?[i]`; reject `f (x)` and `items [i]`. Attachment also excludes
 comments or line breaks between the receiver and opening delimiter.
 For generic calls, the receiver ends at the type-argument closing delimiter,
@@ -140,7 +142,19 @@ parentheses have no receiver: `(x + y)` and `if (ready)` remain valid,
 subject to independent operator rules inside them.
 **C# model:** Call/index syntax is C#-inspired, but this attachment
 restriction deliberately deviates from C#'s trivia-insensitive delimiters.
-This recommendation has not been accepted.
+
+**Delimiter interior spacing question (awaiting review):** Should ordinary
+parentheses, brackets and braces impose padding requirements inside their
+boundaries? **Recommendation:** Keep interior trivia flexible:
+`f(x)` and `f( x )`, `(x + y)` and `( x + y )`, and `items[i]` and
+`items[ i ]` are all valid. Ordinary block braces also impose no padding
+requirement of their own. Delimiters already establish explicit structural
+boundaries, so interior padding does not undermine operator-run evolution.
+Receiver attachment and operator spacing still apply independently:
+`f (x)` and `f(- x)` reject. **C# model:** This follows C#'s flexible
+interior trivia, not a prescribed formatter style. Literal/interpolation
+delimiters retain their own rules. Comma/semicolon spacing remains a separate
+question. This recommendation has not been accepted.
 
 **Comment-fence question:** Should a block comment select its closing fence
 from the opening star count, analogously to the selected delimiter length of

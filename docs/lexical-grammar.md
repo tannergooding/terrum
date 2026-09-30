@@ -145,6 +145,14 @@ provide separation and break attachment. Thus `x + y`, `x + ++y`, `-x`,
 `x++`, `x.y`, `x. y` and `x .y` are valid forms, while `x+y`, `- x`,
 `x ++` and `x . y` reject. Operator roles come from grammar before type
 checking, not from an operand's type or a spacing-driven reinterpretation.
+Calls and indexing are delimited postfix operators, distinct from grouping
+despite sharing delimiter characters. Call argument `(` and index `[`/`?[`
+openers must directly adjoin the receiver's final token, including
+type/constructor calls and generic or
+parenthesized receivers. Thus `f(x)`, `f<T>(x)` and `items?[i]` satisfy
+attachment; `f (x)` and `items [i]` reject. Grouping/control-flow parentheses
+have no receiver and are not subject to call attachment. Padding inside
+delimiters is a separate requirement from attachment to their receiver.
 Keyword operators retain word boundaries. Grouping/list delimiters, generic
 delimiters and range syntax retain their own grammatical rules; their exact
 remaining spacing requirements are separate design work.
