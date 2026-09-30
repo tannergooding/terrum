@@ -47,11 +47,11 @@ public sealed partial class CliTests
                 var input = Encoding.UTF8.GetBytes(source);
                 var (exit, output, error) = await RunAsync(input, "build", "-", "-o", hosted,
                     "--runtime", policy, "--json");
-                Assert.True(exit == 0, output + error);
+                Assert.True(exit == 0, $"build {policy} exited {exit}: {output}{error}");
                 (exit, output, error) = await RunAsync(input, "build-component",
                     Path.Combine(root, "self-host", "Scanner.terrum"), "-", "-o", scanned,
                     "--runtime", policy, "--json");
-                Assert.True(exit == 0, output + error);
+                Assert.True(exit == 0, $"build-component {policy} exited {exit}: {output}{error}");
                 Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(scanned));
                 using var process = Process.Start(new ProcessStartInfo(scanned) {
                     UseShellExecute = false,
@@ -71,6 +71,74 @@ public sealed partial class CliTests
                     throw;
                 }
                 Assert.Equal(42, process.ExitCode);
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task NominalUpdatesMatchCompiledScannerAndPreserveFailureExitAsync()
+    {
+        const string source = """
+            struct Value {
+                public mut int32 Number;
+                public Value(int32 number) { Number = number; }
+                public static Value operator ++(Value value) {
+                    return new Value(value.Number + 1);
+                }
+            }
+            int32 Main() {
+                mut Value value = new Value(int32.MaxValue);
+                value++;
+                return value.Number;
+            }
+            """;
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", ".."));
+        var directory = Path.Combine(root, "artifacts", $"nominal-updates-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var hosted = Path.Combine(directory, "hosted.exe");
+                var scanned = Path.Combine(directory, "scanned.exe");
+                var input = Encoding.UTF8.GetBytes(source);
+                var (exit, output, error) = await RunAsync(input, "build", "-", "-o", hosted,
+                    "--runtime", policy, "--json");
+                Assert.True(exit == 0, $"build {policy} exited {exit}: {output}{error}");
+                (exit, output, error) = await RunAsync(input, "build-component",
+                    Path.Combine(root, "self-host", "Scanner.terrum"), "-", "-o", scanned,
+                    "--runtime", policy, "--json");
+                Assert.True(exit == 0, $"build-component {policy} exited {exit}: {output}{error}");
+                Assert.Equal(await File.ReadAllBytesAsync(hosted), await File.ReadAllBytesAsync(scanned));
+                using var process = Process.Start(new ProcessStartInfo(scanned) {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                }) ?? throw new InvalidOperationException("Could not start nominal update executable.");
+                var stdout = process.StandardOutput.ReadToEndAsync();
+                var stderr = process.StandardError.ReadToEndAsync();
+                try
+                {
+                    await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+                }
+                catch (TimeoutException)
+                {
+                    if (!process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                        await process.WaitForExitAsync();
+                    }
+                    throw;
+                }
+                Assert.Equal(unchecked((int)0xE0540001), process.ExitCode);
+                Assert.Empty(await stdout);
+                Assert.Empty(await stderr);
             }
         }
         finally

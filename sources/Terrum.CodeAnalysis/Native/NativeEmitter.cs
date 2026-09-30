@@ -1022,6 +1022,10 @@ internal sealed partial class PeCompiler
                     BoundBufferRead buffer => ExpressionSpills(buffer.Index, ref maximumArguments),
                     _ => 0,
                 });
+            case BoundNominalUpdate update:
+                maximumArguments = Math.Max(maximumArguments, IsIndirect(update.Type) ? 2 : 1);
+                return Math.Max(4, update.Place is BoundFieldRead nominalField
+                    ? ExpressionSpills(nominalField.Receiver, ref maximumArguments) : 0);
             case BoundCast cast:
                 return ExpressionSpills(cast.Operand, ref maximumArguments);
             case BoundOptionalLift lift:
@@ -2331,6 +2335,48 @@ internal sealed partial class PeCompiler
                     LoadValue(Spill(spill + 2), update.Type);
                 }
                 break;
+            case BoundNominalUpdate update:
+            {
+                var rooted = UpdateAddress(update.Place, spill);
+                _code.Store64(Spill(spill + 1));
+                _code.AddressToRdx(Spill(spill + 2));
+                _code.CopyMemory(Size(update.Type));
+                var callBegin = _code.Position;
+                var rootFunclet = -1;
+                if (rooted && _checkedExceptions && !_emittingFunclet)
+                {
+                    rootFunclet = _funclets.Count;
+                    _funclets.Add((new BoundBlock([], update.Span), _currentFunction, 0, 0));
+                    _managedStagedRoots.Add(rootFunclet, [Spill(spill)]);
+                }
+                LoadValue(Spill(spill + 2), update.Type);
+                _code.MoveArgument(IsIndirect(update.Type) ? 1 : 0, true);
+                if (IsIndirect(update.Type))
+                {
+                    _code.Address(Spill(spill + 3));
+                    _code.MoveArgument(0, true);
+                }
+                EmitTargetCall(update.Function);
+                if (!IsIndirect(update.Type))
+                {
+                    StoreValue(Spill(spill + 3), update.Type);
+                }
+                if (rootFunclet >= 0)
+                {
+                    _code.Byte(0x90);
+                    _scopes[_currentFunction].Add(new NativeExceptionScope(callBegin, _code.Position,
+                        -rootFunclet - 1, 0));
+                }
+                _code.Address(Spill(spill + 3));
+                _code.Load64(Spill(spill + 1), destinationRegister: true);
+                _code.CopyMemory(Size(update.Type));
+                if (rooted)
+                {
+                    SetManagedRoot(Spill(spill), active: false);
+                }
+                LoadValue(Spill(spill + (update.IsPrefix ? 3 : 2)), update.Type);
+                break;
+            }
             case BoundCast cast:
                 Expression(cast.Operand, spill);
                 Cast(cast.Operand.Type, cast.Type);

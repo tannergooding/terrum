@@ -230,6 +230,9 @@ public sealed class Compilation
                         case BoundUpdate update:
                             expressions.Push(update.Place);
                             break;
+                        case BoundNominalUpdate update:
+                            expressions.Push(update.Place);
+                            break;
                         case BoundCast cast:
                             expressions.Push(cast.Operand);
                             break;

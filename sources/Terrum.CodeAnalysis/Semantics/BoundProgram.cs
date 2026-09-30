@@ -530,6 +530,10 @@ public sealed record BoundUnary(TokenKind Operator, BoundExpression Operand, Pri
 public sealed record BoundUpdate(TokenKind Operator, BoundExpression Place, bool IsPrefix,
     PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
+/// <summary>Calls a static Copy-struct operator on a saved place value, then commits its exact-type result.</summary>
+public sealed record BoundNominalUpdate(TokenKind Operator, BoundExpression Place, bool IsPrefix,
+    int Function, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
 /// <summary>A checked binary or short-circuit boolean operation.</summary>
 /// <param name="Operator">The operator token.</param>
 /// <param name="Left">The first input.</param>

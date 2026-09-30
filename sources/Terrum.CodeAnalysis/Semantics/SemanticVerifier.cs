@@ -657,6 +657,9 @@ public static class SemanticVerifier
                 case BoundUpdate update:
                     Expression(update.Place, scope, depth + 1);
                     break;
+                case BoundNominalUpdate update:
+                    Expression(update.Place, scope, depth + 1);
+                    break;
                 case BoundCast cast:
                     Expression(cast.Operand, scope, depth + 1);
                     break;
@@ -1117,6 +1120,9 @@ public static class SemanticVerifier
                     Expression(unary.Operand, depth + 1, acquiringRoot);
                     break;
                 case BoundUpdate update:
+                    Expression(update.Place, depth + 1, acquiringRoot);
+                    break;
+                case BoundNominalUpdate update:
                     Expression(update.Place, depth + 1, acquiringRoot);
                     break;
                 case BoundCast cast:
@@ -1760,7 +1766,8 @@ public static class SemanticVerifier
                 failures?.Add(initialized, fieldMasks);
                 return false;
             case BoundExpressionStatement expressionStatement:
-                if (expressionStatement.Expression is not (BoundCall or BoundViewRead or BoundUpdate))
+                if (expressionStatement.Expression is not (BoundCall or BoundViewRead or BoundUpdate
+                    or BoundNominalUpdate))
                 {
                     throw Invalid();
                 }
@@ -2707,6 +2714,45 @@ public static class SemanticVerifier
                 }
                 failures?.Add(initialized, fieldMasks);
                 break;
+            case BoundNominalUpdate update:
+                if (update.Place is null || update.Operator is not (TokenKind.PlusPlus or TokenKind.MinusMinus)
+                    || (int)update.Type < 100 || (int)update.Type - 100 >= program.Structures.Length
+                    || IsUnique(program, update.Type) || update.Place.Type != update.Type
+                    || update.Function < 0 || update.Function >= program.Functions.Length
+                    || update.Place is BoundRead { Variable: 0 } && function.DeclaringStruct is not null
+                        && !function.IsStatic)
+                {
+                    throw InvalidEffect(update.Span);
+                }
+                var updateTarget = program.Functions[update.Function];
+                var updateOwner = program.Structures[(int)update.Type - 100].Name;
+                var updateMember = update.Operator == TokenKind.PlusPlus
+                    ? ".op_Increment" : ".op_Decrement";
+                if (updateTarget.Name != updateOwner + updateMember
+                        && updateTarget.Name != updateOwner + ".$producer" + updateMember
+                    || updateTarget.DeclaringStruct != updateOwner
+                    || !updateTarget.IsStatic || updateTarget.IsConstructor || updateTarget.IsClassConstructor
+                    || updateTarget.IsCleanup || updateTarget.Intrinsic != BoundIntrinsic.None
+                    || updateTarget.ParameterCount != 1 || updateTarget.Variables.Length == 0
+                    || updateTarget.Variables[0].Type != update.Type
+                    || updateTarget.Variables[0].IsOut || updateTarget.Variables[0].IsInit
+                    || updateTarget.Variables[0].IsMutable || updateTarget.ReturnType != update.Type
+                    || updateTarget.IsPrivate && function.DeclaringStruct != updateTarget.DeclaringStruct)
+                {
+                    throw Invalid();
+                }
+                if (function.IsNoThrow && !updateTarget.IsNoThrow)
+                {
+                    throw InvalidEffect(update.Span);
+                }
+                VerifyUpdatePlace(update.Place, function, program, ref remaining, depth + 1);
+                Expression(update.Place, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+                if (!updateTarget.IsNoThrow)
+                {
+                    failures?.Add(initialized, fieldMasks);
+                }
+                break;
             case BoundMove move:
                 if (!IsUnique(program, move.Type) || move.Variable < 0 || move.Variable >= initialized.Length
                     || (move.Variable == 0 && function.DeclaringStruct is not null && !function.IsStatic)
@@ -3150,6 +3196,8 @@ public static class SemanticVerifier
             BoundUnary unary => InvalidatesReservedOwner(unary.Operand, variable, ref remaining, depth + 1),
             BoundUpdate update => WritesUpdateRoot(update.Place, variable, ref remaining, depth + 1)
                 || InvalidatesReservedOwner(update.Place, variable, ref remaining, depth + 1),
+            BoundNominalUpdate update => WritesUpdateRoot(update.Place, variable, ref remaining, depth + 1)
+                || InvalidatesReservedOwner(update.Place, variable, ref remaining, depth + 1),
             BoundCast cast => InvalidatesReservedOwner(cast.Operand, variable, ref remaining, depth + 1),
             BoundOptionalLift lift => InvalidatesReservedOwner(lift.Value, variable, ref remaining, depth + 1),
             BoundReadonlyProjection projection => InvalidatesReservedOwner(projection.Value, variable, ref remaining, depth + 1),
@@ -3348,6 +3396,9 @@ public static class SemanticVerifier
                 VacateNestedOutputs(unary.Operand, state, ref remaining);
                 break;
             case BoundUpdate update:
+                VacateNestedOutputs(update.Place, state, ref remaining);
+                break;
+            case BoundNominalUpdate update:
                 VacateNestedOutputs(update.Place, state, ref remaining);
                 break;
             case BoundCast cast:

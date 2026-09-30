@@ -201,7 +201,8 @@ internal sealed partial class Binder
         or TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals;
 
     private static bool IsStaticUnaryOperator(TokenKind kind) =>
-        kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde;
+        kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde
+            or TokenKind.PlusPlus or TokenKind.MinusMinus;
 
     private static bool IsComparisonOperator(TokenKind kind) => kind is TokenKind.EqualsEquals or TokenKind.BangEquals
         or TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals;
@@ -215,6 +216,8 @@ internal sealed partial class Binder
         { Operator: TokenKind.Minus, Arity: 1 } => "op_UnaryNegation",
         { Operator: TokenKind.Bang, Arity: 1 } => "op_LogicalNot",
         { Operator: TokenKind.Tilde, Arity: 1 } => "op_OnesComplement",
+        { Operator: TokenKind.PlusPlus, Arity: 1 } => "op_Increment",
+        { Operator: TokenKind.MinusMinus, Arity: 1 } => "op_Decrement",
         { Operator: TokenKind.Plus, Arity: 2 } => "op_Addition",
         { Operator: TokenKind.Minus, Arity: 2 } => "op_Subtraction",
         { Operator: TokenKind.Star, Arity: 2 } => "op_Multiply",
@@ -389,6 +392,8 @@ internal sealed partial class Binder
                 }
                 var result = BindType(parts[^1], allowVoid: false);
                 if (!IsCopyGenericType(result) || IsUnique(result)
+                    || (_protocols[protocolName].Key.Operator is TokenKind.PlusPlus or TokenKind.MinusMinus
+                        && result != _structNames[typeName])
                     || witnesses.Any(item => _protocols[item.Key].Key == _protocols[protocolName].Key
                         && item.Value != result)
                     || !witnesses.TryAdd(protocolName, result))
@@ -551,6 +556,11 @@ internal sealed partial class Binder
                     }
                     if (fixedResult is PrimitiveType concrete
                         && (!IsCopyGenericType(concrete) || IsUnique(concrete)))
+                    {
+                        valid = false;
+                    }
+                    if ((_protocols[protocol].Key.Operator is TokenKind.PlusPlus or TokenKind.MinusMinus)
+                        && (resultIndex != index || fixedResult is not null))
                     {
                         valid = false;
                     }

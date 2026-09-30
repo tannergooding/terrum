@@ -307,6 +307,8 @@ internal sealed partial class Binder
                 return unary with { Operand = ResolveConstExpression(unary.Operand, locals, functions, variableCount) };
             case BoundUpdate update:
                 return update with { Place = ResolveConstExpression(update.Place, locals, functions, variableCount) };
+            case BoundNominalUpdate update:
+                return update with { Place = ResolveConstExpression(update.Place, locals, functions, variableCount) };
             case BoundBinary binary:
                 return binary with {
                     Left = ResolveConstExpression(binary.Left, locals, functions, variableCount),

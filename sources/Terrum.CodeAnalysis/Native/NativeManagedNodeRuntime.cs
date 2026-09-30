@@ -181,6 +181,14 @@ internal sealed partial class PeCompiler
                     CollectExpression(update.Place is BoundFieldRead receiver ? receiver.Receiver
                         : update.Place is BoundBufferRead updateBuffer ? updateBuffer.Index : update.Place, spill);
                     break;
+                case BoundNominalUpdate update:
+                    if (update.Place is BoundFieldRead)
+                    {
+                        _ = slots.Add(spill);
+                    }
+                    CollectExpression(update.Place is BoundFieldRead nominalReceiver
+                        ? nominalReceiver.Receiver : update.Place, spill);
+                    break;
                 case BoundCast cast:
                     CollectExpression(cast.Operand, spill);
                     break;

@@ -1059,9 +1059,11 @@ internal sealed partial class Binder
             && (containingType is null || !TryResolveStruct(Qualify(containingType), out var ownerType)
                 || !IsCopyGenericType(ownerType) || IsUnique(ownerType)
                 || declared.Count != 1 || declared[0].Type != ownerType || declared[0].IsOut
-                || !IsCopyGenericType(returnType) || IsUnique(returnType)))
+                || !IsCopyGenericType(returnType) || IsUnique(returnType)
+                || (operatorKey.Operator is TokenKind.PlusPlus or TokenKind.MinusMinus
+                    && returnType != ownerType)))
         {
-            Report("TRM3007", "A unary static operator requires one Copy operand of its containing struct and a Copy result.",
+            Report("TRM3007", "A unary static operator requires one Copy operand of its containing struct and a Copy result; update operators must return that exact struct.",
                 declaration.Span);
         }
 
@@ -2365,10 +2367,11 @@ internal sealed partial class Binder
                     updateTarget = (SyntaxNode)updateTarget.Children[1];
                 }
                 var place = BindExpression(updateTarget, null);
-                if (place.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32
+                var nominal = IsStruct(place.Type) && !IsUnique(place.Type);
+                if (!nominal && place.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32
                     or PrimitiveType.Int64 or PrimitiveType.UInt64))
                 {
-                    Report("TRM3007", "Increment and decrement require a Copy integer place.", updateTarget.Span);
+                    Report("TRM3007", "Increment and decrement require a Copy integer or Copy struct place.", updateTarget.Span);
                 }
                 switch (place)
                 {
@@ -2391,7 +2394,30 @@ internal sealed partial class Binder
                         Report("TRM3008", "Update requires an initialized writable place, not a getter or temporary.", updateTarget.Span);
                         break;
                 }
-                expression = new BoundUpdate(op.Kind, place, prefix, place.Type, node.Span);
+                if (nominal)
+                {
+                    var operatorName = _structs[(int)place.Type - 100].Name + "."
+                        + OperatorName(new StaticOperatorKey(op.Kind, 1));
+                    if (!TryFindFunction(operatorName, out var method)
+                        || _signatures[method].Parameters is not [var parameter]
+                        || parameter.Type != place.Type || parameter.IsOut
+                        || _signatures[method].ReturnType != place.Type
+                        || !_signatures[method].IsStatic || !_signatures[method].IsOperator)
+                    {
+                        Report("TRM3007", "No matching exact-result unary static update operator is declared.", op.Span);
+                        expression = ErrorExpression(node.Span);
+                        break;
+                    }
+                    if (_signatures[method].IsPrivate && _currentStruct != _signatures[method].StructName)
+                    {
+                        Report("TRM3011", "Private update operator is inaccessible.", op.Span);
+                    }
+                    expression = new BoundNominalUpdate(op.Kind, place, prefix, method, place.Type, node.Span);
+                }
+                else
+                {
+                    expression = new BoundUpdate(op.Kind, place, prefix, place.Type, node.Span);
+                }
                 break;
             }
 

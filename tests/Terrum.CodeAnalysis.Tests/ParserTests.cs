@@ -17,7 +17,7 @@ public sealed class ParserTests
         const string Source = "int32 Main() { _ /* destination */ = int32(42); return 42; }";
         var tree = SyntaxTree.Parse(Source);
         Assert.False(tree.HasErrors, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.Equal("syntax-34", SyntaxTree.LanguageVersion);
+        Assert.Equal("syntax-35", SyntaxTree.LanguageVersion);
         var discard = Assert.Single(tree.Root.DescendantNodes(), static node => node.Kind == SyntaxKind.DiscardStatement);
         Assert.Equal(TokenKind.Underscore, Assert.IsType<SyntaxTokenElement>(discard.Children[0]).Token.Kind);
         Assert.Equal(TokenKind.Equals, Assert.IsType<SyntaxTokenElement>(discard.Children[1]).Token.Kind);

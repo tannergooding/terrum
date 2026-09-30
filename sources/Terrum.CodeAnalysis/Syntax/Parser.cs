@@ -337,6 +337,7 @@ internal sealed class Parser
                     or TokenKind.Percent or TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret
                     or TokenKind.EqualsEquals or TokenKind.BangEquals or TokenKind.Less or TokenKind.LessEquals
                     or TokenKind.Greater or TokenKind.GreaterEquals or TokenKind.Bang or TokenKind.Tilde
+                    or TokenKind.PlusPlus or TokenKind.MinusMinus
                     ? Take() : Expect(TokenKind.Plus));
                 children.Add(ParseParameters());
                 children.Add(Current.Kind == TokenKind.Semicolon ? Take() : ParseCallableBody());

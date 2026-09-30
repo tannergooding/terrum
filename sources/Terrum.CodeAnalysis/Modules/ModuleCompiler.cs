@@ -49,6 +49,7 @@ public static partial class ModuleCompiler
     private const int ConditionalVersion = 41;
     private const int CoalescingVersion = 42;
     private const int UpdateVersion = 43;
+    private const int NominalUpdateVersion = 44;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -830,7 +831,7 @@ public static partial class ModuleCompiler
         Action<BoundMutableFieldLoan>? visitMutableFieldLoan = null,
         Action<BoundStatement>? visitStructuredLoop = null, Action<BoundVacantLocal>? visitVacantLocal = null,
         Action<BoundConditional>? visitConditional = null, Action? visitCoalesce = null,
-        Action? visitUpdate = null)
+        Action? visitUpdate = null, Action? visitNominalUpdate = null)
     {
         var calls = new List<int>();
         VisitStatement(body);
@@ -960,6 +961,15 @@ public static partial class ModuleCompiler
                     visitUpdate?.Invoke();
                     VisitExpression(update.Place);
                     break;
+                case BoundNominalUpdate update:
+                    visitNominalUpdate?.Invoke();
+                    calls.Add(update.Function);
+                    VisitExpression(update.Place);
+                    break;
+                case SymbolicNominalUpdate update:
+                    visitNominalUpdate?.Invoke();
+                    VisitExpression(update.Place);
+                    break;
                 case BoundBinary binary:
                     VisitExpression(binary.Left);
                     VisitExpression(binary.Right);
@@ -1048,6 +1058,13 @@ public static partial class ModuleCompiler
     {
         var found = false;
         _ = Calls(body, visitUpdate: () => found = true);
+        return found;
+    }
+
+    private static bool HasNominalUpdate(BoundStatement body)
+    {
+        var found = false;
+        _ = Calls(body, visitNominalUpdate: () => found = true);
         return found;
     }
 
@@ -1374,6 +1391,14 @@ public static partial class ModuleCompiler
                 Type = RemapType(update.Type, source, destination, classOffset),
                 Place = RemapExpression(update.Place, source, destination, classOffset),
             },
+            BoundNominalUpdate update => update with {
+                Type = RemapType(update.Type, source, destination, classOffset),
+                Place = RemapExpression(update.Place, source, destination, classOffset),
+            },
+            SymbolicNominalUpdate update => update with {
+                Type = RemapType(update.Type, source, destination, classOffset),
+                Place = RemapExpression(update.Place, source, destination, classOffset),
+            },
             BoundBinary binary => binary with {
                 Type = RemapType(binary.Type, source, destination, classOffset),
                 Left = RemapExpression(binary.Left, source, destination, classOffset),
@@ -1578,6 +1603,11 @@ public static partial class ModuleCompiler
             && HasUpdate(function.Body)))
         {
             version = Math.Max(version, UpdateVersion);
+        }
+        if (module.Functions.Any(item => item.Function is BoundFunction function
+            && HasNominalUpdate(function.Body)))
+        {
+            version = Math.Max(version, NominalUpdateVersion);
         }
         writer.Write(Magic);
         writer.Write(version);
@@ -1808,6 +1838,13 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Update expressions require semantic module version 43.");
             }
+            if (version < NominalUpdateVersion && items.Any(item => item.Function is BoundFunction function
+                && HasNominalUpdate(function.Body))
+                || version == NominalUpdateVersion && !items.Any(item => item.Function is BoundFunction function
+                    && HasNominalUpdate(function.Body)))
+            {
+                throw new ModuleFormatException("Nominal update expressions require semantic module version 44.");
+            }
             if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
                 || !items.Any(static item => item.Import && item.Function is BoundFunction function
                     && !ManagedExportShape.ScalarOnly(function))))
@@ -1862,7 +1899,7 @@ public static partial class ModuleCompiler
             or ManagedGraphParticipantVersion or PrivateInitReferenceVersion or ExplicitGetterVersion
             or TransparentLayoutVersion or WideClassFieldsVersion or CorePrimitiveVersion
             or CorePrimitiveGetterVersion or StructuredLoopVersion or VacantLocalVersion or ConditionalVersion
-            or CoalescingVersion or UpdateVersion))
+            or CoalescingVersion or UpdateVersion or NominalUpdateVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -2529,6 +2566,7 @@ public static partial class ModuleCompiler
             BoundRead => (byte)2,
             BoundUnary => (byte)3,
             BoundUpdate => (byte)24,
+            BoundNominalUpdate => (byte)25,
             BoundBinary => (byte)4,
             BoundConditional => (byte)22,
             BoundCoalesce => (byte)23,
@@ -2607,6 +2645,16 @@ public static partial class ModuleCompiler
                 writer.Write(update.IsPrefix);
                 PutExpression(writer, update.Place, names, ref remaining, depth + 1);
                 break;
+            case BoundNominalUpdate update:
+                writer.Write((int)update.Operator);
+                writer.Write(update.IsPrefix);
+                if (update.Function < 0 || update.Function >= names.Length)
+                {
+                    throw new ModuleFormatException("Invalid update operator target.");
+                }
+                PutString(writer, names[update.Function]);
+                PutExpression(writer, update.Place, names, ref remaining, depth + 1);
+                break;
             case BoundBinary binary:
                 writer.Write((int)binary.Operator);
                 PutExpression(writer, binary.Left, names, ref remaining, depth + 1);
@@ -2675,6 +2723,13 @@ public static partial class ModuleCompiler
                 var prefix = reader.ReadBoolean();
                 return new BoundUpdate(updateOperator, GetExpression(reader, ref remaining, depth + 1, version),
                     prefix, type, span);
+            case 25 when version >= NominalUpdateVersion:
+                var nominalOperator = (TokenKind)reader.ReadInt32();
+                var nominalPrefix = reader.ReadBoolean();
+                var nominalName = GetString(reader);
+                return new SymbolicNominalUpdate(nominalOperator,
+                    GetExpression(reader, ref remaining, depth + 1, version),
+                    nominalPrefix, nominalName, type, span);
             case 4:
                 var op = (TokenKind)reader.ReadInt32();
                 var left = GetExpression(reader, ref remaining, depth + 1, version);
@@ -2803,6 +2858,10 @@ public static partial class ModuleCompiler
             : throw new ModuleContractException($"Unresolved call target '{call.Name}'."),
         BoundUnary unary => unary with { Operand = ResolveExpression(unary.Operand, names) },
         BoundUpdate update => update with { Place = ResolveExpression(update.Place, names) },
+        SymbolicNominalUpdate update => names.TryGetValue(update.Name, out var method)
+            ? new BoundNominalUpdate(update.Operator, ResolveExpression(update.Place, names),
+                update.IsPrefix, method, update.Type, update.Span)
+            : throw new ModuleContractException($"Unresolved update operator '{update.Name}'."),
         BoundBinary binary => binary with { Left = ResolveExpression(binary.Left, names), Right = ResolveExpression(binary.Right, names) },
         BoundCoalesce coalesce => coalesce with {
             Optional = ResolveExpression(coalesce.Optional, names),
@@ -2900,6 +2959,8 @@ public static partial class ModuleCompiler
         public bool HasOwnershipTransfer { get; init; }
     }
     private sealed record SymbolicCall(string Name, ImmutableArray<BoundExpression> Arguments, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+    private sealed record SymbolicNominalUpdate(TokenKind Operator, BoundExpression Place, bool IsPrefix,
+        string Name, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
     private sealed record SymbolicDrop(int Variable, string? Name, TextSpan Span) : BoundStatement(Span)
     {
         public bool IsOutput { get; init; }

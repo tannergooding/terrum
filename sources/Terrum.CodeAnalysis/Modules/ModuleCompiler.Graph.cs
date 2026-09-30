@@ -323,7 +323,7 @@ public static partial class ModuleCompiler
                 (LoopTransferVersion or ManagedGraphParticipantVersion or PrivateInitReferenceVersion
                     or ExplicitGetterVersion or TransparentLayoutVersion or WideClassFieldsVersion
                     or StructuredLoopVersion or VacantLocalVersion or ConditionalVersion or CoalescingVersion
-                    or UpdateVersion))
+                    or UpdateVersion or NominalUpdateVersion))
             {
                 throw new ModuleFormatException("Graph libraries cannot use the private class module version.");
             }
