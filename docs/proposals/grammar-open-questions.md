@@ -90,6 +90,57 @@ This keeps common indexing concise while making separation the ordinary
 rule and preserving room for future operators. Exact operator-glyph
 membership and adoption of the proposed list remain open.
 
+**Additional boundary cases under review:** Delimiter adjacency is a lexical
+permission, not permission to mismatch or arbitrarily interleave nesting.
+Ordinary code permits adjacent `()`, `[]` and `{}` boundaries without spaces;
+literal/interpolation contents retain their own delimiter rules. Generic
+closers adjoining assignment, as in `alias A<T>=T;`, are not a listed
+exception: use `alias A<T> = T;`. Group constant-generic expressions containing
+comparison/shift punctuation when needed to make their boundary explicit.
+The `..^` proposal does not permit arbitrary range/spread-plus-prefix runs.
+Prefix chains such as `!!x`, `&*p` and `*&x` likewise need separation or
+grouping unless a distinct spelling is deliberately defined.
+
+**Comment-fence question:** Should a block comment select its closing fence
+from the opening star count, analogously to the selected delimiter length of
+raw text? Candidate `/*** **/ ***/` would contain `**/` as payload and end at
+the three-star fence. This is not C# block-comment syntax and is not an
+adopted Terrum rule. The accepted documentation form `/** ... */` currently
+closes with one star, so counting its two opening stars as a fence would
+change that form. A candidate extra-slash distinction avoids assigning the
+same opener to ordinary fenced comments and documentation:
+
+| Ordinary comment candidate | Documentation candidate |
+|---|---|
+| `// text` | `/// text` |
+| `/* text */` | `//* text *//` |
+| `/** text **/` | `//** text **//` |
+| `/**** text ****/` | `//**** text ****//` |
+
+These block documentation forms must be recognized before ordinary `//`
+line comments. They replace rather than silently preserve the accepted
+`/** ... */` documentation spelling, so require an explicit source-version
+decision. Select recognition and fence syntax together, including
+empty/nonoverlapping fences, shorter terminators as payload and whether
+longer terminator-looking runs are payload or errors. **Recommendation:** If
+fences are adopted, use a maximal opening-star count and whole-run closing
+star matches, not a matching suffix inside a longer star run. Specify the
+one-/two-slash closing boundary without consuming a following comment's
+slashes. Do not introduce nesting as an accidental side effect.
+
+**Constant-generic argument boundary question:** Should direct constant
+arguments be limited to literals and constant names (including qualified
+names), with other expressions parenthesized? Candidate
+`InlineArray<T, (N >> 1)>` explicitly separates a shift from generic closers;
+`InlineArray<T, (N >= Minimum ? N : Minimum)>` separates comparison and
+conditional syntax from the argument boundary. Direct `InlineArray<T, N>`
+and `InlineArray<T, 16>` remain concise. Under this proposed rule, unary
+negative arguments also need grouping because their sign is an operator,
+not part of the literal. This does not select constant-value domains or
+default dependencies from Q12. It is not a restriction on interpolation:
+the accepted interpolation grammar already parses a complete conditional
+expression before alignment/format suffixes, without mandatory grouping.
+
 ### Q04. Hex-float versus member-access token boundaries
 
 **Accepted:** Require grouping before member access on bare numeric literals
@@ -500,6 +551,25 @@ checked library operation, with candidate call shape
 `Pin.TryAcquire(source, init pinned)` and a scoped release/dependency contract,
 not a new `pin` statement. Both operators and the acquisition API are proposals;
 their concrete result/guard types must be reviewed together before adoption.
+
+**Dereference/member grouping question:** Under the candidate prefix `*`
+operation and ordinary postfix precedence, `(*p).M` accesses a member of the
+dereferenced value, while `*(p.M)` dereferences a pointer-valued member.
+`(*(*p)).M` dereferences twice before member access; `*(*p).M` would instead
+dereference the member obtained after one dereference. These are distinct
+operations, subject to ordinary type/authority checks, not interchangeable
+spellings. **Recommendation:** Require the explicit grouped forms when
+dereference and member access combine, rather than allowing the visually
+ambiguous `*p.M` if prefix dereference is selected. Also compare an indexer
+spelling: candidate pointer `p[0]` corresponds to one dereference and
+`p[0][0].M` makes two indirections followed by member access explicit.
+Whether to offer indexing alone or alongside prefix dereference remains
+open; indexing must retain the same unsafe/provenance/lifetime/access
+obligations, not imply an unavailable length or bounds guarantee.
+Multiple prefix indirections use `*(*p)`; do not add a `**`
+punctuation exception. Pointer types remain `ptr<ptr<T>>`, not C-style `T**`.
+This grouping restriction is proposed, not part of the accepted postfix
+grammar. It does not supply provenance, bounds, pinning or writable authority.
 
 ### Q27. Nominal sums and closed-case declarations
 
