@@ -1473,12 +1473,18 @@ public struct BitOperations
     public static uint32 RotateLeft(uint32 value, int32 count);
     public static uint32 RotateRight(uint32 value, int32 count);
     public static uint32 ReverseBits(uint32 value);
+    public static uint32 ReverseEndianness(uint32 value);
+    public static bool IsPow2(uint32 value);
+    public static bool TryRoundUpToPowerOfTwo(uint32 value, init ref<uint32> result);
     public static int32 LeadingZeroCount(uint64 value);
     public static int32 TrailingZeroCount(uint64 value);
     public static int32 PopCount(uint64 value);
     public static uint64 RotateLeft(uint64 value, int32 count);
     public static uint64 RotateRight(uint64 value, int32 count);
     public static uint64 ReverseBits(uint64 value);
+    public static uint64 ReverseEndianness(uint64 value);
+    public static bool IsPow2(uint64 value);
+    public static bool TryRoundUpToPowerOfTwo(uint64 value, init ref<uint64> result);
 }
 public struct Int32Math
 {
@@ -1506,9 +1512,29 @@ public struct Float32Math
 `BitOperations` candidates operate on actual bits of the indicated unsigned
 width; a parallel `uint8/16/128` or `nuint` overload requires its own
 width/target profile. Counts return `int32`, large enough for the proposed
-fixed integer widths. **OPEN:** zero-input leading/trailing counts,
-rotate-count normalization, native-size overloads and signed-bit handling.
-No hidden `uint64` conversion or unsafe bit-layout access is assumed.
+fixed integer widths. The following boundary choices are **PROPOSED API
+contracts**, not changes to language shift operators or approved primitive
+members:
+
+| Operation | Proposed boundary contract |
+|---|---|
+| `LeadingZeroCount`, `TrailingZeroCount` | Zero returns the operand width (32 or 64); other results are between zero and width minus one. |
+| `PopCount` | Counts set bits in the declared width; zero returns zero and an all-ones value returns the width. |
+| `RotateLeft`, `RotateRight` | Normalize the signed count modulo the operand width, including negative counts and `int32.MinValue`, without checked negation overflow. Multiples of the width return the original bits. Negative left counts rotate right and vice versa. |
+| `ReverseBits` | Reverse all bits within the declared width; no widening, sign interpretation or target byte order participates. |
+| `ReverseEndianness` | Reverse the order of the four or eight bytes while preserving the bit order within each byte. This is a value operation, not a load/store or a promise about native memory layout. |
+| `IsPow2` | True exactly for a nonzero value with one set bit; zero is false. |
+| `TryRoundUpToPowerOfTwo` | Publish the least representable power of two greater than or equal to a positive input. Zero or a required result beyond the width returns false with the output vacant; an existing power of two is unchanged. |
+
+For `uint32`, the largest successful power-of-two rounding input is
+`0x80000000`; `0x80000001` fails. The corresponding `uint64` boundary is
+`0x8000000000000000`. Output publication metadata remains **OPEN**, as for
+other `Try...` members. These named rotations deliberately normalize counts;
+they do not weaken the checked count validation of source `<<`, `>>` or
+`>>>`. No hardware instruction availability, compile-time-constant count
+requirement or NoThrow declaration is inferred from a service name.
+Native-size overloads and signed-bit handling remain **OPEN**. No hidden
+`uint64` conversion or unsafe bit-layout access is assumed.
 `Abs(int32.MinValue)` follows checked overflow.
 **OPEN next to math candidates:** invalid `Clamp` bounds need a declared failure contract.
 Float `Min`/`Max`/`Clamp` need NaN propagation and signed-zero tie rules,
