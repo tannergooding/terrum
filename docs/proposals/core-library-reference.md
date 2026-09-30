@@ -225,6 +225,18 @@ public struct TextSpan<TCodeUnit = void> : IFormattable
 }
 public struct rune : IFormattable
 {
+    public uint32 Value { get; }
+    public bool IsAscii { get; }
+    public nuint Utf8CodeUnitCount { get; }
+    public nuint Utf16CodeUnitCount { get; }
+    public static bool IsValid(uint32 value);
+    public static bool TryCreate(uint32 value, init ref<rune> result);
+    public static bool TryDecodeSingleUtf8(Span<char8> source, init ref<rune> result);
+    public static bool TryDecodeSingleUtf16(Span<char16> source, init ref<rune> result);
+    public static bool TryDecodeSingleUtf32(Span<char32> source, init ref<rune> result);
+    public bool TryEncodeUtf8(write Span<char8> destination, init ref<nuint> written);
+    public bool TryEncodeUtf16(write Span<char16> destination, init ref<nuint> written);
+    public bool TryEncodeUtf32(write Span<char32> destination, init ref<nuint> written);
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
 }
@@ -253,6 +265,8 @@ public mut unique struct SpanTextWriter<TCodeUnit> : ITextWriter
 public class Text : IFormattable
 {
     public TextSpan AsSpan();
+    public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
+        where TWriter : ITextWriter;
     [TextTarget("content")]
     public static own<val<Text>> Create<TContent>(TContent content)
         where TContent : IFormattable;
@@ -277,6 +291,26 @@ one scalar. The approved character forms are target-typed: `char8` admits
 only ASCII as a standalone unit, `char16` a nonsurrogate BMP scalar, and
 `char32`/`rune` any scalar. There is no default character-literal type.
 
+The `rune` members are **PROPOSED** scalar services, not approval of additional
+privileged Core members or an encoding default. `IsValid` recognizes
+`0..0x10FFFF` excluding `0xD800..0xDFFF`; `TryCreate` publishes exactly that
+value on success and leaves its output vacant otherwise. `IsAscii` tests
+`Value <= 0x7F`. The UTF counts describe encoded code units, not display
+columns, grapheme clusters or a native object layout.
+
+Each `TryDecodeSingle` requires the entire supplied raw code-unit span to
+encode exactly one scalar. Empty, incomplete, malformed or multi-scalar input
+returns false with no published result; UTF-8 rejects overlong spellings,
+surrogate encodings and out-of-range values, and UTF-16 rejects unpaired
+surrogates. These are exact single-value decoders, not incremental readers;
+the stateful conversion protocols below retain their distinct progress and
+error reporting. Encoding writes one complete scalar with no added terminator
+or byte-order mark. Insufficient capacity leaves destination and output
+unchanged/vacant respectively; success reports the code-unit count and leaves
+the remaining destination unchanged. Destinations contain initialized code
+units before access. No replacement policy, normalization, casing or implicit
+text validation is selected by these names.
+
 `SpanTextWriter` holds an exclusive loan to caller-provided storage; `Written` is accepted code-unit count. A refused fragment does not modify storage for that fragment, but prior fragments remain. `Text.Create` validates/freezes text and may transfer eligible exclusive backing; final representation and builder contract remain open.
 
 ### Text/view/writer signature families
@@ -286,6 +320,7 @@ only ASCII as a standalone unit, `char16` a nonsurrogate BMP scalar, and
 | `Span<T>` / Core | `Length`; `Slice(start, length) -> Span<T>`; matched-access borrowed index; `IContiguousSequence<T>.AsSpan()` | Slot and descriptor mutability are independent; empty slices retain dependencies |
 | `InlineArray<T,N>` / Core | `Length: nuint` (constant `N`); matched-access index; `AsSpan() -> Span<T>` | Fixed inline storage has enclosing-owner lifetime, not allocator ownership |
 | `TextSpan<TCodeUnit>` / Core | `IsEmpty`; `EqualsOrdinal(TextSpan/rune)`; `CompareOrdinal(TextSpan)`; `TryFormat(writer, format)` | Validation and encoding survive erasure; no implicit decoding fallback |
+| `rune` / Core | `Value`, `IsAscii`, UTF code-unit counts, `IsValid`, `TryCreate`, exact `TryDecodeSingleUtf8/16/32`, `TryEncodeUtf8/16/32`, `TryFormat` | Valid scalar only; explicit encodings; conditional publication and fragment-atomic writes |
 | `Text` / Foundation or Application | `AsSpan() -> TextSpan`; `TryFormat(writer, format)`; `Create<TContent>(content) -> own<val<Text>>` | Copy/transfer/lease of backing must be explicit; no mandated native object layout |
 | `TextBuilder<TCodeUnit>` / Foundation, **OPEN** registration | `Append(TextSpan)`, `AppendScalar(rune)`, `TryBuild(init ref<own<val<Text>>> output)` | Registered builder, owned/borrowed backing and failure cleanup need checked contracts |
 | `TextSearch` / Core | `StartsWithOrdinal`, `EndsWithOrdinal`, `TryIndexOfOrdinal`, `TryLastIndexOfOrdinal` | Scalar offsets; no culture, normalization or sentinel |
