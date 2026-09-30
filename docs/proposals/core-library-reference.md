@@ -1117,6 +1117,15 @@ public static class SpanAlgorithms
     public static bool TryLastIndexOf<T, TComparer>(Span<T> source, ref<T> value,
         write ref<TComparer> comparer, init ref<nuint> index)
         where TComparer : IEqualityComparer<T>;
+    public static bool SequenceEqual<T, TComparer>(Span<T> left, Span<T> right,
+        write ref<TComparer> comparer)
+        where TComparer : IEqualityComparer<T>;
+    public static bool StartsWith<T, TComparer>(Span<T> source, Span<T> prefix,
+        write ref<TComparer> comparer)
+        where TComparer : IEqualityComparer<T>;
+    public static bool EndsWith<T, TComparer>(Span<T> source, Span<T> suffix,
+        write ref<TComparer> comparer)
+        where TComparer : IEqualityComparer<T>;
     public static bool TryFind<T, TPredicate>(Span<T> source,
         write ref<TPredicate> predicate, init ref<T> value)
         where T : [Copy]
@@ -1182,6 +1191,8 @@ grant writable element access merely because its own state is mutable.
 |---|---|
 | `Contains`, `TryIndexOf` | Visit from the beginning and stop at the first equality match; empty input returns false. A successful index names that first match. |
 | `TryLastIndexOf` | Visit from the end and stop at the first equality match in that direction; success publishes its original source index. |
+| `SequenceEqual` | Unequal lengths return false without witness calls. Otherwise compare aligned pairs in increasing index order, stopping at the first unequal pair; two empty inputs return true. |
+| `StartsWith`, `EndsWith` | A longer prefix/suffix returns false without witness calls. Compare the matching source range against the supplied prefix/suffix in increasing index order, stopping at the first unequal pair; an empty prefix/suffix matches any source. |
 | `TryFind` | Visit from the beginning and copy the first matching element into the vacant output; no match leaves it vacant. An optional/null element can be a successful result. |
 | `TryFindLast` | Visit from the end and copy the first matching element in that direction; no match leaves the output vacant. No forward scan or predicate replay is implied. |
 | `TryFindIndex`, `TryFindLastIndex` | Search in increasing/decreasing source-index order, respectively, stopping at the first true predicate in that direction. Success publishes the original source index; no match leaves it vacant. No `[Copy]` element capability is required. |
@@ -1218,6 +1229,16 @@ last match. A predicate exception is not a no-match result: it preserves the
 existing checked failure behavior and leaves an initialization output vacant,
 without undoing earlier callback-state writes. This does not grant element
 mutation, reentrant source invalidation or escaping loans.
+
+Sequence comparison is element-wise under the supplied witness, not text
+normalization, ordering, key equivalence or raw representation comparison.
+For prefix/suffix comparisons the source element is the left witness operand,
+and the prefix/suffix element is the right operand. Readonly input ranges may
+overlap, including identical ranges, but identical backing does not permit
+skipping witness calls: a selected floating equality may reject a NaN compared
+with itself, and callbacks retain their declared effects. These operations
+need neither `[Copy]` nor hidden materialization; they cannot retain the
+element loans or reinterpret padding as part of equality.
 
 ### Sequence and eager-operation inventory
 
@@ -1416,12 +1437,6 @@ public interface IFolder<T, TState>
 }
 public static class OrderedSpanAlgorithms
 {
-    public static bool Any<T, TPredicate>(Span<T> source,
-        write ref<TPredicate> predicate)
-        where TPredicate : IPredicate<T>;
-    public static nuint CountWhere<T, TPredicate>(Span<T> source,
-        write ref<TPredicate> predicate)
-        where TPredicate : IPredicate<T>;
     public static bool TryBinarySearch<T, TOrder>(Span<T> source, ref<T> value,
         ref<TOrder> order, init ref<nuint> index)
         where TOrder : IOrderComparer<T>;
@@ -1502,10 +1517,9 @@ public mut unique struct StackCursor<T>
 
 `Compare` is a readonly witness: negative/zero/positive determine order and
 equality; it must remain consistent while values are stored or searched.
-`Any` short-circuits on its first match; `CountWhere` visits every element
-once. Both use the existing `IPredicate<T>` and retain its explicitly
-borrowed callback, without materializing a sequence or replaying earlier
-elements.
+Predicate searches, `Any` and `CountWhere` belong to `SpanAlgorithms`
+above; they require no ordering witness and are not duplicated in this
+ordered-operation service.
 `TryBinarySearch` requires sorted input, chooses the first equal index, and
 leaves `index` vacant when absent. `Sort` may leave a valid permutation if
 comparison fails; it never manufactures or duplicates an affine owner.
