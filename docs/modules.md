@@ -34,6 +34,11 @@ It therefore reuses feature-selected semantic v43/v45 and existing native
 profiles rather than introducing a new persisted module format. Independently
 projected producers can service unchanged semantic/native consumers; this does
 not add general call parsing to the native frontend.
+Projection v50 adds initialized scalar declarations in existing braced
+branch/loop bodies through the same verified local/block representation.
+Lexical visibility does not recycle declaration slots or change the eight-local
+function limit. Existing feature-selected semantic/native writers and consumers
+remain unchanged; this projection revision is not a persisted module revision.
 The highest implemented semantic revision is 45, selected
 by the artifact's required features; not every artifact uses revision 45.
 Revision-specific reader behavior and feature-dependent writer selection

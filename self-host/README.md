@@ -313,6 +313,23 @@ all existing bounds, scanner records and native ABI remain unchanged.
 This does not add calls, field/nominal mutations, parameter mutation, floating
 values, vacant locals or a standalone compiler.
 
+Projection v50 adds initialized declarations of the existing six scalar types
+inside braced branch/loop bodies. Sequential binding and lexical visibility
+match the hosted binder: an initializer cannot read its own or a later
+declaration, active enclosing/parameter names cannot be shadowed, and closed
+sibling scopes may reuse names with distinct monotonic slots. Reads and writes
+cannot refer to expired slots. Loop initializers run on each entered iteration;
+outer mutations, nearest transfers and structured returns retain their effects.
+The native parser and independent source-bound projection reader enforce these
+rules before shared verified lowering, without hosted parsing/binding fallback.
+Nested declaration placement alone selects v50, including bodies with existing
+mutations. Versions 1–49 remain serviced and reject nested declarations.
+The eight-local bound counts all identities, not live names; 392 words,
+64 tokens, 12 statements, 32 nodes, three parameters, 16 expression-recursion
+levels and six structural levels remain unchanged. Both policies use the
+existing ABI and semantic/native persistence. This does not add standalone
+block statements, vacant locals, general calls or richer values.
+
 The host's syntax-29 post-tested loops and named enclosing-loop transfers
 also execute through existing checked lowering; semantic v39 is selected
 when those retained nodes require it. Scanner record/schema and native ABI

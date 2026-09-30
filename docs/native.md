@@ -159,6 +159,15 @@ operations. Actual DLL calls, JIT/EXE execution, byte parity and unchanged
 persisted consumers cover the bounded component; no ABI/profile change,
 general call syntax, field mutation or nominal operation is added.
 
+Projection v50 additionally admits initialized scalar declarations inside the
+component's existing braced branch/loop bodies. Lexical visibility, sequential
+initialization, enclosing-name collision checks and writable authority are
+validated independently of globally unique local slots. Loop reinitialization,
+outer writes and scope exits reuse existing verified block/native lowering
+under both policies. The eight-local function-wide identity budget and all
+other component limits remain unchanged; v1–49 servicing and the native ABI
+are preserved. No standalone blocks, vacant locals or general calls are added.
+
 The native scalar frontend's provisional projection v48 represents scalar
 returns as structured body statements: kind 8, slot 0, a typed result root and
 the keyword-through-semicolon span. Header words 38–40 are `-1`; the source

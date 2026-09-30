@@ -266,6 +266,24 @@ vacant locals, parameter mutation and new unchecked semantics are not added.
 Independent projections, exact checked statuses, actual DLL exports, hosted
 image parity and persisted semantic/native consumers exercise this boundary.
 
+Projection v50 adds initialized typed/inferred scalar declarations inside
+existing braced `if`/`else` and `while` bodies. The native parser and independent
+source-bound reader track lexical visibility separately from monotonic local
+identities. Initializers see only preceding visible declarations; parameters
+and enclosing locals cannot be shadowed, but closed sibling scopes may reuse
+spelling with distinct slots. Scope exits remove name/write authority without
+discarding mutations of outer locals. Shared verified block lowering executes
+initializers on each entered iteration and preserves nearest transfers,
+structured returns and both runtime policies.
+Only nested declarations select v50; versions 1–49 retain their original
+shapes and reject the new placement. The six scalar types and existing
+mutability rules remain unchanged. Eight locals means eight total declaration
+identities across the function, not eight per scope. The 392 words, 64 tokens,
+12 statement records, 32 nodes, three parameters, 16 expression-recursion
+levels, six structural levels, scanner IDs and public ABI remain fixed.
+No standalone block statements, vacant locals, calls, richer values or new
+persisted semantic/native format are introduced.
+
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
 immutable and usable independently. The separate [native profiles](native.md)
