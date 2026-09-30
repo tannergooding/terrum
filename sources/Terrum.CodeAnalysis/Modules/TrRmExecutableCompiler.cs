@@ -6,11 +6,12 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Modules;
 
-/// <summary>Emits and audits the root-free, fail-fast compact-linear TRRM execution profile.</summary>
+/// <summary>Emits and audits root-free fail-fast scalar compact TRRM bodies.</summary>
 public static partial class TrRmExecutableCompiler
 {
     private static readonly PrimitiveType[] s_types =
@@ -41,6 +42,10 @@ public static partial class TrRmExecutableCompiler
             || !program.Structures.IsEmpty || !program.Classes.IsEmpty || !program.Buffers.IsEmpty)
         {
             throw Unsupported("Only fail-fast scalar modules are executable.");
+        }
+        if (program.Functions.Any(static function => function.IndexedBody is not null))
+        {
+            throw Unsupported("An audited indexed Body cannot be reserialized as structured source.");
         }
         if (program.EntryPoint >= 0
             && (program.Functions[program.EntryPoint].ReturnType != PrimitiveType.Int32
@@ -92,7 +97,8 @@ public static partial class TrRmExecutableCompiler
 
             signatures.Add(new TrRmMethodSigRow(TypeRow(function.ReturnType), 0,
                 first, function.ParameterCount, 0, 0));
-            bodies.Add(EncodeBody(function));
+            bodies.Add(ContainsIndexedFlow(function.Body)
+                ? new IndexedBuilder(function).Encode() : EncodeBody(function));
             var contractFirst = function.IsNoThrow ? effects.Count + 1 : 0;
             if (function.IsNoThrow)
             {
@@ -160,7 +166,7 @@ public static partial class TrRmExecutableCompiler
 
     public static BoundProgram Load(ReadOnlySpan<byte> artifact)
     {
-        TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
+        TrRmStructuralMetadataValidator.ValidateCompact(artifact);
         var index = new TrRmArtifactIndex(artifact);
         for (var section = 0; section < index.SectionCount; section++)
         {
@@ -270,12 +276,29 @@ public static partial class TrRmExecutableCompiler
                 noThrow = true;
             }
 
-            _ = new TrRmCompactLinearBodyReader(bodies, row, modules, defs, sigs, parameters, types);
-            var statements = DecodeBody(bodies.GetRow(defs.GetBodyRow(row)), count,
-                variables, noThrow, types);
+            var body = bodies.GetRow(defs.GetBodyRow(row));
+            TrRmScalarGraph? indexed = null;
+            ImmutableArray<BoundStatement> statements;
+            if ((body[0] & 0x0C) == 0x08)
+            {
+                _ = new TrRmCompactIndexedBodyReader(bodies, row, modules, defs, sigs, parameters, types);
+                indexed = IndexedBuilder.DecodeIndexedBody(body, count,
+                    FromRow(types, sigs.GetResultTypeSpec(signature)), noThrow, types);
+                for (var value = count; value < indexed.Types.Length; value++)
+                {
+                    variables.Add(new BoundVariable($"value{value + 1}", indexed.Types[value], false, default));
+                }
+                statements = [];
+            }
+            else
+            {
+                _ = new TrRmCompactLinearBodyReader(bodies, row, modules, defs, sigs, parameters, types);
+                statements = DecodeBody(body, count, variables, noThrow, types);
+            }
             functions.Add(new BoundFunction(name, FromRow(types, sigs.GetResultTypeSpec(signature)),
                 variables.ToImmutable(), count, new BoundBlock(statements, default), default)
             {
+                IndexedBody = indexed,
                 IsNoThrow = noThrow,
                 IsPrivate = flags == 0,
                 IsInternal = flags == 1,
@@ -318,6 +341,39 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static bool Scalar(PrimitiveType type) => Array.IndexOf(s_types, type) >= 0;
+
+    private static bool ContainsIndexedFlow(BoundStatement statement)
+    {
+        switch (statement)
+        {
+            case BoundIf or BoundWhile:
+                return true;
+            case BoundBlock block:
+                return block.Statements.Any(ContainsIndexedFlow);
+            case BoundLocal local:
+                return ContainsIndexedFlow(local.Initializer);
+            case BoundAssignment assignment:
+                return ContainsIndexedFlow(assignment.Value);
+            case BoundReturn { Value: BoundExpression value }:
+                return ContainsIndexedFlow(value);
+            case BoundExpressionStatement discarded:
+                return ContainsIndexedFlow(discarded.Expression);
+            default:
+                return false;
+        }
+    }
+
+    private static bool ContainsIndexedFlow(BoundExpression expression)
+        => expression switch
+        {
+            BoundConditional => true,
+            BoundBinary { Operator: TokenKind.AmpersandAmpersand or TokenKind.PipePipe }
+                => true,
+            BoundBinary binary => ContainsIndexedFlow(binary.Left) || ContainsIndexedFlow(binary.Right),
+            BoundUnary unary => ContainsIndexedFlow(unary.Operand),
+            BoundCast cast => ContainsIndexedFlow(cast.Operand),
+            _ => false,
+        };
     private static int TypeRow(PrimitiveType type)
     {
         var row = Array.IndexOf(s_types, type) + 1;

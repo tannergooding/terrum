@@ -312,6 +312,10 @@ public static class SemanticVerifier
                     }
                 }
             }
+            if (function.IndexedBody is not null)
+            {
+                function.IndexedBody.Verify(function, program.RuntimePolicy);
+            }
             if (function.Intrinsic == BoundIntrinsic.ClassTryCreate)
             {
                 VerifyClassFactory(program, function, i);
@@ -516,6 +520,10 @@ public static class SemanticVerifier
                 continue;
             }
             if (function.Intrinsic != BoundIntrinsic.None)
+            {
+                continue;
+            }
+            if (function.IndexedBody is not null)
             {
                 continue;
             }

@@ -281,6 +281,7 @@ public sealed record BoundStructField(string Name, PrimitiveType Type, int Offse
 public sealed record BoundFunction(string Name, PrimitiveType ReturnType, ImmutableArray<BoundVariable> Variables,
     int ParameterCount, BoundBlock Body, TextSpan Span)
 {
+    internal TrRmScalarGraph? IndexedBody { get; init; }
     /// <summary>The declared property member name, distinct from the callable implementation's name.</summary>
     public string? PropertyName { get; init; }
 

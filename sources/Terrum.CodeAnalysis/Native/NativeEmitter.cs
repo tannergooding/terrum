@@ -320,6 +320,7 @@ internal sealed partial class PeCompiler
     private readonly int[] _spillBases;
     private readonly int[] _outBases;
     private readonly int[] _returnSlots;
+    private readonly int[] _edgeCopyBases;
     private readonly int[][] _liveSlots;
     private readonly int[][] _constructedFieldSlots;
     private readonly int[] _replacementSlots;
@@ -389,6 +390,7 @@ internal sealed partial class PeCompiler
         _spillBases = new int[program.Functions.Length];
         _outBases = new int[program.Functions.Length];
         _returnSlots = new int[program.Functions.Length];
+        _edgeCopyBases = new int[program.Functions.Length];
         _liveSlots = new int[program.Functions.Length][];
         _managedRootFrames = new int[program.Functions.Length];
         _managedRootFlags = new Dictionary<int, int>[program.Functions.Length];
@@ -549,6 +551,16 @@ internal sealed partial class PeCompiler
             }
             var maximumArguments = 0;
             var spillSlots = StatementSpills(function.Body, ref maximumArguments);
+            if (function.IndexedBody is TrRmScalarGraph indexed)
+            {
+                foreach (var block in indexed.Blocks)
+                {
+                    foreach (var operation in block.Operations)
+                    {
+                        spillSlots = Math.Max(spillSlots, StatementSpills(operation, ref maximumArguments));
+                    }
+                }
+            }
             if (function.Intrinsic == BoundIntrinsic.ClassTryCreate)
             {
                 maximumArguments = Math.Max(maximumArguments, function.ParameterCount);
@@ -583,7 +595,16 @@ internal sealed partial class PeCompiler
             _slots[i] = slots;
             _spillBases[i] = (at + 15) & ~15;
             _outBases[i] = _spillBases[i] + (16 * spillSlots);
-            _returnSlots[i] = _outBases[i] + (16 * outParameters);
+            _edgeCopyBases[i] = _outBases[i] + (16 * outParameters);
+            var edgeParameters = 0;
+            if (function.IndexedBody is not null)
+            {
+                foreach (var block in function.IndexedBody.Blocks)
+                {
+                    edgeParameters = Math.Max(edgeParameters, block.Parameters.Length);
+                }
+            }
+            _returnSlots[i] = _edgeCopyBases[i] + (8 * edgeParameters);
             var required = _returnSlots[i] + (IsIndirect(function.ReturnType) ? 8L : 0L);
             var needsReturnSnapshot = ContainsCleanup(function.Body, _checkedExceptions && _managedNodes);
             if (needsReturnSnapshot)
@@ -765,7 +786,14 @@ internal sealed partial class PeCompiler
             }
             else
             {
-                Statement(function.Body);
+                if (function.IndexedBody is TrRmScalarGraph graph)
+                {
+                    EmitIndexedBody(graph);
+                }
+                else
+                {
+                    Statement(function.Body);
+                }
                 if (function.ReturnType == PrimitiveType.Void)
                 {
                     UnregisterManagedRoots(i);
@@ -1488,6 +1516,67 @@ internal sealed partial class PeCompiler
             _code.PatchRelative(offset, _code.Position);
         }
         _code.Bytes(0x31, 0xC0, 0xC3);
+    }
+
+    private void EmitIndexedBody(TrRmScalarGraph graph)
+    {
+        var positions = new int[graph.Blocks.Length + 1];
+        var fixups = new List<(int Offset, int Target)>();
+
+        void EmitEdge(TrRmScalarEdge edge)
+        {
+            var parameters = graph.Blocks[edge.Target - 1].Parameters;
+            // Backedges can exchange parameter values; no destination may overwrite a later source.
+            for (var i = 0; i < parameters.Length; i++)
+            {
+                _code.Load64(Slot(edge.Arguments[i] - 1));
+                _code.Store64(_edgeCopyBases[_currentFunction] + (8 * i));
+            }
+            for (var i = 0; i < parameters.Length; i++)
+            {
+                _code.Load64(_edgeCopyBases[_currentFunction] + (8 * i));
+                _code.Store64(Slot(parameters[i] - 1));
+            }
+            fixups.Add((_code.Jump(), edge.Target));
+        }
+
+        for (var id = 1; id <= graph.Blocks.Length; id++)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            positions[id] = _code.Position;
+            var block = graph.Blocks[id - 1];
+            foreach (var operation in block.Operations)
+            {
+                Statement(operation);
+            }
+            if (block.Condition != 0)
+            {
+                _code.Load(Slot(block.Condition - 1));
+                _code.Bytes(0x85, 0xC0);
+                var falseJump = _code.JumpIf(0x84);
+                EmitEdge(block.True ?? throw new InvalidOperationException("Indexed branch lacks true edge."));
+                _code.PatchRelative(falseJump, _code.Position);
+                EmitEdge(block.False ?? throw new InvalidOperationException("Indexed branch lacks false edge."));
+            }
+            else if (block.True is not null)
+            {
+                EmitEdge(block.True);
+            }
+            else
+            {
+                Statement(new BoundReturn(block.ReturnValue == 0 ? null
+                    : new BoundRead(block.ReturnValue - 1, graph.Types[block.ReturnValue - 1], default),
+                    default));
+            }
+            if (_code.Position > MaximumText)
+            {
+                throw new NotSupportedException("Native text exceeds the 8 MiB image ceiling.");
+            }
+        }
+        foreach (var (offset, target) in fixups)
+        {
+            _code.PatchRelative(offset, positions[target]);
+        }
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The verifier excludes other structured statement variants.")]

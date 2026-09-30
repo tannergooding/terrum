@@ -4,11 +4,12 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Modules;
 
-/// <summary>Inspects the root-free, forward-branching scalar compact-indexed subset.</summary>
-/// <remarks>Only scalar constants, operators, integer conversions, optional values, Copy, Select, local, expected-import and packed direct scalar calls, forward Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
+/// <summary>Inspects the root-free scalar compact-indexed subset with branches and nested loop regions.</summary>
+/// <remarks>Only scalar constants, operators, integer conversions, optional values, Copy, Select, local, expected-import and packed direct scalar calls, Branch/BranchIf, Return and Fail are supported; this is not an executable-contract verifier.</remarks>
 public readonly ref struct TrRmCompactIndexedBodyReader
 {
     private readonly record struct Edge(int Target, int[] Arguments);
@@ -856,6 +857,60 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         reachable[edge.Target] = true;
                         pending.Enqueue(edge.Target);
                     }
+                }
+            }
+        }
+
+        var auditVisits = 0;
+        var auditBlockCount = BlockCount;
+        bool Bypasses(int guard, int destination)
+        {
+            if (guard == 1 || guard == destination)
+            {
+                return false;
+            }
+            var visited = new bool[auditBlockCount + 1];
+            var pending = new Queue<int>();
+            pending.Enqueue(1);
+            visited[1] = true;
+            while (pending.Count != 0)
+            {
+                if (++auditVisits > SemanticVerifier.MaximumAnalysisVisits)
+                {
+                    throw InvalidBody();
+                }
+                foreach (var edge in successors[pending.Dequeue()])
+                {
+                    if (edge.Target == guard || visited[edge.Target])
+                    {
+                        continue;
+                    }
+                    if (edge.Target == destination)
+                    {
+                        return true;
+                    }
+                    visited[edge.Target] = true;
+                    pending.Enqueue(edge.Target);
+                }
+            }
+            return false;
+        }
+        var checkedOwners = new HashSet<(int Owner, int Block)>();
+        for (var block = 1; block <= BlockCount; block++)
+        {
+            foreach (var value in externalUses[block])
+            {
+                var definingBlock = owner[value];
+                if (checkedOwners.Add((definingBlock, block)) && Bypasses(definingBlock, block))
+                {
+                    throw InvalidBody();
+                }
+            }
+            for (var region = blockRegions[block]; region != 0; region = regions[region].Parent)
+            {
+                if (Bypasses(regions[region].Header, block))
+                {
+                    throw InvalidBody();
                 }
             }
         }

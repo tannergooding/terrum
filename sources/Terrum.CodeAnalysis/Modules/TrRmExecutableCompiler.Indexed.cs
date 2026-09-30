@@ -1,0 +1,1004 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System;
+using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Linq;
+using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Semantics;
+
+namespace Terrum.CodeAnalysis.Modules;
+
+public static partial class TrRmExecutableCompiler
+{
+    private sealed class IndexedEdge(IndexedBlock target, int[] arguments)
+    {
+        internal IndexedBlock Target = target;
+        internal int[] Arguments = arguments;
+    }
+
+    private sealed class IndexedBlock(int creation, int region)
+    {
+        internal int Creation = creation;
+        internal int Id;
+        internal int Region = region;
+        internal readonly List<int> Parameters = [];
+        internal readonly List<(int Result, BoundExpression Expression)> Operations = [];
+        internal int Condition;
+        internal IndexedEdge? True;
+        internal IndexedEdge? False;
+        internal int ReturnValue = -1;
+    }
+
+    private sealed class IndexedRegion(int id, int parent, IndexedBlock header)
+    {
+        internal int Id = id;
+        internal int Parent = parent;
+        internal IndexedBlock Header = header;
+        internal IndexedBlock? Exit;
+    }
+
+    private sealed class IndexedBuilder
+    {
+        private readonly BoundFunction _function;
+        private readonly List<IndexedBlock> _blocks = [];
+        private readonly List<IndexedRegion> _regions = [];
+        private readonly List<PrimitiveType> _types = [];
+        private readonly Stack<IndexedRegion> _loops = [];
+        private IndexedBlock? _current;
+        private int[] _slots;
+        private int _branchDepth;
+
+        internal IndexedBuilder(BoundFunction function)
+        {
+            _function = function;
+            _slots = new int[function.Variables.Length];
+            _current = NewBlock(0);
+            for (var index = 0; index < function.ParameterCount; index++)
+            {
+                _slots[index] = NewValue(function.Variables[index].Type);
+                _current.Parameters.Add(_slots[index]);
+            }
+        }
+
+        private static byte[] EncodeIndexed(BoundFunction function, List<IndexedBlock> source,
+            List<IndexedRegion> regions, List<PrimitiveType> sourceTypes)
+        {
+            var indegree = new int[source.Count];
+            foreach (var block in source)
+            {
+                foreach (var edge in Edges(block))
+                {
+                    if (!regions.Any(region => region.Header == edge.Target
+                        && block.Region == region.Id && block != region.Header))
+                    {
+                        indegree[edge.Target.Creation]++;
+                    }
+                }
+            }
+            var ordered = new List<IndexedBlock>(source.Count);
+            var ready = new SortedSet<int>();
+            foreach (var block in source)
+            {
+                if (indegree[block.Creation] == 0)
+                {
+                    ready.Add(block.Creation);
+                }
+            }
+            while (ordered.Count < source.Count)
+            {
+                if (ready.Count == 0)
+                {
+                    throw Unsupported("Indexed scalar flow contains a non-loop cycle.");
+                }
+                var first = ready.Min;
+                ready.Remove(first);
+                var next = source[first];
+                next.Id = ordered.Count + 1;
+                ordered.Add(next);
+                foreach (var edge in Edges(next))
+                {
+                    if (!regions.Any(region => region.Header == edge.Target
+                        && next.Region == region.Id && next != region.Header))
+                    {
+                        if (--indegree[edge.Target.Creation] == 0)
+                        {
+                            ready.Add(edge.Target.Creation);
+                        }
+                    }
+                }
+            }
+            var remap = new int[sourceTypes.Count + 1];
+            var types = new PrimitiveType[sourceTypes.Count + 1];
+            var owner = new int[sourceTypes.Count + 1];
+            var starts = new int[ordered.Count + 1];
+            foreach (var block in ordered)
+            {
+                foreach (var value in block.Parameters)
+                {
+                    remap[value] = ++starts[block.Id];
+                }
+                foreach (var (result, _) in block.Operations)
+                {
+                    remap[result] = ++starts[block.Id];
+                }
+                starts[block.Id] += starts[block.Id - 1];
+                var first = starts[block.Id - 1];
+                foreach (var value in block.Parameters)
+                {
+                    types[remap[value] += first] = sourceTypes[value - 1];
+                    owner[remap[value]] = block.Id;
+                }
+                foreach (var (result, _) in block.Operations)
+                {
+                    types[remap[result] += first] = sourceTypes[result - 1];
+                    owner[remap[result]] = block.Id;
+                }
+            }
+            if (remap.Skip(1).Any(static id => id == 0))
+            {
+                throw Unsupported("Indexed value inventory is incomplete.");
+            }
+
+            var lastUses = new SortedDictionary<int, int>[ordered.Count];
+            var external = new HashSet<int>[ordered.Count];
+            for (var b = 0; b < ordered.Count; b++)
+            {
+                var block = ordered[b];
+                lastUses[b] = new SortedDictionary<int, int>();
+                external[b] = [];
+                void Use(int id, int ordinal)
+                {
+                    if (id <= 0)
+                    {
+                        return;
+                    }
+                    var mapped = remap[id];
+                    lastUses[b][mapped] = ordinal;
+                    if (owner[mapped] != block.Id)
+                    {
+                        external[b].Add(mapped);
+                    }
+                }
+                for (var operation = 0; operation < block.Operations.Count; operation++)
+                {
+                    VisitReads(block.Operations[operation].Expression, id => Use(id, operation));
+                }
+                Use(block.Condition != 0 ? block.Condition : block.ReturnValue, block.Operations.Count);
+                foreach (var edge in Edges(block))
+                {
+                    foreach (var argument in edge.Arguments)
+                    {
+                        Use(argument, block.Operations.Count);
+                    }
+                }
+            }
+            var liveIns = external.Select(static set => new HashSet<int>(set)).ToArray();
+            var liveOuts = ordered.Select(static _ => new HashSet<int>()).ToArray();
+            for (var iteration = 0; iteration <= ordered.Count; iteration++)
+            {
+                var changed = false;
+                for (var b = ordered.Count - 1; b >= 0; b--)
+                {
+                    var block = ordered[b];
+                    foreach (var edge in Edges(block))
+                    {
+                        liveOuts[b].UnionWith(liveIns[edge.Target.Id - 1]);
+                        liveOuts[b].UnionWith(edge.Arguments.Select(id => remap[id]));
+                    }
+                    foreach (var id in liveOuts[b])
+                    {
+                        if (owner[id] != block.Id)
+                        {
+                            changed |= liveIns[b].Add(id);
+                        }
+                    }
+                }
+                if (!changed)
+                {
+                    break;
+                }
+                if (iteration == ordered.Count)
+                {
+                    throw Unsupported("Indexed scalar liveness does not converge.");
+                }
+            }
+            var useCounts = new int[types.Length];
+            foreach (var uses in lastUses)
+            {
+                foreach (var id in uses.Keys)
+                {
+                    useCounts[id]++;
+                }
+            }
+
+            byte[] EncodeWidth(int width)
+            {
+                var sentinel = width == 1 ? byte.MaxValue : width == 2 ? ushort.MaxValue : uint.MaxValue;
+                var offsets = new List<byte>();
+                var definitions = new uint[sourceTypes.Count];
+                var terminators = new List<int>();
+                var data = new List<byte>();
+                var overflowedDefinition = false;
+                offsets.AddRange(BitConverter.GetBytes(0u).AsSpan(0, width).ToArray());
+                foreach (var block in ordered)
+                {
+                    var blockStart = data.Count;
+                    var presence = (block.Region != 0 ? 1 : 0)
+                        | (block.Parameters.Count != 0 ? 2 : 0)
+                        | (liveIns[block.Id - 1].Count != 0 ? 4 : 0)
+                        | (liveOuts[block.Id - 1].Count != 0 ? 8 : 0)
+                        | (lastUses[block.Id - 1].Count != 0 ? 16 : 0);
+                    data.Add((byte)presence);
+                    if (block.Region != 0)
+                    {
+                        Write(data, (ulong)block.Region, width);
+                    }
+                    WriteList(data, block.Parameters.Select(id => remap[id]), width);
+                    WriteList(data, liveIns[block.Id - 1].Order(), width);
+                    WriteList(data, liveOuts[block.Id - 1].Order(), width);
+                    if (lastUses[block.Id - 1].Count != 0)
+                    {
+                        Write(data, (ulong)lastUses[block.Id - 1].Count, width);
+                        foreach (var (value, ordinal) in lastUses[block.Id - 1])
+                        {
+                            Write(data, (ulong)value, width);
+                            Write(data, (ulong)ordinal, width);
+                        }
+                    }
+                    Write(data, (ulong)block.Operations.Count, width);
+                    foreach (var parameter in block.Parameters)
+                    {
+                        definitions[remap[parameter] - 1] = sentinel;
+                    }
+                    foreach (var (result, expression) in block.Operations)
+                    {
+                        definitions[remap[result] - 1] = (uint)(data.Count - blockStart);
+                        overflowedDefinition |= definitions[remap[result] - 1] >= sentinel;
+                        WriteScalarOperation(data, remap[result], expression, remap, function.IsNoThrow);
+                    }
+                    terminators.Add(data.Count - blockStart);
+                    WriteIndexedTerminator(data, block, remap);
+                    Write(offsets, (ulong)data.Count, width);
+                }
+                if (data.Count > sentinel || overflowedDefinition
+                    || terminators.Any(offset => offset > sentinel)
+                    || starts.Any(start => (ulong)start > sentinel))
+                {
+                    return [];
+                }
+                var body = new List<byte> { (byte)(0x08 | WidthCode(width)) };
+                Write(body, (ulong)ordered.Count, width);
+                Write(body, (ulong)sourceTypes.Count, width);
+                Write(body, (ulong)regions.Count, width);
+                Write(body, 6, width);
+                for (var row = 2; row <= 7; row++)
+                {
+                    Write(body, (ulong)row, 4);
+                }
+                foreach (var region in regions)
+                {
+                    body.Add(1);
+                    Write(body, (ulong)region.Parent, width);
+                    Write(body, (ulong)region.Header.Id, width);
+                    Write(body, (ulong)(region.Exit ?? throw Unsupported("Loop exit is missing.")).Id, width);
+                    Write(body, 0, width);
+                }
+                for (var id = 1; id < types.Length; id++)
+                {
+                    Write(body, (ulong)(TypeRow(types[id]) - 1), width);
+                    Write(body, (ulong)useCounts[id], width);
+                }
+                foreach (var start in starts)
+                {
+                    Write(body, (ulong)start, width);
+                }
+                foreach (var definition in definitions)
+                {
+                    Write(body, definition, width);
+                }
+                body.AddRange(offsets);
+                foreach (var terminator in terminators)
+                {
+                    Write(body, (ulong)terminator, width);
+                }
+                body.AddRange(data);
+                return body.ToArray();
+            }
+
+            foreach (var width in new[] { 1, 2, 4 })
+            {
+                if (ordered.Count > (width == 1 ? byte.MaxValue : width == 2 ? ushort.MaxValue : uint.MaxValue)
+                    || sourceTypes.Count > (width == 1 ? byte.MaxValue : width == 2 ? ushort.MaxValue : uint.MaxValue))
+                {
+                    continue;
+                }
+                var body = EncodeWidth(width);
+                if (body.Length != 0)
+                {
+                    return body;
+                }
+            }
+            throw Unsupported("Indexed scalar Body exceeds four-byte offset/index bounds.");
+        }
+
+        private static IEnumerable<IndexedEdge> Edges(IndexedBlock block)
+        {
+            if (block.True is not null)
+            {
+                yield return block.True;
+            }
+            if (block.False is not null)
+            {
+                yield return block.False;
+            }
+        }
+
+        private static void VisitReads(BoundExpression expression, Action<int> visit)
+        {
+            switch (expression)
+            {
+                case BoundRead read:
+                    visit(read.Variable + 1);
+                    break;
+                case BoundUnary unary:
+                    VisitReads(unary.Operand, visit);
+                    break;
+                case BoundCast cast:
+                    VisitReads(cast.Operand, visit);
+                    break;
+                case BoundBinary binary:
+                    VisitReads(binary.Left, visit);
+                    VisitReads(binary.Right, visit);
+                    break;
+            }
+        }
+
+        private static void WriteList(List<byte> bytes, IEnumerable<int> list, int width)
+        {
+            var values = list.ToArray();
+            if (values.Length == 0)
+            {
+                return;
+            }
+            Write(bytes, (ulong)values.Length, width);
+            foreach (var value in values)
+            {
+                Write(bytes, (ulong)value, width);
+            }
+        }
+
+        private static void WriteIndexedTerminator(List<byte> bytes, IndexedBlock block, int[] remap)
+        {
+            var operands = Edges(block).SelectMany(static edge => edge.Arguments)
+                .Select(id => remap[id]).Append(block.Condition == 0
+                    ? block.ReturnValue <= 0 ? 0 : remap[block.ReturnValue]
+                    : remap[block.Condition]).Append(block.True?.Target.Id ?? 0).Append(block.False?.Target.Id ?? 0);
+            var referenceWidth = Width((ulong)operands.Max());
+            var countWidth = Width((ulong)Math.Max(block.True?.Arguments.Length ?? 0,
+                block.False?.Arguments.Length ?? 0));
+            if (block.True is null)
+            {
+                WriteInstruction(bytes, 0x83, referenceWidth, 0);
+                Write(bytes, (ulong)(block.ReturnValue == 0 ? 0 : remap[block.ReturnValue]), referenceWidth);
+                return;
+            }
+            var opcode = block.False is null ? 0x80 : 0x81;
+            if (referenceWidth == 1 && countWidth == 1)
+            {
+                bytes.Add((byte)opcode);
+            }
+            else
+            {
+                bytes.Add(0xF0);
+                bytes.Add((byte)(WidthCode(referenceWidth) | (WidthCode(countWidth) << 2)));
+                bytes.Add((byte)opcode);
+            }
+            if (block.False is not null)
+            {
+                Write(bytes, (ulong)remap[block.Condition], referenceWidth);
+            }
+            foreach (var edge in Edges(block))
+            {
+                Write(bytes, (ulong)edge.Target.Id, referenceWidth);
+                Write(bytes, (ulong)edge.Arguments.Length, countWidth);
+                foreach (var value in edge.Arguments)
+                {
+                    Write(bytes, (ulong)remap[value], referenceWidth);
+                }
+            }
+        }
+
+        private static void WriteScalarOperation(List<byte> bytes, int result,
+            BoundExpression expression, int[] remap, bool noThrow)
+        {
+            int ReadOperand(BoundExpression operand) => operand is BoundRead read
+                ? remap[read.Variable + 1] : throw Unsupported("Indexed scalar operand was not materialized.");
+            var opcode = 0;
+            var kind = 0;
+            var target = 0;
+            var left = 0;
+            var right = 0;
+            ulong bits = 0;
+            var dataWidth = 0;
+            switch (expression)
+            {
+                case BoundConstant constant:
+                    opcode = 1;
+                    target = TypeRow(constant.Type) - 1;
+                    bits = constant.Type switch {
+                        PrimitiveType.Int32 or PrimitiveType.UInt32 => unchecked((uint)constant.Value),
+                        PrimitiveType.Bool or PrimitiveType.Char16 => (ulong)constant.Value,
+                        _ => unchecked((ulong)constant.Value),
+                    };
+                    dataWidth = Width(bits);
+                    break;
+                case BoundUnary unary:
+                    left = ReadOperand(unary.Operand);
+                    (opcode, kind) = unary.Operator switch {
+                        TokenKind.Bang => (4, 1),
+                        TokenKind.Tilde => (4, 2),
+                        TokenKind.Plus => (4, 3),
+                        TokenKind.Minus when unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64 => (0x17, 0),
+                        _ => throw Unsupported($"Unary operator {unary.Operator} has no executable TRRM encoding."),
+                    };
+                    break;
+                case BoundCast cast:
+                    left = ReadOperand(cast.Operand);
+                    opcode = 0x16;
+                    target = TypeRow(cast.Type) - 1;
+                    break;
+                case BoundBinary binary:
+                    if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe
+                        or TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned
+                        || binary.Operator is TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret
+                            && binary.Left.Type == PrimitiveType.Bool
+                        || binary.Operator is TokenKind.Less or TokenKind.LessEquals
+                            or TokenKind.Greater or TokenKind.GreaterEquals
+                            && binary.Left.Type == PrimitiveType.Char16)
+                    {
+                        throw Unsupported($"Binary operator {binary.Operator} has no executable scalar encoding.");
+                    }
+                    left = ReadOperand(binary.Left);
+                    right = ReadOperand(binary.Right);
+                    (opcode, kind) = binary.Operator switch {
+                        TokenKind.Ampersand => (5, 1),
+                        TokenKind.Pipe => (5, 2),
+                        TokenKind.Caret => (5, 3),
+                        TokenKind.EqualsEquals => (5, 4),
+                        TokenKind.BangEquals => (5, 5),
+                        TokenKind.Less => (5, 6),
+                        TokenKind.LessEquals => (5, 7),
+                        TokenKind.Greater => (5, 8),
+                        TokenKind.GreaterEquals => (5, 9),
+                        TokenKind.Plus => (0x15, 1),
+                        TokenKind.Minus => (0x15, 2),
+                        TokenKind.Star => (0x15, 3),
+                        TokenKind.Slash => (0x15, 4),
+                        TokenKind.Percent => (0x15, 5),
+                        _ => throw Unsupported($"Binary operator {binary.Operator} has no executable scalar encoding."),
+                    };
+                    break;
+                default:
+                    throw Unsupported($"Operation {expression.GetType().Name} is not executable.");
+            }
+            if (noThrow && opcode is 0x15 or 0x16 or 0x17)
+            {
+                throw Unsupported("NoThrow requires a total indexed Body.");
+            }
+            var referenceWidth = Width((ulong)Math.Max(result, target));
+            WriteInstruction(bytes, opcode, referenceWidth, dataWidth);
+            Write(bytes, (ulong)result, referenceWidth);
+            if (opcode is 1 or 0x16)
+            {
+                Write(bytes, (ulong)target, referenceWidth);
+            }
+            if (opcode is 4 or 5 or 0x15)
+            {
+                bytes.Add((byte)kind);
+            }
+            if (opcode == 1)
+            {
+                Write(bytes, bits, dataWidth);
+            }
+            if (opcode is 4 or 0x16 or 0x17)
+            {
+                Write(bytes, (ulong)left, referenceWidth);
+            }
+            if (opcode is 5 or 0x15)
+            {
+                Write(bytes, (ulong)left, referenceWidth);
+                Write(bytes, (ulong)right, referenceWidth);
+            }
+        }
+
+        internal static TrRmScalarGraph DecodeIndexedBody(ReadOnlySpan<byte> body,
+            int parameterCount, PrimitiveType resultType, bool noThrow,
+            TrRmTypeSpecTableReader types)
+        {
+            var position = 1;
+            var width = 1 << (body[0] & 3);
+            var blockCount = ReadInt(body, ref position, width);
+            var valueCount = ReadInt(body, ref position, width);
+            var regionCount = ReadInt(body, ref position, width);
+            var typeCount = ReadInt(body, ref position, width);
+            if (blockCount == 0 || blockCount > SemanticVerifier.MaximumAnalysisVisits
+                || valueCount > SemanticVerifier.MaximumVariables
+                || typeCount is < 0 or > 6)
+            {
+                throw Invalid("Indexed scalar Body exceeds native verification bounds.");
+            }
+            var typeMap = new int[typeCount];
+            for (var index = 0; index < typeMap.Length; index++)
+            {
+                typeMap[index] = ReadInt(body, ref position, 4);
+                if (FromRow(types, typeMap[index]) == PrimitiveType.Void)
+                {
+                    throw Invalid("Void indexed value type.");
+                }
+            }
+            position += regionCount * (1 + 4 * width);
+            var valueTypes = ImmutableArray.CreateBuilder<PrimitiveType>(valueCount);
+            for (var value = 0; value < valueCount; value++)
+            {
+                var typeId = ReadInt(body, ref position, width);
+                _ = ReadInt(body, ref position, width);
+                if (typeId <= 0 || typeId > typeCount)
+                {
+                    throw Invalid("Indexed value has unmapped type.");
+                }
+                valueTypes.Add(FromRow(types, typeMap[typeId - 1]));
+            }
+            var starts = new int[blockCount + 1];
+            for (var index = 0; index < starts.Length; index++)
+            {
+                starts[index] = ReadInt(body, ref position, width);
+            }
+            position += valueCount * width;
+            var offsets = new int[blockCount + 1];
+            for (var index = 0; index < offsets.Length; index++)
+            {
+                offsets[index] = ReadInt(body, ref position, width);
+            }
+            var terminators = new int[blockCount];
+            for (var index = 0; index < terminators.Length; index++)
+            {
+                terminators[index] = ReadInt(body, ref position, width);
+            }
+            var blockData = body[position..];
+            if (width != Width((ulong)Math.Max(blockData.Length,
+                Math.Max(blockCount, Math.Max(valueCount, typeCount)))))
+            {
+                throw Invalid("Nonminimal indexed Body-local width.");
+            }
+            var result = ImmutableArray.CreateBuilder<TrRmScalarBlock>(blockCount);
+            for (var b = 0; b < blockCount; b++)
+            {
+                var extent = blockData[offsets[b]..offsets[b + 1]];
+                var cursor = 0;
+                var presence = ReadByte(extent, ref cursor);
+                if ((presence & 1) != 0)
+                {
+                    _ = ReadInt(extent, ref cursor, width);
+                }
+                var parameters = ReadIndexedList(extent, ref cursor, width, (presence & 2) != 0);
+                _ = ReadIndexedList(extent, ref cursor, width, (presence & 4) != 0);
+                _ = ReadIndexedList(extent, ref cursor, width, (presence & 8) != 0);
+                if ((presence & 16) != 0)
+                {
+                    var count = ReadInt(extent, ref cursor, width);
+                    cursor += count * 2 * width;
+                }
+                var countOperations = ReadInt(extent, ref cursor, width);
+                var operationBytes = extent[cursor..terminators[b]];
+                // Reuse scalar opcode/effect auditing with earlier SSA IDs as inputs.
+                // The indexed audit has already established their real dominance and types.
+                var synthetic = new List<byte> { (byte)(0x04 | WidthCode(
+                            Width((ulong)Math.Max(starts[b + 1], typeCount)))) };
+                var localWidth = 1 << (synthetic[0] & 3);
+                Write(synthetic, (ulong)typeCount, localWidth);
+                foreach (var typeRow in typeMap)
+                {
+                    Write(synthetic, (ulong)typeRow, 4);
+                }
+                Write(synthetic, (ulong)countOperations, localWidth);
+                foreach (var item in operationBytes)
+                {
+                    synthetic.Add(item);
+                }
+                synthetic.Add(0x83);
+                synthetic.Add(0);
+                var variables = ImmutableArray.CreateBuilder<BoundVariable>();
+                for (var value = 0; value < starts[b] + parameters.Length; value++)
+                {
+                    variables.Add(new BoundVariable($"value{value + 1}", valueTypes[value], false, default));
+                }
+                var statements = DecodeBody(synthetic.ToArray(), variables.Count,
+                    variables, noThrow, types);
+                var operations = ImmutableArray.CreateBuilder<BoundLocal>(countOperations);
+                foreach (var statement in statements)
+                {
+                    if (statement is BoundLocal local)
+                    {
+                        if (valueTypes[local.Variable] != local.Initializer.Type)
+                        {
+                            throw Invalid("Indexed scalar operation result type mismatch.");
+                        }
+                        operations.Add(local);
+                    }
+                }
+                if (operations.Count != countOperations)
+                {
+                    throw Invalid("Indexed scalar operation count mismatch.");
+                }
+                cursor = terminators[b];
+                var opcode = ReadByte(extent, ref cursor);
+                var referenceWidth = 1;
+                var countWidth = 1;
+                if (opcode == 0xF0)
+                {
+                    var layout = ReadByte(extent, ref cursor);
+                    referenceWidth = 1 << (layout & 3);
+                    countWidth = 1 << ((layout >> 2) & 3);
+                    opcode = ReadByte(extent, ref cursor);
+                }
+                var condition = opcode == 0x81 ? ReadInt(extent, ref cursor, referenceWidth) : 0;
+                var maximumReference = condition;
+                var maximumCount = 0;
+                TrRmScalarEdge? whenTrue = null;
+                TrRmScalarEdge? whenFalse = null;
+                var returned = 0;
+                if (opcode is 0x80 or 0x81)
+                {
+                    whenTrue = ReadIndexedEdge(extent, ref cursor, referenceWidth,
+                        countWidth, ref maximumReference, ref maximumCount);
+                    if (opcode == 0x81)
+                    {
+                        whenFalse = ReadIndexedEdge(extent, ref cursor, referenceWidth,
+                            countWidth, ref maximumReference, ref maximumCount);
+                    }
+                }
+                else if (opcode == 0x83)
+                {
+                    returned = ReadInt(extent, ref cursor, referenceWidth);
+                    maximumReference = returned;
+                }
+                else
+                {
+                    throw Invalid($"Indexed terminator 0x{opcode:X2} is not executable.");
+                }
+                if (cursor != extent.Length || referenceWidth != Width((ulong)maximumReference)
+                    || countWidth != Width((ulong)maximumCount))
+                {
+                    throw Invalid("Indexed scalar terminator has trailing bytes.");
+                }
+                result.Add(new TrRmScalarBlock(parameters, operations.MoveToImmutable(),
+                    condition, whenTrue, whenFalse, returned));
+            }
+            return TrRmScalarGraph.FromAuditedBody(result.MoveToImmutable(),
+                valueTypes.MoveToImmutable(), parameterCount, resultType, noThrow);
+        }
+
+        private static ImmutableArray<int> ReadIndexedList(ReadOnlySpan<byte> body,
+            ref int cursor, int width, bool present)
+        {
+            if (!present)
+            {
+                return [];
+            }
+            var count = ReadInt(body, ref cursor, width);
+            var result = ImmutableArray.CreateBuilder<int>(count);
+            for (var index = 0; index < count; index++)
+            {
+                result.Add(ReadInt(body, ref cursor, width));
+            }
+            return result.MoveToImmutable();
+        }
+
+        private static TrRmScalarEdge ReadIndexedEdge(ReadOnlySpan<byte> body,
+            ref int cursor, int referenceWidth, int countWidth,
+            ref int maximumReference, ref int maximumCount)
+        {
+            var target = ReadInt(body, ref cursor, referenceWidth);
+            var count = ReadInt(body, ref cursor, countWidth);
+            maximumReference = Math.Max(maximumReference, target);
+            maximumCount = Math.Max(maximumCount, count);
+            var args = ImmutableArray.CreateBuilder<int>(count);
+            for (var index = 0; index < count; index++)
+            {
+                var argument = ReadInt(body, ref cursor, referenceWidth);
+                maximumReference = Math.Max(maximumReference, argument);
+                args.Add(argument);
+            }
+            return new TrRmScalarEdge(target, args.MoveToImmutable());
+        }
+
+        private IndexedBlock NewBlock(int region)
+        {
+            var block = new IndexedBlock(_blocks.Count, region);
+            _blocks.Add(block);
+            return block;
+        }
+
+        private int NewValue(PrimitiveType type)
+        {
+            if (_types.Count >= SemanticVerifier.MaximumVariables)
+            {
+                throw Unsupported("Native verification supports at most 256 materialized scalar values per method.");
+            }
+            _types.Add(type);
+            return _types.Count;
+        }
+
+        private BoundRead Read(int id)
+        {
+            if (id <= 0 || id > _types.Count)
+            {
+                throw Unsupported("Read of an uninitialized scalar local.");
+            }
+            return new BoundRead(id - 1, _types[id - 1], default);
+        }
+
+        private int Add(BoundExpression expression)
+        {
+            var result = NewValue(expression.Type);
+            (_current ?? throw Unsupported("An operation followed a terminal transfer."))
+                .Operations.Add((result, expression));
+            return result;
+        }
+
+        private int[] Parameters(IndexedBlock block, int[] values, PrimitiveType? result = null)
+        {
+            var selected = new int[values.Length];
+            if (result is PrimitiveType type)
+            {
+                block.Parameters.Add(NewValue(type));
+            }
+            for (var index = 0; index < values.Length; index++)
+            {
+                if (values[index] != 0)
+                {
+                    selected[index] = NewValue(_function.Variables[index].Type);
+                    block.Parameters.Add(selected[index]);
+                }
+            }
+            return selected;
+        }
+
+        private static int[] Arguments(int[] slots, int result = 0)
+            => result == 0 ? slots.Where(static value => value != 0).ToArray()
+                : [result, .. slots.Where(static value => value != 0)];
+
+        private void Jump(IndexedBlock target, int[] slots, int result = 0)
+        {
+            if (_current is null)
+            {
+                throw Unsupported("Unreachable source transfer cannot be represented in a compact Body.");
+            }
+            _current.True = new IndexedEdge(target, Arguments(slots, result));
+            _current = null;
+        }
+
+        private int Merge(int condition, Func<int> whenTrue, Func<int> whenFalse,
+            PrimitiveType? resultType)
+        {
+            var region = (_current ?? throw Unsupported("A merge followed a terminal transfer.")).Region;
+            var trueBlock = NewBlock(region);
+            var falseBlock = NewBlock(region);
+            _current.Condition = condition;
+            _current.True = new IndexedEdge(trueBlock, []);
+            _current.False = new IndexedEdge(falseBlock, []);
+            var before = (int[])_slots.Clone();
+
+            _current = trueBlock;
+            var trueResult = whenTrue();
+            var trueEnd = _current;
+            var trueSlots = (int[])_slots.Clone();
+
+            _current = falseBlock;
+            _slots = (int[])before.Clone();
+            var falseResult = whenFalse();
+            var falseEnd = _current;
+            var falseSlots = (int[])_slots.Clone();
+            if (resultType is not null && (trueEnd is null || falseEnd is null))
+            {
+                throw Unsupported("A value-producing scalar arm must reach its merge.");
+            }
+            if (trueEnd is null && falseEnd is null)
+            {
+                return 0;
+            }
+            for (var index = 0; index < before.Length; index++)
+            {
+                if (before[index] == 0 && (trueSlots[index] != 0 || falseSlots[index] != 0)
+                    || trueEnd is not null && falseEnd is not null
+                        && (trueSlots[index] == 0) != (falseSlots[index] == 0))
+                {
+                    throw Unsupported("Scalar merge cannot introduce an uninitialized local.");
+                }
+            }
+
+            var join = NewBlock(region);
+            _slots = Parameters(join, before, resultType);
+            if (trueEnd is not null)
+            {
+                trueEnd.True = new IndexedEdge(join, Arguments(trueSlots, trueResult));
+            }
+            if (falseEnd is not null)
+            {
+                falseEnd.True = new IndexedEdge(join, Arguments(falseSlots, falseResult));
+            }
+            _current = join;
+            return resultType is null ? 0 : join.Parameters[0];
+        }
+
+        private int Expression(BoundExpression expression)
+        {
+            switch (expression)
+            {
+                case BoundRead read:
+                    if (read.Variable < 0 || read.Variable >= _slots.Length)
+                    {
+                        throw Unsupported("Invalid scalar local.");
+                    }
+                    return _slots[read.Variable] != 0 ? _slots[read.Variable]
+                        : throw Unsupported("Read of an uninitialized scalar local.");
+                case BoundConstant constant:
+                    return Add(constant);
+                case BoundUnary unary:
+                    return Add(new BoundUnary(unary.Operator, Read(Expression(unary.Operand)),
+                        unary.Type, default));
+                case BoundCast cast:
+                    return Add(new BoundCast(Read(Expression(cast.Operand)), cast.Type, default));
+                case BoundBinary binary when binary.Operator is TokenKind.AmpersandAmpersand
+                    or TokenKind.PipePipe:
+                    var left = Expression(binary.Left);
+                    return binary.Operator == TokenKind.AmpersandAmpersand
+                        ? Merge(left, () => Expression(binary.Right), () => left, PrimitiveType.Bool)
+                        : Merge(left, () => left, () => Expression(binary.Right), PrimitiveType.Bool);
+                case BoundBinary binary:
+                    var lhs = Expression(binary.Left);
+                    var rhs = Expression(binary.Right);
+                    return Add(new BoundBinary(binary.Operator, Read(lhs), Read(rhs), binary.Type, default));
+                case BoundConditional conditional:
+                    var condition = Expression(conditional.Condition);
+                    return Merge(condition, () => Expression(conditional.WhenTrue),
+                        () => Expression(conditional.WhenFalse), conditional.Type);
+                default:
+                    throw Unsupported($"Expression {expression.GetType().Name} has no executable indexed scalar encoding.");
+            }
+        }
+
+        private void Statement(BoundStatement statement)
+        {
+            if (_current is null)
+            {
+                if (_function.ReturnType == PrimitiveType.Void
+                    && statement is BoundReturn { Value: null })
+                {
+                    return;
+                }
+                throw Unsupported("Statements after a transfer cannot be represented.");
+            }
+            switch (statement)
+            {
+                case BoundBlock block when block.RetiredManagedLocals.IsEmpty:
+                    foreach (var child in block.Statements)
+                    {
+                        Statement(child);
+                    }
+                    break;
+                case BoundLocal local:
+                    if (_branchDepth != 0 || _loops.Count != 0)
+                    {
+                        throw Unsupported("Local declarations inside branches or loops are not implemented in indexed scalar emission.");
+                    }
+                    var initialValue = Expression(local.Initializer);
+                    _slots[local.Variable] = initialValue;
+                    break;
+                case BoundAssignment assignment:
+                    var assignedValue = Expression(assignment.Value);
+                    _slots[assignment.Variable] = assignedValue;
+                    break;
+                case BoundExpressionStatement discarded:
+                    _ = Expression(discarded.Expression);
+                    break;
+                case BoundReturn result:
+                    var returned = result.Value is null ? 0 : Expression(result.Value);
+                    (_current ?? throw Unsupported("Return expression did not reach its continuation.")).ReturnValue = returned;
+                    _current = null;
+                    break;
+                case BoundIf conditional:
+                    var condition = Expression(conditional.Condition);
+                    _branchDepth++;
+                    _ = Merge(condition, () => { Statement(conditional.Then); return 0; },
+                        () => { if (conditional.Else is not null) { Statement(conditional.Else); } return 0; },
+                        null);
+                    _branchDepth--;
+                    break;
+                case BoundWhile loop when !loop.IsPostTested && loop.Iterator is null:
+                    var parent = _current.Region;
+                    var header = NewBlock(_regions.Count + 1);
+                    var loopRegion = new IndexedRegion(_regions.Count + 1, parent, header);
+                    _regions.Add(loopRegion);
+                    var entrySlots = (int[])_slots.Clone();
+                    var headerSlots = Parameters(header, entrySlots);
+                    Jump(header, entrySlots);
+                    _current = header;
+                    _slots = headerSlots;
+                    var test = Expression(loop.Condition);
+                    var testBlock = _current ?? throw Unsupported("Loop condition did not produce a branch.");
+                    var testSlots = (int[])_slots.Clone();
+                    var body = NewBlock(loopRegion.Id);
+                    testBlock.Condition = test;
+                    testBlock.True = new IndexedEdge(body, []);
+                    _current = body;
+                    _loops.Push(loopRegion);
+                    Statement(loop.Body);
+                    if (_current is not null)
+                    {
+                        Jump(header, _slots);
+                    }
+                    _loops.Pop();
+                    var exit = NewBlock(parent);
+                    loopRegion.Exit = exit;
+                    var exitSlots = Parameters(exit, entrySlots);
+                    testBlock.False = new IndexedEdge(exit, Arguments(testSlots));
+                    foreach (var block in _blocks)
+                    {
+                        if (block.True is { Target: var target } && target == header
+                            && block != header && block.True.Arguments.Length != header.Parameters.Count)
+                        {
+                            throw Unsupported("Loop-carried scalar inventory changed across an edge.");
+                        }
+                    }
+                    _current = exit;
+                    _slots = exitSlots;
+                    break;
+                case BoundBreak { TargetDepth: 1 } when _loops.Count > 0:
+                    var breakRegion = _loops.Peek();
+                    // The designated exit is allocated after the body, but all break edges must
+                    // carry their snapshots to that same exit.
+                    var deferred = new IndexedBlock(-1, breakRegion.Parent);
+                    Jump(deferred, _slots);
+                    _pendingBreaks.Add((breakRegion, deferred));
+                    break;
+                case BoundContinue { TargetDepth: 1 } when _loops.Count > 0:
+                    Jump(_loops.Peek().Header, _slots);
+                    break;
+                default:
+                    throw Unsupported($"Statement {statement.GetType().Name} has no executable indexed scalar encoding.");
+            }
+        }
+
+        private readonly List<(IndexedRegion Region, IndexedBlock Placeholder)> _pendingBreaks = [];
+
+        internal byte[] Encode()
+        {
+            Statement(_function.Body);
+            if (_current is not null)
+            {
+                throw Unsupported("Indexed scalar Body requires a terminal return.");
+            }
+            foreach (var (region, placeholder) in _pendingBreaks)
+            {
+                foreach (var block in _blocks)
+                {
+                    if (block.True?.Target == placeholder)
+                    {
+                        block.True.Target = region.Exit ?? throw Unsupported("Loop exit is missing.");
+                    }
+                }
+            }
+            foreach (var region in _regions)
+            {
+                if (!_blocks.Any(block => block.Region == region.Id && block != region.Header
+                    && block.True?.Target == region.Header))
+                {
+                    throw Unsupported("An indexed loop requires a reachable header backedge.");
+                }
+            }
+            return EncodeIndexed(_function, _blocks, _regions, _types);
+        }
+    }
+}

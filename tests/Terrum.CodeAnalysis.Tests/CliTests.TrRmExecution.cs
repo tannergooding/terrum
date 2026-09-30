@@ -175,15 +175,17 @@ public sealed partial class CliTests
             .GetProperty("message").GetString());
     }
 
-    [Fact]
-    public async Task TrRmSourceRejectionDoesNotOverwritePreviousArtifactAsync()
+    [Theory]
+    [InlineData("int32 Main() { mut int32 x = 42; return x << 1; }")]
+    [InlineData("int32 Main() { mut int32 x = 42; if (x == 0) { x = x << 1; } return x; }")]
+    public async Task TrRmSourceRejectionDoesNotOverwritePreviousArtifactAsync(string source)
     {
         var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-reject-{Guid.NewGuid():N}.trrm");
         try
         {
             await File.WriteAllBytesAsync(path, [0xAA, 0x55]);
             var (exit, stdout, stderr) = await RunAsync(
-                Encoding.UTF8.GetBytes("int32 Main() { return true ? 42 : 0; }"),
+                Encoding.UTF8.GetBytes(source),
                 "compile-trrm", "-", "--identity", "reject", "-o", path,
                 "--runtime", "fail-fast", "--json");
             Assert.True(exit == 1, $"{stdout}{Environment.NewLine}{stderr}");

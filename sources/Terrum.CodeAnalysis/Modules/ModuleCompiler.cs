@@ -457,6 +457,10 @@ public static partial class ModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(exports);
         ArgumentNullException.ThrowIfNull(program);
+        if (program.Functions.Any(static function => function.IndexedBody is not null))
+        {
+            throw new ModuleFormatException("Indexed executable Bodies cannot be serialized as structured module IR.");
+        }
         if (program.EntryPoint == -1)
         {
             SemanticVerifier.VerifyLibrary(program);
@@ -565,6 +569,11 @@ public static partial class ModuleCompiler
     /// <summary>Stores consumer bound bodies and imported declaration contracts, but never producer bodies.</summary>
     public static byte[] CreateConsumer(BoundProgram program, byte[] referenceProducer)
     {
+        ArgumentNullException.ThrowIfNull(program);
+        if (program.Functions.Any(static function => function.IndexedBody is not null))
+        {
+            throw new ModuleFormatException("Indexed executable Bodies cannot be serialized as structured module IR.");
+        }
         ArgumentNullException.ThrowIfNull(referenceProducer);
         SemanticVerifier.VerifyReferences(program);
         var hasPrivateManagedState = HasPrivateManagedState(program);
@@ -1557,6 +1566,10 @@ public static partial class ModuleCompiler
 
     private static byte[] Write(Module module, BoundProgram program)
     {
+        if (program.Functions.Any(static function => function.IndexedBody is not null))
+        {
+            throw new ModuleFormatException("Indexed executable Bodies cannot be serialized as structured module IR.");
+        }
         if (module.Consumer && !HasPrivateManagedState(module))
         {
             RejectManagedNodes(program);

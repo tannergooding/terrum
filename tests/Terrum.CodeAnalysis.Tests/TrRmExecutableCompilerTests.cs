@@ -67,13 +67,10 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Theory]
-    [InlineData("int32 Main() { if (true) { return 1; } return 0; }")]
-    [InlineData("int32 Main() { return true ? 42 : 0; }")]
     [InlineData("int32 Main() { mut int32 x = 1; return x << 2; }")]
     [InlineData("int32 Main() { return Helper(); } int32 Helper() { return 42; }")]
     [InlineData("int32 Main() { mut int32 x = 1; x += 41; return x; }")]
     [InlineData("int32 Main() { mut int32 x = int32.MaxValue; return x >>> 1; }")]
-    [InlineData("int32 Main() { bool x = true; bool y = x && false; return 0; }")]
     public void UnsupportedConstructsFailExplicitly(string source)
         => Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.Emit(Compile(source), "unsupported"));
