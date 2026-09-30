@@ -271,6 +271,22 @@ internal static partial class Program
                         {
                             projectionVersion = 49;
                         }
+                        for (var index = 0; index < frontend.Statements.Length; index++)
+                        {
+                            if (frontend.Statements[index].Kind != 1)
+                            {
+                                continue;
+                            }
+                            for (var header = 0; header < index; header++)
+                            {
+                                if (frontend.Statements[header].Kind is 3 or 4 or 5
+                                    && frontend.Statements[header].Slot > index)
+                                {
+                                    projectionVersion = 50;
+                                    break;
+                                }
+                            }
+                        }
                         writer.WriteNumber("projectionVersion", projectionVersion);
                         writer.WriteBoolean("expressionBody", frontend.IsExpressionBody);
                         writer.WriteNumber("conditionRoot", frontend.ConditionRoot);

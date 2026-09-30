@@ -157,7 +157,7 @@ public sealed partial class CliTests
 
     [Theory]
     [InlineData("int32 Main() { if (1) { } return 42; }")]
-    [InlineData("int32 Main() { if (true) { mut int32 x = 1; } return 42; }")]
+    [InlineData("int32 Main() { if (true) { mut int32 x = 1; mut int32 x = 2; } return 42; }")]
     [InlineData("int32 Main() { if (true) { return missing; } else { } return 42; }")]
     [InlineData("int32 Main() { if (true) { break; } return 42; }")]
     [InlineData("int32 Main() { if (true) { continue; } return 42; }")]

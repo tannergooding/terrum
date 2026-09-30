@@ -119,6 +119,7 @@ mut class ScalarFrontendState
     private mut int32 _parameterCount;
     private mut bool _isPublic;
     private mut int32 _localCount;
+    private mut int32 _activeLocals;
     private mut int32 _statementCount;
     private mut int32 _structuredReturnType;
     private mut int32 _structuredReturnCount;
@@ -139,6 +140,7 @@ mut class ScalarFrontendState
         _parameterCount = 0;
         _isPublic = false;
         _localCount = 0;
+        _activeLocals = 0;
         _statementCount = 0;
         _structuredReturnType = 0;
         _structuredReturnCount = 0;
@@ -278,6 +280,7 @@ mut class ScalarFrontendState
         }
         for (mut int32 local = 0; local < _localCount; local = local + 1)
         {
+            if (!IsActiveLocal(local)) { continue; }
             int32 offset = 300 + local * 4;
             require SourceRange.TryCreate(Host.Frontend[offset + 2],
                 Host.Frontend[offset + 3], out var name);
@@ -291,6 +294,16 @@ mut class ScalarFrontendState
         }
         FailAt(3, token.Range);
         return false;
+    }
+
+    private bool IsActiveLocal(int32 local)
+    {
+        mut int32 bit = 1;
+        for (mut int32 index = 0; index < local; index = index + 1)
+        {
+            bit = bit * 2;
+        }
+        return (_activeLocals & bit) != 0;
     }
 
     private int32 ParameterLiteralOperation(int32 kind, int32 parameter,
@@ -1606,6 +1619,7 @@ mut class ScalarFrontendState
         }
         for (mut int32 local = 0; local < _localCount; local = local + 1)
         {
+            if (!IsActiveLocal(local)) { continue; }
             int32 offset = 300 + local * 4;
             require SourceRange.TryCreate(Host.Frontend[offset + 2],
                 Host.Frontend[offset + 3], out var oldName);
@@ -1643,6 +1657,12 @@ mut class ScalarFrontendState
         Host.Frontend[offset + 2] = name.Range.Start;
         Host.Frontend[offset + 3] = name.Range.Length;
         _localCount = index + 1;
+        mut int32 bit = 1;
+        for (mut int32 local = 0; local < index; local = local + 1)
+        {
+            bit = bit * 2;
+        }
+        _activeLocals = _activeLocals | bit;
         Host.Frontend[299] = _localCount;
         return AddTreeStatement(1, _parameterCount + index + 1, initializer,
             first.Range.Start, endDeclaration.Range.End);
@@ -1688,9 +1708,9 @@ mut class ScalarFrontendState
                 }
                 _structuredReturnCount = _structuredReturnCount + 1;
             }
-            else if (depth == 0 && (next.Kind == 12 || next.Kind == 13
+            else if (next.Kind == 12 || next.Kind == 13
                 || next.Kind == 2 && _tokens.TryGet(_at + 1, out var following)
-                    && following.Kind == 2))
+                    && following.Kind == 2)
             {
                 if (!ParseTreeStatement()) { return false; }
             }
@@ -1911,12 +1931,14 @@ mut class ScalarFrontendState
             return false;
         }
         int32 header = _statementCount;
+        int32 enclosingLocals = _activeLocals;
         if (!AddTreeStatement(4, 0, condition, keyword.Range.Start, body.Range.End)
             || !ParseTreeStructuredBody(depth + 1, nearestLoop)
             || !Take(49, out var endTrue))
         {
             return false;
         }
+        _activeLocals = enclosingLocals;
         Host.Frontend[332 + header * 5 + 1] = _statementCount;
         mut int32 end = endTrue.Range.End;
         require _tokens.TryGet(_at, out var next);
@@ -1935,6 +1957,7 @@ mut class ScalarFrontendState
             {
                 return false;
             }
+            _activeLocals = enclosingLocals;
             Host.Frontend[332 + marker * 5 + 1] = _statementCount;
             Host.Frontend[332 + marker * 5 + 4] = endFalse.Range.End - otherwise.Range.Start;
             end = endFalse.Range.End;
@@ -1964,6 +1987,7 @@ mut class ScalarFrontendState
             return false;
         }
         int32 header = _statementCount;
+        int32 enclosingLocals = _activeLocals;
         if (!AddTreeStatement(3, 0, condition, keyword.Range.Start, body.Range.End))
         {
             return false;
@@ -1972,6 +1996,7 @@ mut class ScalarFrontendState
         {
             return false;
         }
+        _activeLocals = enclosingLocals;
         Host.Frontend[332 + header * 5 + 1] = _statementCount;
         Host.Frontend[332 + header * 5 + 4] = end.Range.End - keyword.Range.Start;
         return true;
@@ -2114,6 +2139,7 @@ mut class ScalarFrontendState
             }
             for (mut int32 local = 0; local < _localCount; local = local + 1)
             {
+                if (!IsActiveLocal(local)) { continue; }
                 int32 offset = 300 + local * 4;
                 require SourceRange.TryCreate(Host.Frontend[offset + 2],
                     Host.Frontend[offset + 3], out var name);

@@ -35,6 +35,9 @@ namespace Terrum.CodeAnalysis;
 // low=1 prefix or 0 postfix), and compound statements (kind 9, root
 // operation 91..101), plus update expression statements (kind 10).
 // The existing node/statement and source-order capacities remain unchanged.
+// Version 50 selects declarations inside existing braced branches/loops.
+// Slots remain monotonic across scopes; the eight-local limit counts all
+// declaration identities, not only simultaneously visible names.
 void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expression)
 {
     Host.Frontend[offset] = expression.Type;
@@ -152,6 +155,20 @@ bool TryPublishScalarFrontend()
             {
                 Host.Frontend[0] = 49;
                 break;
+            }
+        }
+        for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
+        {
+            if (Host.Frontend[332 + statement * 5] != 1) { continue; }
+            for (mut int32 header = 0; header < statement; header = header + 1)
+            {
+                int32 kind = Host.Frontend[332 + header * 5];
+                if ((kind == 3 || kind == 4 || kind == 5)
+                    && Host.Frontend[332 + header * 5 + 1] > statement)
+                {
+                    Host.Frontend[0] = 50;
+                    break;
+                }
             }
         }
         Host.Frontend[15] = 0;
