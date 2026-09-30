@@ -13,9 +13,9 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class StaticProtocolCompositionTests
 {
     private const string Protocols = """
-        interface Addition<A, B, C> { static abstract C operator +(A left, B right); }
-        interface Multiplication<A, B, C> { static abstract C operator *(A left, B right); }
-        interface OtherAddition<A, B, C> { static abstract C operator +(A left, B right); }
+        interface Addition<A, B, C> { static C operator +(A left, B right); }
+        interface Multiplication<A, B, C> { static C operator *(A left, B right); }
+        interface OtherAddition<A, B, C> { static C operator +(A left, B right); }
         """;
 
     private const string Value = """
@@ -124,7 +124,7 @@ public sealed class StaticProtocolCompositionTests
     {
         var source = """
             interface Addition<A, B, C> {
-                [NoThrow] static abstract C operator +(A left, B right);
+                [NoThrow] static C operator +(A left, B right);
             }
             [NoThrow] T Compose<T>(T value) where T : Addition<T, T, T>, [Copy] {
                 return Identity<T>(value);
@@ -509,7 +509,7 @@ public sealed class StaticProtocolCompositionTests
         var selected = add
             ? "created.Get() + created.Get()" : "created.Get()";
         var compilation = Compilation.Create(SyntaxTree.Parse($$"""
-            interface Addition<A, B, C> { static abstract C operator +(A left, B right); }
+            interface Addition<A, B, C> { static C operator +(A left, B right); }
             struct Value : Addition<Value, Value, Value> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }

@@ -1,6 +1,6 @@
 // DESIGN ONLY: target API contracts with selected implementations. Primitive representation omitted.
-// Bodyless interface members denote required witnesses in the proposed grammar;
-// the implemented bounded operator parser still requires `static abstract`.
+// Bodyless static interface operators denote required witnesses; only the
+// bounded compilation-local operator subset is currently executable.
 // The executable profile currently uses legacy bool/out publication; this
 // inventory shows its planned init ref<T> destination form. Call-site spelling
 // and coordinated migration are not yet implemented.

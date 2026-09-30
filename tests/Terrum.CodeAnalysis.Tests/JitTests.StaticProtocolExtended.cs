@@ -38,7 +38,7 @@ public sealed partial class JitTests
     public async Task ExtendedStaticOperatorsSpecializeCopyStructsAsync(string op, int result, string operatorName)
     {
         var source = $$"""
-            interface Operation<A, B, C> { static abstract C operator {{op}}(A left, B right); }
+            interface Operation<A, B, C> { static C operator {{op}}(A left, B right); }
             struct Value : Operation<Value, Value, Value> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
@@ -73,7 +73,7 @@ public sealed partial class JitTests
     {
         var dividend = divisor == "-1" || op == "-" ? "-2147483648" : "40";
         var source = $$"""
-            interface Operation<A, B, C> { static abstract C operator {{op}}(A left, B right); }
+            interface Operation<A, B, C> { static C operator {{op}}(A left, B right); }
             struct Value : Operation<Value, Value, Value> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
@@ -101,7 +101,7 @@ public sealed partial class JitTests
     {
         const string Source = """
             interface Mask<A, B, C> {
-                [NoThrow] static abstract C operator &(A left, B right);
+                [NoThrow] static C operator &(A left, B right);
             }
             struct Value : Mask<Value, Value, Value> {
                 public int32 Number;

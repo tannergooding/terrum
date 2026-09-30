@@ -20,7 +20,7 @@ public sealed partial class GenericControlFlowModuleTests
     {
         const string Original = "public int32 LeafValue() { return 40; }";
         const string Replacement = """
-            interface Exclusive<A, B, C> { static abstract C operator ^(A left, B right); }
+            interface Exclusive<A, B, C> { static C operator ^(A left, B right); }
             struct Value : Exclusive<Value, Value, Value> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }

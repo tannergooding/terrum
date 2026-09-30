@@ -13,12 +13,12 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class StaticUnaryProtocolTests
 {
     internal const string Source = """
-        interface UnaryPlus<T, R> { [NoThrow] static abstract R operator +(T value); }
-        interface UnaryMinus<T, R> { [NoThrow] static abstract R operator -(T value); }
-        interface UnaryNot<T, R> { [NoThrow] static abstract R operator !(T value); }
-        interface UnaryComplement<T, R> { [NoThrow] static abstract R operator ~(T value); }
-        interface BinaryPlus<L, R, O> { [NoThrow] static abstract O operator +(L left, R right); }
-        interface BinaryMinus<L, R, O> { [NoThrow] static abstract O operator -(L left, R right); }
+        interface UnaryPlus<T, R> { [NoThrow] static R operator +(T value); }
+        interface UnaryMinus<T, R> { [NoThrow] static R operator -(T value); }
+        interface UnaryNot<T, R> { [NoThrow] static R operator !(T value); }
+        interface UnaryComplement<T, R> { [NoThrow] static R operator ~(T value); }
+        interface BinaryPlus<L, R, O> { [NoThrow] static O operator +(L left, R right); }
+        interface BinaryMinus<L, R, O> { [NoThrow] static O operator -(L left, R right); }
         struct Value : UnaryPlus<Value, Value>, UnaryMinus<Value, Value>,
             UnaryNot<Value, int32>, UnaryComplement<Value, bool>,
             BinaryPlus<Value, Value, Value>, BinaryMinus<Value, Value, Value> {
@@ -72,7 +72,7 @@ public sealed class StaticUnaryProtocolTests
     [Theory]
     [InlineData("operator !(Value value)", "operator !(Value first, Value second)", "TRM3007")]
     [InlineData("operator !(Value value)", "operator !(int32 value)", "TRM3007")]
-    [InlineData("static abstract R operator !(T value)", "static abstract R operator !(T first, T second)", "TRM3001")]
+    [InlineData("static R operator !(T value)", "static R operator !(T first, T second)", "TRM3001")]
     [InlineData("UnaryNot<Value, int32>", "UnaryNot<Value, bool>", "TRM3007")]
     [InlineData("UnaryNot<Value, int32>", "UnaryNot<Value, int32>, UnaryNot<Value, bool>", "TRM3007")]
     [InlineData("interface UnaryNot<T, R>", "interface UnaryNot<T, R, Extra>", "TRM3001")]
@@ -127,8 +127,8 @@ public sealed class StaticUnaryProtocolTests
             "public static int32 operator !(Value value)", StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(missing + "int32 Main() { return 42; }"));
         Assert.Contains(compilation.Diagnostics, item => item.Code == "TRM3007");
-        var nonNoThrow = Source.Replace("[NoThrow] static abstract R operator !(T value)",
-            "static abstract R operator !(T value)", StringComparison.Ordinal);
+        var nonNoThrow = Source.Replace("[NoThrow] static R operator !(T value)",
+            "static R operator !(T value)", StringComparison.Ordinal);
         nonNoThrow += "[NoThrow] int32 Check(Value value) { return Negate<Value, int32>(value); } int32 Main() { return 42; }";
         var checkedCompilation = Compilation.Create(SyntaxTree.Parse(nonNoThrow));
         Assert.Contains(checkedCompilation.Diagnostics, item => item.Code == "TRM3017");
@@ -188,11 +188,15 @@ public sealed class StaticUnaryProtocolTests
             TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
     }
 
-    [Fact]
-    public void FixedCopyStructResultUsesDistinctProofTypeAndInference()
+    [Theory]
+    [InlineData(false, NativeRuntimePolicy.FailFast)]
+    [InlineData(false, NativeRuntimePolicy.CheckedExceptions)]
+    [InlineData(true, NativeRuntimePolicy.FailFast)]
+    [InlineData(true, NativeRuntimePolicy.CheckedExceptions)]
+    public void FixedCopyStructResultUsesDistinctProofTypeAndInference(bool self, NativeRuntimePolicy policy)
     {
         var source = """
-            interface Wrap<T, R> { static abstract R operator ~(T value); }
+            interface Wrap<T, R> { static R operator ~(T value); }
             struct Result { public int32 Number; public Result(int32 n) { Number = n; } }
             struct Input : Wrap<Input, Result> {
                 public int32 Number;
@@ -212,11 +216,19 @@ public sealed class StaticUnaryProtocolTests
                 return Fixed(new Input(result.Number)).Number;
             }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+        if (self)
+        {
+            source = source.Replace("interface Wrap<T, R>", "interface Wrap<this T, R>", StringComparison.Ordinal)
+                .Replace("Wrap<Input, Result>", "Wrap<Result>", StringComparison.Ordinal)
+                .Replace("Wrap<T, R>", "Wrap<R>", StringComparison.Ordinal)
+                .Replace("Wrap<T, Result>", "Wrap<Result>", StringComparison.Ordinal);
+        }
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.Contains(Assert.IsType<BoundProgram>(compilation.Program).Functions,
             function => function.Name == "Apply<Input, Result>");
         Assert.Contains(Assert.IsType<BoundProgram>(compilation.Program).Functions,
             function => function.Name == "Fixed<Input>");
+        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program), policy));
     }
 }

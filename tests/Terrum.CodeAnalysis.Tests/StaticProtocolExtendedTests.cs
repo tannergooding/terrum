@@ -11,8 +11,8 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class StaticProtocolExtendedTests
 {
     private const string Source = """
-        interface BitMask<A, B, C> { static abstract C operator &(A left, B right); }
-        interface OtherBitMask<A, B, C> { static abstract C operator &(A left, B right); }
+        interface BitMask<A, B, C> { static C operator &(A left, B right); }
+        interface OtherBitMask<A, B, C> { static C operator &(A left, B right); }
         struct Value : BitMask<Value, Value, Value> {
             public int32 Number;
             public Value(int32 number) { Number = number; }
@@ -35,8 +35,8 @@ public sealed class StaticProtocolExtendedTests
     [InlineData("struct Value : BitMask<Value, Value, Value>", "struct Value : BitMask<Value, Other, Value>", "TRM3007")]
     [InlineData("public static Value operator &(Value left, Value right)", "public static Value operator &(Value left, Other right)", "TRM3007")]
     [InlineData("public static Value operator &(Value left, Value right)", "private static Value operator &(Value left, Value right)", "TRM3007")]
-    [InlineData("static abstract C operator &(A left, B right)", "static abstract B operator &(A left, B right)", "TRM3001")]
-    [InlineData("static abstract C operator &(A left, B right)", "[NoThrow] static abstract C operator &(A left, B right)", "TRM3007")]
+    [InlineData("static C operator &(A left, B right)", "static B operator &(A left, B right)", "TRM3001")]
+    [InlineData("static C operator &(A left, B right)", "[NoThrow] static C operator &(A left, B right)", "TRM3007")]
     [InlineData("where T : BitMask<T, T, T>, [Copy]", "where T : [Copy]", "TRM3007")]
     [InlineData("where T : BitMask<T, T, T>, [Copy]", "where T : BitMask<T, T, T>, OtherBitMask<T, T, T>, [Copy]", "TRM3007")]
     [InlineData("return left & right;", "return left ^ right;", "TRM3007")]
@@ -103,7 +103,7 @@ public sealed class StaticProtocolExtendedTests
     {
         var source = """
             interface Divide<A, B, C> {
-                [NoThrow] static abstract C operator /(A left, B right);
+                [NoThrow] static C operator /(A left, B right);
             }
             struct Value : Divide<Value, Value, Value> {
                 public int32 Number;

@@ -1,25 +1,25 @@
 interface Equality<TSelf, TOther, TResult> {
-    [NoThrow] static abstract TResult operator ==(TSelf left, TOther right);
+    [NoThrow] static TResult operator ==(TSelf left, TOther right);
 }
 
 interface Inequality<TSelf, TOther, TResult> {
-    [NoThrow] static abstract TResult operator !=(TSelf left, TOther right);
+    [NoThrow] static TResult operator !=(TSelf left, TOther right);
 }
 
 interface LessThan<TSelf, TOther, TResult> {
-    [NoThrow] static abstract TResult operator <(TSelf left, TOther right);
+    [NoThrow] static TResult operator <(TSelf left, TOther right);
 }
 
 interface LessThanOrEqual<TSelf, TOther, TResult> {
-    [NoThrow] static abstract TResult operator <=(TSelf left, TOther right);
+    [NoThrow] static TResult operator <=(TSelf left, TOther right);
 }
 
 interface GreaterThan<TSelf, TOther, TResult> {
-    [NoThrow] static abstract TResult operator >(TSelf left, TOther right);
+    [NoThrow] static TResult operator >(TSelf left, TOther right);
 }
 
 interface GreaterThanOrEqual<TSelf, TOther, TResult> {
-    [NoThrow] static abstract TResult operator >=(TSelf left, TOther right);
+    [NoThrow] static TResult operator >=(TSelf left, TOther right);
 }
 
 struct Rank : Equality<Rank, Rank, bool>, Inequality<Rank, Rank, bool>,

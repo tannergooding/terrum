@@ -185,7 +185,7 @@ public sealed partial class JitTests
     public async Task ConstrainedGenericAccumulationPublishesOnlyOnAcceptedCountsAsync()
     {
         const string Source = """
-            interface Addition<A, B, C> { static abstract C operator +(A left, B right); }
+            interface Addition<A, B, C> { static C operator +(A left, B right); }
             struct Value : Addition<Value, Value, Value> {
                 public int64 Number;
                 public Value(int64 number) { Number = number; }

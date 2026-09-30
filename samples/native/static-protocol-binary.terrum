@@ -1,25 +1,25 @@
 interface Subtraction<TSelf, TOther, TResult> {
-    static abstract TResult operator -(TSelf left, TOther right);
+    static TResult operator -(TSelf left, TOther right);
 }
 
 interface Division<TSelf, TOther, TResult> {
-    static abstract TResult operator /(TSelf left, TOther right);
+    static TResult operator /(TSelf left, TOther right);
 }
 
 interface Remainder<TSelf, TOther, TResult> {
-    static abstract TResult operator %(TSelf left, TOther right);
+    static TResult operator %(TSelf left, TOther right);
 }
 
 interface BitwiseAnd<TSelf, TOther, TResult> {
-    static abstract TResult operator &(TSelf left, TOther right);
+    static TResult operator &(TSelf left, TOther right);
 }
 
 interface BitwiseOr<TSelf, TOther, TResult> {
-    static abstract TResult operator |(TSelf left, TOther right);
+    static TResult operator |(TSelf left, TOther right);
 }
 
 interface ExclusiveOr<TSelf, TOther, TResult> {
-    static abstract TResult operator ^(TSelf left, TOther right);
+    static TResult operator ^(TSelf left, TOther right);
 }
 
 struct Int32Value : Subtraction<Int32Value, Int32Value, Int32Value>,

@@ -13,7 +13,7 @@ public sealed class ExpressionBodyTests
 {
     internal const string Source = """
         interface Addition<TLeft, TRight, TResult> {
-            static abstract TResult operator +(TLeft left, TRight right);
+            static TResult operator +(TLeft left, TRight right);
         }
         struct Meter : Addition<Meter, Meter, Meter> {
             public int32 Value;

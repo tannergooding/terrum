@@ -171,7 +171,7 @@ public sealed class LexerTests
     [InlineData("struct", TokenKind.StructKeyword)]
     [InlineData("class", TokenKind.ClassKeyword)]
     [InlineData("interface", TokenKind.InterfaceKeyword)]
-    [InlineData("abstract", TokenKind.AbstractKeyword)]
+    [InlineData("abstract", TokenKind.Identifier)]
     [InlineData("operator", TokenKind.OperatorKeyword)]
     [InlineData("where", TokenKind.WhereKeyword)]
     [InlineData("enum", TokenKind.EnumKeyword)]

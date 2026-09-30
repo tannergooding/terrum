@@ -71,7 +71,7 @@ public sealed partial class JitTests
     }
 
     private const string CompositionValue = """
-        interface Addition<A, B, C> { static abstract C operator +(A left, B right); }
+        interface Addition<A, B, C> { static C operator +(A left, B right); }
         struct Value : Addition<Value, Value, Value> {
             public int64 First;
             public int64 Second;

@@ -102,8 +102,8 @@ public sealed partial class GenericControlFlowModuleTests
         NativeRuntimePolicy policy)
     {
         const string Replacement = """
-            interface Addition<A, B, C> { static abstract C operator +(A left, B right); }
-            interface Multiplication<A, B, C> { static abstract C operator *(A left, B right); }
+            interface Addition<A, B, C> { static C operator +(A left, B right); }
+            interface Multiplication<A, B, C> { static C operator *(A left, B right); }
             struct Left : Addition<Left, Left, Left> {
                 public int32 Number;
                 public Left(int32 number) { Number = number; }
@@ -239,7 +239,7 @@ public sealed partial class GenericControlFlowModuleTests
     public void EqualConcreteArgumentsCannotRescueCrossParameterOperationsOrCopies(string body)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            interface Addition<A, B, C> { static abstract C operator +(A left, B right); }
+            interface Addition<A, B, C> { static C operator +(A left, B right); }
             struct Value : Addition<Value, Value, Value> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
@@ -259,7 +259,7 @@ public sealed partial class GenericControlFlowModuleTests
     public void EachConcretePositionRequiresItsOwnNominalOperatorWitness(string right)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            interface Multiplication<A, B, C> { static abstract C operator *(A left, B right); }
+            interface Multiplication<A, B, C> { static C operator *(A left, B right); }
             struct Plain {
                 public int32 Number;
                 public Plain(int32 number) { Number = number; }
@@ -350,7 +350,7 @@ public sealed partial class GenericControlFlowModuleTests
     public void CalleeWitnessMustComeFromTheMatchingCallerFormal()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            interface Addition<A, B, C> { static abstract C operator +(A left, B right); }
+            interface Addition<A, B, C> { static C operator +(A left, B right); }
             struct Value : Addition<Value, Value, Value> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }

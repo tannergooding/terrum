@@ -39,7 +39,7 @@ public sealed partial class JitTests
     public async Task EveryUnaryOperatorUsesItsOwnNominalWitnessAsync(string operation)
     {
         var source = $$"""
-            interface Operation<T, R> { static abstract R operator {{operation}}(T value); }
+            interface Operation<T, R> { static R operator {{operation}}(T value); }
             struct Value : Operation<Value, int32> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
@@ -60,7 +60,7 @@ public sealed partial class JitTests
     public Task UnaryWitnessPreservesCatchableFailureAsync()
     {
         const string Source = """
-            interface Negate<T, R> { static abstract R operator -(T value); }
+            interface Negate<T, R> { static R operator -(T value); }
             struct Value : Negate<Value, int32> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
@@ -86,7 +86,7 @@ public sealed partial class JitTests
     public async Task UnaryOperandIsEvaluatedExactlyOnceAsync(bool checkedFailures)
     {
         const string Source = """
-            interface Read<T, R> { static abstract R operator !(T value); }
+            interface Read<T, R> { static R operator !(T value); }
             struct Value : Read<Value, int32> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }

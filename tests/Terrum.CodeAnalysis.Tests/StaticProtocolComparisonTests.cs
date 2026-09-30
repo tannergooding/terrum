@@ -12,8 +12,8 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class StaticProtocolComparisonTests
 {
     private const string LessSource = """
-        interface Less<A, B, C> { static abstract C operator <(A left, B right); }
-        interface OtherLess<A, B, C> { static abstract C operator <(A left, B right); }
+        interface Less<A, B, C> { static C operator <(A left, B right); }
+        interface OtherLess<A, B, C> { static C operator <(A left, B right); }
         struct Value : Less<Value, Value, bool> {
             public int32 Number;
             public Value(int32 number) { Number = number; }
@@ -44,7 +44,7 @@ public sealed class StaticProtocolComparisonTests
     public void ComparisonOperatorsHaveBoolResultsAndIndependentNames(string operation, string name)
     {
         var source = $$"""
-            interface Comparison<A, B, C> { static abstract C operator {{operation}}(A left, B right); }
+            interface Comparison<A, B, C> { static C operator {{operation}}(A left, B right); }
             struct Value : Comparison<Value, Value, bool> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
@@ -82,8 +82,8 @@ public sealed class StaticProtocolComparisonTests
         "public static int32 operator <(Value left, Value right)", "TRM3007")]
     [InlineData("public static bool operator <(Value left, Value right)",
         "public static bool operator <(Value left, Other right)", "TRM3007")]
-    [InlineData("static abstract C operator <(A left, B right)",
-        "static abstract B operator <(A left, B right)", "TRM3001")]
+    [InlineData("static C operator <(A left, B right)",
+        "static B operator <(A left, B right)", "TRM3001")]
     [InlineData("where T : Less<T, T, bool>, [Copy]", "where T : Less<T, T, T>, [Copy]", "TRM3007")]
     [InlineData("where T : Less<T, T, bool>, [Copy]", "where T : OtherLess<T, T, bool>, [Copy]", "TRM3007")]
     [InlineData("where T : Less<T, T, bool>, [Copy]", "where T : [Copy]", "TRM3007")]
@@ -104,8 +104,8 @@ public sealed class StaticProtocolComparisonTests
     [InlineData(true)]
     public void NoThrowComparisonRequiresDeclaredAndVerifiedEffect(bool witnessNoThrow)
     {
-        var source = LessSource.Replace("static abstract C operator <",
-            (witnessNoThrow ? "[NoThrow] " : "") + "static abstract C operator <", StringComparison.Ordinal)
+        var source = LessSource.Replace("static C operator <",
+            (witnessNoThrow ? "[NoThrow] " : "") + "static C operator <", StringComparison.Ordinal)
             .Replace("bool Compare<T>", "[NoThrow] bool Compare<T>", StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
@@ -189,8 +189,8 @@ public sealed class StaticProtocolComparisonTests
     [InlineData(true)]
     public void ComparisonEffectsComeFromTheDeclaredProtocolAndBody(bool valid)
     {
-        var source = LessSource.Replace("static abstract C operator <",
-            "[NoThrow] static abstract C operator <", StringComparison.Ordinal)
+        var source = LessSource.Replace("static C operator <",
+            "[NoThrow] static C operator <", StringComparison.Ordinal)
             .Replace("public static bool operator <",
                 "[NoThrow] public static bool operator <", StringComparison.Ordinal)
             .Replace("bool Compare<T>", "[NoThrow] bool Compare<T>", StringComparison.Ordinal);
@@ -215,8 +215,8 @@ public sealed class StaticProtocolComparisonTests
     public void IndependentComparisonConstraintsDriveConditionalCopyOutput()
     {
         var source = """
-            interface Less<A, B, C> { static abstract C operator <(A left, B right); }
-            interface Greater<A, B, C> { static abstract C operator >(A left, B right); }
+            interface Less<A, B, C> { static C operator <(A left, B right); }
+            interface Greater<A, B, C> { static C operator >(A left, B right); }
             struct First : Less<First, First, bool> {
                 public int32 Value;
                 public First(int32 value) { Value = value; }

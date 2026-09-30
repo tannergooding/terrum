@@ -1,5 +1,5 @@
 interface Multiplication<TSelf, TOther, TResult> {
-    static abstract TResult operator *(TSelf left, TOther right);
+    static TResult operator *(TSelf left, TOther right);
 }
 
 struct Int32Value : Multiplication<Int32Value, Int32Value, Int32Value> {

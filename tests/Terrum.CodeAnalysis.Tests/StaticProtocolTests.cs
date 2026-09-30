@@ -71,7 +71,7 @@ public sealed class StaticProtocolTests
     [InlineData("where T : Addition<T, T, T>", "where T : Addition<T, T, T>?", "TRM3007")]
     [InlineData("T EvaluateQuadratic<T>", "[NoThrow] T EvaluateQuadratic<T>", "TRM3007")]
     [InlineData("operator +(Meters left, Meters right)", "op_Addition(Meters left, Meters right)", "TRM3007")]
-    [InlineData("static abstract TResult operator +(TSelf left, TOther right)", "static abstract TOther operator +(TSelf left, TOther right)", "TRM3001")]
+    [InlineData("static TResult operator +(TSelf left, TOther right)", "static TOther operator +(TSelf left, TOther right)", "TRM3001")]
     [InlineData("=> (a * x + b) * x + c;", "=> EvaluateQuadratic<Meters>(x, a, b, c);", "TRM3007")]
     public void RejectsMissingOrFalseProtocolPromises(string before, string after, string expected)
     {
@@ -137,8 +137,8 @@ public sealed class StaticProtocolTests
     [Fact]
     public void AProtocolEffectPromiseRequiresAProvenImplementation()
     {
-        var source = s_sample.Replace("static abstract TResult operator +(TSelf left, TOther right)",
-            "[NoThrow] static abstract TResult operator +(TSelf left, TOther right)", StringComparison.Ordinal);
+        var source = s_sample.Replace("static TResult operator +(TSelf left, TOther right)",
+            "[NoThrow] static TResult operator +(TSelf left, TOther right)", StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3007");
     }
@@ -192,7 +192,7 @@ public sealed class StaticProtocolTests
     [InlineData("Example<int32> (2;")]
     public void SyntaxRecoversAndPreservesMalformedStaticProtocolSource(string invocation)
     {
-        var source = "interface Example<T, U, V> { static abstract V operator +(T a, U b); } "
+        var source = "interface Example<T, U, V> { static V operator +(T a, U b); } "
             + "int32 Main() { return " + invocation + " }";
         var tree = SyntaxTree.Parse(source);
         Assert.Equal(source, tree.Root.ToFullString());
@@ -233,7 +233,7 @@ public sealed class StaticProtocolTests
             "T EvaluateQuadratic".Length).ToString());
     }
 
-    private static async Task<int> RunAsync(byte[] image)
+    internal static async Task<int> RunAsync(byte[] image)
     {
         Assert.True(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var path = Path.Combine(Directory.GetCurrentDirectory(), $"terrum-protocol-{Guid.NewGuid():N}.exe");

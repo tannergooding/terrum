@@ -80,7 +80,7 @@ public static class ScannerHost
         foreach (var kind in Enum.GetValues<TokenKind>())
         {
             var name = kind.ToString();
-            if (name.EndsWith("Keyword", StringComparison.Ordinal))
+            if (kind != TokenKind.AbstractKeyword && name.EndsWith("Keyword", StringComparison.Ordinal))
             {
                 AddLexeme(words, kind, char.ToLowerInvariant(name[0]) + name[1..^"Keyword".Length]);
             }

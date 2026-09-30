@@ -11,7 +11,7 @@ public sealed class StaticProtocolControlFlowTests
 {
     private const string Declarations = """
         interface Multiplication<A, B, C> {
-            static abstract C operator *(A left, B right);
+            static C operator *(A left, B right);
         }
         struct Meters : Multiplication<Meters, Meters, Meters> {
             public int32 Value;
@@ -40,7 +40,7 @@ public sealed class StaticProtocolControlFlowTests
 
     private const string NoThrowDeclarations = """
         interface Multiplication<A, B, C> {
-            [NoThrow] static abstract C operator *(A left, B right);
+            [NoThrow] static C operator *(A left, B right);
         }
         """;
 

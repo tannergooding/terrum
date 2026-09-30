@@ -1,9 +1,9 @@
 interface Addition<TSelf, TOther, TResult> {
-    static abstract TResult operator +(TSelf left, TOther right);
+    static TResult operator +(TSelf left, TOther right);
 }
 
 interface Multiplication<TSelf, TOther, TResult> {
-    static abstract TResult operator *(TSelf left, TOther right);
+    static TResult operator *(TSelf left, TOther right);
 }
 
 struct Meters : Addition<Meters, Meters, Meters>, Multiplication<Meters, Meters, Meters> {

@@ -18,8 +18,8 @@ internal sealed partial class Binder
     private readonly Dictionary<string, Dictionary<string, PrimitiveType>> _conformances = new(StringComparer.Ordinal);
 
     internal readonly record struct StaticOperatorKey(TokenKind Operator, int Arity);
-    private sealed record StaticProtocol(string Name, StaticOperatorKey Key, bool IsNoThrow, SyntaxNode Declaration,
-        SyntaxTree Tree);
+    private sealed record StaticProtocol(string Name, StaticOperatorKey Key, bool IsNoThrow, bool HasSelf,
+        SyntaxNode Declaration, SyntaxTree Tree);
     internal sealed record GenericOperatorConstraint(string Protocol, PrimitiveType? FixedResult,
         int ResultTypeParameterIndex)
     {
@@ -272,16 +272,23 @@ internal sealed partial class Binder
                 var qualified = Qualify(name);
                 var parameters = node.Children.OfType<SyntaxNode>()
                     .FirstOrDefault(static child => child.Kind == SyntaxKind.TypeParameterList);
-                var variables = parameters?.Children.OfType<SyntaxTokenElement>()
+                var formalTokens = parameters?.Children.OfType<SyntaxTokenElement>().ToArray() ?? [];
+                var selfMarkers = formalTokens.Where(static child =>
+                    child.Token.Kind == TokenKind.Identifier && child.Token.Text == "this").ToArray();
+                var hasSelf = selfMarkers.Length == 1 && formalTokens.Length > 2
+                    && ReferenceEquals(formalTokens[1], selfMarkers[0]);
+                var variables = formalTokens
                     .Where(static child => child.Token.Kind == TokenKind.Identifier)
-                    .Select(static child => child.Token.Text).ToArray() ?? [];
+                    .Where(static child => child.Token.Text != "this")
+                    .Select(static child => child.Token.Text).ToArray();
                 if (variables.Any(static variable => TryPrimitiveType(variable, out _)))
                 {
                     Report("TRM3003", "Primitive type names cannot be used as interface type parameters.",
                         node.Span);
                     continue;
                 }
-                if (variables.Length is not (2 or 3)
+                if (selfMarkers.Length > 1 || (selfMarkers.Length == 1 && !hasSelf)
+                    || variables.Length is not (2 or 3)
                     || variables.Distinct(StringComparer.Ordinal).Count() != variables.Length
                     || node.Children.OfType<SyntaxTokenElement>().Any(static child =>
                         child.Token.Kind is TokenKind.PublicKeyword or TokenKind.PrivateKeyword
@@ -324,8 +331,6 @@ internal sealed partial class Binder
                     || member.Children[^1] is not SyntaxTokenElement { Token.Kind: TokenKind.Semicolon }
                     || member.Children.OfType<SyntaxTokenElement>().Count(static child =>
                         child.Token.Kind == TokenKind.StaticKeyword) != 1
-                    || member.Children.OfType<SyntaxTokenElement>().Count(static child =>
-                        child.Token.Kind == TokenKind.AbstractKeyword) != 1
                     || member.Children.OfType<SyntaxTokenElement>().Any(static child =>
                         child.Token.Kind is TokenKind.PrivateKeyword or TokenKind.PublicKeyword
                             or TokenKind.InternalKeyword or TokenKind.MutKeyword or TokenKind.UniqueKeyword)
@@ -337,7 +342,7 @@ internal sealed partial class Binder
                     continue;
                 }
                 if (!_protocols.TryAdd(qualified, new StaticProtocol(qualified,
-                    new StaticOperatorKey(operation, arity), noThrow, node, tree)))
+                    new StaticOperatorKey(operation, arity), noThrow, hasSelf, node, tree)))
                 {
                     Report("TRM3003", $"Duplicate static operator interface '{qualified}'.", node.Span);
                 }
@@ -376,7 +381,7 @@ internal sealed partial class Binder
                 var shape = TryProtocolApplication(name, out var head, out var parts);
                 var protocolName = shape ? FindProtocol(head) : null;
                 if (protocolName is null
-                    || !MatchesProtocolArguments(_protocols[protocolName].Key, parts,
+                    || !MatchesProtocolArguments(_protocols[protocolName], parts,
                         StructName(declaration).Text, typeName))
                 {
                     Report("TRM3007", "Conformance requires a distinct declared local protocol with exact operand and result types.", name.Span);
@@ -529,7 +534,7 @@ internal sealed partial class Binder
                 }
                 var shape = TryProtocolApplication(item, out var head, out var parts);
                 var protocol = shape ? FindProtocol(head) : null;
-                if (protocol is null || !MatchesProtocolArguments(_protocols[protocol].Key, parts,
+                if (protocol is null || !MatchesProtocolArguments(_protocols[protocol], parts,
                         formal.Token.Text)
                     || operations[index].ContainsKey(_protocols[protocol].Key))
                 {
@@ -1067,20 +1072,20 @@ internal sealed partial class Binder
         var tokens = type.Children.OfType<SyntaxTokenElement>().Select(static child => child.Token).ToArray();
         var open = Array.FindIndex(tokens, static token => token.Kind == TokenKind.Less);
         head = open > 0 ? string.Concat(tokens.Take(open).Select(static token => token.Text)) : "";
-        return type.Kind == SyntaxKind.TypeName && open > 0 && arguments.Length is 2 or 3
+        return type.Kind == SyntaxKind.TypeName && open > 0 && arguments.Length is 1 or 2 or 3
             && tokens[^1].Kind == TokenKind.Greater
             && NameText(type) == head + "<" + string.Join(",", arguments.Select(NameText)) + ">";
     }
 
-    private static bool MatchesProtocolArguments(StaticOperatorKey key, SyntaxNode[] arguments, string type,
+    private static bool MatchesProtocolArguments(StaticProtocol protocol, SyntaxNode[] arguments, string type,
         string? qualified = null)
     {
-        var operandCount = key.Arity;
+        var operandCount = protocol.Key.Arity - (protocol.HasSelf ? 1 : 0);
         return arguments.Length == operandCount + 1
             && arguments.Take(operandCount).All(argument =>
                 NameText(argument) == type || NameText(argument) == qualified)
-            && (key.Arity == 1 || (IsComparisonOperator(key.Operator)
-                ? NameText(arguments[2]) == "bool"
-                : NameText(arguments[2]) == type || NameText(arguments[2]) == qualified));
+            && (protocol.Key.Arity == 1 || (IsComparisonOperator(protocol.Key.Operator)
+                ? NameText(arguments[^1]) == "bool"
+                : NameText(arguments[^1]) == type || NameText(arguments[^1]) == qualified));
     }
 }

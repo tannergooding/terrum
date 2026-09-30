@@ -26,12 +26,21 @@ internal sealed class Parser
         _cancellationToken = cancellationToken;
     }
 
-    private SyntaxNode ParseTypeParameters()
+    private SyntaxNode ParseTypeParameters(bool interfaceParameters = false)
     {
-        var children = new List<SyntaxElement> { Expect(TokenKind.Less), Expect(TokenKind.Identifier) };
+        var children = new List<SyntaxElement> { Expect(TokenKind.Less) };
+        if (interfaceParameters && Current.Kind == TokenKind.Identifier && Current.Text == "this")
+        {
+            children.Add(Take());
+        }
+        children.Add(Expect(TokenKind.Identifier));
         while (Current.Kind == TokenKind.Comma)
         {
             children.Add(Take());
+            if (interfaceParameters && Current.Kind == TokenKind.Identifier && Current.Text == "this")
+            {
+                children.Add(Take());
+            }
             children.Add(Expect(TokenKind.Identifier));
         }
         children.Add(Expect(TokenKind.Greater));
@@ -266,7 +275,7 @@ internal sealed class Parser
             children.Add(Node(SyntaxKind.Attribute, attribute));
         }
 
-        while (IsModifier(Current.Kind) || Current.Kind == TokenKind.AbstractKeyword)
+        while (IsModifier(Current.Kind))
         {
             children.Add(Take());
         }
@@ -299,7 +308,7 @@ internal sealed class Parser
         {
             children.Add(Take());
             children.Add(Expect(TokenKind.Identifier));
-            children.Add(ParseTypeParameters());
+            children.Add(ParseTypeParameters(interfaceParameters: true));
             children.Add(Expect(TokenKind.OpenBrace));
             while (Current.Kind is not (TokenKind.CloseBrace or TokenKind.EndOfFile))
             {

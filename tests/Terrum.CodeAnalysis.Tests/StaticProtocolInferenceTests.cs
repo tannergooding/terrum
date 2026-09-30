@@ -176,7 +176,7 @@ public sealed class StaticProtocolInferenceTests
     public void PrimitiveDoesNotAcquireOperatorWitnessAfterStructSpecialization(string call)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            interface Addition<A, B, C> { static abstract C operator +(A left, B right); }
+            interface Addition<A, B, C> { static C operator +(A left, B right); }
             struct Value : Addition<Value, Value, Value> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
@@ -235,7 +235,7 @@ public sealed class StaticProtocolInferenceTests
     public void InferredHelperCannotBorrowCallersStrongerProtocolWitnesses()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            interface Addition<A, B, C> { static abstract C operator +(A left, B right); }
+            interface Addition<A, B, C> { static C operator +(A left, B right); }
             struct Value : Addition<Value, Value, Value> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }

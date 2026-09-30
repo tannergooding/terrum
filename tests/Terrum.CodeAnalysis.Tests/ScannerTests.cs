@@ -110,7 +110,8 @@ public sealed class ScannerTests
     public async Task EveryKeywordClassifiesNativelyAsync()
     {
         var keywords = Enum.GetValues<TokenKind>()
-            .Where(kind => kind.ToString().EndsWith("Keyword", StringComparison.Ordinal))
+            .Where(kind => kind != TokenKind.AbstractKeyword
+                && kind.ToString().EndsWith("Keyword", StringComparison.Ordinal))
             .Select(kind => {
                 var name = kind.ToString();
                 return (Kind: kind, Text: char.ToLowerInvariant(name[0]) + name[1..^"Keyword".Length]);
@@ -162,6 +163,10 @@ public sealed class ScannerTests
             "static-protocol-binary.terrum")).ConfigureAwait(true);
         await CheckScannerAsync(source).ConfigureAwait(true);
     }
+
+    [Fact]
+    public Task SelfBoundStaticProtocolAgreesWithCompiledScannerAsync() =>
+        CheckScannerAsync(StaticProtocolSelfTests.Source);
 
     [Fact]
     public async Task MultipleTypeParameterSampleAgreesWithCompiledScannerAsync()

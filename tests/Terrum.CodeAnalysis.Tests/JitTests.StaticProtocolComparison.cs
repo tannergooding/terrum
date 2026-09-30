@@ -36,7 +36,7 @@ public sealed partial class JitTests
     {
         var value = expected ? "true" : "false";
         var source = $$"""
-            interface Comparison<A, B, C> { static abstract C operator {{op}}(A left, B right); }
+            interface Comparison<A, B, C> { static C operator {{op}}(A left, B right); }
             struct Value : Comparison<Value, Value, bool> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
@@ -61,8 +61,8 @@ public sealed partial class JitTests
     public async Task EqualityAndInequalityDoNotImplyComplementaryResultsAsync()
     {
         const string Source = """
-            interface Equal<A, B, C> { static abstract C operator ==(A a, B b); }
-            interface Unequal<A, B, C> { static abstract C operator !=(A a, B b); }
+            interface Equal<A, B, C> { static C operator ==(A a, B b); }
+            interface Unequal<A, B, C> { static C operator !=(A a, B b); }
             struct Value : Equal<Value, Value, bool>, Unequal<Value, Value, bool> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
@@ -88,7 +88,7 @@ public sealed partial class JitTests
     public Task ComparisonWitnessPreservesCheckedFailureAsync()
     {
         const string Source = """
-            interface Less<A, B, C> { static abstract C operator <(A left, B right); }
+            interface Less<A, B, C> { static C operator <(A left, B right); }
             struct Value : Less<Value, Value, bool> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
@@ -117,7 +117,7 @@ public sealed partial class JitTests
     public Task IndirectCopyComparisonReturnsBoolAcrossAotAndJitAsync(bool checkedFailures)
     {
         const string Source = """
-            interface Less<A, B, C> { static abstract C operator <(A a, B b); }
+            interface Less<A, B, C> { static C operator <(A a, B b); }
             struct Wide : Less<Wide, Wide, bool> {
                 public int64 High;
                 public int64 Low;

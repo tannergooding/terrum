@@ -750,6 +750,29 @@ public sealed partial class CliTests
         Assert.Equal(output, secondOutput);
     }
 
+    private static async Task<int> ExecuteNativeImageAsync(string path)
+    {
+        using var process = Process.Start(new ProcessStartInfo(path) {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        }) ?? throw new InvalidOperationException("Could not start native executable.");
+        try
+        {
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+        }
+        catch (TimeoutException)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync();
+            }
+            throw;
+        }
+
+        return process.ExitCode;
+    }
+
     private static Task<(int ExitCode, string Output, string Error)> RunAsync(byte[] input, params string[] arguments) =>
         RunAsync(input, arguments, workingDirectory: null);
 
