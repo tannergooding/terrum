@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Immutable;
+using System.Linq;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Text;
 
@@ -11,7 +12,7 @@ namespace Terrum.CodeAnalysis.Lexing;
 /// <summary>Bounds the provisional, in-process scalar frontend result projection.</summary>
 public static class ScalarFrontendHost
 {
-    public const int WordCount = 37;
+    public const int WordCount = 298;
     public const int BufferIndex = 9;
 
     public static ImmutableArray<HostBuffer> CreateBuffers(SourceText source)
@@ -39,7 +40,7 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] is < 1 or > 19
+        if (words[0] is < 1 or > 20
             || words[1] is not (1 or 2))
         {
             throw InvalidResult();
@@ -68,6 +69,7 @@ public static class ScalarFrontendHost
             || !AllZero(3, 5) || !ScalarType(words[5]) || count is < 0 or > 3
             || (words[0] < 19 && (!AllZero(34, WordCount) || count == 3))
             || (words[0] == 19 && count != 3)
+            || (words[0] != 20 && !AllZero(37, WordCount))
             || (count == 0 ? words[7] != 0 : !ScalarType(words[7]))
             || (count <= 1 ? words[8] != 0 : !ScalarType(words[8]))
             || (count < 3 ? words[34] != 0 : !ScalarType(words[34]))
@@ -81,6 +83,11 @@ public static class ScalarFrontendHost
             || (words[0] == 4 && words[15] != 2))
         {
             throw InvalidResult();
+        }
+
+        if (words[0] == 20)
+        {
+            return ReadTree();
         }
 
         var condition = Expression(16);
@@ -115,6 +122,274 @@ public static class ScalarFrontendHost
         ScalarFrontendExpression Expression(int offset) => new(
             words[offset], words[offset + 1], words[offset + 2], words[offset + 3],
             Span(offset + 4));
+
+        ScalarFrontendResult ReadTree()
+        {
+            if (!AllZero(16, 34) || words[37] is < 1 or > 32
+                || words[41] is not (0 or 1)
+                || (words[41] == 1 && words[15] != 0)
+                || !AllZero(42 + words[37] * 8, WordCount))
+            {
+                throw InvalidResult();
+            }
+            var nodes = ImmutableArray.CreateBuilder<ScalarFrontendNode>(words[37]);
+            var depths = new int[words[37]];
+            for (var i = 0; i < words[37]; i++)
+            {
+                var offset = 42 + i * 8;
+                var node = new ScalarFrontendNode(words[offset], words[offset + 1],
+                    Span(offset + 2), words[offset + 4], words[offset + 5],
+                    words[offset + 6], words[offset + 7]);
+                var unary = node.Operation is 46 or 62 or 63
+                    || node.Operation is 57 or 58 && node.Right == -1;
+                var leaf = node.Operation is 0 or 3 or 20 or 21;
+                if (!ScalarType(node.Type) || !ValidSpan(node.Span, nonempty: true)
+                    || (!leaf && !unary && node.Operation is not (>= 57 and <= 61
+                        or >= 65 and <= 75))
+                    || (leaf && node.Right != -1)
+                    || (unary && node.Right != -1)
+                    || (!leaf && (node.Left < 0 || node.Left >= i
+                        || (!unary && (node.Right < 0 || node.Right >= i))))
+                    || (node.Operation != 3 && (node.Low != 0 || node.High != 0))
+                    || (node.Operation == 0 && (node.Left < 1 || node.Left > count
+                        || node.Type != ParameterType(node.Left)))
+                    || (node.Operation is 20 or 21 && (node.Left != -1 || node.Type != 5))
+                    || (node.Operation == 3 && (node.Left != -1 || node.Type == 5)))
+                {
+                    throw InvalidResult();
+                }
+                if (!leaf)
+                {
+                    var operand = nodes[node.Left];
+                    depths[i] = depths[node.Left] + 1;
+                    if (unary)
+                    {
+                        if (node.Type != operand.Type
+                            || node.Operation != 46 && operand.Right != -1
+                            || (node.Operation == 62 && node.Type != 5)
+                            || (node.Operation == 63 && node.Type is not (>= 1 and <= 4))
+                            || (node.Operation is 57 or 58
+                                && (node.Type is not (>= 1 and <= 4)
+                                    || node.Operation == 58 && node.Type is not (1 or 3))))
+                        {
+                            throw InvalidResult();
+                        }
+                    }
+                    else
+                    {
+                        var rhs = nodes[node.Right];
+                        depths[i] = Math.Max(depths[i], depths[node.Right] + 1);
+                        var comparison = node.Operation is >= 65 and <= 70;
+                        var logical = node.Operation is 72 or 74;
+                        var bitwise = node.Operation is 71 or 73 or 75;
+                        if (operand.Type != rhs.Type || node.Type != (comparison ? 5 : operand.Type)
+                            || (logical && operand.Type != 5)
+                            || (comparison && (operand.Type == 6 || operand.Type == 5)
+                                && node.Operation >= 67)
+                            || (bitwise && operand.Type == 6)
+                            || (!logical && !bitwise && !comparison
+                                && operand.Type is not (>= 1 and <= 4)))
+                        {
+                            throw InvalidResult();
+                        }
+                    }
+                    if (depths[i] > 32)
+                    {
+                        throw InvalidResult();
+                    }
+                }
+                nodes.Add(node);
+            }
+            var tree = nodes.MoveToImmutable();
+            var conditionRoot = words[38];
+            var trueRoot = words[39];
+            var falseRoot = words[40];
+            if (trueRoot is < 0 or >= 32 || trueRoot >= tree.Length
+                || tree[trueRoot].Type != words[5]
+                || (words[15] == 0
+                    ? conditionRoot != -1 || falseRoot != -1
+                    : conditionRoot < 0 || conditionRoot >= tree.Length
+                        || tree[conditionRoot].Type != 5 || falseRoot < 0
+                        || falseRoot >= tree.Length || tree[falseRoot].Type != words[5]))
+            {
+                throw InvalidResult();
+            }
+            var lexical = Lexer.Lex(source);
+            var tokens = lexical.Tokens;
+            var at = 0;
+            var used = new bool[tree.Length];
+            if (!lexical.Diagnostics.IsEmpty
+                || (isPublic && !Take(TokenKind.PublicKeyword))
+                || (!isPublic && tokens[0].Kind == TokenKind.InternalKeyword
+                    && !Take(TokenKind.InternalKeyword))
+                || !Take(TokenKind.Identifier) || !Take(TokenKind.Identifier)
+                || !Take(TokenKind.OpenParen))
+            {
+                throw InvalidResult();
+            }
+            for (var parameter = 0; parameter < count; parameter++)
+            {
+                if (parameter != 0 && !Take(TokenKind.Comma)
+                    || !Take(TokenKind.Identifier) || !Take(TokenKind.Identifier))
+                {
+                    throw InvalidResult();
+                }
+            }
+            if (!Take(TokenKind.CloseParen))
+            {
+                throw InvalidResult();
+            }
+            if (words[41] == 1)
+            {
+                if (!Take(TokenKind.Arrow) || !TakeTree(trueRoot)
+                    || !Take(TokenKind.Semicolon))
+                {
+                    throw InvalidResult();
+                }
+            }
+            else
+            {
+                if (!Take(TokenKind.OpenBrace))
+                {
+                    throw InvalidResult();
+                }
+                if (words[15] != 0 && (!Take(TokenKind.IfKeyword)
+                    || !Take(TokenKind.OpenParen) || !TakeTree(conditionRoot)
+                    || !Take(TokenKind.CloseParen) || !Take(TokenKind.OpenBrace)))
+                {
+                    throw InvalidResult();
+                }
+                if (!Take(TokenKind.ReturnKeyword) || !TakeTree(trueRoot)
+                    || !Take(TokenKind.Semicolon))
+                {
+                    throw InvalidResult();
+                }
+                if (words[15] != 0)
+                {
+                    if (!Take(TokenKind.CloseBrace)
+                        || (words[15] == 1 && (!Take(TokenKind.ElseKeyword)
+                            || !Take(TokenKind.OpenBrace)))
+                        || !Take(TokenKind.ReturnKeyword) || !TakeTree(falseRoot)
+                        || !Take(TokenKind.Semicolon)
+                        || (words[15] == 1 && !Take(TokenKind.CloseBrace)))
+                    {
+                        throw InvalidResult();
+                    }
+                }
+                if (!Take(TokenKind.CloseBrace))
+                {
+                    throw InvalidResult();
+                }
+            }
+            if (!Take(TokenKind.EndOfFile) || at != tokens.Length)
+            {
+                throw InvalidResult();
+            }
+            if (used.Any(seen => !seen))
+            {
+                throw InvalidResult();
+            }
+            var projection = new ScalarFrontendResult(true, isPublic, 0, default,
+                words[5], count, words[7], words[8], words[34], name,
+                firstName, secondName, thirdName, words[15] != 0, words[15] == 2,
+                Root(conditionRoot), Root(trueRoot), Root(falseRoot));
+            return projection with { Nodes = tree, ConditionRoot = conditionRoot,
+                TrueRoot = trueRoot, FalseRoot = falseRoot, IsExpressionBody = words[41] == 1 };
+
+            ScalarFrontendExpression Root(int index) => index == -1
+                ? default : new ScalarFrontendExpression(tree[index].Type,
+                    tree[index].Operation, tree[index].Left, tree[index].Right,
+                    tree[index].Span);
+
+            bool Take(TokenKind kind)
+            {
+                if (at >= tokens.Length || tokens[at].Kind != kind)
+                {
+                    return false;
+                }
+                at++;
+                return true;
+            }
+
+            bool TakeTree(int index)
+            {
+                var node = tree[index];
+                var start = at;
+                if (used[index])
+                {
+                    return false;
+                }
+                used[index] = true;
+                if (node.Operation == 46)
+                {
+                    if (!Take(TokenKind.OpenParen) || !TakeTree(node.Left)
+                        || !Take(TokenKind.CloseParen))
+                    {
+                        return false;
+                    }
+                }
+                else if (node.Operation is 57 or 58 or 62 or 63 && node.Right == -1)
+                {
+                    if (!Take((TokenKind)node.Operation) || !TakeTree(node.Left))
+                    {
+                        return false;
+                    }
+                }
+                else if (node.Operation == 0)
+                {
+                    var spelling = node.Left switch {
+                        1 => firstName, 2 => secondName, _ => thirdName,
+                    };
+                    if (!Take(TokenKind.Identifier)
+                        || tokens[at - 1].Text != source.Text.Substring(spelling.Start, spelling.Length))
+                    {
+                        return false;
+                    }
+                }
+                else if (node.Operation == 3)
+                {
+                    if (!Take(TokenKind.NumericLiteral)
+                        || !ValidMagnitude(tokens[at - 1].Text.AsSpan(), node.Type,
+                            tree.Any(parent => parent.Operation == 58 && parent.Left == index
+                                && parent.Right == -1), node.Low, node.High))
+                    {
+                        return false;
+                    }
+                }
+                else if (node.Operation is 20 or 21)
+                {
+                    if (!Take((TokenKind)node.Operation))
+                    {
+                        return false;
+                    }
+                }
+                else if (Precedence(tree[node.Left]) < Precedence(node)
+                    || Precedence(tree[node.Right]) <= Precedence(node)
+                    || !TakeTree(node.Left) || !Take((TokenKind)node.Operation)
+                    || !TakeTree(node.Right))
+                {
+                    return false;
+                }
+                return start < at && node.Span.Start == tokens[start].Span.Start
+                    && node.Span.End == tokens[at - 1].Span.End;
+            }
+
+            int Precedence(ScalarFrontendNode node)
+            {
+                if (node.Right == -1 || node.Operation == 46)
+                {
+                    return 11;
+                }
+                return node.Operation switch {
+                    >= 59 and <= 61 => 10,
+                    57 or 58 => 9,
+                    >= 67 and <= 70 => 7,
+                    65 or 66 => 6,
+                    71 => 5, 75 => 4, 73 => 3, 72 => 2, 74 => 1,
+                    _ => 11,
+                };
+            }
+        }
 
         bool ValidSpan(TextSpan span, bool nonempty = false)
             => span.Start >= 0 && span.Start <= source.Length && span.Length >= (nonempty ? 1 : 0)
@@ -971,10 +1246,67 @@ public static class ScalarFrontendHost
         var types = variables.ToImmutable();
         var methodSpan = new TextSpan(0, source.Length);
         var returnType = Type(result.ReturnType);
+        BoundExpression[]? treeExpressions = null;
+        if (!result.Nodes.IsDefault)
+        {
+            treeExpressions = new BoundExpression[result.Nodes.Length];
+            for (var i = 0; i < treeExpressions.Length; i++)
+            {
+                var node = result.Nodes[i];
+                var type = Type(node.Type);
+                BoundExpression bound;
+                if (node.Operation == 46)
+                {
+                    bound = treeExpressions[node.Left];
+                }
+                else if (node.Operation == 0)
+                {
+                    bound = new BoundRead(node.Left - 1, type, node.Span);
+                }
+                else if (node.Operation is 20 or 21)
+                {
+                    bound = new BoundConstant(node.Operation == 20 ? 1 : 0, type, node.Span);
+                }
+                else if (node.Operation == 3)
+                {
+                    var value = node.Type is 1 or 2 or 6 ? node.Low
+                        : unchecked((long)((ulong)(uint)node.High << 32 | (uint)node.Low));
+                    bound = new BoundConstant(value, type, node.Span);
+                }
+                else if (node.Right == -1)
+                {
+                    var operand = treeExpressions[node.Left];
+                    if (node.Operation == (int)TokenKind.Minus
+                        && result.Nodes[node.Left].Operation == 3
+                        && ScannerHost.IntegerRadix(source.Text.AsSpan(
+                            operand.Span.Start, operand.Span.Length)) == 10
+                        && ((node.Type == 1 && (uint)result.Nodes[node.Left].Low == (ulong)int.MaxValue + 1)
+                            || (node.Type == 3 && ((ulong)(uint)result.Nodes[node.Left].High << 32
+                                | (uint)result.Nodes[node.Left].Low) == (ulong)long.MaxValue + 1)))
+                    {
+                        bound = new BoundConstant(node.Type == 1 ? int.MinValue : long.MinValue,
+                            type, node.Span);
+                    }
+                    else
+                    {
+                        bound = Binder.FoldScalarConstant(new BoundUnary(
+                            (TokenKind)node.Operation, operand, type, node.Span));
+                    }
+                }
+                else
+                {
+                    bound = Binder.FoldScalarConstant(new BoundBinary(
+                        (TokenKind)node.Operation, treeExpressions[node.Left],
+                        treeExpressions[node.Right], type, node.Span));
+                }
+                treeExpressions[i] = bound;
+            }
+        }
         ImmutableArray<BoundStatement> statements;
         if (result.HasCondition)
         {
-            var conditional = new BoundIf(Expression(result.Condition),
+            var conditional = new BoundIf(treeExpressions is null
+                    ? Expression(result.Condition) : treeExpressions[result.ConditionRoot],
                 new BoundBlock([Return(result.WhenTrue)], result.WhenTrue.Span),
                 result.HasFallthrough ? null
                     : new BoundBlock([Return(result.WhenFalse)], result.WhenFalse.Span),
@@ -998,7 +1330,10 @@ public static class ScalarFrontendHost
         string Name(TextSpan span) => source.Text.Substring(span.Start, span.Length);
 
         BoundReturn Return(ScalarFrontendExpression expression)
-            => new(Expression(expression), expression.Span);
+            => treeExpressions is null
+                ? new BoundReturn(Expression(expression), expression.Span)
+                : new BoundReturn(treeExpressions[expression == result.WhenTrue
+                    ? result.TrueRoot : result.FalseRoot], expression.Span);
 
         BoundExpression Expression(ScalarFrontendExpression expression)
         {
@@ -1372,9 +1707,19 @@ public static class ScalarFrontendHost
 public readonly record struct ScalarFrontendExpression(
     int Type, int Operation, int LeftParameter, int RightParameter, TextSpan Span);
 
+public readonly record struct ScalarFrontendNode(
+    int Operation, int Type, TextSpan Span, int Left, int Right, int Low, int High);
+
 public readonly record struct ScalarFrontendResult(
     bool IsValid, bool IsPublic, int ErrorCode, TextSpan ErrorSpan, int ReturnType, int ParameterCount,
     int FirstType, int SecondType, int ThirdType, TextSpan Name, TextSpan FirstName, TextSpan SecondName,
     TextSpan ThirdName,
     bool HasCondition, bool HasFallthrough, ScalarFrontendExpression Condition, ScalarFrontendExpression WhenTrue,
-    ScalarFrontendExpression WhenFalse);
+    ScalarFrontendExpression WhenFalse)
+{
+    public ImmutableArray<ScalarFrontendNode> Nodes { get; init; }
+    public int ConditionRoot { get; init; }
+    public int TrueRoot { get; init; }
+    public int FalseRoot { get; init; }
+    public bool IsExpressionBody { get; init; }
+}

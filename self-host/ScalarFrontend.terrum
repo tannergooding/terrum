@@ -1400,13 +1400,450 @@ mut class ScalarFrontendState
                 }
             }
         }
-        if (!Take(47, out var closeParameters) || !Take(48, out var openBody))
+        if (!Take(47, out var closeParameters))
         {
             return false;
         }
         returnType = selected;
         name = function.Range;
         return true;
+    }
+
+    private int32 TreeWord(int32 node, int32 field)
+    {
+        return Host.Frontend[42 + node * 8 + field];
+    }
+
+    private mut bool AddTreeNode(int32 operation, int32 type, int32 start, int32 end,
+        int32 left, int32 right, int32 low, int32 high, out int32 node)
+    {
+        int32 count = Host.Frontend[37];
+        if (count >= 32)
+        {
+            Fail(1);
+            return false;
+        }
+        node = count;
+        int32 offset = 42 + count * 8;
+        Host.Frontend[offset] = operation;
+        Host.Frontend[offset + 1] = type;
+        Host.Frontend[offset + 2] = start;
+        Host.Frontend[offset + 3] = end - start;
+        Host.Frontend[offset + 4] = left;
+        Host.Frontend[offset + 5] = right;
+        Host.Frontend[offset + 6] = low;
+        Host.Frontend[offset + 7] = high;
+        Host.Frontend[37] = count + 1;
+        return true;
+    }
+
+    private int32 TreePrecedence(int32 kind)
+    {
+        if (kind >= 59 && kind <= 61) { return 10; }
+        if (kind == 57 || kind == 58) { return 9; }
+        if (kind >= 67 && kind <= 70) { return 7; }
+        if (kind == 65 || kind == 66) { return 6; }
+        if (kind == 71) { return 5; }
+        if (kind == 75) { return 4; }
+        if (kind == 73) { return 3; }
+        if (kind == 72) { return 2; }
+        if (kind == 74) { return 1; }
+        return 0;
+    }
+
+    private mut bool ResolveTreeLiteral(int32 node, int32 type, bool minimum)
+    {
+        int32 offset = 42 + node * 8;
+        int32 operation = TreeWord(node, 0);
+        if (operation == 3)
+        {
+            int32 start = TreeWord(node, 2);
+            mut int32 tokenIndex = 0;
+            while (_tokens.TryGet(tokenIndex, out var token)
+                && token.Range.Start != start)
+            {
+                tokenIndex = tokenIndex + 1;
+            }
+            if (!_tokens.TryGet(tokenIndex, out var literal)
+                || literal.Kind != 3
+                || !TryReadMagnitude(literal, tokenIndex, type, minimum,
+                    literal.Range, out var low, out var high))
+            {
+                return false;
+            }
+            Host.Frontend[offset + 1] = type;
+            Host.Frontend[offset + 6] = low;
+            Host.Frontend[offset + 7] = high;
+            return true;
+        }
+        if (operation == 46 && TreeWord(node, 1) == 0)
+        {
+            if (!ResolveTreeLiteral(TreeWord(node, 4), type, false))
+            {
+                return false;
+            }
+            Host.Frontend[offset + 1] = type;
+            return true;
+        }
+        if (operation >= 57 && operation <= 61
+            && TreeWord(node, 5) >= 0 && TreeWord(node, 1) == 0)
+        {
+            if (type < 1 || type > 4)
+            {
+                return FailTreeType(node);
+            }
+            if (!ResolveTreeLiteral(TreeWord(node, 4), type, false)
+                || !ResolveTreeLiteral(TreeWord(node, 5), type, false))
+            {
+                return false;
+            }
+            Host.Frontend[offset + 1] = type;
+            return true;
+        }
+        if ((operation == 57 || operation == 58 || operation == 63)
+            && TreeWord(node, 1) == 0)
+        {
+            if (operation == 58 && type != 1 && type != 3)
+            {
+                require SourceRange.TryCreate(TreeWord(node, 2), 1, out var sign);
+                FailAt(2, sign);
+                return false;
+            }
+            if (!ResolveTreeLiteral(TreeWord(node, 4), type,
+                operation == 58 && TreeWord(TreeWord(node, 4), 0) == 3))
+            {
+                return false;
+            }
+            Host.Frontend[offset + 1] = type;
+            return true;
+        }
+        if (TreeWord(node, 1) != type)
+        {
+            return FailTreeType(node);
+        }
+        return true;
+    }
+
+    private mut bool FailTreeType(int32 node)
+    {
+        require SourceRange.TryCreate(TreeWord(node, 2),
+            TreeWord(node, 3), out var span);
+        FailAt(2, span);
+        return false;
+    }
+
+    private mut bool ParseTreePrefix(int32 expected, int32 depth, out int32 node)
+    {
+        if (depth >= 16)
+        {
+            Fail(1);
+            return false;
+        }
+        require _tokens.TryGet(_at, out var token);
+        if (token.Kind == 46)
+        {
+            _at = _at + 1;
+            if (!ParseTreeExpression(expected, 1, depth + 1, out var inner)
+                || !Take(47, out var close))
+            {
+                return false;
+            }
+            return AddTreeNode(46, TreeWord(inner, 1), token.Range.Start,
+                close.Range.End, inner, -1, 0, 0, out node);
+        }
+        if (token.Kind == 57 || token.Kind == 58 || token.Kind == 62
+            || token.Kind == 63)
+        {
+            _at = _at + 1;
+            mut int32 operandExpected = expected;
+            if (token.Kind == 62) { operandExpected = 5; }
+            if (token.Kind != 62 && expected == 5)
+            {
+                operandExpected = 0;
+            }
+            if (token.Kind == 58
+                && _tokens.TryGet(_at, out var directlySigned)
+                && directlySigned.Kind == 3)
+            {
+                operandExpected = 0;
+            }
+            if (!ParseTreePrefix(operandExpected, depth + 1, out var operand))
+            {
+                return false;
+            }
+            mut int32 type = TreeWord(operand, 1);
+            if (type == 0 && expected != 0 && expected != 5)
+            {
+                if (!ResolveTreeLiteral(operand, expected,
+                    token.Kind == 58 && TreeWord(operand, 0) == 3))
+                {
+                    return false;
+                }
+                type = expected;
+            }
+            if ((token.Kind == 62 && type != 5)
+                || (token.Kind == 63 && type != 0 && (type < 1 || type > 4))
+                || ((token.Kind == 57 || token.Kind == 58)
+                    && type != 0 && (type < 1 || type > 4
+                        || (token.Kind == 58 && type != 1 && type != 3))))
+            {
+                FailAt(2, token.Range);
+                return false;
+            }
+            return AddTreeNode(token.Kind, type, token.Range.Start,
+                TreeWord(operand, 2) + TreeWord(operand, 3),
+                operand, -1, 0, 0, out node);
+        }
+        _at = _at + 1;
+        if (token.Kind == 2)
+        {
+            if (!TryResolveParameter(token, out var parameter, out var type))
+            {
+                return false;
+            }
+            return AddTreeNode(0, type, token.Range.Start, token.Range.End,
+                parameter, -1, 0, 0, out node);
+        }
+        if (token.Kind == 20 || token.Kind == 21)
+        {
+            return AddTreeNode(token.Kind, 5, token.Range.Start, token.Range.End,
+                -1, -1, 0, 0, out node);
+        }
+        if (token.Kind == 3)
+        {
+            mut int32 type = expected;
+            mut int32 low = 0;
+            mut int32 high = 0;
+            if (type != 0 && type != 5
+                && !TryReadMagnitude(token, _at - 1, type, false,
+                    token.Range, out low, out high))
+            {
+                return false;
+            }
+            if (type == 5) { type = 0; }
+            return AddTreeNode(3, type, token.Range.Start, token.Range.End,
+                -1, -1, low, high, out node);
+        }
+        FailAt(1, token.Range);
+        return false;
+    }
+
+    private mut bool ParseTreeExpression(int32 expected, int32 precedence,
+        int32 depth, out int32 node)
+    {
+        mut int32 left = 0;
+        if (!ParseTreePrefix(expected, depth, out left))
+        {
+            return false;
+        }
+        while (_tokens.TryGet(_at, out var operation)
+            && TreePrecedence(operation.Kind) >= precedence
+            && TreePrecedence(operation.Kind) != 0)
+        {
+            int32 rank = TreePrecedence(operation.Kind);
+            _at = _at + 1;
+            mut int32 leftType = TreeWord(left, 1);
+            mut int32 rightContext = leftType;
+            if (operation.Kind >= 65 && operation.Kind <= 70
+                && leftType == 0)
+            {
+                rightContext = 0;
+            }
+            if (!ParseTreeExpression(rightContext, rank + 1, depth + 1, out var right))
+            {
+                return false;
+            }
+            mut int32 rightType = TreeWord(right, 1);
+            if (leftType == 0 && rightType != 0
+                && !ResolveTreeLiteral(left, rightType, false))
+            {
+                return false;
+            }
+            if (rightType == 0 && leftType != 0
+                && !ResolveTreeLiteral(right, leftType, false))
+            {
+                return false;
+            }
+            if (leftType == 0) { leftType = TreeWord(left, 1); }
+            if (rightType == 0) { rightType = TreeWord(right, 1); }
+            if (leftType == 0 && rightType == 0)
+            {
+                mut int32 context = expected;
+                if (context == 5 || context == 0)
+                {
+                    if (operation.Kind >= 57 && operation.Kind <= 61)
+                    {
+                        context = 0;
+                    }
+                    else
+                    {
+                        context = 1;
+                    }
+                }
+                if (context != 0 && (!ResolveTreeLiteral(left, context, false)
+                    || !ResolveTreeLiteral(right, context, false)))
+                {
+                    return false;
+                }
+                leftType = context;
+                rightType = context;
+            }
+            bool comparison = operation.Kind >= 65 && operation.Kind <= 70;
+            bool logical = operation.Kind == 72 || operation.Kind == 74;
+            bool bitwise = operation.Kind == 71 || operation.Kind == 73
+                || operation.Kind == 75;
+            if (leftType != rightType
+                || (logical && leftType != 5)
+                || (comparison && leftType == 6 && operation.Kind >= 67)
+                || (comparison && leftType == 5 && operation.Kind >= 67)
+                || (bitwise && leftType == 6)
+                || (!logical && !bitwise && !comparison
+                    && leftType != 0 && (leftType < 1 || leftType > 4)))
+            {
+                FailAt(2, operation.Range);
+                return false;
+            }
+            mut int32 type = leftType;
+            if (comparison) { type = 5; }
+            if (!AddTreeNode(operation.Kind, type, TreeWord(left, 2),
+                TreeWord(right, 2) + TreeWord(right, 3),
+                left, right, 0, 0, out var binary))
+            {
+                return false;
+            }
+            left = binary;
+        }
+        node = left;
+        return true;
+    }
+
+    private mut bool ParseTreeReturn(int32 type, out int32 root)
+    {
+        if (!Take(19, out var keyword)
+            || !ParseTreeExpression(type, 1, 0, out var expression))
+        {
+            return false;
+        }
+        if (!ResolveTreeLiteral(expression, type, false))
+        {
+            require SourceRange.TryCreate(TreeWord(expression, 2),
+                TreeWord(expression, 3), out var span);
+            FailAt(2, span);
+            return false;
+        }
+        if (!Take(52, out var semicolon))
+        {
+            return false;
+        }
+        root = expression;
+        return true;
+    }
+
+    public mut bool TryParseTree(out ScalarFrontendResult result)
+    {
+        require SourceRange.TryCreate(0, 0, out var empty);
+        require ScalarFrontendExpression.TryCreate(0, 0, 0, 0, empty, out var absent);
+        mut SourceRange name = empty;
+        mut int32 returnType = 0;
+        mut bool hasCondition = false;
+        mut bool hasFallthrough = false;
+        mut int32 condition = -1;
+        mut int32 whenTrue = -1;
+        mut int32 whenFalse = -1;
+        mut bool expressionBody = false;
+        if (ParseHeader(out var selected, out var foundName))
+        {
+            returnType = selected;
+            name = foundName;
+            require _tokens.TryGet(_at, out var body);
+            if (body.Kind == 82)
+            {
+                expressionBody = true;
+                _at = _at + 1;
+                if (ParseTreeExpression(returnType, 1, 0, out var root))
+                {
+                    if (!ResolveTreeLiteral(root, returnType, false))
+                    {
+                        require SourceRange.TryCreate(TreeWord(root, 2),
+                            TreeWord(root, 3), out var mismatch);
+                        FailAt(2, mismatch);
+                    }
+                    whenTrue = root;
+                }
+                if (_error == 0) { Take(52, out var semicolon); }
+            }
+            else if (Take(48, out var openBody))
+            {
+                require _tokens.TryGet(_at, out var next);
+                if (next.Kind == 16)
+                {
+                    hasCondition = true;
+                    _at = _at + 1;
+                    if (Take(46, out var openCondition)
+                        && ParseTreeExpression(5, 1, 0, out var predicate))
+                    {
+                        if (TreeWord(predicate, 1) != 5)
+                        {
+                            require SourceRange.TryCreate(TreeWord(predicate, 2),
+                                TreeWord(predicate, 3), out var mismatch);
+                            FailAt(2, mismatch);
+                        }
+                        condition = predicate;
+                    }
+                    if (_error == 0 && Take(47, out var closeCondition)
+                        && Take(48, out var openTrue)
+                        && ParseTreeReturn(returnType, out var first)
+                        && Take(49, out var closeTrue))
+                    {
+                        whenTrue = first;
+                        require _tokens.TryGet(_at, out var following);
+                        if (following.Kind == 17)
+                        {
+                            _at = _at + 1;
+                            if (Take(48, out var openFalse)
+                                && ParseTreeReturn(returnType, out var second)
+                                && Take(49, out var closeFalse))
+                            {
+                                whenFalse = second;
+                            }
+                        }
+                        else if (ParseTreeReturn(returnType, out var trailing))
+                        {
+                            whenFalse = trailing;
+                            hasFallthrough = true;
+                        }
+                    }
+                }
+                else if (ParseTreeReturn(returnType, out var found))
+                {
+                    whenTrue = found;
+                }
+                if (_error == 0) { Take(49, out var closeBody); }
+            }
+            if (_error == 0 && Take(0, out var eof)
+                && _at != _tokens.GetCount())
+            {
+                Fail(1);
+            }
+        }
+        if (_error != 0)
+        {
+            for (mut int32 index = 37; index < Host.Frontend.Length; index = index + 1)
+            {
+                Host.Frontend[index] = 0;
+            }
+            return ScalarFrontendResult.TryCreate(false, false, _error, _errorSpan,
+                0, 0, 0, 0, 0, empty, empty, empty, empty,
+                false, false, absent, absent, absent, out result);
+        }
+        Host.Frontend[38] = condition;
+        Host.Frontend[39] = whenTrue;
+        Host.Frontend[40] = whenFalse;
+        if (expressionBody) { Host.Frontend[41] = 1; }
+        return ScalarFrontendResult.TryCreate(true, _isPublic, 0, empty,
+            returnType, _parameterCount, _firstType, _secondType, _thirdType,
+            name, _first.Range, _second.Range, _third.Range,
+            hasCondition, hasFallthrough, absent, absent, absent, out result);
     }
 
     public mut bool TryParse(out ScalarFrontendResult result)
@@ -1425,7 +1862,8 @@ mut class ScalarFrontendState
         {
             Fail(1);
         }
-        else if (ParseHeader(out var selectedReturnType, out var foundName))
+        else if (ParseHeader(out var selectedReturnType, out var foundName)
+            && Take(48, out var openBody))
         {
             returnType = selectedReturnType;
             name = foundName;
@@ -1524,7 +1962,36 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     {
         return false;
     }
-    return state.TryParse(out result);
+    if (!state.TryParse(out var legacy))
+    {
+        return false;
+    }
+    if (legacy.IsValid)
+    {
+        result = legacy;
+        return true;
+    }
+    if (!ScalarFrontendState.TryCreate(chain, empty, out var tree)
+        || !tree.TryParseTree(out var modern))
+    {
+        return false;
+    }
+    if (modern.IsValid)
+    {
+        result = modern;
+        return true;
+    }
+    for (mut int32 index = 0; index < count; index = index + 1)
+    {
+        require chain.TryGet(index, out var token);
+        if (token.Kind == 82)
+        {
+            result = modern;
+            return true;
+        }
+    }
+    result = legacy;
+    return true;
 }
 
 bool TryScanScalarFrontend(out ScalarFrontendResult result)

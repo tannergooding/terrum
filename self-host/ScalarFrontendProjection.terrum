@@ -1,5 +1,9 @@
 namespace Terrum.CodeAnalysis;
 
+// Version 20 retains the 37-word header. Words 37..41 hold node count,
+// condition/true/false roots (-1 when absent), and expression-body flag.
+// Each of 32 postorder nodes uses eight words: opcode, type, span start/length,
+// child/parameter, right child, and contextual magnitude low/high.
 void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expression)
 {
     Host.Frontend[offset] = expression.Type;
@@ -12,7 +16,7 @@ void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expres
 
 bool TryPublishScalarFrontend()
 {
-    if (Host.Frontend.Length != 37 || !TryScanScalarFrontend(out var result))
+    if (Host.Frontend.Length != 298 || !TryScanScalarFrontend(out var result))
     {
         return false;
     }
@@ -28,6 +32,31 @@ bool TryPublishScalarFrontend()
     }
 
     Host.Frontend[5] = result.ReturnType;
+    if (Host.Frontend[37] != 0)
+    {
+        Host.Frontend[0] = 20;
+        Host.Frontend[15] = 0;
+        if (result.HasCondition)
+        {
+            Host.Frontend[15] = 1;
+            if (result.HasFallthrough) { Host.Frontend[15] = 2; }
+        }
+        if (result.IsPublic) { Host.Frontend[2] = 1; }
+        Host.Frontend[6] = result.ParameterCount;
+        Host.Frontend[7] = result.FirstType;
+        Host.Frontend[8] = result.SecondType;
+        Host.Frontend[9] = result.Name.Start;
+        Host.Frontend[10] = result.Name.Length;
+        Host.Frontend[11] = result.FirstName.Start;
+        Host.Frontend[12] = result.FirstName.Length;
+        Host.Frontend[13] = result.SecondName.Start;
+        Host.Frontend[14] = result.SecondName.Length;
+        Host.Frontend[34] = result.ThirdType;
+        Host.Frontend[35] = result.ThirdName.Start;
+        Host.Frontend[36] = result.ThirdName.Length;
+        Host.Frontend[1] = 1;
+        return true;
+    }
     if (result.IsPublic)
     {
         Host.Frontend[2] = 1;

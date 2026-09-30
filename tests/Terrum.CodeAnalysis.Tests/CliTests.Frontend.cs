@@ -39,6 +39,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return -(~(41 + 0)); }", 42)]
     [InlineData("int32 Main() { return ~(~(40 + 2)); }", 42)]
     [InlineData("int32 Main() { if (true || false) { return 42; } return 0; }", 42)]
+    [InlineData("int32 Main() { if (false && (true || false)) { return 0; } return 6 * (3 + 4); }", 42)]
     [InlineData("int32 Main() { if (true == true) { return 42; } return 0; }", 42)]
     public async Task FrontendRunMatchesHostedJitAsync(string source, int expected)
     {
@@ -156,6 +157,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { return ~(+(0xFFFFFFD5 + 0)); }")]
     [InlineData("int32 Main() { return -(~(41 + 0)); }")]
     [InlineData("int32 Main() { return ~(~(40 + 2)); }")]
+    [InlineData("int32 Main() => 6 * (3 + 4);")]
     public async Task FrontendBuiltExecutableMatchesHostedAndRunsAsync(string source)
     {
         var directory = Path.Combine(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

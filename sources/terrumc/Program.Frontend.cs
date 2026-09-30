@@ -231,6 +231,28 @@ internal static partial class Program
                         WriteFrontendExpression(writer, "whenFalse", frontend.WhenFalse);
                     }
                     WriteFrontendExpression(writer, "whenTrue", frontend.WhenTrue);
+                    if (!frontend.Nodes.IsDefault)
+                    {
+                        writer.WriteNumber("projectionVersion", 20);
+                        writer.WriteBoolean("expressionBody", frontend.IsExpressionBody);
+                        writer.WriteNumber("conditionRoot", frontend.ConditionRoot);
+                        writer.WriteNumber("trueRoot", frontend.TrueRoot);
+                        writer.WriteNumber("falseRoot", frontend.FalseRoot);
+                        writer.WriteStartArray("nodes");
+                        foreach (var node in frontend.Nodes)
+                        {
+                            writer.WriteStartObject();
+                            writer.WriteNumber("operation", node.Operation);
+                            writer.WriteNumber("type", node.Type);
+                            WriteFrontendSpan(writer, "span", node.Span);
+                            writer.WriteNumber("left", node.Left);
+                            writer.WriteNumber("right", node.Right);
+                            writer.WriteNumber("low", node.Low);
+                            writer.WriteNumber("high", node.High);
+                            writer.WriteEndObject();
+                        }
+                        writer.WriteEndArray();
+                    }
                 }
                 writer.WriteEndObject();
             }
