@@ -655,6 +655,82 @@ public sealed partial class CliTests
     }
 
     [Fact]
+    public async Task ValidateTrRmCompactIndexedChecksPersistedChar16RangeConvertAsync()
+    {
+        var module = new byte[44];
+        foreach (var offset in new[] { 0, 4, 28, 32, 36, 40 })
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
+        }
+
+        var strings = TrRmStringTableWriter.EncodeNames([("Module", 0), ("Convert", 0)]);
+        byte[] typeSpec =
+        [
+            0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0,
+            1, 0, 3, 1, 0, 8,
+        ];
+        var signature = new byte[24];
+        BinaryPrimitives.WriteUInt32LittleEndian(signature, 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(signature.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(signature.AsSpan(12), 1);
+        var parameter = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(parameter, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(parameter.AsSpan(8), 1);
+        var method = new byte[28];
+        BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(4), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(12), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(method.AsSpan(24), 1);
+
+        byte[] Artifact(byte[] operation, byte sourceType, byte resultType)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(signature, resultType);
+            BinaryPrimitives.WriteUInt32LittleEndian(parameter.AsSpan(8), sourceType);
+            var body = TrRmBodyExampleTests.IndexedScalarOperation(
+                operation, [sourceType], resultType);
+            return TrRmArtifactWriter.Encode([
+                new TrRmSection(0x0001, 0, 1, module),
+                new TrRmSection(0x0002, 0, 2, strings),
+                new TrRmSection(0x0011, 0, 2, typeSpec),
+                new TrRmSection(0x0016, 0, 1, method),
+                new TrRmSection(0x0017, 0, 1, signature),
+                new TrRmSection(0x0018, 0, 1, parameter),
+                new TrRmSection(0x0020, 0, 1, body),
+            ]);
+        }
+
+        var path = Path.Combine(AppContext.BaseDirectory,
+            $"terrum-trrm-char16-convert-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            foreach (var (source, destination) in new[] { ((byte)1, (byte)2),
+                ((byte)2, (byte)1) })
+            {
+                await File.WriteAllBytesAsync(path, Artifact(
+                    [0x16, 2, destination, 1], source, destination));
+                foreach (var command in new[] { "validate-trrm-structure",
+                    "validate-trrm-compact-indexed", "validate-trrm-compact" })
+                {
+                    var (valid, output, error) = await RunAsync([], command, path, "--json");
+                    Assert.True(valid == 0, output + error);
+                }
+            }
+
+            await File.WriteAllBytesAsync(path, Artifact([6, 2, 2, 1, 1], 1, 2));
+            var (structural, _, _) = await RunAsync([],
+                "validate-trrm-structure", path, "--json");
+            Assert.Equal(0, structural);
+            var (invalid, _, _) = await RunAsync([],
+                "validate-trrm-compact-indexed", path, "--json");
+            Assert.Equal(1, invalid);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task ValidateTrRmCompactIndexedChecksPackedCallDefIdsAsync()
     {
         var modules = new byte[88];

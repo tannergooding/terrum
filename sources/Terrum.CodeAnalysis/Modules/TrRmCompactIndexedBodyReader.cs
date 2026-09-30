@@ -558,7 +558,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     Use(source, ordinal);
                     if (typeId == 0 || typeId > typeCount
                         || mappedTypes[typeId] != valueTypes[result]
-                        || !IsInteger(valueTypes[source]) || !IsInteger(valueTypes[result]))
+                        || valueTypes[source] != 3 && !IsInteger(valueTypes[source])
+                        || valueTypes[result] != 3 && !IsInteger(valueTypes[result]))
                     {
                         throw InvalidBody();
                     }

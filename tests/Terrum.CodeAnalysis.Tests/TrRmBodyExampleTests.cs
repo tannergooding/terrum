@@ -806,6 +806,30 @@ public sealed class TrRmBodyExampleTests
                 parameterTypeIds: parameters, thirdTypeOptional: true));
 
     [Theory]
+    [InlineData((byte)3, (byte)8)]
+    [InlineData((byte)3, (byte)0x0E)]
+    [InlineData((byte)8, (byte)3)]
+    [InlineData((byte)0x0D, (byte)3)]
+    [InlineData((byte)9, (byte)3)]
+    public void CompactIndexedReaderChecksChar16RangeConvert(byte source, byte destination)
+    {
+        var section = IndexedScalarOperation([0x16, 2, 3, 1], [2], 3);
+        Assert.Equal((1, 2), InspectIndexed(section, parameterCount: 1,
+            secondTypeCode: source, thirdTypeCode: destination,
+            resultTypeSpec: 3, parameterTypeIds: [2]));
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0x16, 2, 3, 1 }, new byte[] { 2 }, (byte)3)]
+    [InlineData(new byte[] { 0x16, 2, 2, 1 }, new byte[] { 3 }, (byte)2)]
+    public void CompactIndexedReaderRejectsOptionalChar16RangeConvert(
+        byte[] operation, byte[] parameters, byte resultType)
+        => Assert.Throws<InvalidDataException>(() =>
+            InspectIndexed(IndexedScalarOperation(operation, parameters, resultType),
+                parameters.Length, secondTypeCode: 3, resultTypeSpec: resultType,
+                parameterTypeIds: parameters, thirdTypeOptional: true));
+
+    [Theory]
     [InlineData(new byte[] { 1, 1, 3, 42 }, new byte[] { }, (byte)3, false)]
     [InlineData(new byte[] { 0xF0, 0x10, 1, 1, 3, 0xFF, 0xFF },
         new byte[] { }, (byte)3, false)]

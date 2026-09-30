@@ -1265,7 +1265,7 @@ each with a declared exit and reachable backedge;
 scalar `ConstBits`,
 `ConstSigned`, `Copy`, scalar `Unary`, `Binary`, integer `Convert`
 (wrapping, saturating and equal-width bit reinterpretation), eager `Select`,
-checked integer arithmetic/shifts, integer `CheckedConvert`, signed `CheckedNegate`,
+checked integer arithmetic/shifts, integer/`char16` `CheckedConvert`, signed `CheckedNegate`,
 dual-result `CheckedDivRem`, static `Call` to global or type-owned local or
 retained imported MethodDefs with scalar/optional parameters and result
 (including void), `Switch`, `Return` and `Fail`. The bounded call inspection
@@ -1282,7 +1282,8 @@ Optional scalar values retain their presence-qualified identity through
 interchangeable with the underlying scalar in operations or signatures.
 `char16` and optional `char16` retain their code-unit identity; only canonical
 `ConstBits`, `Copy`, equality, `Select` and optional presence operations apply,
-not integer arithmetic, ordering or conversions.
+plus checked range conversion between non-optional `char16` and integer values,
+not integer arithmetic, ordering or policy `Convert`.
 The indexed reader also accepts valid `F0` reference/data widths on those
 operations and reference/count widths on supported `Branch`, `BranchIf`,
 `Switch` and `Return` terminators and supported `Call` operations; `Switch`
