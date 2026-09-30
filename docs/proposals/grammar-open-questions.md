@@ -127,6 +127,21 @@ This attachment restriction deviates from C#'s trivia-insensitive member
 access and prefix dereference; it does not make arbitrary punctuation runs
 valid or select pointer-expression syntax by itself.
 
+**Call/index attachment question (awaiting review):** Should postfix call
+and index opening delimiters attach directly to their receiver?
+**Recommendation:** Require `f(x)`, `int32(value)`, `items[i]` and
+`items?[i]`; reject `f (x)` and `items [i]`. Attachment also excludes
+comments or line breaks between the receiver and opening delimiter.
+For generic calls, the receiver ends at the type-argument closing delimiter,
+as in `f<T>(x)`; parenthesized receivers can attach at their closing
+parenthesis. This treats calls/indexing as receiver-attached access rather
+than freely spaced structural punctuation. Grouping and control-flow
+parentheses have no receiver: `(x + y)` and `if (ready)` remain valid,
+subject to independent operator rules inside them.
+**C# model:** Call/index syntax is C#-inspired, but this attachment
+restriction deliberately deviates from C#'s trivia-insensitive delimiters.
+This recommendation has not been accepted.
+
 **Comment-fence question:** Should a block comment select its closing fence
 from the opening star count, analogously to the selected delimiter length of
 raw text? Candidate `/*** **/ ***/` would contain `**/` as payload and end at
