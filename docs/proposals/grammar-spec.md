@@ -874,7 +874,7 @@ and `is some name` have equality precedence. The table is highest first:
 | Level | Syntax | Associativity |
 |---:|---|---|
 | 14 | postfix call, member access, index, `?.`, `?[]`, `++`, `--` | left |
-| 13 | prefix `+ - ! ~ move ++ -- await` | prefix/right-nesting |
+| 13 | prefix `+ - ! ~ move ++ -- await`; contextual index-bound `^` | prefix/right-nesting |
 | 12 | `* / %` | left |
 | 11 | `+ -` | left |
 | 10 | `<< >> >>>` | left |
@@ -917,8 +917,10 @@ PostfixPart     = ".", Identifier, [ TypeArguments ]
                 | "?.", Identifier, [ TypeArguments ]
                 | "?[", IndexArgument, { ",", IndexArgument }, "]"
                 | "++" | "--" ;
-IndexArgument   = Expression | SliceRange ;
-SliceRange      = [ Expression ], "..", [ Expression ] ;
+IndexArgument   = IndexBound | SliceRange ;
+IndexBound      = Expression | FromEndBound | "(", IndexBound, ")" ;
+FromEndBound    = "^", Operand ;
+SliceRange      = [ IndexBound ], "..", [ IndexBound ] ;
 Primary         = "(", [ Expression ], ")" | TupleExpression
                 | SwitchExpression | CollectionExpression
                 | "new", Type, Arguments,
@@ -1009,6 +1011,19 @@ text into unchecked raw units. Syntax does not grant heterogeneous tuple
 slicing, tensor rank changes or arbitrary indexer range support without
 their own eligible contracts. First-class range values remain separate work.
 
+An index or slice bound may use contextual prefix `^offset` for an
+end-relative position. It has ordinary prefix binding; use `^(offset + 1)`
+for a computed offset. Infix `^` retains bitwise XOR meaning. Standard
+zero-based sequences check `0 <= offset <= length` before computing
+`length - offset`, without unsigned wrapping. `^1` selects the last element;
+`^0` denotes the end boundary and is legal as a slice endpoint, not an
+element access. Element accesses must still resolve below length.
+The offset evaluates once and is skipped by null optional indexing.
+Separate adjacent range/from-end punctuation with trivia, as in
+`items[start.. ^1]`, under the ordinary punctuation-run rule.
+This contextual bound syntax does not infer a universal first-class `Index`
+type or authorize unrelated unary `^` overloads.
+
 Prefix/postfix `++` and `--` initially apply to writable `Copy` places.
 The place evaluates once, a checked operator produces its replacement,
 and prefix returns the new value while postfix returns the saved old one.
@@ -1024,6 +1039,8 @@ compile-time constant, zero-based in-range index, producing that element's
 exact type. Named elements use their declared names without synthesized
 `Item1` aliases. An arbitrary runtime index cannot pick a heterogeneous
 result type from this rule.
+End-relative tuple element access likewise requires a compile-time constant
+offset resolving to one valid position; `^0` is not an element.
 
 Lambdas require an explicit or contextual callable contract. An explicitly
 typed parameter list does not make `var f = (int32 x) => x + 1` infer a
@@ -2004,7 +2021,7 @@ appears in §2.
 | Arguments | §§3.2 and 5.1 give labels, source-order evaluation and position-preserving named/positional mixtures. | Complete passing-mode/place and overload contracts. |
 | Statements | §3.3 gives blocks, transfers, standalone discard and `yield expression;` / producer `return;`; §§3.1 and 5.12 give the `[Iterator]` marker; §3.4 permits await expressions in async bodies. | Statement-place checks and producer protocol/lifetime contracts. |
 | Iteration | §3.3 gives by-value and `ref`/`mut ref` iteration, including `await for` and structured close; §5.12 gives producer unwind and names `do`. | Iterator loan/backing, protocol identities, cancellation integration and post-test loop production. |
-| Expressions | §3.4 gives conditional/coalescing/optional access, half-open slicing, tuples, target-directed static/async lambdas, await and collection spreads. | Slice/first-class range protocols, callable capture/representation, awaiter registration and collection-fragment contracts; comprehensions/repetition deferred for library/tensor design. |
+| Expressions | §3.4 gives conditional/coalescing/optional access, half-open slicing, end-relative bounds, tuples, target-directed static/async lambdas, await and collection spreads. | Slice/first-class index/range protocols, callable capture/representation, awaiter registration and collection-fragment contracts; comprehensions/repetition deferred for library/tensor design. |
 | Patterns | §3.3 gives shared switch arms, guarded matching, compatible `or` bindings and explicit constant/wildcard transfers. | Full nominal-case, relational and destructuring patterns. |
 | Policies | §§3.3–3.4 and 5.12 describe lexical preferences, strict selection and constant-formal forwarding. | Variant-declaration syntax and compile-time queries. |
 | Contracts | §§3.3 and 5.8 describe `require` and `ensure` direction. | Declaration clauses and correlated output facts. |
