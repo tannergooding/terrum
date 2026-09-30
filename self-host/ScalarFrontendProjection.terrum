@@ -38,6 +38,14 @@ namespace Terrum.CodeAnalysis;
 // Version 50 selects declarations inside existing braced branches/loops.
 // Slots remain monotonic across scopes; the eight-local limit counts all
 // declaration identities, not only simultaneously visible names.
+// Version 51 selects kind-11 post-tested do and kind-12 for headers. Both
+// slots end the body, with a Boolean root (for may use -1 for an omitted
+// condition). For has exactly two following clause records before the body:
+// initializer and iterator, each a normal statement without a semicolon or
+// kind-13 empty marker anchored to its delimiter. Do's trailing condition
+// root belongs to the header after the body, not to the body lexical scope.
+// Header roots remain -1 without return records when verified non-fallthrough;
+// an omitted-condition infinite for may need no expression nodes at all.
 void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expression)
 {
     Host.Frontend[offset] = expression.Type;
@@ -66,7 +74,7 @@ bool TryPublishScalarFrontend()
     }
 
     Host.Frontend[5] = result.ReturnType;
-    if (Host.Frontend[37] != 0)
+    if (Host.Frontend[37] != 0 || Host.Frontend[298] != 0)
     {
         Host.Frontend[0] = 20;
         if (Host.Frontend[298] != 0) { Host.Frontend[0] = 21; }
@@ -169,6 +177,15 @@ bool TryPublishScalarFrontend()
                     Host.Frontend[0] = 50;
                     break;
                 }
+            }
+        }
+        for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
+        {
+            int32 kind = Host.Frontend[332 + statement * 5];
+            if (kind == 11 || kind == 12)
+            {
+                Host.Frontend[0] = 51;
+                break;
             }
         }
         Host.Frontend[15] = 0;

@@ -1495,6 +1495,17 @@ mut class ScalarFrontendState
 
     private mut bool ParseTreeStatement()
     {
+        return ParseTreeClauseStatement(true);
+    }
+
+    private int32 TreeStatementEnd()
+    {
+        require _tokens.TryGet(_at - 1, out var last);
+        return last.Range.End;
+    }
+
+    private mut bool ParseTreeClauseStatement(bool semicolon)
+    {
         require _tokens.TryGet(_at, out var first);
         if (first.Kind == 2
             && _tokens.TryGet(_at + 1, out var equals)
@@ -1515,7 +1526,7 @@ mut class ScalarFrontendState
             if (equals.Kind >= 99) { rightType = 1; }
             if (!ParseTreeExpression(rightType, 1, 0, out var value)
                 || !ResolveTreeLiteral(value, rightType, false)
-                || !Take(52, out var end))
+                || semicolon && !Take(52, out var end))
             {
                 return false;
             }
@@ -1534,9 +1545,9 @@ mut class ScalarFrontendState
                 {
                     return false;
                 }
-                return AddTreeStatement(9, slot, compound, first.Range.Start, end.Range.End);
+                return AddTreeStatement(9, slot, compound, first.Range.Start, TreeStatementEnd());
             }
-            return AddTreeStatement(2, slot, value, first.Range.Start, end.Range.End);
+            return AddTreeStatement(2, slot, value, first.Range.Start, TreeStatementEnd());
         }
         if (first.Kind == 46 || first.Kind == 86 || first.Kind == 87
             || first.Kind == 2 && _tokens.TryGet(_at + 1, out var postfix)
@@ -1558,7 +1569,7 @@ mut class ScalarFrontendState
                 _at = _at + 1;
                 if (!ParseTreeExpression(rightType, 1, 0, out var value)
                     || !ResolveTreeLiteral(value, rightType, false)
-                    || !Take(52, out var end))
+                    || semicolon && !Take(52, out var end))
                 {
                     return false;
                 }
@@ -1569,15 +1580,15 @@ mut class ScalarFrontendState
                     return false;
                 }
                 int32 slot = TreeWord(UngroupTree(update), 4);
-                return AddTreeStatement(9, slot, root, first.Range.Start, end.Range.End);
+                return AddTreeStatement(9, slot, root, first.Range.Start, TreeStatementEnd());
             }
             int32 operation = TreeWord(update, 0);
             if ((operation != 86 && operation != 87)
-                || !Take(52, out var endUpdate))
+                || semicolon && !Take(52, out var endUpdate))
             {
                 return false;
             }
-            return AddTreeStatement(10, 0, update, first.Range.Start, endUpdate.Range.End);
+            return AddTreeStatement(10, 0, update, first.Range.Start, TreeStatementEnd());
         }
 
         mut bool mutable = false;
@@ -1646,7 +1657,7 @@ mut class ScalarFrontendState
             return FailTreeType(initializer);
         }
         if (!ResolveTreeLiteral(initializer, type, false)
-            || !Take(52, out var endDeclaration))
+            || semicolon && !Take(52, out var endDeclaration))
         {
             return false;
         }
@@ -1665,7 +1676,24 @@ mut class ScalarFrontendState
         _activeLocals = _activeLocals | bit;
         Host.Frontend[299] = _localCount;
         return AddTreeStatement(1, _parameterCount + index + 1, initializer,
-            first.Range.Start, endDeclaration.Range.End);
+            first.Range.Start, TreeStatementEnd());
+    }
+
+    private mut bool ParseTreeForClause(bool initializer)
+    {
+        require _tokens.TryGet(_at, out var first);
+        if (first.Kind == 52 || first.Kind == 47)
+        {
+            return AddTreeStatement(13, 0, -1, first.Range.Start, first.Range.End);
+        }
+        if (!initializer && (first.Kind == 12 || first.Kind == 13
+            || first.Kind == 2 && _tokens.TryGet(_at + 1, out var following)
+                && following.Kind == 2))
+        {
+            FailAt(1, first.Range);
+            return false;
+        }
+        return ParseTreeClauseStatement(false);
     }
 
     private mut bool ParseTreeStructuredBody(int32 depth, int32 nearestLoop)
@@ -1677,6 +1705,14 @@ mut class ScalarFrontendState
             if (next.Kind == 18)
             {
                 if (!ParseTreeWhile(depth)) { return false; }
+            }
+            else if (next.Kind == 83)
+            {
+                if (!ParseTreeDo(depth)) { return false; }
+            }
+            else if (next.Kind == 31)
+            {
+                if (!ParseTreeFor(depth)) { return false; }
             }
             else if (next.Kind == 16)
             {
@@ -1747,15 +1783,24 @@ mut class ScalarFrontendState
             int32 header = cursor;
             int32 kind = Host.Frontend[332 + cursor * 5];
             mut bool returns = kind == 8 || kind == 6 || kind == 7;
-            if (kind == 3 || kind == 4)
+            if (kind == 3 || kind == 4 || kind == 11 || kind == 12)
             {
                 int32 armEnd = Host.Frontend[332 + cursor * 5 + 1];
-                bool whenTrue = TreeBodyReturns(cursor + 1, armEnd);
+                int32 bodyStart = kind == 12 ? cursor + 3 : cursor + 1;
+                bool whenTrue = TreeBodyReturns(bodyStart, armEnd);
                 cursor = armEnd;
-                if (kind == 3)
+                if (kind == 3 || kind == 11 || kind == 12)
                 {
-                    int32 condition = TreeLiteralBoolean(Host.Frontend[332 + header * 5 + 2]);
-                    returns = condition == 1 && !TreeBodyHasBreak(header + 1, armEnd, header);
+                    int32 conditionRoot = Host.Frontend[332 + header * 5 + 2];
+                    mut int32 condition = 1;
+                    if (conditionRoot != -1)
+                    {
+                        condition = TreeLiteralBoolean(conditionRoot);
+                    }
+                    returns = (kind == 11 && whenTrue
+                            && !TreeBodyHasTransfer(bodyStart, armEnd, header, 7)
+                        || condition == 1)
+                        && !TreeBodyHasTransfer(bodyStart, armEnd, header, 6);
                 }
                 else
                 {
@@ -1823,19 +1868,19 @@ mut class ScalarFrontendState
         return -1;
     }
 
-    private bool TreeBodyHasBreak(int32 start, int32 end, int32 loop)
+    private bool TreeBodyHasTransfer(int32 start, int32 end, int32 loop, int32 transfer)
     {
         mut int32 cursor = start;
         while (cursor < end)
         {
             int32 header = cursor;
             int32 kind = Host.Frontend[332 + cursor * 5];
-            if (kind == 6 && Host.Frontend[332 + cursor * 5 + 1] == loop)
+            if (kind == transfer && Host.Frontend[332 + cursor * 5 + 1] == loop)
             {
                 return true;
             }
             if (kind == 8 || kind == 7) { return false; }
-            if (kind == 3)
+            if (kind == 3 || kind == 11 || kind == 12)
             {
                 cursor = Host.Frontend[332 + cursor * 5 + 1];
             }
@@ -1843,7 +1888,8 @@ mut class ScalarFrontendState
             {
                 int32 condition = TreeLiteralBoolean(Host.Frontend[332 + cursor * 5 + 2]);
                 int32 armEnd = Host.Frontend[332 + cursor * 5 + 1];
-                if (condition != 0 && TreeBodyHasBreak(cursor + 1, armEnd, loop))
+                if (condition != 0
+                    && TreeBodyHasTransfer(cursor + 1, armEnd, loop, transfer))
                 {
                     return true;
                 }
@@ -1851,7 +1897,8 @@ mut class ScalarFrontendState
                 if (cursor < end && Host.Frontend[332 + cursor * 5] == 5)
                 {
                     int32 elseEnd = Host.Frontend[332 + cursor * 5 + 1];
-                    if (condition != 1 && TreeBodyHasBreak(cursor + 1, elseEnd, loop))
+                    if (condition != 1
+                        && TreeBodyHasTransfer(cursor + 1, elseEnd, loop, transfer))
                     {
                         return true;
                     }
@@ -1879,13 +1926,19 @@ mut class ScalarFrontendState
             returnType = selected;
             name = foundName;
             _structuredReturnType = returnType;
-            if (ParseTreeStructuredBody(0, -1)
-                && Take(49, out var closeBody)
-                && Take(0, out var eof) && _at != _tokens.GetCount())
+            if (!ParseTreeStructuredBody(0, -1)
+                || !Take(49, out var closeBody)
+                || !Take(0, out var eof) || _at != _tokens.GetCount())
             {
-                Fail(1);
+                if (_error == 0) { Fail(1); }
             }
-            if (_error == 0 && (_structuredReturnCount == 0
+            mut bool hasDoFor = false;
+            for (mut int32 index = 0; index < _statementCount; index = index + 1)
+            {
+                int32 kind = Host.Frontend[332 + index * 5];
+                if (kind == 11 || kind == 12) { hasDoFor = true; }
+            }
+            if (_error == 0 && (_structuredReturnCount == 0 && !hasDoFor
                 || !TreeBodyReturns(0, _statementCount)))
             {
                 Fail(1);
@@ -1993,6 +2046,89 @@ mut class ScalarFrontendState
             return false;
         }
         if (!ParseTreeStructuredBody(depth + 1, header) || !Take(49, out var end))
+        {
+            return false;
+        }
+        _activeLocals = enclosingLocals;
+        Host.Frontend[332 + header * 5 + 1] = _statementCount;
+        Host.Frontend[332 + header * 5 + 4] = end.Range.End - keyword.Range.Start;
+        return true;
+    }
+
+    private mut bool ParseTreeDo(int32 depth)
+    {
+        if (depth >= 6 || _statementCount >= 12)
+        {
+            Fail(1);
+            return false;
+        }
+        if (!Take(83, out var keyword) || !Take(48, out var body))
+        {
+            return false;
+        }
+        int32 header = _statementCount;
+        int32 enclosingLocals = _activeLocals;
+        if (!AddTreeStatement(11, 0, -1, keyword.Range.Start, body.Range.End)
+            || !ParseTreeStructuredBody(depth + 1, header)
+            || !Take(49, out var closeBody))
+        {
+            return false;
+        }
+        _activeLocals = enclosingLocals;
+        Host.Frontend[332 + header * 5 + 1] = _statementCount;
+        if (!Take(18, out var keywordWhile) || !Take(46, out var open)
+            || !ParseTreeExpression(5, 1, 0, out var condition))
+        {
+            return false;
+        }
+        if (TreeWord(condition, 1) != 5)
+        {
+            return FailTreeType(condition);
+        }
+        if (!Take(47, out var close) || !Take(52, out var semicolon))
+        {
+            return false;
+        }
+        Host.Frontend[332 + header * 5 + 2] = condition;
+        Host.Frontend[332 + header * 5 + 4] = semicolon.Range.End - keyword.Range.Start;
+        return true;
+    }
+
+    private mut bool ParseTreeFor(int32 depth)
+    {
+        if (depth >= 6 || _statementCount + 3 > 12)
+        {
+            Fail(1);
+            return false;
+        }
+        if (!Take(31, out var keyword) || !Take(46, out var open))
+        {
+            return false;
+        }
+        int32 header = _statementCount;
+        int32 enclosingLocals = _activeLocals;
+        if (!AddTreeStatement(12, 0, -1, keyword.Range.Start, open.Range.End)
+            || !ParseTreeForClause(true) || !Take(52, out var firstEnd))
+        {
+            return false;
+        }
+        require _tokens.TryGet(_at, out var next);
+        if (next.Kind != 52)
+        {
+            if (!ParseTreeExpression(5, 1, 0, out var condition))
+            {
+                return false;
+            }
+            if (TreeWord(condition, 1) != 5)
+            {
+                return FailTreeType(condition);
+            }
+            Host.Frontend[332 + header * 5 + 2] = condition;
+        }
+        if (!Take(52, out var secondEnd) || !ParseTreeForClause(false)
+            || !Take(47, out var close) || !Take(48, out var body)
+            || !ParseTreeStructuredBody(depth + 1, header)
+            || !Take(49, out var end))
         {
             return false;
         }

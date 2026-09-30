@@ -287,6 +287,10 @@ internal static partial class Program
                                 }
                             }
                         }
+                        if (frontend.Statements.Any(static statement => statement.Kind is 11 or 12))
+                        {
+                            projectionVersion = 51;
+                        }
                         writer.WriteNumber("projectionVersion", projectionVersion);
                         writer.WriteBoolean("expressionBody", frontend.IsExpressionBody);
                         writer.WriteNumber("conditionRoot", frontend.ConditionRoot);
