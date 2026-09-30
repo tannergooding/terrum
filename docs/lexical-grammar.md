@@ -123,8 +123,20 @@ directly to the contextual target under the specified floating conversion
 policy, without an intermediate host type. Exact malformed-exponent,
 separator and identifier-tail recovery remains open.
 
+A bare numeric literal must be grouped before member access, independent of
+radix or whether the following name resembles fractional/exponent digits.
+Use `(literal).Member` or an explicitly typed `T(literal).Member`; spacing
+around the period does not make an ungrouped receiver legal. This also
+applies to optional member access and witness selection. Grouping alone
+does not infer a numeric target. Valid numeric fractions/exponents and range
+bounds retain their existing rules, and already-delimited text/character
+literals have no equivalent grouping requirement. Malformed numeric forms
+do not become valid member accesses through an alternate tokenization.
+
 ## Punctuation boundaries
 
+Punctuation adjacency follows an allow list: one defined spelling or an
+explicit grammatical boundary, not an enumeration of forbidden combinations.
 A contiguous run of operator glyphs must be one defined operator, not
 implicitly concatenated operators: `x+++y` rejects, whereas `x++ +y` and
 `x+ ++y` separate their operators. Trivia can separate operators; grouping

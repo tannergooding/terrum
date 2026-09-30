@@ -254,6 +254,7 @@ which tokens are formed under lexical longest-match and identifier-boundary
 rules; whitespace is not permission to split or merge token spellings after
 lexing. Comments and line breaks follow their documented trivia rules,
 not an arbitrary mandatory space-around-operator policy.
+Punctuation adjacency follows an allow list, not a list of forbidden runs.
 A contiguous run of operator glyphs must be one defined operator, not an
 implicit concatenation of separate operators. Thus `x+++y` rejects, while
 `x++ +y` and `x+ ++y` separate the operators explicitly. Whitespace or a
@@ -263,6 +264,8 @@ recognized in type-argument context, so `List<List<T>>` does not require
 spaces. Exact glyph membership and contextual boundary rules, including
 optional/type punctuation and comment openers, remain lexical specification
 work; this is not permission to reinterpret a run by guessing user intent.
+Unlisted combinations require separation; adding an operator spelling or a
+contextual adjacency exception requires an explicit language rule.
 
 `CharacterScalar` excludes an unescaped quote, backslash or line break.
 Escape decoding must yield exactly one Unicode scalar, never a surrogate.
@@ -290,6 +293,18 @@ rules, not through an intermediate host floating type. Both
 `var x = 0x1.fp+2;` has no target and diagnoses.
 The [lexical grammar](lexical-grammar.md) shares these source rules; open
 recovery details do not permit alternative target-format rounding.
+
+Bare numeric literals require grouping before member access, for every
+numeric radix and format. `(literal).Member` and `T(literal).Member` have an
+explicit receiver boundary; `literal.Member` is not a source form. The same
+restriction applies to optional member access and `.via<I>` witness selection,
+and trivia between the literal and member punctuator does not remove it.
+Grouping does not supply a missing numeric target; an explicit type call can.
+A period belonging to a valid numeric fraction remains part of that literal,
+not member access. Numeric range bounds such as `items[0..2]` remain legal;
+strings, characters and other already-delimited literals do not require this
+numeric-only grouping. Malformed numeric syntax is not recovered as a valid
+ungrouped member access.
 
 Primitive spellings (`int32`, `float32`, `bool`, `char16`, etc.) remain
 ordinary identifier **tokens**, not lexical keywords. Their exact type
@@ -444,7 +459,7 @@ InterfaceMemberDeclaration = InterfaceMemberPrefix,
 TopPrefix       = ContextualPrefix ;
 MemberPrefix    = ContextualPrefix ;
 InterfaceMemberPrefix = ContextualPrefix ;
-AliasPrefix     = { Attribute | VisibilityModifier } ;
+AliasPrefix     = { Attribute | NamespaceVisibilityModifier } ;
 Attribute       = "[", [ AttributeTarget, ":" ], AttributeName,
                   [ AttributeArguments ], "]" ;
 AttributeTarget = SingletonTarget
@@ -455,6 +470,7 @@ AttributeName   = DottedIdentifier ;
 AttributeArguments = "(", [ ConstantExpression,
                      { ",", ConstantExpression } ], ")" ;
 VisibilityModifier = "public" | "internal" | "private" ;
+NamespaceVisibilityModifier = "public" | "internal" ;
 DeclarationModifier = "public" | "internal" | "private" | "static"
                     | "mut" | "unique" | "unsafe" | "partial" | "async" ;
 
@@ -549,9 +565,18 @@ Imports precede declarations in their own scope. File imports apply to that
 file; imports after a file-scoped namespace apply to its remaining body.
 An import in a namespace block applies to that lexical block and its nested
 blocks, not other blocks of the same namespace or other files. Namespace
-identity does not merge import scopes. Declarations retain source order within compiler file
-order. Fields and constructors occur in class/struct bodies;
-interface members do not include fields or constructors. An interface
+identity does not merge import scopes. Declarations retain source order within
+compiler file order.
+
+Namespace/file-level declarations permit `public` and `internal`, not
+`private`. `internal` grants access within the declaring module; `private`
+is a declaring-type member access domain within that module. Another module
+declaring the same namespace does not extend either access domain, and
+linking or unsafe authorization does not grant friend-module access.
+File-limited visibility is not a selected source form.
+
+Fields and constructors occur in class/struct bodies; interface members do
+not include fields or constructors. An interface
 constant with an initializer is fixed by its declaration; one without an
 initializer requires an implementer-supplied `const` binding of that selected
 member identity. An unrelated same-named constant does not satisfy it.
@@ -1045,7 +1070,10 @@ tail as the right form. Unlike an ordinary binary operator, it may bind
 `name` for the appropriate checked scope. The table, not the flat
 `BinaryOperator` alternatives, resolves any mixed expression. `HexFloat`
 participates in `Number` exactly like the other numeric alternatives; its
-value semantics and lexical adoption gates are described in §2.
+value semantics and lexical boundaries are described in §2.
+When `Primary` is a bare `Number`, its first `PostfixPart` cannot be member
+access (`.`, `?.`, or `.via<I>`); parenthesized or explicitly typed receivers
+use the ordinary postfix grammar.
 
 Generic argument parsing uses the selected declaration's formal kinds to
 distinguish type arguments from constant-value expressions; the broad
@@ -1478,7 +1506,7 @@ explicit qualification.
 
 **Alias form:** `alias Option<T> = T?;` names the same resolved type,
 not a distinct wrapper or new witness. Aliases are namespace-level
-declarations, with `public`, `internal` or `private` visibility like other
+declarations, with `public` or `internal` visibility like other
 top-level declarations; they are not nominal members. Exporting or
 qualifying an alias cannot create a new nominal identity or change the
 target's access, ownership, layout or compatibility contract. A public alias
@@ -2121,11 +2149,11 @@ appears in §2.
 
 | Concept | Defined direction | Still to specify |
 |---|---|---|
-| Lexical tokens | §2 gives identifier and reserved-word forms; primitive names are identifiers with reserved bindings. | Exact contextual-word classification and `HexFloat` token boundaries/diagnostics. |
+| Lexical tokens | §2 gives keyword escapes and contextual-word positions; primitive names are identifiers with reserved bindings. | Exact punctuation adjacency allow list and malformed floating-token recovery. |
 | Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw framing/headers, deterministic interpolation, identifier/quoted/expression formats and runtime alignment. | Complete floating token recovery, character diagnostics, raw/interpolation recovery and registered text/whole-output normalization APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
-| Namespace | §3.1 permits file-scoped or block namespaces, without mixing. | Nested namespace blocks and namespace-local imports. |
-| Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
+| Namespace | §3.1 permits file-scoped or nested block namespaces without mixing, with lexically scoped imports before declarations. | Other namespace forms, if any. |
+| Visibility | §3.1 permits namespace-level `public`/module-internal declarations and declaring-type `private`; equal namespace names do not cross module access boundaries. | File-limited visibility and the remaining declaration-kind modifier matrix. |
 | Nominal types | §3.1 sketches structs, classes, interfaces and integral-base enums. | Union and nested declarations, enum constant restrictions and contextual attributes. |
 | Generic declarations | §§3.1–3.2 give type/constant formals, defaults, `_` inference and explicit `default` selection. | Permitted value domains, default dependencies and complete inference contracts. |
 | Aliases | §§3.1 and 5.4 give namespace-level aliases and transparent public source export. | Cycles, substitution and metadata encoding. |

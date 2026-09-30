@@ -68,41 +68,48 @@ punctuation; `List<List<int32>>` uses type-context closers.
 **C# model:** Not C# maximal-munch operator concatenation. Terrum requires one
 defined operator per contiguous run except explicit contextual exceptions.
 
-**Recommendation (under review):** Use a finite lexical/context table, not
-backtracking over possible expressions. Permit contiguous `..^` specifically
-at an index/slice-bound boundary, as in `items[start..^1]`; this is two
-contextual tokens, not a new general operator. Retain comment, grouping and
-type-delimiter boundaries explicitly. Unknown arithmetic runs such as `+++`
-and `**` reject rather than being split into currently legal operators;
-future revisions can introduce a single operator spelling without changing
-an existing concatenation's meaning. Parentheses or trivia separate other
-operator combinations. This keeps common indexing concise and future
-operator introduction deterministic. The exact exception table remains open.
+**Recommendation (under review):** Use an explicit allow list, not a deny
+list or backtracking over possible expressions. Separate punctuation tokens
+require trivia unless a listed lexical/grammatical boundary permits adjacency.
+The proposed allow list is:
+
+| Allowed adjacency | Scope and example |
+|---|---|
+| One defined operator/punctuator spelling | Exactly a spelling assigned by the grammar, such as `++`, `+=`, `<<`, `??`, `?.`, `=>` or `..`; not concatenated operators. |
+| Grouping and list delimiters | `(`, `)`, `[`, `]`, `{`, `}`, `,` and `;` bound separate tokens, as in `x*(-y)` or `f(a[i])`. |
+| Comment boundaries | Recognize `//` and `/*` before operator-run validation outside literals/comments, as in `x+/* explanation */y`. |
+| Type-context punctuation | Optional `?` followed by generic closers and consecutive generic closers, as in `List<T?>` and `List<List<T>>`; only when required by the type/argument grammar. |
+| Range/from-end boundary | `..` followed by upper-bound `^` in index/slice syntax, as in `items[start..^1]`; two contextual tokens, not a new general operator. |
+
+Literal contents and escaped identifier tokens follow their own lexical
+rules, not operator-run validation. No other operator-token concatenation is
+permitted. New operators must be added to the language's defined spelling
+catalog; new adjacency exceptions must be added to this list. Neither a
+formatter nor error recovery guesses an expression from an unlisted run.
+This keeps common indexing concise while making separation the ordinary
+rule and preserving room for future operators. Exact operator-glyph
+membership and adoption of the proposed list remain open.
 
 ### Q04. Hex-float versus member-access token boundaries
 
-**Question:** When a based integer is followed immediately by a dot and
-hexadecimal-looking member name, does the lexer commit to a hex-float or
-retain member access unless a complete exponent follows? Valid hex-float
-spelling and direct target rounding are already settled.
+**Accepted:** Require grouping before member access on bare numeric literals
+of every radix and format, including optional member access and witness
+selection. Trivia does not remove the restriction. Valid numeric fractions,
+exponents and range bounds remain unchanged; malformed numeric spelling
+cannot be reinterpreted as valid ungrouped member access.
 **Example:** `float32 x = 0x1.fp+2;` is a hex-float; `(0x1).face`
-forces a separate member-access interpretation. Decide whether grouping is
-required for the latter spelling when a target type provides that member.
+has a separate member-access receiver boundary, still requiring a valid
+numeric target. `float32(0x1.fp+2).Foo` supplies an explicit receiver type.
 
 **C# model:** Not a C# hexadecimal-floating feature; C# has hexadecimal integer
 tokens but no corresponding hex-float literal. Decimal recovery offers only
 comparative lexer practice.
 
-**Recommendation (under review):** Require a bare numeric literal to be
-parenthesized before member access, for every numeric radix and format.
-`(0x1).face` is a syntactic member access (still needing a valid numeric target);
-`float32(0x1.fp+2).Foo` has an explicit receiver type. Reject unparenthesized
-numeric/member spellings rather than making them depend on whether the
-following name resembles fractional or exponent digits. Strings and other
-delimited literals do not need this numeric-only restriction. Valid numeric
-fraction/exponent syntax remains unchanged; incomplete numeric forms retain
-malformed-token diagnostics. This trades a small grouping requirement for
-stable literal/member boundaries and avoids future reinterpretation.
+**Rationale:** Trades a small grouping requirement for stable literal/member
+boundaries independent of whether the member name resembles fractional or
+exponent digits. Strings and other delimited literals have no equivalent
+restriction. Grouping does not supply a missing literal type. Exact malformed
+token recovery/diagnostic text remains tooling work.
 
 ### Q05. Namespace nesting and local imports
 
@@ -124,26 +131,32 @@ See the adopted [source-file structure](../grammar-spec.md#31-source-file-struct
 
 ### Q06. Visibility and modifier applicability
 
-**Question:** Complete the declaration-kind matrix: namespace-private scope,
-interface-member access, static nominal containers, and combinations of
+**Accepted visibility boundary:** Namespace/file-level declarations permit
+`public` or module-scoped `internal`, not `private`. Type-member `private`
+is restricted to the declaring type within its module. Equal namespace names
+in another module never extend either access domain; there is no friend-module
+access through linking or unsafe authorization.
+
+**Remaining question:** Complete the declaration-kind matrix:
+interface-member access, static nominal containers, default access, and combinations of
 `mut`, `unique`, `partial`, `unsafe` and `async`. Permutation is already legal;
-duplicates/conflicts are not.
-**Example:** `private struct Helper { }` needs an exact namespace-private
-visibility domain; `mut class Counter { }` does not answer it.
+duplicates/conflicts are not. Should a separate file-limited access domain be
+available, and to which declaration kinds would it apply? `file private` and
+`file internal` are review ideas, not adopted modifier combinations.
+**Example:** `internal struct Helper { }` is accessible throughout its module,
+not only the file or namespace that declares it.
 
 **C# model:** Partly modeled on explicit declaration modifiers. Do not import
 `protected`, friend assemblies, stateful class inheritance, or C#'s different
 top-level-private restrictions.
 
-**Recommendation (under review):** Allow `public` and module-scoped `internal`
-on namespace-level declarations; reject `private` there rather than making it
-an alias for `internal`. Reserve `private` for declaring-type members. A
-same-namespace-only rule would be observably narrower than `internal`, but adds
-a separate access domain without a selected need; namespace organization
-should not impose that extra visibility boundary. No friend-module mechanism
-is implied. Interface-member access and the remaining declaration-kind
-modifier matrix still need separate decisions; neither access choice changes
-ownership, layout or effects.
+**Rationale for the accepted boundary:** Namespace organization does not add
+another access domain, and `private` is not an alias for `internal`.
+Neither access choice changes ownership, layout or effects.
+**Recommendation for the remaining questions:** Specify each declaration
+kind's legal modifiers independently. Consider file-limited access separately
+if a concrete source-local helper use warrants it; do not infer a new `file`
+modifier or equivalent attribute merely from accepting the module boundary.
 
 ### Q07. Attribute arguments and multiplicity
 
