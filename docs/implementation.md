@@ -1269,7 +1269,8 @@ checked integer arithmetic/shifts, integer `CheckedConvert`, signed `CheckedNega
 dual-result `CheckedDivRem`, static `Call` to global or type-owned local or
 retained imported MethodDefs with scalar/optional parameters and result
 (including void), `Switch`, `Return` and `Fail`. The bounded call inspection
-rejects receiver/generic calls. Packed direct MethodDef `DefId` calls require
+rejects receiver/generic calls and generic owners for external members.
+Packed direct MethodDef `DefId` calls require
 an authored public global target or a public static member of a public
 TypeDef in another included module with the same runtime policy and a
 target requirement no stronger than the caller's; retained imports require a

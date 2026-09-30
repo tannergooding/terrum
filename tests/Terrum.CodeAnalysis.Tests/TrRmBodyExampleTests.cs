@@ -1002,6 +1002,25 @@ public sealed class TrRmBodyExampleTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CompactIndexedReaderRejectsGenericExternalOwner(bool packedTarget)
+    {
+        var operation = packedTarget
+            ? new byte[] { 0x12, 2, 0, 2, 0, 0, 0x16, 1, 1 }
+            : [0x12, 2, 2, 1, 1];
+        var section = IndexedScalarOperation(operation, [2], 2);
+        Assert.Equal((1, 2), InspectIndexed(section, parameterCount: 1,
+            parameterTypeIds: [2], secondMethod: true, ownedTarget: true,
+            packedTarget: packedTarget, importedTarget: !packedTarget,
+            expectedTarget: !packedTarget));
+        Assert.Throws<InvalidDataException>(() => InspectIndexed(section,
+            parameterCount: 1, parameterTypeIds: [2], secondMethod: true,
+            ownedTarget: true, packedTarget: packedTarget, importedTarget: !packedTarget,
+            expectedTarget: !packedTarget, genericOwner: true));
+    }
+
+    [Theory]
     [InlineData(new byte[] { 0x12, 1, 0, 0 }, new byte[0])]
     [InlineData(new byte[] { 0x12, 1, 2, 0 }, new byte[0])]
     [InlineData(new byte[] { 0x12, 1, 1, 1, 1 }, new byte[0])]
@@ -1385,7 +1404,8 @@ public sealed class TrRmBodyExampleTests
         bool importedTarget = false, bool expectedTarget = false,
         bool ownedTarget = false, bool packedTarget = false,
         bool privateOwner = false, byte callerTargetRequirement = 0,
-        byte packedTargetRequirement = 0, byte packedTargetRuntimePolicy = 0)
+        byte packedTargetRequirement = 0, byte packedTargetRuntimePolicy = 0,
+        bool genericOwner = false)
     {
         var names = new TrRmStringTableReader(
             TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]), 2);
@@ -1421,8 +1441,14 @@ public sealed class TrRmBodyExampleTests
         BinaryPrimitives.WriteUInt32LittleEndian(typeDef.AsSpan(4), 2);
         BinaryPrimitives.WriteUInt32LittleEndian(typeDef.AsSpan(8),
             (packedTarget || expectedTarget) && !privateOwner ? 6u : 4u);
+        if (genericOwner)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(typeDef.AsSpan(20), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(typeDef.AsSpan(24), 1);
+        }
+
         var defs = new TrRmTypeDefTableReader(ownedTarget ? typeDef : [],
-            ownedTarget ? 1 : 0, names, modules, 0, 0, 0, 0);
+            ownedTarget ? 1 : 0, names, modules, 0, genericOwner ? 1 : 0, 0, 0);
         byte[] typeBytes = (thirdTypeOptional, thirdTypeCode) switch
         {
             (true, _) => [0, 0, 0, 0, 3, 0, 0, 0, 6, 0, 0, 0, 12, 0, 0, 0,

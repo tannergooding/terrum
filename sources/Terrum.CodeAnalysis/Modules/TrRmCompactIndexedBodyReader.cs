@@ -477,7 +477,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                     if ((method == 0 || imported)
                         && (methods.GetFlags(target) != 2
                             || targetOwner != 0 && (targetOwner > nominalTypes.Count
-                                || (nominalTypes.GetFlags(targetOwner) & 3) != 2)))
+                                || (nominalTypes.GetFlags(targetOwner) & 3) != 2
+                                || nominalTypes.GetGenericRange(targetOwner).Count != 0)))
                     {
                         throw InvalidBody();
                     }
