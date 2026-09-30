@@ -112,6 +112,7 @@ mut class ScalarFrontendState
     private mut Token _first;
     private mut Token _second;
     private mut Token _third;
+    private mut Token _function;
     private mut int32 _firstType;
     private mut int32 _secondType;
     private mut int32 _thirdType;
@@ -129,6 +130,7 @@ mut class ScalarFrontendState
         _first = new Token(2, empty);
         _second = new Token(2, empty);
         _third = new Token(2, empty);
+        _function = new Token(2, empty);
         _firstType = 0;
         _secondType = 0;
         _thirdType = 0;
@@ -1423,6 +1425,7 @@ mut class ScalarFrontendState
         }
         returnType = selected;
         name = function.Range;
+        _function = function;
         return true;
     }
 
@@ -1685,6 +1688,90 @@ mut class ScalarFrontendState
             return false;
         }
         require _tokens.TryGet(_at, out var token);
+        if (token.Kind == 2
+            && _tokens.TryGet(_at + 1, out var opening)
+            && opening.Kind == 46)
+        {
+            if (!TryGetScalarType(token, out var target)
+                || target == 5)
+            {
+                FailAt(1, token.Range);
+                return false;
+            }
+            if (SameTokenSpelling(_function, token)
+                || (_parameterCount > 0 && SameTokenSpelling(_first, token))
+                || (_parameterCount > 1 && SameTokenSpelling(_second, token))
+                || (_parameterCount > 2 && SameTokenSpelling(_third, token)))
+            {
+                FailAt(1, token.Range);
+                return false;
+            }
+            for (mut int32 local = 0; local < _localCount; local = local + 1)
+            {
+                int32 offset = 300 + local * 4;
+                require SourceRange.TryCreate(Host.Frontend[offset + 2],
+                    Host.Frontend[offset + 3], out var name);
+                if (SameTokenSpelling(new Token(2, name), token))
+                {
+                    FailAt(1, token.Range);
+                    return false;
+                }
+            }
+            _at = _at + 2;
+            mut int32 operandContext = target;
+            mut int32 parens = 0;
+            mut int32 cursor = _at;
+            while (_tokens.TryGet(cursor, out var part))
+            {
+                if (part.Kind == 47)
+                {
+                    if (parens == 0) { break; }
+                    parens = parens - 1;
+                }
+                if (part.Kind == 46) { parens = parens + 1; }
+                if (part.Kind == 2
+                    && ((_parameterCount > 0 && SameTokenSpelling(_first, part))
+                        || (_parameterCount > 1 && SameTokenSpelling(_second, part))
+                        || (_parameterCount > 2 && SameTokenSpelling(_third, part))))
+                {
+                    operandContext = 0;
+                }
+                if (part.Kind == 2
+                    && _tokens.TryGet(cursor + 1, out var next)
+                    && next.Kind == 46
+                    && TryGetScalarType(part, out var nestedType))
+                {
+                    operandContext = 0;
+                }
+                for (mut int32 local = 0; local < _localCount; local = local + 1)
+                {
+                    int32 offset = 300 + local * 4;
+                    require SourceRange.TryCreate(Host.Frontend[offset + 2],
+                        Host.Frontend[offset + 3], out var name);
+                    if (part.Kind == 2
+                        && SameTokenSpelling(new Token(2, name), part))
+                    {
+                        operandContext = 0;
+                    }
+                }
+                cursor = cursor + 1;
+            }
+            if (!ParseTreeExpression(operandContext, 1, depth + 1, out var operand)
+                || (TreeWord(operand, 1) == 0
+                    && !ResolveTreeLiteral(operand, target, false))
+                || !Take(47, out var close))
+            {
+                return false;
+            }
+            int32 sourceType = TreeWord(operand, 1);
+            if (sourceType == 5 || sourceType == 0)
+            {
+                FailTreeType(operand);
+                return false;
+            }
+            return AddTreeNode(83, target, token.Range.Start, close.Range.End,
+                operand, -1, 0, 0, out node);
+        }
         if (token.Kind == 46)
         {
             _at = _at + 1;

@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.ComponentModel;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using Terrum.CodeAnalysis.Lexing;
@@ -233,8 +234,12 @@ internal static partial class Program
                     WriteFrontendExpression(writer, "whenTrue", frontend.WhenTrue);
                     if (!frontend.Nodes.IsDefault)
                     {
-                        writer.WriteNumber("projectionVersion",
-                            frontend.Statements.IsDefaultOrEmpty ? 20 : 21);
+                        var projectionVersion = frontend.Statements.IsDefaultOrEmpty ? 20 : 21;
+                        if (frontend.Nodes.Any(static node => node.Operation == 83))
+                        {
+                            projectionVersion += 2;
+                        }
+                        writer.WriteNumber("projectionVersion", projectionVersion);
                         writer.WriteBoolean("expressionBody", frontend.IsExpressionBody);
                         writer.WriteNumber("conditionRoot", frontend.ConditionRoot);
                         writer.WriteNumber("trueRoot", frontend.TrueRoot);

@@ -7,6 +7,8 @@ namespace Terrum.CodeAnalysis;
 // Version 21 adds 12 ordered statement records and eight local declarations:
 // words 298/299 count statements/locals; 300..331 hold (type, mut, name start,
 // name length); 332..391 hold (kind, slot, root, span start, span length).
+// Versions 22/23 add unary operation 83 for checked numeric conversion,
+// respectively without/with local records; its type is the destination.
 void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expression)
 {
     Host.Frontend[offset] = expression.Type;
@@ -39,6 +41,14 @@ bool TryPublishScalarFrontend()
     {
         Host.Frontend[0] = 20;
         if (Host.Frontend[298] != 0) { Host.Frontend[0] = 21; }
+        for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
+        {
+            if (Host.Frontend[42 + node * 8] == 83)
+            {
+                if (Host.Frontend[298] == 0) { Host.Frontend[0] = 22; }
+                else { Host.Frontend[0] = 23; }
+            }
+        }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {
