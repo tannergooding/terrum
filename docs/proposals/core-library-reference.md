@@ -572,8 +572,15 @@ public mut unique struct Vector<T>
     public nuint Count { get; }
     public nuint Capacity { get; }
     public static Vector<T> Create(AllocatorContext allocator);
+    public T this[nuint index] { get; mut set; }
+    public bool TryGet(nuint index, init ref<T> value);
     public mut void Add(T value);
+    public mut bool TryAdd(T value);
+    public mut void Insert(nuint index, T value);
+    public mut bool TryInsert(nuint index, T value);
+    public mut void RemoveAt(nuint index);
     public mut void Reserve(nuint capacity);
+    public mut bool TryReserve(nuint capacity);
     public Span<T> AsSpan();
     [ViewOf(Access.Write)] public mut write Span<T> GetWriteAccess();
     public mut void Clear();
@@ -606,6 +613,36 @@ span. Exact disposed-state diagnostics, release-failure reporting and
 implicit no-throw cleanup metadata remain open; the `Dispose` name alone
 supplies none of them. A vector retains its explicitly supplied allocator
 dependency for future growth rather than consulting an ambient provider.
+
+The vector's indexed access, insertion/removal and allocation-refusal
+overloads are **PROPOSED** additions for its existing `[Sized], [Copy]`
+profile. `TryGet` checks the initialized prefix: false leaves the output
+vacant, and true publishes a copied element. The indexer and `RemoveAt`
+require `index < Count`; `Insert` and `TryInsert` accept `index <= Count`.
+Insertion preserves prefix order, and removal shifts later elements toward
+the removed position before retiring the former final slot. These operations
+must obey typed initialization, rooting/barrier and replacement/cleanup
+contracts; `[Copy]` does not authorize untyped byte moves or exposing the
+now-vacant tail as a readable element.
+
+`TryAdd`, `TryInsert` and `TryReserve` report expected allocation refusal as
+false with prior contents, count and capacity preserved. Invalid indexes,
+capacity/count arithmetic overflow, conflicting loans and other checked
+failures do not become false. An already sufficient reservation succeeds
+without allocation; reservation never reduces capacity or changes count.
+Successful growth preserves existing element order and publishes replacement
+storage only after all required initialization succeeds. Non-`Try` operations
+surface allocation failure through the provider's declared checked-failure
+contract, not a silent no-op. Neither overload family adds implicit rollback
+of provider side effects or retries the provider after refusal.
+
+All structural operations require their conflicting backing loans to have
+ended, even if spare capacity means no relocation is needed. The indexer
+copies its result rather than returning a slot loan; writable span access
+still requires the explicit exclusive accessor. Ordinary readonly span access
+does not authorize replacement through an alias. Disposed-state and provider
+lifetime checks remain those of the owner above; these conveniences neither
+reacquire a disposed allocation nor select a global allocator.
 
 ### Proposed borrowed arena and typed rental storage
 
@@ -811,7 +848,7 @@ need collector roots/barriers independently of memory order.
 | `AllocationLease` / `Terrum.Collections` | `ByteLength`, `Alignment`, `Dispose()`; optional checked `SliceBytes(offset, length) -> Span<uint8>` | Owns one allocation/release, not a provider; slicing retains lease |
 | `AllocatorContext` / `Terrum.Collections` | `Allocate(bytes, alignment) -> AllocationLease`, `Dispose()`; `TryAllocate(..., init ref<AllocationLease>) -> bool` | Provider must outlive outstanding allocations or explicitly transfer release capability |
 | `Buffer<T>` / `Terrum.Collections` | `Capacity`, `Count`, `Adopt`, `Initialize`, `AsSpan`, `GetWriteAccess`, `Clear`, `Dispose` | Initialized prefix versus vacant capacity; unique owner and trace/barrier policy |
-| `Vector<T>` / `Terrum.Collections` | `Create`, `Count`, `Capacity`, `Add`, `Reserve`, `AsSpan`, `GetWriteAccess`, `Clear`, `Dispose` | Growth retains allocator context, replaces lease transactionally; views prevent relocation |
+| `Vector<T>` / `Terrum.Collections` | `Create`, `Count`, `Capacity`, copied index/`TryGet`, `Add`/`TryAdd`, `Insert`/`TryInsert`, `RemoveAt`, `Reserve`/`TryReserve`, span access, `Clear`, `Dispose` | Initialized prefix and explicit allocator; allocation refusal preserves prior state; conflicting views prevent structural mutation |
 | `ByteArena` / `Terrum.Collections` | Borrowed-backing constructor, `Capacity`, `Used`, `Allocate`, `TryAllocate`, `Reset`, `Dispose` | Fixed initialized byte backing; disjoint-slice, alignment and reset/disposal loan checks; owned/growable arena remains OPEN |
 | `MemoryPool<T>`, `MemoryOwner<T>` / `Terrum.Collections` | Explicit-provider `Create`, `Rent`/`TryRent`; rental `Capacity`, `Count`, `Initialize`, span access, `Clear`, `Dispose` | Unique rental/return responsibility; initialized prefix versus pooled capacity; pool disposal requires all rentals returned |
 | `MemoryPrimitives` / `Terrum` | `AtomicRead/Write`, RMW families, strong CAS/observation, `Fence`, `CompilerFence`, non-temporal read/write/copy/complete, cache writeback/invalidate | See the complete proposed member set and strict representation/order/range constraints above |
