@@ -35,6 +35,8 @@ public enum SyntaxKind
     Block,
     /// <summary>A variable declaration.</summary>
     VariableDeclaration,
+    /// <summary>A local awaiting checked initialization.</summary>
+    VacantLocalDeclaration,
     /// <summary>A local whose initializer must evaluate to a compile-time scalar value.</summary>
     ConstDeclaration,
     /// <summary>An expression required to evaluate at compile time.</summary>

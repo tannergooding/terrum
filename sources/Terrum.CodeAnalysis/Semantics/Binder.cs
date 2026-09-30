@@ -35,6 +35,7 @@ internal sealed partial class Binder
     private readonly HashSet<string> _usings = new(StringComparer.Ordinal);
     private string _namespace = "";
     private readonly List<BoundVariable> _variables = [];
+    private readonly HashSet<int> _unresolvedVacantLocals = [];
     private readonly List<Dictionary<string, int>> _scopes = [];
     private readonly List<LoopBinding> _loops = [];
     private int _finallyLoopDepth;
@@ -444,6 +445,7 @@ internal sealed partial class Binder
             SetContext(signature.Tree);
             _variables.Clear();
             _scopes.Clear();
+            _unresolvedVacantLocals.Clear();
             _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
             _returnType = signature.ReturnType;
             _currentStruct = signature.StructName;
@@ -1302,7 +1304,8 @@ internal sealed partial class Binder
                 {
                     if (IsUnique(_variables[slot].Type)
                         && _scopes[^1].TryGetValue(_variables[slot].Name, out var scoped)
-                        && scoped == slot && !(boundStatement is BoundLocal local && local.Variable == slot))
+                        && scoped == slot && !(boundStatement is BoundLocal local && local.Variable == slot)
+                        && !(boundStatement is BoundVacantLocal vacant && vacant.Variable == slot))
                     {
                         outputOwners.Add((statements.Count, slot));
                     }
@@ -1311,6 +1314,14 @@ internal sealed partial class Binder
             }
         }
 
+        foreach (var slot in _scopes[^1].Values)
+        {
+            if (_unresolvedVacantLocals.Remove(slot))
+            {
+                Report("TRM3016", $"Cannot infer the type of vacant local '{_variables[slot].Name}' from a checked initialization.",
+                    _variables[slot].Span);
+            }
+        }
         var managedLocals = _scopes[^1].Values
             .Where(slot => ManagedClassTypes.IsManaged(_variables[slot].Type))
             .Order().ToImmutableArray();
@@ -1329,6 +1340,15 @@ internal sealed partial class Binder
                 bound = bound[..(index + 1)].Add(new BoundTryFinally(
                     new BoundBlock(bound[(index + 1)..], block.Span),
                     new BoundBlock([new BoundDrop(local.Variable, cleanupFunction, block.Span)], block.Span),
+                    block.Span));
+            }
+            if (bound[index] is BoundVacantLocal vacant && IsUnique(_variables[vacant.Variable].Type))
+            {
+                var method = CleanupMethod(_variables[vacant.Variable].Type);
+                var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
+                bound = bound[..(index + 1)].Add(new BoundTryFinally(
+                    new BoundBlock(bound[(index + 1)..], block.Span),
+                    new BoundBlock([new BoundDrop(vacant.Variable, cleanupFunction, block.Span)], block.Span),
                     block.Span));
             }
             for (var output = outputOwners.Count - 1; output >= 0; output--)
@@ -1461,6 +1481,24 @@ internal sealed partial class Binder
                 // Locals enter scope only after their initializer, including in nested blocks.
                 var slot = AddVariable(name.Text, declaredType ?? initializer.Type, isMutable, name.Span);
                 return new BoundLocal(slot, initializer, node.Span);
+            }
+
+            case SyntaxKind.VacantLocalDeclaration:
+            {
+                var typeElement = node.Children[1];
+                var name = ((SyntaxTokenElement)node.Children[2]).Token;
+                var inferred = typeElement is SyntaxTokenElement;
+                var type = inferred ? PrimitiveType.Void : BindType((SyntaxNode)typeElement, allowVoid: false);
+                if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
+                {
+                    Report("TRM3023", "Native buffer views require an initialized lexical owner loan.", node.Span);
+                }
+                var slot = AddVariable(name.Text, type, false, name.Span);
+                if (inferred)
+                {
+                    _ = _unresolvedVacantLocals.Add(slot);
+                }
+                return new BoundVacantLocal(slot, node.Span);
             }
 
             case SyntaxKind.ConstDeclaration:
@@ -1751,10 +1789,19 @@ internal sealed partial class Binder
                     if (IsUnique(_variables[slot].Type)
                         && _scopes[^1].TryGetValue(_variables[slot].Name, out var scoped)
                         && scoped == slot
-                        && !(initializer is BoundLocal ownerInitializer && ownerInitializer.Variable == slot))
+                        && !(initializer is BoundLocal ownerInitializer && ownerInitializer.Variable == slot)
+                        && !(initializer is BoundVacantLocal vacantInitializer && vacantInitializer.Variable == slot))
                     {
                         Report("TRM3023", "An owning for-condition or iterator output has no lexical cleanup region.",
                             node.Span);
+                    }
+                }
+                foreach (var slot in _scopes[^1].Values)
+                {
+                    if (_unresolvedVacantLocals.Remove(slot))
+                    {
+                        Report("TRM3016", $"Cannot infer the type of vacant local '{_variables[slot].Name}' from a checked initialization.",
+                            _variables[slot].Span);
                     }
                 }
                 var managedLocals = _scopes[^1].Values
@@ -1773,6 +1820,19 @@ internal sealed partial class Binder
                         initializer,
                         new BoundTryFinally(new BoundBlock([loop], node.Span),
                             new BoundBlock([new BoundDrop(owner.Variable, cleanupFunction, node.Span)], node.Span), node.Span),
+                    ], node.Span) {
+                        IsManagedLexicalScope = true,
+                        RetiredManagedLocals = managedLocals,
+                    };
+                }
+                if (initializer is BoundVacantLocal vacant && IsUnique(_variables[vacant.Variable].Type))
+                {
+                    var method = CleanupMethod(_variables[vacant.Variable].Type);
+                    var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
+                    return new BoundBlock([
+                        initializer,
+                        new BoundTryFinally(new BoundBlock([loop], node.Span),
+                            new BoundBlock([new BoundDrop(vacant.Variable, cleanupFunction, node.Span)], node.Span), node.Span),
                     ], node.Span) {
                         IsManagedLexicalScope = true,
                         RetiredManagedLocals = managedLocals,
@@ -2658,6 +2718,11 @@ internal sealed partial class Binder
                 }
                 var slot = declares ? AddVariable(outName.Text, expectedParameter.Type, false, outName.Span)
                     : TryFindVariable(outName.Text, out var existing) ? existing : -1;
+                if (slot >= 0 && _unresolvedVacantLocals.Contains(slot) && isInit)
+                {
+                    _variables[slot] = _variables[slot] with { Type = expectedParameter.Type };
+                    _ = _unresolvedVacantLocals.Remove(slot);
+                }
                 if (slot < 0 || _variables[slot].Type != expectedParameter.Type
                     || (!declares && ((!isInit && !_variables[slot].IsMutable)
                         || (_hasReceiver && slot == 0))))
@@ -2895,7 +2960,7 @@ internal sealed partial class Binder
                 var name = ((SyntaxTokenElement)node.Children[0]).Token.Text;
                 if (TryFindVariable(name, out var slot))
                 {
-                    return _variables[slot].Type;
+                    return _unresolvedVacantLocals.Contains(slot) ? null : _variables[slot].Type;
                 }
                 if (_hasReceiver && _currentStruct is not null
                     && _primitiveBackingFields.TryGetValue(_currentStruct, out var backing)

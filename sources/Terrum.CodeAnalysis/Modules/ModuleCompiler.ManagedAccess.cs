@@ -71,7 +71,7 @@ public static partial class ModuleCompiler
     private static BoundStatement LegacyStatement(BoundStatement statement) => statement switch {
         BoundBlock block => block with { Statements = [.. block.Statements.Select(LegacyStatement)] },
         BoundLocal local => local with { Initializer = LegacyExpression(local.Initializer) },
-        BoundOwnerDeclaration or BoundBreak or BoundContinue or BoundDrop or BoundDropConstructedFields
+        BoundOwnerDeclaration or BoundVacantLocal or BoundBreak or BoundContinue or BoundDrop or BoundDropConstructedFields
             or SymbolicDrop => statement,
         BoundAssignment assignment => assignment with { Value = LegacyExpression(assignment.Value) },
         BoundFieldAssignment field => field with { Value = LegacyExpression(field.Value) },

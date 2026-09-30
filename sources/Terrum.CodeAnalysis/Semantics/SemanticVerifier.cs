@@ -765,6 +765,16 @@ public static class SemanticVerifier
                         Declare(local.Variable, scope, local.Span);
                     }
                     break;
+                case BoundVacantLocal vacant:
+                    if (vacant.Variable < 0 || vacant.Variable >= function.Variables.Length)
+                    {
+                        throw Invalid();
+                    }
+                    if (ManagedClassTypes.IsManaged(function.Variables[vacant.Variable].Type))
+                    {
+                        Declare(vacant.Variable, scope, vacant.Span);
+                    }
+                    break;
                 case BoundAssignment assignment:
                     Expression(assignment.Value, scope, depth + 1);
                     if (assignment.Variable < 0 || assignment.Variable >= function.Variables.Length)
@@ -821,6 +831,7 @@ public static class SemanticVerifier
     {
         var owners = new HashSet<BoundLocal>(ReferenceEqualityComparer.Instance);
         var outputOwners = new HashSet<BoundOwnerDeclaration>(ReferenceEqualityComparer.Instance);
+        var vacantOwners = new HashSet<BoundVacantLocal>(ReferenceEqualityComparer.Instance);
         var allowed = new HashSet<BoundDrop>(ReferenceEqualityComparer.Instance);
         var drops = new List<BoundDrop>();
         var parameterBody = body;
@@ -890,11 +901,13 @@ public static class SemanticVerifier
                                 throw Invalid(local.Span);
                             }
                         }
-                        if (child is BoundOwnerDeclaration output
-                            && output.Variable >= 0 && output.Variable < function.Variables.Length
-                            && IsUnique(program, function.Variables[output.Variable].Type))
+                        if (child is BoundOwnerDeclaration or BoundVacantLocal)
                         {
-                            if (index + 1 >= block.Statements.Length
+                            var output = child is BoundOwnerDeclaration owner ? owner.Variable
+                                : ((BoundVacantLocal)child).Variable;
+                            if (output >= 0 && output < function.Variables.Length
+                                && IsUnique(program, function.Variables[output].Type)
+                                && (index + 1 >= block.Statements.Length
                                 || block.Statements[index + 1] is not BoundTryFinally outputRegion
                                 || (index + 2 != block.Statements.Length
                                     && !(index + 3 == block.Statements.Length
@@ -902,10 +915,12 @@ public static class SemanticVerifier
                                         && ((function.ReturnType == PrimitiveType.Void && terminal.Value is null)
                                             || (function.IsConstructor && terminal.Value is BoundRead { Variable: 0 }))))
                                 || outputRegion.Finally.Statements is not [BoundDrop outputDrop]
-                                || outputDrop.Variable != output.Variable || outputDrop.IsOutput
-                                || !allowed.Add(outputDrop) || !outputOwners.Add(output))
+                                || outputDrop.Variable != output || outputDrop.IsOutput
+                                || !allowed.Add(outputDrop)
+                                || (child is BoundOwnerDeclaration declaration && !outputOwners.Add(declaration))
+                                || (child is BoundVacantLocal vacant && !vacantOwners.Add(vacant))))
                             {
-                                throw Invalid(output.Span);
+                                throw Invalid(child.Span);
                             }
                         }
                         pending.Push((child, item.Depth + 1));
@@ -922,6 +937,14 @@ public static class SemanticVerifier
                     if (!outputOwners.Remove(output))
                     {
                         throw Invalid(output.Span);
+                    }
+                    break;
+                case BoundVacantLocal vacant:
+                    if (vacant.Variable >= 0 && vacant.Variable < function.Variables.Length
+                        && IsUnique(program, function.Variables[vacant.Variable].Type)
+                        && !vacantOwners.Remove(vacant))
+                    {
+                        throw Invalid(vacant.Span);
                     }
                     break;
                 case BoundDrop drop:
@@ -975,7 +998,7 @@ public static class SemanticVerifier
                 throw Invalid(drop.Span);
             }
         }
-        if (allowed.Count != 0 || owners.Count != 0 || outputOwners.Count != 0
+        if (allowed.Count != 0 || owners.Count != 0 || outputOwners.Count != 0 || vacantOwners.Count != 0
             || constructedFields is not null)
         {
             throw Invalid();
@@ -1178,6 +1201,8 @@ public static class SemanticVerifier
                         throw InvalidEffect(local.Span, "Ownership");
                     }
                     Expression(local.Initializer, depth + 1);
+                    break;
+                case BoundVacantLocal:
                     break;
                 case BoundAssignment assignment:
                     if (assignment.Variable < 0 || assignment.Variable >= roots.Length
@@ -1451,6 +1476,15 @@ public static class SemanticVerifier
                 if (HasFields(program, local.Initializer.Type))
                 {
                     fieldMasks[local.Variable] = FullMask(program, local.Initializer.Type);
+                }
+                return false;
+            case BoundVacantLocal vacant:
+                if (vacant.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                    || vacant.Variable >= initialized.Length
+                    || !declarations.Add(vacant.Variable) || initialized[vacant.Variable]
+                    || function.Variables[vacant.Variable].IsMutable)
+                {
+                    throw Invalid(vacant.Span);
                 }
                 return false;
             case BoundOwnerDeclaration output:

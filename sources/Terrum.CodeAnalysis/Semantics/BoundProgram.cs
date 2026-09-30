@@ -357,6 +357,9 @@ public sealed record BoundBlock(ImmutableArray<BoundStatement> Statements, TextS
 /// <param name="Span">The source range.</param>
 public sealed record BoundLocal(int Variable, BoundExpression Initializer, TextSpan Span) : BoundStatement(Span);
 
+/// <summary>Declares typed storage that cannot be read until a checked init call publishes its value.</summary>
+public sealed record BoundVacantLocal(int Variable, TextSpan Span) : BoundStatement(Span);
+
 /// <summary>Introduces a vacant owner whose initializer is a conditional output in the following region.</summary>
 public sealed record BoundOwnerDeclaration(int Variable, TextSpan Span) : BoundStatement(Span);
 

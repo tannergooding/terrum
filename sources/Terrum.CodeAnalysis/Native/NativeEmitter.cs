@@ -1522,7 +1522,7 @@ internal sealed partial class PeCompiler
                 _code.Load(Spill(1));
                 _code.Bytes(0x89, 0x04, 0x8A);
                 break;
-            case BoundOwnerDeclaration:
+            case BoundOwnerDeclaration or BoundVacantLocal:
                 break;
             case BoundAssignment assignment:
                 Expression(assignment.Value, 0);

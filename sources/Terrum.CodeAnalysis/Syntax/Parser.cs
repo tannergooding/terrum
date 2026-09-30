@@ -699,6 +699,7 @@ internal sealed class Parser
             {
                 var children = new List<SyntaxElement> { Take(), Expect(TokenKind.OpenParen) };
                 children.Add(Current.Kind == TokenKind.Semicolon ? Node(SyntaxKind.EmptyStatement, [])
+                    : IsVacantLocalStart() ? ParseVacantLocal(semicolon: false)
                     : Current.Kind is TokenKind.VarKeyword or TokenKind.MutKeyword || LooksLikeLocal()
                         ? ParseLocal(semicolon: false) : ParseExpressionStatement(semicolon: false));
                 children.Add(Expect(TokenKind.Semicolon));
@@ -761,6 +762,10 @@ internal sealed class Parser
                     var keyword = Take();
                     node = Node(SyntaxKind.ConstDeclaration, [keyword, ParseLocal()]);
                 }
+                else if (IsVacantLocalStart())
+                {
+                    node = ParseVacantLocal();
+                }
                 else if (Current.Kind is TokenKind.VarKeyword or TokenKind.MutKeyword || LooksLikeLocal())
                 {
                     node = ParseLocal();
@@ -810,7 +815,15 @@ internal sealed class Parser
         children.Add(Current.Kind == TokenKind.VarKeyword ? Take() : ParseType());
         children.Add(Expect(TokenKind.Identifier));
         children.Add(Expect(TokenKind.Equals));
-        children.Add(ParseExpression());
+        if (Current.Kind == TokenKind.Semicolon)
+        {
+            Report("TRM1001", "An ordinary local requires an initializer.", Current.Span);
+            children.Add(Node(SyntaxKind.OmittedExpression, []));
+        }
+        else
+        {
+            children.Add(ParseExpression());
+        }
 
         if (semicolon)
         {
@@ -818,6 +831,23 @@ internal sealed class Parser
         }
 
         return Node(SyntaxKind.VariableDeclaration, children);
+    }
+
+    private bool IsVacantLocalStart() => Current.Kind == TokenKind.Identifier
+        && Current.Text == "init"
+        && (Peek(1).Kind == TokenKind.VarKeyword || LooksLikeLocal(1));
+
+    private SyntaxNode ParseVacantLocal(bool semicolon = true)
+    {
+        var children = new List<SyntaxElement> {
+            Take(), Current.Kind == TokenKind.VarKeyword ? Take() : ParseType(),
+            Expect(TokenKind.Identifier),
+        };
+        if (semicolon)
+        {
+            children.Add(Expect(TokenKind.Semicolon));
+        }
+        return Node(SyntaxKind.VacantLocalDeclaration, children);
     }
 
     private bool LooksLikeLocal(int initialOffset = 0)

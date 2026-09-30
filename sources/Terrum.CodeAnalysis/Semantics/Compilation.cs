@@ -316,7 +316,7 @@ public sealed class Compilation
                     case BoundReturn { Value: BoundExpression value }:
                         expressions.Push(value);
                         break;
-                    case BoundOwnerDeclaration or BoundDrop or BoundDropConstructedFields or BoundReturn
+                    case BoundOwnerDeclaration or BoundVacantLocal or BoundDrop or BoundDropConstructedFields or BoundReturn
                         or BoundBreak or BoundContinue:
                         break;
                     default:

@@ -78,6 +78,8 @@ internal sealed partial class Binder
                 return true;
             case BoundLocal local:
                 return CheckConstExpression(local.Initializer, out unsupported);
+            case BoundVacantLocal:
+                return false;
             case BoundAssignment assignment:
                 return CheckConstExpression(assignment.Value, out unsupported);
             case BoundExpressionStatement expression:
@@ -197,6 +199,8 @@ internal sealed partial class Binder
                     return local;
                 }
             }
+            case BoundVacantLocal:
+                return statement;
             case BoundIf conditional:
                 return conditional with {
                     Condition = ResolveConstExpression(conditional.Condition, locals, functions, variableCount),

@@ -45,6 +45,7 @@ public static partial class ModuleCompiler
     private const int CorePrimitiveVersion = 37;
     private const int CorePrimitiveGetterVersion = 38;
     private const int StructuredLoopVersion = 39;
+    private const int VacantLocalVersion = 40;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -824,7 +825,7 @@ public static partial class ModuleCompiler
     private static List<int> Calls(BoundStatement body, Action<PrimitiveType>? visitType = null,
         Action<BoundViewScope>? visitView = null, Action? visitLoopTransfer = null,
         Action<BoundMutableFieldLoan>? visitMutableFieldLoan = null,
-        Action<BoundStatement>? visitStructuredLoop = null)
+        Action<BoundStatement>? visitStructuredLoop = null, Action<BoundVacantLocal>? visitVacantLocal = null)
     {
         var calls = new List<int>();
         VisitStatement(body);
@@ -842,6 +843,9 @@ public static partial class ModuleCompiler
                     break;
                 case BoundLocal local:
                     VisitExpression(local.Initializer);
+                    break;
+                case BoundVacantLocal vacant:
+                    visitVacantLocal?.Invoke(vacant);
                     break;
                 case BoundAssignment assignment:
                     VisitExpression(assignment.Value);
@@ -998,6 +1002,13 @@ public static partial class ModuleCompiler
     {
         var found = false;
         _ = Calls(body, visitStructuredLoop: _ => found = true);
+        return found;
+    }
+
+    private static bool HasVacantLocal(BoundStatement body)
+    {
+        var found = false;
+        _ = Calls(body, visitVacantLocal: _ => found = true);
         return found;
     }
 
@@ -1367,7 +1378,7 @@ public static partial class ModuleCompiler
         return statement switch {
             BoundBlock block => block with { Statements = RemapStatements(block.Statements, source, destination, classOffset) },
             BoundLocal local => local with { Initializer = RemapExpression(local.Initializer, source, destination, classOffset) },
-            BoundOwnerDeclaration => statement,
+            BoundOwnerDeclaration or BoundVacantLocal => statement,
             BoundAssignment assignment => assignment with { Value = RemapExpression(assignment.Value, source, destination, classOffset) },
             BoundFieldAssignment field => field with { Value = RemapExpression(field.Value, source, destination, classOffset) },
             BoundExpressionStatement expression => expression with {
@@ -1482,6 +1493,11 @@ public static partial class ModuleCompiler
             && HasStructuredLoops(function.Body)))
         {
             version = Math.Max(version, StructuredLoopVersion);
+        }
+        if (module.Functions.Any(item => item.Function is BoundFunction function
+            && HasVacantLocal(function.Body)))
+        {
+            version = Math.Max(version, VacantLocalVersion);
         }
         writer.Write(Magic);
         writer.Write(version);
@@ -1684,6 +1700,13 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Post-tested or named loop transfers require semantic module version 39.");
             }
+            if (version < VacantLocalVersion && items.Any(item => item.Function is BoundFunction function
+                && HasVacantLocal(function.Body))
+                || version == VacantLocalVersion && !items.Any(item => item.Function is BoundFunction function
+                    && HasVacantLocal(function.Body)))
+            {
+                throw new ModuleFormatException("Vacant locals require semantic module version 40.");
+            }
             if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
                 || !items.Any(static item => item.Import && item.Function is BoundFunction function
                     && !ManagedExportShape.ScalarOnly(function))))
@@ -1737,7 +1760,7 @@ public static partial class ModuleCompiler
             or MutableBufferFieldReceiverVersion or MutableBufferFieldViewVersion or ManagedValueExportVersion
             or ManagedGraphParticipantVersion or PrivateInitReferenceVersion or ExplicitGetterVersion
             or TransparentLayoutVersion or WideClassFieldsVersion or CorePrimitiveVersion
-            or CorePrimitiveGetterVersion or StructuredLoopVersion))
+            or CorePrimitiveGetterVersion or StructuredLoopVersion or VacantLocalVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -2104,6 +2127,7 @@ public static partial class ModuleCompiler
             BoundTryCatch => (byte)12,
             BoundDrop => (byte)13,
             BoundOwnerDeclaration => (byte)14,
+            BoundVacantLocal when version >= VacantLocalVersion => (byte)24,
             BoundDropConstructedFields => (byte)15,
             BoundViewScope => (byte)16,
             BoundViewSet => (byte)17,
@@ -2149,6 +2173,9 @@ public static partial class ModuleCompiler
                 break;
             case BoundOwnerDeclaration declaration:
                 writer.Write(declaration.Variable);
+                break;
+            case BoundVacantLocal vacant:
+                writer.Write(vacant.Variable);
                 break;
             case BoundDropConstructedFields partial:
                 writer.Write(partial.Variable);
@@ -2335,6 +2362,8 @@ public static partial class ModuleCompiler
                 };
             case 14 when version >= TransferVersion:
                 return new BoundOwnerDeclaration(reader.ReadInt32(), span);
+            case 24 when version >= VacantLocalVersion:
+                return new BoundVacantLocal(reader.ReadInt32(), span);
             case 15 when version >= CompositeVersion:
                 var constructedOwner = reader.ReadInt32();
                 var acquired = Count(reader, ValueLayout.MaximumSize);
@@ -2578,7 +2607,7 @@ public static partial class ModuleCompiler
     private static BoundStatement ResolveStatement(BoundStatement statement, IReadOnlyDictionary<string, int> names) => statement switch {
         BoundBlock block => block with { Statements = [.. block.Statements.Select(child => ResolveStatement(child, names))] },
         BoundLocal local => local with { Initializer = ResolveExpression(local.Initializer, names) },
-        BoundOwnerDeclaration => statement,
+        BoundOwnerDeclaration or BoundVacantLocal => statement,
         BoundAssignment assignment => assignment with { Value = ResolveExpression(assignment.Value, names) },
         BoundFieldAssignment field => field with { Value = ResolveExpression(field.Value, names) },
         BoundExpressionStatement expression => expression with { Expression = ResolveExpression(expression.Expression, names) },
