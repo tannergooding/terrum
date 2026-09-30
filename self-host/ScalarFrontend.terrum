@@ -1485,7 +1485,7 @@ mut class ScalarFrontendState
         require _tokens.TryGet(_at, out var first);
         if (first.Kind == 2
             && _tokens.TryGet(_at + 1, out var equals)
-            && equals.Kind == 64)
+            && (equals.Kind == 64 || equals.Kind >= 91 && equals.Kind <= 101))
         {
             if (!TryResolveParameter(first, out var slot, out var type))
             {
@@ -1498,13 +1498,73 @@ mut class ScalarFrontendState
                 return false;
             }
             _at = _at + 2;
-            if (!ParseTreeExpression(type, 1, 0, out var value)
-                || !ResolveTreeLiteral(value, type, false)
+            mut int32 rightType = type;
+            if (equals.Kind >= 99) { rightType = 1; }
+            if (!ParseTreeExpression(rightType, 1, 0, out var value)
+                || !ResolveTreeLiteral(value, rightType, false)
                 || !Take(52, out var end))
             {
                 return false;
             }
+            if (equals.Kind != 64)
+            {
+                if (type < 1 || type > 4)
+                {
+                    FailAt(2, first.Range);
+                    return false;
+                }
+                if (!AddTreeNode(0, type, first.Range.Start, first.Range.End,
+                    slot, -1, 0, 0, out var old)
+                    || !AddTreeNode(equals.Kind, type, first.Range.Start,
+                        TreeWord(value, 2) + TreeWord(value, 3),
+                        old, value, 0, 0, out var compound))
+                {
+                    return false;
+                }
+                return AddTreeStatement(9, slot, compound, first.Range.Start, end.Range.End);
+            }
             return AddTreeStatement(2, slot, value, first.Range.Start, end.Range.End);
+        }
+        if (first.Kind == 46 || first.Kind == 86 || first.Kind == 87
+            || first.Kind == 2 && _tokens.TryGet(_at + 1, out var postfix)
+                && (postfix.Kind == 86 || postfix.Kind == 87))
+        {
+            if (!ParseTreeExpression(0, 1, 0, out var update))
+            {
+                return false;
+            }
+            if (_tokens.TryGet(_at, out var compound)
+                && compound.Kind >= 91 && compound.Kind <= 101)
+            {
+                if (!TryTreeUpdatePlace(update))
+                {
+                    return false;
+                }
+                int32 type = TreeWord(update, 1);
+                int32 rightType = compound.Kind >= 99 ? 1 : type;
+                _at = _at + 1;
+                if (!ParseTreeExpression(rightType, 1, 0, out var value)
+                    || !ResolveTreeLiteral(value, rightType, false)
+                    || !Take(52, out var end))
+                {
+                    return false;
+                }
+                if (!AddTreeNode(compound.Kind, type, first.Range.Start,
+                    TreeWord(value, 2) + TreeWord(value, 3),
+                    update, value, 0, 0, out var root))
+                {
+                    return false;
+                }
+                int32 slot = TreeWord(UngroupTree(update), 4);
+                return AddTreeStatement(9, slot, root, first.Range.Start, end.Range.End);
+            }
+            int32 operation = TreeWord(update, 0);
+            if ((operation != 86 && operation != 87)
+                || !Take(52, out var endUpdate))
+            {
+                return false;
+            }
+            return AddTreeStatement(10, 0, update, first.Range.Start, endUpdate.Range.End);
         }
 
         mut bool mutable = false;
@@ -1636,7 +1696,9 @@ mut class ScalarFrontendState
             }
             else if (next.Kind == 2
                 && _tokens.TryGet(_at + 1, out var equals)
-                && equals.Kind == 64)
+                && (equals.Kind == 64 || equals.Kind >= 91 && equals.Kind <= 101
+                    || equals.Kind == 86 || equals.Kind == 87)
+                || next.Kind == 46 || next.Kind == 86 || next.Kind == 87)
             {
                 if (!ParseTreeStatement()) { return false; }
             }
@@ -1918,6 +1980,7 @@ mut class ScalarFrontendState
     private int32 TreePrecedence(int32 kind)
     {
         if (kind >= 59 && kind <= 61) { return 10; }
+        if (kind >= 88 && kind <= 90) { return 8; }
         if (kind == 57 || kind == 58) { return 9; }
         if (kind >= 67 && kind <= 70) { return 7; }
         if (kind == 65 || kind == 66) { return 6; }
@@ -1974,6 +2037,7 @@ mut class ScalarFrontendState
             return true;
         }
         if ((operation >= 57 && operation <= 61
+                || operation >= 88 && operation <= 90
                 || operation == 71 || operation == 73 || operation == 75)
             && TreeWord(node, 5) >= 0 && TreeWord(node, 1) == 0)
         {
@@ -1982,7 +2046,8 @@ mut class ScalarFrontendState
                 return FailTreeType(node);
             }
             if (!ResolveTreeLiteral(TreeWord(node, 4), type, false)
-                || !ResolveTreeLiteral(TreeWord(node, 5), type, false))
+                || !ResolveTreeLiteral(TreeWord(node, 5),
+                    operation >= 88 && operation <= 90 ? 1 : type, false))
             {
                 return false;
             }
@@ -2085,8 +2150,36 @@ mut class ScalarFrontendState
             {
                 return false;
             }
-            return AddTreeNode(46, TreeWord(inner, 1), token.Range.Start,
-                close.Range.End, inner, -1, 0, 0, out node);
+            if (!AddTreeNode(46, TreeWord(inner, 1), token.Range.Start,
+                close.Range.End, inner, -1, 0, 0, out var grouped))
+            {
+                return false;
+            }
+            if (_tokens.TryGet(_at, out var update)
+                && (update.Kind == 86 || update.Kind == 87))
+            {
+                _at = _at + 1;
+                if (!TryTreeUpdatePlace(grouped))
+                {
+                    return false;
+                }
+                return AddTreeNode(update.Kind, TreeWord(grouped, 1),
+                    token.Range.Start, update.Range.End,
+                    grouped, -1, 0, 0, out node);
+            }
+            node = grouped;
+            return true;
+        }
+        if (token.Kind == 86 || token.Kind == 87)
+        {
+            _at = _at + 1;
+            if (!ParseTreePrefix(0, depth + 1, out var place)
+                || !TryTreeUpdatePlace(place))
+            {
+                return false;
+            }
+            return AddTreeNode(token.Kind, TreeWord(place, 1), token.Range.Start,
+                TreeWord(place, 2) + TreeWord(place, 3), place, -1, 1, 0, out node);
         }
         if (token.Kind == 57 || token.Kind == 58 || token.Kind == 62
             || token.Kind == 63)
@@ -2138,8 +2231,24 @@ mut class ScalarFrontendState
             {
                 return false;
             }
-            return AddTreeNode(0, type, token.Range.Start, token.Range.End,
-                parameter, -1, 0, 0, out node);
+            if (!AddTreeNode(0, type, token.Range.Start, token.Range.End,
+                parameter, -1, 0, 0, out var read))
+            {
+                return false;
+            }
+            if (_tokens.TryGet(_at, out var update)
+                && (update.Kind == 86 || update.Kind == 87))
+            {
+                _at = _at + 1;
+                if (!TryTreeUpdatePlace(read))
+                {
+                    return false;
+                }
+                return AddTreeNode(update.Kind, type, token.Range.Start,
+                    update.Range.End, read, -1, 0, 0, out node);
+            }
+            node = read;
+            return true;
         }
         if (token.Kind == 20 || token.Kind == 21)
         {
@@ -2180,7 +2289,8 @@ mut class ScalarFrontendState
             int32 rank = TreePrecedence(operation.Kind);
             _at = _at + 1;
             mut int32 leftType = TreeWord(left, 1);
-            mut int32 rightContext = leftType;
+            bool shift = operation.Kind >= 88 && operation.Kind <= 90;
+            mut int32 rightContext = shift ? 1 : leftType;
             if (operation.Kind >= 65 && operation.Kind <= 70
                 && leftType == 0)
             {
@@ -2191,19 +2301,19 @@ mut class ScalarFrontendState
                 return false;
             }
             mut int32 rightType = TreeWord(right, 1);
-            if (leftType == 0 && rightType != 0
+            if (!shift && leftType == 0 && rightType != 0
                 && !ResolveTreeLiteral(left, rightType, false))
             {
                 return false;
             }
-            if (rightType == 0 && leftType != 0
-                && !ResolveTreeLiteral(right, leftType, false))
+            if (rightType == 0 && (shift || leftType != 0)
+                && !ResolveTreeLiteral(right, shift ? 1 : leftType, false))
             {
                 return false;
             }
             if (leftType == 0) { leftType = TreeWord(left, 1); }
             if (rightType == 0) { rightType = TreeWord(right, 1); }
-            if (leftType == 0 && rightType == 0)
+            if (leftType == 0 && rightType == 0 && !shift)
             {
                 mut int32 context = expected;
                 if (context == 5 || context == 0)
@@ -2232,7 +2342,8 @@ mut class ScalarFrontendState
             bool logical = operation.Kind == 72 || operation.Kind == 74;
             bool bitwise = operation.Kind == 71 || operation.Kind == 73
                 || operation.Kind == 75;
-            if (leftType != rightType
+            if ((shift ? (leftType != 0 && (leftType < 1 || leftType > 4)
+                    || rightType != 1) : leftType != rightType)
                 || (logical && leftType != 5)
                 || (comparison && leftType == 6 && operation.Kind >= 67)
                 || (comparison && leftType == 5 && operation.Kind >= 67)
@@ -2303,6 +2414,26 @@ mut class ScalarFrontendState
             left = conditional;
         }
         node = left;
+        return true;
+    }
+
+    private int32 UngroupTree(int32 node)
+    {
+        mut int32 read = node;
+        while (TreeWord(read, 0) == 46) { read = TreeWord(read, 4); }
+        return read;
+    }
+
+    private mut bool TryTreeUpdatePlace(int32 node)
+    {
+        int32 read = UngroupTree(node);
+        int32 slot = TreeWord(read, 4);
+        if (TreeWord(read, 0) != 0 || slot <= _parameterCount
+            || TreeWord(read, 1) < 1 || TreeWord(read, 1) > 4
+            || Host.Frontend[300 + (slot - _parameterCount - 1) * 4 + 1] != 1)
+        {
+            return FailTreeType(node);
+        }
         return true;
     }
 

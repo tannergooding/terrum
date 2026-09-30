@@ -31,6 +31,10 @@ namespace Terrum.CodeAnalysis;
 // span). Header roots 38..40 are -1 and word 15 is 0: there is no terminal
 // envelope. Version 48 admits the existing conversion, conditional, loop,
 // branch and nearest-loop transfer features without a cross-product version.
+// Version 49 selects shifts (operations 88..90), local updates (86/87,
+// low=1 prefix or 0 postfix), and compound statements (kind 9, root
+// operation 91..101), plus update expression statements (kind 10).
+// The existing node/statement and source-order capacities remain unchanged.
 void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expression)
 {
     Host.Frontend[offset] = expression.Type;
@@ -137,6 +141,16 @@ bool TryPublishScalarFrontend()
             if (Host.Frontend[332 + statement * 5] == 8)
             {
                 Host.Frontend[0] = 48;
+                break;
+            }
+        }
+        for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
+        {
+            int32 operation = Host.Frontend[42 + node * 8];
+            if (operation == 86 || operation == 87
+                || operation >= 88 && operation <= 101)
+            {
+                Host.Frontend[0] = 49;
                 break;
             }
         }
