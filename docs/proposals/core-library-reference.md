@@ -425,12 +425,26 @@ including any inline-data form, remains open and is not fixed by TRRM.
 `Span<T>` is one language-defined view type; backing/owner relationship is opaque and carried as a dependency, not as a public owner generic argument. `Length`, a borrowed indexer and slice are the useful public observations. Empty/end slices retain lease/root/lifetime. A by-value getter without a `[Copy]` restriction is not a usable contract for unique `T`: it would duplicate a value from even a readonly view. A candidate matched-access borrowed-place/ref indexer is shown in §3: read-only views yield `ref<T>`, while `write ref<T>` is available only through a write-authorized view. If property syntax cannot express that matched place, define an explicit compiler-owned place category; by-value get/copy APIs require `[Copy]`. Concrete spans deliberately do not expose `AsSpan()`; interface projection is explicit. Exact stored-view anchors and ABI are open.
 
 ```terrum
-public struct InlineArray<T, const nuint N>
+public struct InlineArray<T, const uint64 N>
     where T : [Sized]
 {
+    public nuint Length { get; }
     [MatchedAccess] public ref<T> this[nuint index] { get; }
+    [MatchedAccess] public Span<T> AsSpan();
 }
 ```
+
+The candidate length formal uses a fixed-width unsigned domain, consistent
+with the approved initial constant-generic domains; native-sized `nuint` is
+not silently admitted as a constant formal. Choosing `uint64` rather than
+another fixed width remains an API proposal. `Length` reports the same
+constant `N` in the target's indexing domain. A closed instantiation must
+reject if `N` or the checked storage-size product cannot be represented or
+supported by that target; it must not truncate the length or defer an invalid
+inline layout to runtime. Exact target layout limits and zero-length storage
+remain open. Borrowed indexing and `AsSpan` retain the enclosing owner's
+lifetime and supplied access; they neither copy arbitrary `T` nor grant write
+authority through a readonly owner.
 
 ### Explicit native storage (representative Foundation inventory)
 
