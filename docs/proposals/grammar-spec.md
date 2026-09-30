@@ -853,8 +853,10 @@ Contextually generic lambdas retain their definition-site constraint contract.
 forms; it is not part of the callable's result type. Declaration modifiers
 retain their ordinary legal permutation rules. Lambda `static` and `async`
 may occur in either order, at most once each. An async implementation must
-have a declared or contextual task-like completion result; arbitrary result
-types are not implicitly wrapped, and `async void` rejects. In an async body,
+have a declared or contextual task-like completion result, or the eligible
+async-producer result contract described in §5.12 when marked `[Iterator]`.
+Arbitrary result types are not implicitly wrapped, and `async void` rejects.
+In an ordinary async body,
 successful return or expression-body evaluation supplies the completion's
 result, not a second task handle. Task-like and awaitable eligibility require
 checked contracts, not similarly named methods.
@@ -865,8 +867,9 @@ Postfix access/calls bind first; `await Read() + offset` means
 operand. The operand evaluates once and its checked completion supplies the
 await expression's result or propagates failure under the ordinary failure
 rules. Awaiting a completed operation may continue inline; an incomplete
-operation suspends under its checked scheduling contract. Invocation starts
-eagerly, without implicit executor capture or a mandatory worker hop.
+operation suspends under its checked scheduling contract. Ordinary async
+invocation starts eagerly, without implicit executor capture or a mandatory
+worker hop.
 Postconditions are checked before successful completion publication, and
 suspension preserves ownership, loan, cleanup and affinity obligations.
 A separately declared non-async lambda is not an async body merely because
@@ -1549,6 +1552,15 @@ backing lifetimes even if advancement is delayed or never occurs. Protocol
 method names, element-loan contracts, abandonment cleanup and representation
 remain separate design work. `[Iterator]` marks the
 implementation; it is not a traversal-direction or element-access flag.
+`[Iterator]` composes with `async` for an async producer. Its declared result
+must satisfy a checked async-producer contract; `Task<Sequence<T>>` by itself
+only represents completion of sequence creation, not asynchronous advancement.
+Async producer creation remains lazy, unlike ordinary eager async invocation.
+Advancement may suspend at an `await` and resumes under the ordinary checked
+scheduling, failure and affinity rules until yield, completion or failure.
+`yield expression;` still emits an element and `return;` finishes production;
+neither introduces an implicit result wrapper. Protocol names, advance and
+close operations, and cancellation integration remain library design.
 Reverse traversal and readonly/writable items belong to the selected
 sequence/item contracts. Whether variations are exposed as adapters or
 explicitly declared policies remains library design. Any selection must
