@@ -148,8 +148,8 @@ native emitter or compiler self-build.
 | [IntegerFormatting](IntegerFormatting.terrum) | Invariant signed/unsigned 32-/64-bit and `char16` code-unit decimal and explicit radix-2..36 digits (lowercase or uppercase) in reusable owned storage, with vacancy-only radix length queries for exact allocation | AOT/JIT per-radix length, exact-capacity and repeated-use fixtures; native heap checks cover same-allocation transfer and failure cleanup |
 | [IntegerParsing](IntegerParsing.terrum) | Strict signed/unsigned radix-2..36 ASCII parsing of an exact UTF-16 source slice with conditional 32-/64-bit and unsigned `char16` code-unit `out` or `init ref` outputs | AOT/JIT under both policies; full-range per-radix boundaries, invalid spelling/bounds and unpublished outputs; existing `out` entry points remain unchanged |
 | [IntegerCheckedConversions](IntegerCheckedConversions.terrum) | All twelve cross-type 32-/64-bit integer conversions and four checked narrowings to `char16`, preserving the value or leaving an `init ref` result vacant on out-of-range input | Independent semantic-module producer/consumer with AOT/JIT under both policies; `char16` preserves any in-range code unit, including surrogates, without asserting Unicode scalar validity; provisional named alternatives to failing checked type-calls, not new syntax or conversion witnesses |
-| [IntegerSaturation](IntegerSaturation.terrum) | All twelve cross-type 32-/64-bit integer conversions and four `char16` narrowings preserving or clamping to the destination range | AOT/JIT range boundaries and an independent compiled-module consumer under both policies; these named functions are provisional, not general conversion syntax or witnesses |
-| [IntegerWrapping](IntegerWrapping.terrum) | All twelve cross-type signed/unsigned 32- and 64-bit conversions plus four `char16` narrowings preserving destination-width low bits | AOT/JIT host-oracle cases and an independent compiled-module consumer under both policies; no `unchecked` syntax or new primitive conversion policy |
+| [IntegerSaturation](IntegerSaturation.terrum) | All twelve cross-type 32-/64-bit integer conversions, four `char16` narrowings that clamp, and four value-preserving `char16` widenings | AOT/JIT range and code-unit boundaries plus an independent compiled-module consumer under both policies; these named functions are provisional, not general conversion syntax or witnesses |
+| [IntegerWrapping](IntegerWrapping.terrum) | All twelve cross-type signed/unsigned 32- and 64-bit conversions, four low-bit `char16` narrowings and four value-preserving `char16` widenings | AOT/JIT host-oracle cases and an independent compiled-module consumer under both policies; no `unchecked` syntax or new primitive conversion policy |
 | [SourceRange](SourceRange.terrum) | Checked UTF-16 range construction without invalid output payloads | Executed with private construction and conditional `out` or vacancy-only `init ref` publication through independent module consumers |
 | [SourceLines](SourceLines.terrum) | Streaming line ranges, line extents and bidirectional UTF-16 offset/line-position mapping over an immutable source grant | AOT/JIT `out` and vacancy-only `init ref` outputs under both policies; CRLF, every supported line break, EOF and malformed surrogate offsets agree with the host snapshot |
 | [SourceLineIndex](SourceLineIndex.terrum) | Owned line-start table, random-access line content and including-break extents, and bidirectional UTF-16 offset/line-position lookup | Executed as AOT/JIT under both failure policies; existing `out` APIs and vacancy-only `init ref` construction/lookups, exact offset round-trips, invalid output and owner-copy rejection |
@@ -289,18 +289,21 @@ integer binding or create a runtime text representation.
 conversions among signed and unsigned 32-/64-bit integers. They compare in
 the source domain before checked destination conversion, clamping values
 outside the destination range to its nearest endpoint. In-range values are
-preserved, including signed minima and maxima.
+preserved, including signed minima and maxima. Four `char16`-to-integer
+widenings preserve every 16-bit code unit, including surrogates, without
+interpreting it as a Unicode scalar.
 No ambient conversion policy, floating-point behavior or public generic
 conversion witness is implied by these library functions. A separate module
-consumer binds their twelve published signatures and runs without incorporating
+consumer binds the published signatures and runs without incorporating
 the producer's source.
 
 `IntegerWrapping` supplies all twelve named conversions across the four
 signed and unsigned 32-/64-bit types. They retain the low bits for the
 destination width and interpret signed destinations as two's complement,
 including signed minima. Each internal checked conversion occurs only after
-its value is in range. They run as an independent module without changing checked
-`T(value)` behavior or establishing `unchecked` expression syntax.
+its value is in range. Four `char16`-to-integer widenings preserve every
+code unit, including surrogates. They run as an independent module without
+changing checked `T(value)` behavior or establishing `unchecked` expression syntax.
 
 `ManagedTokenChain` stores at most 64 complete `Token` values in source-defined
 managed links. It compiles with `Token.terrum` and `SourceRange.terrum`; each

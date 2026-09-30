@@ -532,7 +532,11 @@ public sealed class WideCandidateTests
             "Terrum.CodeAnalysis.Numerics64.SaturateInt32ToChar16",
             "Terrum.CodeAnalysis.Numerics64.SaturateUInt32ToChar16",
             "Terrum.CodeAnalysis.Numerics64.SaturateInt64ToChar16",
-            "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToChar16");
+            "Terrum.CodeAnalysis.Numerics64.SaturateUInt64ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.SaturateChar16ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.SaturateChar16ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.SaturateChar16ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.SaturateChar16ToUInt64");
         var source = SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
@@ -549,6 +553,11 @@ public sealed class WideCandidateTests
                     || SaturateInt64ToChar16(int64.MaxValue) != char16(65535)
                     || SaturateUInt64ToChar16(0) != char16(0)
                     || SaturateUInt64ToChar16(uint64.MaxValue) != char16(65535)) { return 0; }
+                if (SaturateChar16ToInt32(char16(0)) != 0
+                    || SaturateChar16ToInt32(char16(55296)) != 55296
+                    || SaturateChar16ToUInt32(char16(65535)) != 65535
+                    || SaturateChar16ToInt64(char16(55296)) != 55296
+                    || SaturateChar16ToUInt64(char16(65535)) != 65535) { return 1; }
                 return 42;
             }
             """);
@@ -613,7 +622,11 @@ public sealed class WideCandidateTests
             "Terrum.CodeAnalysis.Numerics64.WrapInt32ToChar16",
             "Terrum.CodeAnalysis.Numerics64.WrapUInt32ToChar16",
             "Terrum.CodeAnalysis.Numerics64.WrapInt64ToChar16",
-            "Terrum.CodeAnalysis.Numerics64.WrapUInt64ToChar16");
+            "Terrum.CodeAnalysis.Numerics64.WrapUInt64ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.WrapChar16ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.WrapChar16ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.WrapChar16ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.WrapChar16ToUInt64");
         var source = SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
@@ -628,6 +641,11 @@ public sealed class WideCandidateTests
                     || WrapInt64ToChar16(65536) != char16(0)
                     || WrapUInt64ToChar16(uint64.MaxValue) != char16(65535)
                     || WrapUInt64ToChar16(65536) != char16(0)) { return 0; }
+                if (WrapChar16ToInt32(char16(0)) != 0
+                    || WrapChar16ToInt32(char16(55296)) != 55296
+                    || WrapChar16ToUInt32(char16(65535)) != 65535
+                    || WrapChar16ToInt64(char16(55296)) != 55296
+                    || WrapChar16ToUInt64(char16(65535)) != 65535) { return 1; }
                 return 42;
             }
             """);

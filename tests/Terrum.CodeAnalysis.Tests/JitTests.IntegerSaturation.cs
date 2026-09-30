@@ -73,7 +73,14 @@ public sealed partial class JitTests
             "SaturateInt64ToUInt64(42) != 42",
             "SaturateInt64ToUInt64(int64.MaxValue) != uint64(int64.MaxValue)",
         };
-        var assertions = string.Join(Environment.NewLine, checks.Select((check, index) =>
+        ushort[] codeUnits = [0, 1, 0xD7FF, 0xD800, 0xDFFF, 0xE000, ushort.MaxValue];
+        var wideningChecks = codeUnits.SelectMany(value => new[] {
+            $"SaturateChar16ToInt32(char16({value})) != {value}",
+            $"SaturateChar16ToUInt32(char16({value})) != {value}",
+            $"SaturateChar16ToInt64(char16({value})) != {value}",
+            $"SaturateChar16ToUInt64(char16({value})) != {value}",
+        });
+        var assertions = string.Join(Environment.NewLine, checks.Concat(wideningChecks).Select((check, index) =>
             $"if ({check}) {{ return {index + 1}; }}"));
         var component = await File.ReadAllTextAsync(
             Path.Combine(RepositoryRoot(), "self-host", "IntegerSaturation.terrum")).ConfigureAwait(true);

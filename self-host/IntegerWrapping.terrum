@@ -95,3 +95,23 @@ public static char16 WrapUInt64ToChar16(uint64 value)
 {
     return char16(value & uint64(65535));
 }
+
+public static int32 WrapChar16ToInt32(char16 value)
+{
+    return int32(value);
+}
+
+public static uint32 WrapChar16ToUInt32(char16 value)
+{
+    return uint32(value);
+}
+
+public static int64 WrapChar16ToInt64(char16 value)
+{
+    return int64(value);
+}
+
+public static uint64 WrapChar16ToUInt64(char16 value)
+{
+    return uint64(value);
+}

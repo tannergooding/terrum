@@ -147,3 +147,23 @@ public static char16 SaturateUInt64ToChar16(uint64 value)
     }
     return char16(value);
 }
+
+public static int32 SaturateChar16ToInt32(char16 value)
+{
+    return int32(value);
+}
+
+public static uint32 SaturateChar16ToUInt32(char16 value)
+{
+    return uint32(value);
+}
+
+public static int64 SaturateChar16ToInt64(char16 value)
+{
+    return int64(value);
+}
+
+public static uint64 SaturateChar16ToUInt64(char16 value)
+{
+    return uint64(value);
+}

@@ -55,6 +55,15 @@ public sealed partial class JitTests
             checks.Add($"WrapUInt32ToInt64({value}) != {value}");
             checks.Add($"WrapUInt32ToUInt64({value}) != {value}");
         }
+        ushort[] codeUnits = [0, 1, 0xD7FF, 0xD800, 0xDFFF, 0xE000, ushort.MaxValue];
+        foreach (var value in codeUnits)
+        {
+            var source = $"char16({value})";
+            checks.Add($"WrapChar16ToInt32({source}) != {value}");
+            checks.Add($"WrapChar16ToUInt32({source}) != {value}");
+            checks.Add($"WrapChar16ToInt64({source}) != {value}");
+            checks.Add($"WrapChar16ToUInt64({source}) != {value}");
+        }
 
         var component = await File.ReadAllTextAsync(
             Path.Combine(RepositoryRoot(), "self-host", "IntegerWrapping.terrum")).ConfigureAwait(true);

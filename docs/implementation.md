@@ -970,6 +970,8 @@ throwing checked `T(value)` conversions, select witness policy or add syntax.
 The separate [integer-saturation candidate](../self-host/IntegerSaturation.terrum)
 provides all twelve explicit cross-type signed/unsigned 32-/64-bit integer
 conversion functions with destination-range clamping where required.
+Four additional `char16`-to-integer widenings preserve every code unit,
+including surrogate values, without a Unicode scalar interpretation.
 AOT/JIT exercise bounds and in-range values under both failure policies,
 including a separately compiled module consumer of the published functions.
 This does not add saturating conversion syntax, generic conversion witnesses
@@ -978,8 +980,9 @@ or a change to checked `T(value)` conversions.
 The [integer-wrapping candidate](../self-host/IntegerWrapping.terrum)
 provides all twelve cross-type 32-/64-bit signedness and width conversions that
 retain destination-width low bits, rather than applying checked range
-semantics. AOT/JIT compare against host bit-pattern results under both
-policies, including an independent compiled-module consumer. This does not
+semantics. Four additional `char16`-to-integer widenings preserve every
+code unit, including surrogate values. AOT/JIT compare against host bit-pattern
+results under both policies, including an independent compiled-module consumer. This does not
 introduce `unchecked` source syntax or change existing type-call conversion.
 
 The [StringLiteral candidate](../self-host/StringLiteral.terrum) decodes
