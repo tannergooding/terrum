@@ -5,6 +5,8 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 using Xunit;
 
 namespace Terrum.CodeAnalysis.Tests;
@@ -19,6 +21,8 @@ public sealed partial class CliTests
     [InlineData("public uint64 Value(uint64 x) => (x ^ 0xFFFFFFFFFFFFFFFF) & (x | 4);")]
     [InlineData("public bool Value(bool x, bool y) => !(x && (false || y)) || x;")]
     [InlineData("public bool Value(int64 x, int64 y) => (x + 3) < (y * 2) && x != y;")]
+    [InlineData("public bool Value(int64 x) => (1 | 2) == x;")]
+    [InlineData("public bool Value(uint64 x) => (1 ^ 2) == x;")]
     [InlineData("public bool Value(char16 x, char16 y) => (x == y) || (x != 42);")]
     [InlineData("public char16 Value(char16 x) => x;")]
     [InlineData("public int32 Value(int32 x, int32 y, int32 z) { if ((x + y) > (z * 2)) { return (x - z) + y; } return z + (x * 2); }")]
@@ -89,9 +93,16 @@ public sealed partial class CliTests
     [InlineData("public bool Value(int32 x) => (x < 5) && x;", 2, "&&")]
     [InlineData("public int32 Value(int32 x) => x + (2 * 3;", 1, ";")]
     [InlineData("public int32 Value(int32 x) => x + 2 * 3);", 1, ")")]
+    [InlineData("public bool Value() => 1 < 2;", 2, "<")]
+    [InlineData("public bool Value() => (1 + 2) < 4;", 2, "<")]
+    [InlineData("public bool Value() => (1 & 2) == 3;", 2, "==")]
+    [InlineData("public bool Value() => (1 | 2) == 3;", 2, "==")]
+    [InlineData("public bool Value() => (1 ^ 2) == 3;", 2, "==")]
     public async Task TreeFrontendRejectsInvalidExpressionsAsync(
         string source, int code, string offending)
     {
+        Assert.True(Compilation.Create(SyntaxTree.Parse(source
+            + " int32 Main() => 42;")).HasErrors);
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", ".."));
         var frontend = Path.Combine(root, "self-host");

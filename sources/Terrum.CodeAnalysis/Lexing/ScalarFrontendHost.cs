@@ -134,6 +134,7 @@ public static class ScalarFrontendHost
             }
             var nodes = ImmutableArray.CreateBuilder<ScalarFrontendNode>(words[37]);
             var depths = new int[words[37]];
+            var intrinsicTypes = new int[words[37]];
             for (var i = 0; i < words[37]; i++)
             {
                 var offset = 42 + i * 8;
@@ -183,6 +184,8 @@ public static class ScalarFrontendHost
                         var logical = node.Operation is 72 or 74;
                         var bitwise = node.Operation is 71 or 73 or 75;
                         if (operand.Type != rhs.Type || node.Type != (comparison ? 5 : operand.Type)
+                            || (comparison && intrinsicTypes[node.Left] == 0
+                                && intrinsicTypes[node.Right] == 0)
                             || (logical && operand.Type != 5)
                             || (comparison && (operand.Type == 6 || operand.Type == 5)
                                 && node.Operation >= 67)
@@ -198,6 +201,13 @@ public static class ScalarFrontendHost
                         throw InvalidResult();
                     }
                 }
+                // A comparison's bool result cannot supply its numeric operand context.
+                intrinsicTypes[i] = node.Operation switch {
+                    0 or 20 or 21 or 62 or >= 65 and <= 70 or 72 or 74 => node.Type,
+                    3 => 0,
+                    _ => intrinsicTypes[node.Left] != 0 || node.Right < 0
+                        ? intrinsicTypes[node.Left] : intrinsicTypes[node.Right],
+                };
                 nodes.Add(node);
             }
             var tree = nodes.MoveToImmutable();

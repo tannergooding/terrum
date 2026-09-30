@@ -11,6 +11,39 @@ namespace Terrum.CodeAnalysis.Tests;
 public sealed class TreeFrontendProjectionTests
 {
     [Fact]
+    public void ReadResultRejectsInventedIntegerComparisonContext()
+    {
+        const string text = "public bool Value() => 1 < 2;";
+        var words = new int[ScalarFrontendHost.WordCount];
+        words[0] = 20;
+        words[1] = 1;
+        words[2] = 1;
+        words[5] = 5;
+        words[9] = text.IndexOf("Value", StringComparison.Ordinal);
+        words[10] = 5;
+        words[37] = 3;
+        words[38] = -1;
+        words[39] = 2;
+        words[40] = -1;
+        words[41] = 1;
+        var left = text.IndexOf('1', StringComparison.Ordinal);
+        var right = text.IndexOf('2', StringComparison.Ordinal);
+        int[] nodes = [
+            3, 1, left, 1, -1, -1, 1, 0,
+            3, 1, right, 1, -1, -1, 2, 0,
+            67, 5, left, right - left + 1, 0, 1, 0, 0,
+        ];
+        nodes.CopyTo(words, 42);
+        var bytes = new byte[words.Length * sizeof(int)];
+        for (var index = 0; index < words.Length; index++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(index * 4, 4), words[index]);
+        }
+        Assert.Throws<ArgumentException>(() =>
+            ScalarFrontendHost.ReadResult(SourceText.From(text), bytes));
+    }
+
+    [Fact]
     public void ReadResultRejectsInvalidTreeReferencesTypesAndSourceAnchors()
     {
         const string text = "public int32 Value(int32 x) => x + (x * 2);";

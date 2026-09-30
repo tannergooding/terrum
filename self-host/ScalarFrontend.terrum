@@ -1485,7 +1485,8 @@ mut class ScalarFrontendState
             Host.Frontend[offset + 1] = type;
             return true;
         }
-        if (operation >= 57 && operation <= 61
+        if ((operation >= 57 && operation <= 61
+                || operation == 71 || operation == 73 || operation == 75)
             && TreeWord(node, 5) >= 0 && TreeWord(node, 1) == 0)
         {
             if (type < 1 || type > 4)
@@ -1671,13 +1672,16 @@ mut class ScalarFrontendState
                 mut int32 context = expected;
                 if (context == 5 || context == 0)
                 {
-                    if (operation.Kind >= 57 && operation.Kind <= 61)
+                    if (operation.Kind >= 57 && operation.Kind <= 61
+                        || operation.Kind == 71 || operation.Kind == 73
+                        || operation.Kind == 75)
                     {
                         context = 0;
                     }
                     else
                     {
-                        context = 1;
+                        FailAt(2, operation.Range);
+                        return false;
                     }
                 }
                 if (context != 0 && (!ResolveTreeLiteral(left, context, false)
