@@ -1903,6 +1903,7 @@ The following distinctions and signature questions remain open:
 - `Task<TResult = void>` uses the approved generic-default syntax; this particular library type and its task members are not finalized. `Task` does not erase an owning `Task<T>` result. Optional normalization is semantic; source `T?` is approved, while exported `Option<T>` is only proposed.
 - [Filesystem metadata and traversal](#proposed-filesystem-metadata-and-directory-traversal) propose a terminal-on-error lending cursor and scoped rename operations. Review link traversal, enumeration invalidation, metadata availability/precision and which target rename guarantees are required; these are API/host-profile choices, not newly adopted source syntax.
 - [Address/datagram operations](#proposed-address-values-and-datagram-operations) propose family-preserving address keys, capability-qualified binding and whole-message sends. Review numeric address grammar/scope IDs, client/listener capability separation and error consumption reporting before adopting these signatures.
+- [Binary values and fixed codecs](#proposed-binary-values-and-fixed-codecs) propose explicit byte-order operations and a bounded fixed-length witness. Review wire profiles, permitted codec effects and conditional publication; fixed-size encoding does not settle incremental schema registration, reflection or general object serialization.
 
 ## 11. Scoped proposed signatures: random and `uint32`
 
@@ -2446,6 +2447,110 @@ allocation/constructor failure transport and checked capture/close metadata
 are **OPEN**. These synchronous methods create no task or early release of
 captured buffers.
 
+### Proposed binary values and fixed codecs
+
+These candidate `Terrum.IO`/`Terrum.Serialization` signatures distinguish
+scalar byte encoding from object serialization and native layout. The
+closed primitive functions are a potential Core leaf; their widths remain
+subject to the selected primitive catalog. They need neither a stream owner
+nor an Application `Error` value. No declaration below is implemented or
+approved by this reference.
+
+```terrum
+public struct BinaryPrimitives
+{
+    public static bool TryReadInt16LittleEndian(Span<uint8> source, init ref<int16> value);
+    public static bool TryReadInt16BigEndian(Span<uint8> source, init ref<int16> value);
+    public static bool TryReadUInt16LittleEndian(Span<uint8> source, init ref<uint16> value);
+    public static bool TryReadUInt16BigEndian(Span<uint8> source, init ref<uint16> value);
+    public static bool TryReadInt32LittleEndian(Span<uint8> source, init ref<int32> value);
+    public static bool TryReadInt32BigEndian(Span<uint8> source, init ref<int32> value);
+    public static bool TryReadUInt32LittleEndian(Span<uint8> source, init ref<uint32> value);
+    public static bool TryReadUInt32BigEndian(Span<uint8> source, init ref<uint32> value);
+    public static bool TryReadInt64LittleEndian(Span<uint8> source, init ref<int64> value);
+    public static bool TryReadInt64BigEndian(Span<uint8> source, init ref<int64> value);
+    public static bool TryReadUInt64LittleEndian(Span<uint8> source, init ref<uint64> value);
+    public static bool TryReadUInt64BigEndian(Span<uint8> source, init ref<uint64> value);
+    public static bool TryWriteInt16LittleEndian(write Span<uint8> destination, int16 value);
+    public static bool TryWriteInt16BigEndian(write Span<uint8> destination, int16 value);
+    public static bool TryWriteUInt16LittleEndian(write Span<uint8> destination, uint16 value);
+    public static bool TryWriteUInt16BigEndian(write Span<uint8> destination, uint16 value);
+    public static bool TryWriteInt32LittleEndian(write Span<uint8> destination, int32 value);
+    public static bool TryWriteInt32BigEndian(write Span<uint8> destination, int32 value);
+    public static bool TryWriteUInt32LittleEndian(write Span<uint8> destination, uint32 value);
+    public static bool TryWriteUInt32BigEndian(write Span<uint8> destination, uint32 value);
+    public static bool TryWriteInt64LittleEndian(write Span<uint8> destination, int64 value);
+    public static bool TryWriteInt64BigEndian(write Span<uint8> destination, int64 value);
+    public static bool TryWriteUInt64LittleEndian(write Span<uint8> destination, uint64 value);
+    public static bool TryWriteUInt64BigEndian(write Span<uint8> destination, uint64 value);
+}
+public enum ByteOrder : int32
+{
+    LittleEndian,
+    BigEndian
+}
+public enum BinaryCodecStatus : int32
+{
+    Complete,
+    NeedInput,
+    NeedOutput,
+    InvalidData
+}
+public interface IFixedBinaryCodec<T>
+    where T : [Copy], [Sized]
+{
+    nuint EncodedLength { get; }
+    BinaryCodecStatus Encode(ref<T> value, write Span<uint8> destination);
+    BinaryCodecStatus Decode(Span<uint8> source, init ref<T> value);
+}
+public struct UInt32BinaryCodec : IFixedBinaryCodec<uint32>
+{
+    public UInt32BinaryCodec(ByteOrder order);
+    public nuint EncodedLength { get; }
+    public BinaryCodecStatus Encode(ref<uint32> value, write Span<uint8> destination);
+    public BinaryCodecStatus Decode(Span<uint8> source, init ref<uint32> value);
+}
+public struct Int64BinaryCodec : IFixedBinaryCodec<int64>
+{
+    public Int64BinaryCodec(ByteOrder order);
+    public nuint EncodedLength { get; }
+    public BinaryCodecStatus Encode(ref<int64> value, write Span<uint8> destination);
+    public BinaryCodecStatus Decode(Span<uint8> source, init ref<int64> value);
+}
+```
+
+Primitive reads/writes use exactly 2, 4 or 8 prefix bytes. Insufficient input
+returns false with the output vacant; insufficient destination returns false
+without writing. Successful writes leave a longer destination's suffix
+unchanged. Signed integers use the specified two's-complement bit pattern,
+not a checked numeric conversion from the unsigned interpretation. Byte order
+is explicit and independent of the target's native order; unaligned access
+does not imply an atomic snapshot. Ordinary backing, access and overlap
+checks still apply. There is no generic `Read<T>` that trusts arbitrary
+padding, `Blittable` layout, object references or nominal invariants.
+
+The fixed-codec witness proposes one stable positive `EncodedLength` per
+instance, not a size discovered by replaying a value's formatter. `Encode`
+accepts one value, writes exactly that prefix on `Complete`, and leaves the
+destination unchanged on `NeedOutput`/`InvalidData`. `Decode` consumes one
+fixed prefix on `Complete` and fully initializes its output only then;
+`NeedInput`/`InvalidData` leave it vacant. No input/output buffer is retained.
+`NeedInput` is not a valid encode result, and `NeedOutput` is not a valid
+decode result. Exceptions remain separate from these expected statuses.
+The sample codecs have lengths 4 and 8 and validate their constructor's
+`ByteOrder`; no process byte-order setting is consulted.
+
+An authored codec must check its selected wire profile and the resulting
+value's invariants; equal native size does not establish eligibility.
+Conditional initialization for `Complete`, permitted callback effects and
+nonpublication/cleanup on failure require explicit checked contracts before
+adoption. This subset does not cover affine/borrowed payloads, variable-length
+frames, recursive object graphs or schema discovery. The incremental
+`IByteEncoder<T>`/`IByteDecoder<T>` and serializer families in the matrix below
+remain separate **OPEN** contracts: they need framing, consumed/written
+progress on errors, resource/depth limits, schema versions and registration,
+not a hidden fallback to the fixed codec or raw memory copying.
+
 ### Capability breadth: files, networking, terminal, globalization, serialization
 
 The complete representative byte-stream/handle and scoped filesystem shapes
@@ -2471,6 +2576,7 @@ singleton, a default encoding, or authority to escape its supplied capability.
 | `Locale`, `CultureData` | `Locale.Parse(TextSpan,init ref<Locale>) -> bool`, `CultureData.Load(Locale,provider) -> Result<CultureData,Error>` | Injected versioned data provider; no implicit process locale or culture in core parse |
 | `NumberFormatter`, `DateTimeFormatter` | `TryFormat(value,write ref<ITextWriter>, ref<CultureData>) -> bool`; paired `TryParse(text,ref<CultureData>,init ref<T>) -> bool` | Locale-sensitive APIs explicitly separate from ordinal/invariant primitive formatting |
 | `TimeZoneDatabase`, `TimeZone` | `Find(TextSpan) -> Result<TimeZone,Error>`, `Convert(Instant,TimeZone) -> LocalDateTime` | Versioned rule provider; ambiguity/gap resolution needs explicit policy |
+| `BinaryPrimitives`, `IFixedBinaryCodec<T>`, `UInt32BinaryCodec`, `Int64BinaryCodec` | Closed signed/unsigned 16/32/64-bit byte-order reads/writes; fixed `EncodedLength`, `Encode`, `Decode` | Explicit wire bytes, no native-layout inference; checked vacancy/publication and no retained buffers |
 | `IByteEncoder<T>`, `IByteDecoder<T>` | `Encode(ref<T>,write Span<uint8>,init ref<nuint> written) -> Result<bool,Error>`; `Decode(Span<uint8>,init ref<T>,init ref<nuint> consumed) -> Result<bool,Error>` | Explicit schema/version, incremental state, output-publication rules |
 | `BinarySerializer<T>`, `TextSerializer<T>` | `Write(ref<T>,write ref<IByteStream>) -> Result<void,Error>`; `Read(write ref<IByteStream>,init ref<T>) -> Result<bool,Error>` | Checked registration/schema/encoding; no reflection on arbitrary objects or hidden allocation |
 
