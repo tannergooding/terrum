@@ -21,11 +21,11 @@ The approved [source grammar](docs/grammar-spec.md) and related design
 documents describe the target contract separately
 from this executable subset; `samples\design` remains informative.
 Places default to readonly, `mut` applies to
-places/receivers, and `write` qualifies reference or view access. The target
-initialization-loan form is `init ref<T>`; current executable examples still
-use the legacy `bool`/`out` contract until compiler declarations and call sites
-are migrated together. Design sketches are not claims that these semantics or
-their broader syntax and library surface are implemented; the bounded
+places/receivers, and `write` qualifies reference or view access. The bounded
+compiler supports `bool`/`init ref<T>` conditional initialization alongside
+legacy `bool`/`out` contracts; their caller vacancy rules remain distinct.
+Design sketches are not claims that the broader syntax and library surface
+are implemented; the bounded
 class/`ManagedNode` exception is described next.
 
 The syntax-16 numeric subset constructs context-typed decimal, hexadecimal and
@@ -46,7 +46,10 @@ substitutions preserve readonly/write and supported optional qualification;
 they do not grant member, null-test or operator capabilities absent from the
 function's constraints. See the [bounded generic contract](docs/implementation.md#bounded-generic-functions)
 for inference, results, outputs, rooting and remaining limits.
-The current parser version is syntax-29. Syntax-18 recognizes qualified generic
+The current parser version is syntax-30. Standalone `init T name;` and
+`init var name;` declare readonly vacant locals, published only by checked
+initialization; semantic v40 is selected when these declarations are retained.
+Syntax-18 recognizes qualified generic
 type arguments such as `write Record` and `write Record?`; managed generic
 producer examples use the existing semantic v24 managed contracts; other
 features still select their required versions. The native profile, wire
@@ -59,8 +62,9 @@ Syntax-29 adds post-tested loops and enclosing-loop named transfers, retaining
 checked cleanup, initialization, managed rooting and constant evaluation.
 Semantic v39 carries those new loop nodes when used; native ABI and scanner
 record/schema remain unchanged. The native scalar frontend also executes
-bounded nested expression trees and expression-bodied functions; it is still
-a compiler component, not a self-host compiler.
+bounded nested expression trees, expression-bodied functions and initialized
+scalar locals with ordered mutable assignments; it is still a compiler
+component, not a self-host compiler.
 Copy structs can explicitly implement homogeneous binary operator protocols
 for `+`, `-`, `*`, `/`, `%`, `&`, `|` and `^`. Generic bodies may use only the
 operators named by their constraints; identical signatures on unrelated

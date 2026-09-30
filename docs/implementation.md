@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-29, semantic v39 structured loops, native-10 through native-20
+## Current boundary: syntax-30, semantic v40 vacant locals, native-10 through native-20
 
 The approved [source grammar](grammar-spec.md) is broader than this
 implementation. Syntax-28 adds `=>` bodies to supported top-level functions
@@ -36,9 +36,23 @@ transfers; older headers reject those nodes. Ordinary pre-tested loops and
 nearest transfers retain their earlier feature-selected formats. No native
 ABI, scanner-5 record or syntax-protocol schema change is introduced.
 
+Syntax-30 adds standalone `init T name;` and `init var name;` vacant locals,
+including a `for` initializer. These readonly slots have no default value;
+checked `init` completion publishes them, while false or failure leaves them
+vacant. Inferred declarations require a type established by a checked
+initialization. Existing definite-assignment, owner cleanup and managed-root
+rules apply. Semantic v40 is selected only when a retained body contains such
+a declaration; older feature-selected modules and the native ABI are unchanged.
+The bounded constant evaluator does not support vacant declarations.
+
 The executable Terrum scalar frontend additionally supports bounded nested
 expression trees and expression-bodied scalar functions through provisional
-projection v20. It retains existing v1–19 projections for their supported
+projection v20, plus initialized scalar locals and assignments in v21.
+Up to eight typed or inferred locals and twelve ordered declaration/assignment
+statements may precede its terminal return/conditional-return envelope.
+Only `mut` locals can be reassigned; names bind sequentially, and inferred
+numeric literals have no fallback type. Calls, loops and vacant locals remain
+outside this native component. It retains existing v1–20 projections for their supported
 shapes. Its own parser and scalar binder produce up to 32 postorder nodes
 with bounded recursive descent; the host validates source anchors, types,
 node order, roots and precedence before lowering to the existing verified
@@ -964,9 +978,13 @@ phase with the host source buffers, but `build-component` still passes
 scanner records to the hosted parser and binder. Connecting the native phase
 to that compilation handoff remains open. A separate
 [`ScalarFrontendProjection`](../self-host/ScalarFrontendProjection.terrum)
-can publish its typed result through a fixed 298-word host buffer. The v20
-tree layout follows the original 37-word header; earlier versions zero the
-tree extension. Versions 1–18 retain their original 34-word payload with
+can publish its typed result through a fixed 392-word host buffer. The v20
+tree layout occupies words 37–297 after the original header. Version 21 adds
+statement/local counts at 298–299, eight four-word local records at 300–331
+and twelve five-word statement records at 332–391. The host validates local
+source names, declaration order, initializer types, live slots and mutability
+before lowering ordered statements. Earlier versions zero their unused
+extensions. Versions 1–18 retain their original 34-word payload with
 three zero header-extension words.
 Version 19 assigns words 34–36 to the third parameter's type and UTF-16
 name span. Its parameter/literal operations reserve the disjoint 40000 offset

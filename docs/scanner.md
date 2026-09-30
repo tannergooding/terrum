@@ -11,6 +11,8 @@ identifier; underscore-prefixed names remain identifiers.
 The shared keyword catalog also recognizes syntax-29's `do`; loop labels and
 named transfers reuse identifiers, `:`, `break` and `continue`. Neither
 scanner-5 records nor the syntax-protocol schema changes.
+Syntax-30's standalone vacant declarations reuse the contextual identifier
+`init`; no keyword or scanner record is added.
 
 The shared operator catalog includes syntax-28's `=>` token for expression
 bodies; no scanner record or schema revision is needed. Syntax-16 rejects attached

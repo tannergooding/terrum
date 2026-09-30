@@ -79,7 +79,11 @@ ABI changes; imported functions cannot satisfy required constant calls.
 Syntax-26 adds scalar `const expression` requirements in nested executable
 expressions, with the same limits and deferred constant substitution; no new
 native or semantic wire representation is emitted. The current parser version
-is syntax-29. Syntax-27 adds compile-time-only body `static require`
+is syntax-30. Standalone `init T name;` and `init var name;` declare vacant
+readonly local slots without a default value. Existing checked initialization
+controls publication, owner cleanup and managed-root activation. Semantic v40
+persists these declarations when retained; they add no native ABI operation.
+Syntax-27 adds compile-time-only body `static require`
 and outer-body `static ensure` for closed scalar proofs. Successful proofs
 leave no native operation or semantic wire record; known false, unsupported
 and unevaluated proofs diagnose before emission. Existing executable

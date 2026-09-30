@@ -13,7 +13,7 @@ compiler-primitives library exports `Terrum.CodeAnalysis.IsAsciiDigit`,
 `Terrum.CodeAnalysis.IsLineBreak` and `Terrum.CodeAnalysis.GetDecimalDigit`;
 it is not a self-host compiler or an executable scanner/parser.
 The host test runner remains C#, even when it compiles and executes a candidate.
-The host parser's current language version is syntax-29. Syntax-18's qualified
+The host parser's current language version is syntax-30. Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle
 specializations described below. These reuse existing, feature-selected
 semantic contracts without changing the scanner record/schema, native profile
@@ -182,7 +182,7 @@ native emitter or compiler self-build.
 | [TokenDiagnosticSnapshot](TokenDiagnosticSnapshot.terrum) | Independently owned lexical diagnostic codes and source ranges, available after a scan with errors even when token snapshots cannot publish | AOT/JIT host diagnostic parity under both policies, invalid buffer rejection, stable reads after host mutation and no success-shaped empty token stream on lexical failure |
 | [ScalarParserTypes](ScalarParserTypes.terrum) | Shared scalar type recognition, token-name equality, scalar comparison and scanner-integer decoding for separately compiled bounded parser probes | Scanner-owned source ranges, UTF-16 spelling and integer records, with no independent syntax or semantic ABI |
 | [ScalarFrontend](ScalarFrontend.terrum) | Reusable bounded frontend phase over a successful scanner snapshot: one scalar function with zero to three named parameters, parameter references, Boolean literals or unary `!` over a Boolean literal/parameter (including grouped operands), `~` over a contextual integer literal/parameter (including grouped operands), `+` over a contextual integer literal/parameter or named parameter (including grouped operands), or signed `-` over a named integer parameter (including grouped operands), contextual unsuffixed integer literals (including unary signed minus and decimal minima), either order of parameter/literal integer arithmetic or bitwise operations and integer/`char16` comparisons (including unary `+` or `-` on supported literal operands), two contextual 32-bit integer literals in arithmetic or bitwise operations, Boolean equality, bitwise or short-circuit operations between parameters and/or literals, optional `if`/`else` returns or a trailing fallthrough return, whole-expression grouping, and explicit `public`/`internal` visibility | AOT/JIT typed parameter, expression, branch and UTF-16 span facts under both policies; scanner integer records and destination bounds determine integer constants without rescanning digit text; unsupported or invalid shapes publish only a code/span, lexical failure publishes no artifact. Uses `Host.Source` and managed tokens, so neither the persisted primitives DLL nor `build-component` consumes its typed result yet |
-| [ScalarFrontendProjection](ScalarFrontendProjection.terrum) | Provisional 298-word host-owned buffer with completion status written last. Version 20 adds typed postorder expression trees after the original header; versions 1–18 retain their 34-word payload, version 19 retains its third-parameter header/operation extension, and older shapes zero the tree extension | `ScalarFrontendHost` checks source anchors, scalar types, literal bits, node order, precedence and roots before lowering to verified `BoundProgram` without the hosted parser/binder pass. Both-policy AOT/JIT, exported DLL byte parity and malformed projection tests exercise the bounded component; no standalone native compiler or machine-code encoder |
+| [ScalarFrontendProjection](ScalarFrontendProjection.terrum) | Provisional 392-word host-owned buffer with completion status written last. Version 21 adds initialized scalar locals and ordered assignments after the v20 expression trees; v1–19 retain their payloads and unused extensions are zero | `ScalarFrontendHost` checks source anchors, scalar types, literal bits, node order, precedence, roots, sequential local binding and mutability before lowering to verified `BoundProgram` without the hosted parser/binder pass. Both-policy AOT/JIT, exported DLL byte parity and malformed projection tests exercise the bounded component; no standalone native compiler or machine-code encoder |
 | [ScalarFunctionParser](ScalarFunctionParser.terrum) | Provisional scalar function probe: grouped/unary literals, two-literal checked arithmetic and bitwise operations, typed integer/`char16` comparisons, and one named scalar parameter in comparisons or integer checked addition | Hosted-span and executed-value parity with AOT/JIT at decimal/based boundaries across all four integer widths and `char16` comparisons; names bind to declarations, invalid magnitudes and checked addition overflow reject; requires `ScalarParserTypes`; other declarations still require the host parser |
 | [ScalarParameterPairParser](ScalarParameterPairParser.terrum) | Separate bounded probe of two named scalar parameters returned through checked integer addition/subtraction, `x + y + literal` with both checked steps, or a Boolean comparison (including `char16`) | AOT/JIT under both policies across signed/unsigned 32-/64-bit extrema, code-unit comparisons and decimal/based literal boundaries; both identifiers bind to distinct declarations, either overflow or unsigned subtraction underflow rejects; requires `ScalarParserTypes`, not a bootstrap compiler |
 | [ScalarConditionalParser](ScalarConditionalParser.terrum) | Separately compiled probe of a `bool` parameter selecting between two named, same-typed scalar parameters with explicit `if`/`else` returns | AOT/JIT under both policies check both reachable arms across six scalar types and reject swapped/unbound names and missing branches; uses scanner-owned tokens and `ScalarParserTypes`, not the general hosted parser or a bootstrap compiler |
@@ -196,11 +196,17 @@ The scalar frontend now also parses and binds bounded expression trees in
 Terrum, including `=>` scalar functions and nested arithmetic, bitwise,
 comparison and Boolean expressions with grouping and short-circuiting. It
 retains the six scalar types and zero-to-three-parameter function envelope;
-shifts, calls, locals, general statements and floating values are not added.
-Projection v20 uses a 298-word host buffer: the original 37-word header,
-five tree-header words and at most 32 eight-word postorder nodes. Recursive
+shifts, calls, general statements and floating values are not added.
+Projection v21 adds up to eight initialized typed/inferred scalar locals and
+twelve ordered declaration/assignment statements before the terminal return
+envelope. Only `mut` locals permit reassignment; forward/self references and
+untyped numeric inference are rejected. Standalone vacant locals and loops
+remain hosted features, not part of this native component.
+The host buffer has 392 words: the original 37-word header,
+five tree-header words, at most 32 eight-word postorder nodes, two counts,
+eight four-word local records and twelve five-word statement records. Recursive
 descent is limited to 16 levels and input still uses the bounded token chain.
-Older v1–19 shapes retain their tags/payloads with a zero tree extension.
+Older shapes retain their tags/payloads with zero unused extensions.
 The host validates the native nodes against source tokens and types without
 running the hosted parser/binder, then uses the shared verifier/emitter.
 DLL byte-parity, JIT results, invalid expression/projection cases and atomic
@@ -211,6 +217,9 @@ The host's syntax-29 post-tested loops and named enclosing-loop transfers
 also execute through existing checked lowering; semantic v39 is selected
 when those retained nodes require it. Scanner record/schema and native ABI
 remain unchanged.
+Syntax-30 additionally supports standalone typed/inferred vacant locals in the
+host, with feature-selected semantic v40 persistence and existing checked
+publication, cleanup and managed rooting.
 
 `SourceRange` deliberately mirrors the current host's signed 32-bit UTF-16
 coordinates, including the checked end bound. This is an interchange limit for
