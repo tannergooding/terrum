@@ -8,7 +8,7 @@
 > to choose new semantics on the user's behalf.
 
 This is a decision inventory, not a compiler backlog. Stable question numbers
-are retained; gaps in the pending queue are intentional. Ten resolved IDs
+are retained; gaps in the pending queue are intentional. Fourteen resolved IDs
 have only [canonical link redirects](#resolved-question-link-redirects) at
 the end of this document, so old review links remain usable without mixing
 their rules into the questions below.
@@ -22,31 +22,40 @@ is the question does not assert that it is valid. No candidate establishes a
 new grammar production. Method bodies omitted from surrounding
 examples are not a new bodyless-concrete-declaration rule.
 
-There are **32 pending numbered groups**. Q03 and all seven punctuation
+There are **28 pending numbered groups**. Q03 and all seven punctuation
 subquestions have canonical redirects, not pending votes. Partially resolved
 groups ask only about their remaining choice; settled context is linked or
 labeled, not another vote.
 
 | Pending area | Stable IDs |
 |---|---|
-| Visibility and attributes | Q06, Q07 |
-| Generic/witness lookup and declaration forms | Q12-Q14, Q16-Q18 |
+| Declaration applicability and modifier order | Q06 |
+| Extension, adapter and family declaration forms | Q16-Q18 |
 | References, initialization and operators | Q19-Q26 |
 | Other source forms and contracts | Q27-Q37, Q40-Q42 |
 | Documentation | Q38-Q39 |
 
 ## Lexical and declaration choices
 
-### Q06. Visibility and modifier applicability
+<a id="q06-visibility-and-modifier-applicability"></a>
+
+### Q06. Visibility, modifier applicability and ordering
 
 **Settled context:** Module-scoped visibility and declaring-type `private`
 are in the [official declaration contract](../grammar-spec.md#31-source-file-structure-and-declarations).
 Neither is awaiting another vote.
 
-**Remaining question:** Complete the declaration-kind matrix:
+**Accepted direction:** Specify legal modifiers independently for each
+declaration kind; a legal modifier on one kind does not become legal everywhere.
+Module and declaring-type boundaries remain fixed. File-limited visibility
+needs a separate concrete use/decision, not an invented friend-module domain.
+
+**Remaining question:** Complete the concrete declaration-kind matrix:
 interface-member access, static nominal containers, default access, and combinations of
-`mut`, `unique`, `partial`, `unsafe` and `async`. Permutation is already legal;
-duplicates/conflicts are not. Should a separate file-limited access domain be
+`mut`, `unique`, `partial`, `unsafe` and `async`. The currently approved
+prefix permits permutation; the proposed stricter order below would replace
+that rule only after acceptance. Duplicates/conflicts remain invalid.
+Should a separate file-limited access domain be
 available, and to which declaration kinds would it apply? `file private` and
 `file internal` are review ideas, not adopted modifier combinations.
 **Example:** Candidate `file internal struct Helper { }` would introduce a
@@ -56,128 +65,41 @@ file-limited helper; that modifier combination is not currently adopted.
 `protected`, friend assemblies, stateful class inheritance, or C#'s different
 top-level-private restrictions.
 
-**Recommendation for the remaining questions:** Specify each declaration
-kind's legal modifiers independently. Consider file-limited access separately
-if a concrete source-local helper use warrants it; do not infer a new `file`
-modifier or equivalent attribute merely from accepting the module boundary.
+**Ordering recommendation (not yet adopted):** Use one fixed declaration-prefix
+order, omitting inapplicable/absent slots:
 
-### Q07. Attribute arguments and multiplicity
+| Order | Role | Candidate spelling |
+|---|---|---|
+| 1 | Targeted semantic metadata | Attribute lists |
+| 2 | Visibility | `public`, `internal` or `private` |
+| 3 | Placement | `static` |
+| 4 | Receiver/storage access | `mut` |
+| 5 | Ownership | `unique` |
+| 6 | Caller obligation | `unsafe` |
+| 7 | Execution form | `async` |
+| 8 | Declaration composition | `partial` |
 
-**Question:** Which constant values/type references can attribute arguments
-contain, how are attribute identities registered, and when can one attribute
-repeat or merge? Direct/named targets and selectors are already specified.
-**Example:** `[param(count): Limit(16)] void Read(int32 count) { }`
+For example, `public mut unique struct Lease { }` follows the proposed order;
+`unique public mut struct Lease { }` would reject under it, despite being
+permitted by the current permutation rule. This table is an ordering rule,
+not permission to combine every slot on every declaration.
 
-**C# model:** Modeled on resolved attribute identity and target applicability,
-not CLR attribute classes, boxed attribute values, or C#'s fixed argument-type
-catalog.
+Passing modes and type constructors are separately ordered productions,
+not interchangeable declaration modifiers. `mut ref T`, `init ref<T>` and
+`implicit ref<T>` have fixed roles/word order; `ref mut T` is not a reordered
+passing mode. The existing type production places `write` before `pin` when
+both are valid. A future two-word construct must declare its complete
+production, not happen to emerge from arbitrary adjacent modifiers.
+Reject a misordered prefix explicitly instead of letting type lookup reinterpret
+it. Formatter output uses that same canonical sequence.
 
-**Clarified recommendation (awaiting confirmation):** Reuse the language's
-checked, encodable compile-time constant values rather than inventing a
-second evaluator or allowing arbitrary runtime objects. Each resolved
-attribute identity declares its argument schema, applicable targets and
-whether repetition is permitted. Being a constant is necessary, not enough:
-the value must match the attribute's declared argument type and encoding.
-Type-reference arguments require an explicitly supported schema, not an
-implicit first-class type-object API. Retain
-source-order merging only where multiplicity permits it; reject unknown
-targets rather than redirecting them.
-For example, `Limit(16)` can use an integer constant and a declaration that
-permits a parameter target but forbids repetition; repeating that resolved
-attribute on `count` rejects even though both arguments are constants.
+This is stricter than C#'s mixture of permutable modifiers and ordered compound
+forms. Reserve semantic roles rather than assuming today's keyword adjacency
+is always safe to reuse. Exact applicability/defaults and file-local access
+remain separate choices; neither `file` nor a replacement modifier order is
+silently approved by this recommendation.
 
 ## Types, lookup and references
-
-### Q12. Constant formals and dependent defaults
-
-**Settled context:** Initial constant domains, transparent alias expansion
-and earlier-only default dependencies are in the
-[official generic contract](../grammar-spec.md#32-types-parameters-and-arguments).
-Only nominal-wrapper eligibility remains in this question.
-
-**Question:** Should an eligible one-field primitive wrapper be allowed as a
-constant formal domain?
-**Example:** Candidate `struct Endpoint<const PortId Port> { }`, where
-`PortId` is a nominal wrapper over `uint16`. Equal representation alone does
-not currently make that domain eligible.
-
-**C# model:** Not C# generic parameter defaults or constant generic parameters;
-neither is part of the C# generic declaration model.
-
-**Recommendation:** Consider
-an opt-in checked subset with constant construction, full initialization,
-canonical equality/encoding and preserved nominal identity. `Transparent`
-or `Blittable` layout alone proves none of these. This remains proposed:
-the user's interest in simple wrappers does not approve arbitrary aggregate
-constants or erase their invariants.
-
-### Q13. Remaining overload specificity and constructor inference
-
-**Question:** Complete applicability and specificity for combinations of
-generic inference, declared projections, defaults and constructor candidates.
-Do not revisit argument dominance, no numeric fallback, fixed-versus-expanded
-priority, member priority, or the exclusion of return-only overloads.
-**Concrete example (recommendation still under review):**
-
-```terrum
-int32 Parse(int32 value) => value;
-T Parse<T>(T value) where T : [Copy] => value;
-int32 Read() => Parse(int32(7));
-```
-
-At the call, the explicit type call gives the argument type `int32`.
-The nongeneric parameter is exactly `int32`; inference makes the generic
-parameter `T = int32`, also an exact argument match. The proposed last
-tie-break chooses the nongeneric declaration only after argument quality
-ties. `Parse<int32>(int32(7))` explicitly selects the generic candidate.
-Neither result type alone nor a conversion search creates this tie.
-
-For structural generic specificity, compare candidate parameter shapes
-`T` and `Span<U>` at an actual `Span<int32>` argument. Both can become
-that exact parameter type, but the `Span<U>` shape is more specific.
-This is a proposed ranking, not a count of inferred formals or a new
-implicit numeric promotion rule. Constructor inference remains separately
-under review.
-
-**C# model:** Partly C#-inspired, with material differences: Terrum may use an
-expected result to fill unresolved generic positions, forbids implicit numeric
-promotion searches, and has explicit loan/witness contracts.
-
-**Recommendation:** Prefer an applicable nongeneric exact declaration only
-after argument quality ties; define structural generic specificity rather
-than counting inferred parameters. Apply the same staged inference to
-constructors without deriving types from field capture or arbitrary witnesses.
-
-### Q14. Associated equality constraints
-
-**Question:** Choose the source form that binds an associated type to another
-formal and define its inference direction and collision checks.
-**Example:** `T.via<ISource>.Item` already explicitly selects a projection;
-the missing form is a constraint equating that projection with `U`.
-
-**C# model:** Not C# associated types. Its generic constraints and static
-abstract interfaces are comparison points, not associated-type equality.
-
-**Spelling decision remains open:** The earlier `==` candidate emphasized
-exact type identity, not runtime value equality. `is` is a reasonable
-alternative if constraint grammar gives it that exact meaning.
-
-| Candidate constraint | Meaning under consideration |
-|---|---|
-| `where T : ISource` | Require the named interface conformance/witness; not exact identity with the interface. |
-| `where T.via<ISource>.Item is U` | Require equality of complete resolved types; not an assignability test or runtime pattern. |
-| `where T.via<ISource>.Item == U` | Alternative spelling for that same proposed type-identity requirement. |
-
-**Recommendation:** Retain `:` for ordinary conformance and prefer a
-separate `is` identity clause for an associated projection, rather than
-silently replacing every `where T : I` with pattern syntax. This avoids
-confusing witness availability with exact type identity; it is not approved.
-For example, a source whose selected `Item` is `int32` satisfies the identity
-clause when `U` resolves to `int32`, not `int64`; a transparent alias of
-`int32` resolves to the same identity. Full access/ownership qualification
-still matters. Resolve the witness and
-ordinary type arguments first, then check equality; do not infer an otherwise
-unbound `T` backward from `Item`. The new clause is proposed, not accepted.
 
 ### Q16. Extension declarations and call disambiguation
 
@@ -214,10 +136,37 @@ These are ordinary qualified static calls. If both methods are explicitly
 made eligible as extensions in one lexical scope, `value.Measure()` has
 two equally good candidates and is ambiguous; the qualified calls select
 7 and 8 respectively for argument 7. An applicable ordinary instance member
-wins before extension lookup. `value.via<IMeasure>` cannot select either
-helper unless the value has that actual interface witness. Extension
-declaration/import eligibility syntax remains pending; no registration
-attribute or block syntax is invented by this example.
+wins before extension lookup. `value.via<IMeasure>` selects an actual
+interface witness, not an unrelated extension. Extension declaration/import eligibility syntax remains pending;
+no registration attribute or block syntax is invented by this example.
+
+**Revised recommendation (not yet adopted):** Allow `.via<Provider>` to
+select an explicitly eligible extension provider as well as retaining
+`.via<I>` for witness selection. They share the meaning "select this declared
+behavior route"; provider selection does not invent an interface conformance.
+Initially use a nominal non-interface provider container, keeping the
+resolved selector kinds disjoint. It still needs explicit lexical extension
+eligibility and ordinary access/loan checks; naming a container does not
+expose every static/private member as an extension.
+
+With the one-parameter helpers above:
+
+```terrum
+// CANDIDATE provider selection; eligibility declaration remains open.
+int32 ExplicitA(int32 value) => value.via<MetricsA>.Measure();
+int32 ExplicitB(int32 value) => value.via<MetricsB>.Measure();
+```
+
+These calls would lower to `MetricsA.Measure(value)` and
+`MetricsB.Measure(value)`. The receiver is evaluated once before explicit
+arguments and occupies the extension receiver parameter. Consequently
+`value.via<MetricsA>.Measure(value)` would pass two values, not repeat or replace
+the implicit receiver; it requires a corresponding two-parameter extension
+and rejects for the shown helper. An explicit provider selection may choose
+that provider even when an ordinary same-named member would win an unqualified
+call. Overloads within the selected provider use the ordinary ranking rules,
+not declaration/import order. This is not C# syntax; qualified static calls
+remain available without approving this selector extension.
 
 ### Q17. Adapter declaration and forwarding
 
@@ -245,7 +194,7 @@ struct MeasuredInt : IMeasure
 }
 ```
 
-`MeasuredInt(7)` copies the integer into a new nominal value that supplies
+`new MeasuredInt(7)` copies the integer into a new nominal value that supplies
 `IMeasure`; it does not make `int32` implement that interface. Forwarding is
 an authored checked member, not an automatically invented vtable.
 This example avoids unresolved stored-loan syntax. A wrapper around an
@@ -254,6 +203,49 @@ A narrowing wrapper such as a nonnegative integer cannot admit arbitrary
 negative `int32` bits, and `List<int32>` cannot become `List<MeasuredInt>`
 merely because their element payload sizes match. Dedicated adapter and
 one-way container-projection syntax remain pending.
+
+**Recommendation (not yet adopted):** Use a checked adapter attribute naming
+the carried field, and opt-in forwarding attributes on explicitly declared
+members. Forward nothing by default; there is no wildcard forwarding followed
+by a hiding list. Omitting a forwarding declaration keeps that wrapped member
+off the adapter's public surface, and adding a member to the wrapped type does
+not silently add one to the adapter.
+
+```terrum
+// CANDIDATE attribute identities and generated-member contract.
+// Formatting types/members are illustrative core-library proposals.
+[Adapter("_value")]
+struct MeasuredInt : IMeasure
+{
+    private int32 _value;
+    public MeasuredInt(int32 value) { _value = value; }
+    public int32 Measure() => _value;
+
+    [Forward("_value")]
+    public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
+        where TWriter : ITextWriter;
+}
+```
+
+This would expose authored `Measure` and the explicitly forwarded `TryFormat`,
+not automatically expose `int32` operators, parse methods or its witnesses.
+The adapter marker resolves one actual instance field and preserves its
+validity/access/ownership/backing contract. `Forward` resolves one compatible
+member of that field's type from the authored complete signature, then generates
+a checked body. Unknown fields, ambiguous targets, incompatible signatures or
+weakened loans/effects reject; no name-only overload guessing. This candidate
+is the explicit proposed exception enabling a generated body, not a claim
+that arbitrary concrete methods may now end in `;`.
+
+Initially forward ordinary instance callables/accessors, not implicit
+conversions, operators or whole interfaces. Those often need authored
+unwrapping/wrapping and invariant checks; forwarding must not silently choose
+a constructor or reinterpret result bits. Extra interface conformance still
+requires a declaration and checked witness mapping. A wrapper can explicitly
+publish an underlying-value accessor if desired, but that is not implied by
+the adapter marker. Attribute schemas, exact forwarding target selection and
+dependency metadata remain pending; neither attribute makes a container
+projection, foreign ABI promise or primitive constant domain automatically.
 
 ### Q18. Family and conditional-member declarations
 
@@ -268,6 +260,11 @@ relationships that C# name/arity matching does not provide.
 **Recommendation:** Separate family membership from extension lookup; require
 declared projection and per-member constraints. Keep a conditional member's
 guarantee visible to definition-site generic checking.
+
+**Review boundary:** Explicit family membership and checked projections are
+already accepted contracts. The following source-level example clarifies
+the proposed conditional-member behavior without selecting a family-registration
+attribute or keyword.
 
 **Concrete family/member distinction (APIs remain proposals):**
 
@@ -284,6 +281,34 @@ later instantiation happens to be `char16`. Erased validated text is not
 an arbitrary writable byte span. Exact family/conditional-member declaration
 and projection syntax remain unapproved; the table describes the requested
 contract rather than introducing a new keyword.
+
+```terrum
+// Illustrative calls under the declared text-family contract.
+// These API names/shapes remain library proposals.
+TextSpan<void> EraseUtf16(TextSpan<char16> text) => text.AsTextSpan();
+Span<char16> KeepUtf16Units(TextSpan<char16> text) => text.AsSpan();
+
+// REJECT: erased text has no unconditional char16 AsSpan member.
+Span<char16> GuessUtf16Units(TextSpan<void> text) => text.AsSpan();
+
+Span<TCodeUnit> Units<TCodeUnit>(TextSpan<TCodeUnit> text)
+    where TCodeUnit : [TextCodeUnit]
+{
+    return text.AsSpan();
+}
+```
+
+`EraseUtf16` hides the static unit type but retains the actual encoding and
+backing dependency; it neither transcodes nor creates owned storage.
+`KeepUtf16Units` preserves the exact typed units. `GuessUtf16Units` cannot
+infer an encoding from its requested result or reinterpret UTF-8/UTF-32 as
+UTF-16. `Units` is definition-site valid only with the declared typed-member
+guarantee; a later favorable instantiation cannot repair an unqualified
+generic body. A runtime encoding check could participate in a separately
+declared checked refinement projection, not an automatic overload fallback.
+Ordinary `Box<T>` has no erasure operation unless a family/projection contract
+explicitly opts it in. This example accepts no exact family-registration,
+conditional-member or conditional-conformance declaration syntax.
 
 ### Q19. Complete parameter and reference qualifier matrix
 
@@ -796,6 +821,10 @@ Resolved; see the [official grammar](../grammar-spec.md#2-lexical-notation).
 
 Resolved; see the [official grammar](../grammar-spec.md#31-source-file-structure-and-declarations).
 
+### Q07. Attribute arguments and multiplicity
+
+Resolved; see [resolved attribute schemas, targets and repetition](../grammar-spec.md#31-source-file-structure-and-declarations).
+
 ### Q08. Partial-declaration compatibility
 
 Resolved; see the [official grammar](../grammar-spec.md#512-modifiers-cleanup-and-finalization).
@@ -811,6 +840,21 @@ Resolved; see the [official grammar](../grammar-spec.md#2-lexical-notation).
 ### Q11. Alias recursion and substitution
 
 Resolved; see the [official grammar](../grammar-spec.md#54-aliases-and-associated-types-declarations-and-open-binding).
+
+### Q12. Constant formals and dependent defaults
+
+Resolved; see [checked wrapper constant domains and published guarantees](../grammar-spec.md#32-types-parameters-and-arguments).
+Constructed-data recipes remain a separate undecided facility.
+
+### Q13. Remaining overload specificity and constructor inference
+
+Resolved recommendation; see [generic specificity and staged constructor inference](../grammar-spec.md#52-exact-overload-grammar-ranking-and-disambiguation).
+Complete applicability/diagnostics and constructor-versus-conversion selection
+remain separate specification work.
+
+### Q14. Associated equality constraints
+
+Resolved; see [exact `is` identity constraints](../grammar-spec.md#54-aliases-and-associated-types-declarations-and-open-binding).
 
 ### Q15. Inherited default/member resolution
 

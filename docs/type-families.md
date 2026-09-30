@@ -58,7 +58,17 @@ ABI-transparent nominal wrappers and adapters serve different purposes. A
 wrapper such as `NeverNegativeInt32` may share `int32` representation while
 allowing only nonnegative values; equal bits do not make every `int32` a valid
 wrapper or authorize arbitrary reinterpretation. Unused encodings are
-potential niches, not an adopted niche encoding. An explicit `Int32Adapter`
+potential niches, not an adopted niche encoding. Constant-formal eligibility
+is another explicit checked capability: an eligible one-field primitive
+wrapper over an already eligible integer/Boolean carrier publishes constant
+construction, complete initialization and canonical
+equality/value encoding while preserving nominal identity and validity.
+It is not inferred from `Transparent`, `Blittable` or today's field shape.
+Independently compiled users rely on those published guarantees under the
+[existing replacement contract](language-contracts.md#45-versioning-and-independent-implementations);
+removing eligibility or incompatibly changing canonical value identity breaks
+that contract. Opt-in spelling and encoding remain specification work.
+An explicit `Int32Adapter`
 may carry `int32` and implement `IExtra` without making `int32` conform to
 `IExtra`. The behavior sets may use two dispatch tables/vtables or an
 equivalent; the value need not physically store two vtable pointers.
@@ -83,14 +93,16 @@ Associated types are named type members of a selected interface witness and
 `IInteger<TSelf>` may declare `type Wider;`, with an implementation binding
 that member to a concrete type; `T.Wider` is resolved through the selected
 `IInteger<T>` witness. A constraint may explicitly bind an associated type,
-through a separately specified associated-identity clause. Candidate `is`
-and `==` spellings remain under review in
-[Q14](proposals/grammar-open-questions.md#q14-associated-equality-constraints);
-neither replaces ordinary conformance constraints. This does not infer the
+through `where T.via<ISource>.Item is U`. The `is` clause checks exact
+complete resolved type identity after witness selection and ordinary type
+inference; it does not replace ordinary `where T : I` conformance constraints
+or add a new inference source. Transparent aliases normalize, while nominal
+wrapper identities and access/ownership qualifications remain distinct.
+This does not infer the
 original `T` backward from an associated result. If multiple valid witnesses
 or relations could supply a projection, the use must explicitly disambiguate
-them. The associated-identity clause remains proposed; complete
-identity-clause checking and metadata rules remain to be specified.
+them. Complete identity-clause checking diagnostics and metadata rules remain
+to be specified.
 Inherited defaults require an unambiguous identity/default or explicit
 resolution, never an inheritance/import-order winner.
 Associated bindings do not replace independent

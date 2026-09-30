@@ -637,9 +637,13 @@ GenericFormal   = { Attribute }, ( Identifier, [ "=", Type ]
 InterfaceTypeParameters = "<", ( { Attribute }, "this", Identifier
                                 | GenericFormal ),
                           { ",", GenericFormal }, ">" ;
-ConstraintClause  = "where", Identifier, ":",
-                    ( Type | "[", Identifier, "]" ),
-                    { ",", ( Type | "[", Identifier, "]" ) } ;
+ConstraintClause  = ConformanceConstraint | AssociatedIdentityConstraint ;
+ConformanceConstraint = "where", Identifier, ":",
+                        ( Type | "[", Identifier, "]" ),
+                        { ",", ( Type | "[", Identifier, "]" ) } ;
+AssociatedIdentityConstraint = "where", AssociatedProjection, "is", Type ;
+AssociatedProjection = ( "void" | DottedIdentifier ), [ TypeArguments ],
+                       ".", "via", "<", Type, ">", ".", Identifier ;
 OperatorSymbol  = "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^"
                 | "<<" | ">>" | ">>>"
                 | "==" | "!=" | "<" | "<=" | ">" | ">=" | "!" | "~"
@@ -689,6 +693,15 @@ in particular `[get: Name]` on a property targets its getter, not the whole
 property. Neither unknown nor misplaced targets silently fall back to the
 declaration. Attribute arguments here are a syntactic approximation;
 constant-value eligibility and multiplicity require semantic validation.
+Each resolved attribute identity declares its argument schema, applicable
+targets and repetition policy. Arguments use the ordinary checked, encodable
+compile-time constant evaluator, not a separate attribute evaluator or
+arbitrary runtime objects. A constant must also match its declared argument
+type and encoding. Type-reference arguments require an explicitly supported
+schema; this does not introduce `typeof`, open-generic type literals or a
+first-class type-object API. Repeated placements merge in source order only
+where that identity permits repetition; otherwise they reject. Registration
+syntax, concrete schema catalogs and metadata encoding remain separate work.
 Attributes may attach directly to their target or identify a named target on
 the enclosing declaration: `[param(count): Attr]` and `[typeparam(T): Attr]`
 bind the same formal identities as inline attributes. A selector must resolve
@@ -892,12 +905,33 @@ Omitting a suffix or the whole list may use defaults; an empty comma slot
 such as `Make<, int32>()` is invalid. Defaults must satisfy the formal's
 constraints; they do not rescue contradictory or ambiguous inference.
 The initial constant-formal domains are fixed-width integers, Boolean and
-nominal enums. Floating values, arbitrary structs, references and allocated
-object identities are not eligible. Transparent aliases expand to their
-qualified target before eligibility checking; an alias does not create a
-new value domain. Eligibility of nominal primitive wrappers, including
-`Transparent`/`Blittable` wrappers, remains open: equal layout alone supplies
-neither a valid constant value nor canonical generic identity.
+nominal enums, plus explicitly opted-in eligible one-field wrappers over an
+already eligible integer/Boolean carrier.
+Floating values, arbitrary aggregates, references and allocated object
+identities do not become eligible merely by being constructible.
+Transparent aliases expand to their qualified target before eligibility
+checking; an alias does not create a new value domain. A nominal wrapper
+retains its distinct identity and invariants. Its checked constant-domain
+contract requires constant construction, complete initialization and
+canonical equality/value encoding, not just equal layout or a
+`Transparent`/`Blittable` annotation.
+
+Wrapper eligibility is a published capability under the existing
+[contract-versioning rules](language-contracts.md#45-versioning-and-independent-implementations),
+not an observation of today's private fields or constructor body.
+Its validity, canonical value identity and any separately promised interop
+representation must remain compatible for independently compiled consumers.
+Removing eligibility or incompatibly changing those promises is breaking;
+an unpromised private implementation change is not automatically breaking.
+Neither an adapter nor a nominal wrapper becomes a transparent alias.
+Required construction checks still execute in constant evaluation; a
+negative input to a nonnegative wrapper rejects rather than manufacturing
+a value from equal-width bits. Ordinary binary consumers rely on the
+published contract, while evaluating a new constant still requires the
+eligible body/dependencies under the separate constant-evaluation contract.
+Exact opt-in spelling and value encoding remain open. Attribute-encoded
+constructed data, such as a constructor recipe for a decimal-like value,
+is a separate undecided facility, not implied by this wrapper subset.
 A generic default may depend only on earlier formals. Self, forward and
 cyclic dependencies reject; interleaving required/defaulted formals does
 not change that direction. Defaults still satisfy the selected domain,
@@ -1657,11 +1691,36 @@ but do not form constraint-only overloads. Source binding records the selected
 declaration and closed generic arguments; downstream tools do not rerun source
 overload resolution.
 
-**Open:** formalize the complete applicability and declared
-specificity relation, interaction with generic inference and the accepted
-by-value/`implicit ref<T>`/`params` priorities, exact ambiguity diagnostics,
-extension-disambiguation spelling, and serialized binding metadata. This is
-accepted semantic direction, not a complete overload-resolution contract.
+**Accepted generic specificity:** after argument quality and the existing
+binding/`params` priorities tie, compare declared parameter structure rather
+than counting inferred formals. An applicable `Span<U>` parameter pattern is
+more specific than bare `T` at a `Span<int32>` argument: both infer an exact
+parameter, but only the former declares the span structure. A pattern that
+strictly specializes another through consistent substitution is more
+specific; unrelated/crossed structures remain ambiguous. An applicable
+nongeneric exact declaration wins a remaining tie with a generic declaration,
+not regardless of argument quality. Explicit generic arguments select only
+eligible generic candidates.
+
+```terrum
+int32 Select(int32 value) => value;
+T Select<T>(T value) where T : [Copy] => value;
+int32 OrdinarySelection() => Select(int32(7));
+int32 ExplicitGenericSelection() => Select<int32>(int32(7));
+```
+
+Both candidates give an exact `int32` argument match in `OrdinarySelection`;
+the nongeneric declaration wins the remaining tie. The explicit type argument
+in `ExplicitGenericSelection` selects the generic declaration.
+
+Constructors use the same staged inference: explicit arguments pin positions,
+typed value arguments contribute types, expected-result context fills
+unresolved positions, and declared defaults fill omitted unresolved positions
+before contextual literals/lambdas are checked. Do not infer generic arguments
+from field capture, private constructor implementation or arbitrary witness
+search. Constructor-versus-conversion selection is a separate open question.
+Complete applicability details, exact diagnostics, extension-provider
+disambiguation and serialized binding metadata remain specification work.
 
 ### 5.3 Caller-unsafe declarations and explicit unsafe scopes
 
@@ -1715,10 +1774,10 @@ declarations such as `TextSpan<void>` are not reopened; this is not universal
 an interface witness. The §3.1 forms are `type Wider;` in the
 interface and `type Wider = MyWideInteger;` in a conforming type.
 `T.Wider` resolves through the selected `IInteger<T>` witness. An associated
-identity clause may explicitly equate a selected projection with another
-formal; its spelling remains under review in
-[Q14](proposals/grammar-open-questions.md#q14-associated-equality-constraints).
-This is distinct from ordinary `where T : I` conformance.
+identity clause uses `where T.via<ISource>.Item is U` to equate a selected
+projection with a resolved type. `is` here means exact complete type identity,
+not runtime pattern matching, assignability or conformance. Ordinary
+`where T : I` still requires the named witness.
 Do not infer the original `T` backward
 from an associated result, choose an arbitrary implementer from a constraint,
 or silently resolve collisions; ambiguous witness/projection uses require
@@ -1779,10 +1838,18 @@ type/interface pair reject rather than being resolved with `via`.
 Extension-interface behavior still needs an explicit adapter and does not
 change the original type's witnesses.
 
-**Open:** associated-identity clause spelling and its complete checking/
-metadata representation. Preserve the selected inherited-identity/default
-resolution rules. Keep family opt-in and declared checked projections; do
-not introduce universal erasure or inferred covariance.
+Associated identity resolves the selected witness and ordinary type arguments
+first, then checks equality. Transparent aliases normalize to their targets;
+nominal wrappers do not. Full access/ownership qualification remains part of
+the comparison. The clause is an applicability check, not a new inference
+source or a search for an otherwise unknown implementing type.
+Complete checking diagnostics and metadata representation remain open.
+For a selected `Item = int32`, `where T.via<ISource>.Item is U` succeeds
+when the otherwise resolved `U` is `int32` or its transparent alias, not
+`int64` or a nominal wrapper over `int32`.
+Preserve the selected inherited-identity/default resolution rules. Keep family
+opt-in and declared checked projections; do not introduce universal erasure
+or inferred covariance.
 Interface constructors are deferred: a future requirement
 needs a checked construction and initialization-completion contract. Fixed
 `const T Name = value;` interface constants are owned by the interface
@@ -2333,10 +2400,10 @@ followed by `=`. Pointer dereference/address formation and short-circuit
 they are not ordinary overloads merely because they use operator punctuation.
 
 Still **OPEN** for a full source grammar: nominal safe union cases and complete
-patterns, associated equality and family/adapter declarations,
+patterns, full associated-identity checking and family/adapter declarations,
 conditional/default conformance and text-target fragment contracts,
 general `const` declarations/expressions,
-general ownership/reference results, constructor inference, async completion
+general ownership/reference results, complete constructor applicability, async completion
 and scheduling protocols, producers, capture/exception transport, and registered collection-fragment
 construction. Source type packs and tuple arity extensions remain deferred.
 Specifying a source form does not complete its open lifetime,
@@ -2393,10 +2460,10 @@ appears in §2.
 | Namespace | §3.1 permits file-scoped or nested block namespaces without mixing, with lexically scoped imports before declarations. | Other namespace forms, if any. |
 | Visibility | §3.1 permits namespace-level `public`/module-internal declarations and declaring-type `private`; equal namespace names do not cross module access boundaries. | File-limited visibility and the remaining declaration-kind modifier matrix. |
 | Nominal types | §3.1 sketches structs, classes, interfaces and integral-base enums with exact constants, checked successor overflow and deliberate aliases. | Union/nested declarations, selected integer catalogs, flags schemas and contextual attributes. |
-| Generic declarations | §§3.1–3.2 give bounded constant domains, earlier-only defaults, `_` inference and explicit `default` selection. | Nominal-wrapper constant eligibility and complete inference contracts. |
+| Generic declarations | §§3.1–3.2 give bounded constant domains, checked opt-in primitive-wrapper constants, earlier-only defaults, `_` inference and explicit `default` selection. | Wrapper capability spelling/value encoding and complete inference contracts. |
 | Aliases | §§3.1 and 5.4 give finite qualified expansion, cycle rejection, namespace-level aliases and transparent public export. | Metadata encoding. |
-| Associated types | §§3.1 and 5.4 give requirements, replaceable defaults, inherited identity resolution, qualified bindings, optional `<this T>` and `.via<I>` selection. | Complete associated-identity clause and metadata. |
-| Partial declarations | §5.12 defines one-identity merge, complete-signature agreement, consistent repeated defaults/contracts and required body provision. | Attribute multiplicity schemas and any explicitly permissioned future API-absence mechanism. |
+| Associated types | §§3.1 and 5.4 give requirements, replaceable defaults, inherited identity resolution, qualified bindings, optional `<this T>`, `.via<I>` selection and exact `is` identity constraints. | Complete checking diagnostics and metadata. |
+| Partial declarations | §5.12 defines one-identity merge, complete-signature agreement, consistent repeated defaults/contracts and required body provision; §3.1 requires resolved attribute schemas/multiplicity. | Concrete attribute catalogs/encoding and any explicitly permissioned future API-absence mechanism. |
 | Core primitive declarations | §2 preserves reserved primitive identities with a privileged backing field. | Artifact identity, permitted members and separate-compilation enforcement. |
 | Fields | §3.1 sketches instance fields. | Applicable attribute contracts and layout restrictions. |
 | Constructors | §§3.1 and 5.10 give `ensure P is init` minimum guarantees and repeatable unpublished init-property writes. | Completion validation hooks, value/effect compatibility and metadata encoding. |

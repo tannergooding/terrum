@@ -290,6 +290,17 @@ specialization cannot invent a missing source capability. A promised capability
 cannot silently disappear when an implementation changes. Capability stability,
 fixed layout and trivial-wrapper atomicity are separate contracts.
 
+An explicitly eligible one-field wrapper over an already eligible
+integer/Boolean carrier may be a constant-formal domain under its checked
+constant-construction, complete-initialization and
+canonical equality/value-encoding contract. Its nominal identity and validity
+remain meaningful, including a nonnegative invariant. Equal representation,
+an adapter relationship or `Transparent`/`Blittable` alone does not supply
+that capability. Removing or incompatibly changing its published guarantees
+is breaking under the existing replacement contract; unpromised private
+implementation details remain replaceable. Exact opt-in/encoding and any
+separate attribute-encoded constructor recipe remain specification work.
+
 No universal root is required to supply `Equals`, `GetHashCode`, or
 `ToString`, or to impose object-default boxing/allocation on every value; nor
 is there automatic `IEquatable<T>`/`IFormattable` conformance. This rejects
@@ -689,6 +700,13 @@ example, given `Log<T>(T item)` and `Log<T>(params List<T> items)`, a
 have identity matches after inference, but the declared `List<T>` parameter
 shape is more specific than bare `T`. This same specificity applies without
 the `params` modifier; it is not a count of inferred parameters or solver work.
+An applicable nongeneric exact declaration wins a remaining tie with a generic
+declaration after argument quality and the existing binding priorities, not
+before them. Explicit generic arguments select eligible generic candidates.
+Constructors use the same explicit/typed-argument/expected-result/default
+inference stages; field capture, private bodies and arbitrary witness search
+do not infer otherwise unresolved formals. Complete constructor applicability
+and constructor-versus-conversion selection remain separate specification work.
 
 The [source grammar](grammar-spec.md#32-types-parameters-and-arguments)
 specifies final `params` placement, eligible Copy parameter defaults,
