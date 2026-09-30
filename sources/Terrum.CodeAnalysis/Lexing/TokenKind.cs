@@ -169,4 +169,6 @@ public enum TokenKind
     WriteKeyword,
     /// <summary>The reserved discard marker (<c>_</c>), never an identifier.</summary>
     Underscore,
+    /// <summary>The expression-body arrow (<c>=&gt;</c>).</summary>
+    Arrow,
 }

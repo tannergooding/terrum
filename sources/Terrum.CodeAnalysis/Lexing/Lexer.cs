@@ -224,6 +224,11 @@ public sealed class Lexer
             case '!':
                 return Compound('=', TokenKind.BangEquals, TokenKind.Bang);
             case '=':
+                if (!AtEnd && Current == '>')
+                {
+                    _position++;
+                    return TokenKind.Arrow;
+                }
                 return Compound('=', TokenKind.EqualsEquals, TokenKind.Equals);
             case '<':
                 return Compound('=', TokenKind.LessEquals, TokenKind.Less);

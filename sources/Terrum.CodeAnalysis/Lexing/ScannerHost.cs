@@ -34,6 +34,7 @@ public static class ScannerHost
         (TokenKind.Minus, "-"), (TokenKind.Star, "*"), (TokenKind.Slash, "/"),
         (TokenKind.Percent, "%"), (TokenKind.Bang, "!"), (TokenKind.Tilde, "~"),
         (TokenKind.Equals, "="), (TokenKind.EqualsEquals, "=="),
+        (TokenKind.Arrow, "=>"),
         (TokenKind.BangEquals, "!="), (TokenKind.Less, "<"),
         (TokenKind.LessEquals, "<="), (TokenKind.Greater, ">"),
         (TokenKind.GreaterEquals, ">="), (TokenKind.Ampersand, "&"),

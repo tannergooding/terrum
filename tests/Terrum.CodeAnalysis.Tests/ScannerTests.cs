@@ -71,6 +71,7 @@ public sealed class ScannerTests
     [InlineData("")]
     [InlineData(" \t\r\n\u0085\u2028\u2029\u00A0\u3000")]
     [InlineData("alpha _value 0123 + (beta != 7) >> >= && & || | == =")]
+    [InlineData("int32 F(int32 x) => x == 0; => = > ==> /* arrow */ =>")]
     [InlineData("_ _name __ _123 _/* trivia */=int32(42);")]
     [InlineData("\U00010400_var \u2118 \u212E \u2122 \u0301")]
     [InlineData("a\u200Cb a\u200Db \u200C \u200D \u0661 a\u06612")]
@@ -132,7 +133,7 @@ public sealed class ScannerTests
     [Fact]
     public async Task EveryOperatorAndTriviaFormExecutesNativelyAsync()
     {
-        const string Operators = "_ ( ) { } [ ] ; , . : ? + - * / % ! ~ = == != < <= > >= & && | || ^";
+        const string Operators = "_ ( ) { } [ ] ; , . : ? + - * / % ! ~ = == => != < <= > >= & && | || ^";
         var lexed = Lexer.Lex(SourceText.From(Operators));
         var actual = lexed.Tokens.Select(token => token.Kind).ToHashSet();
         foreach (var kind in Enum.GetValues<TokenKind>())

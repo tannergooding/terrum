@@ -58,7 +58,6 @@ public sealed class GetterPropertyTests
     [Theory]
     [InlineData("public int32 Value { get; }", "TRM1002")]
     [InlineData("public int32 Value { get { return _value; } set { _value = 1; } }", "TRM1002")]
-    [InlineData("public int32 Value => _value;", "TRM1001")]
     [InlineData("public int32 Value { [DoesNotReturn] get { return _value; } }", "TRM3001")]
     [InlineData("public mut int32 Value { get { return _value; } }", "TRM3001")]
     [InlineData("public static int32 Value { get { return _value; } }", "TRM3001")]

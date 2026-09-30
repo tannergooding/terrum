@@ -444,7 +444,7 @@ internal sealed partial class Binder
         var returnName = returnType is null ? "" : NameText(returnType);
         var scalarReturn = GenericScalarType(returnName);
         var parameters = children.FirstOrDefault(static child => child.Kind == SyntaxKind.ParameterList);
-        var body = children.LastOrDefault(static child => child.Kind == SyntaxKind.Block);
+        var body = children.LastOrDefault(static child => child.Kind is SyntaxKind.Block or SyntaxKind.ExpressionBody);
         var nameToken = ((SyntaxTokenElement)declaration.Children.First(element =>
             element is SyntaxTokenElement { Token.Kind: TokenKind.Identifier })).Token;
         var qualified = Qualify(nameToken.Text);
@@ -819,7 +819,7 @@ internal sealed partial class Binder
         _genericContext = instantiation;
         try
         {
-            return BindBlock(template.Body);
+            return BindCallableBody(template.Body);
         }
         finally
         {

@@ -123,4 +123,6 @@ public enum SyntaxKind
     BreakStatement,
     /// <summary>Continues the nearest enclosing loop.</summary>
     ContinueStatement,
+    /// <summary>A single-statement callable body introduced by <c>=&gt;</c>.</summary>
+    ExpressionBody,
 }

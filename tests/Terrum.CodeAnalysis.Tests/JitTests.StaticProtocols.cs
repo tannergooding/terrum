@@ -8,11 +8,20 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class JitTests
 {
-    [Fact]
-    public async Task ClosedStaticProtocolSpecializationsAgreeWithNativeExecutableAsync()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ClosedStaticProtocolSpecializationsAgreeWithNativeExecutableAsync(bool checkedFailures)
     {
         var source = await File.ReadAllTextAsync(Path.Combine(RepositoryRoot(), "samples", "native",
             "static-protocol-quadratic.terrum")).ConfigureAwait(true);
-        await AssertFailFastExecutionAsync(source, 46).ConfigureAwait(true);
+        if (checkedFailures)
+        {
+            await AssertCheckedExecutionAsync(source, 46).ConfigureAwait(true);
+        }
+        else
+        {
+            await AssertFailFastExecutionAsync(source, 46).ConfigureAwait(true);
+        }
     }
 }

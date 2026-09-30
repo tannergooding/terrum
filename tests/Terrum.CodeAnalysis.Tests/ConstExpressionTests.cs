@@ -26,7 +26,7 @@ public sealed class ConstExpressionTests
         Assert.Equal(Source, tree.Root.ToFullString());
         var version = Assert.IsAssignableFrom<System.Reflection.FieldInfo>(
             typeof(SyntaxTree).GetField(nameof(SyntaxTree.LanguageVersion)));
-        Assert.Equal("syntax-27", version.GetRawConstantValue());
+        Assert.Equal("syntax-28", version.GetRawConstantValue());
         Assert.Equal(2, tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.ConstExpression));
         var compilation = Compilation.Create(tree);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));

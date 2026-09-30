@@ -8,30 +8,20 @@ interface Multiplication<TSelf, TOther, TResult> {
 
 struct Meters : Addition<Meters, Meters, Meters>, Multiplication<Meters, Meters, Meters> {
     public int32 Value;
-    public Meters(int32 value) { Value = value; }
-    public static Meters operator +(Meters left, Meters right) {
-        return new Meters(left.Value + right.Value);
-    }
-    public static Meters operator *(Meters left, Meters right) {
-        return new Meters(left.Value * right.Value);
-    }
+    public Meters(int32 value) => Value = value;
+    public static Meters operator +(Meters left, Meters right) => new Meters(left.Value + right.Value);
+    public static Meters operator *(Meters left, Meters right) => new Meters(left.Value * right.Value);
 }
 
 struct Seconds : Addition<Seconds, Seconds, Seconds>, Multiplication<Seconds, Seconds, Seconds> {
     public int32 Value;
-    public Seconds(int32 value) { Value = value; }
-    public static Seconds operator +(Seconds left, Seconds right) {
-        return new Seconds(left.Value + right.Value);
-    }
-    public static Seconds operator *(Seconds left, Seconds right) {
-        return new Seconds(left.Value * right.Value);
-    }
+    public Seconds(int32 value) => Value = value;
+    public static Seconds operator +(Seconds left, Seconds right) => new Seconds(left.Value + right.Value);
+    public static Seconds operator *(Seconds left, Seconds right) => new Seconds(left.Value * right.Value);
 }
 
 T EvaluateQuadratic<T>(T x, T a, T b, T c)
-    where T : Addition<T, T, T>, Multiplication<T, T, T>, [Copy] {
-    return (a * x + b) * x + c;
-}
+    where T : Addition<T, T, T>, Multiplication<T, T, T>, [Copy] => (a * x + b) * x + c;
 
 int32 Main() {
     Meters distance = EvaluateQuadratic<Meters>(

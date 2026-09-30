@@ -473,7 +473,7 @@ internal sealed partial class Binder
             }
 
             var body = signature.Generic is GenericInstantiation generic
-                ? BindGenericBody(generic) : BindBlock(syntaxBody);
+                ? BindGenericBody(generic) : BindCallableBody(syntaxBody);
             if (signature.IsConstructor)
             {
                 var end = new TextSpan(syntaxBody.Span.End, 0);
@@ -827,7 +827,9 @@ internal sealed partial class Binder
         var constructor = declaration.Kind == SyntaxKind.ConstructorDeclaration;
         var operatorDeclaration = declaration.Kind == SyntaxKind.OperatorDeclaration;
         var property = declaration.Kind == SyntaxKind.PropertyDeclaration;
-        var modifierCount = declaration.Children.Length - (property ? 5 : constructor ? 3 : operatorDeclaration ? 5 : 4);
+        var directGetter = property && declaration.Children[^1] is SyntaxNode { Kind: SyntaxKind.ExpressionBody };
+        var modifierCount = declaration.Children.Length - (property ? directGetter ? 3 : 5
+            : constructor ? 3 : operatorDeclaration ? 5 : 4);
         var isMutable = false;
         var isPrivate = false;
         var isInternal = false;
@@ -910,26 +912,30 @@ internal sealed partial class Binder
             Report("TRM3001", "A mut method requires a writable class or struct receiver.", declaration.Span);
         }
 
-        var returnNode = constructor ? null : (SyntaxNode)declaration.Children[property || operatorDeclaration ? ^5 : ^4];
+        var returnNode = constructor ? null : (SyntaxNode)declaration.Children[property && directGetter ? ^3
+            : property || operatorDeclaration ? ^5 : ^4];
         var parameters = property ? null : (SyntaxNode)declaration.Children[^2];
-        var nameToken = ((SyntaxTokenElement)declaration.Children[property ? ^4 : ^3]).Token;
+        var nameToken = ((SyntaxTokenElement)declaration.Children[property ? directGetter ? ^2 : ^4 : ^3]).Token;
         var operatorKey = new StaticOperatorKey(nameToken.Kind, parameters?.Children.OfType<SyntaxNode>().Count() ?? 0);
         var validOperator = (operatorKey.Arity == 1 && IsStaticUnaryOperator(nameToken.Kind))
             || (operatorKey.Arity == 2 && IsStaticBinaryOperator(nameToken.Kind));
         var nameText = operatorDeclaration && validOperator ? OperatorName(operatorKey) : nameToken.Text;
-        var getter = property ? (SyntaxNode)declaration.Children[^2] : null;
+        var getter = property && !directGetter ? (SyntaxNode)declaration.Children[^2] : null;
         var body = getter is SyntaxNode accessor ? (SyntaxNode)accessor.Children[^1]
             : (SyntaxNode)declaration.Children[^1];
-        if (getter is not null)
+        if (property)
         {
-            foreach (var attribute in getter.Children.OfType<SyntaxNode>()
-                .Where(static child => child.Kind == SyntaxKind.Attribute))
+            if (getter is not null)
             {
-                if (attribute.Children[1] is not SyntaxTokenElement { Token.Text: "NoThrow" } || isNoThrow)
+                foreach (var attribute in getter.Children.OfType<SyntaxNode>()
+                    .Where(static child => child.Kind == SyntaxKind.Attribute))
                 {
-                    Report("TRM3001", "Only a single getter-local NoThrow effect is supported.", attribute.Span);
+                    if (attribute.Children[1] is not SyntaxTokenElement { Token.Text: "NoThrow" } || isNoThrow)
+                    {
+                        Report("TRM3001", "Only a single getter-local NoThrow effect is supported.", attribute.Span);
+                    }
+                    isNoThrow = true;
                 }
-                isNoThrow = true;
             }
             if (containingType is null || isStatic || isMutable || isCleanup || doesNotReturn
                 || (!TryResolveStruct(Qualify(containingType), out var propertyOwner)
@@ -945,7 +951,8 @@ internal sealed partial class Binder
                     declaration.Span);
             }
         }
-        if (operatorDeclaration && (containingType is null || !isStatic || body.Kind != SyntaxKind.Block
+        if (operatorDeclaration && (containingType is null || !isStatic
+            || body.Kind is not (SyntaxKind.Block or SyntaxKind.ExpressionBody)
             || !validOperator))
         {
             Report("TRM3001", "A static operator implementation requires a supported arity and a struct body.", declaration.Span);
@@ -1266,6 +1273,17 @@ internal sealed partial class Binder
     private bool TryResolveStruct(string name, out PrimitiveType type) =>
         ResolveTypeName(name, out type) == DeclaredTypeResolution.Unique && IsStruct(type);
 
+    private BoundBlock BindCallableBody(SyntaxNode body)
+    {
+        if (body.Kind == SyntaxKind.Block)
+        {
+            return BindBlock(body);
+        }
+
+        var block = new SyntaxNode(SyntaxKind.Block, [body], body.Span.Start);
+        return BindBlock(block);
+    }
+
     private BoundBlock BindBlock(SyntaxNode block)
     {
         _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
@@ -1363,6 +1381,23 @@ internal sealed partial class Binder
 
         switch (node.Kind)
         {
+            case SyntaxKind.ExpressionBody:
+            {
+                var statement = (SyntaxNode)node.Children[1];
+                if (!_constructor && _returnType != PrimitiveType.Void)
+                {
+                    if (statement.Kind != SyntaxKind.ExpressionStatement)
+                    {
+                        Report("TRM3010", "A value-producing expression body requires one expression.", statement.Span);
+                        return new BoundBlock([], node.Span);
+                    }
+
+                    var expression = (SyntaxNode)statement.Children[0];
+                    return new BoundReturn(BindExpression(expression, _returnType), node.Span);
+                }
+
+                return BindStatement(statement);
+            }
             case SyntaxKind.Block:
                 return BindBlock(node);
 

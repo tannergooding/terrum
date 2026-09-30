@@ -314,7 +314,7 @@ internal sealed class Parser
         {
             children.Add(Take());
             children.Add(ParseParameters());
-            children.Add(ParseBlock());
+            children.Add(ParseCallableBody());
             kind = SyntaxKind.ConstructorDeclaration;
         }
         else if (IsTypeStart(Current.Kind))
@@ -329,7 +329,7 @@ internal sealed class Parser
                     or TokenKind.Greater or TokenKind.GreaterEquals or TokenKind.Bang or TokenKind.Tilde
                     ? Take() : Expect(TokenKind.Plus));
                 children.Add(ParseParameters());
-                children.Add(Current.Kind == TokenKind.Semicolon ? Take() : ParseBlock());
+                children.Add(Current.Kind == TokenKind.Semicolon ? Take() : ParseCallableBody());
                 kind = SyntaxKind.OperatorDeclaration;
             }
             else
@@ -347,13 +347,18 @@ internal sealed class Parser
                     {
                         children.Add(ParseConstraint());
                     }
-                    children.Add(ParseBlock());
+                    children.Add(ParseCallableBody());
                     kind = SyntaxKind.FunctionDeclaration;
                 }
                 else if (containingType is not null && children.TrueForAll(static child =>
                     child is not SyntaxNode { Kind: SyntaxKind.TypeParameterList }))
                 {
-                    if (Current.Kind == TokenKind.OpenBrace)
+                    if (Current.Kind == TokenKind.Arrow)
+                    {
+                        children.Add(ParseCallableBody());
+                        kind = SyntaxKind.PropertyDeclaration;
+                    }
+                    else if (Current.Kind == TokenKind.OpenBrace)
                     {
                         children.Add(Take());
                         var accessor = new List<SyntaxElement>();
@@ -370,14 +375,14 @@ internal sealed class Parser
                         else
                         {
                             accessor.Add(Take());
-                            if (Current.Kind != TokenKind.OpenBrace)
+                            if (Current.Kind is not (TokenKind.OpenBrace or TokenKind.Arrow))
                             {
-                                Report("TRM1002", "A getter requires a braced body.", Current.Span);
+                                Report("TRM1002", "A getter requires a body.", Current.Span);
                                 accessor.Add(SkipDeclaration());
                             }
                             else
                             {
-                                accessor.Add(ParseBlock());
+                                accessor.Add(ParseCallableBody());
                             }
                             children.Add(Node(SyntaxKind.GetAccessor, accessor));
                         }
@@ -579,6 +584,26 @@ internal sealed class Parser
         _depth--;
 
         return Node(SyntaxKind.Block, children);
+    }
+
+    private SyntaxNode ParseCallableBody()
+    {
+        if (Current.Kind != TokenKind.Arrow)
+        {
+            return ParseBlock();
+        }
+
+        var children = new List<SyntaxElement> { Take() };
+        if (Current.Kind is TokenKind.RequireKeyword or TokenKind.Underscore)
+        {
+            children.Add(ParseStatement());
+        }
+        else
+        {
+            children.Add(ParseExpressionStatement());
+        }
+
+        return Node(SyntaxKind.ExpressionBody, children);
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Other tokens enter expression parsing or recovery; they are not distinct statement forms.")]
