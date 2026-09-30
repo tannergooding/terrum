@@ -79,7 +79,7 @@ ABI changes; imported functions cannot satisfy required constant calls.
 Syntax-26 adds scalar `const expression` requirements in nested executable
 expressions, with the same limits and deferred constant substitution; no new
 native or semantic wire representation is emitted. The current parser version
-is syntax-32. Conditional expressions evaluate one Boolean condition and only
+is syntax-33. Conditional expressions evaluate one Boolean condition and only
 the selected target-checked arm, with existing cleanup and rooting behavior.
 Retained conditional nodes select semantic v41, not a new native ABI.
 Managed-handle `??` and statement-form `??=` use a single value/place evaluation
@@ -88,6 +88,13 @@ or writable mutable class field; computed receivers remain rooted through
 fallback calls and checked failure. Results retain existing nullability and
 readonly/write contracts. Retained nodes select semantic v42, with no native
 ABI change or scalar/unique optional representation.
+Prefix/postfix integer updates save the old value and commit a checked
+replacement only on success. Supported mutable local, compact-field,
+writable class-field and host-buffer places retain receiver/index
+single evaluation, access checks and managed-root cleanup. Prefix returns
+the replacement; postfix returns the saved value. Retained nodes select
+semantic v43 without changing the native ABI. Nominal operators, `char16`,
+unique-value updates and nested owning-child paths are not implemented.
 Standalone `init T name;` and `init var name;` declare vacant
 readonly local slots without a default value. Existing checked initialization
 controls publication, owner cleanup and managed-root activation. Semantic v40

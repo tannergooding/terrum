@@ -17,6 +17,10 @@ Syntax-31's conditional expressions reuse the existing `?` and `:` tokens.
 Syntax-32 appends `??` and `??=` identities to the operator catalog without
 renumbering existing tokens. Both scanners use longest matches; parser type
 recovery still retains and diagnoses repeated optional markers.
+Syntax-33 appends `++` and `--` as token identities 86 and 87, preserving all
+earlier identities and scanner-5 records. Both scanners select longest
+matches. New adjacent update/additive runs such as `x+++y` diagnose rather
+than being reinterpreted; trivia distinguishes `x++ +y` from `x+ ++y`.
 Compiled-scanner input and hosted lexing produce the same checked lowering.
 
 The shared operator catalog includes syntax-28's `=>` token for expression

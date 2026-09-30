@@ -46,7 +46,7 @@ substitutions preserve readonly/write and supported optional qualification;
 they do not grant member, null-test or operator capabilities absent from the
 function's constraints. See the [bounded generic contract](docs/implementation.md#bounded-generic-functions)
 for inference, results, outputs, rooting and remaining limits.
-The current parser version is syntax-32. Standalone `init T name;` and
+The current parser version is syntax-33. Standalone `init T name;` and
 `init var name;` declare readonly vacant locals, published only by checked
 initialization; semantic v40 is selected when these declarations are retained.
 Syntax-31 adds target-checked conditional expressions: evaluate the condition
@@ -57,6 +57,10 @@ optionals, with initialized writable destinations and feature-selected semantic
 v42 persistence. The native scalar component separately supports `?:` through
 projections v24–27, including local and numeric-conversion combinations; it
 still uses the shared hosted verifier/emitter.
+Syntax-33 adds checked prefix/postfix integer updates on supported writable
+places, with single evaluation and no replacement on failure; retained updates
+select semantic v43. Native scalar projections v28–31 add bounded assignment
+and nested-while bodies while retaining the shared backend and older payloads.
 Syntax-18 recognizes qualified generic
 type arguments such as `write Record` and `write Record?`; managed generic
 producer examples use the existing semantic v24 managed contracts; other

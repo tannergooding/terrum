@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-32, semantic v42 managed coalescing, native-10 through native-20
+## Current boundary: syntax-33, semantic v43 integer updates, native-10 through native-20
 
 The approved [source grammar](grammar-spec.md) is broader than this
 implementation. Syntax-28 adds `=>` bodies to supported top-level functions
@@ -77,13 +77,31 @@ existing rules. Retained coalescing nodes select semantic v42; older headers
 reject them. Scalar/unique optionals, conditional access and managed ConstEval
 are not added, and the native ABI is unchanged.
 
+Syntax-33 adds prefix/postfix `++` and `--` for initialized writable
+`int32`, `uint32`, `int64` and `uint64` places. Supported places include
+mutable locals, mutable compact-field paths rooted in a mutable local or
+writable source-class handle, scalar fields of a mutable unique root, and
+existing writable `int32` host-buffer elements. A computed receiver or index
+evaluates once. The old value is saved, the replacement is checked, and only
+success commits it; prefix returns the replacement and postfix the saved
+value. Failure does not undo earlier receiver/index effects. Managed receivers
+remain rooted through the operation and retire their staged root on checked
+failure. Updates are valid expression statements and `for` iterators;
+scalar-slot updates also execute in bounded ConstEval.
+Semantic v43 is selected only for retained update nodes, with old-header
+rejection and unchanged semantic/native consumer contracts. `NoThrow` cannot
+promise an unproven checked update. Getters, temporaries, readonly/vacant
+places, `char16`, nested owning-child paths and nominal static update
+operators remain unsupported; this does not defer the approved static
+operator grammar or authorize updating a unique value itself.
+
 The executable Terrum scalar frontend additionally supports bounded nested
 expression trees and expression-bodied scalar functions through provisional
 projection v20, plus initialized scalar locals and assignments in v21.
 Up to eight typed or inferred locals and twelve ordered declaration/assignment
 statements may precede its terminal return/conditional-return envelope.
 Only `mut` locals can be reassigned; names bind sequentially, and inferred
-numeric literals have no fallback type. Ordinary calls, loops and vacant locals remain
+numeric literals have no fallback type. Ordinary calls and vacant locals remain
 outside this native component. It retains existing v1–20 projections for their supported
 shapes. Its own parser and scalar binder produce up to 32 postorder nodes
 with bounded recursive descent; the host validates source anchors, types,
@@ -111,6 +129,21 @@ types and tree ownership independently of the native parser. Existing v1–23
 payloads and zero-reserved checks remain unchanged, as do buffer/node/depth
 limits. DLL byte parity, JIT/EXE execution under both policies and atomic
 failed-output retention cover this bounded compiler component.
+
+Projections v28–31 add pre-tested `while` bodies containing scalar assignments
+and nested `while` loops, followed by the existing terminal return envelope.
+Declarations remain at outer function scope and may occur between loops;
+loop-body declarations, other nested control flow, early returns, named
+transfers, `break`/`continue` and native update expressions are rejected.
+There are at most six nested loop headers, twelve total statement records
+(headers included), eight locals and thirty-two expression nodes. Zero-local
+empty loops are permitted. Versions 28/29/30/31 respectively select loops
+alone, with conversions, with conditional expressions, or with both.
+The component checks Boolean conditions before each iteration and preserves
+checked failures and body order without a runtime iteration cap. Independent
+source validation checks body extents, scope, mutability and structural
+limits before shared `BoundWhile` lowering. Existing v1–27 payloads, the
+392-word buffer and public ABI/profiles remain unchanged.
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -403,6 +436,9 @@ mutable locals, accessible fields of mutable compact values, constructor fields,
 conditional output scratch slots and checked writable host-buffer elements.
 The `??=` subset accepts only initialized optional managed-handle locals or
 writable mutable source-class fields, as described above.
+Prefix/postfix integer updates are also expression statements and may occupy
+a `for` iterator. Their writable-place subset is described above; they do not
+make arbitrary value expressions valid statements.
 Unique local places additionally track vacancy and cleanup obligations.
 Composite owning fields are assigned once along sequential constructor flow;
 complete owners can be transferred, but partial field moves are unsupported.
@@ -1051,6 +1087,13 @@ identifies the false-arm node, and its high word remains zero. All three
 children precede the parent and participate in source, type, depth and
 single-use validation. Only these new versions interpret operation 84's low
 word as a child; earlier profiles reject the operation.
+Versions 28–31 add statement kind 3 for a while header, followed by its body
+records in preorder. Its `slot` field is the exclusive body-end record index,
+its root is the Boolean condition, and its span covers the whole loop.
+Nested body endpoints cannot cross an enclosing endpoint. Source validation
+derives the braced body span rather than trusting an extra payload field.
+Earlier versions reject this statement kind and retain variable-slot meaning
+for their declaration/assignment records.
 Version 19 assigns words 34–36 to the third parameter's type and UTF-16
 name span. Its parameter/literal operations reserve the disjoint 40000 offset
 for the third parameter (using the first-parameter group before adding the
