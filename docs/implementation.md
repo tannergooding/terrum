@@ -1552,11 +1552,24 @@ the result back. There is no kind 8 or checked numeric cast of a negative
 payload. Policy 3 accepts only equal-width integer representations, never
 `bool`, `char16`, optional or nominal values.
 
+Module-local direct calls use assigned `Call` opcode `0x12`, selecting the
+existing MethodDef ordinal and exact scalar by-value signature. Forward and
+finite recursive calls, scalar/void results, and the existing register/stack
+argument ABI compose with mutations, lazy expressions, branches and loops.
+Arguments are materialized once, left-to-right, so later argument mutations or
+conditional continuations cannot change earlier snapshots. Void calls retain
+their operation ordinal and effects without allocating an SSA value.
+Value definitions and last-use ordinals therefore advance independently.
+
 Loading audits block extents, definition indices, value types, exact use and
 liveness inventories, dominance, region entry/exit and backedges before
 creating an immutable internal graph. The mandatory semantic verifier
 rechecks that graph's parameter/result/effect contract against its containing
-declaration. Independently supplied linear Bodies with shifts or policy-3
+declaration and every call target's current signature, mode and effect.
+A declaration prepass resolves forward targets; all declared Bodies, even
+uncalled ones, are audited before native execution. Resultless operations and
+their argument checks still consume the shared analysis-visit budget.
+Independently supplied linear Bodies with calls, shifts or policy-3
 conversions use the same internal graph; other linear Bodies retain their
 existing structured lowering. The internal representation-conversion node
 does not change checked source casts or add a development-module wire tag.
@@ -1564,7 +1577,7 @@ The loader accepts `ConstBits`,
 `ConstSigned`, `Copy`, Boolean NOT, integer bitwise NOT/unary plus,
 scalar equality/inequality, integer ordering/bitwise operations, checked
 integer arithmetic/negation/count shifts, checked numeric conversion,
-equal-width integer bit reinterpretation, `Branch`,
+equal-width integer bit reinterpretation, module-local scalar `Call`, `Branch`,
 `BranchIf` and `Return`.
 Integer division/remainder retain their distinct signed-minimum behavior.
 `char16` has conversion/equality semantics, not integer arithmetic or ordering.
@@ -1583,8 +1596,10 @@ that would excuse a retained checked operation. Other effect promises and
 contract clauses reject, as do unsupported sections, parameter modes,
 generic/nominal declarations and qualified types.
 
-Calls, including local `NoThrow` calls, remain **inspection-only** assigned
-shapes in the approved ISA; this execution path rejects them. Branch- or
+Calls to imported or packed cross-module targets, nominal/instance and
+generic/witness calls, and non-value/owning parameters remain unsupported.
+A `NoThrow` caller requires a declared and audited `NoThrow` callee; the
+runtime policy does not manufacture that guarantee. Branch- or
 loop-local declarations, vacant locals, post-tested/iterator loops, transfers
 beyond the nearest loop, field/nominal mutations,
 places, roots, ownership, cleanup, exceptional transfer and imported

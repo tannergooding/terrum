@@ -325,7 +325,7 @@ parameters and other rich bodies; **neither form yet encodes** complete
 ownership/loan/cleanup, safepoint roots or exceptional regions. A
 compact form may structurally contain assigned opcode
 shapes only when its derived records are complete; it does not make
-decode-only calls, fields or exceptional operations executable.
+calls outside the executable subset, fields or exceptional operations executable.
 Future root and method/block effect inventories must be represented
 in *every* eligible form before adding features requiring them to its
 executable subset. `NoThrow` is neither purity nor a no-safepoint
@@ -2106,7 +2106,7 @@ For `(1, 0)`, an executable body uses only scalar TypeSpecs (`bool`,
 `char16`, `int32`, `uint32`, `int64`, `uint64`) and optional forms of those
 scalars, by-value parameters, no receiver, no places, and no generic or
 external call. It can contain loop regions as constrained above. Operations
-`01..0A`, `15..18` and terminators `80..83`, `87` are executable with their stated
+`01..0A`, module-local scalar `12`, `15..18` and terminators `80..83`, `87` are executable with their stated
 type, state and failure checks. `CheckedBinary` kinds 4 and 5 require
 an integer divisor and use the selected module fail-fast policy on failure;
 `CheckedConvert` accepts the assigned integer types and `char16` as a
@@ -2117,10 +2117,23 @@ checked-exception dispatch requires a specified exceptional edge, payload
 and cleanup protocol. All live values in this subset are Copy values, so a
 failure cannot strand a unique cleanup obligation.
 
-`0B..14`, `1A..1C`, `8A`, and nonzero place counts are **assigned
+Executable `Call` (`12`) selects a locally authored, module-level MethodDef
+using nonzero `m`, with no receiver or generic parameters. Its parameters are
+by-value primitive scalars and its result is a primitive scalar or `void`;
+every argument and result must match the selected signature exactly. A void
+call has result ID zero but still consumes an operation ordinal and retains
+its ordered effects. It creates no value definition. Every declared Body,
+including uncalled targets, must pass the executable audit. A `NoThrow`
+caller requires the selected callee's checked `NoThrow` declaration; other
+calls may fail under the module's fail-fast policy. Forward and recursive
+references do not require declaration order or recursive inlining.
+Imported, packed cross-module (`m=0`), nominal/instance, generic/witness,
+non-value-mode and owning calls remain outside this executable subset.
+
+`0B..11`, `13..14`, `1A..1C`, `8A`, and nonzero place counts are **assigned
 decode shapes, not executable forms**; `19` is reserved and rejects.
 The assigned shapes require place authority,
-ownership, cleanup, call failure, backing or region rules that this revision
+ownership, cleanup, richer call failure, backing or region rules that this revision
 does not encode completely. The `02` lexical and `03..07` region kinds are
 likewise reserved for execution. A structural inspector can identify each
 known opcode's operands and report unsupported semantics; a semantic editor
@@ -2135,7 +2148,7 @@ contract:
 
 | Surface | Missing binary and verification contract |
 |---|---|
-| Exception and cleanup | Authored catch/finally, cleanup on normal/exceptional exit, fault replacement, operation-site failure state (including calls) and required roots through cleanup. A potentially failing call without a local handler is insufficient. |
+| Exception and cleanup | Authored catch/finally, cleanup on normal/exceptional exit, fault replacement, operation-site failure state (including calls) and required roots through cleanup. Root-free fail-fast calls do not establish these broader contracts. |
 | Fast method facts | The Body now assigns direct value definitions, per-block last-use inventories and per-value/place use-block counts. Still define the mandatory method-level operation/effect summary, finer per-block effects and safepoint/root inventory, with bounds and consistency audits. Specialized branch reachability and per-consumer profitability are computed at the call site, not serialized as authoritative facts. |
 | Loans and views | Place provenance, region escape/alias checks, retained backing and owner dependencies, interior references, `mut` versus `write`, suspension/capture and explicit begin/end loan forms. |
 | Managed values | Root maps at safepoints, stable descriptors, write barriers, allocation/collection, optional handles and per-image heap boundaries. Root lifetime cannot be inferred solely from SSA uses. |

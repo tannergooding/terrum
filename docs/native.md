@@ -26,6 +26,11 @@ replacement values through those same branches and loops. Equal-width integer
 reinterpretation preserves bits without a numeric range check; checked shifts
 still reject every count outside the operand width before the machine shift.
 This does not add unchecked source casts, mutable TRRM places or a new opcode.
+Module-local scalar calls use the existing direct-call fixups and scalar
+register/stack ABI, including forward and recursive targets. Previously
+evaluated arguments remain snapshots across later mutations or lazy branches.
+Void calls execute without a synthetic value slot; call scratch/outgoing
+argument space is included in the same frame analysis as value-returning calls.
 It supports fail-fast only; the approved Body subset does not
 encode checked-exception dispatch, even though the native backend supports
 that policy for the existing source and development-module paths. Loading
