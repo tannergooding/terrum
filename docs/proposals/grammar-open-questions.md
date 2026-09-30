@@ -143,9 +143,8 @@ subject to independent operator rules inside them.
 **C# model:** Call/index syntax is C#-inspired, but this attachment
 restriction deliberately deviates from C#'s trivia-insensitive delimiters.
 
-**Delimiter interior spacing question (awaiting review):** Should ordinary
-parentheses, brackets and braces impose padding requirements inside their
-boundaries? **Recommendation:** Keep interior trivia flexible:
+**Accepted delimiter interior spacing:** Keep interior trivia flexible
+inside ordinary parentheses, brackets and braces:
 `f(x)` and `f( x )`, `(x + y)` and `( x + y )`, and `items[i]` and
 `items[ i ]` are all valid. Ordinary block braces also impose no padding
 requirement of their own. Delimiters already establish explicit structural
@@ -154,7 +153,20 @@ Receiver attachment and operator spacing still apply independently:
 `f (x)` and `f(- x)` reject. **C# model:** This follows C#'s flexible
 interior trivia, not a prescribed formatter style. Literal/interpolation
 delimiters retain their own rules. Comma/semicolon spacing remains a separate
-question. This recommendation has not been accepted.
+question. This includes multiline arguments, with the call opener attached
+to the callee and the arguments/closing delimiter on subsequent lines.
+
+**Separator spacing question (awaiting review):** Should commas and
+semicolons impose additional spacing or attachment requirements?
+**Recommendation:** Treat them as fixed structural separators with flexible
+trivia: `f(x,y)`, `f(x, y)` and `f(x , y)` are valid forms, as are
+`return x;` and `return x ;`. They already establish explicit boundaries
+and are excluded from operator runs, so this does not weaken the operator
+spacing/evolution rules. A formatter may prefer attached separators followed
+by spaces or line breaks without making that style mandatory.
+**C# model:** This follows C#'s trivia-insensitive separator spacing.
+It does not change where separators, trailing commas or empty statements
+are permitted. This recommendation has not been accepted.
 
 **Comment-fence question:** Should a block comment select its closing fence
 from the opening star count, analogously to the selected delimiter length of

@@ -151,8 +151,12 @@ openers must directly adjoin the receiver's final token, including
 type/constructor calls and generic or
 parenthesized receivers. Thus `f(x)`, `f<T>(x)` and `items?[i]` satisfy
 attachment; `f (x)` and `items [i]` reject. Grouping/control-flow parentheses
-have no receiver and are not subject to call attachment. Padding inside
-delimiters is a separate requirement from attachment to their receiver.
+have no receiver and are not subject to call attachment. Interior trivia
+in ordinary parentheses, brackets and braces is optional, including comments
+and line breaks around enclosed tokens. Multiline calls keep the opening
+`(` attached to the callee while permitting arguments and the closing `)`
+on subsequent lines. Receiver/operator attachment remains independent of
+interior padding, and literal/interpolation delimiters retain their own rules.
 Keyword operators retain word boundaries. Grouping/list delimiters, generic
 delimiters and range syntax retain their own grammatical rules; their exact
 remaining spacing requirements are separate design work.

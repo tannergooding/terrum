@@ -1105,7 +1105,23 @@ A generic call attaches after its type-argument closing delimiter, as in
 `f<T>(x)`; a parenthesized receiver attaches after its closing parenthesis.
 Grouping and control-flow parentheses have no receiver and do not acquire
 this requirement: `(x + y)` and `if (ready)` remain valid.
-This outer attachment rule does not impose padding rules inside delimiters.
+Interior trivia in ordinary parentheses, brackets and braces is optional:
+`f(x)` and `f( x )`, `(x + y)` and `( x + y )`, and `items[i]` and
+`items[ i ]` are valid forms. Whitespace, comments and line breaks may
+separate the enclosed tokens from the opening/closing delimiters, including
+multiline argument lists:
+
+```terrum
+F(
+    x,
+    y,
+    z
+)
+```
+
+Receiver attachment and operator spacing still apply independently:
+`f (x)` and `f(- x)` reject. Literal/interpolation delimiters retain their
+own rules; interior trivia is not permission to alter literal contents.
 
 Generic argument parsing uses the selected declaration's formal kinds to
 distinguish type arguments from constant-value expressions; the broad
