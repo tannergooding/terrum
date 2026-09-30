@@ -376,14 +376,15 @@ public static partial class TrRmExecutableCompiler
             || (source is PrimitiveType.Int64 or PrimitiveType.UInt64
                 && destination is PrimitiveType.Int64 or PrimitiveType.UInt64);
 
-    private static bool ContainsIndexedFlow(BoundStatement statement)
+    private static bool ContainsIndexedFlow(BoundStatement statement, bool nested = false)
     {
         switch (statement)
         {
             case BoundIf or BoundWhile:
                 return true;
             case BoundBlock block:
-                return block.Statements.Any(ContainsIndexedFlow);
+                return nested && block.Statements.Any(static child => child is BoundLocal)
+                    || block.Statements.Any(child => ContainsIndexedFlow(child, true));
             case BoundLocal local:
                 return ContainsIndexedFlow(local.Initializer);
             case BoundAssignment assignment:

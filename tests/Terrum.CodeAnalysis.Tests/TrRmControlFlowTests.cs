@@ -180,10 +180,13 @@ public sealed class TrRmControlFlowTests
     }
 
     [Theory]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { int32 inner = x; x = inner + 1; } return x; }")]
-    [InlineData("int32 Main() { mut int32 x = 0; if (x == 0) { int32 inner = x; x = inner + 1; } return x; }")]
-    public void UnsupportedRetainedArmsAndScopedLocalsFailExplicitly(string source)
-        => Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(Compile(source), "unsupported"));
+    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { int32 inner = x; x = inner + 1; } return x; }", 2)]
+    [InlineData("int32 Main() { mut int32 x = 0; if (x == 0) { int32 inner = x; x = inner + 1; } return x; }", 1)]
+    public void ScopedScalarLocalsExecuteThroughIndexedFlow(string source, int expected)
+    {
+        var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(Compile(source), "scoped"));
+        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+    }
 
     [Fact]
     public void IndexedEvidenceCannotBeReusedUnderDifferentDeclarationContracts()

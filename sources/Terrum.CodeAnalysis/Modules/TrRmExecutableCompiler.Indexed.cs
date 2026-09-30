@@ -30,12 +30,13 @@ public static partial class TrRmExecutableCompiler
         internal int ReturnValue = -1;
     }
 
-    private sealed class IndexedRegion(int id, int parent, IndexedBlock header)
+    private sealed class IndexedRegion(int id, int parent, IndexedBlock header, int[] visibleSlots)
     {
         internal int Id = id;
         internal int Parent = parent;
         internal IndexedBlock Header = header;
         internal IndexedBlock? Exit;
+        internal int[] VisibleSlots = visibleSlots;
     }
 
     private sealed class IndexedBuilder
@@ -48,7 +49,6 @@ public static partial class TrRmExecutableCompiler
         private readonly Stack<IndexedRegion> _loops = [];
         private IndexedBlock? _current;
         private int[] _slots;
-        private int _branchDepth;
 
         internal IndexedBuilder(BoundFunction function, BoundProgram program)
         {
@@ -864,17 +864,34 @@ public static partial class TrRmExecutableCompiler
             return selected;
         }
 
-        private static int[] Arguments(int[] slots, int result = 0)
-            => result == 0 ? slots.Where(static value => value != 0).ToArray()
-                : [result, .. slots.Where(static value => value != 0)];
+        private static int[] Arguments(int[] slots, int[] visible, int result = 0)
+        {
+            var arguments = new List<int>();
+            if (result != 0)
+            {
+                arguments.Add(result);
+            }
+            for (var index = 0; index < visible.Length; index++)
+            {
+                if (visible[index] != 0)
+                {
+                    if (slots[index] == 0)
+                    {
+                        throw Unsupported("A target-visible scalar local is uninitialized.");
+                    }
+                    arguments.Add(slots[index]);
+                }
+            }
+            return arguments.ToArray();
+        }
 
-        private void Jump(IndexedBlock target, int[] slots, int result = 0)
+        private void Jump(IndexedBlock target, int[] slots, int[] visible)
         {
             if (_current is null)
             {
                 throw Unsupported("Unreachable source transfer cannot be represented in a compact Body.");
             }
-            _current.True = new IndexedEdge(target, Arguments(slots, result));
+            _current.True = new IndexedEdge(target, Arguments(slots, visible));
             _current = null;
         }
 
@@ -921,11 +938,11 @@ public static partial class TrRmExecutableCompiler
             _slots = Parameters(join, before, resultType);
             if (trueEnd is not null)
             {
-                trueEnd.True = new IndexedEdge(join, Arguments(trueSlots, trueResult));
+                trueEnd.True = new IndexedEdge(join, Arguments(trueSlots, before, trueResult));
             }
             if (falseEnd is not null)
             {
-                falseEnd.True = new IndexedEdge(join, Arguments(falseSlots, falseResult));
+                falseEnd.True = new IndexedEdge(join, Arguments(falseSlots, before, falseResult));
             }
             _current = join;
             return resultType is null ? 0 : join.Parameters[0];
@@ -1024,16 +1041,20 @@ public static partial class TrRmExecutableCompiler
             switch (statement)
             {
                 case BoundBlock block when block.RetiredManagedLocals.IsEmpty:
+                    var visible = (int[])_slots.Clone();
                     foreach (var child in block.Statements)
                     {
                         Statement(child);
                     }
+                    for (var index = 0; index < visible.Length; index++)
+                    {
+                        if (visible[index] == 0)
+                        {
+                            _slots[index] = 0;
+                        }
+                    }
                     break;
                 case BoundLocal local:
-                    if (_branchDepth != 0 || _loops.Count != 0)
-                    {
-                        throw Unsupported("Local declarations inside branches or loops are not implemented in indexed scalar emission.");
-                    }
                     var initialValue = Expression(local.Initializer);
                     _slots[local.Variable] = initialValue;
                     break;
@@ -1051,20 +1072,18 @@ public static partial class TrRmExecutableCompiler
                     break;
                 case BoundIf conditional:
                     var condition = Expression(conditional.Condition);
-                    _branchDepth++;
                     _ = Merge(condition, () => { Statement(conditional.Then); return 0; },
                         () => { if (conditional.Else is not null) { Statement(conditional.Else); } return 0; },
                         null);
-                    _branchDepth--;
                     break;
                 case BoundWhile loop when !loop.IsPostTested && loop.Iterator is null:
                     var parent = _current.Region;
                     var header = NewBlock(_regions.Count + 1);
-                    var loopRegion = new IndexedRegion(_regions.Count + 1, parent, header);
-                    _regions.Add(loopRegion);
                     var entrySlots = (int[])_slots.Clone();
+                    var loopRegion = new IndexedRegion(_regions.Count + 1, parent, header, entrySlots);
+                    _regions.Add(loopRegion);
                     var headerSlots = Parameters(header, entrySlots);
-                    Jump(header, entrySlots);
+                    Jump(header, entrySlots, entrySlots);
                     _current = header;
                     _slots = headerSlots;
                     var test = Expression(loop.Condition);
@@ -1078,13 +1097,13 @@ public static partial class TrRmExecutableCompiler
                     Statement(loop.Body);
                     if (_current is not null)
                     {
-                        Jump(header, _slots);
+                        Jump(header, _slots, entrySlots);
                     }
                     _loops.Pop();
                     var exit = NewBlock(parent);
                     loopRegion.Exit = exit;
                     var exitSlots = Parameters(exit, entrySlots);
-                    testBlock.False = new IndexedEdge(exit, Arguments(testSlots));
+                    testBlock.False = new IndexedEdge(exit, Arguments(testSlots, entrySlots));
                     foreach (var block in _blocks)
                     {
                         if (block.True is { Target: var target } && target == header
@@ -1101,11 +1120,12 @@ public static partial class TrRmExecutableCompiler
                     // The designated exit is allocated after the body, but all break edges must
                     // carry their snapshots to that same exit.
                     var deferred = new IndexedBlock(-1, breakRegion.Parent);
-                    Jump(deferred, _slots);
+                    Jump(deferred, _slots, breakRegion.VisibleSlots);
                     _pendingBreaks.Add((breakRegion, deferred));
                     break;
                 case BoundContinue { TargetDepth: 1 } when _loops.Count > 0:
-                    Jump(_loops.Peek().Header, _slots);
+                    var continueRegion = _loops.Peek();
+                    Jump(continueRegion.Header, _slots, continueRegion.VisibleSlots);
                     break;
                 default:
                     throw Unsupported($"Statement {statement.GetType().Name} has no executable indexed scalar encoding.");
