@@ -41,6 +41,7 @@ public static partial class TrRmExecutableCompiler
     private sealed class IndexedBuilder
     {
         private readonly BoundFunction _function;
+        private readonly BoundProgram _program;
         private readonly List<IndexedBlock> _blocks = [];
         private readonly List<IndexedRegion> _regions = [];
         private readonly List<PrimitiveType> _types = [];
@@ -49,9 +50,10 @@ public static partial class TrRmExecutableCompiler
         private int[] _slots;
         private int _branchDepth;
 
-        internal IndexedBuilder(BoundFunction function)
+        internal IndexedBuilder(BoundFunction function, BoundProgram program)
         {
             _function = function;
+            _program = program;
             _slots = new int[function.Variables.Length];
             _current = NewBlock(0);
             for (var index = 0; index < function.ParameterCount; index++)
@@ -62,7 +64,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         private static byte[] EncodeIndexed(BoundFunction function, List<IndexedBlock> source,
-            List<IndexedRegion> regions, List<PrimitiveType> sourceTypes)
+            List<IndexedRegion> regions, List<PrimitiveType> sourceTypes, BoundProgram program)
         {
             var indegree = new int[source.Count];
             foreach (var block in source)
@@ -120,7 +122,10 @@ public static partial class TrRmExecutableCompiler
                 }
                 foreach (var (result, _) in block.Operations)
                 {
-                    remap[result] = ++starts[block.Id];
+                    if (result != 0)
+                    {
+                        remap[result] = ++starts[block.Id];
+                    }
                 }
                 starts[block.Id] += starts[block.Id - 1];
                 var first = starts[block.Id - 1];
@@ -131,8 +136,11 @@ public static partial class TrRmExecutableCompiler
                 }
                 foreach (var (result, _) in block.Operations)
                 {
-                    types[remap[result] += first] = sourceTypes[result - 1];
-                    owner[remap[result]] = block.Id;
+                    if (result != 0)
+                    {
+                        types[remap[result] += first] = sourceTypes[result - 1];
+                        owner[remap[result]] = block.Id;
+                    }
                 }
             }
             if (remap.Skip(1).Any(static id => id == 0))
@@ -253,9 +261,13 @@ public static partial class TrRmExecutableCompiler
                     }
                     foreach (var (result, expression) in block.Operations)
                     {
-                        definitions[remap[result] - 1] = (uint)(data.Count - blockStart);
-                        overflowedDefinition |= definitions[remap[result] - 1] >= sentinel;
-                        WriteScalarOperation(data, remap[result], expression, remap, function.IsNoThrow);
+                        if (result != 0)
+                        {
+                            definitions[remap[result] - 1] = (uint)(data.Count - blockStart);
+                            overflowedDefinition |= definitions[remap[result] - 1] >= sentinel;
+                        }
+                        WriteScalarOperation(data, result == 0 ? 0 : remap[result],
+                            expression, remap, function.IsNoThrow, program);
                     }
                     terminators.Add(data.Count - blockStart);
                     WriteIndexedTerminator(data, block, remap);
@@ -354,6 +366,12 @@ public static partial class TrRmExecutableCompiler
                     VisitReads(binary.Left, visit);
                     VisitReads(binary.Right, visit);
                     break;
+                case BoundCall call:
+                    foreach (var argument in call.Arguments)
+                    {
+                        VisitReads(argument, visit);
+                    }
+                    break;
             }
         }
 
@@ -413,7 +431,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         private static void WriteScalarOperation(List<byte> bytes, int result,
-            BoundExpression expression, int[] remap, bool noThrow)
+            BoundExpression expression, int[] remap, bool noThrow, BoundProgram program)
         {
             int ReadOperand(BoundExpression operand) => operand is BoundRead read
                 ? remap[read.Variable + 1] : throw Unsupported("Indexed scalar operand was not materialized.");
@@ -493,6 +511,14 @@ public static partial class TrRmExecutableCompiler
                         _ => throw Unsupported($"Binary operator {binary.Operator} has no executable scalar encoding."),
                     };
                     break;
+                case BoundCall call:
+                    opcode = 0x12;
+                    target = call.Function + 1;
+                    if (noThrow && !program.Functions[call.Function].IsNoThrow)
+                    {
+                        throw Unsupported("NoThrow caller cannot target a may-fail declaration.");
+                    }
+                    break;
                 default:
                     throw Unsupported($"Operation {expression.GetType().Name} is not executable.");
             }
@@ -500,7 +526,38 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Unsupported("NoThrow requires a total indexed Body.");
             }
-            var referenceWidth = Width((ulong)Math.Max(result, target));
+            var maximum = Math.Max(result, target);
+            if (expression is BoundCall callOperands)
+            {
+                foreach (var argument in callOperands.Arguments)
+                {
+                    maximum = Math.Max(maximum, ReadOperand(argument));
+                }
+            }
+            var referenceWidth = Width((ulong)maximum);
+            if (opcode == 0x12)
+            {
+                var call = (BoundCall)expression;
+                var countWidth = Width((ulong)call.Arguments.Length);
+                if (referenceWidth == 1 && countWidth == 1)
+                {
+                    bytes.Add(0x12);
+                }
+                else
+                {
+                    bytes.Add(0xF0);
+                    bytes.Add((byte)(WidthCode(referenceWidth) | (WidthCode(countWidth) << 2)));
+                    bytes.Add(0x12);
+                }
+                Write(bytes, (ulong)result, referenceWidth);
+                Write(bytes, (ulong)target, referenceWidth);
+                Write(bytes, (ulong)call.Arguments.Length, countWidth);
+                foreach (var argument in call.Arguments)
+                {
+                    Write(bytes, (ulong)ReadOperand(argument), referenceWidth);
+                }
+                return;
+            }
             WriteInstruction(bytes, opcode, referenceWidth, dataWidth);
             Write(bytes, (ulong)result, referenceWidth);
             if (opcode is 1 or 6 or 0x16)
@@ -532,7 +589,7 @@ public static partial class TrRmExecutableCompiler
 
         internal static TrRmScalarGraph DecodeIndexedBody(ReadOnlySpan<byte> body,
             int parameterCount, PrimitiveType resultType, bool noThrow,
-            TrRmTypeSpecTableReader types)
+            TrRmTypeSpecTableReader types, ImmutableArray<BoundFunction>.Builder functions)
         {
             var position = 1;
             var width = 1 << (body[0] & 3);
@@ -612,7 +669,8 @@ public static partial class TrRmExecutableCompiler
                 // Reuse scalar opcode/effect auditing with earlier SSA IDs as inputs.
                 // The indexed audit has already established their real dominance and types.
                 var synthetic = new List<byte> { (byte)(0x04 | WidthCode(
-                            Width((ulong)Math.Max(starts[b + 1], typeCount)))) };
+                            Width((ulong)Math.Max(Math.Max(starts[b + 1], countOperations),
+                                typeCount)))) };
                 var localWidth = 1 << (synthetic[0] & 3);
                 Write(synthetic, (ulong)typeCount, localWidth);
                 foreach (var typeRow in typeMap)
@@ -632,8 +690,8 @@ public static partial class TrRmExecutableCompiler
                     variables.Add(new BoundVariable($"value{value + 1}", valueTypes[value], false, default));
                 }
                 var statements = DecodeBody(synthetic.ToArray(), variables.Count,
-                    variables, noThrow, types);
-                var operations = ImmutableArray.CreateBuilder<BoundLocal>(countOperations);
+                    variables, noThrow, types, functions);
+                var operations = ImmutableArray.CreateBuilder<BoundStatement>(countOperations);
                 foreach (var statement in statements)
                 {
                     if (statement is BoundLocal local)
@@ -643,6 +701,10 @@ public static partial class TrRmExecutableCompiler
                             throw Invalid("Indexed scalar operation result type mismatch.");
                         }
                         operations.Add(local);
+                    }
+                    else if (statement is BoundExpressionStatement discarded)
+                    {
+                        operations.Add(discarded);
                     }
                 }
                 if (operations.Count != countOperations)
@@ -759,7 +821,7 @@ public static partial class TrRmExecutableCompiler
 
         private int Add(BoundExpression expression)
         {
-            var result = NewValue(expression.Type);
+            var result = expression.Type == PrimitiveType.Void ? 0 : NewValue(expression.Type);
             (_current ?? throw Unsupported("An operation followed a terminal transfer."))
                 .Operations.Add((result, expression));
             return result;
@@ -936,6 +998,13 @@ public static partial class TrRmExecutableCompiler
                     var condition = Expression(conditional.Condition);
                     return Merge(condition, () => Expression(conditional.WhenTrue),
                         () => Expression(conditional.WhenFalse), conditional.Type);
+                case BoundCall call:
+                    var arguments = ImmutableArray.CreateBuilder<BoundExpression>(call.Arguments.Length);
+                    foreach (var argument in call.Arguments)
+                    {
+                        arguments.Add(Read(Expression(argument)));
+                    }
+                    return Add(new BoundCall(call.Function, arguments.MoveToImmutable(), call.Type, default));
                 default:
                     throw Unsupported($"Expression {expression.GetType().Name} has no executable indexed scalar encoding.");
             }
@@ -1070,7 +1139,7 @@ public static partial class TrRmExecutableCompiler
                     throw Unsupported("An indexed loop requires a reachable header backedge.");
                 }
             }
-            return EncodeIndexed(_function, _blocks, _regions, _types);
+            return EncodeIndexed(_function, _blocks, _regions, _types, _program);
         }
     }
 }

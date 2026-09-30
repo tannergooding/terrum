@@ -67,11 +67,59 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Theory]
-    [InlineData("int32 Main() { return Helper(); } int32 Helper() { return 42; }")]
-    [InlineData("int32 Main() { mut int32 x = 1; x += Helper(); return x; } int32 Helper() { return 41; }")]
-    public void UnsupportedConstructsFailExplicitly(string source)
-        => Assert.Throws<NotSupportedException>(() =>
-            TrRmExecutableCompiler.Emit(Compile(source), "unsupported"));
+    [InlineData("int32 Main() { return Helper(); } int32 Helper() { return 42; }", 42)]
+    [InlineData("int32 Main() { mut int32 x = 1; x += Helper(); return x; } int32 Helper() { return 41; }", 42)]
+    [InlineData("int32 Main() { return Factorial(5); } int32 Factorial(int32 n) { if (n == 0) { return 1; } else { return n * Factorial(n - 1); } }", 120)]
+    [InlineData("int32 Main() { return Even(6); } int32 Even(int32 n) { if (n == 0) { return 1; } else { return Odd(n - 1); } } int32 Odd(int32 n) { if (n == 0) { return 0; } else { return Even(n - 1); } }", 1)]
+    [InlineData("int32 Main() { Observe(); return 42; } void Observe() { }", 42)]
+    [InlineData("int32 Main() { return Mix(true, char16(66), -3, uint32(4), int64(5), uint64(6)); } int32 Mix(bool b, char16 c, int32 i, uint32 u, int64 l, uint64 w) { if (b) { return int32(c) + i + int32(u) + int32(l) + int32(w); } else { return 0; } }", 78)]
+    [InlineData("int32 Main() { mut int32 n = 0; while (n < 4) { n = Step(n); } return n + Final(); } int32 Step(int32 n) { return n + 1; } int32 Final() { return 38; }", 42)]
+    public void LocalCallsIncludeForwardNestedAndFiniteRecursion(string source, int expected)
+    {
+        var program = Compile(source);
+        var artifact = TrRmExecutableCompiler.Emit(program, "calls");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        Assert.Equal(expected, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.Equal(expected, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.NotEmpty(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast));
+        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(loaded, "source-free"));
+    }
+
+    [Fact]
+    public void VoidCallsAndArgumentSnapshotsSurviveMutationAndLazyFlow()
+    {
+        const string source = """
+            void Observe(int32 value) { }
+            int32 Sum(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) {
+                return a * 10 + b + c + d + e + f;
+            }
+            int32 Main() {
+                mut int32 x = 1;
+                Observe(x++);
+                if (false && (Sum(1, 2, 3, 4, 5, 6) == 0)) { Observe(9); }
+                Observe(x);
+                return Sum(x++, ++x, 3, 4, 5, 6);
+            }
+            """;
+        var program = Compile(source);
+        var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(program, "void-calls"));
+        Assert.Equal(42, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+        Assert.Empty(loaded.Functions[2].Body.Statements);
+        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(loaded, "not-source"));
+    }
+
+    [Fact]
+    public void VoidOperationOrdinalsDoNotExhaustScalarValueInventory()
+    {
+        var source = "int32 Main() { "
+            + string.Concat(Enumerable.Repeat("Observe(); ", 260))
+            + "return 42; } void Observe() { }";
+        var artifact = TrRmExecutableCompiler.Emit(Compile(source), "void-ordinals");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        Assert.Single(loaded.Functions[0].Variables);
+        Assert.Equal(42, NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast));
+    }
 
     [Fact]
     public void NoThrowEffectRoundTripsWithoutFabricatedProof()

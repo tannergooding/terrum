@@ -133,12 +133,199 @@ public sealed class TrRmExecutionAuditTests
     }
 
     [Fact]
-    public void InspectableCallIsNotAnExecutableInstruction()
+    public void SelfCallIsAuditedWithoutExecutingUnboundedRecursion()
     {
         byte[] body = [4, 1, 1, 0, 0, 0, 1, 0x12, 1, 1, 0, 0x83, 1];
         var artifact = Artifact(body);
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        Assert.Empty(loaded.Functions[0].Body.Statements);
+        Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(loaded, "source-free"));
+    }
+
+    [Fact]
+    public void HandwrittenForwardLinearCallUsesModuleOrdinalAndParameterSignature()
+    {
+        byte[] caller = [4, 1, 1, 0, 0, 0, 2,
+            1, 1, 1, 41, 0x12, 2, 2, 1, 1, 0x83, 2];
+        byte[] callee = [4, 1, 1, 0, 0, 0, 0, 0x83, 1];
+        var artifact = LocalCallArtifact(caller, callee);
+        TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
+        Assert.Equal(41, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
+            NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    public void HandwrittenCallRejectsForeignOrNonexistentOrdinal(byte ordinal)
+    {
+        byte[] caller = ordinal == 0
+            ? [4, 1, 1, 0, 0, 0, 2,
+                1, 1, 1, 41, 0x12, 2, 0, 2, 0, 0, 0x16, 1, 1, 0x83, 2]
+            : [4, 1, 1, 0, 0, 0, 2,
+                1, 1, 1, 41, 0x12, 2, ordinal, 1, 1, 0x83, 2];
+        byte[] callee = [4, 1, 1, 0, 0, 0, 0, 0x83, 1];
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(LocalCallArtifact(caller, callee)));
+    }
+
+    [Fact]
+    public void HandwrittenIndexedForwardCallExecutesAndTracksUses()
+    {
+        byte[] caller =
+        [
+            8, 1, 2, 0, 1, 1, 0, 0, 0,
+            1, 1, 1, 1, 0, 2, 7, 11, 0, 18, 16,
+            0x10, 2, 1, 1, 2, 2, 2,
+            1, 1, 1, 41, 0x12, 2, 2, 1, 1, 0x83, 2,
+        ];
+        byte[] callee = [4, 1, 1, 0, 0, 0, 0, 0x83, 1];
+        var artifact = LocalCallArtifact(caller, callee);
+        TrRmStructuralMetadataValidator.ValidateCompact(artifact);
+        Assert.Equal(41, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
+            NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void HandwrittenIndexedVoidCallHasNoDefinitionOrValueSlot()
+    {
+        byte[] caller =
+        [
+            8, 1, 1, 0, 1, 1, 0, 0, 0,
+            1, 1, 0, 1, 5, 0, 16, 14,
+            0x10, 1, 1, 2, 2,
+            1, 1, 1, 41, 0x12, 0, 2, 1, 1, 0x83, 1,
+        ];
+        byte[] callee = [4, 1, 1, 0, 0, 0, 0, 0x83, 0];
+        var artifact = LocalCallArtifact(caller, callee, resultRow: 7);
+        TrRmStructuralMetadataValidator.ValidateCompact(artifact);
+        Assert.Equal(41, NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
+            NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void HandwrittenLinearVoidCallBetweenDefinitionsKeepsValueNumbering()
+    {
+        byte[] caller = [4, 1, 1, 0, 0, 0, 4,
+            1, 1, 1, 41, 0x12, 0, 2, 1, 1,
+            3, 2, 1, 0x12, 0, 2, 1, 2, 0x83, 2];
+        byte[] callee = [4, 1, 1, 0, 0, 0, 0, 0x83, 0];
+        Assert.Equal(41, NativeJit.Execute(
+            TrRmExecutableCompiler.Load(LocalCallArtifact(caller, callee, resultRow: 7)),
+            NativeRuntimePolicy.FailFast));
+    }
+
+    [Theory]
+    [InlineData(0, 1, 0)]
+    [InlineData(2, 0, 1)]
+    [InlineData(2, 2, 1)]
+    [InlineData(3, 1, 0)]
+    public void HandwrittenCallRejectsResultCountAndModeMismatch(byte result, byte argumentCount, byte mode)
+    {
+        byte[] caller = [4, 1, 1, 0, 0, 0, 2,
+            1, 1, 1, 41, 0x12, result, 2, argumentCount, 1, 0x83, 2];
+        byte[] callee = [4, 1, 1, 0, 0, 0, 0, 0x83, 1];
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(LocalCallArtifact(caller, callee, parameterMode: mode)));
+    }
+
+    [Fact]
+    public void NoThrowCallRequiresCalleeDeclarationAndCannotBeForgedAfterLoad()
+    {
+        byte[] caller = [4, 1, 1, 0, 0, 0, 2,
+            1, 1, 1, 41, 0x12, 2, 2, 1, 1, 0x83, 2];
+        byte[] callee = [4, 1, 1, 0, 0, 0, 0, 0x83, 1];
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+            LocalCallArtifact(caller, callee, callerNoThrow: true)));
+        var program = TrRmExecutableCompiler.Load(
+            LocalCallArtifact(caller, callee, callerNoThrow: true, calleeNoThrow: true));
+        Assert.Equal(41, NativeJit.Execute(program, NativeRuntimePolicy.FailFast));
+        var changedEffect = program with
+        {
+            Functions = program.Functions.SetItem(1, program.Functions[1] with { IsNoThrow = false }),
+        };
+        Assert.Throws<ArgumentException>(() =>
+            NativeEmitter.Emit(changedEffect, NativeRuntimePolicy.FailFast));
+        var changedType = program with
+        {
+            Functions = program.Functions.SetItem(1, program.Functions[1] with
+            {
+                Variables = program.Functions[1].Variables.SetItem(0,
+                    program.Functions[1].Variables[0] with { Type = PrimitiveType.UInt32 }),
+            }),
+        };
+        Assert.Throws<ArgumentException>(() =>
+            NativeEmitter.Emit(changedType, NativeRuntimePolicy.FailFast));
+    }
+
+    [Fact]
+    public void UncalledCalleeStillRequiresACompleteAuditedBody()
+    {
+        byte[] caller = [4, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1];
+        byte[] unsupported = [4, 1, 1, 0, 0, 0, 1, 0x19, 2, 1, 0x83, 2];
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(LocalCallArtifact(caller, unsupported)));
+    }
+
+    [Fact]
+    public void CallArgumentTypeIsAuditedAgainstParameterMetadata()
+    {
+        byte[] caller = [4, 1, 1, 0, 0, 0, 2,
+            1, 1, 1, 41, 0x12, 2, 2, 1, 1, 0x83, 2];
+        byte[] callee = [4, 2, 1, 0, 0, 0, 4, 0, 0, 0,
+            1, 1, 2, 1, 42, 0x83, 2];
+        var independentlyValidTarget = LocalCallArtifact(s_return42, callee);
+        WriteWord(independentlyValidTarget, SectionOffset(independentlyValidTarget, 0x18) + 8, 4);
+        TrRmStructuralMetadataValidator.ValidateCompactLinear(independentlyValidTarget);
+        var artifact = LocalCallArtifact(caller, callee);
+        WriteWord(artifact, SectionOffset(artifact, 0x18) + 8, 4);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+    }
+
+    // Independent metadata and Body bytes; no production compiler, table writer or source parser.
+    internal static byte[] LocalCallArtifact(byte[] caller, byte[] callee,
+        int resultRow = 1, byte parameterMode = 0, bool callerNoThrow = false,
+        bool calleeNoThrow = false)
+    {
+        byte[] codes = [8, 1, 3, 0x0D, 9, 0x0E, 0];
+        var strings = new[] { "independent", "Main", "Callee" }.Select(text =>
+        {
+            var utf8 = Encoding.UTF8.GetBytes(text);
+            var row = new byte[(4 + utf8.Length + 1 + 3) & ~3];
+            WriteWord(row, 0, ((uint)utf8.Length << 8) | 1);
+            utf8.CopyTo(row, 4);
+            return row;
+        });
+        var contractCount = (callerNoThrow ? 1 : 0) + (calleeNoThrow ? 1 : 0);
+        var sections = new List<(ushort Kind, uint Count, byte[] Bytes)>
+        {
+            (1, 1, Words(1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1)),
+            (2, 3, Rows(strings)),
+            (0x11, 7, Rows(codes.Select(code => new byte[] { 1, 0, code }))),
+            (0x16, 2, Words(
+                0, 2, 1, 1, callerNoThrow ? 1u : 0, callerNoThrow ? 1u : 0, 1,
+                0, 3, 2, 1, calleeNoThrow ? (uint)(contractCount) : 0,
+                calleeNoThrow ? 1u : 0, 2)),
+            (0x17, 2, Words(1, 0, 0, 0, 0, 0,
+                (uint)resultRow, 0, 1, 1, 0, 0)),
+            (0x18, 1, Words(2, 0, 1, parameterMode)),
+        };
+        if (contractCount != 0)
+        {
+            var clauses = new List<byte[]>();
+            if (callerNoThrow)
+            {
+                clauses.Add(Words(0x16000001, 1, 1));
+            }
+            if (calleeNoThrow)
+            {
+                clauses.Add(Words(0x16000002, 1, 1));
+            }
+            sections.Add((0x1B, (uint)contractCount, Rows(clauses)));
+        }
+        sections.Add((0x20, 2, Rows([caller, callee])));
+        return Assemble(sections);
     }
 
     [Fact]
@@ -233,6 +420,11 @@ public sealed class TrRmExecutionAuditTests
             sections.Add((0x1D, 1, Words(0x16000001, 2)));
         }
         sections.Add((0x20, 1, Rows([body])));
+        return Assemble(sections);
+    }
+
+    private static byte[] Assemble(List<(ushort Kind, uint Count, byte[] Bytes)> sections)
+    {
         var offset = 32 + sections.Count * 16;
         var artifact = new byte[offset + sections.Sum(section => section.Bytes.Length)];
         "TRRM"u8.CopyTo(artifact);

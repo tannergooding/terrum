@@ -12,7 +12,7 @@ internal sealed record TrRmScalarReinterpret(BoundExpression Operand, PrimitiveT
     : BoundExpression(Type, default);
 
 internal sealed record TrRmScalarBlock(ImmutableArray<int> Parameters,
-    ImmutableArray<BoundLocal> Operations, int Condition, TrRmScalarEdge? True,
+    ImmutableArray<BoundStatement> Operations, int Condition, TrRmScalarEdge? True,
     TrRmScalarEdge? False, int ReturnValue);
 
 /// <summary>Immutable, source-free scalar SSA body admitted only after compact Body validation.</summary>
@@ -40,9 +40,9 @@ internal sealed class TrRmScalarGraph
         PrimitiveType resultType, bool noThrow)
         => new(blocks, types, parameterCount, resultType, noThrow);
 
-    internal void Verify(BoundFunction function, BoundRuntimePolicy policy)
+    internal void Verify(BoundProgram program, BoundFunction function, ref int remaining)
     {
-        if (policy != BoundRuntimePolicy.FailFast || function.IsExternal
+        if (program.RuntimePolicy != BoundRuntimePolicy.FailFast || function.IsExternal
             || function.DoesNotReturn || function.IsConstructor || function.IsClassConstructor
             || function.ClassConstructor != -1 || function.DeclaringStruct is not null
             || function.IsStatic || function.IsCleanup || function.PropertyName is not null
@@ -67,6 +67,58 @@ internal sealed class TrRmScalarGraph
             || function.Body.IsManagedLexicalScope || !function.Body.RetiredManagedLocals.IsDefaultOrEmpty)
         {
             throw new ArgumentException("Indexed scalar Body cannot also contain structured statements.");
+        }
+        foreach (var block in Blocks)
+        {
+            Visit(ref remaining);
+            foreach (var operation in block.Operations)
+            {
+                Visit(ref remaining);
+                var call = operation switch
+                {
+                    BoundLocal { Initializer: BoundCall value } => value,
+                    BoundExpressionStatement { Expression: BoundCall value } => value,
+                    _ => null,
+                };
+                if (call is null)
+                {
+                    continue;
+                }
+                if ((uint)call.Function >= (uint)program.Functions.Length)
+                {
+                    throw new ArgumentException("Indexed call target is outside the module.");
+                }
+                var target = program.Functions[call.Function];
+                if (target is null || target.Variables.IsDefault
+                    || target.Variables.Length < call.Arguments.Length
+                    || target.IsExternal || target.DoesNotReturn || target.IsConstructor
+                    || target.IsClassConstructor || target.ClassConstructor != -1
+                    || target.DeclaringStruct is not null || target.IsStatic || target.IsCleanup
+                    || target.PropertyName is not null || target.Intrinsic != BoundIntrinsic.None
+                    || target.ReturnType != call.Type || target.ParameterCount != call.Arguments.Length
+                    || function.IsNoThrow && !target.IsNoThrow)
+                {
+                    throw new ArgumentException("Indexed call target declaration does not match.");
+                }
+                for (var index = 0; index < call.Arguments.Length; index++)
+                {
+                    Visit(ref remaining);
+                    var parameter = target.Variables[index];
+                    if (parameter.IsOut || parameter.IsInit
+                        || parameter.Type != call.Arguments[index].Type)
+                    {
+                        throw new ArgumentException("Indexed call argument declaration does not match.");
+                    }
+                }
+            }
+        }
+    }
+
+    private static void Visit(ref int remaining)
+    {
+        if (--remaining < 0)
+        {
+            throw new NotSupportedException("Scalar graph exceeds the native verification visit limit.");
         }
     }
 }

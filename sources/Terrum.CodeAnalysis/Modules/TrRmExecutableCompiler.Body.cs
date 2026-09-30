@@ -200,7 +200,7 @@ public static partial class TrRmExecutableCompiler
 
     private static ImmutableArray<BoundStatement> DecodeBody(ReadOnlySpan<byte> body,
         int parameterCount, ImmutableArray<BoundVariable>.Builder variables, bool noThrow,
-        TrRmTypeSpecTableReader types)
+        TrRmTypeSpecTableReader types, ImmutableArray<BoundFunction>.Builder functions)
     {
         var position = 0;
         var header = ReadByte(body, ref position);
@@ -221,24 +221,24 @@ public static partial class TrRmExecutableCompiler
             mappedTypes[id] = type;
         }
         var count = ReadInt(body, ref position, localWidth);
-        if (count > SemanticVerifier.MaximumVariables - parameterCount)
+        if (count > SemanticVerifier.MaximumAnalysisVisits)
         {
-            throw Invalid("Body value inventory exceeds native verification bounds.");
+            throw Invalid("Body operation inventory exceeds verification bounds.");
         }
-        if (localWidth != Width((ulong)Math.Max(parameterCount + count, typeCount)))
-        {
-            throw Invalid("Nonminimal Body-local width.");
-        }
+        // A void call consumes an operation ordinal, not a value identifier.
+        // The structural reader has already checked every definition and use.
+        var nextValue = parameterCount;
         var statements = ImmutableArray.CreateBuilder<BoundStatement>();
         for (var ordinal = 0; ordinal < count; ordinal++)
         {
-            var (opcode, width, dataWidth) = ReadInstruction(body, ref position);
-            if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 0x15 or 0x16 or 0x17))
+            var (opcode, width, countWidth, dataWidth) = ReadInstruction(body, ref position);
+            if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 0x12 or 0x15 or 0x16 or 0x17))
             {
                 throw Invalid($"Operation 0x{opcode:X2} is not executable.");
             }
             var result = ReadInt(body, ref position, width);
-            if (result != parameterCount + ordinal + 1)
+            if (result != 0 && result != ++nextValue || result == 0 && opcode != 0x12
+                || nextValue > SemanticVerifier.MaximumVariables)
             {
                 throw Invalid("Noncontiguous value definitions.");
             }
@@ -249,7 +249,28 @@ public static partial class TrRmExecutableCompiler
             var left = opcode is 3 or 4 or 6 or 0x16 or 0x17 or 5 or 0x15
                 ? ReadInt(body, ref position, width) : 0;
             var right = opcode is 5 or 0x15 ? ReadInt(body, ref position, width) : 0;
-            if (width != Width((ulong)Math.Max(result, typeId))
+            var method = opcode == 0x12 ? ReadInt(body, ref position, width) : 0;
+            if (opcode == 0x12 && (method == 0 || method > functions.Count))
+            {
+                throw Invalid("Call target is not a module-local definition.");
+            }
+            var argumentCount = opcode == 0x12 ? ReadInt(body, ref position, countWidth) : 0;
+            var arguments = ImmutableArray.CreateBuilder<BoundExpression>(argumentCount);
+            for (var argument = 0; argument < argumentCount; argument++)
+            {
+                var id = ReadInt(body, ref position, width);
+                if (id <= 0 || id > variables.Count)
+                {
+                    throw Invalid("Undefined call operand.");
+                }
+                arguments.Add(new BoundRead(id - 1, variables[id - 1].Type, default));
+            }
+            var maximum = Math.Max(Math.Max(Math.Max(result, typeId), method), Math.Max(left, right));
+            foreach (var argument in arguments)
+            {
+                maximum = Math.Max(maximum, ((BoundRead)argument).Variable + 1);
+            }
+            if (width != Width((ulong)maximum) || countWidth != Width((ulong)argumentCount)
                 || opcode == 1 && dataWidth != Width(bits)
                 || opcode == 2 && dataWidth != SignedWidth(
                     dataWidth == 8 ? unchecked((long)bits)
@@ -263,7 +284,7 @@ public static partial class TrRmExecutableCompiler
             }
             BoundRead Operand(int id)
             {
-                if (id <= 0 || id >= result)
+                if (id <= 0 || id > variables.Count)
                 {
                     throw Invalid("Undefined operation operand.");
                 }
@@ -285,6 +306,25 @@ public static partial class TrRmExecutableCompiler
                     value = unchecked((int)value);
                 }
                 expression = new BoundConstant(value, type, default);
+            }
+            else if (opcode == 0x12)
+            {
+                var target = functions[method - 1];
+                if (target.ReturnType == PrimitiveType.Void != (result == 0)
+                    || target.ParameterCount != argumentCount
+                    || noThrow && !target.IsNoThrow)
+                {
+                    throw Invalid("Call signature or effect does not match.");
+                }
+                for (var argument = 0; argument < argumentCount; argument++)
+                {
+                    if (target.Variables[argument].Type != arguments[argument].Type
+                        || target.Variables[argument].IsOut || target.Variables[argument].IsInit)
+                    {
+                        throw Invalid("Call argument type or mode does not match.");
+                    }
+                }
+                expression = new BoundCall(method - 1, arguments.MoveToImmutable(), target.ReturnType, default);
             }
             else if (opcode == 3)
             {
@@ -351,11 +391,22 @@ public static partial class TrRmExecutableCompiler
                     ? PrimitiveType.Bool : first.Type;
                 expression = new BoundBinary(token, first, second, resultType, default);
             }
-            variables.Add(new BoundVariable($"value{result}", expression.Type, false, default));
-            statements.Add(new BoundLocal(result - 1, expression, default));
+            if (result == 0)
+            {
+                statements.Add(new BoundExpressionStatement(expression, default));
+            }
+            else
+            {
+                variables.Add(new BoundVariable($"value{result}", expression.Type, false, default));
+                statements.Add(new BoundLocal(result - 1, expression, default));
+            }
         }
-        var (terminator, returnWidth, returnDataWidth) = ReadInstruction(body, ref position);
-        if (terminator != 0x83 || returnDataWidth != 0)
+        if (localWidth != Width((ulong)Math.Max(Math.Max(nextValue, count), typeCount)))
+        {
+            throw Invalid("Nonminimal Body-local width.");
+        }
+        var (terminator, returnWidth, returnCountWidth, returnDataWidth) = ReadInstruction(body, ref position);
+        if (terminator != 0x83 || returnDataWidth != 0 || returnCountWidth != 1)
         {
             throw Invalid("Only terminal Return is supported.");
         }
@@ -426,23 +477,23 @@ public static partial class TrRmExecutableCompiler
         }
         return (int)bits;
     }
-    private static (byte Opcode, int Width, int DataWidth) ReadInstruction(ReadOnlySpan<byte> bytes, ref int position)
+    private static (byte Opcode, int Width, int CountWidth, int DataWidth) ReadInstruction(ReadOnlySpan<byte> bytes, ref int position)
     {
         var opcode = ReadByte(bytes, ref position);
         if (opcode != 0xF0)
         {
-            return (opcode, 1, opcode is 1 or 2 ? 1 : 0);
+            return (opcode, 1, 1, opcode is 1 or 2 ? 1 : 0);
         }
         var layout = ReadByte(bytes, ref position);
         opcode = ReadByte(bytes, ref position);
         if (layout == 0 || (layout & 0xC0) != 0 || (layout & 3) == 3
-            || ((layout >> 2) & 3) == 3 || (layout & 0x0C) != 0
+            || ((layout >> 2) & 3) == 3 || (layout & 0x0C) != 0 && opcode != 0x12
             || (layout & 0x30) != 0 && opcode is not (1 or 2))
         {
             throw Invalid("Unsupported wide instruction layout.");
         }
         var width = (layout & 3) switch { 0 => 1, 1 => 2, 2 => 4, _ => throw Invalid("Reserved reference width.") };
         var dataWidth = opcode is 1 or 2 ? 1 << ((layout >> 4) & 3) : 0;
-        return (opcode, width, dataWidth);
+        return (opcode, width, 1 << ((layout >> 2) & 3), dataWidth);
     }
 }

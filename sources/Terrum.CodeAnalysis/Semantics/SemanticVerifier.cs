@@ -266,6 +266,7 @@ public static class SemanticVerifier
             layoutStates[index] = 2;
         }
 
+        var remaining = MaximumAnalysisVisits;
         var names = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 0; i < program.Functions.Length; i++)
         {
@@ -314,7 +315,7 @@ public static class SemanticVerifier
             }
             if (function.IndexedBody is not null)
             {
-                function.IndexedBody.Verify(function, program.RuntimePolicy);
+                function.IndexedBody.Verify(program, function, ref remaining);
             }
             if (function.Intrinsic == BoundIntrinsic.ClassTryCreate)
             {
@@ -511,7 +512,6 @@ public static class SemanticVerifier
             }
         }
 
-        var remaining = MaximumAnalysisVisits;
         for (var functionIndex = 0; functionIndex < program.Functions.Length; functionIndex++)
         {
             var function = program.Functions[functionIndex];

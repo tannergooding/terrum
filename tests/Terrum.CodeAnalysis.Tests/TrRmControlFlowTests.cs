@@ -182,7 +182,6 @@ public sealed class TrRmControlFlowTests
     [Theory]
     [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { int32 inner = x; x = inner + 1; } return x; }")]
     [InlineData("int32 Main() { mut int32 x = 0; if (x == 0) { int32 inner = x; x = inner + 1; } return x; }")]
-    [InlineData("int32 Main() { mut int32 x = 0; if (x != 0) { x = Helper(); } return x; } int32 Helper() { return 1; }")]
     public void UnsupportedRetainedArmsAndScopedLocalsFailExplicitly(string source)
         => Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(Compile(source), "unsupported"));
 

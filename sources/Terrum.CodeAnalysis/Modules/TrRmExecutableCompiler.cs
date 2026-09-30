@@ -98,7 +98,7 @@ public static partial class TrRmExecutableCompiler
             signatures.Add(new TrRmMethodSigRow(TypeRow(function.ReturnType), 0,
                 first, function.ParameterCount, 0, 0));
             bodies.Add(ContainsIndexedFlow(function.Body)
-                ? new IndexedBuilder(function).Encode() : EncodeBody(function));
+                ? new IndexedBuilder(function, program).Encode() : EncodeBody(function));
             var contractFirst = function.IsNoThrow ? effects.Count + 1 : 0;
             if (function.IsNoThrow)
             {
@@ -276,6 +276,20 @@ public static partial class TrRmExecutableCompiler
                 noThrow = true;
             }
 
+            functions.Add(new BoundFunction(name, FromRow(types, sigs.GetResultTypeSpec(signature)),
+                variables.ToImmutable(), count, new BoundBlock([], default), default)
+            {
+                IsNoThrow = noThrow,
+                IsPrivate = flags == 0,
+                IsInternal = flags == 1,
+            });
+        }
+        for (var row = 1; row <= methodCount; row++)
+        {
+            var declaration = functions[row - 1];
+            var variables = declaration.Variables.ToBuilder();
+            var count = declaration.ParameterCount;
+            var noThrow = declaration.IsNoThrow;
             var body = bodies.GetRow(defs.GetBodyRow(row));
             TrRmScalarGraph? indexed = null;
             ImmutableArray<BoundStatement> statements;
@@ -283,7 +297,7 @@ public static partial class TrRmExecutableCompiler
             {
                 _ = new TrRmCompactIndexedBodyReader(bodies, row, modules, defs, sigs, parameters, types);
                 indexed = IndexedBuilder.DecodeIndexedBody(body, count,
-                    FromRow(types, sigs.GetResultTypeSpec(signature)), noThrow, types);
+                    declaration.ReturnType, noThrow, types, functions);
                 for (var value = count; value < indexed.Types.Length; value++)
                 {
                     variables.Add(new BoundVariable($"value{value + 1}", indexed.Types[value], false, default));
@@ -293,30 +307,30 @@ public static partial class TrRmExecutableCompiler
             else
             {
                 _ = new TrRmCompactLinearBodyReader(bodies, row, modules, defs, sigs, parameters, types);
-                statements = DecodeBody(body, count, variables, noThrow, types);
+                statements = DecodeBody(body, count, variables, noThrow, types, functions);
                 if (statements.Any(static statement => statement is BoundLocal
                     { Initializer: TrRmScalarReinterpret or BoundBinary
-                        { Operator: TokenKind.ShiftLeft or TokenKind.ShiftRight } }))
+                        { Operator: TokenKind.ShiftLeft or TokenKind.ShiftRight } }
+                    or BoundLocal { Initializer: BoundCall }
+                    or BoundExpressionStatement { Expression: BoundCall }))
                 {
-                    var operations = statements.OfType<BoundLocal>().ToImmutableArray();
+                    var operations = statements[..^1];
                     var returned = (BoundReturn)statements[^1];
                     indexed = TrRmScalarGraph.FromAuditedBody(
                         [new TrRmScalarBlock(Enumerable.Range(1, count).ToImmutableArray(),
                             operations, 0, null, null,
                             returned.Value is BoundRead read ? read.Variable + 1 : 0)],
                         variables.Select(static variable => variable.Type).ToImmutableArray(),
-                        count, FromRow(types, sigs.GetResultTypeSpec(signature)), noThrow);
+                        count, declaration.ReturnType, noThrow);
                     statements = [];
                 }
             }
-            functions.Add(new BoundFunction(name, FromRow(types, sigs.GetResultTypeSpec(signature)),
-                variables.ToImmutable(), count, new BoundBlock(statements, default), default)
+            functions[row - 1] = declaration with
             {
+                Variables = variables.ToImmutable(),
+                Body = new BoundBlock(statements, default),
                 IndexedBody = indexed,
-                IsNoThrow = noThrow,
-                IsPrivate = flags == 0,
-                IsInternal = flags == 1,
-            });
+            };
         }
         for (var signature = 1; signature <= sigCount; signature++)
         {
@@ -394,6 +408,7 @@ public static partial class TrRmExecutableCompiler
             BoundBinary binary => ContainsIndexedFlow(binary.Left) || ContainsIndexedFlow(binary.Right),
             BoundUnary unary => ContainsIndexedFlow(unary.Operand),
             BoundCast cast => ContainsIndexedFlow(cast.Operand),
+            BoundCall => true,
             _ => false,
         };
     private static int TypeRow(PrimitiveType type)

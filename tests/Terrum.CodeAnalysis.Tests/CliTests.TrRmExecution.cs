@@ -55,6 +55,82 @@ public sealed partial class CliTests
     }
 
     [Fact]
+    public async Task PersistedDirectCallsAgreeAcrossJitAndExecutableAsync()
+    {
+        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-calls-{Guid.NewGuid():N}");
+        var artifact = prefix + ".trrm";
+        var executable = prefix + ".exe";
+        try
+        {
+            const string source = """
+                int32 Main() { return Recursive(5); }
+                int32 Recursive(int32 n) {
+                    if (n == 0) { return 1; }
+                    else { return n * Recursive(n - 1); }
+                }
+                """;
+            var (compiled, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                "compile-trrm", "-", "--identity", "recursive-calls", "-o", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.True(compiled == 0, $"{output}{Environment.NewLine}{error}");
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.True(ran == 120, $"{runOutput}{Environment.NewLine}{runError}");
+            var (built, buildOutput, buildError) = await RunAsync([], "build-trrm", artifact,
+                "-o", executable, "--runtime", "fail-fast", "--json");
+            Assert.True(built == 0, $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.Equal(120, await ExecuteTrRmImageAsync(executable));
+        }
+        finally
+        {
+            File.Delete(artifact);
+            File.Delete(executable);
+        }
+    }
+
+    [Fact]
+    public async Task PersistedLibraryExportCanCallPrivateSixArgumentHelperAsync()
+    {
+        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-calls-library-{Guid.NewGuid():N}");
+        var artifact = prefix + ".trrm";
+        var library = prefix + ".dll";
+        try
+        {
+            const string source = """
+                public int32 Add(int32 first, int32 second) {
+                    return Helper(first, second, 3, 4, 5, 6);
+                }
+                int32 Helper(int32 a, int32 b, int32 c, int32 d, int32 e, int32 f) {
+                    return a + b + c + d + e + f;
+                }
+                """;
+            var (compiled, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                "compile-trrm", "-", "--identity", "export-calls", "-o", artifact,
+                "--runtime", "fail-fast", "--library", "--json");
+            Assert.True(compiled == 0, $"{output}{Environment.NewLine}{error}");
+            var (built, buildOutput, buildError) = await RunAsync([],
+                "build-trrm-library", artifact, "--export", "Add", "-o", library,
+                "--runtime", "fail-fast", "--json");
+            Assert.True(built == 0, $"{buildOutput}{Environment.NewLine}{buildError}");
+            var handle = NativeLibrary.Load(library);
+            try
+            {
+                var add = Marshal.GetDelegateForFunctionPointer<TrRmAdd>(
+                    NativeLibrary.GetExport(handle, "Add"));
+                Assert.Equal(41, add(10, 13));
+            }
+            finally
+            {
+                NativeLibrary.Free(handle);
+            }
+        }
+        finally
+        {
+            File.Delete(artifact);
+            File.Delete(library);
+        }
+    }
+    [Fact]
     public async Task PersistedTrRmLibraryPublishesTwoIndependentNativeExportsAsync()
     {
         var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-library-{Guid.NewGuid():N}");
@@ -106,6 +182,10 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { int32 x = 1 / 0; return 42; }", unchecked((int)0xE0540002))]
     [InlineData("int32 Main() { return (1 / 0) + (int32.MaxValue + 1); }", unchecked((int)0xE0540002))]
     [InlineData("int32 Main() { return (int32.MaxValue + 1) + (1 / 0); }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { Fail(); return 42; } void Fail() { int32 x = 1 / 0; }", unchecked((int)0xE0540002))]
+    [InlineData("int32 Main() { _ = Fail(); return 42; } int32 Fail() { return 1 / 0; }", unchecked((int)0xE0540002))]
+    [InlineData("int32 Main() { return F(1 / 0, int32.MaxValue + 1); } int32 F(int32 a, int32 b) { return 42; }", unchecked((int)0xE0540002))]
+    [InlineData("int32 Main() { return F(int32.MaxValue + 1, 1 / 0); } int32 F(int32 a, int32 b) { return 42; }", unchecked((int)0xE0540001))]
     public async Task TrRmCheckedFailureKeepsFailFastPolicyAfterPersistenceAsync(string source, int failure)
     {
         var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-failure-{Guid.NewGuid():N}");
@@ -176,8 +256,8 @@ public sealed partial class CliTests
     }
 
     [Theory]
-    [InlineData("int32 Main() { return Helper(); } int32 Helper() { return 42; }")]
-    [InlineData("int32 Main() { mut int32 x = 42; if (x == 0) { x = Helper(); } return x; } int32 Helper() { return 1; }")]
+    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { int32 inner = x; x = inner + 1; } return x; }")]
+    [InlineData("int32 Main() { mut int32 x = 0; if (x == 0) { int32 inner = x; x = inner + 1; } return x; }")]
     public async Task TrRmSourceRejectionDoesNotOverwritePreviousArtifactAsync(string source)
     {
         var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-reject-{Guid.NewGuid():N}.trrm");

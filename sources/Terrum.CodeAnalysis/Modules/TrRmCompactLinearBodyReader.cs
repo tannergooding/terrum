@@ -101,7 +101,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
         var (first, parameterCount) = signatures.GetParamRange(signature);
         var operationCount = ReadLocal(body, ref position, width);
         var maximum = width == 4 ? int.MaxValue : (1 << (width * 8)) - 1;
-        if (parameterCount > maximum || operationCount > maximum - parameterCount
+        if (parameterCount > maximum || operationCount > int.MaxValue - parameterCount - 1
             || operationCount > (body.Length - position) / 3)
         {
             throw InvalidBody();
