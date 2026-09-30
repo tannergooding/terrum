@@ -9,10 +9,11 @@
 This is a decision inventory, not a compiler backlog. Questions are grouped
 by the source contract a user must choose, rather than by missing parser
 productions or implementation files. The number of questions is not a target.
-Examples use approved Terrum syntax to expose the issue; referenced library
-types and APIs are illustrative, and an example whose legality is the question
-does not assert that it is valid. New syntax alternatives appear in prose,
-not as silently approved productions. Method bodies omitted from surrounding
+Examples use approved Terrum syntax where possible to expose the issue;
+referenced library types and APIs are illustrative. Explicitly labeled
+candidate spellings are unapproved alternatives, and an example whose legality
+is the question does not assert that it is valid. No candidate establishes a
+new grammar production. Method bodies omitted from surrounding
 examples are not a new bodyless-concrete-declaration rule.
 
 ## Lexical and declaration choices
@@ -22,7 +23,9 @@ examples are not a new bodyless-concrete-declaration rule.
 **Question:** Should a narrowly scoped keyword escape be available for imported
 names and generated source? Arbitrary-string identifiers are not an approved
 alternative. **Example:** `alias AwaitedValue = Task<int32>;` currently avoids
-using the reserved spelling `await` as an alias name.
+using the reserved spelling `await` as an alias name. The proposed escape would
+instead permit `alias @await = Task<int32>;` and a type use `@await pending;`.
+These escaped spellings are candidates, not accepted identifiers.
 
 **C# model:** A narrow escape would be modeled on C# `@identifier`, not its
 Unicode identifier normalization rules. Terrum retains ordinal, unnormalized
@@ -112,9 +115,14 @@ visibility domain; `mut class Counter { }` does not answer it.
 `protected`, friend assemblies, stateful class inheritance, or C#'s different
 top-level-private restrictions.
 
-**Recommendation:** Publish one context matrix and define namespace-private
-visibility directly rather than letting file order or linking grant access.
-Keep access independent from ownership, layout and effects.
+**Recommendation:** For namespace-level declarations, make `private` visible
+only in the same fully qualified namespace within the current module, across
+its source files but not implicitly in child namespaces or another module.
+For example, a private `App.Helper` is available in another `namespace App`
+block of that module, but not in `namespace App.Tools`. This is a proposed
+visibility domain, not a selected rule. Type-member `private` remains a
+separate applicability question; a declaration-kind matrix should state each
+legal modifier without coupling access to ownership, layout or effects.
 
 ### Q07. Attribute arguments and multiplicity
 
@@ -241,9 +249,12 @@ the missing form is a constraint equating that projection with `U`.
 **C# model:** Not C# associated types. Its generic constraints and static
 abstract interfaces are comparison points, not associated-type equality.
 
-**Recommendation:** Make equality an explicit constraint on a selected witness,
-not a special extra type argument inferred backward from `Item`. That
-preserves nominal witness identity and prevents accidental implementer search.
+**Recommendation:** Add an explicit equality clause with the candidate spelling
+`where T.via<ISource>.Item == U`. Here `==` compares type identities in a
+constraint, not runtime values, and the clause requires the named `ISource`
+witness rather than searching for an implementer. Resolve the witness and
+ordinary type arguments first, then check equality; do not infer an otherwise
+unbound `T` backward from `Item`. The new clause is proposed, not accepted.
 
 ### Q15. Inherited default/member resolution
 
@@ -332,10 +343,15 @@ dependency relationship; its result type alone does not identify the backing.
 Terrum additionally distinguishes descriptor, backing and allocation/lease
 lifetimes and preserves explicit ownership.
 
-**Recommendation:** Use declaration-bound dependency identities with safe
-defaults and explicit refinements. Avoid a universal return marker that
-conflates receiver storage with forwarded backing; check captures against
-the target callable rather than infer stronger exported promises.
+**Recommendation:** Begin with an explicit result annotation, for example the
+candidate `[return: DependsOn("left", "right")]` on `Select`. Constant strings
+identify parameter declarations of that callable; unknown names or incompatible
+dependency kinds are errors, not runtime lookup. The result may depend on
+either input, so callers retain both possible backing obligations rather than
+only backing common to both inputs; neither input's lifetime is extended. Use separate
+targeted contracts for receiver storage, forwarded backing and stored captures;
+the result annotation alone must not imply all three. This proposed attribute
+contract and its default treatment of unannotated results remain unapproved.
 
 ### Q21. Reservation versus immediate reference formation
 
@@ -428,9 +444,16 @@ neither spelling alone roots or pins arbitrary storage.
 not adopted syntax. Terrum has checked provenance/backing dependencies and
 does not use `pin` as a statement keyword.
 
-**Recommendation:** Begin with explicit checked or caller-unsafe operations
-whose result declares its source dependency. Add punctuation only once its
-access, bounds and lifetime expansion is defined.
+**Recommendation:** Use candidate prefix `&place` and `*pointer` operations
+inside `unsafe`, for example `unsafe { ptr<int32> p = &local; int32 n = *p; }`.
+Restrict address formation to addressable, nonmoving storage or storage covered
+by an explicit live pin; `unsafe` itself does not root or pin managed storage.
+Retain source provenance, bounds, access and lifetime obligations, and do not
+grant writable access merely by taking an address. Acquire pins through a
+checked library operation, with candidate call shape
+`Pin.TryAcquire(source, init pinned)` and a scoped release/dependency contract,
+not a new `pin` statement. Both operators and the acquisition API are proposals;
+their concrete result/guard types must be reviewed together before adoption.
 
 ### Q27. Nominal sums and closed-case declarations
 
@@ -532,9 +555,14 @@ call. Exact-tuple lexical preference and strict `require policy` are settled.
 of an already resolved base; the request is not ambient behavior inherited
 by callees.
 
-**Recommendation:** Use an explicit declaration annotation bound to the base
-identity, with no import-attached variants. Omit a general policy query until
-its subject is explicit; an active preference is not proof of selected behavior.
+**Recommendation:** Use a candidate declaration annotation such as
+`[PolicyVariant("Add(int32, int32)", Arithmetic.Wrap)]` on the variant callable.
+The compiler resolves the constant signature string to one base declaration in
+the declaring scope and checks the policy tuple and complete callable contract;
+it must reject ambiguity rather than select an overload by spelling alone.
+This proposes an attribute contract, not an adopted attribute or wire identity.
+Do not allow import-attached variants. Omit a general policy query until its
+subject is explicit; an active preference is not proof of selected behavior.
 
 ### Q34. General constants and type/layout queries
 
