@@ -35,6 +35,7 @@ public static partial class TrRmExecutableCompiler
         internal int Id = id;
         internal int Parent = parent;
         internal IndexedBlock Header = header;
+        internal IndexedBlock ContinueTarget = header;
         internal IndexedBlock? Exit;
         internal int[] VisibleSlots = visibleSlots;
     }
@@ -1076,7 +1077,7 @@ public static partial class TrRmExecutableCompiler
                         () => { if (conditional.Else is not null) { Statement(conditional.Else); } return 0; },
                         null);
                     break;
-                case BoundWhile loop when !loop.IsPostTested && loop.Iterator is null:
+                case BoundWhile loop:
                     var parent = _current.Region;
                     var header = NewBlock(_regions.Count + 1);
                     var entrySlots = (int[])_slots.Clone();
@@ -1086,24 +1087,77 @@ public static partial class TrRmExecutableCompiler
                     Jump(header, entrySlots, entrySlots);
                     _current = header;
                     _slots = headerSlots;
-                    var test = Expression(loop.Condition);
-                    var testBlock = _current ?? throw Unsupported("Loop condition did not produce a branch.");
-                    var testSlots = (int[])_slots.Clone();
-                    var body = NewBlock(loopRegion.Id);
-                    testBlock.Condition = test;
-                    testBlock.True = new IndexedEdge(body, []);
-                    _current = body;
+                    IndexedBlock? testBlock = null;
+                    int[]? testSlots = null;
+                    if (!loop.IsPostTested)
+                    {
+                        var test = Expression(loop.Condition);
+                        testBlock = _current ?? throw Unsupported("Loop condition did not produce a branch.");
+                        testSlots = (int[])_slots.Clone();
+                        var body = NewBlock(loopRegion.Id);
+                        testBlock.Condition = test;
+                        testBlock.True = new IndexedEdge(body, []);
+                        _current = body;
+                        _slots = (int[])testSlots.Clone();
+                    }
+                    else if (loop.Iterator is not null)
+                    {
+                        throw Unsupported("Post-tested iterator loops have no executable scalar encoding.");
+                    }
+
+                    IndexedBlock? continuation = null;
+                    int[]? continuationSlots = null;
+                    if (loop.IsPostTested || loop.Iterator is not null)
+                    {
+                        continuation = NewBlock(loopRegion.Id);
+                        loopRegion.ContinueTarget = continuation;
+                        continuationSlots = Parameters(continuation, entrySlots);
+                    }
                     _loops.Push(loopRegion);
                     Statement(loop.Body);
                     if (_current is not null)
                     {
-                        Jump(header, _slots, entrySlots);
+                        Jump(continuation ?? header, _slots, entrySlots);
+                    }
+                    if (continuation is not null && !_blocks.Any(block =>
+                        block.True?.Target == continuation || block.False?.Target == continuation))
+                    {
+                        throw Unsupported("A scalar loop iterator or post-test requires a reachable body continuation.");
+                    }
+                    if (loop.Iterator is not null)
+                    {
+                        _current = continuation;
+                        _slots = (int[])(continuationSlots ?? throw Unsupported("Loop iterator target is missing.")).Clone();
+                        Statement(loop.Iterator);
+                        if (_current is not null)
+                        {
+                            Jump(header, _slots, entrySlots);
+                        }
                     }
                     _loops.Pop();
+                    if (loop.IsPostTested)
+                    {
+                        _current = continuation;
+                        _slots = (int[])(continuationSlots ?? throw Unsupported("Post-tested condition target is missing.")).Clone();
+                    }
+                    var postCondition = loop.IsPostTested ? Expression(loop.Condition) : 0;
                     var exit = NewBlock(parent);
                     loopRegion.Exit = exit;
                     var exitSlots = Parameters(exit, entrySlots);
-                    testBlock.False = new IndexedEdge(exit, Arguments(testSlots, entrySlots));
+                    if (loop.IsPostTested)
+                    {
+                        var conditionBlock = _current ?? throw Unsupported("Post-tested condition did not produce a branch.");
+                        var conditionSlots = (int[])_slots.Clone();
+                        conditionBlock.Condition = postCondition;
+                        conditionBlock.True = new IndexedEdge(header, Arguments(conditionSlots, entrySlots));
+                        conditionBlock.False = new IndexedEdge(exit, Arguments(conditionSlots, entrySlots));
+                    }
+                    else
+                    {
+                        (testBlock ?? throw Unsupported("Pre-tested condition block is missing.")).False =
+                            new IndexedEdge(exit, Arguments(testSlots
+                                ?? throw Unsupported("Pre-tested condition slots are missing."), entrySlots));
+                    }
                     foreach (var block in _blocks)
                     {
                         if (block.True is { Target: var target } && target == header
@@ -1125,7 +1179,7 @@ public static partial class TrRmExecutableCompiler
                     break;
                 case BoundContinue { TargetDepth: 1 } when _loops.Count > 0:
                     var continueRegion = _loops.Peek();
-                    Jump(continueRegion.Header, _slots, continueRegion.VisibleSlots);
+                    Jump(continueRegion.ContinueTarget, _slots, continueRegion.VisibleSlots);
                     break;
                 default:
                     throw Unsupported($"Statement {statement.GetType().Name} has no executable indexed scalar encoding.");

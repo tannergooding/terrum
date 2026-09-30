@@ -99,7 +99,7 @@ public sealed class TrRmScopedLocalTests
     [Fact]
     public void UnsupportedBodyInUnusedFunctionIsStillRejected()
     {
-        var source = "int32 Main() { if (true) { int32 x = 42; return x; } return 0; } int32 Unused() { mut int32 x = 0; do { x++; } while (x < 1); return x; }";
+        var source = "int32 Main() { if (true) { int32 x = 42; return x; } return 0; } int32 Unused() { mut int32 x = 0; outer: while (x < 2) { do { break outer; } while (x < 1); } return x; }";
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(Compile(source), "unused-body"));
     }
 
