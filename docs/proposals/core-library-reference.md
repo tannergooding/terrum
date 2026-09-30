@@ -879,7 +879,114 @@ remain specification work.
 
 ## 6. Numerics and conversions
 
-The numerics source is representative, not a complete primitive matrix:
+**ACCEPTED DIRECTION:** Numeric literals construct directly in their target;
+already typed numeric operands do not promote implicitly. Integer arithmetic
+is checked by default. Floating conversion follows the canonical
+[conversion policies](../conversions.md#conversion-policies). The following
+**PROPOSED** reference signatures extend the design-only
+[numeric sketch](../../library/numerics.api.terrum), not implemented
+primitive exports or a required universal number root. Core's privileged
+primitive declarations attach members but cannot author source-defined
+primitive operators; operator requirements below describe potential nominal
+witnesses for intrinsic operations, not additional primitive operator bodies.
+
+### Independently selectable operation protocols
+
+These are independently witnessed. A different `TOther` or `TResult` does
+not imply automatic promotion, and conformance to one protocol never grants
+another. The optional first `<this TSelf>` binder is an approved interface
+source form. The bodyless interface requirements use ordinary grammar;
+the later concrete member `;` is reference-signature notation only.
+
+```terrum
+public interface ISubtractionOperators<this TSelf, TOther, TResult>
+{
+    static TResult operator -(TSelf left, TOther right);
+}
+public interface IDivisionOperators<this TSelf, TOther, TResult>
+{
+    static TResult operator /(TSelf left, TOther right);
+}
+public interface IRemainderOperators<this TSelf, TOther, TResult>
+{
+    static TResult operator %(TSelf left, TOther right);
+}
+public interface IUnaryPlusOperators<this TSelf, TResult>
+{
+    static TResult operator +(TSelf value);
+}
+public interface IUnaryNegationOperators<this TSelf, TResult>
+{
+    static TResult operator -(TSelf value);
+}
+public interface IEqualityOperators<this TSelf, TOther>
+{
+    static bool operator ==(TSelf left, TOther right);
+    static bool operator !=(TSelf left, TOther right);
+}
+public interface IComparisonOperators<this TSelf, TOther>
+{
+    static bool operator <(TSelf left, TOther right);
+    static bool operator <=(TSelf left, TOther right);
+    static bool operator >(TSelf left, TOther right);
+    static bool operator >=(TSelf left, TOther right);
+}
+public interface IBitwiseOperators<this TSelf>
+{
+    static TSelf operator &(TSelf left, TSelf right);
+    static TSelf operator |(TSelf left, TSelf right);
+    static TSelf operator ^(TSelf left, TSelf right);
+    static TSelf operator ~(TSelf value);
+}
+public interface IShiftOperators<this TSelf, TCount>
+{
+    static TSelf operator <<(TSelf value, TCount count);
+    static TSelf operator >>(TSelf value, TCount count);
+    static TSelf operator >>>(TSelf value, TCount count);
+}
+public interface IMultiplicativeIdentity<this TSelf, TResult>
+{
+    static TResult One { get; }
+}
+public interface IIntegerRelations<this TSelf>
+{
+    type Signed;
+    type Unsigned;
+    type Wider;
+}
+public interface IFloatingClassification<this TSelf>
+{
+    static bool IsNaN(TSelf value);
+    static bool IsFinite(TSelf value);
+    static bool IsInfinity(TSelf value);
+    static bool IsNormal(TSelf value);
+    static bool IsSubnormal(TSelf value);
+}
+```
+
+`IAdditionOperators`, `IMultiplyOperators`, `IAdditiveIdentity` and the
+optional scalar composites in the original sketch below complete the
+arithmetic/identity shapes. No scalar composite automatically entails
+division, bitwise operations, key equality or classification. Vector
+operators do not establish scalar classification. **OPEN:** per-type
+operator/witness matrix, right-shift fill, negative/out-of-range shift
+counts, division/remainder overflow and sign rules, and heterogeneous
+operator eligibility. Unary operators do not confer increment/decrement;
+ordinary numeric equality is not numeric-key equality or bit identity.
+For floats NaN is unordered and `==` leaves NaN unequal.
+`IIntegerRelations` is an optional relation proposal; the `uint32` witness
+below shows approved `type Name = Type;` bindings. The maximum width need not have
+a `Wider` or this witness at all. Relations confer no conversion and do
+not infer `T` backward from `T.Wider`; associated equality, inherited
+witnesses and metadata remain **OPEN** in [type families](../type-families.md#nominal-witnesses-and-associated-relationships).
+
+### Existing sampled declarations
+
+The numerics source is representative, not a complete primitive matrix.
+The candidate `IScalarIeee754` here composes the new independent
+`IFloatingClassification` requirement; the source sketch currently declares
+only `IsNaN` and `IsFinite` directly, so this is an expansion, not a claim of
+an existing checked conformance:
 
 ```terrum
 public interface IAdditionOperators<TSelf, TOther, TResult>
@@ -904,11 +1011,10 @@ public interface IScalarNumber<TSelf>
     where TSelf : IScalarNumber<TSelf>
 {
 }
-public interface IScalarIeee754<TSelf> : IScalarNumber<TSelf>
+public interface IScalarIeee754<TSelf>
+    : IScalarNumber<TSelf>, IFloatingClassification<TSelf>
     where TSelf : IScalarIeee754<TSelf>
 {
-    static bool IsNaN(TSelf value);
-    static bool IsFinite(TSelf value);
     static TSelf FusedMultiplyAdd(TSelf left, TSelf right, TSelf addend);
 }
 public interface ICheckedConversion<TDestination, TSource>
@@ -929,6 +1035,7 @@ public interface ITruncatingConversion<TDestination, TSource>
 public struct int32 : IParsable<int32>, IFormattable, IScalarNumber<int32>
 {
     public static int32 Zero { get; }
+    public static int32 One { get; }
     public static int32 MinValue { get; }
     public static int32 MaxValue { get; }
     public static bool TryParse(TextSpan text, init ref<int32> value);
@@ -937,14 +1044,28 @@ public struct int32 : IParsable<int32>, IFormattable, IScalarNumber<int32>
     public static bool TryAdd(int32 left, int32 right, init ref<int32> result);
     public static bool TrySubtract(int32 left, int32 right, init ref<int32> result);
     public static bool TryMultiply(int32 left, int32 right, init ref<int32> result);
+    public static int32 AddWrapping(int32 left, int32 right);
     public static int32 FromBits(uint32 bits);
+    public static uint32 ToBits(int32 value);
 }
 public struct float32 : IParsable<float32>, IFormattable, IScalarIeee754<float32>
 {
     public static float32 Zero { get; }
+    public static float32 One { get; }
+    public static float32 PositiveInfinity { get; }
+    public static float32 NegativeInfinity { get; }
+    public static float32 NaN { get; }
     public static bool IsNaN(float32 value);
     public static bool IsFinite(float32 value);
+    public static bool IsInfinity(float32 value);
+    public static bool IsNormal(float32 value);
+    public static bool IsSubnormal(float32 value);
+    public static bool IsNegative(float32 value);
     public static float32 FusedMultiplyAdd(float32 left, float32 right, float32 addend);
+    public static float32 CopySign(float32 value, float32 sign);
+    public static float32 NextUp(float32 value);
+    public static float32 NextDown(float32 value);
+    public static float32 FromBits(uint32 bits);
     public static uint32 ToBits(float32 value);
     public bool KeyEquals(float32 other);
     public int32 GetKeyHashCode();
@@ -955,12 +1076,21 @@ public struct float32 : IParsable<float32>, IFormattable, IScalarIeee754<float32
 public struct decimal32 : IParsable<decimal32>, IFormattable, IScalarIeee754<decimal32>
 {
     public static decimal32 Zero { get; }
+    public static decimal32 One { get; }
+    public static decimal32 PositiveInfinity { get; }
+    public static decimal32 NegativeInfinity { get; }
+    public static decimal32 NaN { get; }
     public static bool IsNaN(decimal32 value);
     public static bool IsFinite(decimal32 value);
+    public static bool IsInfinity(decimal32 value);
+    public static bool IsNormal(decimal32 value);
+    public static bool IsSubnormal(decimal32 value);
     public static decimal32 FusedMultiplyAdd(decimal32 left, decimal32 right, decimal32 addend);
     public bool KeyEquals(decimal32 other);
     public int32 GetKeyHashCode();
     public static bool TryParse(TextSpan text, init ref<decimal32> value);
+    public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
+        where TWriter : ITextWriter;
 }
 ```
 
@@ -968,34 +1098,179 @@ public struct decimal32 : IParsable<decimal32>, IFormattable, IScalarIeee754<dec
 
 `int32.TryAdd/Subtract/Multiply` are checked expected failures; false publishes no output. `int32.FromBits` and `float32.ToBits` reinterpret bits, not numerically convert. Integer arithmetic is checked by default. Bare numeric literals have no default width; target context selects their type. The canonical [conversion policy](../conversions.md#conversion-policies) is: checked integer conversion preserves or throws, unchecked integer conversion wraps to destination-width bits, and saturation is explicit; floating-to-floating conversion follows IEEE-754 without language failure; float-to-int truncates then checked-throws or unchecked/explicitly-saturates, never modulo-narrows, with NaN converting to zero. Floating APIs are target-specific; exact source/destination witness lookup and user-defined declarations remain open.
 
-### Numeric protocol, conversion and math matrix
+### Candidate primitive member families
 
-The grammar's approved operator and literal forms do not confer these
-**proposed** interfaces on all numeric primitives. Each row names a
-separately checkable operation relationship; no generic `Number` root
-silently provides every row.
+This is a *generative* inventory, not a duplicate declaration for every
+width. Each eligible concrete width may have its own same-type arithmetic,
+unary, ordinary equality/comparison and identity witnesses from above,
+`Zero`/`One`/range members, parse/format members and named checked/wrapping
+helpers as applicable. The row does not declare that witness, representation
+or ABI; the shaped concrete examples below illustrate substitutions. These
+are the [proposed language spellings](../language.md#primitives-strict-arithmetic-and-text),
+not a compiler-required-type list or presently implemented matrix.
 
-| Candidate protocol / service | Signature family | Applicability / policy |
-|---|---|---|
-| `IAdditionOperators<TLeft,TRight,TResult>`; `ISubtractionOperators<...>` | `static TResult operator +(TLeft,TRight)` / `-` | Result and right operand need not be same type; no promotion |
-| `IMultiplyOperators<...>`; `IDivisionOperators<...>`; `IModulusOperators<...>` | corresponding `static TResult operator` | Division by zero, remainder sign, overflow and floating exceptions require per-family policy |
-| `IUnaryPlusOperators<T,TResult>`; `IUnaryNegationOperators<T,TResult>` | `static TResult operator +(T)` / `-(T)` | Only types with valid result/overflow contract participate |
-| `IComparisonOperators<TLeft,TRight>`; `IBitwiseOperators<T>`; `IShiftOperators<T,TCount>` | `<`, `<=`, `>`, `>=` returning `bool`; `&`, `\|`, `^`, `~`, shifts returning `T` | Numeric `<` on NaN is unordered; bitwise eligibility is not inferred from arithmetic |
-| `IAdditiveIdentity<T,TResult>`; `IMultiplicativeIdentity<T,TResult>` | `static TResult Zero` / `One` | Identity is a witness, not universal default construction |
-| `IScalarIeee754<T>` | `IsNaN`, `IsFinite`, `FusedMultiplyAdd`; candidate `IsInfinity`, `CopySign`, `NextUp`, `NextDown` | FMA explicitly rounds once; decimal and binary format behavior are profiled separately |
-| `ICheckedConversion<TDestination,TSource>`; `ISaturatingConversion<...>`; `ITruncatingConversion<...>` | `ConvertChecked`, `ConvertSaturating`, `ConvertTruncating` | Checked, unchecked and saturation remain distinct; no conversion chains or back-inferred witnesses |
-| `NumericKeys<T>` / **OPEN** comparer witness | `Equals(ref<T>,ref<T>)`, `GetHashCode(ref<T>) -> uint64` | Equal NaNs and signed zero; decimal equal cohorts share hash |
-| `Math<T>` / **new proposal** | `Abs`, `Min`, `Max`, `Clamp`, `Sqrt`, `Pow`, `Exp`, `Log`, `Sin`, `Cos` as applicable | Candidate per-format/domain contracts; do not fabricate every operation for every scalar |
-| `BitOperations<T>` / **new proposal** | `LeadingZeroCount`, `TrailingZeroCount`, `PopCount`, `RotateLeft/Right`, `ReverseBits` | Integer bit width and signed representation defined per member; no implicit `T -> uint64` |
+| Candidate width family | Per-type application of shaped declarations |
+|---|---|
+| Signed `int8/16/32/64/128` | Closed same-width `+`, `-`, `*`, `/`, `%`, unary `+`/`-`, equality, ordered comparison, bitwise and eligible shifts. Checked negation of MinValue fails; wrapping requires explicit selection. |
+| Unsigned `uint8/16/32/64/128` | Closed same-width arithmetic, equality, ordered comparison, bitwise and shifts; checked subtraction can underflow. No same-type unary negation is inferred from signed types. |
+| Target-size `nint`/`nuint` | Corresponding signed/unsigned shapes but target-dependent limits; no invented fixed serialized width. |
+| Binary `float16/32/64/128`, `bfloat16` | Same-format arithmetic, ordinary IEEE comparisons, classification, target-specific functions and numeric-key policy; no integer bitwise/wrapping witness implied. |
+| Decimal `decimal32/64/128` | Same-format arithmetic, ordinary numeric comparison, decimal classification, parse/format and cohort-normalized key policy; no binary layout or CLR decimal semantics. |
 
-Conversions that reinterpret representation (matching-width `FromBits`/
-`ToBits`) are not instances of numerical conversion protocols. Hash policy,
-rounding mode and mathematical reproducibility must be specified before
-standardizing concrete implementations. `float32` and `decimal32` in the
-sample do not imply CLR `Single`/`Decimal` layout or a shared .NET numeric
-interface graph. Integer associated `Wider`, `Signed` and `Unsigned` bindings
-remain checked per witness; an unconstrained `Wider` is not a convertible
-destination merely because its name suggests one.
+The `int32`, `float32`, `decimal32` and `uint32` samples establish
+only the members they actually show. This extended concrete pair illustrates
+the proposed common unsigned shape and a narrow signed substitution; other
+widths require their own checked members, not textual ABI substitution.
+
+```terrum
+public struct uint32
+    : IParsable<uint32>, IFormattable, IScalarNumber<uint32>,
+      IIntegerRelations<uint32>
+{
+    type Signed = int32;
+    type Unsigned = uint32;
+    type Wider = uint64;
+    public static uint32 Zero { get; }
+    public static uint32 One { get; }
+    public static uint32 MinValue { get; }
+    public static uint32 MaxValue { get; }
+    [Literal(LiteralKind.Integer), ConstEval]
+    public static bool TryParse(TextSpan text, init ref<uint32> value);
+    public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
+        where TWriter : ITextWriter;
+    public static bool TryAdd(uint32 left, uint32 right, init ref<uint32> result);
+    public static bool TrySubtract(uint32 left, uint32 right, init ref<uint32> result);
+    public static bool TryMultiply(uint32 left, uint32 right, init ref<uint32> result);
+    public static uint32 AddWrapping(uint32 left, uint32 right);
+    public static uint32 FromBits(uint32 bits);
+    public static uint32 ToBits(uint32 value);
+}
+public struct int8 : IParsable<int8>, IFormattable
+{
+    public static int8 Zero { get; }
+    public static int8 One { get; }
+    public static int8 MinValue { get; }
+    public static int8 MaxValue { get; }
+    [Literal(LiteralKind.Integer), ConstEval]
+    public static bool TryParse(TextSpan text, init ref<int8> value);
+    public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
+        where TWriter : ITextWriter;
+    public static bool TryAdd(int8 left, int8 right, init ref<int8> result);
+    public static int8 AddWrapping(int8 left, int8 right);
+    public static int8 FromBits(uint8 bits);
+    public static uint8 ToBits(int8 value);
+}
+```
+
+Other proposed signed widths substitute their corresponding unsigned
+matching-width bits types (e.g., `int64.FromBits(uint64)`); bit reinterpretation
+is *not* `int8(uint8Value)` value conversion. The `Try...` family returns
+false with a vacant output for overflow, rather than fabricating zero;
+publication proof and compiled outcome metadata are still **OPEN**. An
+ordinary checked operator instead uses the selected language failure policy.
+For a signed integer, `FromBits` interprets precisely its own two's-complement
+width; these examples specify no arbitrary native or foreign layout.
+
+The concrete float/decimal blocks' `KeyEquals`/`GetKeyHashCode` pair equates all NaNs
+and signed zeros; decimal numeric cohorts such as `1.0` and `1.00` also
+share a key hash. A collection still selects an explicit paired
+`IKeyComparer<T>` (§2), not a name-matched `GetHashCode`. Ordinary `==`
+leaves NaN unequal and signed zeros equal. **OPEN adjacent to the
+classification and stepping candidates:** whether `IsNegative` reads a
+sign bit for negative zero and NaNs, the decimal counterpart, signaling-NaN
+behavior, `NextUp`/`NextDown` endpoints and zero transitions, and `CopySign`
+NaN payload handling. FMA promises one final rounding, not implicit
+contraction of separate operators. Matching-width binary `FromBits`/
+`ToBits` requires an explicit per-format bit/payload mapping, including
+`bfloat16`; `decimal32` has no proposed `FromBits` until BID/DPD, cohorts,
+canonical encodings and validity are specified. Decimal is not CLR decimal.
+
+### Numeric conversion and scalar service signatures
+
+The existing `ICheckedConversion<TDestination,TSource>`,
+`ISaturatingConversion<...>` and `ITruncatingConversion<...>` requirements
+above express independent, selected pairs, not automatic interfaces on
+every primitive. `T(value)` is the checked typed-value spelling; literals
+parse in the target directly. These illustrative *pair candidates* show
+the result type is the destination, not a promoted intermediate:
+
+| Destination/source candidate | `ConvertChecked` | `ConvertSaturating` | `ConvertTruncating` |
+|---|---|---|---|
+| `uint8 <- int32`; `int32 <- uint32`; `int64 <- int32` | Preserve exact integer or fail if out of range | Clamp to destination limits | Modulo destination 2^N, then signed-interpret if applicable |
+| `int32 <- float32`; `uint8 <- decimal32` | Truncate toward zero then range-check; NaN fails | Truncate then clamp; NaN -> zero | Truncate then clamp; NaN -> zero, **never modulo** |
+| `float32 <- int64`; `float64 <- float32`; `decimal64 <- decimal32` | IEEE target-format rounding (no failure for inexactness, infinity, underflow) | **OPEN** distinct pair policy | **OPEN** distinct pair policy |
+
+For example, the existing witness shape yields
+`static uint8 ConvertChecked(int32 value)` in a `uint8`/`int32` conformance and
+`static int32 ConvertTruncating(float32 value)` in an `int32`/`float32`
+conformance. There is no generic `FromInt32` family or conversion chain.
+Unchecked integer conversion wraps to the destination width; floating to
+integer *never* modulo-narrows. Floating destination conversion uses
+nearest/ties-even by default without traps. **OPEN:** exact pair eligibility,
+source/destination witness lookup, user conversion precedence, cross-format
+NaN payloads and explicit alternate-rounding APIs; typed binary-to-decimal
+eligibility cannot be inferred from the sample pairs. No conversion protocol
+is a bit-reinterpretation protocol, and no declaration here promises
+NoThrow.
+
+Proposed closed service signatures make operand/result/count widths
+reviewable without pretending that every scalar has every mathematical
+function or that a generic service secretly converts operands:
+
+```terrum
+public struct BitOperations
+{
+    public static int32 LeadingZeroCount(uint32 value);
+    public static int32 TrailingZeroCount(uint32 value);
+    public static int32 PopCount(uint32 value);
+    public static uint32 RotateLeft(uint32 value, int32 count);
+    public static uint32 RotateRight(uint32 value, int32 count);
+    public static uint32 ReverseBits(uint32 value);
+    public static int32 LeadingZeroCount(uint64 value);
+    public static int32 TrailingZeroCount(uint64 value);
+    public static int32 PopCount(uint64 value);
+    public static uint64 RotateLeft(uint64 value, int32 count);
+    public static uint64 RotateRight(uint64 value, int32 count);
+    public static uint64 ReverseBits(uint64 value);
+}
+public struct Int32Math
+{
+    public static int32 Abs(int32 value);
+    public static int32 Min(int32 left, int32 right);
+    public static int32 Max(int32 left, int32 right);
+    public static int32 Clamp(int32 value, int32 minimum, int32 maximum);
+}
+public struct Float32Math
+{
+    public static float32 Abs(float32 value);
+    public static float32 Min(float32 left, float32 right);
+    public static float32 Max(float32 left, float32 right);
+    public static float32 Clamp(float32 value, float32 minimum, float32 maximum);
+    public static float32 Sqrt(float32 value);
+    public static float32 Pow(float32 value, float32 exponent);
+    public static float32 Exp(float32 value);
+    public static float32 Log(float32 value);
+    public static float32 Sin(float32 value);
+    public static float32 Cos(float32 value);
+    public static float32 RoundToIntegral(float32 value);
+}
+```
+
+`BitOperations` candidates operate on actual bits of the indicated unsigned
+width; a parallel `uint8/16/128` or `nuint` overload requires its own
+width/target profile. Counts return `int32`, large enough for the proposed
+fixed integer widths. **OPEN:** zero-input leading/trailing counts,
+rotate-count normalization, native-size overloads and signed-bit handling.
+No hidden `uint64` conversion or unsafe bit-layout access is assumed.
+`Abs(int32.MinValue)` follows checked overflow.
+**OPEN next to math candidates:** invalid `Clamp` bounds need a declared failure contract.
+Float `Min`/`Max`/`Clamp` need NaN propagation and signed-zero tie rules,
+while `Sqrt`/`Pow`/`Exp`/`Log`/`Sin`/`Cos`/`RoundToIntegral` need special-value,
+domain, precision and rounding-mode contracts. Strict target-format
+`float32` arithmetic neither reassociates nor contracts implicitly.
+Native/approximate variants and reproducible reductions need separate names
+and contracts. Decimal transcendental availability, cohorts and rounding
+must be separately determined, not cloned from `Float32Math`.
 
 ## 7. Fixed SIMD, scalable vectors and tensors
 
