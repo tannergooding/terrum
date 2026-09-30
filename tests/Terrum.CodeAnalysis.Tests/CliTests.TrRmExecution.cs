@@ -176,8 +176,8 @@ public sealed partial class CliTests
     }
 
     [Theory]
-    [InlineData("int32 Main() { mut int32 x = 42; return x << 1; }")]
-    [InlineData("int32 Main() { mut int32 x = 42; if (x == 0) { x = x << 1; } return x; }")]
+    [InlineData("int32 Main() { return Helper(); } int32 Helper() { return 42; }")]
+    [InlineData("int32 Main() { mut int32 x = 42; if (x == 0) { x = Helper(); } return x; } int32 Helper() { return 1; }")]
     public async Task TrRmSourceRejectionDoesNotOverwritePreviousArtifactAsync(string source)
     {
         var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-reject-{Guid.NewGuid():N}.trrm");

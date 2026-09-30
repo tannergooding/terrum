@@ -7,11 +7,15 @@ namespace Terrum.CodeAnalysis.Semantics;
 
 internal sealed record TrRmScalarEdge(int Target, ImmutableArray<int> Arguments);
 
+/// <summary>An audited, equal-width integer bit reinterpretation; never a structured source cast.</summary>
+internal sealed record TrRmScalarReinterpret(BoundExpression Operand, PrimitiveType Type)
+    : BoundExpression(Type, default);
+
 internal sealed record TrRmScalarBlock(ImmutableArray<int> Parameters,
     ImmutableArray<BoundLocal> Operations, int Condition, TrRmScalarEdge? True,
     TrRmScalarEdge? False, int ReturnValue);
 
-/// <summary>Immutable, source-free scalar SSA body admitted only after indexed Body validation.</summary>
+/// <summary>Immutable, source-free scalar SSA body admitted only after compact Body validation.</summary>
 internal sealed class TrRmScalarGraph
 {
     internal ImmutableArray<TrRmScalarBlock> Blocks { get; }

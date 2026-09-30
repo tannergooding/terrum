@@ -294,6 +294,20 @@ public static partial class TrRmExecutableCompiler
             {
                 _ = new TrRmCompactLinearBodyReader(bodies, row, modules, defs, sigs, parameters, types);
                 statements = DecodeBody(body, count, variables, noThrow, types);
+                if (statements.Any(static statement => statement is BoundLocal
+                    { Initializer: TrRmScalarReinterpret or BoundBinary
+                        { Operator: TokenKind.ShiftLeft or TokenKind.ShiftRight } }))
+                {
+                    var operations = statements.OfType<BoundLocal>().ToImmutableArray();
+                    var returned = (BoundReturn)statements[^1];
+                    indexed = TrRmScalarGraph.FromAuditedBody(
+                        [new TrRmScalarBlock(Enumerable.Range(1, count).ToImmutableArray(),
+                            operations, 0, null, null,
+                            returned.Value is BoundRead read ? read.Variable + 1 : 0)],
+                        variables.Select(static variable => variable.Type).ToImmutableArray(),
+                        count, FromRow(types, sigs.GetResultTypeSpec(signature)), noThrow);
+                    statements = [];
+                }
             }
             functions.Add(new BoundFunction(name, FromRow(types, sigs.GetResultTypeSpec(signature)),
                 variables.ToImmutable(), count, new BoundBlock(statements, default), default)
@@ -342,6 +356,12 @@ public static partial class TrRmExecutableCompiler
 
     private static bool Scalar(PrimitiveType type) => Array.IndexOf(s_types, type) >= 0;
 
+    private static bool CanReinterpret(PrimitiveType source, PrimitiveType destination)
+        => (source is PrimitiveType.Int32 or PrimitiveType.UInt32
+                && destination is PrimitiveType.Int32 or PrimitiveType.UInt32)
+            || (source is PrimitiveType.Int64 or PrimitiveType.UInt64
+                && destination is PrimitiveType.Int64 or PrimitiveType.UInt64);
+
     private static bool ContainsIndexedFlow(BoundStatement statement)
     {
         switch (statement)
@@ -366,7 +386,9 @@ public static partial class TrRmExecutableCompiler
     private static bool ContainsIndexedFlow(BoundExpression expression)
         => expression switch
         {
-            BoundConditional => true,
+            BoundConditional or BoundUpdate or BoundCompoundAssignment => true,
+            BoundBinary { Operator: TokenKind.ShiftLeft or TokenKind.ShiftRight
+                or TokenKind.ShiftRightUnsigned } => true,
             BoundBinary { Operator: TokenKind.AmpersandAmpersand or TokenKind.PipePipe }
                 => true,
             BoundBinary binary => ContainsIndexedFlow(binary.Left) || ContainsIndexedFlow(binary.Right),

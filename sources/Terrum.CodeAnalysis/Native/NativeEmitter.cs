@@ -2520,6 +2520,9 @@ internal sealed partial class PeCompiler
                 Expression(cast.Operand, spill);
                 Cast(cast.Operand.Type, cast.Type);
                 break;
+            case TrRmScalarReinterpret reinterpret:
+                Expression(reinterpret.Operand, spill);
+                break;
             case BoundBinary binary:
                 if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe)
                 {

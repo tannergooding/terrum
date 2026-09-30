@@ -233,7 +233,7 @@ public static partial class TrRmExecutableCompiler
         for (var ordinal = 0; ordinal < count; ordinal++)
         {
             var (opcode, width, dataWidth) = ReadInstruction(body, ref position);
-            if (opcode is not (1 or 2 or 3 or 4 or 5 or 0x15 or 0x16 or 0x17))
+            if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 0x15 or 0x16 or 0x17))
             {
                 throw Invalid($"Operation 0x{opcode:X2} is not executable.");
             }
@@ -242,10 +242,11 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Invalid("Noncontiguous value definitions.");
             }
-            var typeId = opcode is 1 or 2 or 0x16 ? ReadInt(body, ref position, width) : 0;
+            var typeId = opcode is 1 or 2 or 6 or 0x16 ? ReadInt(body, ref position, width) : 0;
+            var policy = opcode == 6 ? ReadByte(body, ref position) : (byte)0;
             var kind = opcode is 4 or 5 or 0x15 ? ReadByte(body, ref position) : (byte)0;
             var bits = opcode is 1 or 2 ? ReadBits(body, ref position, dataWidth) : 0;
-            var left = opcode is 3 or 4 or 0x16 or 0x17 or 5 or 0x15
+            var left = opcode is 3 or 4 or 6 or 0x16 or 0x17 or 5 or 0x15
                 ? ReadInt(body, ref position, width) : 0;
             var right = opcode is 5 or 0x15 ? ReadInt(body, ref position, width) : 0;
             if (width != Width((ulong)Math.Max(result, typeId))
@@ -289,6 +290,15 @@ public static partial class TrRmExecutableCompiler
             {
                 expression = Operand(left);
             }
+            else if (opcode == 6)
+            {
+                if (typeId <= 0 || typeId > typeCount || policy != 3
+                    || !CanReinterpret(Operand(left).Type, mappedTypes[typeId]))
+                {
+                    throw Invalid("Unsupported scalar representation conversion.");
+                }
+                expression = new TrRmScalarReinterpret(Operand(left), mappedTypes[typeId]);
+            }
             else if (opcode == 0x16)
             {
                 if (typeId <= 0 || typeId > typeCount)
@@ -326,8 +336,17 @@ public static partial class TrRmExecutableCompiler
                     (0x15, 1) => TokenKind.Plus, (0x15, 2) => TokenKind.Minus,
                     (0x15, 3) => TokenKind.Star, (0x15, 4) => TokenKind.Slash,
                     (0x15, 5) => TokenKind.Percent,
+                    (0x15, 6) => TokenKind.ShiftLeft,
+                    (0x15, 7) => TokenKind.ShiftRight,
                     _ => throw Invalid("Unsupported binary kind."),
                 };
+                if (opcode == 0x15 && kind is 6 or 7
+                    && (first.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32
+                        or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                        || second.Type != PrimitiveType.UInt32))
+                {
+                    throw Invalid("Checked shift requires an integer and a uint32 count.");
+                }
                 var resultType = opcode == 5 && kind is >= 4 and <= 9
                     ? PrimitiveType.Bool : first.Type;
                 expression = new BoundBinary(token, first, second, resultType, default);

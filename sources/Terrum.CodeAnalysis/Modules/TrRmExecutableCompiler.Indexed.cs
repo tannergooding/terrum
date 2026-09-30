@@ -347,6 +347,9 @@ public static partial class TrRmExecutableCompiler
                 case BoundCast cast:
                     VisitReads(cast.Operand, visit);
                     break;
+                case TrRmScalarReinterpret reinterpret:
+                    VisitReads(reinterpret.Operand, visit);
+                    break;
                 case BoundBinary binary:
                     VisitReads(binary.Left, visit);
                     VisitReads(binary.Right, visit);
@@ -448,9 +451,17 @@ public static partial class TrRmExecutableCompiler
                     opcode = 0x16;
                     target = TypeRow(cast.Type) - 1;
                     break;
+                case TrRmScalarReinterpret reinterpret:
+                    left = ReadOperand(reinterpret.Operand);
+                    if (!CanReinterpret(reinterpret.Operand.Type, reinterpret.Type))
+                    {
+                        throw Unsupported("Only equal-width integer bit reinterpretation is executable.");
+                    }
+                    opcode = 6;
+                    target = TypeRow(reinterpret.Type) - 1;
+                    break;
                 case BoundBinary binary:
                     if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe
-                        or TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned
                         || binary.Operator is TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret
                             && binary.Left.Type == PrimitiveType.Bool
                         || binary.Operator is TokenKind.Less or TokenKind.LessEquals
@@ -476,6 +487,9 @@ public static partial class TrRmExecutableCompiler
                         TokenKind.Star => (0x15, 3),
                         TokenKind.Slash => (0x15, 4),
                         TokenKind.Percent => (0x15, 5),
+                        TokenKind.ShiftLeft => (0x15, 6),
+                        TokenKind.ShiftRight => (0x15, 7),
+                        TokenKind.ShiftRightUnsigned => (0x15, 7),
                         _ => throw Unsupported($"Binary operator {binary.Operator} has no executable scalar encoding."),
                     };
                     break;
@@ -489,9 +503,13 @@ public static partial class TrRmExecutableCompiler
             var referenceWidth = Width((ulong)Math.Max(result, target));
             WriteInstruction(bytes, opcode, referenceWidth, dataWidth);
             Write(bytes, (ulong)result, referenceWidth);
-            if (opcode is 1 or 0x16)
+            if (opcode is 1 or 6 or 0x16)
             {
                 Write(bytes, (ulong)target, referenceWidth);
+            }
+            if (opcode == 6)
+            {
+                bytes.Add(3);
             }
             if (opcode is 4 or 5 or 0x15)
             {
@@ -501,7 +519,7 @@ public static partial class TrRmExecutableCompiler
             {
                 Write(bytes, bits, dataWidth);
             }
-            if (opcode is 4 or 0x16 or 0x17)
+            if (opcode is 4 or 6 or 0x16 or 0x17)
             {
                 Write(bytes, (ulong)left, referenceWidth);
             }
@@ -747,6 +765,25 @@ public static partial class TrRmExecutableCompiler
             return result;
         }
 
+        private int Reinterpret(int value, PrimitiveType destination)
+            => Add(new TrRmScalarReinterpret(Read(value), destination));
+
+        private int Shift(TokenKind token, int left, int count, PrimitiveType type)
+        {
+            var unsignedCount = Reinterpret(count, PrimitiveType.UInt32);
+            if (token == TokenKind.ShiftRightUnsigned
+                && type is PrimitiveType.Int32 or PrimitiveType.Int64)
+            {
+                var unsignedType = type == PrimitiveType.Int32
+                    ? PrimitiveType.UInt32 : PrimitiveType.UInt64;
+                var payload = Reinterpret(left, unsignedType);
+                var result = Add(new BoundBinary(TokenKind.ShiftRightUnsigned, Read(payload),
+                    Read(unsignedCount), unsignedType, default));
+                return Reinterpret(result, type);
+            }
+            return Add(new BoundBinary(token, Read(left), Read(unsignedCount), type, default));
+        }
+
         private int[] Parameters(IndexedBlock block, int[] values, PrimitiveType? result = null)
         {
             var selected = new int[values.Length];
@@ -850,6 +887,36 @@ public static partial class TrRmExecutableCompiler
                         unary.Type, default));
                 case BoundCast cast:
                     return Add(new BoundCast(Read(Expression(cast.Operand)), cast.Type, default));
+                case BoundUpdate { Place: BoundRead place } update
+                    when update.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
+                        or PrimitiveType.Int64 or PrimitiveType.UInt64:
+                    if (!_function.Variables[place.Variable].IsMutable)
+                    {
+                        throw Unsupported("Indexed update requires a writable local.");
+                    }
+                    var previous = Expression(place);
+                    var one = Add(new BoundConstant(1, update.Type, default));
+                    var replacement = Add(new BoundBinary(update.Operator == TokenKind.PlusPlus
+                        ? TokenKind.Plus : TokenKind.Minus, Read(previous), Read(one),
+                        update.Type, default));
+                    _slots[place.Variable] = replacement;
+                    return update.IsPrefix ? replacement : previous;
+                case BoundCompoundAssignment { Place: BoundRead place } compound
+                    when compound.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
+                        or PrimitiveType.Int64 or PrimitiveType.UInt64:
+                    if (!_function.Variables[place.Variable].IsMutable)
+                    {
+                        throw Unsupported("Indexed compound assignment requires a writable local.");
+                    }
+                    var old = Expression(place);
+                    var operand = Expression(compound.Right);
+                    var operation = CompoundOperators.Binary(compound.Operator);
+                    var next = CompoundOperators.IsShift(compound.Operator)
+                        ? Shift(operation, old, operand, compound.Type)
+                        : Add(new BoundBinary(operation, Read(old), Read(operand),
+                            compound.Type, default));
+                    _slots[place.Variable] = next;
+                    return next;
                 case BoundBinary binary when binary.Operator is TokenKind.AmpersandAmpersand
                     or TokenKind.PipePipe:
                     var left = Expression(binary.Left);
@@ -859,6 +926,11 @@ public static partial class TrRmExecutableCompiler
                 case BoundBinary binary:
                     var lhs = Expression(binary.Left);
                     var rhs = Expression(binary.Right);
+                    if (binary.Operator is TokenKind.ShiftLeft or TokenKind.ShiftRight
+                        or TokenKind.ShiftRightUnsigned)
+                    {
+                        return Shift(binary.Operator, lhs, rhs, binary.Type);
+                    }
                     return Add(new BoundBinary(binary.Operator, Read(lhs), Read(rhs), binary.Type, default));
                 case BoundConditional conditional:
                     var condition = Expression(conditional.Condition);
