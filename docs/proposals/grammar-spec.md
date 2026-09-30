@@ -205,7 +205,7 @@ context.
 | Default selection | `default` | Select a declared generic default or an interface default body. |
 | Witness selection | contextual `via` | Explicitly select an existing interface witness after `.`. |
 | Patterns | `when`, `is`, `some`, `and`, `or`, `not` | Match values and guard arms; full pattern grammar remains open. |
-| Loops and iteration | `while`, `do`, `for`, `in`, `break`, `continue` | Iterate and transfer to the nearest loop. |
+| Loops and iteration | `while`, `do`, `for`, `in`, `break`, `continue` | Iterate, including `await for`, and transfer to the nearest loop. |
 | Results | `return` | Complete a call. |
 | Producers | `yield` | Emit an element from a producer; ordinary `return;` finishes it. |
 | Asynchrony | `async`, `await` | Mark an async callable implementation and await a checked completion. |
@@ -555,7 +555,8 @@ IfStatement     = "if", "(", Expression, ")", Block,
                   [ "else", ( Block | IfStatement ) ] ;
 WhileStatement  = "while", "(", Expression, ")", Block ;
 LoopStatement   = [ Identifier, ":" ],
-                  ( WhileStatement | ForStatement | ForEachStatement ) ;
+                  ( WhileStatement | ForStatement | ForEachStatement
+                  | AsyncForEachStatement ) ;
 ForStatement    = "for", "(", [ ForInit ], ";", [ Expression ], ";",
                   [ ForStep ], ")", Block ;
 ForInit         = LocalBinding | StepExpression ;
@@ -564,6 +565,7 @@ StepExpression  = Expression | Assignment ;
 ForEachStatement = "for", "(", [ "mut" | "ref" | "mut", "ref" ],
                    ( "var" | Type ), Identifier,
                    "in", Expression, ")", Block ;
+AsyncForEachStatement = "await", ForEachStatement ;
 RequireStatement = "require", Expression, ";" ;
 TryStatement    = "try", Block, ( "finally", Block
                   | CatchClause, { CatchClause }, [ "finally", Block ] ) ;
@@ -627,6 +629,17 @@ neither silently copies a value or upgrades a readonly source. The iterator
 protocol, loan extent, backing dependency and whether advancing it invalidates
 the current element remain **OPEN**; these spellings do not grant escaping
 loans or overlapping mutation.
+`await for (... in ...)` selects an eligible checked async iteration protocol
+inside an async implementation. The source expression evaluates once, and
+each advancement uses that protocol's awaitable completion. It does not
+implicitly await yielded elements: an async sequence of task values still
+yields task values. Awaiting each task in an ordinary synchronous sequence
+instead uses a normal `for (... in ...)` with an explicit `await` in its body.
+`await` is not an element-binding modifier, and `for (await ... in ...)` is
+not an alternate form. Reference modes retain their ordinary access checks,
+with suspension preserving backing, loan and affinity obligations. Iterator
+acquisition, close and cancellation protocol details remain library design;
+the spelling introduces neither implicit blocking nor executor capture.
 Blocks are required after `if`, `while`, `for`, `try`, `catch`,
 `finally`, and `unsafe`; a single unbraced statement is not part of this
 candidate. Assignment is a
@@ -1781,7 +1794,7 @@ appears in §2.
 | Parameters | §§3.2, 5.1–5.2 give modes, final `params`, eligible Copy defaults and direct/named attribute targets. | Complete qualifier legality and output/loan metadata. |
 | Arguments | §§3.2 and 5.1 give labels, source-order evaluation and position-preserving named/positional mixtures. | Complete passing-mode/place and overload contracts. |
 | Statements | §3.3 gives blocks, transfers, standalone discard and `yield expression;` / producer `return;`; §§3.1 and 5.12 give the `[Iterator]` marker; §3.4 permits await expressions in async bodies. | Statement-place checks and producer protocol/lifetime contracts. |
-| Iteration | §3.3 sketches by-value and `ref`/`mut ref` `for (... in ...)`; §5.12 names `do`. | Iterator loan/backing contracts and post-test loop production. |
+| Iteration | §3.3 gives by-value and `ref`/`mut ref` iteration, including `await for`; §5.12 names `do`. | Iterator loan/backing, acquisition/close/cancellation contracts and post-test loop production. |
 | Expressions | §3.4 gives conditional/coalescing/optional access, tuples, target-directed static/async lambdas, await and collection spreads. | Callable capture/representation, awaiter registration and collection-fragment contracts; comprehensions/repetition deferred for library/tensor design. |
 | Patterns | §3.3 gives shared switch arms, guarded matching, compatible `or` bindings and explicit constant/wildcard transfers. | Full nominal-case, relational and destructuring patterns. |
 | Policies | §§3.3–3.4 and 5.12 describe lexical preferences, strict selection and constant-formal forwarding. | Variant-declaration syntax and compile-time queries. |
