@@ -1278,56 +1278,271 @@ must be separately determined, not cloned from `Float32Math`.
 
 ## 7. Fixed SIMD, scalable vectors and tensors
 
-SIMD values are fixed/scalable ABI values; tensors are logical views over memory. These are different representations. Fixed-vector registration is explicit and checked; width/mask/name resemblance is not membership. Family registration and the particular associated-mask relationships are open.
+SIMD values are fixed/scalable ABI values; tensors are logical views over
+memory. These are different representations. All declarations and inventories
+in this section are **proposals**, not adopted APIs, compiler bindings or
+runtime exports. A semicolon on a concrete member is the reference-signature
+notation used throughout this document: its implementation is omitted; it is
+not a new runnable bodyless-declaration form.
+
+### Fixed-width SIMD
+
+A fixed-width vector is a member only after explicit, checked registration.
+Neither a type's spelling, width nor apparent mask pairing proves membership;
+the checker must validate the registered lane type, width, mask shape,
+operators, representation, ABI and effects. Generic fixed-vector algorithms
+range over registered members, not all vector-looking types. The exact family
+registration and associated-mask spelling remain open; do not read the
+inventory below as valid family grammar or infer a nominal `ISimdVector`
+witness.
+
+`simd.api.terrum` supplies local design sketches for the `simd64`,
+`simd128`, `simd256`, and `simd512` plus matching `simd*mask` names. The
+following is a fully shaped **128-bit reference specialization**. `T` remains
+an explicitly registered, sized SIMD element, and each listed operation is
+available only for the registered element/protocol combinations that support
+it. No universal `Number` classification or automatic scalar-to-vector
+promotion is implied.
 
 ```terrum
-// Declaration-only specialization of simd.api.terrum's local fixed-family contract.
 public struct simd128<T> : IAdditionOperators<simd128<T>, simd128<T>, simd128<T>>
     where T : [SimdElement], [Copy], [Sized]
 {
     public static nuint LaneCount { get; }
+
+    public T GetLane(nuint lane);
+    public simd128<T> WithLane(nuint lane, T value);
+
     public static simd128<T> Splat(T value);
+    public static bool TryCreate(Span<T> lanes, init ref<simd128<T>> result);
     public static simd128<T> Load(Span<T> source);
-    public static simd128<T> LoadMasked(Span<T> source, simd128mask<T> active, T inactive);
+    public static simd128<T> LoadMasked(Span<T> source, simd128mask<T> active,
+        T inactive);
     public static void Store(simd128<T> value, write Span<T> destination);
     public static void StoreMasked(simd128<T> value, simd128mask<T> active,
         write Span<T> destination);
+
     public static simd128mask<T> CompareEqual(simd128<T> left, simd128<T> right);
+    public static simd128mask<T> CompareNotEqual(simd128<T> left, simd128<T> right);
     public static simd128mask<T> CompareLessThan(simd128<T> left, simd128<T> right);
+    public static simd128mask<T> CompareLessThanOrEqual(simd128<T> left,
+        simd128<T> right);
+    public static simd128mask<T> CompareGreaterThan(simd128<T> left,
+        simd128<T> right);
+    public static simd128mask<T> CompareGreaterThanOrEqual(simd128<T> left,
+        simd128<T> right);
     public static simd128<T> Select(simd128mask<T> condition,
         simd128<T> whenTrue, simd128<T> whenFalse);
 }
+
 public struct simd128mask<T>
     where T : [SimdElement], [Copy], [Sized]
 {
+    public static nuint LaneCount { get; }
+
+    public bool GetLane(nuint lane);
+    public simd128mask<T> WithLane(nuint lane, bool value);
     public static simd128mask<T> First(nuint activeLanes);
+    public static simd128mask<T> And(simd128mask<T> left, simd128mask<T> right);
+    public static simd128mask<T> Or(simd128mask<T> left, simd128mask<T> right);
+    public static simd128mask<T> Xor(simd128mask<T> left, simd128mask<T> right);
+    public static simd128mask<T> Not(simd128mask<T> value);
+    public static nuint CountTrue(simd128mask<T> value);
     public static bool Any(simd128mask<T> value);
     public static bool All(simd128mask<T> value);
+    public static bool None(simd128mask<T> value);
 }
+```
 
+`TryCreate` requires exactly `LaneCount` source elements; `Load` and `Store`
+use the first `LaneCount` elements and require that many to be in bounds.
+Their failure behavior is not selected here. Masked operations access only
+active lanes: an inactive load lane uses `inactive`, and an inactive store
+lane does not access memory. Active lanes must be in bounds. `write Span<T>`
+is required to store; `mut Span<T>` only allows rebinding the descriptor.
+Lane access checks bounds; exact failure contracts, mask bit layout, lane
+order, alignment and fixed-vector ABI remain open.
+Masks represent Boolean lane predicates, not numeric vectors of all-one bits.
+
+#### Operation and conversion signature inventory
+
+The existing section-6 protocols remain the source of scalar operation
+contracts. These are **candidate signature shapes** for supported
+specializations, not a declaration that every `T` supports every operation.
+Addition is the one protocol shown on the concrete generic head above; other
+protocols remain independently selected. In particular, these do not add
+vector shift-count rules or change scalar integer shift/division behavior.
+No operator becomes a universal SIMD requirement.
+The operator block is a member excerpt from an eligible `simd128<T>`
+declaration, not namespace-level operator declarations or new family syntax.
+
+```terrum
+// Members of an eligible simd128<T> declaration.
+public static simd128<T> operator +(simd128<T> left, simd128<T> right);
+public static simd128<T> operator -(simd128<T> left, simd128<T> right);
+public static simd128<T> operator *(simd128<T> left, simd128<T> right);
+public static simd128<T> operator /(simd128<T> left, simd128<T> right);
+public static simd128<T> operator %(simd128<T> left, simd128<T> right);
+public static simd128<T> operator +(simd128<T> value);
+public static simd128<T> operator -(simd128<T> value);
+```
+
+```terrum
+public static class Simd128Conversions
+{
+    public static simd128<uint32> WidenLowerToUInt32(simd128<uint16> value);
+    public static simd128<uint32> WidenUpperToUInt32(simd128<uint16> value);
+    public static bool TryNarrowCheckedToUInt16(simd128<uint32> lower,
+        simd128<uint32> upper, init ref<simd128<uint16>> result);
+    public static simd128<uint16> NarrowSaturatingToUInt16(simd128<uint32> lower,
+        simd128<uint32> upper);
+    public static simd128<uint16> NarrowTruncatingToUInt16(simd128<uint32> lower,
+        simd128<uint32> upper);
+}
+public static class Simd128Reductions
+{
+    public static float32 SumFloat32StrictCandidate(simd128<float32> value);
+    public static float32 SumFloat32RelaxedCandidate(simd128<float32> value);
+}
+```
+
+The operator signatures use the existing `IAdditionOperators`,
+`ISubtractionOperators`, `IMultiplyOperators`, `IDivisionOperators`,
+`IRemainderOperators`, `IUnaryPlusOperators` and `IUnaryNegationOperators`
+vocabulary; each specialization must retain the corresponding scalar contract
+and exact target-default arithmetic/conversion behavior. Vector comparisons are named
+operations returning the registered mask, not `IComparisonOperators` methods
+returning scalar `bool`. Widening and narrowing signatures illustrate concrete
+lane-count-compatible shapes; a generic associated result relationship is not
+specified. A full-vector widening retains both lower and upper results;
+neither half alone preserves every source lane.
+The two reduction names are only a place to review distinct
+strict/relaxed policies. Their exact policy definitions and lane order are
+**OPEN**; floating-point reduction, reassociation and contraction must not be
+silently selected. See [associated equality, Q14](grammar-open-questions.md#q14-associated-equality-constraints)
+before proposing a generic associated-type spelling.
+
+| Explicit member substitution inventory | Registration status |
+|---|---|
+| `simd64<T>` + `simd64mask<T>` | Proposed same member categories; width, supported element/mask pairs and ABI require individual checking |
+| `simd128<T>` + `simd128mask<T>` | Fully shaped sample above; family/mask registration remains OPEN |
+| `simd256<T>` + `simd256mask<T>` | Proposed same member categories with checked lane count, target support and fallback |
+| `simd512<T>` + `simd512mask<T>` | Proposed same member categories with checked lane count, target support and fallback |
+
+This is a generative substitution inventory, not hundreds of duplicate
+declarations: substitute a width only after registering and checking that
+concrete pair. It makes no claim that the target supports every width or
+element combination, nor that every operation is supplied by every pair.
+
+### Scalable SIMD
+
+`simd<T>` is a separate, genuinely hardware-scalable, initially sizeless
+candidate—not an alias for a convenient fixed width, a member of the fixed
+family, or a vectorization promise for scalar callback bodies.
+`simd.api.terrum` sketches splat, predicated load/store, comparison,
+selection and active-lane reductions, but no complete callable declaration
+is proposed until a target profile settles scalable lane/mask ABI, storage,
+call, return, suspension and spill restrictions. Those source and profile
+requirements are **BLOCKED/OPEN**; fixed-width signatures above must not be
+reused as evidence that scalable values are storable or passable.
+The existing initial profile permits locals, scoped loans and statically
+specialized compatible calls, not ordinary fields, heap boxes, arrays or
+aggregate payloads. Live values cannot cross suspension or incompatible
+vector contexts; the exact target ABI must preserve those restrictions.
+
+### Tensor shapes and views
+
+Tensor APIs describe logical multidimensional views over memory; they are not
+SIMD ABI values. Lengths are `nuint`, element strides are signed `nint`, and
+shape metadata has a backing/lifetime dependency of its own. A rank-zero shape
+has one element. Any zero dimension makes the count zero without multiplying
+other dimensions or evaluating `(length - 1)` address terms. For nonempty
+shapes, check signed offset/address bounds. Writable views require injective
+index-to-address mappings; broadcasting that aliases logical indexes is
+readonly. A `mut` descriptor alone never grants write access.
+
+The members present in `tensors.api.terrum` remain proposed reference
+signatures. Creation/result backing syntax is **OPEN**: a shape must preserve
+its own metadata lifetime, and a returned view must preserve both storage and
+shape dependencies. The following signatures are inventory shapes wherever
+they need those unresolved dependency annotations; none selects new syntax.
+See [Q20 on backing dependencies](grammar-open-questions.md#q20-declaring-result-capture-and-backing-dependencies).
+
+```terrum
 public struct TensorShape
 {
     public nuint Rank { get; }
     public nuint ElementCount { get; }
     public Span<nuint> Lengths { get; }
     public Span<nint> Strides { get; }
+
+    public static bool TryCreate(Span<nuint> lengths, Span<nint> strides,
+        init ref<TensorShape> result);
 }
+
 public struct TensorSpan<T>
 {
     public TensorShape Shape { get; }
     public nuint ElementCount { get; }
-    [MatchedAccess] public ref<T> this[Span<nuint> indexes] { get; }
-    [MatchedAccess] public TensorSpan<T> Slice(Span<nuint> origin, Span<nuint> lengths);
-    [MatchedAccess] public TensorSpan<T> Transpose(Span<nuint> permutation);
+
+    [MatchedAccess]
+    public ref<T> this[Span<nuint> indexes] { get; }
+
+    [MatchedAccess]
+    public TensorSpan<T> Slice(Span<nuint> origin, Span<nuint> lengths);
+    [MatchedAccess]
+    public TensorSpan<T> Transpose(Span<nuint> permutation);
+    [MatchedAccess]
+    public TensorSpan<T> Reshape(TensorShape shape);
 }
+
 public static class TensorViews
 {
-    public static TensorSpan<T> View<T>(Span<T> storage, TensorShape shape, nuint origin);
-    public static write TensorSpan<T> View<T>(write Span<T> storage, TensorShape shape, nuint origin);
-    public static bool TryAsDenseSpan<T>(TensorSpan<T> source, init ref<Span<T>> result);
-    public static void CopyTo<T>(TensorSpan<T> source, write TensorSpan<T> destination)
+    public static TensorSpan<T> View<T>(Span<T> storage, TensorShape shape,
+        nuint origin);
+    public static write TensorSpan<T> View<T>(write Span<T> storage,
+        TensorShape shape, nuint origin);
+    public static TensorSpan<T> BroadcastTo<T>(TensorSpan<T> source,
+        Span<nuint> lengths);
+    public static bool TryAsDenseSpan<T>(TensorSpan<T> source,
+        init ref<Span<T>> result);
+    public static void CopyTo<T>(TensorSpan<T> source,
+        write TensorSpan<T> destination)
         where T : [Copy];
 }
+```
+
+`TryCreate` is an inventory shape only: whether it copies metadata into
+shape-owned storage or retains explicitly supplied backing, and how that
+dependency is expressed, remain unresolved. `Slice` bounds-checks origin and
+lengths; `Transpose` validates a permutation; `Reshape` requires a dense-layout
+proof and equal element count. `BroadcastTo` is deliberately readonly.
+`TryAsDenseSpan` succeeds only when the view is representable as one
+contiguous span, and its result retains the view's backing dependency. The
+multi-source lifetime notation for `View` is also open.
+
+`CopyTo` requires equal logical shapes and preflights shape, extent and
+aliasing before writing. It permits disjoint backing or exactly identical
+per-index mappings (a no-op); displaced or differently-strided overlap is
+rejected, with no hidden scratch allocation. Copies require `[Copy]`
+independently of view capability. Elementwise operations likewise preflight
+shape, destination extent and alias safety, do not implicitly broadcast or
+reduce, and allow disjoint or same-per-index mappings only.
+
+### Tensor operations
+
+The full signatures below show explicit tensor sources and writable
+destinations. Protocol constraints stay granular; arithmetic does not imply
+`[Copy]`, and no universal numeric classification is required. Reduction
+signature names and relaxed-policy definitions remain **OPEN** candidates: empty
+sum/dot use additive identity/zero, but floating-point reductions,
+reassociation and contraction require separately named policies.
+Strict tensor reductions retain the accepted logical row-major order;
+the open questions concern exact API naming, cross-width reproducibility
+and separately selected relaxed policies, not permission to reorder a strict
+reduction.
+
+```terrum
 public static class TensorPrimitives
 {
     public static void Add<T>(Span<T> left, Span<T> right, write Span<T> destination)
@@ -1337,35 +1552,50 @@ public static class TensorPrimitives
     public static T Dot<T>(Span<T> left, Span<T> right)
         where T : IAdditionOperators<T, T, T>, IMultiplyOperators<T, T, T>,
                  IAdditiveIdentity<T, T>, [Copy];
+
     public static void Add<T>(TensorSpan<T> left, TensorSpan<T> right,
         write TensorSpan<T> destination)
         where T : IAdditionOperators<T, T, T>, [Copy];
+    public static void Subtract<T>(TensorSpan<T> left, TensorSpan<T> right,
+        write TensorSpan<T> destination)
+        where T : ISubtractionOperators<T, T, T>, [Copy];
+    public static void Multiply<T>(TensorSpan<T> left, TensorSpan<T> right,
+        write TensorSpan<T> destination)
+        where T : IMultiplyOperators<T, T, T>, [Copy];
+    public static void Scale<T>(TensorSpan<T> source, T scalar,
+        write TensorSpan<T> destination)
+        where T : IMultiplyOperators<T, T, T>, [Copy];
+
+    public static T SumStrictCandidate<T>(TensorSpan<T> source)
+        where T : IAdditionOperators<T, T, T>, IAdditiveIdentity<T, T>, [Copy];
+    public static T DotStrictCandidate<T>(TensorSpan<T> left, TensorSpan<T> right)
+        where T : IAdditionOperators<T, T, T>, IMultiplyOperators<T, T, T>,
+                 IAdditiveIdentity<T, T>, [Copy];
+    public static void ReduceRowsStrictCandidate<T>(TensorSpan<T> source,
+        write TensorSpan<T> destination)
+        where T : IAdditionOperators<T, T, T>, IAdditiveIdentity<T, T>, [Copy];
+    public static void MatMulStrictCandidate<T>(TensorSpan<T> left,
+        TensorSpan<T> right, write TensorSpan<T> destination)
+        where T : IAdditionOperators<T, T, T>, IMultiplyOperators<T, T, T>,
+                 IAdditiveIdentity<T, T>, [Copy];
+
+    public static float32 SumRelaxedCandidate(TensorSpan<float32> source);
+    public static float32 DotRelaxedCandidate(TensorSpan<float32> left,
+        TensorSpan<float32> right);
+    public static void MatMulRelaxedCandidate(TensorSpan<float32> left,
+        TensorSpan<float32> right, write TensorSpan<float32> destination);
 }
 ```
 
-`simd.api.terrum` contains concrete type heads for `simd128<T>`/mask and a local pseudo-family contract for their static members; the declarations above specialize that member set for 128 bits. They remain design-only, not compiler bindings or runtime exports. Other fixed widths appear only in the family registration sketch. `simd<T>` is a separate scalable, initially sizeless type, not a host-selected fixed width. Masked-off lane access, tails, lane order, aliasing, FP contraction and reductions need explicit contracts. Tensor lengths are `nuint`, strides signed `nint`; rank-zero is scalar count one, any zero dimension yields zero without multiplying the remaining dimensions or computing `(length - 1)` addresses. Validate signed offset/address bounds for nonempty shapes. Shape metadata has its own lifetime dependency. Writable views require injective mappings; broadcast/zero-stride views cannot write when logical indexes alias. Copy preflights shape/aliasing, allows disjoint or identical per-index mappings only, and allocates no hidden temporary. Empty sum/dot return additive identity/zero. Exact default layout, scalable target ABI, family syntax and reproducible versus relaxed reduction APIs remain open.
-
-| **OPEN** fixed-family registration | Proposed common static family on each registered pair | Status |
-|---|---|---|
-| `simd64<T>` + `simd64mask<T>` | Same `Splat`, `Load/LoadMasked`, `Store/StoreMasked`, comparisons, `Select`, mask `First/Any/All` as the complete `simd128<T>` shape above | Width/element/mask ABI separately checked, not exported by the sample |
-| `simd128<T>` + `simd128mask<T>` | Complete sample above | Concrete heads exist in sketch; registration syntax OPEN |
-| `simd256<T>` + `simd256mask<T>` | Same common members, specialized lane count | Checked target support and fallback required |
-| `simd512<T>` + `simd512mask<T>` | Same common members, specialized lane count | Checked target support and fallback required |
-| `simd<T>` + scalable predicate | `Splat`, predicated load/store, comparisons, select, active-lane reduction | Separate target profile: sizeless storage/call/suspension restrictions |
-
-| Tensor family / proposed extension | Signature shape |
-|---|---|
-| `TensorShape` | `Rank`, `ElementCount`, immutable `Lengths`, signed `Strides`; checked `Create(lengths,strides,init ref<shape>)` candidate, with owned or explicitly borrowed metadata |
-| `TensorSpan<T>` | `Shape`, `ElementCount`, matched-access indexed loan, `Slice`, `Transpose`; `Reshape` only after dense-layout proof |
-| `TensorViews` | readonly/writable `View`, `TryAsDenseSpan`, `CopyTo`; candidate `BroadcastTo` returns readonly view only |
-| `TensorPrimitives` | `Add`, `Sum`, `Dot` as above; candidate `Multiply`, `Scale`, `ReduceRows`, `MatMul` require explicit shapes, destination and reduction order |
-
-Active masked lanes must be in bounds; inactive masked loads/stores do not
-touch memory. A float reduction's strict row-major order and relaxed
-architecture-dependent regrouping need distinct API names/contracts.
-An overlapping tensor view is not rendered writable merely by qualifying
-its descriptor `mut`. SIMD shape registration does not make tensors SIMD ABI
-values or grant generic vectorization of callback bodies.
+These API signatures remain proposals; strict candidates retain the existing
+row-major contract rather than selecting an accelerated reduction policy.
+`MatMulStrictCandidate` requires rank-two operands with matching contraction
+dimensions and a destination of the explicit result shape; a zero-length
+contraction produces the additive identity. `ReduceRowsStrictCandidate` reduces
+the last dimension to an explicit destination shape in logical row-major order.
+`SumStrictCandidate`, `DotStrictCandidate` and the relaxed floating signatures
+must not imply an unrecorded order, contraction or reassociation permission.
+No tensor primitive promises SIMD dispatch or hidden scratch storage.
 
 ## 8. Callables, tasks, errors, time, random and application services
 
