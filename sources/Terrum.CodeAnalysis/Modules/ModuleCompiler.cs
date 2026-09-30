@@ -46,6 +46,7 @@ public static partial class ModuleCompiler
     private const int CorePrimitiveGetterVersion = 38;
     private const int StructuredLoopVersion = 39;
     private const int VacantLocalVersion = 40;
+    private const int ConditionalVersion = 41;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -825,7 +826,8 @@ public static partial class ModuleCompiler
     private static List<int> Calls(BoundStatement body, Action<PrimitiveType>? visitType = null,
         Action<BoundViewScope>? visitView = null, Action? visitLoopTransfer = null,
         Action<BoundMutableFieldLoan>? visitMutableFieldLoan = null,
-        Action<BoundStatement>? visitStructuredLoop = null, Action<BoundVacantLocal>? visitVacantLocal = null)
+        Action<BoundStatement>? visitStructuredLoop = null, Action<BoundVacantLocal>? visitVacantLocal = null,
+        Action<BoundConditional>? visitConditional = null)
     {
         var calls = new List<int>();
         VisitStatement(body);
@@ -950,6 +952,12 @@ public static partial class ModuleCompiler
                     VisitExpression(binary.Left);
                     VisitExpression(binary.Right);
                     break;
+                case BoundConditional conditional:
+                    visitConditional?.Invoke(conditional);
+                    VisitExpression(conditional.Condition);
+                    VisitExpression(conditional.WhenTrue);
+                    VisitExpression(conditional.WhenFalse);
+                    break;
                 case BoundCast cast:
                     VisitExpression(cast.Operand);
                     break;
@@ -1009,6 +1017,13 @@ public static partial class ModuleCompiler
     {
         var found = false;
         _ = Calls(body, visitVacantLocal: _ => found = true);
+        return found;
+    }
+
+    private static bool HasConditional(BoundStatement body)
+    {
+        var found = false;
+        _ = Calls(body, visitConditional: _ => found = true);
         return found;
     }
 
@@ -1329,6 +1344,12 @@ public static partial class ModuleCompiler
                 Left = RemapExpression(binary.Left, source, destination, classOffset),
                 Right = RemapExpression(binary.Right, source, destination, classOffset),
             },
+            BoundConditional conditional => conditional with {
+                Type = RemapType(conditional.Type, source, destination, classOffset),
+                Condition = RemapExpression(conditional.Condition, source, destination, classOffset),
+                WhenTrue = RemapExpression(conditional.WhenTrue, source, destination, classOffset),
+                WhenFalse = RemapExpression(conditional.WhenFalse, source, destination, classOffset),
+            },
             BoundCast cast => cast with {
                 Type = RemapType(cast.Type, source, destination, classOffset),
                 Operand = RemapExpression(cast.Operand, source, destination, classOffset),
@@ -1498,6 +1519,11 @@ public static partial class ModuleCompiler
             && HasVacantLocal(function.Body)))
         {
             version = Math.Max(version, VacantLocalVersion);
+        }
+        if (module.Functions.Any(item => item.Function is BoundFunction function
+            && HasConditional(function.Body)))
+        {
+            version = Math.Max(version, ConditionalVersion);
         }
         writer.Write(Magic);
         writer.Write(version);
@@ -1707,6 +1733,13 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Vacant locals require semantic module version 40.");
             }
+            if (version < ConditionalVersion && items.Any(item => item.Function is BoundFunction function
+                && HasConditional(function.Body))
+                || version == ConditionalVersion && !items.Any(item => item.Function is BoundFunction function
+                    && HasConditional(function.Body)))
+            {
+                throw new ModuleFormatException("Conditional expressions require semantic module version 41.");
+            }
             if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
                 || !items.Any(static item => item.Import && item.Function is BoundFunction function
                     && !ManagedExportShape.ScalarOnly(function))))
@@ -1760,7 +1793,7 @@ public static partial class ModuleCompiler
             or MutableBufferFieldReceiverVersion or MutableBufferFieldViewVersion or ManagedValueExportVersion
             or ManagedGraphParticipantVersion or PrivateInitReferenceVersion or ExplicitGetterVersion
             or TransparentLayoutVersion or WideClassFieldsVersion or CorePrimitiveVersion
-            or CorePrimitiveGetterVersion or StructuredLoopVersion or VacantLocalVersion))
+            or CorePrimitiveGetterVersion or StructuredLoopVersion or VacantLocalVersion or ConditionalVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -2418,6 +2451,7 @@ public static partial class ModuleCompiler
             BoundRead => (byte)2,
             BoundUnary => (byte)3,
             BoundBinary => (byte)4,
+            BoundConditional => (byte)22,
             BoundCall => (byte)5,
             BoundCast => (byte)6,
             BoundFieldRead => (byte)7,
@@ -2493,6 +2527,11 @@ public static partial class ModuleCompiler
                 PutExpression(writer, binary.Left, names, ref remaining, depth + 1);
                 PutExpression(writer, binary.Right, names, ref remaining, depth + 1);
                 break;
+            case BoundConditional conditional:
+                PutExpression(writer, conditional.Condition, names, ref remaining, depth + 1);
+                PutExpression(writer, conditional.WhenTrue, names, ref remaining, depth + 1);
+                PutExpression(writer, conditional.WhenFalse, names, ref remaining, depth + 1);
+                break;
             case BoundCast cast:
                 PutExpression(writer, cast.Operand, names, ref remaining, depth + 1);
                 break;
@@ -2546,6 +2585,11 @@ public static partial class ModuleCompiler
                 var op = (TokenKind)reader.ReadInt32();
                 var left = GetExpression(reader, ref remaining, depth + 1, version);
                 return new BoundBinary(op, left, GetExpression(reader, ref remaining, depth + 1, version), type, span);
+            case 22 when version >= ConditionalVersion:
+                var condition = GetExpression(reader, ref remaining, depth + 1, version);
+                var whenTrue = GetExpression(reader, ref remaining, depth + 1, version);
+                return new BoundConditional(condition, whenTrue,
+                    GetExpression(reader, ref remaining, depth + 1, version), type, span);
             case 5:
                 // Names are resolved after the complete module graph is read.
                 var name = GetString(reader);
@@ -2657,6 +2701,11 @@ public static partial class ModuleCompiler
             : throw new ModuleContractException($"Unresolved call target '{call.Name}'."),
         BoundUnary unary => unary with { Operand = ResolveExpression(unary.Operand, names) },
         BoundBinary binary => binary with { Left = ResolveExpression(binary.Left, names), Right = ResolveExpression(binary.Right, names) },
+        BoundConditional conditional => conditional with {
+            Condition = ResolveExpression(conditional.Condition, names),
+            WhenTrue = ResolveExpression(conditional.WhenTrue, names),
+            WhenFalse = ResolveExpression(conditional.WhenFalse, names),
+        },
         BoundCast cast => cast with { Operand = ResolveExpression(cast.Operand, names) },
         BoundOptionalLift lift => lift with { Value = ResolveExpression(lift.Value, names) },
         BoundReadonlyProjection projection => projection with { Value = ResolveExpression(projection.Value, names) },

@@ -117,6 +117,10 @@ internal sealed partial class Binder
             case BoundBinary binary:
                 return CheckConstExpression(binary.Left, out unsupported)
                     && CheckConstExpression(binary.Right, out unsupported);
+            case BoundConditional conditional:
+                return CheckConstExpression(conditional.Condition, out unsupported)
+                    && CheckConstExpression(conditional.WhenTrue, out unsupported)
+                    && CheckConstExpression(conditional.WhenFalse, out unsupported);
             case BoundCast cast:
                 return CheckConstExpression(cast.Operand, out unsupported);
             case BoundCall call when call.Function >= 0 && call.Function < _signatures.Count
@@ -299,6 +303,12 @@ internal sealed partial class Binder
                     Left = ResolveConstExpression(binary.Left, locals, functions, variableCount),
                     Right = ResolveConstExpression(binary.Right, locals, functions, variableCount),
                 };
+            case BoundConditional conditional:
+                return conditional with {
+                    Condition = ResolveConstExpression(conditional.Condition, locals, functions, variableCount),
+                    WhenTrue = ResolveConstExpression(conditional.WhenTrue, locals, functions, variableCount),
+                    WhenFalse = ResolveConstExpression(conditional.WhenFalse, locals, functions, variableCount),
+                };
             case BoundCast cast:
                 return cast with { Operand = ResolveConstExpression(cast.Operand, locals, functions, variableCount) };
             case BoundCall call:
@@ -372,6 +382,12 @@ internal sealed partial class Binder
                 var right = EvaluateConstExpression(binary.Right, slots, functions, depth, state);
                 return FoldScalarConstant(binary with { Left = left, Right = right }) as BoundConstant
                     ?? throw new ConstEvalFailure("ConstEval checked arithmetic failed (overflow or division by zero).");
+            }
+            case BoundConditional conditional:
+            {
+                var condition = EvaluateConstExpression(conditional.Condition, slots, functions, depth, state);
+                return EvaluateConstExpression(condition.Value != 0 ? conditional.WhenTrue : conditional.WhenFalse,
+                    slots, functions, depth, state);
             }
             case BoundCast cast:
             {

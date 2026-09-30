@@ -2287,6 +2287,27 @@ internal sealed partial class Binder
                 expression = BindBinary(node, expected);
                 break;
 
+            case SyntaxKind.ConditionalExpression:
+            {
+                var condition = BindExpression((SyntaxNode)node.Children[0], PrimitiveType.Bool);
+                var trueNode = (SyntaxNode)node.Children[2];
+                var falseNode = (SyntaxNode)node.Children[4];
+                var trueKnown = KnownType(trueNode);
+                var falseKnown = KnownType(falseNode);
+                var resultType = expected ?? (trueKnown is null ? falseKnown
+                    : falseKnown is null || trueKnown == falseKnown ? trueKnown : null);
+                var whenTrue = BindExpression(trueNode, resultType);
+                var whenFalse = BindExpression(falseNode, resultType);
+                if (resultType is null || resultType == PrimitiveType.Void
+                    || whenTrue.Type != resultType || whenFalse.Type != resultType)
+                {
+                    Report("TRM3007", "Conditional arms require the same known, non-void result type or an expected result type.", node.Span);
+                }
+                expression = new BoundConditional(condition, whenTrue, whenFalse,
+                    resultType ?? PrimitiveType.Int32, node.Span);
+                break;
+            }
+
             case SyntaxKind.InvocationExpression:
                 expression = BindCall(node, expected);
                 break;
@@ -3133,6 +3154,12 @@ internal sealed partial class Binder
                 }
 
                 return KnownType((SyntaxNode)node.Children[0]) ?? KnownType((SyntaxNode)node.Children[2]);
+            }
+            case SyntaxKind.ConditionalExpression:
+            {
+                var whenTrue = KnownType((SyntaxNode)node.Children[2]);
+                var whenFalse = KnownType((SyntaxNode)node.Children[4]);
+                return whenTrue is null ? whenFalse : whenFalse is null || whenTrue == whenFalse ? whenTrue : null;
             }
             default:
                 return null;

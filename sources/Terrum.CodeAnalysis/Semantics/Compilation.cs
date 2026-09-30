@@ -215,6 +215,11 @@ public sealed class Compilation
                             expressions.Push(binary.Left);
                             expressions.Push(binary.Right);
                             break;
+                        case BoundConditional conditional:
+                            expressions.Push(conditional.Condition);
+                            expressions.Push(conditional.WhenTrue);
+                            expressions.Push(conditional.WhenFalse);
+                            break;
                         case BoundUnary unary:
                             expressions.Push(unary.Operand);
                             break;

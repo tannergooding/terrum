@@ -136,6 +136,12 @@ public static partial class ModuleCompiler
                 Left = LegacyExpression(binary.Left),
                 Right = LegacyExpression(binary.Right),
             },
+            BoundConditional conditional => conditional with {
+                Type = type,
+                Condition = LegacyExpression(conditional.Condition),
+                WhenTrue = LegacyExpression(conditional.WhenTrue),
+                WhenFalse = LegacyExpression(conditional.WhenFalse),
+            },
             BoundCast cast => cast with { Type = type, Operand = LegacyExpression(cast.Operand) },
             BoundOptionalLift lift => lift with { Type = type, Value = LegacyExpression(lift.Value) },
             BoundIsNull test => test with { Value = LegacyExpression(test.Value) },

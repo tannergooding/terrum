@@ -38,7 +38,7 @@ public sealed class OptionalManagedCoreTests
     {
         var syntax = SyntaxTree.Parse(Source);
         Assert.False(syntax.HasErrors);
-        Assert.Equal("syntax-30", SyntaxTree.LanguageVersion);
+        Assert.Equal("syntax-31", SyntaxTree.LanguageVersion);
         Assert.Contains(syntax.Tokens, static token => token is { Kind: TokenKind.Identifier, Text: "is" });
         Assert.Contains(syntax.Tokens, static token => token is { Kind: TokenKind.Identifier, Text: "some" });
         var identifiers = SyntaxTree.Parse("int32 Main() { int32 is = 20; int32 some = 22; return is + some; }");

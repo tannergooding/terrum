@@ -951,6 +951,15 @@ internal sealed class Parser
             left = Node(SyntaxKind.BinaryExpression, [left, Take(), ParseExpression(precedence)]);
         }
 
+        if (parentPrecedence == 0 && Current.Kind == TokenKind.Question)
+        {
+            var question = Take();
+            var whenTrue = ParseExpression();
+            var colon = Expect(TokenKind.Colon);
+            var whenFalse = ParseExpression();
+            left = Node(SyntaxKind.ConditionalExpression, [left, question, whenTrue, colon, whenFalse]);
+        }
+
         _depth--;
 
         return left;

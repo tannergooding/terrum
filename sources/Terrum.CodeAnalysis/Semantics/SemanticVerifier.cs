@@ -657,6 +657,11 @@ public static class SemanticVerifier
                     Expression(binary.Left, scope, depth + 1);
                     Expression(binary.Right, scope, depth + 1);
                     break;
+                case BoundConditional conditional:
+                    Expression(conditional.Condition, scope, depth + 1);
+                    Expression(conditional.WhenTrue, scope, depth + 1);
+                    Expression(conditional.WhenFalse, scope, depth + 1);
+                    break;
                 case BoundFieldRead field:
                     Expression(field.Receiver, scope, depth + 1);
                     break;
@@ -1118,6 +1123,11 @@ public static class SemanticVerifier
                 case BoundBinary binary:
                     Expression(binary.Left, depth + 1, acquiringRoot);
                     Expression(binary.Right, depth + 1, acquiringRoot);
+                    break;
+                case BoundConditional conditional:
+                    Expression(conditional.Condition, depth + 1, acquiringRoot);
+                    Expression(conditional.WhenTrue, depth + 1, acquiringRoot);
+                    Expression(conditional.WhenFalse, depth + 1, acquiringRoot);
                     break;
                 case BoundFieldRead field:
                     Expression(field.Receiver, depth + 1, acquiringRoot);
@@ -2674,6 +2684,41 @@ public static class SemanticVerifier
                     failures?.Add(initialized, fieldMasks);
                 }
                 break;
+            case BoundConditional conditional:
+                if (conditional.Condition is null || conditional.WhenTrue is null || conditional.WhenFalse is null
+                    || conditional.Condition.Type != PrimitiveType.Bool
+                    || conditional.WhenTrue.Type != conditional.Type || conditional.WhenFalse.Type != conditional.Type
+                    || conditional.Type == PrimitiveType.Void)
+                {
+                    throw Invalid();
+                }
+                var beforeCondition = (bool[])initialized.Clone();
+                Expression(conditional.Condition, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+                var trueFeasible = CanBe(conditional.Condition, true, ref remaining);
+                var falseFeasible = CanBe(conditional.Condition, false, ref remaining);
+                var trueState = Outcome(conditional.Condition, beforeCondition, true, ref remaining);
+                var falseState = Outcome(conditional.Condition, beforeCondition, false, ref remaining);
+                var trueMasks = (uint[])fieldMasks.Clone();
+                var falseMasks = (uint[])fieldMasks.Clone();
+                MarkOutMasks(trueState, trueMasks, function, program);
+                MarkOutMasks(falseState, falseMasks, function, program);
+                var trueDeclarations = new HashSet<int>(declarations);
+                var falseDeclarations = new HashSet<int>(declarations);
+                Expression(conditional.WhenTrue, trueState, trueMasks, trueDeclarations, function, program,
+                    ref remaining, depth + 1, trueFeasible ? failures : null);
+                Expression(conditional.WhenFalse, falseState, falseMasks, falseDeclarations, function, program,
+                    ref remaining, depth + 1, falseFeasible ? failures : null);
+                declarations.UnionWith(trueDeclarations);
+                declarations.UnionWith(falseDeclarations);
+                for (var i = 0; i < initialized.Length; i++)
+                {
+                    initialized[i] = !trueFeasible ? falseState[i] : !falseFeasible ? trueState[i]
+                        : trueState[i] && falseState[i];
+                    fieldMasks[i] = !trueFeasible ? falseMasks[i] : !falseFeasible ? trueMasks[i]
+                        : trueMasks[i] & falseMasks[i];
+                }
+                break;
             case BoundCall call:
                 if (call.Function < 0 || call.Function >= program.Functions.Length || call.Arguments.IsDefault)
                 {
@@ -2949,6 +2994,9 @@ public static class SemanticVerifier
             BoundIsSome pattern => InvalidatesReservedOwner(pattern.Value, variable, ref remaining, depth + 1),
             BoundBinary binary => InvalidatesReservedOwner(binary.Left, variable, ref remaining, depth + 1)
                 || InvalidatesReservedOwner(binary.Right, variable, ref remaining, depth + 1),
+            BoundConditional conditional => InvalidatesReservedOwner(conditional.Condition, variable, ref remaining, depth + 1)
+                || InvalidatesReservedOwner(conditional.WhenTrue, variable, ref remaining, depth + 1)
+                || InvalidatesReservedOwner(conditional.WhenFalse, variable, ref remaining, depth + 1),
             BoundFieldRead field => InvalidatesReservedOwner(field.Receiver, variable, ref remaining, depth + 1),
             BoundBufferRead buffer => InvalidatesReservedOwner(buffer.Index, variable, ref remaining, depth + 1),
             BoundViewRead view => InvalidatesReservedOwner(view.Index, variable, ref remaining, depth + 1),
@@ -3035,6 +3083,15 @@ public static class SemanticVerifier
             return Combine(firstTrue, CanBe(or.Left, true, ref remaining), rightTrue,
                 CanBe(or.Left, false, ref remaining) && CanBe(or.Right, true, ref remaining));
         }
+        if (expression is BoundConditional conditional)
+        {
+            var whenTrue = Outcome(conditional.Condition, initialized, true, ref remaining);
+            var whenFalse = Outcome(conditional.Condition, initialized, false, ref remaining);
+            return Combine(Outcome(conditional.WhenTrue, whenTrue, result, ref remaining),
+                CanBe(conditional.Condition, true, ref remaining) && CanBe(conditional.WhenTrue, result, ref remaining),
+                Outcome(conditional.WhenFalse, whenFalse, result, ref remaining),
+                CanBe(conditional.Condition, false, ref remaining) && CanBe(conditional.WhenFalse, result, ref remaining));
+        }
         var state = (bool[])initialized.Clone();
         if (expression is BoundIsSome pattern)
         {
@@ -3093,6 +3150,15 @@ public static class SemanticVerifier
             case BoundBinary binary:
                 VacateNestedOutputs(binary.Left, state, ref remaining);
                 VacateNestedOutputs(binary.Right, state, ref remaining);
+                break;
+            case BoundConditional conditional:
+                var trueState = Outcome(conditional.Condition, state, true, ref remaining);
+                VacateNestedOutputs(conditional.WhenTrue, trueState, ref remaining);
+                var falseState = Outcome(conditional.Condition, state, false, ref remaining);
+                VacateNestedOutputs(conditional.WhenFalse, falseState, ref remaining);
+                var joined = Combine(trueState, CanBe(conditional.Condition, true, ref remaining),
+                    falseState, CanBe(conditional.Condition, false, ref remaining));
+                Array.Copy(joined, state, state.Length);
                 break;
             case BoundUnary unary:
                 VacateNestedOutputs(unary.Operand, state, ref remaining);
@@ -3155,6 +3221,11 @@ public static class SemanticVerifier
             BoundBinary { Operator: TokenKind.PipePipe } or => result
                 ? CanBe(or.Left, true, ref remaining) || (CanBe(or.Left, false, ref remaining) && CanBe(or.Right, true, ref remaining))
                 : CanBe(or.Left, false, ref remaining) && CanBe(or.Right, false, ref remaining),
+            BoundConditional conditional =>
+                (CanBe(conditional.Condition, true, ref remaining)
+                    && CanBe(conditional.WhenTrue, result, ref remaining))
+                || (CanBe(conditional.Condition, false, ref remaining)
+                    && CanBe(conditional.WhenFalse, result, ref remaining)),
             _ => true,
         };
     }

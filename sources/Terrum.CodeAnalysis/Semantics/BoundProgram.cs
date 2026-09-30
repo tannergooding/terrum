@@ -527,6 +527,10 @@ public sealed record BoundUnary(TokenKind Operator, BoundExpression Operand, Pri
 public sealed record BoundBinary(TokenKind Operator, BoundExpression Left, BoundExpression Right,
     PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
+/// <summary>Evaluates the condition once and only the selected result arm.</summary>
+public sealed record BoundConditional(BoundExpression Condition, BoundExpression WhenTrue,
+    BoundExpression WhenFalse, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
 /// <summary>A statically resolved direct call.</summary>
 /// <param name="Function">The callee index.</param>
 /// <param name="Arguments">Arguments evaluated once in source order.</param>

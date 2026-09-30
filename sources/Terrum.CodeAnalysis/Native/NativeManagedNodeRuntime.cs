@@ -195,6 +195,11 @@ internal sealed partial class PeCompiler
                         binary.Operator is Terrum.CodeAnalysis.Lexing.TokenKind.AmpersandAmpersand
                             or Terrum.CodeAnalysis.Lexing.TokenKind.PipePipe ? spill : spill + 1);
                     break;
+                case BoundConditional conditional:
+                    CollectExpression(conditional.Condition, spill);
+                    CollectExpression(conditional.WhenTrue, spill);
+                    CollectExpression(conditional.WhenFalse, spill);
+                    break;
                 case BoundCall call:
                     var argumentsBase = spill + 1;
                     for (var i = 0; i < call.Arguments.Length; i++)

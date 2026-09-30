@@ -1030,6 +1030,10 @@ internal sealed partial class PeCompiler
             case BoundBinary binary:
                 return Math.Max(ExpressionSpills(binary.Left, ref maximumArguments),
                     1 + ExpressionSpills(binary.Right, ref maximumArguments));
+            case BoundConditional conditional:
+                return Math.Max(ExpressionSpills(conditional.Condition, ref maximumArguments),
+                    Math.Max(ExpressionSpills(conditional.WhenTrue, ref maximumArguments),
+                        ExpressionSpills(conditional.WhenFalse, ref maximumArguments)));
             case BoundCall call:
                 maximumArguments = Math.Max(maximumArguments,
                     call.Arguments.Length + (IsIndirect(call.Type) ? 1 : 0));
@@ -2209,6 +2213,18 @@ internal sealed partial class PeCompiler
                 LoadValue(Spill(spill), binary.Left.Type);
                 Binary(binary.Operator, binary.Left.Type);
                 break;
+            case BoundConditional conditional:
+            {
+                Expression(conditional.Condition, spill);
+                _code.Bytes(0x85, 0xC0);
+                var whenFalse = _code.JumpIf(0x84);
+                Expression(conditional.WhenTrue, spill);
+                var done = _code.Jump();
+                _code.PatchRelative(whenFalse, _code.Position);
+                Expression(conditional.WhenFalse, spill);
+                _code.PatchRelative(done, _code.Position);
+                break;
+            }
             case BoundCall call:
                 var argumentsBase = spill + 1;
                 List<(int Value, int Live, PrimitiveType Type)>? staged = null;

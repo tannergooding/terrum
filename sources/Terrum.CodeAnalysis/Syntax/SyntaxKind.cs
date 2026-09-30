@@ -131,4 +131,6 @@ public enum SyntaxKind
     DoStatement,
     /// <summary>A loop with an explicitly named transfer target.</summary>
     LabeledLoopStatement,
+    /// <summary>A right-associative conditional choice.</summary>
+    ConditionalExpression,
 }
