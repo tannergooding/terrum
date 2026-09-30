@@ -14,6 +14,9 @@ scanner-5 records nor the syntax-protocol schema changes.
 Syntax-30's standalone vacant declarations reuse the contextual identifier
 `init`; no keyword or scanner record is added.
 Syntax-31's conditional expressions reuse the existing `?` and `:` tokens.
+Syntax-32 appends `??` and `??=` identities to the operator catalog without
+renumbering existing tokens. Both scanners use longest matches; parser type
+recovery still retains and diagnoses repeated optional markers.
 Compiled-scanner input and hosted lexing produce the same checked lowering.
 
 The shared operator catalog includes syntax-28's `=>` token for expression
