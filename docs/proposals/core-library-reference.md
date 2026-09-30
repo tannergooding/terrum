@@ -704,9 +704,9 @@ an operation says otherwise.
 
 | Protocol / type | Proposed members and shape | Outcome / ownership |
 |---|---|---|
-| `ISequence<T>` | `GetEnumerator() -> TCursor` via an associated cursor relationship (**OPEN**) | Iterator construction is not enumeration or storage transfer |
-| `ICursor<T>` | `MoveNext() -> bool`; `Current -> ref<T>` or `[Copy]` value | Lending current cannot outlive cursor advancement; relation syntax OPEN |
-| `IAsyncCursor<T>` | `MoveNextAsync() -> Task<bool>`; `Current -> ref<T>` | Producer borrows persist through each completion; structured close required |
+| `ISequence<T, TCursor>` | `GetEnumerator() -> TCursor`; cursor is an explicit type argument | Proposed value/copy protocol below; no universal element-copy guarantee |
+| `ICursor<T>` | `MoveNext() -> bool`; `Current -> T` where `T:[Copy]`; candidate `Close()` | The concrete copied-value path does not define lending or consuming iteration |
+| `IAsyncSequence<T, TCursor>` / `IAsyncCursor<T>` | `GetAsyncEnumeratorAsync() -> Task<TCursor>`; `MoveNextAsync() -> Task<bool>`; `Current -> T` where `T:[Copy]`; candidate `CloseAsync() -> Task<void>` | Each task has a completion owner; borrowed variants remain blocked below |
 | `SpanAlgorithms` search | `Contains`, `IndexOf`/`TryIndexOf`, `LastIndexOf`, `Find`/`TryFind`, `CountWhere`, `All`, `Any` | Explicit equality witness or predicate; no unknown-index sentinel |
 | `SpanAlgorithms` transform | `Select`, `Where`, `Zip`, `ForEach`, `Fill`, `Reverse`, `CopyTo`, `MoveWithin` | Mutable callbacks take `write ref<TCallback>`; destination/overlap contracts differ by operation |
 | `OrderedSpanAlgorithms` aggregate | `Fold<T,TState,TFolder>`; prospective `Sum<T>`, `Min/Max<T,TOrder>` | Initial accumulator/witness explicit; empty min/max return presence, not fabricated `T` |
@@ -717,6 +717,155 @@ an operation says otherwise.
 | `SortedSet<T,TOrder>` / managed, **new** | `Count`, `Order`, `Contains`, `TryAdd`, `Remove`, `Clear`, ascending cursor | Explicit total-order witness; comparison-zero means duplicate |
 | `Deque<T>` / owned, **new** | `Count`, `PushFront/Back`, `TryPopFront/Back(init ref<T>)`, `GetSegments()` | Segments are guarded loans, never a fabricated one-span contiguous view |
 | `Dictionary<TKey,TValue,TComparer>`, `HashSet<T,TComparer>` | `Count`, comparer, `TryGet`/`Contains`, `TryAdd`, `Remove`, `Clear`, guarded cursor | Explicit key comparer; complete sample and failure contracts in §13 |
+
+#### Proposed sequence and cursor protocol candidates
+
+The following declarations are **PROPOSED** API shapes. The generic
+copy-value protocols and concrete `int32` examples describe only copied
+elements; they do not require every sequence or collection to store or copy
+its items. A cursor is acquired separately from traversal, and acquiring or
+constructing an `[Iterator]` producer does not eagerly run its body.
+
+```terrum
+public interface ICursor<T>
+    where T : [Copy]
+{
+    public mut bool MoveNext();
+    public T Current { get; }
+    public mut void Close();
+}
+public interface ISequence<T, TCursor>
+    where T : [Copy]
+    where TCursor : ICursor<T>
+{
+    public TCursor GetEnumerator();
+}
+public mut unique struct Int32RangeCursor : ICursor<int32>
+{
+    public mut bool MoveNext();
+    public int32 Current { get; }
+    public mut void Close();
+}
+public struct Int32RangeSequence : ISequence<int32, Int32RangeCursor>
+{
+    public Int32RangeCursor GetEnumerator();
+}
+[Iterator]
+public static Int32RangeSequence Range(int32 start, nuint count);
+
+public interface IAsyncCursor<T>
+    where T : [Copy]
+{
+    public mut Task<bool> MoveNextAsync();
+    public T Current { get; }
+    public mut Task<void> CloseAsync();
+}
+public interface IAsyncSequence<T, TCursor>
+    where T : [Copy]
+    where TCursor : IAsyncCursor<T>
+{
+    public Task<TCursor> GetAsyncEnumeratorAsync();
+}
+public mut unique struct Int32AsyncCursor : IAsyncCursor<int32>
+{
+    public mut Task<bool> MoveNextAsync();
+    public int32 Current { get; }
+    public mut Task<void> CloseAsync();
+}
+public struct Int32AsyncSequence : IAsyncSequence<int32, Int32AsyncCursor>
+{
+    public Task<Int32AsyncCursor> GetAsyncEnumeratorAsync();
+}
+[Iterator]
+public static async Int32AsyncSequence ValuesAsync(int32 start, nuint count);
+```
+
+`Range` and `ValuesAsync` are reference signatures for producer result
+contracts, not executable bodyless concrete members. Their implementations
+would use `yield expression;` and producer `return;`; the sync body starts on
+its first advancement, and the async body likewise starts on its first
+asynchronous advancement. `ValuesAsync` returns the proposed async-sequence
+type directly, **not** `Task<Int32AsyncSequence>`: async producer creation is
+lazy, unlike ordinary eager async invocation. The proposed async acquisition
+task completes with a cursor but must not start that producer body. Sequence
+state, cursor backing and representation are intentionally omitted and
+unselected; these signatures do not promise a storage strategy or Copy
+capability beyond the explicit `int32` examples and generic constraints.
+
+The `Current` value is available only after a successful advancement; a
+subsequent advancement changes the cursor's current position, but a copied
+`T` already read is independent of that cursor. `Close` and `CloseAsync` are
+candidate checked protocol operations, not `[NoThrow] [Cleanup]` destructors.
+Whether either name is registered as the loop-close operation is **OPEN**.
+Structured iteration closes its acquired iterator once on exhaustion, `break`, `return`, or
+failure; `await for` awaits asynchronous close before completing the exit.
+Close failure follows ordinary checked failure/chaining rules. Async
+acquisition, advancement and close tasks retain any required sequence,
+cursor, backing and affinity dependencies until their completion; a caller
+must await them or transfer responsibility to an explicit owner. Cancellation
+is only a request and does not release those dependencies or discharge task
+completion/error obligations.
+
+Borrowed and consuming forms are deliberately distinct from those
+copy-value declarations. The following are **BLOCKED CANDIDATE FORMS**, not
+approved API contracts: their signatures alone do not establish an associated
+cursor mapping, item lifetime, access mode, invalidation rule, or dependency
+metadata.
+
+```terrum
+public interface ISequence<T>
+{
+    public type Cursor;
+    public Cursor GetEnumerator();
+}
+public interface ILendingCursor<T>
+{
+    public mut bool MoveNext();
+    [return: DependsOn("this")]
+    public ref<T> Current { get; }
+    public mut void Close();
+}
+public interface IAsyncLendingCursor<T>
+{
+    public mut Task<bool> MoveNextAsync();
+    [return: DependsOn("this")]
+    public ref<T> Current { get; }
+    public mut Task<void> CloseAsync();
+}
+public interface IConsumingCursor<T>
+{
+    public mut bool TryMoveNext(init ref<T> value);
+    public mut void Close();
+}
+public interface IAsyncConsumingCursor<T>
+{
+    public mut Task<bool> TryMoveNextAsync(init ref<T> value);
+    public mut Task<void> CloseAsync();
+}
+```
+
+The associated `Cursor` spelling uses the grammar's associated-type
+declaration form, but its binding and selection contract is not adopted here.
+`[return: DependsOn("this")]` is only a dependency-annotation candidate from
+[Q20](grammar-open-questions.md#q20-declaring-result-capture-and-backing-dependencies);
+it is **UNAPPROVED** and does not itself specify which advancement invalidates
+the borrow. An item borrowing cursor state cannot outlive that state or
+silently survive a conflicting advance/suspension. A backing-only item loan
+instead preserves its declared backing dependency; it is not automatically
+shortened to the cursor-state lifetime. Async item loans must
+also retain backing and access obligations across each awaitable completion.
+The precise producer clause phases and suspension loans remain open
+([Q31](grammar-open-questions.md#q31-producer-contract-phases-and-suspension-loans)).
+
+`TryMoveNext(init ref<T>)` and its async counterpart are alternative
+consuming-advance candidates: a successful completion would transfer one
+element into the vacant output; false would leave it vacant. For the async
+form, publication would occur at task completion, not when the task is
+returned. Exact advancement, close registration and failure contracts are
+unresolved; no consuming or writable binding is implied by ordinary
+by-value iteration. Selection among by-value, borrowed and consuming element
+modes, including when advancement invalidates an item, remains open
+([Q41](grammar-open-questions.md#q41-iteration-element-binding-modes)).
 
 ### Proposed ordered and sequential collection declarations
 
@@ -834,12 +983,16 @@ bodyless signatures.
 
 `[Iterator]` denotes a lazy producer rather than a collection of eager
 results; async producers have a distinct awaitable advancement contract.
-Neither function-call syntax nor `ISequence<T>` alone authorizes hidden
+Neither function-call syntax nor a sequence interface alone authorizes hidden
 materialization, replay of a stateful callback, or a captured loan that
-escapes its lifetime. Cursor registration, close/abandon APIs, and
-associated-cursor constraints remain **OPEN**. A deterministic snapshot requires
-an explicit allocated result and policy. Collection-expression registration
-is checked per builder, not inferred from `TryAdd` spelling.
+escapes its lifetime. Exact close registration, associated-cursor selection,
+borrowed dependency annotations and representation remain **OPEN**. A
+deterministic snapshot requires an explicit allocated result and policy.
+Collection-expression registration is checked per builder, not inferred from
+`TryAdd` spelling. The accepted lazy-start, structured-close and
+awaited-close rules are in the [grammar's iteration contract](../grammar-spec.md#33-statements-and-local-declarations)
+and [producer contract](../grammar-spec.md#512-modifiers-cleanup-and-finalization);
+those operational rules do not approve the candidate member names above.
 
 ### Collection `params` binding (accepted direction; signatures illustrative)
 
