@@ -1998,6 +1998,7 @@ public mut class Dictionary<TKey, TValue, TComparer>
     public mut Result<void, Error> Set(TKey key, TValue value);
     public mut bool Remove(TKey key);
     public mut void Clear();
+    public DictionaryCursor<TKey, TValue, TComparer> GetEnumerator();
 }
 
 public mut class HashSet<T, TComparer>
@@ -2011,10 +2012,58 @@ public mut class HashSet<T, TComparer>
     public mut Result<bool, Error> TryAdd(T value);
     public mut bool Remove(T value);
     public mut void Clear();
+    public HashSetCursor<T, TComparer> GetEnumerator();
+}
+
+public struct DictionaryEntry<TKey, TValue>
+    where TKey : [ManagedStorable], [Copy], [Sized]
+    where TValue : [ManagedStorable], [Copy], [Sized]
+{
+    public DictionaryEntry(TKey key, TValue value);
+    public TKey Key { get; }
+    public TValue Value { get; }
+}
+public mut unique struct DictionaryCursor<TKey, TValue, TComparer>
+    where TKey : [ManagedStorable], [Copy], [Sized]
+    where TValue : [ManagedStorable], [Copy], [Sized]
+    where TComparer : IKeyComparer<TKey>, [ManagedStorable], [Copy], [Sized]
+{
+    public mut bool MoveNext();
+    public DictionaryEntry<TKey, TValue> Current { get; }
+    public mut void Close();
+}
+public mut unique struct HashSetCursor<T, TComparer>
+    where T : [ManagedStorable], [Copy], [Sized]
+    where TComparer : IKeyComparer<T>, [ManagedStorable], [Copy], [Sized]
+{
+    public mut bool MoveNext();
+    public T Current { get; }
+    public mut void Close();
 }
 ```
 
 These proposed constructors require both comparer and capacity; no `DefaultComparer` or hidden comparer lookup is provided, and missing values are never synthesized with `default(TValue)`. `TryGet` returns false for a missing key and leaves its output vacant; true publishes a copied value. `TryAdd` returns `Success(false)` for a duplicate without changing collection contents or count, `Success(true)` only after insertion, and `Failure(Error)` on allocation failure with no partial publication. `Set` inserts or updates and leaves the prior mapping unchanged if insertion allocation fails. `Remove` returns false when absent; `Clear` empties the collection. Construction validates capacity and is all-or-nothing; capacity/allocation failure must be a checked failure before an instance is published. The precise constructor-failure transport remains open because no constructor-failure ABI or library-wide exception hierarchy is accepted. Keys must retain equality/hash stability while stored; comparer behavior must also remain stable, and comparer equality must imply identical hashes. These collections add no automatic concurrent safety; callers need an explicit external synchronization contract. Initial key, value, element and stored-comparer constraints intentionally retain `[ManagedStorable]`, `[Copy]`, and `[Sized]`; broader affine/non-Copy storage is out of scope.
+
+The **PROPOSED** concrete cursors complete the traversal surface without
+choosing a generic associated-cursor witness or erased iterator. Each cursor
+retains a loan on its collection until close and cannot outlive that backing.
+Traversal visits each entry once in an unspecified order; it is not an
+allocated snapshot or a promise of insertion/hash order. `Current` is valid
+only after `MoveNext` returns true and before the next advancement or close.
+False exhaustion has no current value. `Close` ends traversal and releases
+the loan; repeated close is harmless, but advancement or current access after
+close is an invalid-state failure, not an empty/default result.
+
+Every successful `Current` access copies an explicitly Copy-constrained
+entry/value. A copied entry is independent of cursor position; it does not
+expose a writable dictionary slot, and its key/value copies retain their own
+ordinary backing dependencies. The initial traversal contract excludes
+collection mutation while a cursor is live, including `Set` replacing an
+existing value; it does not rely on eventual mutation detection or allow an
+aliased caller to invalidate storage behind a loan. Exact loan metadata and
+loop registration of `Close` remain **OPEN**, as for the sequence proposals
+in §5. There is no implied `[NoThrow]` cleanup registration, cross-thread
+safety, lending iteration or consuming transfer of stored elements.
 
 ### Tasks, await, cancellation and completion responsibility
 
