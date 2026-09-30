@@ -127,8 +127,19 @@ length accommodates quote runs in the content, as in
 `""""He wrote """ literally.""""`. Raw text retains ordinary target-directed
 text typing; rawness does not select an allocating string type.
 `lexer-raw-text-content` denotes content bounded by that selected fence, not
-an identifier token. Exact single-line boundary handling, multiline framing
-and indentation remain separate lexical design work.
+an identifier token. Exact quote-boundary handling and indentation remain
+separate lexical design work.
+
+Multiline raw text uses delimiter lines. After the opening fence, only
+optional horizontal whitespace precedes the framing newline. The closing
+line contains only optional indentation before its fence; ordinary source
+tokens may follow that fence. The newline after the opening delimiter and
+the newline before the closing delimiter are framing, not payload. Additional
+blank content lines supply leading/trailing payload newlines. Adjacent
+opening and closing lines are a valid empty raw value; their shared framing
+newline is excluded once, without requiring a dummy content line.
+The nonframed single-line form does not permit literal text line breaks.
+Indentation removal and interior newline value rules remain to specify.
 
 Interpolated raw text prefixes its quote fence with one or more contiguous
 `$` characters. With `N` dollar signs, a hole uses `N` opening and `N` closing
@@ -150,8 +161,10 @@ literal runs. Thus `$$"""{{{value}}}"""` emits literal braces around the
 formatted value. The split is fixed by lexical position and delimiter
 count, never by testing alternative expression interpretations.
 `lexer-raw-interpolated-content` denotes these alternating segments and
-holes under the selected delimiter lengths. Multiline framing and exact
-recovery remain separate lexical design work.
+holes under the selected delimiter lengths. Interpolated raw text uses the
+same multiline framing; line breaks inside hole expressions follow ordinary
+expression trivia rules, not literal text framing. Exact recovery remains
+separate lexical design work.
 Both interpolated forms use the same checked target-directed handler and
 capture/drain contracts in §3.4.
 
@@ -1868,7 +1881,7 @@ appears in §2.
 | Concept | Defined direction | Still to specify |
 |---|---|---|
 | Lexical tokens | §2 gives identifier and reserved-word forms; primitive names are identifiers with reserved bindings. | Exact contextual-word classification and `HexFloat` token boundaries/diagnostics. |
-| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw quote fences, `$"..."` interpolation and deterministic `$`-count raw interpolation. | Complete floating token recovery, character diagnostics, raw quote-boundary/multiline rules, format/alignment spelling and registered text APIs. |
+| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give framed raw text, `$"..."` interpolation and deterministic `$`-count raw interpolation. | Complete floating token recovery, character diagnostics, raw quote-boundary/indentation/newline rules, format/alignment spelling and registered text APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or block namespaces, without mixing. | Nested namespace blocks and namespace-local imports. |
 | Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
