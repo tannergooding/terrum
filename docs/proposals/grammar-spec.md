@@ -638,8 +638,20 @@ instead uses a normal `for (... in ...)` with an explicit `await` in its body.
 `await` is not an element-binding modifier, and `for (await ... in ...)` is
 not an alternate form. Reference modes retain their ordinary access checks,
 with suspension preserving backing, loan and affinity obligations. Iterator
-acquisition, close and cancellation protocol details remain library design;
+acquisition, close and cancellation protocol identities remain library design;
 the spelling introduces neither implicit blocking nor executor capture.
+An iteration loop closes its successfully acquired iterator according to
+the declared protocol on exhaustion, `break`, `return`, or failure, including
+an advancement failure. Acquisition failure instead uses ordinary partial
+initialization cleanup. Closing the iterator does not by itself dispose the
+source collection. The loop performs its required close operation once;
+completed producer cleanup cannot be rerun by close.
+`await for` awaits a required asynchronous close before completing the exit.
+This is a checked protocol operation, not permission for generated owner
+destruction to suspend. Backing, ownership, loans and affinity remain valid
+through close completion; a cancellation request alone does not discharge
+them. Close failures use ordinary cleanup/failure chaining without silent
+suppression.
 Blocks are required after `if`, `while`, `for`, `try`, `catch`,
 `finally`, and `unsafe`; a single unbraced statement is not part of this
 candidate. Assignment is a
@@ -1562,7 +1574,7 @@ propagates. Subsequent advances resume after the previous yield. Argument
 evaluation and producer construction can fail at invocation; body effects
 and failures occur during advancement. Captured loans retain their permitted
 backing lifetimes even if advancement is delayed or never occurs. Protocol
-method names, element-loan contracts, abandonment cleanup and representation
+method names, element-loan contracts and representation
 remain separate design work. `[Iterator]` marks the
 implementation; it is not a traversal-direction or element-access flag.
 `[Iterator]` composes with `async` for an async producer. Its declared result
@@ -1573,7 +1585,16 @@ Advancement may suspend at an `await` and resumes under the ordinary checked
 scheduling, failure and affinity rules until yield, completion or failure.
 `yield expression;` still emits an element and `return;` finishes production;
 neither introduces an implicit result wrapper. Protocol names, advance and
-close operations, and cancellation integration remain library design.
+close operation identities and cancellation integration remain library design.
+Closing a suspended producer unwinds entered scopes, executes applicable
+`finally` bodies and registered `defer` actions, and releases owned state under
+the checked cleanup contract; it does not run the remaining production body or enter previously
+unentered scopes. Already-completed cleanup is not repeated. Captured owners
+still require cleanup when a producer is closed without ever being advanced,
+even though its body has not entered any scopes. Async close may suspend only
+under its declared contract, retaining the required state and dependencies
+until completion. Loop closing is structured as specified in §3.3; manual
+consumers retain the corresponding declared close/ownership obligations.
 Reverse traversal and readonly/writable items belong to the selected
 sequence/item contracts. Whether variations are exposed as adapters or
 explicitly declared policies remains library design. Any selection must
@@ -1794,7 +1815,7 @@ appears in §2.
 | Parameters | §§3.2, 5.1–5.2 give modes, final `params`, eligible Copy defaults and direct/named attribute targets. | Complete qualifier legality and output/loan metadata. |
 | Arguments | §§3.2 and 5.1 give labels, source-order evaluation and position-preserving named/positional mixtures. | Complete passing-mode/place and overload contracts. |
 | Statements | §3.3 gives blocks, transfers, standalone discard and `yield expression;` / producer `return;`; §§3.1 and 5.12 give the `[Iterator]` marker; §3.4 permits await expressions in async bodies. | Statement-place checks and producer protocol/lifetime contracts. |
-| Iteration | §3.3 gives by-value and `ref`/`mut ref` iteration, including `await for`; §5.12 names `do`. | Iterator loan/backing, acquisition/close/cancellation contracts and post-test loop production. |
+| Iteration | §3.3 gives by-value and `ref`/`mut ref` iteration, including `await for` and structured close; §5.12 gives producer unwind and names `do`. | Iterator loan/backing, protocol identities, cancellation integration and post-test loop production. |
 | Expressions | §3.4 gives conditional/coalescing/optional access, tuples, target-directed static/async lambdas, await and collection spreads. | Callable capture/representation, awaiter registration and collection-fragment contracts; comprehensions/repetition deferred for library/tensor design. |
 | Patterns | §3.3 gives shared switch arms, guarded matching, compatible `or` bindings and explicit constant/wildcard transfers. | Full nominal-case, relational and destructuring patterns. |
 | Policies | §§3.3–3.4 and 5.12 describe lexical preferences, strict selection and constant-formal forwarding. | Variant-declaration syntax and compile-time queries. |
