@@ -166,13 +166,18 @@ to adjoin the preceding name. Interior trivia remains optional, including
 comments and multiline arguments/closers. A constructed type remains a
 sequence of lexical tokens; generic delimiters are recognized by grammatical
 role, distinct from spaced binary comparisons.
+Designated keyword-introduced angle lists likewise attach their `<` to
+the introducer: `default<I>`, `.via<I>`, `policy<Domain.Case>` and
+`ref<T>` (including `init ref<T>` and `implicit ref<T>`). Their interiors
+retain ordinary trivia, but trivia before the opener rejects. Word
+boundaries between separate keywords are unchanged.
 Optional-type suffix `?` adjoins the type's final token, including a tuple
 or generic closing delimiter. Type-context adjacency permits `List<T?>`,
 `List<T>?` and `List<List<T?>>`; it does not define general expression
 operators containing those glyph runs. `T ?` rejects, as does repeated
 source optional marking `T??`. Spaced coalescing `a ?? b` is unchanged.
-Keyword operators retain word boundaries. Other delimiter roles,
-keyword-selected angle lists and range syntax retain their own grammatical
+Keyword operators retain word boundaries. Other delimiter roles and
+range syntax retain their own grammatical
 rules; their exact remaining spacing requirements are separate design work.
 
 Punctuation adjacency follows an allow list: one defined spelling or an

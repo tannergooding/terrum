@@ -183,7 +183,7 @@ checked against its declaration.
 **C# model:** Generic syntax is C#-inspired, but requiring opener attachment
 deviates from C#'s trivia-insensitive generic delimiters. Flexible interior
 trivia follows C#.
-Keyword-selected angle lists remain a separate decision.
+Keyword-selected angle lists follow the accepted attachment rule below.
 
 **Accepted optional-type suffix attachment:** Require type suffix `?` to
 attach directly to the type's final token. Use `T?`, `(T, U)?` and `List<T>?`, rejecting
@@ -197,10 +197,8 @@ the distinct spaced coalescing expression operator.
 but mandatory attachment differs from C#'s trivia-insensitive spelling,
 and Terrum's optional semantics remain its own contract.
 
-**Keyword-selected angle-list question (awaiting review):** Should angle
-lists introduced by designated keywords follow the same opener-attachment
-rule as generic lists?
-**Recommendation:** Require `default<I>`, `.via<I>`,
+**Accepted keyword-selected angle-list attachment:** Apply the same
+opener-attachment rule as generic lists. Require `default<I>`, `.via<I>`,
 `policy<Domain.Case>` and `init ref<T>`; reject `default <I>`,
 `.via <I>`, `policy <Domain.Case>` and `init ref <T>`.
 Their `<` attaches to the designated introducer, with flexible interior
@@ -210,7 +208,20 @@ keywords remain required; attachment does not permit `initref<T>`.
 **C# model:** These Terrum witness/policy/init forms have no direct C#
 equivalent. C# `default(T)` is a default-value expression, not Terrum's
 interface-default-body selector `default<I>`.
-This recommendation has not been accepted.
+
+**Range/from-end composite question (awaiting review):** Should `..^`
+be a defined composite punctuator for a slice whose upper bound is
+end-relative, as in `items[start..^1]`?
+**Recommendation:** Yes; assign that complete spelling explicitly rather
+than permitting free concatenation of `..` and `^`. Preserve the existing
+separated `items[start.. ^1]` form with the same slicing semantics.
+This admits the common tight form while leaving unassigned runs such as
+`...` reserved for an explicit future language decision.
+**C# model:** The slicing purpose resembles C# range/from-end indexing,
+but this indivisible punctuator differs from the separate `..` and `^`
+forms in the [C# range/index grammar](https://github.com/dotnet/csharplang/blob/main/proposals/csharp-8.0/ranges.md).
+It is not a general arithmetic operator or unrestricted operator-run
+exception. This recommendation has not been accepted.
 
 **Comment-fence question:** Should a block comment select its closing fence
 from the opening star count, analogously to the selected delimiter length of

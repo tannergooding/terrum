@@ -775,6 +775,16 @@ Nested generic closing delimiters retain their type-context recognition, so
 `List<List<T>>` does not require separating its closers. Comparison `<` and
 `>` remain spaced binary expression operators, not generic delimiters.
 
+Designated keyword-introduced angle lists use the same opener attachment
+and flexible interior trivia: `default<I>`, `.via<I>`,
+`policy<Domain.Case>` and `init ref<T>` require `<` to adjoin its
+introducer. `default <I>`, `.via <I>`, `policy <Domain.Case>` and
+`init ref <T>` reject. This applies to the reference-type/loan constructor
+`ref<T>`, including its separately worded `init` and `implicit` forms.
+Separate words retain their normal boundaries: `init ref<T>` is not
+`initref<T>`. Attachment does not change witness selection, policy
+selection, initialization or reference authority.
+
 The optional-type suffix `?` attaches directly to the type's final token:
 `T?`, `(T, U)?` and `List<T>?` are valid forms, but `T ?` and
 `List<T> ?` reject. In type context, optional suffixes may adjoin generic
