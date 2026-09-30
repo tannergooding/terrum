@@ -280,8 +280,9 @@ of a compound receiver, not only an identifier; generic lists attach to
 their introducing name. Interior trivia does not relax operator spacing,
 nesting, argument or other content requirements.
 Punctuation adjacency follows an allow list, not a list of forbidden runs.
-A contiguous run of operator glyphs must be one defined operator, not an
-implicit concatenation of separate operators. Thus `x+++y` rejects, while
+A contiguous run of operator glyphs must be one defined operator or
+punctuator, not an implicit concatenation of separate operators.
+Thus `x+++y` rejects, while
 `x++ + y` and `x + ++y` separate and attach operators according to their
 roles. Whitespace or a comment can separate operators; ordinary grouping
 delimiters, commas and
@@ -1094,7 +1095,8 @@ PostfixPart     = ".", Identifier, [ TypeArguments ]
 IndexArgument   = IndexBound | SliceRange ;
 IndexBound      = Expression | FromEndBound | "(", IndexBound, ")" ;
 FromEndBound    = "^", Operand ;
-SliceRange      = [ IndexBound ], "..", [ IndexBound ] ;
+SliceRange      = [ IndexBound ], "..", [ IndexBound ]
+                | [ IndexBound ], "..^", Operand ;
 Primary         = "(", [ Expression ], ")" | TupleExpression
                 | SwitchExpression | CollectionExpression
                 | "new", Type, Arguments,
@@ -1245,8 +1247,12 @@ zero-based sequences check `0 <= offset <= length` before computing
 `^0` denotes the end boundary and is legal as a slice endpoint, not an
 element access. Element accesses must still resolve below length.
 The offset evaluates once and is skipped by null optional indexing.
-Separate adjacent range/from-end punctuation with trivia, as in
-`items[start.. ^1]`, under the ordinary punctuation-run rule.
+The defined composite punctuator `..^` introduces a slice with an
+end-relative upper bound: `items[start..^1]` and `items[..^1]`.
+The separated `items[start.. ^1]` form remains valid with the same semantics.
+Recognize `..^` as one assigned spelling, not as permission to concatenate
+arbitrary range/spread and prefix operators. It is admitted only in this
+slice-bound role; unassigned runs such as `...` remain invalid.
 This contextual bound syntax does not infer a universal first-class `Index`
 type or authorize unrelated unary `^` overloads.
 

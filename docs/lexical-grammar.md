@@ -182,8 +182,9 @@ rules; their exact remaining spacing requirements are separate design work.
 
 Punctuation adjacency follows an allow list: one defined spelling or an
 explicit grammatical boundary, not an enumeration of forbidden combinations.
-A contiguous run of operator glyphs must be one defined operator, not
-implicitly concatenated operators: `x+++y` rejects, whereas `x++ + y` and
+A contiguous run of operator glyphs must be one defined operator or
+punctuator, not implicitly concatenated operators: `x+++y` rejects,
+whereas `x++ + y` and
 `x + ++y` satisfy the operator-role spacing rules. Trivia can separate
 operators; grouping delimiters, commas and semicolons are not part of such a
 run. Nested generic
@@ -191,6 +192,12 @@ closing delimiters are recognized in type-argument context. Exact glyph
 membership and contextual exceptions, including optional/type punctuation
 and comment openers, remain to specify. Neither recovery nor a formatter may
 guess a different expression from an invalid run.
+
+`..^` is one defined composite punctuator for an end-relative upper slice
+bound, as in `items[start..^1]`. The grammar also permits separated `..`
+and `^`, as in `items[start.. ^1]`, with the same slicing semantics.
+This does not allow arbitrary concatenation or assign the unlisted `...`
+spelling. Lexical recognition does not admit `..^` outside its slice role.
 
 ## Strings and character notation
 

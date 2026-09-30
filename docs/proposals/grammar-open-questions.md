@@ -75,7 +75,8 @@ are still under review.
 punctuation; `List<List<int32>>` uses type-context closers.
 
 **C# model:** Not C# maximal-munch operator concatenation. Terrum requires one
-defined operator per contiguous run except explicit contextual exceptions.
+defined operator/punctuator per contiguous run except explicit contextual
+exceptions.
 Unlike C#, operator-role spacing and attachment are source validity rules.
 
 **Recommendation (under review):** Use an explicit allow list, not a deny
@@ -89,7 +90,7 @@ The proposed allow list is:
 | Grouping and list delimiters | `(`, `)`, `[`, `]`, `{`, `}`, `,` and `;` bound separate tokens, as in `x * (-y)` or `f(a[i])`; ordinary interior/separator trivia is flexible, with receiver attachment required for calls/indexing. |
 | Comment boundaries | Recognize ordinary `//`/`/*` and selected documentation `///`/`//*` openers before operator-run validation outside literals/comments; documentation-block recognition precedes ordinary line comments. |
 | Type-context punctuation | Attached optional `?` before/after generic closers and consecutive generic closers, as in `List<T?>`, `List<T>?` and `List<List<T?>>`; only when required by the type/argument grammar. |
-| Range/from-end punctuator | Candidate named composite `..^` introduces an end-relative upper slice bound, as in `items[start..^1]`; not a freely concatenated `..` and `^` or a general arithmetic operator. |
+| Range/from-end punctuator | Accepted named composite `..^` introduces an end-relative upper slice bound, as in `items[start..^1]`; not a freely concatenated `..` and `^` or a general arithmetic operator. |
 
 Literal contents and escaped identifier tokens follow their own lexical
 rules, not operator-run validation. No other operator-token concatenation is
@@ -107,7 +108,8 @@ literal/interpolation contents retain their own delimiter rules. Generic
 closers adjoining assignment, as in `alias A<T>=T;`, are not a listed
 exception: use `alias A<T> = T;`. Group constant-generic expressions containing
 comparison/shift punctuation when needed to make their boundary explicit.
-The `..^` proposal does not permit arbitrary range/spread-plus-prefix runs.
+The accepted `..^` punctuator does not permit arbitrary
+range/spread-plus-prefix runs.
 Prefix chains such as `!!x`, `&*p` and `*&x` need grouping unless a distinct
 spelling or adjacency boundary is deliberately defined. Separating two
 symbolic prefix operators with trivia does not satisfy operand attachment.
@@ -209,10 +211,9 @@ keywords remain required; attachment does not permit `initref<T>`.
 equivalent. C# `default(T)` is a default-value expression, not Terrum's
 interface-default-body selector `default<I>`.
 
-**Range/from-end composite question (awaiting review):** Should `..^`
-be a defined composite punctuator for a slice whose upper bound is
-end-relative, as in `items[start..^1]`?
-**Recommendation:** Yes; assign that complete spelling explicitly rather
+**Accepted range/from-end composite:** Define `..^` as a composite
+punctuator for an end-relative upper slice bound, as in `items[start..^1]`.
+Assign that complete spelling explicitly rather
 than permitting free concatenation of `..` and `^`. Preserve the existing
 separated `items[start.. ^1]` form with the same slicing semantics.
 This admits the common tight form while leaving unassigned runs such as
@@ -221,7 +222,20 @@ This admits the common tight form while leaving unassigned runs such as
 but this indivisible punctuator differs from the separate `..` and `^`
 forms in the [C# range/index grammar](https://github.com/dotnet/csharplang/blob/main/proposals/csharp-8.0/ranges.md).
 It is not a general arithmetic operator or unrestricted operator-run
-exception. This recommendation has not been accepted.
+exception.
+
+**Slice-bound spacing question (awaiting review):** Should `..` allow
+flexible spacing while from-end `^` attaches to its following offset?
+**Recommendation:** Permit `items[start..end]`, `items[start .. end]`,
+`items[..end]` and `items[start..]`. Treat `..` as the slice connector,
+not a binary arithmetic operator requiring spaces. Require `^1` or
+`^(offset + 1)`, rejecting `^ 1`; the composite `..^` likewise attaches
+to its offset, admitting `items[start..^1]` but not `items[start..^ 1]`.
+The separated `items[start.. ^1]` form retains the same meaning.
+**C# model:** The range spellings and flexible connector spacing are
+C#-inspired; mandatory from-end offset attachment deviates from C#'s
+trivia-insensitive unary prefix syntax. Bounds/lifetime and once-only
+evaluation contracts do not change. This recommendation has not been accepted.
 
 **Comment-fence question:** Should a block comment select its closing fence
 from the opening star count, analogously to the selected delimiter length of
