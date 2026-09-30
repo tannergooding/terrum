@@ -198,6 +198,12 @@ bound, as in `items[start..^1]`. The grammar also permits separated `..`
 and `^`, as in `items[start.. ^1]`, with the same slicing semantics.
 This does not allow arbitrary concatenation or assign the unlisted `...`
 spelling. Lexical recognition does not admit `..^` outside its slice role.
+The slice connector `..` allows flexible trivia on either side, including
+omitted bounds where the grammar permits. From-end prefix `^` attaches
+to its following offset token; the composite `..^` does likewise.
+Thus `items[start .. end]`, `items[^1]`, `items[start.. ^1]` and
+`items[start..^1]` are valid forms; `^ 1` and `..^ 1` reject.
+Expression bitwise XOR remains a distinct spaced binary operator.
 
 ## Strings and character notation
 

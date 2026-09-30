@@ -224,9 +224,9 @@ forms in the [C# range/index grammar](https://github.com/dotnet/csharplang/blob/
 It is not a general arithmetic operator or unrestricted operator-run
 exception.
 
-**Slice-bound spacing question (awaiting review):** Should `..` allow
-flexible spacing while from-end `^` attaches to its following offset?
-**Recommendation:** Permit `items[start..end]`, `items[start .. end]`,
+**Accepted slice-bound spacing:** Allow flexible `..` spacing while
+from-end `^` attaches to its following offset.
+Permit `items[start..end]`, `items[start .. end]`,
 `items[..end]` and `items[start..]`. Treat `..` as the slice connector,
 not a binary arithmetic operator requiring spaces. Require `^1` or
 `^(offset + 1)`, rejecting `^ 1`; the composite `..^` likewise attaches
@@ -235,7 +235,19 @@ The separated `items[start.. ^1]` form retains the same meaning.
 **C# model:** The range spellings and flexible connector spacing are
 C#-inspired; mandatory from-end offset attachment deviates from C#'s
 trivia-insensitive unary prefix syntax. Bounds/lifetime and once-only
-evaluation contracts do not change. This recommendation has not been accepted.
+evaluation contracts do not change.
+
+**Assignment/binding spacing question (awaiting review):** Should assignment
+and binding operators require separating trivia on both sides, including
+declaration initializers/defaults and alias/associated bindings?
+**Recommendation:** Yes: require `x = value`, `x += value`,
+`int32 x = 1`, `T = void` in a defaulted formal, and `alias A<T> = T`.
+Reject their squashed counterparts. Treat the complete compound spelling
+as one operator and retain each context's existing type/constant/ownership
+rules; spacing does not turn assignment into an expression.
+**C# model:** Assignment/binding spellings are C#-inspired, but mandatory
+separation differs from C#'s trivia-insensitive operators.
+This recommendation has not been accepted.
 
 **Comment-fence question:** Should a block comment select its closing fence
 from the opening star count, analogously to the selected delimiter length of

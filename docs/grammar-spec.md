@@ -1239,9 +1239,16 @@ text into unchecked raw units. Syntax does not grant heterogeneous tuple
 slicing, tensor rank changes or arbitrary indexer range support without
 their own eligible contracts. First-class range values remain separate work.
 
+The slice connector `..` imposes no spacing or attachment requirement
+of its own: `items[start..end]`, `items[start .. end]`, `items[..end]`
+and `items[start..]` are valid forms. It connects slice bounds rather than
+acting as a binary arithmetic operator.
+
 An index or slice bound may use contextual prefix `^offset` for an
 end-relative position. It has ordinary prefix binding; use `^(offset + 1)`
-for a computed offset. Infix `^` retains bitwise XOR meaning. Standard
+for a computed offset. The prefix attaches directly to its following
+operand token: `^1` and `^(offset + 1)` are valid, but `^ 1` rejects.
+Infix `^` retains bitwise XOR meaning. Standard
 zero-based sequences check `0 <= offset <= length` before computing
 `length - offset`, without unsigned wrapping. `^1` selects the last element;
 `^0` denotes the end boundary and is legal as a slice endpoint, not an
@@ -1249,6 +1256,8 @@ element access. Element accesses must still resolve below length.
 The offset evaluates once and is skipped by null optional indexing.
 The defined composite punctuator `..^` introduces a slice with an
 end-relative upper bound: `items[start..^1]` and `items[..^1]`.
+The composite likewise attaches to its offset: `..^1` or
+`..^(offset + 1)`, not `..^ 1`.
 The separated `items[start.. ^1]` form remains valid with the same semantics.
 Recognize `..^` as one assigned spelling, not as permission to concatenate
 arbitrary range/spread and prefix operators. It is admitted only in this
