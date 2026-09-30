@@ -30,7 +30,14 @@ reinterpretations to preserve the source's `int32` count semantics.
 It is implemented in C#,
 supports fail-fast only, and does not make these broader Terrum compiler
 candidates self-hosting or change their provisional frontend projections.
-The host parser's current language version is syntax-36. Syntax-18's qualified
+Syntax-37/scanner-6 adopts whole-star ordinary/documentation comment fences,
+opaque nonnesting contents and exact one-/two-slash closers. Documentation
+trivia kinds 4/5 and overlong-fence diagnostic 10 append to existing records
+without widening them. The native snapshots/frontend consume those records
+within unchanged bounds and projection versions; historical fixed-fence
+outputs cannot masquerade as current parser input. No extraction schema,
+other punctuation adoption, semantic format or native ABI is added.
+The host parser's current language version is syntax-37. Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle
 specializations described below. These reuse existing, feature-selected
 semantic contracts without changing the scanner record/schema, native profile
@@ -196,8 +203,8 @@ native emitter or compiler self-build.
 | [TokenTests](TokenTests.terrum) | Nested value copies and reconstruction with a vacancy-only initialized replacement range | Executed through the Windows indirect aggregate ABI; token and range fields stay read-only; no retained backing views |
 | [ManagedTokenChain](ManagedTokenChain.terrum) | Bounded linked storage for complete Copy tokens and vacancy-only validated source ranges, with a sequential managed cursor, non-consuming indexed lookahead and conditional kind consumption | AOT/JIT fixtures under both policies; 64-link capacity, count/version changes, `out` and vacancy-only `init ref` cursor creation, lookahead and indexed/sequential Copy results, mismatch does not advance, mutation invalidation and collection after clear |
 | [TokenSnapshot](TokenSnapshot.terrum) | Owned, indexed copy of a completed compiled scanner stream using three words per token, without the managed chain's 64-link limit | AOT/JIT indexed-read parity beyond 64 tokens, exact EOF and checked invalid indices; buffer capacity and allocation still bound the snapshot, trivia requires the separate snapshot, and diagnostics and general parser integration remain future work |
-| [TokenTriviaSnapshot](TokenTriviaSnapshot.terrum) | Separately owned scanner-5 leading-trivia records with kind, range and owning token index, atomically published with `TokenSnapshot` by `TryScanLossless` | AOT/JIT host-lexer parity, contiguous source coverage, invalid record/owner rejection and input mutation independence under both policies; no diagnostic recovery, integer-value ownership or general CST parser |
-| [TokenIntegerSnapshot](TokenIntegerSnapshot.terrum) | Separately owned scanner-5 numeric-token indices and raw unsigned magnitude words, published with tokens and trivia by `TryScanCompilerInput` | AOT/JIT full-`uint64`, radix and overflow fixtures, indexed token lookup, invalid index/status/tag/owner rejection and atomic failure; shape checks do not prove a producer's arithmetic, and general binding remains hosted |
+| [TokenTriviaSnapshot](TokenTriviaSnapshot.terrum) | Separately owned scanner-6 leading-trivia records with kind, range and owning token index, atomically published with `TokenSnapshot` by `TryScanLossless` | AOT/JIT host-lexer parity, contiguous source coverage, invalid record/owner rejection and input mutation independence under both policies; no diagnostic recovery, integer-value ownership or general CST parser |
+| [TokenIntegerSnapshot](TokenIntegerSnapshot.terrum) | Separately owned scanner-6 numeric-token indices and raw unsigned magnitude words, published with tokens and trivia by `TryScanCompilerInput` | AOT/JIT full-`uint64`, radix and overflow fixtures, indexed token lookup, invalid index/status/tag/owner rejection and atomic failure; shape checks do not prove a producer's arithmetic, and general binding remains hosted |
 | [TokenDiagnosticSnapshot](TokenDiagnosticSnapshot.terrum) | Independently owned lexical diagnostic codes and source ranges, available after a scan with errors even when token snapshots cannot publish | AOT/JIT host diagnostic parity under both policies, invalid buffer rejection, stable reads after host mutation and no success-shaped empty token stream on lexical failure |
 | [ScalarParserTypes](ScalarParserTypes.terrum) | Shared scalar type recognition, token-name equality, scalar comparison and scanner-integer decoding for separately compiled bounded parser probes | Scanner-owned source ranges, UTF-16 spelling and integer records, with no independent syntax or semantic ABI |
 | [ScalarFrontend](ScalarFrontend.terrum) | Reusable bounded frontend phase over a successful scanner snapshot: one scalar function with zero to three named parameters, parameter references, Boolean literals or unary `!` over a Boolean literal/parameter (including grouped operands), `~` over a contextual integer literal/parameter (including grouped operands), `+` over a contextual integer literal/parameter or named parameter (including grouped operands), or signed `-` over a named integer parameter (including grouped operands), contextual unsuffixed integer literals (including unary signed minus and decimal minima), either order of parameter/literal integer arithmetic or bitwise operations and integer/`char16` comparisons (including unary `+` or `-` on supported literal operands), two contextual 32-bit integer literals in arithmetic or bitwise operations, Boolean equality, bitwise or short-circuit operations between parameters and/or literals, conditional returns or trailing fallthrough where valid, whole-expression grouping, and explicit `public`/`internal` visibility; v48 adds structured returns and v49 adds integer shifts, compounds and local updates across branches/loops | Bounded scalar type, expression, source-span and control-flow projection consumed by the shared host verifier/emitter; scanner integer records and destination bounds determine integer constants without rescanning digit text. Uses `Host.Source` and managed tokens, so neither the persisted primitives DLL nor `build-component` consumes its typed result yet |
@@ -612,7 +619,7 @@ type. Empty hexadecimal and binary prefixes
 report `TRM0007` and `TRM0008`, respectively. Hexadecimal and binary literals
 construct bits in their destination type; nonzero bits beyond its width are
 diagnosed, and decimal signed-range and negative-minimum rules are unchanged.
-Attached width suffixes are lexical errors (`TRM0006`); scanner-5 retains
+Attached width suffixes are lexical errors (`TRM0006`); scanner-6 retains
 recognized suffix-tag metadata only in the existing record for those rejected
 tokens, while valid integer records are untagged. Larger integer magnitudes
 are reported as beyond the decoder's range, not lexical errors. Floating

@@ -40,6 +40,16 @@ closing tokens in the CST, retaining leading trivia on the first part.
 CST stream. The scanner's internal packed match reserves three width bits
 for the four-code-unit `>>>=` spelling; published token records are unchanged.
 
+Syntax-37 advances the current component to scanner-6/schema-6 for generalized
+ordinary and documentation comment fences. Maximal opening star runs select
+whole equal-length closing runs with one slash for ordinary blocks and two
+for documentation blocks. Shorter runs and missing slash suffixes are payload;
+overlong runs with the required suffix diagnose `TRM0010`. Payload is opaque,
+not nested, and extra closer slashes remain for later lexing.
+Trivia IDs 0–3 retain their meanings; 4/5 append documentation line/block
+comments. Diagnostic 10 is added without changing any record width, token ID,
+source/token budget or native/semantic protocol.
+
 The shared operator catalog includes syntax-28's `=>` token for expression
 bodies; no scanner record or schema revision is needed. Syntax-16 rejects attached
 numeric width suffixes with `TRM0006`, diagnoses missing hexadecimal and
@@ -64,7 +74,7 @@ Both are execution-worker commands: compiled scanner code runs inside that CLI
 process. Supervising clients must launch a bounded subprocess and treat abnormal
 termination as a runtime failure. Ordinary `build` still uses the host lexer.
 When `scan-component`
-scanning completes, JSON uses `schemaVersion: 5`, `component: "scanner-5"`,
+scanning completes, JSON uses `schemaVersion: 6`, `component: "scanner-6"`,
 `coordinateSystem: "utf-16"`, the pinned `unicodeVersion`, `sourceLength`,
 `success`, and arrays of `tokens`, `integerValues`, and `diagnostics`. Each token has an exact
 lexical `kind`, `start`, `length` and its ordered `leadingTrivia` array.
@@ -78,7 +88,7 @@ return `success: false` and exit code 1 but still publish the full token stream
 and diagnostics on stdout. Without `--json`, token rows go to stdout and
 diagnostic code/spans go to stderr. Input, compilation, or invalid-result
 failures retain the standard schema-1 error response rather than producing a
-scanner-5 token response.
+scanner-6 token response.
 
 `build-component` instead adapts the native records to `LexResult`, pairs the
 validated integer values with that same source and token stream, feeds them
@@ -88,7 +98,8 @@ integer magnitudes, including signed-minimum operands, rather than decoding
 their source digit sequences again. Missing, duplicate or mismatched integer
 records reject the component result; unsupported numeric forms retain their
 existing binding diagnostics. Ordinary `build` still uses the host lexer and integer
-decoder. `build-component` never re-lexes the target source or falls back to
+decoder. `build-component` validates current trivia extents and comment
+diagnostics without re-lexing target tokens or falling back to
 host decoding when the scanner fails. The scanner's own source is still
 compiled by the host front end. This is a Terrum-implemented lexical and
 integer-decoding phase in the real compiler pipeline, not a self-hosted parser
@@ -158,8 +169,11 @@ records, including EOF. Words beyond that count are not token records.
 numeric value, UTF-16 start, UTF-16 length, and zero-based owning token index.
 Leading trivia remains attached to EOF when there is no following token.
 `Host.Diagnostics[0]` contains
-the diagnostic count; subsequent triples are numeric code (1–9 maps to
-`TRM0001`–`TRM0009`), UTF-16 start and UTF-16 length, in reporting order.
+the diagnostic count; subsequent triples are numeric code (1–10 maps to
+`TRM0001`–`TRM0010`), UTF-16 start and UTF-16 length, in reporting order.
+Overlong suffixed fences report their whole run plus the required suffix;
+recovery keeps them in the comment until a valid closer or EOF. EOF without
+a valid closer also reports `TRM0003`, retaining all source text.
 `Host.IntegerValues[0]` contains a count followed by five-word records:
 zero-based numeric-token index, status (0 = decoded; 1 = exceeds `uint64`),
 unsigned magnitude low 32 bits, high 32 bits, and suffix-tag metadata.
@@ -205,6 +219,13 @@ overload re-lexes or duplicates the token stream.
 The adapter validates published counts, kinds, ranges, owner ordering,
 nonempty diagnostic/trivia spans, and exact contiguous coverage by token and
 trivia records. No source unit may be omitted, duplicated or reordered.
+Current parser adaptation additionally audits only the leading-trivia portions
+against the current comment rules, including required diagnostics; token
+classification and numeric decoding remain native results. Historical
+scanner-5 records keep their numeric identities and raw readers, and historical
+compiled scanners still execute. Compatible outputs can feed the current
+adapter, but old fixed-fence or documentation classifications that disagree
+with syntax-37 reject as `TRM5001` in CLI adaptation rather than being relabeled.
 A malformed token remains a `Bad`, `NumericLiteral`, or `StringLiteral` token
 with its raw source span; diagnostics do not replace source characters.
 
@@ -225,8 +246,8 @@ the same generated `UnicodeXid` ranges as the host lexer; the public read-only
 `UnicodeIdentifierProfile` carries the version and pinned input SHA-256.
 No normalization, case folding or ambient host Unicode categories are involved.
 
-Whitespace runs, individual line breaks (with CRLF as one trivia item), and
-non-nesting `//` and `/* ... */` comments follow the host lexer and are
+Whitespace runs, individual line breaks (with CRLF as one trivia item), ordinary
+and documentation line comments, and generalized nonnesting block fences follow the host lexer and are
 preserved as leading trivia; malformed surrogates within comments and unterminated
 block comments are diagnosed. Strings preserve raw spans across escapes;
 unterminated strings stop before a newline, and invalid/incomplete escapes and

@@ -54,7 +54,9 @@ substitutions preserve readonly/write and supported optional qualification;
 they do not grant member, null-test or operator capabilities absent from the
 function's constraints. See the [bounded generic contract](docs/implementation.md#bounded-generic-functions)
 for inference, results, outputs, rooting and remaining limits.
-The current parser version is syntax-36. Standalone `init T name;` and
+The current parser version is syntax-37, including generalized ordinary and
+documentation comment fences in the hosted lexer and compiled scanner-6.
+Standalone `init T name;` and
 `init var name;` declare readonly vacant locals, published only by checked
 initialization; semantic v40 is selected when these declarations are retained.
 Syntax-31 adds target-checked conditional expressions: evaluate the condition

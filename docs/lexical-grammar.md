@@ -312,9 +312,9 @@ outside it and is not a valid continuation of that comment. Generalized
 fences do not create nesting or a tooling-specific escape from the closer.
 Documentation trivia retains its source extent while participating in
 declaration attachment and separate documentation extraction.
-These approved fence rules are source targets, not evidence of current
-scanner adoption; fixed-fence empty-comment behavior is not generalized-fence
-conformance.
+See the [scanner implementation](scanner.md) for current adoption and
+historical profile compatibility; fixed-fence empty-comment behavior is not
+generalized-fence conformance.
 The final zero-width EOF token owns trailing trivia. Unterminated block
 comments receive a diagnostic. Malformed surrogate units inside any comment form are
 diagnosed without changing the trivia text. Lexical diagnostic codes are
@@ -322,7 +322,10 @@ diagnosed without changing the trivia text. Lexical diagnostic codes are
 unterminated string, `TRM0003` for an unterminated block comment, `TRM0004`
 for an incomplete exponent, `TRM0005` for an invalid escape, `TRM0006`
 for an attached numeric width suffix, `TRM0007` for a hexadecimal prefix
-without a digit, `TRM0008` for a binary prefix without a digit, and `TRM0009`
-for malformed digit separators. Every UTF-16 unit belongs exactly once
+without a digit, `TRM0008` for a binary prefix without a digit, `TRM0009`
+for malformed digit separators, and `TRM0010` for a longer closing star run
+with the required slash suffix. `TRM0010` spans that whole run and the required
+suffix. Recovery retains it as comment payload and continues to an exact
+closer; reaching EOF additionally reports `TRM0003`. Every UTF-16 unit belongs exactly once
 to either token text or its leading trivia, including invalid input.
 Diagnostics for malformed text do not replace or normalize source characters.
