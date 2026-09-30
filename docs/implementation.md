@@ -1,6 +1,25 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-27, semantic v38 Core primitive getters, native-10 through native-20
+## Current boundary: syntax-28, semantic v38 Core primitive getters, native-10 through native-20
+
+The approved [source grammar](grammar-spec.md) is broader than this
+implementation. Syntax-28 adds `=>` bodies to supported top-level functions
+(including bounded generic templates), instance/static methods, static
+operators, constructors and by-value getters. A property may use
+`T Name => expression;` or an explicit `get => expression;` accessor.
+Value-producing bodies use ordinary checked return binding; void methods
+and constructors execute one supported statement, including assignment,
+discard or `require`. Existing initialization, ownership, receiver, effect,
+rooting and cleanup checks apply unchanged. Getter-local `[NoThrow]` still
+requires an explicit accessor; direct property attributes do not acquire a
+new target interpretation.
+
+Host and compiled-scanner paths recognize the same `=>` token. Lowering
+reuses existing verified operations, so scanner-5/schema-5, feature-selected
+semantic module versions and native ABI/profiles remain unchanged.
+Persisted semantic/native consumers use the same callable/property identity.
+This does not implement conversion declarations, setters, init accessors,
+auto-properties, indexers, lambdas, declaration contracts or async producers.
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -751,7 +770,8 @@ are unchanged. Primitive-owned properties additionally require v38 in producer
 and consumer semantic modules; existing nominal getters retain their selected
 versions. Exported structs still require their existing public field
 layout, and managed class handles remain private to their image. Setter,
-auto-property, ref-return and expression-bodied forms are unsupported. No
+auto-property and ref-return forms are unsupported; syntax-28 adds the
+expression-bodied getter forms described above. No
 scanner or native ABI/profile version changes.
 `syntax-24` permits `[Layout(Transparent)]` on a compact Copy struct with
 exactly one `bool`, `char16`, `int32`, `uint32`, `int64`, or `uint64` field.

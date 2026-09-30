@@ -79,7 +79,7 @@ ABI changes; imported functions cannot satisfy required constant calls.
 Syntax-26 adds scalar `const expression` requirements in nested executable
 expressions, with the same limits and deferred constant substitution; no new
 native or semantic wire representation is emitted. The current parser version
-is syntax-27. Syntax-27 adds compile-time-only body `static require`
+is syntax-28. Syntax-27 adds compile-time-only body `static require`
 and outer-body `static ensure` for closed scalar proofs. Successful proofs
 leave no native operation or semantic wire record; known false, unsupported
 and unevaluated proofs diagnose before emission. Existing executable
@@ -90,6 +90,12 @@ bounded nominal comparison protocols; neither changes the native profile,
 scanner record/schema or semantic wire format. Managed-handle substitutions
 reuse the existing managed contracts, with feature-dependent semantic version
 selection.
+Syntax-28 supports expression-bodied functions, methods, static operators,
+constructors and direct/explicit by-value getters through the existing
+verified return/statement and cleanup paths. AOT/JIT, compiled-scanner builds
+and persisted semantic/native consumers retain their existing ABI and format
+versions; conversion declarations and broader accessor/callable forms remain
+unsupported.
 Syntax-21 adds compilation-local unary `+`, `-`, `!` and `~` protocols with
 separate operand/result formals. Their closed calls reuse existing verified
 native calls and private module servicing without a new scanner record,

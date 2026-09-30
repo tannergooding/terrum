@@ -13,7 +13,7 @@ compiler-primitives library exports `Terrum.CodeAnalysis.IsAsciiDigit`,
 `Terrum.CodeAnalysis.IsLineBreak` and `Terrum.CodeAnalysis.GetDecimalDigit`;
 it is not a self-host compiler or an executable scanner/parser.
 The host test runner remains C#, even when it compiles and executes a candidate.
-The host parser's current language version is syntax-27. Syntax-18's qualified
+The host parser's current language version is syntax-28. Syntax-18's qualified
 generic-call type-argument lookahead enables the bounded managed-handle
 specializations described below. These reuse existing, feature-selected
 semantic contracts without changing the scanner record/schema, native profile
@@ -49,6 +49,12 @@ Syntax-27 accepts bounded constant-only body `static require` and
 outer-body `static ensure` obligations; proven conditions disappear before
 native emission and do not publish module contracts. Symbolic proofs over
 runtime values remain scheduled.
+Syntax-28 adds expression-bodied supported functions, methods, operators,
+constructors and direct/explicit getters. The compiled scanner recognizes
+`=>` from the shared operator catalog without changing scanner-5/schema-5;
+`build-component` preserves hosted-parser/binder behavior and native output.
+This is not an implementation of lambdas, new accessor kinds or conversion
+declarations, nor a promotion of design candidates to executable libraries.
 
 Host fixtures retain syntax round trips and add native execution of
 `SourceRange`, `CharacterFacts`, `RangeTests`, `Token` and `TokenTests` with entry wrappers.

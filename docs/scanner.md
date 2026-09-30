@@ -7,7 +7,9 @@ quoted strings and escapes, leading trivia and lexical diagnostics in Terrum.
 The C# host supplies buffers and pinned lexical data; it does not pretokenize
 or make source-dependent classification decisions for the component.
 The scanner-5 contract reserves `_` as a distinct token rather than an
-identifier; underscore-prefixed names remain identifiers. Syntax-16 rejects attached
+identifier; underscore-prefixed names remain identifiers.
+The shared operator catalog includes syntax-28's `=>` token for expression
+bodies; no scanner record or schema revision is needed. Syntax-16 rejects attached
 numeric width suffixes with `TRM0006`, diagnoses missing hexadecimal and
 binary prefix digits with `TRM0007` and `TRM0008`, and reports malformed digit
 separators as `TRM0009`. Valid decimal, hexadecimal and binary integer records
