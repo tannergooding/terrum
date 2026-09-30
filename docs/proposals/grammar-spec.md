@@ -97,6 +97,7 @@ Escape           = "\n" | "\r" | "\t" | "\\" | '\"' | "\0"
                  | "\u", HexDigit, HexDigit, HexDigit, HexDigit
                  | "\U", HexDigit, HexDigit, HexDigit, HexDigit,
                    HexDigit, HexDigit, HexDigit, HexDigit ;
+RawNewlineDirective = Escape, [ Escape ] ;
 Boolean          = "true" | "false" ;
 Null             = "null" ;
 Trivia           = whitespace | line-comment | non-nesting-block-comment ;
@@ -130,8 +131,9 @@ text typing; rawness does not select an allocating string type.
 an identifier token. Exact quote-boundary handling remains separate lexical
 design work.
 
-Multiline raw text uses delimiter lines. After the opening fence, only
-optional horizontal whitespace precedes the framing newline. The closing
+Multiline raw text uses delimiter lines. After the opening fence, optional
+horizontal whitespace and an optional newline directive precede the framing
+newline; horizontal whitespace may surround the directive. The closing
 line contains only optional indentation before its fence; ordinary source
 tokens may follow that fence. The newline after the opening delimiter and
 the newline before the closing delimiter are framing, not payload. Additional
@@ -149,13 +151,33 @@ compared as characters, not visual columns, with no normalization.
 An empty closing indentation preserves all content indentation.
 In interpolated raw text, this transformation applies only to literal text
 line prefixes, not hole-expression trivia or the formatted values of holes.
-Interior source line-ending sequences are preserved, including CRLF versus
-LF and other recognized line breaks; compilation does not substitute a
-host-platform newline or normalize to LF. Framing removal treats CRLF as
-one line-break sequence and excludes both code units when it is framing.
-Source line-ending conversion can therefore change a raw value. Explicit
-normalization operations or handler metadata remain separate library design,
-not implicit literal behavior.
+Without a directive, interior source line-ending sequences are preserved,
+including CRLF versus LF and other recognized line breaks; compilation does
+not substitute a host-platform newline or normalize to LF. Framing removal
+treats CRLF as one line-break sequence and excludes both code units when it
+is framing.
+Source line-ending conversion can therefore change an unmarked raw value.
+An opening-line `\n` directive replaces each interior source line-break
+sequence with LF; `\r\n` replaces each with CRLF. These are literal source
+escape spellings consumed as header metadata, followed by the physical
+framing newline, not emitted text. They apply only to framed multiline
+raw forms, including interpolated raw text. Single-line `"""\n"""` remains
+literal backslash-plus-`n`. Normalization affects literal source segments,
+not hole-expression trivia or formatted interpolation values.
+The directive uses existing escape spellings whose decoded value is exactly
+one of LF (U+000A), CR (U+000D), VT (U+000B), FF (U+000C), NEL (U+0085),
+LS (U+2028), PS (U+2029), or the CRLF pair. Equivalent `\u`/`\U` spellings
+are allowed; other characters, reversed pairs and arbitrary separator
+strings reject. Thus `\u2028` selects LS, while `\u000D\u000A` is equivalent
+to `\r\n`. A CRLF source break is replaced once, not as separate CR and LF
+breaks. Every recognized source break is replaced independently; normalization
+does not collapse consecutive breaks.
+These are output-target choices, not source-lexer classification changes:
+VT and FF in raw content remain their existing whitespace/content characters,
+not additional source line breaks to normalize. The chosen text target must
+represent the selected separator under its ordinary checked text contract.
+Whole-output normalization operations and handler metadata remain separate
+library design.
 
 Interpolated raw text prefixes its quote fence with one or more contiguous
 `$` characters. With `N` dollar signs, a hole uses `N` opening and `N` closing
@@ -1897,7 +1919,7 @@ appears in §2.
 | Concept | Defined direction | Still to specify |
 |---|---|---|
 | Lexical tokens | §2 gives identifier and reserved-word forms; primitive names are identifiers with reserved bindings. | Exact contextual-word classification and `HexFloat` token boundaries/diagnostics. |
-| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give framed/dedented raw text with preserved line endings, `$"..."` interpolation and deterministic `$`-count raw interpolation. | Complete floating token recovery, character diagnostics, raw quote-boundary rules, format/alignment spelling and registered text/normalization APIs. |
+| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give framed/dedented raw text with preserve/default or explicit newline headers, `$"..."` interpolation and deterministic `$`-count raw interpolation. | Complete floating token recovery, character diagnostics, raw quote-boundary rules, format/alignment spelling and registered text/whole-output normalization APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or block namespaces, without mixing. | Nested namespace blocks and namespace-local imports. |
 | Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
