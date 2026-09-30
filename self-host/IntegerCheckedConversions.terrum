@@ -160,3 +160,27 @@ public static bool TryConvertUInt64ToChar16(uint64 value, init ref<char16> resul
     result = char16(value);
     return true;
 }
+
+public static bool TryConvertChar16ToInt32(char16 value, init ref<int32> result)
+{
+    result = int32(value);
+    return true;
+}
+
+public static bool TryConvertChar16ToUInt32(char16 value, init ref<uint32> result)
+{
+    result = uint32(value);
+    return true;
+}
+
+public static bool TryConvertChar16ToInt64(char16 value, init ref<int64> result)
+{
+    result = int64(value);
+    return true;
+}
+
+public static bool TryConvertChar16ToUInt64(char16 value, init ref<uint64> result)
+{
+    result = uint64(value);
+    return true;
+}

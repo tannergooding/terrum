@@ -425,7 +425,11 @@ public sealed class WideCandidateTests
             "Terrum.CodeAnalysis.Numerics64.TryConvertInt32ToChar16",
             "Terrum.CodeAnalysis.Numerics64.TryConvertUInt32ToChar16",
             "Terrum.CodeAnalysis.Numerics64.TryConvertInt64ToChar16",
-            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToChar16");
+            "Terrum.CodeAnalysis.Numerics64.TryConvertUInt64ToChar16",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToUInt32",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToInt64",
+            "Terrum.CodeAnalysis.Numerics64.TryConvertChar16ToUInt64");
         var source = SyntaxTree.Parse("""
             using Terrum.CodeAnalysis.Numerics64;
             int32 Main() {
@@ -443,6 +447,14 @@ public sealed class WideCandidateTests
                 if (zero != char16(0) || max32 != char16(65535)
                     || surrogate != char16(55296) || max64 != char16(65535)
                     || maxUnsigned64 != char16(65535)) { return 2; }
+                require TryConvertChar16ToInt32(zero, init var widenedZero);
+                require TryConvertChar16ToInt32(surrogate, init var widenedSurrogate);
+                require TryConvertChar16ToUInt32(max32, init var widenedUnsigned32);
+                require TryConvertChar16ToInt64(surrogate, init var widenedSigned64);
+                require TryConvertChar16ToUInt64(maxUnsigned64, init var widenedUnsigned64);
+                if (widenedZero != 0 || widenedSurrogate != 55296
+                    || widenedUnsigned32 != 65535 || widenedSigned64 != 55296
+                    || widenedUnsigned64 != 65535) { return 3; }
                 return 42;
             }
             """);

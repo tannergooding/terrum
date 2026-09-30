@@ -963,6 +963,9 @@ The [checked integer-conversion candidate](../self-host/IntegerCheckedConversion
 provides all twelve cross-type signed/unsigned 32-/64-bit pairs as named
 `bool`/`init ref` functions. A value outside the destination range returns
 false without publishing; successful conversions preserve its numeric value.
+Four checked narrowings to `char16` retain vacancy on out-of-range input.
+Four `char16`-to-integer widenings always return true and publish the unchanged
+code-unit value, including surrogates; they do not validate Unicode scalars.
 Independent semantic-module consumers execute the boundaries under AOT/JIT
 and both failure policies. These provisional APIs do not replace the existing
 throwing checked `T(value)` conversions, select witness policy or add syntax.
