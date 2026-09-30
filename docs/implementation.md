@@ -284,6 +284,31 @@ levels, six structural levels, scanner IDs and public ABI remain fixed.
 No standalone block statements, vacant locals, calls, richer values or new
 persisted semantic/native format are introduced.
 
+Projection v51 adds braced scalar `do` and `for` loops through the existing
+verified `BoundWhile` lowering under both runtime policies. `do` executes the
+body before its condition; nearest `continue` reaches that condition. `for`
+executes its initializer once, tests before each body, and executes its iterator
+after normal body completion or nearest `continue`, but not after `break` or
+return. Initializers may be empty, initialized scalar declarations, named-local
+assignments, or existing integer compounds/updates; iterators admit the same
+statement forms except declarations. Omitted conditions mean true. Header
+locals span condition/iterator/body and expire after the loop; body locals
+cannot appear in header clauses or the trailing `do` condition.
+
+Kind 11 records `do`, with the body-end record index and trailing Boolean root.
+Kind 12 records `for`, with the body-end index and Boolean root or `-1` for
+omission. Exactly two following records represent initializer and iterator,
+before body records; nonempty clause spans exclude their delimiter. Kind 13
+marks an empty clause with slot 0, root `-1` and its delimiter's one-token span.
+These records all count against the existing twelve-record limit.
+The independent reader checks roles, source, scopes, roots and nearest targets.
+Existing terminal-return envelopes remain valid; verified non-fallthrough
+structured bodies need no synthetic return. In v51 alone, an infinite empty
+`for` can have zero expression nodes. Reachable non-void fallthrough rejects.
+All upper bounds, three-parameter ABI, scanner inventory and v1–50 servicing
+remain unchanged. This adds no named transfers, standalone blocks, calls,
+vacant/richer locals, source grammar decision or persisted-format revision.
+
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
 immutable and usable independently. The separate [native profiles](native.md)

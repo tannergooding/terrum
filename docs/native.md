@@ -174,6 +174,15 @@ under both policies. The eight-local function-wide identity budget and all
 other component limits remain unchanged; v1–49 servicing and the native ABI
 are preserved. No standalone blocks, vacant locals or general calls are added.
 
+Projection v51 adds bounded braced scalar `do`/`for` loops. Shared lowering
+preserves first-iteration and condition order, for-header scope and one-time
+initialization, iterator execution on normal completion/nearest continue, and
+break/return bypass. The independent source-bound reader validates clause roles
+and local visibility before native execution. Proven non-fallthrough loops
+need no synthetic return; reachable non-void fallthrough rejects. Both policies,
+all existing upper bounds and v1–50 servicing remain; no ABI/profile/scanner
+change, named transfers, standalone blocks or richer values are added.
+
 The native scalar frontend's provisional projection v48 represents scalar
 returns as structured body statements: kind 8, slot 0, a typed result root and
 the keyword-through-semicolon span. Header words 38–40 are `-1`; the source

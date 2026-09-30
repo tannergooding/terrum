@@ -333,6 +333,25 @@ levels and six structural levels remain unchanged. Both policies use the
 existing ABI and semantic/native persistence. This does not add standalone
 block statements, vacant locals, general calls or richer values.
 
+Projection v51 adds braced `do`/`for` loops with the hosted scalar ordering and
+scope rules. Nearest `continue` reaches the `do` condition or `for` iterator;
+break/return skip those steps. A for initializer runs once and may be empty,
+an initialized scalar declaration, named-local assignment, or supported
+integer compound/update. Its iterator accepts the same statement forms except
+declarations; empty condition means true. Header locals expire after `for`;
+body locals are unavailable to its clauses or the trailing `do` condition.
+Kind 11 is a post-tested header. Kind 12 is a for header followed by exactly
+two initializer/iterator records, then its body. Both headers carry body-end
+indices; for root `-1` means omitted condition. Empty clauses use kind 13,
+slot 0, root `-1` and the delimiter span; nonempty clause spans omit delimiters.
+All records share the twelve-record budget. Only new loop headers select v51.
+The source-bound reader validates roles/scopes/spans before existing verified
+lowering under both policies. Terminal-return envelopes remain serviced;
+proven non-fallthrough loops need no synthetic return, and v51 permits zero
+nodes for an empty infinite for. All existing upper bounds, scanner IDs,
+ABI/persistence and v1–50 shapes remain unchanged. Named transfers, calls,
+standalone blocks and vacant/richer locals are not added.
+
 The host's syntax-29 post-tested loops and named enclosing-loop transfers
 also execute through existing checked lowering; semantic v39 is selected
 when those retained nodes require it. Scanner record/schema and native ABI

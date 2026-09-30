@@ -43,6 +43,11 @@ branch/loop bodies through the same verified local/block representation.
 Lexical visibility does not recycle declaration slots or change the eight-local
 function limit. Existing feature-selected semantic/native writers and consumers
 remain unchanged; this projection revision is not a persisted module revision.
+Projection v51 adds bounded native-frontend `do`/`for` clauses and header scopes
+using existing verified block/loop nodes, including post-tested and iterator
+forms. Existing semantic/native feature selection handles those nodes without a
+new format or ABI revision. This does not expand the separate approved-TRRM
+source loop envelope.
 The highest implemented semantic revision is 45, selected
 by the artifact's required features; not every artifact uses revision 45.
 Revision-specific reader behavior and feature-dependent writer selection
