@@ -172,7 +172,7 @@ public sealed partial class CliTests
 
     [Theory]
     [InlineData("int32 Main() { int32 x = 0; while (x < 2) { x = x + 1; } return x; }")]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { int32 y = x; x = y + 1; } return x; }")]
+    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { int32 y = y; x = y + 1; } return x; }")]
     [InlineData("int32 Main() { mut int32 x = x; while (x < 2) { x = x + 1; } return x; }")]
     [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { x = y; } return x; }")]
     [InlineData("int32 Main() { mut int32 x = 0; while (x + 1) { x = x + 1; } return x; }")]
@@ -180,7 +180,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { return missing; } return x; }")]
     [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { break outer; } return x; }")]
     [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { continue outer; } return x; }")]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { if (true) { mut int32 y = x; } } return x; }")]
+    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { if (true) { mut int32 x = 1; } } return x; }")]
     [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { x = x + 1; } mut var x = 3; return x; }")]
     public async Task FrontendWhileInvalidSourceRetainsOutputAsync(string source)
     {

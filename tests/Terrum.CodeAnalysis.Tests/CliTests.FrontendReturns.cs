@@ -150,7 +150,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { if (true) { return missing; } return 42; }")]
     [InlineData("int32 Main() { return 42; if (false) { return unknown; } }")]
     [InlineData("int32 Main() { while (true) { if (true) { return false; } } }")]
-    [InlineData("int32 Main() { if (true) { int32 x = 42; return x; } }")]
+    [InlineData("int32 Main() { if (true) { int32 x = x; return x; } }")]
     public async Task FrontendInvalidStructuredReturnsRetainBuiltOutputAsync(string source)
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

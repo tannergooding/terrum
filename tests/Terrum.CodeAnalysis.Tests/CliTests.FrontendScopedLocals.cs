@@ -17,6 +17,7 @@ public sealed partial class CliTests
 {
     [Theory]
     [InlineData("int32 Main() { if (true) { int32 x = 42; return x; } return 0; }", 42)]
+    [InlineData("int32 Main() { if (true) { int32 x = 42; return x; } }", 42)]
     [InlineData("int32 Main() { if (false) { int32 x = 1; return x; } else { int32 x = 42; return x; } }", 42)]
     [InlineData("int32 Main() { mut int32 n = 0; while (n < 3) { mut var x = n; n += 1; if (n == 2) { continue; } if (n == 3) { break; } } return n + 39; }", 42)]
     [InlineData("int32 Main() { mut int32 n = 0; while (n < 3) { mut var x = n; x += x++; n += 1; } return n + 39; }", 42)]
@@ -24,6 +25,8 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { mut int32 n = 0; mut int32 s = 0; while (n < 3) { mut int32 x = 1; s += x++; n++; } return s + 39; }", 42)]
     [InlineData("int32 Main() { if (false) { int32 x = 1; } mut int32 x = 41; x++; return x; }", 42)]
     [InlineData("int32 Main() { while (false) { int32 x = 1 / 0; } return 42; }", 42)]
+    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { int32 y = x; x = y + 1; } return x + 40; }", 42)]
+    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { if (true) { mut int32 y = x; x = y + 1; } } return x + 40; }", 42)]
     [InlineData("int32 Main() { mut int32 n = 0; mut int32 s = 0; while (n < 3) { int32 x = 1; n++; if (n == 2) { continue; } s += x; } return s + 40; }", 42)]
     [InlineData("int32 Main() { if (true) { int32 x = 42; if (x == 42) { var y = x; return y; } } return 0; }", 42)]
     [InlineData("int32 Main() { mut int32 x = 0; if (true) { mut var y = x; y = 42; x = y; } return x; }", 42)]
@@ -148,13 +151,14 @@ public sealed partial class CliTests
     public async Task ScopedLocalIdentityBudgetRemainsEightAcrossScopesAsync()
     {
         var frontend = Path.Combine(RepositoryRoot(), "self-host");
-        var eight = string.Concat(Enumerable.Range(0, 8).Select(i => $"int32 x{i} = {i}; "));
-        var nine = eight + "int32 x8 = 8; ";
+        var first = string.Concat(Enumerable.Range(0, 4).Select(i => $"int32 x{i} = {i}; "));
+        var eight = first;
+        var nine = first + "int32 x4 = 4; ";
         foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
         {
             foreach (var (body, expected) in new[] { (eight, 8), (nine, -1) })
             {
-                var source = $"int32 Main() {{ if (false) {{ {body} }} return 42; }}";
+                var source = $"int32 Main() {{ if (false) {{ {first} }} else {{ {body} }} return 42; }}";
                 Assert.True(Lexer.Lex(SourceText.From(source)).Tokens.Length <= 64);
                 var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source),
                     "frontend-component", frontend, "-", "--runtime", policy, "--json");
