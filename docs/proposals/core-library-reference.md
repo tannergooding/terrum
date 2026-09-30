@@ -758,17 +758,38 @@ The algorithms inventory is eager and nonmaterializing; no allocation, boxing, d
 ```terrum
 public interface IMapper<TSource, TResult>
 {
-    TResult Map(ref<TSource> value);
+    mut TResult Map(ref<TSource> value);
 }
 public interface IPredicate<T>
 {
-    bool Test(ref<T> value);
+    mut bool Test(ref<T> value);
+}
+public interface IZipper<TLeft, TRight, TResult>
+{
+    mut TResult Zip(ref<TLeft> left, ref<TRight> right);
+}
+public interface IVisitor<T>
+{
+    mut void Visit(ref<T> value);
 }
 public static class SpanAlgorithms
 {
+    public static bool Contains<T, TComparer>(Span<T> source, ref<T> value,
+        write ref<TComparer> comparer)
+        where TComparer : IEqualityComparer<T>;
     public static bool TryIndexOf<T, TComparer>(Span<T> source, ref<T> value,
         write ref<TComparer> comparer, init ref<nuint> index)
         where TComparer : IEqualityComparer<T>;
+    public static bool TryLastIndexOf<T, TComparer>(Span<T> source, ref<T> value,
+        write ref<TComparer> comparer, init ref<nuint> index)
+        where TComparer : IEqualityComparer<T>;
+    public static bool TryFind<T, TPredicate>(Span<T> source,
+        write ref<TPredicate> predicate, init ref<T> value)
+        where T : [Copy]
+        where TPredicate : IPredicate<T>;
+    public static bool All<T, TPredicate>(Span<T> source,
+        write ref<TPredicate> predicate)
+        where TPredicate : IPredicate<T>;
     public static void Select<TSource, TResult, TMapper>(Span<TSource> source,
         write Span<TResult> destination, write ref<TMapper> mapper)
         where TMapper : IMapper<TSource, TResult>;
@@ -776,16 +797,67 @@ public static class SpanAlgorithms
         write Span<T> destination, write ref<TPredicate> predicate)
         where T : [Copy]
         where TPredicate : IPredicate<T>;
+    public static void Zip<TLeft, TRight, TResult, TZipper>(Span<TLeft> left,
+        Span<TRight> right, write Span<TResult> destination,
+        write ref<TZipper> zipper)
+        where TZipper : IZipper<TLeft, TRight, TResult>;
+    public static void ForEach<T, TVisitor>(Span<T> source,
+        write ref<TVisitor> visitor)
+        where TVisitor : IVisitor<T>;
+    public static void Fill<T>(write Span<T> destination, T value)
+        where T : [Copy];
+    public static void Reverse<T>(write Span<T> values)
+        where T : [Copy];
+    public static void CopyTo<T>(Span<T> source, write Span<T> destination)
+        where T : [Copy];
+    public static void MoveWithin<T>(write Span<T> values, nuint sourceStart,
+        nuint destinationStart, nuint length)
+        where T : [Copy];
 }
 ```
 
 `TryIndexOf` false means no index was published. `Select` preflights destination size and rejects any overlap before callback. `Where` reserves upper-bound capacity, calls predicate once per element, and permits disjoint storage or exact same-start compaction; displaced overlap is rejected before callbacks. Stateful callbacks are mutable borrowed values. Callback failure may leave accepted prefix; no rollback or predicate replay. General lazy/GroupBy/Join surfaces are not inventoried; one bounded sort signature follows.
 
+These additions are **PROPOSED** members in
+`Terrum.Collections.Algorithms`, not executable generic exports. The
+`mut` mapper/predicate requirements deliberately make callback-state writes
+expressible through the supplied `write ref<TCallback>`; the readonly
+requirements in the older design-only sketch cannot promise that behavior.
+The equality witness remains readonly. Borrowing a callback mutably does not
+permit it to retain element loans or invalidate the source/destination during
+reentrant work. `IVisitor` observes elements through `ref<T>`; it does not
+grant writable element access merely because its own state is mutable.
+
+| Proposed member | Visit, result and storage contract |
+|---|---|
+| `Contains`, `TryIndexOf` | Visit from the beginning and stop at the first equality match; empty input returns false. A successful index names that first match. |
+| `TryLastIndexOf` | Visit from the end and stop at the first equality match in that direction; success publishes its original source index. |
+| `TryFind` | Visit from the beginning and copy the first matching element into the vacant output; no match leaves it vacant. An optional/null element can be a successful result. |
+| `All` | Stop at the first false predicate; empty input returns true without invoking it. |
+| `Zip` | Require equal input lengths and sufficient destination capacity before callbacks. Inputs may overlap each other, but neither may overlap the written destination prefix. Visit paired elements once in increasing index order; no shorter-input truncation or hidden padding. |
+| `ForEach` | Visit each element once in increasing index order; callback failure stops further visits. No deferred execution or materialized result. |
+| `Fill`, `Reverse` | Fill every initialized destination slot with a copy, or reverse the initialized span in place. Empty spans are valid; neither operation constructs vacant capacity. |
+| `CopyTo` | Preflight sufficient destination length and disjoint source/written-destination ranges, then copy the whole source into the destination prefix. A longer destination suffix is untouched. |
+| `MoveWithin` | Check both complete ranges without index overflow before writes. Overlap is permitted with original-source snapshot semantics, without allocating a snapshot. The name denotes range relocation by copying, not transfer of an affine owner or vacancy of the old range. |
+
+`Select` writes exactly the source-length prefix, and `Zip` exactly the
+common input-length prefix; longer destination suffixes remain unchanged.
+`Where` returns the initialized written-prefix count without clearing the
+unused suffix. All span destinations refer to existing initialized slots;
+replacement must obey the element's cleanup, rooting and write-barrier
+requirements. None of these operations treats arbitrary bytes as valid
+`T` or substitutes raw memory copying for checked typed access. `[Copy]`
+is required wherever one existing element is duplicated; mapper/zipper
+results instead transfer each separately produced result into its destination.
+Output publication/effect metadata and callback-loan enforcement remain
+**OPEN**. No callback is replayed after failure, and these signatures do not
+promise rollback, NoThrow or a hidden allocation-free callback.
+
 ### Sequence and eager-operation inventory
 
-The three `SpanAlgorithms` declarations above supply the complete
-representative signature shapes for a mutable comparer, selector and
-predicate. The following **proposed** matrix fills out the protocol family
+The `SpanAlgorithms` declarations above supply concrete search, selection,
+pairing, visitation and storage-operation signatures. The following
+**proposed** matrix indexes them and fills out the protocol family
 without repeating a concrete declaration for every element type. `Span<T>`
 means a non-owning readonly input; a `write` destination must be explicit.
 All algorithms check bounds, destination length and prohibited overlap before
@@ -797,7 +869,7 @@ an operation says otherwise.
 | `ISequence<T, TCursor>` | `GetEnumerator() -> TCursor`; cursor is an explicit type argument | Proposed value/copy protocol below; no universal element-copy guarantee |
 | `ICursor<T>` | `MoveNext() -> bool`; `Current -> T` where `T:[Copy]`; candidate `Close()` | The concrete copied-value path does not define lending or consuming iteration |
 | `IAsyncSequence<T, TCursor>` / `IAsyncCursor<T>` | `GetAsyncEnumeratorAsync() -> Task<TCursor>`; `MoveNextAsync() -> Task<bool>`; `Current -> T` where `T:[Copy]`; candidate `CloseAsync() -> Task<void>` | Each task has a completion owner; borrowed variants remain blocked below |
-| `SpanAlgorithms` search | `Contains`, `IndexOf`/`TryIndexOf`, `LastIndexOf`, `Find`/`TryFind`, `CountWhere`, `All`, `Any` | Explicit equality witness or predicate; no unknown-index sentinel |
+| `SpanAlgorithms` search / `OrderedSpanAlgorithms` predicates | `Contains`, `TryIndexOf`, `TryLastIndexOf`, `TryFind`, `All`; `CountWhere`, `Any` | Explicit equality witness or predicate; no unknown-index sentinel |
 | `SpanAlgorithms` transform | `Select`, `Where`, `Zip`, `ForEach`, `Fill`, `Reverse`, `CopyTo`, `MoveWithin` | Mutable callbacks take `write ref<TCallback>`; destination/overlap contracts differ by operation |
 | `OrderedSpanAlgorithms` aggregate | `Fold<T,TState,TFolder>`; prospective `Sum<T>`, `Min/Max<T,TOrder>` | Initial accumulator/witness explicit; empty min/max return presence, not fabricated `T` |
 | `OrderedSpanAlgorithms` order | `Sort<T,TOrder>(write Span<T>,ref<TOrder>)`, `TryBinarySearch<T,TOrder>(Span<T>,ref<T>,ref<TOrder>,init ref<nuint>)` | Ordering witness must define total key policy; sort comparator failures can leave permutation partial |
