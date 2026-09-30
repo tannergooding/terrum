@@ -92,8 +92,9 @@ InterpolatedText = "$", '"',
                    | InterpolationHole }, '"' ;
 LiteralBrace     = "{{" | "}}" ;
 InterpolationHole = "{", InterpolationContents, "}" ;
-InterpolationContents = Expression, [ ",", Expression ], [ ":", FormatText ] ;
-FormatText       = lexer-interpolation-format-text ;
+InterpolationContents = Expression, [ ",", Expression ], [ ":", FormatSpecifier ] ;
+FormatSpecifier = String | RawText | "(", Expression, ")" | BareFormatText ;
+BareFormatText  = lexer-interpolation-bare-format-text ;
 Character        = "'", ( CharacterScalar | Escape | "\'" ), "'" ;
 Escape           = "\n" | "\r" | "\t" | "\\" | '\"' | "\0"
                  | "\u", HexDigit, HexDigit, HexDigit, HexDigit
@@ -125,7 +126,15 @@ Parse a full ordinary expression before recognizing a suffix; conditionals
 need no parentheses merely to protect their colon. Thus
 `{flag ? left : right}` is a conditional hole, and
 `{flag ? left : right:X8}` formats its result. The alignment expression uses
-the same expression-aware parsing. Format-text boundaries, escaping and
+the same expression-aware parsing.
+After `:`, quoted text supplies a format literal, a parenthesized expression
+supplies a runtime format, and otherwise the suffix is bare static format
+text. Selection is syntactic, not a test of format validity or expression
+binding. Examples are `{value:X8}`, `{value:"X8"}`, and
+`{value:(formatSpec)}`. A raw text literal may supply the quoted format;
+other computed/interpolated formats can appear in the parenthesized
+expression. A static format beginning with `(` must be quoted rather than
+parsed as an expression. Bare-format boundaries, whitespace/escaping and
 exact interpolation recovery remain separate lexical work.
 
 Raw text uses matching opening and closing quote fences of length three or
@@ -1033,8 +1042,10 @@ handler, not an implicit allocating string type or arbitrary same-named
 builder methods. Hole expressions evaluate once, left-to-right into typed
 captures before segments drain. An alignment expression may be an ordinary
 checked runtime expression, not just a compile-time constant. Evaluate the
-value first, then its supplied alignment once, then proceed to the next
-hole; no width expression is deferred until output draining.
+value first, then its supplied alignment once, then its supplied runtime
+format once, then proceed to the next hole. Width and format expressions
+are not deferred until output draining and obey ordinary ownership,
+lifetime, effect and failure checks.
 Alignment is checked in the handler's declared signed integral width domain,
 without inventing an independent numeric literal type. Positive width means
 right alignment, negative means left, and zero requires no padding. Width is
@@ -1043,6 +1054,9 @@ Width bounds, magnitude computation and text measurement obey the checked
 handler contract, not unchecked negation or an implicit bytes/code-units/
 terminal-columns choice. Format text and the value are passed to that
 contract without obligatory `ToString` conversion or temporary strings.
+Quoted and computed format arguments are checked under the handler's
+published format-argument contract; neither their syntax nor a similarly
+named method grants a formatter registration or an implicit representation.
 Named unique transfers require explicit
 `move`; borrowed captures retain their backing and lifetime dependencies.
 Formatting forwards the same writer for nested values without obligatory
@@ -1891,7 +1905,7 @@ they are not ordinary overloads merely because they use operator punctuation.
 Still **OPEN** for a full source grammar: nominal safe union cases and complete
 patterns, associated equality and family/adapter declarations,
 conditional/default conformance, text-target fragments and complete
-interpolation format-text lexical rules,
+interpolation bare-format lexical rules,
 general `const` declarations/expressions, full contract-clause placement,
 general ownership/reference results, constructor inference, async completion
 and scheduling protocols, producers, capture/exception transport, and registered collection-fragment
@@ -1945,7 +1959,7 @@ appears in §2.
 | Concept | Defined direction | Still to specify |
 |---|---|---|
 | Lexical tokens | §2 gives identifier and reserved-word forms; primitive names are identifiers with reserved bindings. | Exact contextual-word classification and `HexFloat` token boundaries/diagnostics. |
-| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw framing/headers, deterministic interpolation, format suffixes and runtime alignment. | Complete floating token recovery, character diagnostics, raw/interpolation recovery, format-text boundaries/escaping and registered text/whole-output normalization APIs. |
+| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw framing/headers, deterministic interpolation, bare/quoted/runtime formats and runtime alignment. | Complete floating token recovery, character diagnostics, raw/interpolation recovery, bare-format boundaries/whitespace/escaping and registered text/whole-output normalization APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or block namespaces, without mixing. | Nested namespace blocks and namespace-local imports. |
 | Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
