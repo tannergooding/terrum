@@ -432,25 +432,88 @@ public sealed class TrRmCompactLinearBodyReaderTests
             secondMethod: true, parameterMode: 2));
     }
 
+    [Theory]
+    [InlineData(1, 0, 0, 2, true)]
+    [InlineData(0, 0, 0, 2, true)]
+    [InlineData(0, 1, 0, 2, false)]
+    [InlineData(1, 0, 1, 2, false)]
+    [InlineData(1, 0, 0, 0, false)]
+    public void ChecksPackedPublicGlobalCall(byte callerRequirement,
+        byte targetRequirement, byte targetPolicy, byte targetVisibility, bool valid)
+    {
+        byte[] row =
+        [
+            0x04, 1, 1, 0, 0, 0, 1,
+            0x12, 2, 0, 2, 0, 0, 0x16, 1, 1, 0x83, 2,
+        ];
+        if (valid)
+        {
+            var index = Inspect(row, 1, secondMethod: true, packedTarget: true,
+                callerRequirement: callerRequirement, targetRequirement: targetRequirement,
+                targetPolicy: targetPolicy, targetVisibility: targetVisibility);
+            Assert.Equal(2, index.ValueCount);
+            Assert.Equal([0, 1], index.LastUses);
+        }
+        else
+        {
+            Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
+                secondMethod: true, packedTarget: true,
+                callerRequirement: callerRequirement, targetRequirement: targetRequirement,
+                targetPolicy: targetPolicy, targetVisibility: targetVisibility));
+        }
+    }
+
+    [Theory]
+    [InlineData(0, 0x15)]
+    [InlineData(0, 0x17)]
+    [InlineData(1, 0x16)]
+    [InlineData(3, 0x16)]
+    public void RejectsMalformedPackedCallTarget(byte targetRow, byte kind)
+    {
+        byte[] row =
+        [
+            0x04, 1, 1, 0, 0, 0, 1,
+            0x12, 2, 0, targetRow, 0, 0, kind, 1, 1, 0x83, 2,
+        ];
+        Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
+            secondMethod: true, packedTarget: true));
+    }
+
     private static (int Operations, int ValueCount, int[] Definitions, int[] LastUses,
         int[] UseBlocks, byte[] TypeCodes, bool[] Optional) Inspect(
         byte[] row, int parameterCount, byte runtimePolicy = 0, byte parameterMode = 0,
         bool duplicateSignatureType = false, byte typeCode = 8,
         byte? secondTypeCode = null, bool resultUsesSecondType = false,
         bool secondTypeOptional = false, bool parameterUsesSecondType = false,
-        bool secondMethod = false, bool secondBody = true)
+        bool secondMethod = false, bool secondBody = true, bool packedTarget = false,
+        byte callerRequirement = 1, byte targetRequirement = 0, byte targetPolicy = 0,
+        byte targetVisibility = 2)
     {
         var names = new TrRmStringTableReader(
             TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]), 2);
-        var moduleBytes = new byte[44];
+        var moduleBytes = new byte[packedTarget ? 88 : 44];
         Write(moduleBytes, 0, 1);
-        Write(moduleBytes, 4, 1);
+        Write(moduleBytes, 4, callerRequirement);
         Write(moduleBytes, 8, runtimePolicy);
         Write(moduleBytes, 28, 1);
         Write(moduleBytes, 32, 1);
         Write(moduleBytes, 36, 1);
         Write(moduleBytes, 40, 1);
-        var modules = new TrRmModuleTableReader(moduleBytes, 1, names, 0, 0,
+        if (packedTarget)
+        {
+            foreach (var offset in new[] { 48, 72, 76, 84 })
+            {
+                Write(moduleBytes, offset, 1);
+            }
+
+            Write(moduleBytes, 44, 2);
+            Write(moduleBytes, 48, targetRequirement);
+            Write(moduleBytes, 52, targetPolicy);
+            Write(moduleBytes, 80, 2);
+        }
+
+        var modules = new TrRmModuleTableReader(moduleBytes, packedTarget ? 2 : 1,
+            names, 0, 0,
             secondMethod ? 2 : 1, 0);
         var typeDefs = new TrRmTypeDefTableReader([], 0, names, modules, 0, 0, 0, 0);
         var second = duplicateSignatureType ? typeCode : secondTypeCode;
@@ -488,6 +551,7 @@ public sealed class TrRmCompactLinearBodyReaderTests
         if (secondMethod)
         {
             methodBytes.AsSpan(0, 28).CopyTo(methodBytes.AsSpan(28));
+            Write(methodBytes, 40, targetVisibility);
             Write(methodBytes, 52, secondBody ? 2u : 0u);
         }
 

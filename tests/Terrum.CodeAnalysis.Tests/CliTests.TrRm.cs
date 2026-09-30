@@ -215,21 +215,22 @@ public sealed partial class CliTests
 
         byte[] caller = [0x04, 1, 1, 0, 0, 0, 1, 0x12, 2, 2, 1, 1, 0x83, 2];
         byte[] callee = [0x04, 1, 1, 0, 0, 0, 0, 0x83, 1];
-        byte[] Artifact() => TrRmArtifactWriter.Encode([
-            new TrRmSection(0x0001, 0, 1, module),
+        byte[] Artifact(byte[] moduleBytes, uint moduleCount, byte[] callerBody)
+            => TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, moduleCount, moduleBytes),
             new TrRmSection(0x0002, 0, 3, strings),
             new TrRmSection(0x0011, 0, 1, typeSpec),
             new TrRmSection(0x0016, 0, 2, methods),
             new TrRmSection(0x0017, 0, 1, signature),
             new TrRmSection(0x0018, 0, 1, parameter),
             new TrRmSection(0x0020, 0, 2,
-                TrRmVariableTableWriter.EncodeBodies([caller, callee])),
+                TrRmVariableTableWriter.EncodeBodies([callerBody, callee])),
         ]);
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-trrm-linear-call-{Guid.NewGuid():N}.trrm");
         try
         {
-            await File.WriteAllBytesAsync(path, Artifact());
+            await File.WriteAllBytesAsync(path, Artifact(module, 1, caller));
             foreach (var command in new[] { "validate-trrm-structure",
                 "validate-trrm-compact-linear", "validate-trrm-compact" })
             {
@@ -238,13 +239,40 @@ public sealed partial class CliTests
             }
 
             caller[9] = 0;
-            await File.WriteAllBytesAsync(path, Artifact());
+            await File.WriteAllBytesAsync(path, Artifact(module, 1, caller));
             var (structural, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
             Assert.Equal(0, structural);
             var (invalid, _, _) = await RunAsync([],
                 "validate-trrm-compact-linear", path, "--json");
             Assert.Equal(1, invalid);
+
+            var packedModule = new byte[88];
+            module.CopyTo(packedModule, 0);
+            foreach (var offset in new[] { 72, 76, 84 })
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(packedModule.AsSpan(offset), 1);
+            }
+
+            BinaryPrimitives.WriteUInt32LittleEndian(packedModule.AsSpan(44), 3);
+            BinaryPrimitives.WriteUInt32LittleEndian(packedModule.AsSpan(80), 2);
+            byte[] packedCaller =
+            [
+                0x04, 1, 1, 0, 0, 0, 1,
+                0x12, 2, 0, 2, 0, 0, 0x16, 1, 1, 0x83, 2,
+            ];
+            await File.WriteAllBytesAsync(path, Artifact(packedModule, 2, packedCaller));
+            var (packedValid, packedOutput, packedError) = await RunAsync([],
+                "validate-trrm-compact-linear", path, "--json");
+            Assert.True(packedValid == 0, packedOutput + packedError);
+            methods[40] = 0;
+            await File.WriteAllBytesAsync(path, Artifact(packedModule, 2, packedCaller));
+            var (packedStructural, _, _) = await RunAsync([],
+                "validate-trrm-structure", path, "--json");
+            Assert.Equal(0, packedStructural);
+            var (packedInvalid, _, _) = await RunAsync([],
+                "validate-trrm-compact-linear", path, "--json");
+            Assert.Equal(1, packedInvalid);
         }
         finally
         {

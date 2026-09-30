@@ -228,12 +228,36 @@ public readonly ref struct TrRmCompactLinearBodyReader
                 var method = ReadLocal(body, ref position, referenceWidth);
                 var callerModule = methods.GetOwnerModule(methodRow);
                 var (firstMethod, lastMethod) = modules.GetMethodDefRange(callerModule);
-                if (method == 0 || method > lastMethod - firstMethod)
+                int target;
+                if (method == 0)
+                {
+                    var definition = Read(body, ref position, 4);
+                    target = (int)(definition & 0xFF_FFFF);
+                    if (definition >> 24 != 0x16 || modules.Count < 2
+                        || target == 0 || target > methods.Count)
+                    {
+                        throw InvalidBody();
+                    }
+
+                    var targetModule = methods.GetOwnerModule(target);
+                    var (callerTarget, callerPolicy) = modules.GetRequirements(callerModule);
+                    var (targetRequirement, targetPolicy) = modules.GetRequirements(targetModule);
+                    if (targetModule == callerModule || methods.GetBodyRow(target) == 0
+                        || targetPolicy != callerPolicy || targetRequirement > callerTarget
+                        || methods.GetOwnerType(target) != 0 || methods.GetFlags(target) != 2)
+                    {
+                        throw InvalidBody();
+                    }
+                }
+                else if (method > lastMethod - firstMethod)
                 {
                     throw InvalidBody();
                 }
+                else
+                {
+                    target = firstMethod + method - 1;
+                }
 
-                var target = firstMethod + method - 1;
                 if (methods.GetBodyRow(target) == 0)
                 {
                     throw InvalidBody();
