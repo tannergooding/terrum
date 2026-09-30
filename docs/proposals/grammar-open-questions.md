@@ -1,14 +1,17 @@
 # Remaining source-language decisions
 
 > [!IMPORTANT]
-> Open recommendations are review inputs, not adopted rules. Entries marked
-> **Accepted** record decisions incorporated into the source grammar.
+> This is the pending source-decision queue. Recommendations are review
+> inputs, not adopted rules.
 > The [source grammar](../grammar-spec.md) remains authoritative for settled
 > forms. This inventory does not reopen those choices or authorize a compiler
 > to choose new semantics on the user's behalf.
 
 This is a decision inventory, not a compiler backlog. Stable question numbers
-are retained after a decision so related review references remain usable.
+are retained; gaps in the pending queue are intentional. Nine resolved IDs
+have only [canonical link redirects](#resolved-question-link-redirects) at
+the end of this document, so old review links remain usable without mixing
+their rules into the questions below.
 Questions are grouped
 by the source contract a user must choose, rather than by missing parser
 productions or implementation files. The number of questions is not a target.
@@ -19,267 +22,26 @@ is the question does not assert that it is valid. No candidate establishes a
 new grammar production. Method bodies omitted from surrounding
 examples are not a new bodyless-concrete-declaration rule.
 
+There are **33 pending numbered groups**, with seven explicit punctuation
+subquestions under Q03. Partially resolved groups ask only about their
+remaining choice; settled context is linked or labeled, not another vote.
+
+| Pending area | Stable IDs |
+|---|---|
+| Punctuation, visibility and attributes | Q03.1-Q03.7, Q06, Q07 |
+| Generic/witness lookup and declaration forms | Q12-Q14, Q16-Q18 |
+| References, initialization and operators | Q19-Q26 |
+| Other source forms and contracts | Q27-Q37, Q40-Q42 |
+| Documentation | Q38-Q39 |
+
 ## Lexical and declaration choices
-
-### Q01. Escaping reserved words in identifiers
-
-**Accepted:** Permit contiguous `@` followed by a reserved or contextual
-keyword spelling, preserving the underlying identifier name and suppressing
-keyword recognition at that occurrence. It does not permit arbitrary-string
-identifiers or confer primitive-definition authority.
-**Example:** `alias @await = Task<int32>;` and `@await pending;`.
-
-**C# model:** A narrow escape would be modeled on C# `@identifier`, not its
-Unicode identifier normalization rules. Terrum retains ordinal, unnormalized
-Unicode 17 spelling; an escape must not authorize defining a reserved primitive.
-See [C# lexical structure](#official-comparison-sources).
-
-**Rationale:** Supports generated/imported names without creating a second
-arbitrary-text name or changing primitive authority. See the adopted
-[lexical notation](../grammar-spec.md#2-lexical-notation).
-
-### Q02. Reserved versus contextual words
-
-**Accepted:** Use contextual recognition for narrowly placed words and publish
-their context table. Reserve a spelling globally only where its grammar
-requires that treatment. Future reservations and contextual recognition must
-consider ordinary source use; meaning-changing additions require a
-source-language version boundary. The adopted table covers `field`, `some`,
-`when`, `type`, `policy`, `const`, `via` and pattern combinators.
-**Example:** `int32 Read(int32 some) => some;`
-
-**C# model:** Modeled on C# contextual keywords as a technique, not its keyword
-list. Terrum's `init` loan, `some` pattern, associated `type`, and policy scopes
-have different contexts.
-
-**Rationale:** Avoids accidental source breakage from ordinary names without
-making recognition depend on library lookup. Exact source-version selection
-remains a tooling contract, not an implicit library-dependent language mode.
 
 ### Q03. Exact operator-run boundaries
 
-**Question:** Specify which glyphs join a run and which contextual boundaries
-split it: comment openers, optional/type punctuation, generic delimiters,
-range punctuation and adjacent prefix operators. The rejection of `x+++y`
-as concatenated operators is already settled.
-**Accepted operator spacing:** Symbolic binary arithmetic, shift, comparison,
-bitwise, Boolean and coalescing expression operators require separation on
-both sides; symbolic prefix/postfix operators attach to their operand on
-the appropriate side. Member access attaches on at least one side.
-Whitespace, line breaks and comments separate tokens and break attachment.
-Determine operator roles from grammar before type checking, without
-reinterpreting an invalid expression. This replaces the earlier allowance
-of unspaced binary arithmetic; the remaining punctuation categories below
-are still under review.
-**Example:** `items[start.. ^1]` deliberately separates range and end-relative
-punctuation; `List<List<int32>>` uses type-context closers.
-
-**C# model:** Not C# maximal-munch operator concatenation. Terrum requires one
-defined operator/punctuator per contiguous run except explicit contextual
-exceptions.
-Unlike C#, operator-role spacing and attachment are source validity rules.
-
-**Accepted boundary framework:** Use an explicit allow list, not a deny
-list or backtracking over possible expressions. Separate punctuation tokens
-require trivia unless a listed lexical/grammatical boundary permits adjacency.
-The boundary inventory is:
-
-| Allowed adjacency | Scope and example |
-|---|---|
-| One defined operator/punctuator spelling | Exactly a spelling assigned by the grammar, such as `++`, `+=`, `<<`, `??`, `?.`, `=>` or `..`; not concatenated operators. |
-| Grouping and list delimiters | `(`, `)`, `[`, `]`, `{`, `}`, `,` and `;` bound separate tokens, as in `x * (-y)` or `f(a[i])`; ordinary interior/separator trivia is flexible, with receiver attachment required for calls/indexing. |
-| Comment boundaries | Recognize ordinary `//`/`/*` and selected documentation `///`/`//*` openers before operator-run validation outside literals/comments; documentation-block recognition precedes ordinary line comments. |
-| Type-context punctuation | Attached optional `?` before/after generic closers and consecutive generic closers, as in `List<T?>`, `List<T>?` and `List<List<T?>>`; only when required by the type/argument grammar. |
-| Range/from-end punctuator | Accepted named composite `..^` introduces an end-relative upper slice bound, as in `items[start..^1]`; not a freely concatenated `..` and `^` or a general arithmetic operator. |
-
-Literal contents and escaped identifier tokens follow their own lexical
-rules, not operator-run validation. No other operator-token concatenation is
-permitted. New operators must be added to the language's defined spelling
-catalog; new adjacency exceptions must be added to this list. Neither a
-formatter nor error recovery guesses an expression from an unlisted run.
-This keeps common indexing concise while making separation the ordinary
-rule and preserving room for future operators. Remaining details are
-separated into Q03.1-Q03.7 below; their recommendations are not adopted.
-
-**Additional boundary cases under review:** Delimiter adjacency is a lexical
-permission, not permission to mismatch or arbitrarily interleave nesting.
-Ordinary code permits adjacent `()`, `[]` and `{}` boundaries without spaces;
-literal/interpolation contents retain their own delimiter rules. Generic
-closers adjoining assignment, as in `alias A<T>=T;`, are not a listed
-exception: use `alias A<T> = T;`. Group constant-generic expressions containing
-comparison/shift punctuation when needed to make their boundary explicit.
-The accepted `..^` punctuator does not permit arbitrary
-range/spread-plus-prefix runs.
-Prefix chains such as `!!x`, `&*p` and `*&x` need grouping unless a distinct
-spelling or adjacency boundary is deliberately defined. Separating two
-symbolic prefix operators with trivia does not satisfy operand attachment.
-
-**Accepted access attachment:** Apply an operator-specific attachment rule,
-separate from punctuation-run recognition. Member-access `.` and `?.` must
-directly adjoin the receiver's final token or the following member's first
-token, or both. Thus `x.y`, `x. y`, `x .y` and a fluent chain continuing with
-`.Member` on the next line remain valid; `x . y` and `x ?. y` do not.
-Whitespace, line breaks and comments break attachment on that side.
-Grouping boundaries can supply attachment, as in `(x). Member`.
-The numeric-receiver grouping rule still applies independently.
-If Q26 selects prefix dereference, require `*` to attach to its following
-operand token: `*p`, `*(p)` and `*(*p)` are valid forms, but `* p` and
-`* *p` are not. Binary multiplication remains distinct and permits `x * y`.
-This attachment restriction deviates from C#'s trivia-insensitive member
-access and prefix dereference; it does not make arbitrary punctuation runs
-valid or select pointer-expression syntax by itself.
-
-**Accepted call/index attachment:** Require call
-and index opening delimiters to attach directly to their receiver.
-Calls `f(...)` and indexing `f[...]` are delimited postfix operators, not
-grouping constructs; their grammatical role selects the attachment rule.
-Use `f(x)`, `int32(value)`, `new Widget(value)`, `items[i]` and
-`items?[i]`; reject `f (x)` and `items [i]`. Attachment also excludes
-comments or line breaks between the receiver and opening delimiter.
-For generic calls, the receiver ends at the type-argument closing delimiter,
-as in `f<T>(x)`; parenthesized receivers can attach at their closing
-parenthesis. This treats calls/indexing as receiver-attached access rather
-than freely spaced structural punctuation. Grouping and control-flow
-parentheses have no receiver: `(x + y)` and `if (ready)` remain valid,
-subject to independent operator rules inside them.
-**C# model:** Call/index syntax is C#-inspired, but this attachment
-restriction deliberately deviates from C#'s trivia-insensitive delimiters.
-
-**Accepted delimiter interior spacing:** Keep interior trivia flexible
-inside ordinary parentheses, brackets and braces:
-`f(x)` and `f( x )`, `(x + y)` and `( x + y )`, and `items[i]` and
-`items[ i ]` are all valid. Ordinary block braces also impose no padding
-requirement of their own. Delimiters already establish explicit structural
-boundaries, so interior padding does not undermine operator-run evolution.
-Receiver attachment and operator spacing still apply independently:
-`f (x)` and `f(- x)` reject. **C# model:** This follows C#'s flexible
-interior trivia, not a prescribed formatter style. Literal/interpolation
-delimiters retain their own rules. Separators follow the rule below.
-This includes multiline arguments, with the call opener attached
-to the callee and the arguments/closing delimiter on subsequent lines.
-
-**Accepted separator spacing:** Treat commas and semicolons as fixed
-structural separators, not postfix operators, with flexible
-trivia: `f(x,y)`, `f(x, y)` and `f(x , y)` are valid forms, as are
-`return x;` and `return x ;`. They already establish explicit boundaries
-and are excluded from operator runs, so this does not weaken the operator
-spacing/evolution rules. A formatter may prefer attached separators followed
-by spaces or line breaks without making that style mandatory.
-**C# model:** This follows C#'s trivia-insensitive separator spacing.
-It does not change where separators, trailing commas or empty statements
-are permitted. Leading-comma alignment across lines is also valid;
-spacing around a comma is not a formatter mandate.
-
-**Accepted generic opener attachment and interior trivia:** Require generic
-argument and declaration parameter lists' `<` to attach directly to the
-preceding name. Use `List<T>` and `F<T>(x)`, rejecting
-`List <T>` and `F <T>(x)`. Generic application is a delimited construct,
-whereas comparison remains a spaced binary operation, as in `x < y`.
-This supplies a grammatical boundary without consulting operand types or
-trying another interpretation after a binding failure.
-Apply the same attachment rule to generic parameter lists in declarations.
-Interior trivia is flexible, including comments, multiline arguments and
-a closing `>` on its own line. A constructed generic type is one type
-expression, not one lexical token; argument counts and formal kinds remain
-checked against its declaration.
-**C# model:** Generic syntax is C#-inspired, but requiring opener attachment
-deviates from C#'s trivia-insensitive generic delimiters. Flexible interior
-trivia follows C#.
-Keyword-selected angle lists follow the accepted attachment rule below.
-
-**Accepted optional-type suffix attachment:** Require type suffix `?` to
-attach directly to the type's final token. Use `T?`, `(T, U)?` and `List<T>?`, rejecting
-`T ?` and `List<T> ?`. In type context, explicitly permit optional markers
-next to generic closers, as in `List<T?>`, `List<T>?` and
-`List<List<T?>>`. These are grammatical type boundaries, not concatenated
-expression operators or permission to split arbitrary operator runs.
-Repeated source markers such as `T??` remain invalid; `a ?? b` remains
-the distinct spaced coalescing expression operator.
-**C# model:** Optional-type suffix syntax resembles C# nullable syntax,
-but mandatory attachment differs from C#'s trivia-insensitive spelling,
-and Terrum's optional semantics remain its own contract.
-
-**Accepted keyword-selected angle-list attachment:** Apply the same
-opener-attachment rule as generic lists. Require `default<I>`, `.via<I>`,
-`policy<Domain.Case>` and `init ref<T>`; reject `default <I>`,
-`.via <I>`, `policy <Domain.Case>` and `init ref <T>`.
-Their `<` attaches to the designated introducer, with flexible interior
-trivia and a matching closer. This changes spacing only, not witness,
-policy or initialization-loan semantics. Word boundaries between separate
-keywords remain required; attachment does not permit `initref<T>`.
-**C# model:** These Terrum witness/policy/init forms have no direct C#
-equivalent. C# `default(T)` is a default-value expression, not Terrum's
-interface-default-body selector `default<I>`.
-
-**Accepted range/from-end composite:** Define `..^` as a composite
-punctuator for an end-relative upper slice bound, as in `items[start..^1]`.
-Assign that complete spelling explicitly rather
-than permitting free concatenation of `..` and `^`. Preserve the existing
-separated `items[start.. ^1]` form with the same slicing semantics.
-This admits the common tight form while leaving unassigned runs such as
-`...` reserved for an explicit future language decision.
-**C# model:** The slicing purpose resembles C# range/from-end indexing,
-but this indivisible punctuator differs from the separate `..` and `^`
-forms in the [C# range/index grammar](https://github.com/dotnet/csharplang/blob/main/proposals/csharp-8.0/ranges.md).
-It is not a general arithmetic operator or unrestricted operator-run
-exception.
-
-**Accepted slice-bound spacing:** Allow flexible `..` spacing while
-from-end `^` attaches to its following offset.
-Permit `items[start..end]`, `items[start .. end]`,
-`items[..end]` and `items[start..]`. Treat `..` as the slice connector,
-not a binary arithmetic operator requiring spaces. Require `^1` or
-`^(offset + 1)`, rejecting `^ 1`; the composite `..^` likewise attaches
-to its offset, admitting `items[start..^1]` but not `items[start..^ 1]`.
-The separated `items[start.. ^1]` form retains the same meaning.
-**C# model:** The range spellings and flexible connector spacing are
-C#-inspired; mandatory from-end offset attachment deviates from C#'s
-trivia-insensitive unary prefix syntax. Bounds/lifetime and once-only
-evaluation contracts do not change.
-
-**Accepted assignment/binding spacing:** Require separating trivia on
-both sides, including declaration initializers/defaults and alias/associated
-bindings. Use `x = value`, `x += value`,
-`int32 x = 1`, `T = void` in a defaulted formal, and `alias A<T> = T`.
-Reject their squashed counterparts. Treat the complete compound spelling
-as one operator and retain each context's existing type/constant/ownership
-rules; spacing does not turn assignment into an expression.
-**C# model:** Assignment/binding spellings are C#-inspired, but mandatory
-separation differs from C#'s trivia-insensitive operators.
-
-**Accepted arrow spacing:** Require separating trivia on both sides of `=>`
-in expression bodies, lambdas and switch arms.
-Use `int32 F() => 1;`, `x => x + 1`
-and `0 => 1`, not `F()=>1`, `x=>x + 1` or `0=>1`.
-The complete arrow remains one defined spelling; spaces inside `= >` do
-not form an arrow. Its callable/arm semantics and delimiter roles remain
-unchanged. **C# model:** Arrow syntax is C#-inspired, but mandatory outer
-separation deliberately differs from C#'s trivia-insensitive spelling.
-
-**Accepted conditional connector spacing:** Require separation on both
-sides of the `?` and `:` parts. Use `flag ? left : right`, rejecting
-`flag?left:right`. These are expression connectors, not an optional-type
-suffix or an optional-access token. Their grammatical role selects the
-spacing rule before type checking.
-Interpolation still permits a full conditional before its format suffix,
-as in `{flag ? left : right:X8}`: the first colon is a separated conditional
-connector, while the format colon follows its own grammar.
-**C# model:** Conditional syntax is C#-inspired, but mandatory separation
-differs from C#'s trivia-insensitive spelling. Other colon roles remain
-separate decisions.
-
-**Accepted declaration relationship colon spacing:** Require separating
-trivia on both sides in conformance/interface-base lists, enum underlying
-types and generic constraints. Use `struct S : I`, `enum E : int32` and
-`where T : I`, rejecting squashed equivalents. This colon connects declared
-relationships rather than being an attached type suffix. Existing eligibility,
-conformance, underlying-type and constraint checks remain unchanged.
-**C# model:** These declaration spellings are C#-inspired, but mandatory
-separation differs from C#'s trivia-insensitive colon spelling.
-Label, named-argument, tuple-name and attribute-target colons remain distinct
-roles. Interpolation already permits ordinary source trivia between suffix
-tokens; quoted format contents retain their literal whitespace. Do not reopen
-that accepted format grammar as an expression-colon spacing question.
+Only Q03.1-Q03.7 below need a response. The operator-run allow list,
+role-based spacing, receiver/generic/type attachment, flexible interiors and
+separators, `..^`, slice offsets and declaration connector rules are already
+in the [official lexical grammar](../grammar-spec.md#2-lexical-notation).
 
 #### Q03.1. Exact operator glyph set and lexical priority
 
@@ -396,21 +158,10 @@ at the three-star fence. `/**/` exposes the empty-comment compatibility case.
 **C# model:** Selected star-count fences are not C# block-comment syntax.
 C# uses a fixed nonnesting `/* ... */` boundary.
 
-**Accepted documentation marker:** Documentation adds
-one slash to the ordinary line/block form: `///` and `//* ... *//`.
-Documentation blocks are recognized before ordinary line comments.
-The longer star-count fences below remain candidates, independent of that
-accepted marker distinction:
-
-| Ordinary form | Documentation form |
-|---|---|
-| `// text` | `/// text` |
-| `/* text */` | `//* text *//` |
-| `/** text **/` | `//** text **//` |
-| `/**** text ****/` | `//**** text ****//` |
-
-The selected marker is in the canonical source/lexical grammar; a plain
-`/** ... */` is not a documentation form. Select generalized fence syntax,
+**Settled context:** The extra-slash documentation marker is already in the
+[official lexical grammar](../grammar-spec.md#2-lexical-notation).
+Only generalized star-count fences remain under review, for ordinary and
+documentation blocks alike. Select generalized fence syntax,
 including empty/nonoverlapping fences, shorter terminators as payload and whether
 longer terminator-looking runs are payload or errors.
 **Recommendation:** Retain the accepted fixed forms until an explicit,
@@ -422,52 +173,11 @@ slashes, and preserve or explicitly version existing empty-comment
 recognition; maximal star counting alone must not silently reinterpret
 `/**/`. Do not introduce nesting as an accidental side effect.
 
-### Q04. Hex-float versus member-access token boundaries
-
-**Accepted:** Require grouping before member access on bare numeric literals
-of every radix and format, including optional member access and witness
-selection. Trivia does not remove the restriction. Valid numeric fractions,
-exponents and range bounds remain unchanged; malformed numeric spelling
-cannot be reinterpreted as valid ungrouped member access.
-**Example:** `float32 x = 0x1.fp+2;` is a hex-float; `(0x1).face`
-has a separate member-access receiver boundary, still requiring a valid
-numeric target. `float32(0x1.fp+2).Foo` supplies an explicit receiver type.
-
-**C# model:** Not a C# hexadecimal-floating feature; C# has hexadecimal integer
-tokens but no corresponding hex-float literal. Decimal recovery offers only
-comparative lexer practice.
-
-**Rationale:** Trades a small grouping requirement for stable literal/member
-boundaries independent of whether the member name resembles fractional or
-exponent digits. Strings and other delimited literals have no equivalent
-restriction. Grouping does not supply a missing literal type. Exact malformed
-token recovery/diagnostic text remains tooling work.
-
-### Q05. Namespace nesting and local imports
-
-**Accepted:** Allow nested block namespaces and lexically scoped imports
-before declarations in each scope. Nested qualified names extend their
-enclosing namespace. Imports apply to their lexical scope and nested blocks,
-not other blocks of the same namespace or other source files. Preserve the
-prohibition on mixing file-scoped and block namespaces in one file.
-**Example:** `namespace A.B { struct Value { } }` expresses a qualified
-namespace without requiring nested blocks.
-
-**C# model:** C# permits nested namespaces and namespace-local `using`
-directives. Terrum already permits file-scoped or block form without mixing
-them in one file; adopting local imports need not add global/static imports.
-
-**Rationale:** Permits generated and hand-authored namespace grouping without
-import-order lookup or merging the imports of separately authored blocks.
-See the adopted [source-file structure](../grammar-spec.md#31-source-file-structure-and-declarations).
-
 ### Q06. Visibility and modifier applicability
 
-**Accepted visibility boundary:** Namespace/file-level declarations permit
-`public` or module-scoped `internal`, not `private`. Type-member `private`
-is restricted to the declaring type within its module. Equal namespace names
-in another module never extend either access domain; there is no friend-module
-access through linking or unsafe authorization.
+**Settled context:** Module-scoped visibility and declaring-type `private`
+are in the [official declaration contract](../grammar-spec.md#31-source-file-structure-and-declarations).
+Neither is awaiting another vote.
 
 **Remaining question:** Complete the declaration-kind matrix:
 interface-member access, static nominal containers, default access, and combinations of
@@ -475,16 +185,13 @@ interface-member access, static nominal containers, default access, and combinat
 duplicates/conflicts are not. Should a separate file-limited access domain be
 available, and to which declaration kinds would it apply? `file private` and
 `file internal` are review ideas, not adopted modifier combinations.
-**Example:** `internal struct Helper { }` is accessible throughout its module,
-not only the file or namespace that declares it.
+**Example:** Candidate `file internal struct Helper { }` would introduce a
+file-limited helper; that modifier combination is not currently adopted.
 
 **C# model:** Partly modeled on explicit declaration modifiers. Do not import
 `protected`, friend assemblies, stateful class inheritance, or C#'s different
 top-level-private restrictions.
 
-**Rationale for the accepted boundary:** Namespace organization does not add
-another access domain, and `private` is not an alias for `internal`.
-Neither access choice changes ownership, layout or effects.
 **Recommendation for the remaining questions:** Specify each declaration
 kind's legal modifiers independently. Consider file-limited access separately
 if a concrete source-local helper use warrants it; do not infer a new `file`
@@ -515,114 +222,25 @@ For example, `Limit(16)` can use an integer constant and a declaration that
 permits a parameter target but forbids repetition; repeating that resolved
 attribute on `count` rejects even though both arguments are constants.
 
-### Q08. Partial-declaration compatibility
-
-**Accepted:** Complete matching and conflict rules for generic parameter names,
-accessor parts, attributes, defaults and repeated clauses. One identity, one
-implementation, consistent contracts and deterministic file/source order are
-already approved.
-**Example:** `partial int32 Read(int32 value);` and
-`partial int32 Read(int32 value) => value;` illustrate matching parts.
-
-**C# model:** Partial composition is C#-inspired. Terrum does not inherit C#'s
-historical erasable private partial methods; it requires an implementation
-and forbids generators from altering an existing published contract.
-
-**Rule:** Match by declared identity and complete signature; require
-explicit repeated defaults/contracts to agree rather than accumulate stronger
-obligations. This makes generated-part integration reviewable and stable.
-A generator may not silently remove a required API by omitting its body.
-Any future optional-generation/API-absence mechanism must be explicitly
-declared and separately specified; none is adopted here.
-
-### Q09. Enum constant and flag restrictions
-
-**Accepted direction:** Integral underlying types only; specify eligible
-integer catalogs, implicit member-value
-progression/overflow, duplicate-valued names and `[Flags]` validity checks.
-Unnamed underlying values remain permitted.
-**Example:** `enum Access : uint32 { Read = 1, Write = 2 }`
-
-**C# model:** Integral-base enums and named flags are C#-inspired, but Terrum's
-width families, required constant evaluation and checked arithmetic differ.
-Do not infer closed-case exhaustiveness from an enum declaration.
-
-**Rule:** Check constants in the exact underlying type; reject
-implicit successor overflow, permit deliberate aliases, and keep flags
-annotation validation separate from runtime value validity.
-Strings, type identities and other case payloads are different facilities,
-not implicitly another enum base. An integral ID plus separately typed
-lookup storage remains available without repeated string comparisons.
-Exact eligible profile catalogs and flags-attribute schemas remain explicit
-profile/schema work, not permission to infer closed-case exhaustiveness.
-
-### Q10. Reserved primitive bindings and privileged members
-
-**Accepted direction:** Publish a closed selected primitive binding catalog,
-independent of optional library APIs, and finalize
-which member forms a designated Core declaration may supply. One intrinsic
-backing field and the prohibition on source-defined primitive operators are
-already specified.
-**Example:** `struct int32 { private int32 _value; }` is meaningful only in
-the designated Core compilation.
-
-**C# model:** Not C# source redefining `System.Int32`. Terrum uses ordinary
-identifier tokens with privileged primitive binding; no keyword escape grants
-that privilege.
-
-**Rule:** Publish a closed primitive binding catalog independently
-of optional library APIs, and allow ordinary checked members only where they
-cannot redefine representation or built-in arithmetic. Artifact identity is
-separate metadata/build work, not this source decision.
-The lowest **`language`** profile supplies the selected language-required
-bindings/substrate; **Core** adds a scoped, generally useful surface above it.
-Foundation/Application and ecosystem packages retain their explicit runtime
-dependencies. The [core-library reference](core-library-reference.md#dependency-layers)
-records this distinction. Exact primitive width/native-sized catalogs and
-optional API inventories are not automatically approved by the layering.
-
 ## Types, lookup and references
-
-### Q11. Alias recursion and substitution
-
-**Accepted:** Require finite generic alias expansion, diagnose recursive
-cycles, and preserve qualification and accessibility of the expanded target. Transparent public
-export and namespace-only placement are already approved.
-**Example:** `public alias Rows<T> = List<List<T>>;`
-
-**C# model:** Not C# `using` aliases: C# aliases do not introduce generic alias
-formals or exported alias declarations. See the official using reference.
-
-**Rule:** Require finite structural expansion, diagnose cycles with
-the declaration chain, and preserve complete qualified arguments. Recursive
-data should use nominal declarations, not an infinitely expanded synonym.
 
 ### Q12. Constant formals and dependent defaults
 
-**Accepted initial domains/dependencies:** Fixed-width integers, Boolean and
-nominal enums may form compile-time value arguments.
-Defaults depend only on earlier formals; self/forward/cyclic dependencies
-reject. Defaults may interleave with required formals; `_` never
-falls back to a default.
-**Example:** `struct Pair<T, U = T> { }` exposes a dependency between formals.
+**Settled context:** Initial constant domains, transparent alias expansion
+and earlier-only default dependencies are in the
+[official generic contract](../grammar-spec.md#32-types-parameters-and-arguments).
+Only nominal-wrapper eligibility remains in this question.
+
+**Question:** Should an eligible one-field primitive wrapper be allowed as a
+constant formal domain?
+**Example:** Candidate `struct Endpoint<const PortId Port> { }`, where
+`PortId` is a nominal wrapper over `uint16`. Equal representation alone does
+not currently make that domain eligible.
 
 **C# model:** Not C# generic parameter defaults or constant generic parameters;
 neither is part of the C# generic declaration model.
 
-**Rule:** Beyond the named policy enums already contemplated by the
-grammar, initially permit fixed-width integer, Boolean and nominal enum
-constants, but not floating values, arbitrary structs, references or allocated
-object identities. For example,
-`struct Tile<T, const uint32 Width, const uint32 Height = Width> { }`
-allows a width-dependent default. A default may depend only on earlier
-formals; self, forward and cyclic dependencies reject. These accepted domain
-and dependency restrictions support widths/policies without a cyclic solver
-or an unbounded compile-time object identity model. Transparent aliases
-expand before eligibility checking; aliases of allowed domains remain
-allowed without creating a new constant category.
-
-**Remaining wrapper question:** Should an eligible one-field primitive
-wrapper be allowed as a constant formal domain? **Recommendation:** Consider
+**Recommendation:** Consider
 an opt-in checked subset with constant construction, full initialization,
 canonical equality/encoding and preserved nominal identity. `Transparent`
 or `Blittable` layout alone proves none of these. This remains proposed:
@@ -697,33 +315,6 @@ still matters. Resolve the witness and
 ordinary type arguments first, then check equality; do not infer an otherwise
 unbound `T` backward from `Item`. The new clause is proposed, not accepted.
 
-### Q15. Inherited default/member resolution
-
-**Accepted:** Complete qualification and resolution for multiple inherited
-paths to the same member or competing defaults. Explicit implementations,
-separate witness identities and restricted `default<I>.Member()` are settled.
-**Example:** `interface ICombined : ILeft, IRight { }` needs a resolution rule
-when both paths supply the relevant default.
-
-**C# model:** C# default interfaces require a unique most-specific
-implementation, as specified by the [default-interface most-specific rule](https://github.com/dotnet/csharplang/blob/main/proposals/csharp-8.0/default-interface-methods.md#the-most-specific-implementation-rule).
-Terrum must not import an inheritance-order tie-break or a
-physical vtable model; its associated members also participate.
-For independently declared members C# can disambiguate through an interface
-reference/cast and explicit implementation; it does not lack all interface
-qualification. Terrum's `.via<I>` is explicit witness selection, while
-restricted `default<I>` is intentional default-body selection, not a
-general cast. See [C# explicit interface implementation](https://learn.microsoft.com/en-us/dotnet/csharp/programming-guide/interfaces/explicit-interface-implementation).
-
-**Rule:** Require one unambiguous inherited identity/default or an
-explicit resolution. Reuse the same rule for associated defaults and callable
-defaults, so adding an unrelated base cannot silently retarget calls.
-Two paths inheriting the same `IBase.Read` identity are not two new members.
-Two interfaces independently declaring `Read` retain distinct identities:
-`value.via<ILeft>.Read()` names the left witness, not an inheritance-order
-winner. Conflicting claims for the same type/interface pair still reject;
-`via` does not repair an invalid conformance.
-
 ### Q16. Extension declarations and call disambiguation
 
 **Question:** Choose declaration/import scope and an explicit way to name a
@@ -736,7 +327,7 @@ unrelated extension.
 **C# model:** Extension lookup is C#-inspired, but do not import C# 14 extension
 block syntax or permit retroactive conformance merely because it is available.
 
-**Accepted boundary direction; syntax still open:** Keep explicit static-call qualification available and
+**Settled context; syntax still open:** Keep explicit static-call qualification available and
 make extension eligibility lexical, with the receiver's full access/loan
 contract. Avoid a second overload-ranking system.
 
@@ -774,7 +365,7 @@ does not by itself forward an original object's representation or members.
 **C# model:** Not C# extension methods or inheritance. Terrum adapters retain
 their own witness set; no original type gains a new conformance.
 
-**Accepted boundary direction; dedicated syntax still open:** Begin with explicit nominal wrappers and declared
+**Settled context; dedicated syntax still open:** Begin with explicit nominal wrappers and declared
 forwarding operations. Add projection syntax only where validity, ownership,
 access, backing and cost contracts are expressible; equal bits are insufficient.
 
@@ -1286,6 +877,48 @@ layout eligibility. Target limits and wire encoding remain ABI work.
 | Metadata/ABI work | Wire rows, witness/capture representation, dispatch tables, compatibility encoding, exception transport, public tuple/callable ABI, layouts and resource limits. These must carry chosen source contracts, not choose them. Existing reserved fields remain generically reserved. |
 | Library API work | Iterator/awaiter/close operation identities, scheduler/executor/cancellation APIs, task ownership surfaces, text/collection handler registration APIs, primitive comparer names, allocator and tensor APIs. Review in the [core-library proposal](core-library-reference.md), with source dependencies above where needed. |
 | Proof/tooling work | Exact portable proof rules/budgets remain in the [proof proposal](static-proof-and-constant-evaluation.md). XML schema/member IDs, package layout and optional documentation tests follow the approved attachment/reference decisions; they are not extra language features. |
+
+## Resolved question link redirects
+
+These stable headings preserve existing review links, not pending votes.
+The rules live in the official grammar; their former proposal text is not
+duplicated here.
+
+### Q01. Escaping reserved words in identifiers
+
+Resolved; see the [official grammar](../grammar-spec.md#2-lexical-notation).
+
+### Q02. Reserved versus contextual words
+
+Resolved; see the [official grammar](../grammar-spec.md#2-lexical-notation).
+
+### Q04. Hex-float versus member-access token boundaries
+
+Resolved; see the [official grammar](../grammar-spec.md#2-lexical-notation).
+
+### Q05. Namespace nesting and local imports
+
+Resolved; see the [official grammar](../grammar-spec.md#31-source-file-structure-and-declarations).
+
+### Q08. Partial-declaration compatibility
+
+Resolved; see the [official grammar](../grammar-spec.md#512-modifiers-cleanup-and-finalization).
+
+### Q09. Enum constant and flag restrictions
+
+Resolved; see the [official grammar](../grammar-spec.md#31-source-file-structure-and-declarations).
+
+### Q10. Reserved primitive bindings and privileged members
+
+Resolved; see the [official grammar](../grammar-spec.md#2-lexical-notation).
+
+### Q11. Alias recursion and substitution
+
+Resolved; see the [official grammar](../grammar-spec.md#54-aliases-and-associated-types-declarations-and-open-binding).
+
+### Q15. Inherited default/member resolution
+
+Resolved; see the [official grammar](../grammar-spec.md#54-aliases-and-associated-types-declarations-and-open-binding).
 
 ## Official comparison sources
 
