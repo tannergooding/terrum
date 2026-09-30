@@ -22,6 +22,10 @@ namespace Terrum.CodeAnalysis;
 // kind-5 else marker at that index has slot at the exclusive else-arm end,
 // root -1, and span covering the else keyword and braced body. Versions
 // 36..39 additionally require kind-3 loops; +1/+2 select conversion/?:.
+// Versions 40..43 require a loop and a kind-6 break or kind-7 continue;
+// versions 44..47 additionally require a branch. Transfer slot names the
+// nearest enclosing kind-3 header record; root is -1 and span is the keyword
+// through semicolon. +1/+2 select conversion/?:.
 void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expression)
 {
     Host.Frontend[offset] = expression.Type;
@@ -93,6 +97,26 @@ bool TryPublishScalarFrontend()
         {
             Host.Frontend[0] = 32;
             if (hasWhile) { Host.Frontend[0] = 36; }
+            for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
+            {
+                if (Host.Frontend[42 + node * 8] == 83)
+                {
+                    Host.Frontend[0] = Host.Frontend[0] + 1;
+                    break;
+                }
+            }
+            if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 2; }
+        }
+        mut bool hasTransfer = false;
+        for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
+        {
+            int32 kind = Host.Frontend[332 + statement * 5];
+            if (kind == 6 || kind == 7) { hasTransfer = true; }
+        }
+        if (hasTransfer)
+        {
+            Host.Frontend[0] = 40;
+            if (hasBranch) { Host.Frontend[0] = 44; }
             for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
             {
                 if (Host.Frontend[42 + node * 8] == 83)

@@ -1584,7 +1584,7 @@ mut class ScalarFrontendState
             first.Range.Start, endDeclaration.Range.End);
     }
 
-    private mut bool ParseTreeStructuredBody(int32 depth)
+    private mut bool ParseTreeStructuredBody(int32 depth, int32 nearestLoop)
     {
         require _tokens.TryGet(_at, out var first);
         mut Token next = first;
@@ -1596,7 +1596,22 @@ mut class ScalarFrontendState
             }
             else if (next.Kind == 16)
             {
-                if (!ParseTreeIf(depth)) { return false; }
+                if (!ParseTreeIf(depth, nearestLoop)) { return false; }
+            }
+            else if (next.Kind == 33 || next.Kind == 34)
+            {
+                if (nearestLoop < 0)
+                {
+                    FailAt(1, next.Range);
+                    return false;
+                }
+                _at = _at + 1;
+                if (!Take(52, out var semicolon)
+                    || !AddTreeStatement(next.Kind == 33 ? 6 : 7,
+                        nearestLoop, -1, next.Range.Start, semicolon.Range.End))
+                {
+                    return false;
+                }
             }
             else if (next.Kind == 2
                 && _tokens.TryGet(_at + 1, out var equals)
@@ -1614,7 +1629,7 @@ mut class ScalarFrontendState
         return true;
     }
 
-    private mut bool ParseTreeIf(int32 depth)
+    private mut bool ParseTreeIf(int32 depth, int32 nearestLoop)
     {
         if (depth >= 6 || _statementCount >= 12)
         {
@@ -1636,7 +1651,7 @@ mut class ScalarFrontendState
         }
         int32 header = _statementCount;
         if (!AddTreeStatement(4, 0, condition, keyword.Range.Start, body.Range.End)
-            || !ParseTreeStructuredBody(depth + 1)
+            || !ParseTreeStructuredBody(depth + 1, nearestLoop)
             || !Take(49, out var endTrue))
         {
             return false;
@@ -1654,7 +1669,7 @@ mut class ScalarFrontendState
             }
             int32 marker = _statementCount;
             if (!AddTreeStatement(5, 0, -1, otherwise.Range.Start, openFalse.Range.End)
-                || !ParseTreeStructuredBody(depth + 1)
+                || !ParseTreeStructuredBody(depth + 1, nearestLoop)
                 || !Take(49, out var endFalse))
             {
                 return false;
@@ -1692,7 +1707,7 @@ mut class ScalarFrontendState
         {
             return false;
         }
-        if (!ParseTreeStructuredBody(depth + 1) || !Take(49, out var end))
+        if (!ParseTreeStructuredBody(depth + 1, header) || !Take(49, out var end))
         {
             return false;
         }
@@ -2174,7 +2189,7 @@ mut class ScalarFrontendState
                     }
                     mut bool parsed = false;
                     if (next.Kind == 18) { parsed = ParseTreeWhile(0); }
-                    else if (next.Kind == 16) { parsed = ParseTreeIf(0); }
+                    else if (next.Kind == 16) { parsed = ParseTreeIf(0, -1); }
                     else { parsed = ParseTreeStatement(); }
                     if (!parsed)
                     {
