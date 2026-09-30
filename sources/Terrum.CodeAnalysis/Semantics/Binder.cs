@@ -936,9 +936,12 @@ internal sealed partial class Binder
                     && !TryResolveClass(Qualify(containingType), out propertyOwner)
                     && !_primitiveDeclarations.Contains(containingType))
                 || (IsStruct(propertyOwner) && IsUnique(propertyOwner))
-                || TryFindField(propertyOwner, nameToken.Text, out _))
+                || TryFindField(propertyOwner, nameToken.Text, out _)
+                || containingType is not null
+                    && _primitiveBackingFields.TryGetValue(containingType, out var backing)
+                    && backing == nameToken.Text)
             {
-                Report("TRM3001", "Getter-only properties require a distinct member on a Copy struct or source class with a readonly receiver.",
+                Report("TRM3001", "Getter-only properties require a distinct member on a Copy struct, source class or Core primitive with a readonly receiver.",
                     declaration.Span);
             }
         }

@@ -215,6 +215,21 @@ public sealed class CoreLibraryTests
         }
     }
 
+    [Theory]
+    [InlineData("bool")]
+    [InlineData("char16")]
+    [InlineData("int32")]
+    [InlineData("uint32")]
+    [InlineData("int64")]
+    [InlineData("uint64")]
+    public void CorePrimitiveGetterCannotShadowIntrinsicBacking(string name)
+    {
+        var source = $"public struct {name} {{ private {name} value; "
+            + $"public {name} value {{ get {{ return value; }} }} }}";
+        var compilation = Compilation.CreateCoreLibrary([SyntaxTree.Parse(source)]);
+        Assert.Contains(compilation.Diagnostics, diagnostic => diagnostic.Code == "TRM3001");
+    }
+
     [Fact]
     public void CorePrimitiveGetterVisibilityIsNotInferredFromConventionalMethodName()
     {
