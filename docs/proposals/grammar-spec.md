@@ -1634,6 +1634,11 @@ special conditional postcondition block grammar. See the canonical
 
 ### 5.9 Static-proof floor and constant evaluation
 
+Declaration-level `static require` and `static ensure` are deferred pending
+a concrete API need. Ordinary declaration contracts and required static
+body proofs retain their established roles; no caller-proof declaration
+qualifier is introduced.
+
 **Accepted policy:** required static obligations use
 a versioned portable minimum of proof rules/complexity and guaranteed
 resources, available independently of optimization level. Sound
@@ -2012,7 +2017,7 @@ they are not ordinary overloads merely because they use operator punctuation.
 Still **OPEN** for a full source grammar: nominal safe union cases and complete
 patterns, associated equality and family/adapter declarations,
 conditional/default conformance and text-target fragment contracts,
-general `const` declarations/expressions and proof-qualified contract forms,
+general `const` declarations/expressions,
 general ownership/reference results, constructor inference, async completion
 and scheduling protocols, producers, capture/exception transport, and registered collection-fragment
 construction. Source type packs and tuple arity extensions remain deferred.
@@ -2091,7 +2096,7 @@ appears in §2.
 | Expressions | §3.4 gives conditional/coalescing/optional access, half-open slicing, end-relative bounds, tuples, target-directed static/async lambdas, await and collection spreads. | Slice/first-class index/range protocols, callable capture/representation, awaiter registration and collection-fragment contracts; comprehensions/repetition deferred for library/tensor design. |
 | Patterns | §3.3 gives shared switch arms, guarded matching, compatible `or` bindings and explicit constant/wildcard transfers. | Full nominal-case, relational and destructuring patterns. |
 | Policies | §§3.3–3.4 and 5.12 describe lexical preferences, strict selection and constant-formal forwarding. | Variant-declaration syntax and compile-time queries. |
-| Contracts | §§3.1, 3.3–3.4 and 5.8 give grouped named/lambda `require`/`ensure`, contextual result `return` and distinct body-level checks. | Proof-qualified forms, producer phases and correlated-output metadata. |
+| Contracts | §§3.1, 3.3–3.4 and 5.8 give grouped named/lambda `require`/`ensure`, contextual result `return` and distinct body-level checks. | Producer phases and correlated-output metadata; declaration-level static qualifiers are deferred. |
 | Static proof | §5.9 describes the portable static-proof floor. | Constant-evaluation and symbolic source forms. |
 | Exceptions | §§3.3–3.4 give typed/bare catches, filters, throw expressions, rethrow and explicit captured-failure propagation. | Catch eligibility, capture APIs, transport, unwind phase and chaining metadata. |
 | Cleanup | §§3.3 and 5.12 distinguish lexical `defer` from `[Cleanup]`. | Defer action validation and attribute placement. |
