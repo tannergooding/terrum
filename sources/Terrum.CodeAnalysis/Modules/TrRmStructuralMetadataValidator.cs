@@ -130,7 +130,7 @@ public static class TrRmStructuralMetadataValidator
                     if (linear)
                     {
                         var body = new TrRmCompactLinearBodyReader(bodies, method, modules,
-                            methods, signatures, parameters, typeSpecs);
+                            methods, signatures, parameters, typeSpecs, imports);
                         if (sourceMapCount != 0)
                         {
                             if (inspection == BodyInspection.CompactMixed)

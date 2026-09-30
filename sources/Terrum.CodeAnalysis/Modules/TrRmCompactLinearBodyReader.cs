@@ -28,6 +28,14 @@ public readonly ref struct TrRmCompactLinearBodyReader
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types)
+        : this(bodies, methodRow, modules, methods, signatures, parameters, types, default)
+    {
+    }
+
+    public TrRmCompactLinearBodyReader(TrRmBodyTableReader bodies, int methodRow,
+        TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader types, TrRmImportTableReader imports)
     {
         var bodyRow = methods.GetBodyRow(methodRow);
         if (bodyRow == 0
@@ -260,7 +268,19 @@ public readonly ref struct TrRmCompactLinearBodyReader
 
                 if (methods.GetBodyRow(target) == 0)
                 {
-                    throw InvalidBody();
+                    if (methods.GetOwnerType(target) != 0 || methods.GetFlags(target) != 2
+                        || !imports.TryGetExpectedRequirements(
+                            0x1600_0000u | (uint)target, out var requirements))
+                    {
+                        throw InvalidBody();
+                    }
+
+                    var (callerTarget, callerPolicy) = modules.GetRequirements(callerModule);
+                    var (targetRequirement, targetPolicy) = requirements;
+                    if (targetPolicy != callerPolicy || targetRequirement > callerTarget)
+                    {
+                        throw InvalidBody();
+                    }
                 }
 
                 var targetSignature = methods.GetSignature(target);

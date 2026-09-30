@@ -215,17 +215,39 @@ public sealed partial class CliTests
 
         byte[] caller = [0x04, 1, 1, 0, 0, 0, 1, 0x12, 2, 2, 1, 1, 0x83, 2];
         byte[] callee = [0x04, 1, 1, 0, 0, 0, 0, 0x83, 1];
-        byte[] Artifact(byte[] moduleBytes, uint moduleCount, byte[] callerBody)
-            => TrRmArtifactWriter.Encode([
-            new TrRmSection(0x0001, 0, moduleCount, moduleBytes),
-            new TrRmSection(0x0002, 0, 3, strings),
-            new TrRmSection(0x0011, 0, 1, typeSpec),
-            new TrRmSection(0x0016, 0, 2, methods),
-            new TrRmSection(0x0017, 0, 1, signature),
-            new TrRmSection(0x0018, 0, 1, parameter),
-            new TrRmSection(0x0020, 0, 2,
-                TrRmVariableTableWriter.EncodeBodies([callerBody, callee])),
-        ]);
+        var moduleRef = new byte[12];
+        BinaryPrimitives.WriteUInt32LittleEndian(moduleRef, 3);
+        var import = new byte[12];
+        BinaryPrimitives.WriteUInt32LittleEndian(import, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(import.AsSpan(4), 3);
+        BinaryPrimitives.WriteUInt32LittleEndian(import.AsSpan(8), 0x1600_0002);
+        byte[] Artifact(byte[] moduleBytes, uint moduleCount, byte[] callerBody,
+            bool imported = false)
+        {
+            var sections = new List<TrRmSection>
+            {
+                new(0x0001, 0, moduleCount, moduleBytes),
+                new(0x0002, 0, 3, strings),
+            };
+            if (imported)
+            {
+                sections.Add(new(0x0010, 0, 1, moduleRef));
+            }
+
+            sections.Add(new(0x0011, 0, 1, typeSpec));
+            sections.Add(new(0x0016, 0, 2, methods));
+            sections.Add(new(0x0017, 0, 1, signature));
+            sections.Add(new(0x0018, 0, 1, parameter));
+            if (imported)
+            {
+                sections.Add(new(0x001C, 0, 1, import));
+            }
+
+            sections.Add(new(0x0020, 0, imported ? 1u : 2u,
+                imported ? TrRmVariableTableWriter.EncodeBodies([callerBody])
+                    : TrRmVariableTableWriter.EncodeBodies([callerBody, callee])));
+            return TrRmArtifactWriter.Encode(sections);
+        }
 
         var path = Path.Combine(Path.GetTempPath(), $"terrum-trrm-linear-call-{Guid.NewGuid():N}.trrm");
         try
@@ -273,6 +295,25 @@ public sealed partial class CliTests
             var (packedInvalid, _, _) = await RunAsync([],
                 "validate-trrm-compact-linear", path, "--json");
             Assert.Equal(1, packedInvalid);
+
+            methods[40] = 2;
+            BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(52), 0);
+            byte[] importedCaller = [0x04, 1, 1, 0, 0, 0, 1, 0x12, 2, 2, 1, 1, 0x83, 2];
+            await File.WriteAllBytesAsync(path, Artifact(module, 1, importedCaller,
+                imported: true));
+            var (importedValid, importedOutput, importedError) = await RunAsync([],
+                "validate-trrm-compact-linear", path, "--json");
+            Assert.True(importedValid == 0, importedOutput + importedError);
+
+            BinaryPrimitives.WriteUInt32LittleEndian(moduleRef.AsSpan(8), 1);
+            await File.WriteAllBytesAsync(path, Artifact(module, 1, importedCaller,
+                imported: true));
+            var (importedStructural, _, _) = await RunAsync([],
+                "validate-trrm-structure", path, "--json");
+            Assert.Equal(0, importedStructural);
+            var (importedInvalid, _, _) = await RunAsync([],
+                "validate-trrm-compact-linear", path, "--json");
+            Assert.Equal(1, importedInvalid);
         }
         finally
         {
