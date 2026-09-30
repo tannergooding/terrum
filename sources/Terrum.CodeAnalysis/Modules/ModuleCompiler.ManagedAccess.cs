@@ -74,6 +74,10 @@ public static partial class ModuleCompiler
         BoundOwnerDeclaration or BoundVacantLocal or BoundBreak or BoundContinue or BoundDrop or BoundDropConstructedFields
             or SymbolicDrop => statement,
         BoundAssignment assignment => assignment with { Value = LegacyExpression(assignment.Value) },
+        BoundOptionalAssignment assignment => assignment with {
+            Place = LegacyExpression(assignment.Place),
+            Value = LegacyExpression(assignment.Value),
+        },
         BoundFieldAssignment field => field with { Value = LegacyExpression(field.Value) },
         BoundExpressionStatement expression => expression with { Expression = LegacyExpression(expression.Expression) },
         BoundIf conditional => conditional with {
@@ -141,6 +145,11 @@ public static partial class ModuleCompiler
                 Condition = LegacyExpression(conditional.Condition),
                 WhenTrue = LegacyExpression(conditional.WhenTrue),
                 WhenFalse = LegacyExpression(conditional.WhenFalse),
+            },
+            BoundCoalesce coalesce => coalesce with {
+                Type = type,
+                Optional = LegacyExpression(coalesce.Optional),
+                Fallback = LegacyExpression(coalesce.Fallback),
             },
             BoundCast cast => cast with { Type = type, Operand = LegacyExpression(cast.Operand) },
             BoundOptionalLift lift => lift with { Type = type, Value = LegacyExpression(lift.Value) },

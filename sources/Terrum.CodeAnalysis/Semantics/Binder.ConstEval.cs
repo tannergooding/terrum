@@ -242,6 +242,11 @@ internal sealed partial class Binder
                 };
             case BoundAssignment assignment:
                 return assignment with { Value = ResolveConstExpression(assignment.Value, locals, functions, variableCount) };
+            case BoundOptionalAssignment optionalAssignment:
+                return optionalAssignment with {
+                    Place = ResolveConstExpression(optionalAssignment.Place, locals, functions, variableCount),
+                    Value = ResolveConstExpression(optionalAssignment.Value, locals, functions, variableCount),
+                };
             case BoundFieldAssignment assignment:
                 return assignment with { Value = ResolveConstExpression(assignment.Value, locals, functions, variableCount) };
             case BoundBufferAssignment assignment:
@@ -308,6 +313,11 @@ internal sealed partial class Binder
                     Condition = ResolveConstExpression(conditional.Condition, locals, functions, variableCount),
                     WhenTrue = ResolveConstExpression(conditional.WhenTrue, locals, functions, variableCount),
                     WhenFalse = ResolveConstExpression(conditional.WhenFalse, locals, functions, variableCount),
+                };
+            case BoundCoalesce coalesce:
+                return coalesce with {
+                    Optional = ResolveConstExpression(coalesce.Optional, locals, functions, variableCount),
+                    Fallback = ResolveConstExpression(coalesce.Fallback, locals, functions, variableCount),
                 };
             case BoundCast cast:
                 return cast with { Operand = ResolveConstExpression(cast.Operand, locals, functions, variableCount) };

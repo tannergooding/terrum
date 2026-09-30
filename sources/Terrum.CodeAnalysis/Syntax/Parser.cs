@@ -105,7 +105,7 @@ internal sealed class Parser
             else if (kind == TokenKind.Greater)
             {
                 if (depth == 0 || previous is not (TokenKind.Identifier or TokenKind.VoidKeyword
-                    or TokenKind.Greater or TokenKind.Question))
+                    or TokenKind.Greater or TokenKind.Question or TokenKind.QuestionQuestion))
                 {
                     return false;
                 }
@@ -139,14 +139,15 @@ internal sealed class Parser
             else if (kind == TokenKind.Comma)
             {
                 if (depth == 0 || previous is not (TokenKind.Identifier or TokenKind.VoidKeyword
-                    or TokenKind.Greater or TokenKind.Question))
+                    or TokenKind.Greater or TokenKind.Question or TokenKind.QuestionQuestion))
                 {
                     return false;
                 }
             }
-            else if (kind == TokenKind.Question)
+            else if (kind is TokenKind.Question or TokenKind.QuestionQuestion)
             {
-                if (previous is not (TokenKind.Identifier or TokenKind.VoidKeyword or TokenKind.Greater))
+                if (previous is not (TokenKind.Identifier or TokenKind.VoidKeyword or TokenKind.Greater
+                    or TokenKind.Question or TokenKind.QuestionQuestion))
                 {
                     return false;
                 }
@@ -492,14 +493,19 @@ internal sealed class Parser
             children.Add(Expect(TokenKind.Greater));
         }
 
-        if (Current.Kind == TokenKind.Question)
+        if (Current.Kind is TokenKind.Question or TokenKind.QuestionQuestion)
         {
-            children.Add(Take());
-
-            while (Current.Kind == TokenKind.Question)
+            var hasModifier = false;
+            while (Current.Kind is TokenKind.Question or TokenKind.QuestionQuestion)
             {
-                Report("TRM1005", "An optional modifier cannot be repeated on the same source type.", Current.Span);
-                children.Add(Take());
+                var modifier = Take();
+                children.Add(modifier);
+                for (var index = hasModifier ? 0 : 1; index < modifier.Token.Text.Length; index++)
+                {
+                    Report("TRM1005", "An optional modifier cannot be repeated on the same source type.",
+                        new TextSpan(modifier.Span.Start + index, 1));
+                }
+                hasModifier = true;
             }
         }
 
@@ -787,7 +793,7 @@ internal sealed class Parser
     private SyntaxNode ParseExpressionStatement(bool semicolon = true)
     {
         var children = new List<SyntaxElement> { ParseExpression() };
-        var assignment = Current.Kind == TokenKind.Equals;
+        var assignment = Current.Kind is TokenKind.Equals or TokenKind.QuestionQuestionEquals;
 
         if (assignment)
         {
@@ -881,7 +887,7 @@ internal sealed class Parser
                 {
                     nesting--;
                 }
-                else if (kind is not (TokenKind.Identifier or TokenKind.VoidKeyword or TokenKind.Comma or TokenKind.Dot or TokenKind.Question))
+                else if (kind is not (TokenKind.Identifier or TokenKind.VoidKeyword or TokenKind.Comma or TokenKind.Dot or TokenKind.Question or TokenKind.QuestionQuestion))
                 {
                     return false;
                 }
@@ -889,7 +895,7 @@ internal sealed class Parser
             while (nesting != 0);
         }
 
-        while (Peek(offset).Kind == TokenKind.Question)
+        while (Peek(offset).Kind is TokenKind.Question or TokenKind.QuestionQuestion)
         {
             offset++;
         }
@@ -904,13 +910,13 @@ internal sealed class Parser
         var unaryPrecedence = UnaryPrecedence(Current.Kind);
 
         if (Current.Kind == TokenKind.Identifier && Current.Text == "const"
-            && 11 >= parentPrecedence && (Peek(1).Kind is TokenKind.Identifier
+            && 12 >= parentPrecedence && (Peek(1).Kind is TokenKind.Identifier
                 or TokenKind.NumericLiteral or TokenKind.StringLiteral
                 or TokenKind.TrueKeyword or TokenKind.FalseKeyword or TokenKind.NullKeyword
                 or TokenKind.NewKeyword or TokenKind.MoveKeyword or TokenKind.Bang or TokenKind.Tilde
                 || (Peek(1).Kind == TokenKind.OpenParen && Peek(1).Span.Start > Current.Span.End)))
         {
-            left = Node(SyntaxKind.ConstExpression, [Take(), ParseExpression(11)]);
+            left = Node(SyntaxKind.ConstExpression, [Take(), ParseExpression(12)]);
         }
         else if (unaryPrecedence != 0 && unaryPrecedence >= parentPrecedence)
         {
@@ -923,7 +929,7 @@ internal sealed class Parser
 
         while (true)
         {
-            if (Current.Kind == TokenKind.Identifier && Current.Text == "is" && parentPrecedence < 6)
+            if (Current.Kind == TokenKind.Identifier && Current.Text == "is" && parentPrecedence < 7)
             {
                 var keyword = Take();
                 if (Current.Kind == TokenKind.NullKeyword)
@@ -943,7 +949,8 @@ internal sealed class Parser
             }
             var precedence = BinaryPrecedence(Current.Kind);
 
-            if (precedence == 0 || precedence <= parentPrecedence)
+            if (precedence == 0 || precedence < parentPrecedence
+                || (precedence == parentPrecedence && Current.Kind != TokenKind.QuestionQuestion))
             {
                 break;
             }
@@ -1158,19 +1165,20 @@ internal sealed class Parser
     private static bool IsTypeStart(TokenKind kind) => kind is TokenKind.Identifier or TokenKind.VoidKeyword
         or TokenKind.WriteKeyword;
 
-    private static int UnaryPrecedence(TokenKind kind) => kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde or TokenKind.MoveKeyword ? 11 : 0;
+    private static int UnaryPrecedence(TokenKind kind) => kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde or TokenKind.MoveKeyword ? 12 : 0;
 
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Non-operator tokens have zero precedence.")]
     private static int BinaryPrecedence(TokenKind kind) => kind switch {
-        TokenKind.Star or TokenKind.Slash or TokenKind.Percent => 10,
-        TokenKind.Plus or TokenKind.Minus => 9,
-        TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals => 7,
-        TokenKind.EqualsEquals or TokenKind.BangEquals => 6,
-        TokenKind.Ampersand => 5,
-        TokenKind.Caret => 4,
-        TokenKind.Pipe => 3,
-        TokenKind.AmpersandAmpersand => 2,
-        TokenKind.PipePipe => 1,
+        TokenKind.Star or TokenKind.Slash or TokenKind.Percent => 11,
+        TokenKind.Plus or TokenKind.Minus => 10,
+        TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals => 8,
+        TokenKind.EqualsEquals or TokenKind.BangEquals => 7,
+        TokenKind.Ampersand => 6,
+        TokenKind.Caret => 5,
+        TokenKind.Pipe => 4,
+        TokenKind.AmpersandAmpersand => 3,
+        TokenKind.PipePipe => 2,
+        TokenKind.QuestionQuestion => 1,
         _ => 0,
     };
 

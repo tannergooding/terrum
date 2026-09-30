@@ -96,6 +96,18 @@ internal sealed partial class PeCompiler
                 case BoundAssignment assignment:
                     CollectExpression(assignment.Value, 0);
                     break;
+                case BoundOptionalAssignment optionalAssignment:
+                    if (optionalAssignment.Place is BoundFieldRead field)
+                    {
+                        _ = slots.Add(0);
+                        CollectExpression(field.Receiver, 0);
+                        CollectExpression(optionalAssignment.Value, 1);
+                    }
+                    else
+                    {
+                        CollectExpression(optionalAssignment.Value, 0);
+                    }
+                    break;
                 case BoundFieldAssignment assignment:
                     if (ManagedClassTypes.IsClass(function.Variables[assignment.Variable].Type))
                     {
@@ -199,6 +211,10 @@ internal sealed partial class PeCompiler
                     CollectExpression(conditional.Condition, spill);
                     CollectExpression(conditional.WhenTrue, spill);
                     CollectExpression(conditional.WhenFalse, spill);
+                    break;
+                case BoundCoalesce coalesce:
+                    CollectExpression(coalesce.Optional, spill);
+                    CollectExpression(coalesce.Fallback, spill);
                     break;
                 case BoundCall call:
                     var argumentsBase = spill + 1;

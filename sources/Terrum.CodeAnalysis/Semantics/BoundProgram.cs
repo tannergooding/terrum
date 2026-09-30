@@ -369,6 +369,10 @@ public sealed record BoundOwnerDeclaration(int Variable, TextSpan Span) : BoundS
 /// <param name="Span">The source range.</param>
 public sealed record BoundAssignment(int Variable, BoundExpression Value, TextSpan Span) : BoundStatement(Span);
 
+/// <summary>Conditionally writes an initialized optional local or class field.</summary>
+public sealed record BoundOptionalAssignment(BoundExpression Place, BoundExpression Value, TextSpan Span)
+    : BoundStatement(Span);
+
 /// <summary>Writes a field in a mutable local value, without aliasing its storage.</summary>
 public sealed record BoundFieldAssignment(int Variable, int Field, BoundExpression Value, TextSpan Span) : BoundStatement(Span)
 {
@@ -474,6 +478,10 @@ public sealed record BoundNull(PrimitiveType Type, TextSpan Span) : BoundExpress
 
 /// <summary>Widens a known non-null handle without changing its pointer bits.</summary>
 public sealed record BoundOptionalLift(BoundExpression Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
+/// <summary>Reads one initialized optional value and evaluates its fallback only when absent.</summary>
+public sealed record BoundCoalesce(BoundExpression Optional, BoundExpression Fallback,
+    PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
 /// <summary>Projects a writable managed handle to readonly without changing its pointer bits.</summary>
 public sealed record BoundReadonlyProjection(BoundExpression Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);

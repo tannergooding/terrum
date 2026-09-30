@@ -47,6 +47,7 @@ public static partial class ModuleCompiler
     private const int StructuredLoopVersion = 39;
     private const int VacantLocalVersion = 40;
     private const int ConditionalVersion = 41;
+    private const int CoalescingVersion = 42;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -827,7 +828,7 @@ public static partial class ModuleCompiler
         Action<BoundViewScope>? visitView = null, Action? visitLoopTransfer = null,
         Action<BoundMutableFieldLoan>? visitMutableFieldLoan = null,
         Action<BoundStatement>? visitStructuredLoop = null, Action<BoundVacantLocal>? visitVacantLocal = null,
-        Action<BoundConditional>? visitConditional = null)
+        Action<BoundConditional>? visitConditional = null, Action? visitCoalesce = null)
     {
         var calls = new List<int>();
         VisitStatement(body);
@@ -851,6 +852,11 @@ public static partial class ModuleCompiler
                     break;
                 case BoundAssignment assignment:
                     VisitExpression(assignment.Value);
+                    break;
+                case BoundOptionalAssignment optionalAssignment:
+                    visitCoalesce?.Invoke();
+                    VisitExpression(optionalAssignment.Place);
+                    VisitExpression(optionalAssignment.Value);
                     break;
                 case BoundFieldAssignment field:
                     VisitExpression(field.Value);
@@ -958,6 +964,11 @@ public static partial class ModuleCompiler
                     VisitExpression(conditional.WhenTrue);
                     VisitExpression(conditional.WhenFalse);
                     break;
+                case BoundCoalesce coalesce:
+                    visitCoalesce?.Invoke();
+                    VisitExpression(coalesce.Optional);
+                    VisitExpression(coalesce.Fallback);
+                    break;
                 case BoundCast cast:
                     VisitExpression(cast.Operand);
                     break;
@@ -1024,6 +1035,13 @@ public static partial class ModuleCompiler
     {
         var found = false;
         _ = Calls(body, visitConditional: _ => found = true);
+        return found;
+    }
+
+    private static bool HasCoalescing(BoundStatement body)
+    {
+        var found = false;
+        _ = Calls(body, visitType: null, visitCoalesce: () => found = true);
         return found;
     }
 
@@ -1350,6 +1368,11 @@ public static partial class ModuleCompiler
                 WhenTrue = RemapExpression(conditional.WhenTrue, source, destination, classOffset),
                 WhenFalse = RemapExpression(conditional.WhenFalse, source, destination, classOffset),
             },
+            BoundCoalesce coalesce => coalesce with {
+                Type = RemapType(coalesce.Type, source, destination, classOffset),
+                Optional = RemapExpression(coalesce.Optional, source, destination, classOffset),
+                Fallback = RemapExpression(coalesce.Fallback, source, destination, classOffset),
+            },
             BoundCast cast => cast with {
                 Type = RemapType(cast.Type, source, destination, classOffset),
                 Operand = RemapExpression(cast.Operand, source, destination, classOffset),
@@ -1401,6 +1424,10 @@ public static partial class ModuleCompiler
             BoundLocal local => local with { Initializer = RemapExpression(local.Initializer, source, destination, classOffset) },
             BoundOwnerDeclaration or BoundVacantLocal => statement,
             BoundAssignment assignment => assignment with { Value = RemapExpression(assignment.Value, source, destination, classOffset) },
+            BoundOptionalAssignment optionalAssignment => optionalAssignment with {
+                Place = RemapExpression(optionalAssignment.Place, source, destination, classOffset),
+                Value = RemapExpression(optionalAssignment.Value, source, destination, classOffset),
+            },
             BoundFieldAssignment field => field with { Value = RemapExpression(field.Value, source, destination, classOffset) },
             BoundExpressionStatement expression => expression with {
                 Expression = RemapExpression(expression.Expression, source, destination, classOffset),
@@ -1524,6 +1551,11 @@ public static partial class ModuleCompiler
             && HasConditional(function.Body)))
         {
             version = Math.Max(version, ConditionalVersion);
+        }
+        if (module.Functions.Any(item => item.Function is BoundFunction function
+            && HasCoalescing(function.Body)))
+        {
+            version = Math.Max(version, CoalescingVersion);
         }
         writer.Write(Magic);
         writer.Write(version);
@@ -1740,6 +1772,13 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Conditional expressions require semantic module version 41.");
             }
+            if (version < CoalescingVersion && items.Any(item => item.Function is BoundFunction function
+                && HasCoalescing(function.Body))
+                || version == CoalescingVersion && !items.Any(item => item.Function is BoundFunction function
+                    && HasCoalescing(function.Body)))
+            {
+                throw new ModuleFormatException("Coalescing requires semantic module version 42.");
+            }
             if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
                 || !items.Any(static item => item.Import && item.Function is BoundFunction function
                     && !ManagedExportShape.ScalarOnly(function))))
@@ -1793,7 +1832,8 @@ public static partial class ModuleCompiler
             or MutableBufferFieldReceiverVersion or MutableBufferFieldViewVersion or ManagedValueExportVersion
             or ManagedGraphParticipantVersion or PrivateInitReferenceVersion or ExplicitGetterVersion
             or TransparentLayoutVersion or WideClassFieldsVersion or CorePrimitiveVersion
-            or CorePrimitiveGetterVersion or StructuredLoopVersion or VacantLocalVersion or ConditionalVersion))
+            or CorePrimitiveGetterVersion or StructuredLoopVersion or VacantLocalVersion or ConditionalVersion
+            or CoalescingVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -2147,6 +2187,7 @@ public static partial class ModuleCompiler
             BoundBlock => (byte)1,
             BoundLocal => (byte)2,
             BoundAssignment => (byte)3,
+            BoundOptionalAssignment when version >= CoalescingVersion => (byte)25,
             BoundExpressionStatement => (byte)4,
             BoundIf => (byte)5,
             BoundWhile { IsPostTested: true, Iterator: null } when version >= StructuredLoopVersion => (byte)21,
@@ -2222,6 +2263,10 @@ public static partial class ModuleCompiler
             case BoundAssignment assignment:
                 writer.Write(assignment.Variable);
                 PutExpression(writer, assignment.Value, names, ref remaining, depth + 1);
+                break;
+            case BoundOptionalAssignment optionalAssignment:
+                PutExpression(writer, optionalAssignment.Place, names, ref remaining, depth + 1);
+                PutExpression(writer, optionalAssignment.Value, names, ref remaining, depth + 1);
                 break;
             case BoundFieldAssignment field:
                 writer.Write(field.Variable);
@@ -2344,6 +2389,10 @@ public static partial class ModuleCompiler
                 return new BoundLocal(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1, version), span);
             case 3:
                 return new BoundAssignment(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1, version), span);
+            case 25 when version >= CoalescingVersion:
+                var place = GetExpression(reader, ref remaining, depth + 1, version);
+                return new BoundOptionalAssignment(place,
+                    GetExpression(reader, ref remaining, depth + 1, version), span);
             case 4:
                 return new BoundExpressionStatement(GetExpression(reader, ref remaining, depth + 1, version), span);
             case 5:
@@ -2452,6 +2501,7 @@ public static partial class ModuleCompiler
             BoundUnary => (byte)3,
             BoundBinary => (byte)4,
             BoundConditional => (byte)22,
+            BoundCoalesce => (byte)23,
             BoundCall => (byte)5,
             BoundCast => (byte)6,
             BoundFieldRead => (byte)7,
@@ -2532,6 +2582,10 @@ public static partial class ModuleCompiler
                 PutExpression(writer, conditional.WhenTrue, names, ref remaining, depth + 1);
                 PutExpression(writer, conditional.WhenFalse, names, ref remaining, depth + 1);
                 break;
+            case BoundCoalesce coalesce:
+                PutExpression(writer, coalesce.Optional, names, ref remaining, depth + 1);
+                PutExpression(writer, coalesce.Fallback, names, ref remaining, depth + 1);
+                break;
             case BoundCast cast:
                 PutExpression(writer, cast.Operand, names, ref remaining, depth + 1);
                 break;
@@ -2590,6 +2644,10 @@ public static partial class ModuleCompiler
                 var whenTrue = GetExpression(reader, ref remaining, depth + 1, version);
                 return new BoundConditional(condition, whenTrue,
                     GetExpression(reader, ref remaining, depth + 1, version), type, span);
+            case 23 when version >= CoalescingVersion:
+                var optional = GetExpression(reader, ref remaining, depth + 1, version);
+                return new BoundCoalesce(optional, GetExpression(reader, ref remaining, depth + 1, version),
+                    type, span);
             case 5:
                 // Names are resolved after the complete module graph is read.
                 var name = GetString(reader);
@@ -2653,6 +2711,10 @@ public static partial class ModuleCompiler
         BoundLocal local => local with { Initializer = ResolveExpression(local.Initializer, names) },
         BoundOwnerDeclaration or BoundVacantLocal => statement,
         BoundAssignment assignment => assignment with { Value = ResolveExpression(assignment.Value, names) },
+        BoundOptionalAssignment optionalAssignment => optionalAssignment with {
+            Place = ResolveExpression(optionalAssignment.Place, names),
+            Value = ResolveExpression(optionalAssignment.Value, names),
+        },
         BoundFieldAssignment field => field with { Value = ResolveExpression(field.Value, names) },
         BoundExpressionStatement expression => expression with { Expression = ResolveExpression(expression.Expression, names) },
         BoundIf conditional => conditional with {
@@ -2701,6 +2763,10 @@ public static partial class ModuleCompiler
             : throw new ModuleContractException($"Unresolved call target '{call.Name}'."),
         BoundUnary unary => unary with { Operand = ResolveExpression(unary.Operand, names) },
         BoundBinary binary => binary with { Left = ResolveExpression(binary.Left, names), Right = ResolveExpression(binary.Right, names) },
+        BoundCoalesce coalesce => coalesce with {
+            Optional = ResolveExpression(coalesce.Optional, names),
+            Fallback = ResolveExpression(coalesce.Fallback, names),
+        },
         BoundConditional conditional => conditional with {
             Condition = ResolveExpression(conditional.Condition, names),
             WhenTrue = ResolveExpression(conditional.WhenTrue, names),

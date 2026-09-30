@@ -220,6 +220,10 @@ public sealed class Compilation
                             expressions.Push(conditional.WhenTrue);
                             expressions.Push(conditional.WhenFalse);
                             break;
+                        case BoundCoalesce coalesce:
+                            expressions.Push(coalesce.Optional);
+                            expressions.Push(coalesce.Fallback);
+                            break;
                         case BoundUnary unary:
                             expressions.Push(unary.Operand);
                             break;
@@ -263,6 +267,10 @@ public sealed class Compilation
                         break;
                     case BoundAssignment assignment:
                         expressions.Push(assignment.Value);
+                        break;
+                    case BoundOptionalAssignment optionalAssignment:
+                        expressions.Push(optionalAssignment.Place);
+                        expressions.Push(optionalAssignment.Value);
                         break;
                     case BoundFieldAssignment field:
                         expressions.Push(field.Value);

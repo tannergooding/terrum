@@ -206,6 +206,11 @@ public sealed class Lexer
             case ':':
                 return TokenKind.Colon;
             case '?':
+                if (!AtEnd && Current == '?')
+                {
+                    _position++;
+                    return Compound('=', TokenKind.QuestionQuestionEquals, TokenKind.QuestionQuestion);
+                }
                 return TokenKind.Question;
             case '+':
                 return TokenKind.Plus;

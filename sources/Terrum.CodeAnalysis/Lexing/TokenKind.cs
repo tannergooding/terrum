@@ -173,4 +173,8 @@ public enum TokenKind
     Arrow,
     /// <summary>The <c>do</c> keyword.</summary>
     DoKeyword,
+    /// <summary>The null-coalescing operator (<c>??</c>).</summary>
+    QuestionQuestion,
+    /// <summary>The null-coalescing assignment operator (<c>??=</c>).</summary>
+    QuestionQuestionEquals,
 }

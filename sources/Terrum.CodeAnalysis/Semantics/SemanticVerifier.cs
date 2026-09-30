@@ -637,6 +637,10 @@ public static class SemanticVerifier
                 case BoundOptionalLift lift:
                     Expression(lift.Value, scope, depth + 1);
                     break;
+                case BoundCoalesce coalesce:
+                    Expression(coalesce.Optional, scope, depth + 1);
+                    Expression(coalesce.Fallback, scope, depth + 1);
+                    break;
                 case BoundReadonlyProjection projection:
                     Expression(projection.Value, scope, depth + 1);
                     break;
@@ -791,6 +795,10 @@ public static class SemanticVerifier
                     {
                         throw InvalidEffect(assignment.Span, "Ownership");
                     }
+                    break;
+                case BoundOptionalAssignment optionalAssignment:
+                    Expression(optionalAssignment.Place, scope, depth + 1);
+                    Expression(optionalAssignment.Value, scope, depth + 1);
                     break;
                 case BoundFieldAssignment field:
                     Expression(field.Value, scope, depth + 1);
@@ -1111,6 +1119,10 @@ public static class SemanticVerifier
                 case BoundOptionalLift lift:
                     Expression(lift.Value, depth + 1, acquiringRoot);
                     break;
+                case BoundCoalesce coalesce:
+                    Expression(coalesce.Optional, depth + 1, acquiringRoot);
+                    Expression(coalesce.Fallback, depth + 1, acquiringRoot);
+                    break;
                 case BoundReadonlyProjection projection:
                     Expression(projection.Value, depth + 1, acquiringRoot);
                     break;
@@ -1223,6 +1235,10 @@ public static class SemanticVerifier
                         throw InvalidEffect(assignment.Span, "Ownership");
                     }
                     Expression(assignment.Value, depth + 1);
+                    break;
+                case BoundOptionalAssignment optionalAssignment:
+                    Expression(optionalAssignment.Place, depth + 1);
+                    Expression(optionalAssignment.Value, depth + 1);
                     break;
                 case BoundFieldAssignment field:
                     if (field.Variable < 0 || field.Variable >= roots.Length
@@ -1554,6 +1570,54 @@ public static class SemanticVerifier
                     fieldMasks[assignment.Variable] = FullMask(program, assignment.Value.Type);
                 }
                 initialized[assignment.Variable] = true;
+                return false;
+            case BoundOptionalAssignment optionalAssignment:
+                if (optionalAssignment.Place is null || optionalAssignment.Value is null
+                    || !ManagedClassTypes.IsOptional(optionalAssignment.Place.Type)
+                    || optionalAssignment.Value.Type != optionalAssignment.Place.Type)
+                {
+                    throw Invalid(optionalAssignment.Span);
+                }
+                if (optionalAssignment.Place is BoundRead localPlace)
+                {
+                    if (localPlace.Variable < 0 || localPlace.Variable >= initialized.Length
+                        || (localPlace.Variable < function.ParameterCount
+                            && !function.Variables[localPlace.Variable].IsOut)
+                        || (function.IsConstructor && localPlace.Variable == 0)
+                        || !function.Variables[localPlace.Variable].IsMutable)
+                    {
+                        throw Invalid(optionalAssignment.Span);
+                    }
+                }
+                else if (optionalAssignment.Place is BoundFieldRead fieldPlace)
+                {
+                    if (!ValidType(fieldPlace.Receiver.Type, allowVoid: false, program)
+                        || !ManagedClassTypes.IsClass(fieldPlace.Receiver.Type)
+                        || !ManagedClassTypes.IsWritable(fieldPlace.Receiver.Type)
+                        || fieldPlace.Field < 0
+                        || fieldPlace.Field >= Fields(program, fieldPlace.Receiver.Type).Length
+                        || !Fields(program, fieldPlace.Receiver.Type)[fieldPlace.Field].IsMutable)
+                    {
+                        throw Invalid(optionalAssignment.Span);
+                    }
+                }
+                else
+                {
+                    throw Invalid(optionalAssignment.Span);
+                }
+                Expression(optionalAssignment.Place, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+                var assignedState = (bool[])initialized.Clone();
+                var assignedMasks = (uint[])fieldMasks.Clone();
+                var assignedDeclarations = new HashSet<int>(declarations);
+                Expression(optionalAssignment.Value, assignedState, assignedMasks, assignedDeclarations, function, program,
+                    ref remaining, depth + 1, failures);
+                declarations.UnionWith(assignedDeclarations);
+                for (var index = 0; index < initialized.Length; index++)
+                {
+                    initialized[index] &= assignedState[index];
+                    fieldMasks[index] &= assignedMasks[index];
+                }
                 return false;
             case BoundFieldAssignment fieldAssignment:
                 if (fieldAssignment.Variable < 0 || fieldAssignment.Variable >= initialized.Length
@@ -2422,6 +2486,44 @@ public static class SemanticVerifier
                 Expression(lift.Value, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures);
                 break;
+            case BoundCoalesce coalesce:
+                if (coalesce.Optional is null || coalesce.Fallback is null
+                    || !ManagedClassTypes.IsOptional(coalesce.Optional.Type)
+                    || !ManagedClassTypes.IsManaged(coalesce.Type)
+                    || (coalesce.Type != ManagedClassTypes.Required(coalesce.Optional.Type)
+                        && !(ManagedClassTypes.IsWritable(ManagedClassTypes.Required(coalesce.Optional.Type))
+                            && coalesce.Type == ManagedClassTypes.Readonly(
+                                ManagedClassTypes.Required(coalesce.Optional.Type)))
+                        && !(ManagedClassTypes.IsOptional(coalesce.Type)
+                            && (coalesce.Type == coalesce.Optional.Type
+                                || (ManagedClassTypes.IsWritable(coalesce.Optional.Type)
+                                    && coalesce.Type == ManagedClassTypes.Readonly(coalesce.Optional.Type)))))
+                    || coalesce.Fallback.Type != coalesce.Type)
+                {
+                    throw Invalid();
+                }
+                Expression(coalesce.Optional, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+                var absentState = (bool[])initialized.Clone();
+                var absentMasks = (uint[])fieldMasks.Clone();
+                var absentDeclarations = new HashSet<int>(declarations);
+                Expression(coalesce.Fallback, absentState, absentMasks, absentDeclarations, function, program,
+                    ref remaining, depth + 1, coalesce.Optional is BoundOptionalLift ? null : failures);
+                declarations.UnionWith(absentDeclarations);
+                if (coalesce.Optional is BoundNull)
+                {
+                    Array.Copy(absentState, initialized, initialized.Length);
+                    Array.Copy(absentMasks, fieldMasks, fieldMasks.Length);
+                }
+                else if (coalesce.Optional is not BoundOptionalLift)
+                {
+                    for (var i = 0; i < initialized.Length; i++)
+                    {
+                        initialized[i] &= absentState[i];
+                        fieldMasks[i] &= absentMasks[i];
+                    }
+                }
+                break;
             case BoundReadonlyProjection projection:
                 if (projection.Value is null || !ManagedClassTypes.IsWritable(projection.Value.Type)
                     || projection.Type != ManagedClassTypes.Readonly(projection.Value.Type))
@@ -2991,6 +3093,8 @@ public static class SemanticVerifier
             BoundOptionalLift lift => InvalidatesReservedOwner(lift.Value, variable, ref remaining, depth + 1),
             BoundReadonlyProjection projection => InvalidatesReservedOwner(projection.Value, variable, ref remaining, depth + 1),
             BoundIsNull test => InvalidatesReservedOwner(test.Value, variable, ref remaining, depth + 1),
+            BoundCoalesce coalesce => InvalidatesReservedOwner(coalesce.Optional, variable, ref remaining, depth + 1)
+                || InvalidatesReservedOwner(coalesce.Fallback, variable, ref remaining, depth + 1),
             BoundIsSome pattern => InvalidatesReservedOwner(pattern.Value, variable, ref remaining, depth + 1),
             BoundBinary binary => InvalidatesReservedOwner(binary.Left, variable, ref remaining, depth + 1)
                 || InvalidatesReservedOwner(binary.Right, variable, ref remaining, depth + 1),
@@ -3159,6 +3263,15 @@ public static class SemanticVerifier
                 var joined = Combine(trueState, CanBe(conditional.Condition, true, ref remaining),
                     falseState, CanBe(conditional.Condition, false, ref remaining));
                 Array.Copy(joined, state, state.Length);
+                break;
+            case BoundCoalesce coalesce:
+                VacateNestedOutputs(coalesce.Optional, state, ref remaining);
+                var absentState = (bool[])state.Clone();
+                VacateNestedOutputs(coalesce.Fallback, absentState, ref remaining);
+                for (var index = 0; index < state.Length; index++)
+                {
+                    state[index] &= absentState[index];
+                }
                 break;
             case BoundUnary unary:
                 VacateNestedOutputs(unary.Operand, state, ref remaining);

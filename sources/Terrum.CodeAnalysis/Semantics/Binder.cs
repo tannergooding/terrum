@@ -1521,6 +1521,10 @@ internal sealed partial class Binder
             {
                 var target = (SyntaxNode)node.Children[0];
                 var valueNode = (SyntaxNode)node.Children[2];
+                if (((SyntaxTokenElement)node.Children[1]).Token.Kind == TokenKind.QuestionQuestionEquals)
+                {
+                    return BindOptionalAssignment(target, valueNode, node.Span);
+                }
                 while (target.Kind == SyntaxKind.ParenthesizedExpression)
                 {
                     target = (SyntaxNode)target.Children[1];
@@ -1848,6 +1852,49 @@ internal sealed partial class Binder
                 Report("TRM3001", "This statement is not supported.", node.Span);
                 return new BoundBlock([], node.Span);
         }
+    }
+
+    private BoundStatement BindOptionalAssignment(SyntaxNode target, SyntaxNode value, TextSpan span)
+    {
+        while (target.Kind == SyntaxKind.ParenthesizedExpression)
+        {
+            target = (SyntaxNode)target.Children[1];
+        }
+        var place = BindExpression(target, null);
+        if (!ManagedClassTypes.IsOptional(place.Type))
+        {
+            Report("TRM3007", "Coalescing assignment requires an initialized optional place.", target.Span);
+            _ = BindExpression(value, null);
+            return new BoundBlock([], span);
+        }
+        switch (place)
+        {
+            case BoundRead local:
+                if (local.Variable == 0 && _hasReceiver && !_constructor)
+                {
+                    Report("TRM3008", "A method cannot rebind its receiver.", target.Span);
+                }
+                else if (!_variables[local.Variable].IsMutable)
+                {
+                    Report("TRM3008", "Coalescing assignment requires a mutable local.", target.Span);
+                }
+                break;
+            case BoundFieldRead field when IsClass(field.Receiver.Type):
+                if (!ManagedClassTypes.IsWritable(field.Receiver.Type))
+                {
+                    Report("TRM3008", "Field assignment requires a writable managed handle.", target.Span);
+                }
+                if (!GetField(field.Receiver.Type, field.Field).IsMutable)
+                {
+                    Report("TRM3008", "Coalescing assignment requires a mut field.", target.Span);
+                }
+                break;
+            default:
+                Report("TRM3008", "Coalescing assignment requires a mutable local or writable class field, not a value-returning getter or temporary.", target.Span);
+                _ = BindExpression(value, place.Type);
+                return new BoundBlock([], span);
+        }
+        return new BoundOptionalAssignment(place, BindExpression(value, place.Type), span);
     }
 
     private BoundStatement BindFieldAssignment(SyntaxNode target, SyntaxNode value, TextSpan span)
@@ -2400,12 +2447,50 @@ internal sealed partial class Binder
                     || readonlySource == ManagedClassTypes.Required(target)));
     }
 
+    private static bool IsNullExpression(SyntaxNode node)
+    {
+        while (node.Kind == SyntaxKind.ParenthesizedExpression)
+        {
+            node = (SyntaxNode)node.Children[1];
+        }
+        return node.Kind == SyntaxKind.LiteralExpression
+            && ((SyntaxTokenElement)node.Children[0]).Token.Kind == TokenKind.NullKeyword;
+    }
+
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unsupported operators are rejected by the default branch.")]
     private BoundExpression BindBinary(SyntaxNode node, PrimitiveType? expected)
     {
         var leftNode = (SyntaxNode)node.Children[0];
         var op = ((SyntaxTokenElement)node.Children[1]).Token;
         var rightNode = (SyntaxNode)node.Children[2];
+        if (op.Kind == TokenKind.QuestionQuestion)
+        {
+            var leftContext = expected is PrimitiveType expectedOptional
+                && ManagedClassTypes.IsOptional(expectedOptional) ? expectedOptional
+                : KnownType(rightNode) is PrimitiveType knownOptional
+                    && ManagedClassTypes.IsOptional(knownOptional) ? knownOptional : (PrimitiveType?)null;
+            if (leftContext is null && IsNullExpression(leftNode)
+                && (expected ?? KnownType(rightNode)) is PrimitiveType nullContext
+                && ManagedClassTypes.IsManaged(nullContext))
+            {
+                leftContext = ManagedClassTypes.Optional(nullContext);
+            }
+            var optional = BindExpression(leftNode, leftContext);
+            if (!ManagedClassTypes.IsOptional(optional.Type))
+            {
+                Report("TRM3007", "Coalescing requires a supported initialized optional operand.", leftNode.Span);
+                _ = BindExpression(rightNode, expected);
+                return ErrorExpression(node.Span);
+            }
+            var required = ManagedClassTypes.Required(optional.Type);
+            var coalesceType = expected is PrimitiveType target && CanImplicitlyConvert(required, target)
+                ? target
+                : KnownType(rightNode) is PrimitiveType rhs && ManagedClassTypes.IsOptional(rhs)
+                    && CanImplicitlyConvert(required, rhs) ? rhs
+                : IsNullExpression(rightNode) ? optional.Type : required;
+            var fallback = BindExpression(rightNode, coalesceType);
+            return new BoundCoalesce(optional, fallback, coalesceType, node.Span);
+        }
         var leftKnown = KnownType(leftNode);
         var rightKnown = KnownType(rightNode);
         if (leftKnown is PrimitiveType concrete && IsStruct(concrete) && IsStaticBinaryOperator(op.Kind))
@@ -3147,6 +3232,26 @@ internal sealed partial class Binder
             case SyntaxKind.BinaryExpression:
             {
                 var op = ((SyntaxTokenElement)node.Children[1]).Token.Kind;
+                if (op == TokenKind.QuestionQuestion)
+                {
+                    var left = (SyntaxNode)node.Children[0];
+                    var optional = KnownType(left);
+                    var right = (SyntaxNode)node.Children[2];
+                    var fallback = KnownType(right);
+                    if (optional is null && IsNullExpression(left)
+                        && fallback is PrimitiveType knownOptional
+                        && ManagedClassTypes.IsManaged(knownOptional))
+                    {
+                        return knownOptional;
+                    }
+                    if (optional is PrimitiveType type && ManagedClassTypes.IsOptional(type))
+                    {
+                        return fallback is PrimitiveType rhs && ManagedClassTypes.IsOptional(rhs)
+                            && CanImplicitlyConvert(ManagedClassTypes.Required(type), rhs) ? rhs
+                            : IsNullExpression(right) ? type : ManagedClassTypes.Required(type);
+                    }
+                    return null;
+                }
                 if (op is TokenKind.EqualsEquals or TokenKind.BangEquals or TokenKind.Less or TokenKind.LessEquals
                     or TokenKind.Greater or TokenKind.GreaterEquals or TokenKind.AmpersandAmpersand or TokenKind.PipePipe)
                 {

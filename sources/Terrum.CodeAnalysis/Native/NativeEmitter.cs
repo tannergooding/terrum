@@ -970,6 +970,11 @@ internal sealed partial class PeCompiler
                 return Math.Max(ExpressionSpills(assignment.Value, ref maximumArguments),
                     HasDeclaredCleanup(assignment.Value.Type)
                         ? CleanupSpills(ref maximumArguments) : 0);
+            case BoundOptionalAssignment optionalAssignment:
+                return optionalAssignment.Place is BoundFieldRead field
+                    ? Math.Max(ExpressionSpills(field.Receiver, ref maximumArguments),
+                        1 + ExpressionSpills(optionalAssignment.Value, ref maximumArguments))
+                    : ExpressionSpills(optionalAssignment.Value, ref maximumArguments);
             case BoundDrop drop:
                 return drop.CleanupFunction >= 0 ? CleanupSpills(ref maximumArguments) : 0;
             case BoundFieldAssignment assignment:
@@ -1015,6 +1020,9 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(cast.Operand, ref maximumArguments);
             case BoundOptionalLift lift:
                 return ExpressionSpills(lift.Value, ref maximumArguments);
+            case BoundCoalesce coalesce:
+                return Math.Max(ExpressionSpills(coalesce.Optional, ref maximumArguments),
+                    ExpressionSpills(coalesce.Fallback, ref maximumArguments));
             case BoundReadonlyProjection projection:
                 return ExpressionSpills(projection.Value, ref maximumArguments);
             case BoundIsNull test:
@@ -1562,6 +1570,50 @@ internal sealed partial class PeCompiler
                     StoreValue(Slot(assignment.Variable), assignment.Value.Type);
                 }
                 break;
+            case BoundOptionalAssignment optionalAssignment:
+                if (optionalAssignment.Place is BoundRead optionalLocal)
+                {
+                    _code.Load64(OwnerPlace(optionalLocal.Variable));
+                    _code.Bytes(0x48, 0x85, 0xC0);
+                    var localPresent = _code.JumpIf(0x85);
+                    Expression(optionalAssignment.Value, 0);
+                    StoreValue(OwnerPlace(optionalLocal.Variable), optionalLocal.Type);
+                    SetManagedRoot(OwnerPlace(optionalLocal.Variable), active: true);
+                    _code.PatchRelative(localPresent, _code.Position);
+                    break;
+                }
+                var optionalField = (BoundFieldRead)optionalAssignment.Place;
+                Expression(optionalField.Receiver, 0);
+                _code.Store64(Spill(0));
+                SetManagedRoot(Spill(0), active: true);
+                var fieldDeclaration = _program.Classes[ManagedClassTypes.ClassIndex(optionalField.Receiver.Type)]
+                    .Fields[optionalField.Field];
+                _code.LoadPointerField(32 + fieldDeclaration.Offset, 8);
+                _code.Bytes(0x48, 0x85, 0xC0);
+                var fieldPresent = _code.JumpIf(0x85);
+                var fallbackBegin = _code.Position;
+                var fallbackFunclet = -1;
+                if (_checkedExceptions && !_emittingFunclet)
+                {
+                    fallbackFunclet = _funclets.Count;
+                    _funclets.Add((new BoundBlock([], optionalAssignment.Span), _currentFunction, 0, 0));
+                    _managedStagedRoots.Add(fallbackFunclet, [Spill(0)]);
+                }
+                Expression(optionalAssignment.Value, 1);
+                _code.Bytes(0x48, 0x89, 0xC1);
+                _code.Load64(Spill(0));
+                _code.PointerOffset(32 + fieldDeclaration.Offset);
+                _code.Bytes(0x48, 0x89, 0xC2, 0x48, 0x89, 0xC8);
+                _code.Bytes(0x48, 0x89, 0x02);
+                if (fallbackFunclet >= 0)
+                {
+                    _code.Byte(0x90);
+                    _scopes[_currentFunction].Add(new NativeExceptionScope(fallbackBegin, _code.Position,
+                        -fallbackFunclet - 1, 0));
+                }
+                _code.PatchRelative(fieldPresent, _code.Position);
+                SetManagedRoot(Spill(0), active: false);
+                break;
             case BoundDrop drop:
                 if (drop.IsOutput)
                 {
@@ -2019,6 +2071,13 @@ internal sealed partial class PeCompiler
                 break;
             case BoundOptionalLift lift:
                 Expression(lift.Value, spill);
+                break;
+            case BoundCoalesce coalesce:
+                Expression(coalesce.Optional, spill);
+                _code.Bytes(0x48, 0x85, 0xC0);
+                var present = _code.JumpIf(0x85);
+                Expression(coalesce.Fallback, spill);
+                _code.PatchRelative(present, _code.Position);
                 break;
             case BoundReadonlyProjection projection:
                 Expression(projection.Value, spill);
