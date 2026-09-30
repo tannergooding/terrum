@@ -277,6 +277,10 @@ type/constant bindings. Use `x = value`, `x += value`, `int32 x = 1`,
 `T = void` and `alias A<T> = T`, not their squashed counterparts.
 Each context retains its type, constant and ownership checks; spacing does
 not make assignment an expression.
+The `=>` connector requires separating trivia on both sides in expression
+bodies, lambdas and switch arms. Use `int32 F() => 1;`, `x => x + 1`
+and `0 => 1`, not their squashed counterparts. `=>` is one indivisible
+spelling; `= >` does not form an arrow.
 Trivia does not permit splitting or merging a token spelling after lexing.
 Receiver/name-attached delimited constructs share a boundary rule:
 the opener attaches to its receiver or introducing name, the interior

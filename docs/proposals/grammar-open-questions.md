@@ -247,15 +247,27 @@ rules; spacing does not turn assignment into an expression.
 **C# model:** Assignment/binding spellings are C#-inspired, but mandatory
 separation differs from C#'s trivia-insensitive operators.
 
-**Arrow spacing question (awaiting review):** Should `=>` require separating
-trivia on both sides in expression bodies, lambdas and switch arms?
-**Recommendation:** Yes: use `int32 F() => 1;`, `x => x + 1`
+**Accepted arrow spacing:** Require separating trivia on both sides of `=>`
+in expression bodies, lambdas and switch arms.
+Use `int32 F() => 1;`, `x => x + 1`
 and `0 => 1`, not `F()=>1`, `x=>x + 1` or `0=>1`.
 The complete arrow remains one defined spelling; spaces inside `= >` do
 not form an arrow. Its callable/arm semantics and delimiter roles remain
 unchanged. **C# model:** Arrow syntax is C#-inspired, but mandatory outer
 separation deliberately differs from C#'s trivia-insensitive spelling.
-This recommendation has not been accepted.
+
+**Conditional connector spacing question (awaiting review):** Should the
+`?` and `:` parts of a conditional expression require separation on both
+sides? **Recommendation:** Yes: use `flag ? left : right`, rejecting
+`flag?left:right`. These are expression connectors, not an optional-type
+suffix or an optional-access token. Their grammatical role selects the
+spacing rule before type checking.
+Interpolation still permits a full conditional before its format suffix,
+as in `{flag ? left : right:X8}`: the first colon is a separated conditional
+connector, while the format colon follows its own grammar.
+**C# model:** Conditional syntax is C#-inspired, but mandatory separation
+differs from C#'s trivia-insensitive spelling. Other colon roles remain
+separate decisions. This recommendation has not been accepted.
 
 **Comment-fence question:** Should a block comment select its closing fence
 from the opening star count, analogously to the selected delimiter length of
