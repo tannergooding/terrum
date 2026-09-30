@@ -13,8 +13,11 @@ The approved [source grammar](../grammar-spec.md) and
 [approved current semantic IL/metadata design](../il-metadata.md) are separate
 documents; neither adopts the signatures here. Related accepted direction is
 described in [language](../language.md), [libraries](../libraries.md),
-[lifetimes](../lifetimes.md), [type families](../type-families.md),
-[conversions](../conversions.md), and [memory model](../memory-model.md).
+[language contracts](../language-contracts.md), [lifetimes](../lifetimes.md),
+[type families](../type-families.md), [conversions](../conversions.md), and
+[memory model](../memory-model.md). The design-only
+[`library/*.api.terrum`](../../library/) sketches are inventory inputs, not
+approved or executable reference assemblies.
 
 ## Scope, status, and notation
 
@@ -26,6 +29,43 @@ source form is explicitly identified. No proposal-only declaration is required
 for language conformance. Conformance to a library profile requires adoption
 of its declarations together with their contracts and feature dependencies;
 these candidate inventories establish no such conformance.
+
+This is **reference-signature notation**: a terminating `;` on a concrete
+member denotes its proposed public signature, not permission to compile a
+bodyless concrete method, accessor, constructor, or property in runnable
+Terrum. The implementing library must provide legal bodies or a separately
+specified intrinsic/foreign implementation. Interface requirements have their
+own bodyless semantics. Tables using `Type.Member(arguments) -> Result` are
+likewise inventories, not Terrum source productions. In particular, a table
+marked **OPEN** cannot acquire source syntax or metadata simply by copying
+its entry into a declaration.
+
+The public namespace map follows the concept namespaces already present in
+the sketches; dependency layers do **not** prefix public names:
+
+| Namespace | Candidate types and operations |
+|---|---|
+| `Terrum` | primitives, `Span`, text, formatting, memory, tasks/application entry prototypes |
+| `Terrum.Collections` | owned storage, list, linked list, keyed and sequential collections |
+| `Terrum.Collections.Algorithms` | equality/key comparers, callbacks, eager span operations |
+| `Terrum.Numerics` | fixed/scalable vector values and masks |
+| `Terrum.Numerics.Tensors` | shape/view and tensor operations |
+
+New application capability namespaces below are **proposals**, not evidence
+of exports in `library/*.api.terrum`. They can be split into packages without
+renaming established concept types. Neither .NET inheritance nor CLR primitive
+categories, array/object roots, `IDisposable`, finalizers, or an implicit
+numeric-promotion lattice are imported by this reference.
+
+The comparison target is *inventory breadth and reviewability*, not
+compatibility: [.NET reference assemblies](https://learn.microsoft.com/en-us/dotnet/standard/assembly/reference-assemblies)
+expose a public API without implementations, while
+[ECMA-335 Partition IV](https://www.ecma-international.org/publications-and-standards/standards/ecma-335/)
+and its [TR/84 library listing](https://www.ecma-international.org/publications-and-standards/technical-reports/ecma-tr-84/)
+organize CLI library profiles. This document instead inventories Terrum's
+checked value, view, ownership, operation, and capability boundaries. It
+does not import CLI type identity, standardized profile names, interfaces
+or implementation layout.
 
 ## Dependency layers
 
@@ -57,34 +97,59 @@ and feature-to-runtime support remain open.
 ## Reading declarations
 
 - `mut` grants a writable place or receiver; `write` qualifies authority through a reference/view. They are not interchangeable. Readonly is the declaration default.
-- `ref<T>` is an ordinary reference/loan. `init ref<T>` names a vacant output destination, not writable access; the accepted call-site form is `Create(init value)`. Exact grammar and output contracts remain open.
+- `ref<T>` is an ordinary reference/loan. `init ref<T>` names a vacant output destination, not writable access; the approved call-site form is `Create(init value)`. Declaration-specific conditional publication clauses and their metadata remain open.
 - `write Span<T>` lends write access to backing slots; `mut Span<T>` only permits descriptor rebinding. `Span<write C>` is separately writable through each retained handle. Generic substitutions preserve their complete qualification.
 - `[Copy]`, `[Sized]`, `[ManagedStorable]`, `[TextCodeUnit]`, and `[SimdElement]` are checked properties/capabilities, not user assertions inferred from an interface name.
+- The approved interface grammar permits an optional first `<this TSelf>` formal, but does not force every protocol to use it. Associated defaults and interface-qualified bindings have approved declaration forms; selecting a witness and conditional family registration still need checked contracts. `.via<I>` and `default<I>` are not arbitrary runtime dispatch or construction: `default<I>` is restricted to the conforming `this` in an interface default body.
+- A final `params` parameter may have a `[Copy]` default only under the approved call rules. Neither a defaulted parameter nor `init ref<T>` supplies an uninitialized value to the callee; `init` remains a vacant output until publication. Constructor and `init`-property guarantees belong to contract clauses; mixed property backing and `init` mutability do not turn a readonly receiver into writable storage.
 - A signature does not express all dependencies. A returned view retains its backing/root/lease and any shape metadata. Ownership, allocation, checked failure, effect and task-completion rules are stated under the relevant family.
 
 ## 1. Fundamental values, presence and outcomes
 
 `void` is the zero-data result type, with value `()`, usable as `func<void>` or `Task<void>`; there is no public `unit` or `never` primitive. There is no universal `default(T)` and no required universal root with `Equals`, `GetHashCode`, or `ToString`.
 
-The accepted semantic direction normalizes optional `T?` substitutions: `T?` with already-optional `T` remains one optional layer. `Option<T>` is an optional projection/alias intent for that same normalized presence type, not a nominal `Some(T)` wrapper; its exact source spelling remains open. `Option<void>` still represents absent versus present `()`.
+The accepted semantic direction normalizes optional `T?` substitutions: `T?` with already-optional `T` remains one optional layer. `Option<T>` is a proposed transparent alias for that same normalized presence type, not a nominal `Some(T)` wrapper; alias scope and syntax are approved, while this concrete library export remains open. `Option<void>` still represents absent versus present `()`.
 
 A distinct nominal union can preserve distinctions that optional normalization cannot, including missing versus present-null by making its payload itself optional. These are illustrative type shapes, not approved declaration grammar:
 
 ```terrum
-// Candidate transparent alias; declaration scope and export remain open.
-alias Option<T> = T?;
-
-// Separate nominal cases preserve Missing versus Found(null).
-public nominal union Lookup<T>
-{
-    Missing;
-    Found(T? value);
-}
+// Approved alias declaration form; this particular exported alias is PROPOSED.
+public alias Option<T> = T?;
 ```
+
+| Proposed nominal sum | Cases (not source union syntax) | Distinction |
+|---|---|---|
+| `Lookup<T>` | `Missing`; `Found(T? value)` | Missing versus a present optional payload, including null |
 
 `Lookup<T>.Missing` remains distinct from `Lookup<T>.Found(null)` when `T` is optional; `Option<T>` itself does not add a second presence state. Niche representations must be declared and validated; no invalid bit pattern, padding, or null encoding is available implicitly. General `init ref<T>` does **not** universally mean false leaves the destination vacant: a declaration must specify initialization/publication outcomes and the checker must verify them. For example, an API contract for `bool TryParse(TextSpan, init ref<T>)` may specify false => vacant and true => initialized; the signature alone does not convey that rule.
 
 Expected domain alternatives should be represented by a status/union/result contract; the proposed `Result<T,E>` shape is defined once in §13. Exceptional failures propagate. `require` can lift a declared false outcome into checked failure, but no general library-wide exception hierarchy/object ABI is selected. Catch/recovery is not implied by `require`.
+
+### Primitive and presence inventory
+
+The following is an inventory of **candidate** value surfaces, not a claim that
+all have the same bit layout, supported operators or storage category. An
+operation listed for a family is subject to its per-type semantic constraints;
+it is not an implicit conversion or promoted mixed-width expression.
+
+| Family / values | Proposed representative public members | Boundary |
+|---|---|---|
+| `bool` | `True`, `False`; `operator !`, `operator &`, `operator \|`, `operator ^` | Logical and bitwise evaluation forms retain distinct expression semantics; no integer coercion |
+| signed integer widths (including sampled `int32`, and `nint`) | `MinValue`, `MaxValue`, `Zero`; same-width arithmetic, comparison, bitwise, shifts, `TryAdd/Subtract/Multiply`, `TryParse`, `TryFormat` | Exact supported width set is OPEN; native width is target-dependent; overflow follows checked policy |
+| unsigned integer widths (including sampled `uint32`, `uint8`, and `nuint`) | `MinValue`, `MaxValue`, `Zero`; same-width operations and checked/unchecked/explicit saturating conversions | Exact supported width set is OPEN; `uint32.AddWrapping` is a concrete sample |
+| binary floating widths (including sampled `float32`) | `Zero`, `IsNaN`, `IsFinite`, `FusedMultiplyAdd`, `TryParse`, `TryFormat`, matching-width bit reinterpretation | Exact supported width set is OPEN; numeric comparison differs from key equivalence |
+| decimal floating widths (including sampled `decimal32`) | `Zero`, classification, arithmetic, parse/format, numeric-key policy | Exact supported width set, cohorts, rounding and transcendentals need separate profiles |
+| `char8`, `char16`, `char32`, `rune` | scalar validity, ordinal comparison, formatter where selected | Code units are not automatically complete Unicode scalars |
+| `void`, `T?`, candidate `Option<T>` alias | `()`; presence test and checked payload access for option | No universal `default(T)`; optional normalization is not nested two-state wrappers |
+| proposed `Lookup<T>`, `Result<T,E>` | case test and checked payload access | Case spelling and ownership/registration are OPEN; see §13 for result |
+
+Primitive widths in this table are **candidate coverage**, not a compiler
+required-type list. `int32` and `uint32` concrete sketches are in §6 and §8;
+source spelling/availability for additional widths must be checked against
+the target's approved primitive inventory before adoption. Unary operators,
+literal typing, conversion witnesses and checked policy belong to the
+[grammar](../grammar-spec.md) and [conversions](../conversions.md), not to a
+fictional shared primitive base class.
 
 ## 2. Explicit equality, keying and formatting witnesses
 
@@ -146,18 +211,6 @@ public struct TextSpan<TCodeUnit = void> : IFormattable
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
 }
-public extension TextSpan<TCodeUnit> : IContiguousSequence<TCodeUnit>
-    where TCodeUnit : [TextCodeUnit]
-{
-    public nuint Length { get; }
-    public Span<TCodeUnit> AsSpan();
-    public TextSpan<void> AsTextSpan();
-}
-public extension TextSpan<void>
-{
-    public bool TryProject<TRequested>(init ref<TextSpan<TRequested>> result)
-        where TRequested : [TextCodeUnit];
-}
 public struct rune : IFormattable
 {
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
@@ -194,9 +247,154 @@ public class Text : IFormattable
 }
 ```
 
-Conditional family/extension syntax above is pseudocode pending grammar/custom-family rules. Typed erasure and successful projection preserve actual encoding, validation, access, backing/root/lease and lifetime without copying/transcoding. Mismatch exposes no typed view. `AsSpan()` drops text validity as a view, never immutability or backing lifetime; there is no `Span<void>`. Ordinal comparisons operate over scalar sequences without normalization, culture or case folding. `EqualsOrdinal(rune)` requires the *whole* view to be precisely one scalar. `rune` is target-typed; `char8` admits only ASCII as a standalone unit, `char16` a nonsurrogate BMP scalar, and `char32`/`rune` any scalar. Character-literal syntax is design-only.
+| **OPEN** conditional family contract | Proposed member/relationship |
+|---|---|
+| `TextSpan<char8/char16/char32>` | `Length: nuint`; `AsSpan() -> Span<TCodeUnit>`; `AsTextSpan() -> TextSpan<void>`; implements `IContiguousSequence<TCodeUnit>` |
+| `TextSpan<void>` | `TryProject<TRequested>(init ref<TextSpan<TRequested>> result) -> bool`, with `TRequested : [TextCodeUnit]`; false leaves output vacant |
+| all `TextSpan` members | `IsEmpty`, scalar-ordinal comparisons and `TryFormat`; none promises writable text storage |
+
+Conditional family membership/conformance and registration are **OPEN**; an
+ordinary extension lookup cannot establish an interface witness. Typed
+erasure and successful projection preserve actual encoding, validation,
+access, backing/root/lease and lifetime without copying/transcoding. Mismatch
+exposes no typed view. `AsSpan()` drops text validity as a view, never
+immutability or backing lifetime; there is no `Span<void>`. Ordinal
+comparisons operate over scalar sequences without normalization, culture or
+case folding. `EqualsOrdinal(rune)` requires the *whole* view to be precisely
+one scalar. The approved character forms are target-typed: `char8` admits
+only ASCII as a standalone unit, `char16` a nonsurrogate BMP scalar, and
+`char32`/`rune` any scalar. There is no default character-literal type.
 
 `SpanTextWriter` holds an exclusive loan to caller-provided storage; `Written` is accepted code-unit count. A refused fragment does not modify storage for that fragment, but prior fragments remain. `Text.Create` validates/freezes text and may transfer eligible exclusive backing; final representation and builder contract remain open.
+
+### Text/view/writer signature families
+
+| Type / proposed layer | Additional signature inventory | Source/ownership boundary |
+|---|---|---|
+| `Span<T>` / Core | `Length`; `Slice(start, length) -> Span<T>`; matched-access borrowed index; `IContiguousSequence<T>.AsSpan()` | Slot and descriptor mutability are independent; empty slices retain dependencies |
+| `InlineArray<T,N>` / Core | `Length: nuint` (constant `N`); matched-access index; `AsSpan() -> Span<T>` | Fixed inline storage has enclosing-owner lifetime, not allocator ownership |
+| `TextSpan<TCodeUnit>` / Core | `IsEmpty`; `EqualsOrdinal(TextSpan/rune)`; `CompareOrdinal(TextSpan)`; `TryFormat(writer, format)` | Validation and encoding survive erasure; no implicit decoding fallback |
+| `Text` / Foundation or Application | `AsSpan() -> TextSpan`; `TryFormat(writer, format)`; `Create<TContent>(content) -> own<val<Text>>` | Copy/transfer/lease of backing must be explicit; no mandated native object layout |
+| `TextBuilder<TCodeUnit>` / Foundation, **OPEN** registration | `Append(TextSpan)`, `AppendScalar(rune)`, `TryBuild(init ref<own<val<Text>>> output)` | Registered builder, owned/borrowed backing and failure cleanup need checked contracts |
+| `TextSearch` / Core | `StartsWithOrdinal`, `EndsWithOrdinal`, `TryIndexOfOrdinal`, `TryLastIndexOfOrdinal` | Scalar offsets; no culture, normalization or sentinel |
+| `TextFormatting` / Core | `TryWrite<TWriter,TContent>(write ref<TWriter>, TContent) -> bool` | Typed forwarding, not stringify-to-temporary |
+| `ITextWriter`, `SpanTextWriter<TCodeUnit>` / Core | `TryWrite`, `TryWriteScalar`, `TryWriteFormatted`; `Written` for bounded writer | Refusal is per-fragment; no replay after visible partial writes |
+| `ITextDecoder<TCodeUnit>`, `ITextEncoder<TCodeUnit>` / Foundation | `Convert`, `Finish`, `Reset` with `TextConversionProgress`; concrete UTF-8 witnesses below | Caller advances by reported code units/scalars; EOF requires `Finish` |
+| `Utf8TextReader<TStream>` / Application, **OPEN** | `ReadScalar(init ref<rune>) -> Result<bool,Error>`; `ReadLine(init ref<own<val<Text>>>) -> Result<bool,Error>` | Borrows an explicit byte stream; EOF differs from empty line |
+
+The proposed explicit encoding protocols below retain incremental state and
+select malformed-input policy on decoder construction. No encoding is
+defaulted from a `uint8` span, a terminal handle, or a file path. These
+protocols do not change validated `TextSpan`'s encoding-erasure rules.
+
+### Proposed text construction, search and incremental transcoding
+
+The following concrete signatures in candidate `Terrum` expand the text
+inventory; they are reference-only declarations under the notation above. The proposed
+`TextBuilder<TCodeUnit>` is not automatically the registered text-literal
+handler; its registration and `Text.Create` forwarding remain **OPEN**.
+
+```terrum
+public mut unique class TextBuilder<TCodeUnit>
+    where TCodeUnit : [TextCodeUnit]
+{
+    public TextBuilder(nuint capacityHint);
+    public nuint Length { get; }
+    public mut void Append(TextSpan source);
+    public mut void AppendScalar(rune value);
+    public mut bool TryBuild(init ref<own<val<Text>>> result);
+    public mut void Clear();
+}
+
+public static class TextSearch
+{
+    public static bool StartsWithOrdinal(TextSpan source, TextSpan prefix);
+    public static bool EndsWithOrdinal(TextSpan source, TextSpan suffix);
+    public static bool TryIndexOfOrdinal(TextSpan source, TextSpan needle,
+        init ref<nuint> scalarIndex);
+    public static bool TryLastIndexOfOrdinal(TextSpan source, TextSpan needle,
+        init ref<nuint> scalarIndex);
+}
+
+public enum MalformedTextPolicy : int32
+{
+    Reject,
+    Replace
+}
+public enum TextConversionStatus : int32
+{
+    NeedInput,
+    NeedOutput,
+    InvalidData,
+    Complete
+}
+public struct TextConversionProgress
+{
+    public nuint Consumed { get; }
+    public nuint Written { get; }
+    public TextConversionStatus Status { get; }
+}
+public interface ITextDecoder<TCodeUnit>
+    where TCodeUnit : [TextCodeUnit]
+{
+    mut TextConversionProgress Convert(Span<TCodeUnit> source,
+        write Span<rune> destination);
+    mut TextConversionProgress Finish(write Span<rune> destination);
+    mut void Reset();
+}
+public interface ITextEncoder<TCodeUnit>
+    where TCodeUnit : [TextCodeUnit]
+{
+    mut TextConversionProgress Convert(Span<rune> source,
+        write Span<TCodeUnit> destination);
+    mut TextConversionProgress Finish(write Span<TCodeUnit> destination);
+    mut void Reset();
+}
+public mut unique struct Utf8Decoder : ITextDecoder<char8>
+{
+    public Utf8Decoder(MalformedTextPolicy policy);
+    public mut TextConversionProgress Convert(Span<char8> source,
+        write Span<rune> destination);
+    public mut TextConversionProgress Finish(write Span<rune> destination);
+    public mut void Reset();
+}
+public mut unique struct Utf8Encoder : ITextEncoder<char8>
+{
+    public Utf8Encoder();
+    public mut TextConversionProgress Convert(Span<rune> source,
+        write Span<char8> destination);
+    public mut TextConversionProgress Finish(write Span<char8> destination);
+    public mut void Reset();
+}
+```
+
+The builder copies or transcodes each fragment into its chosen code-unit
+encoding while the fragment is borrowed; it retains no source view. A failed
+`TryBuild` leaves `result` vacant and the builder responsible for its storage;
+successful publication transfers exactly one owned `Text`. `TextSearch`
+returns scalar offsets, not byte offsets; an empty needle matches position
+zero (or the source's scalar length for the last match). Ordinal search does
+not normalize or fold. Its `TryIndexOfOrdinal`/`TryLastIndexOfOrdinal` false
+outcomes leave `scalarIndex` vacant.
+
+`Convert` accepts the reported prefix and never partially writes an encoded
+scalar. Counts are in input and output *elements*, respectively. The codec
+retains incomplete input in its private state only when it reports that input
+as consumed; the caller advances solely by `Consumed`. `NeedOutput` requires more destination capacity before retrying the
+unconsumed suffix; it may still report an already accepted prefix or
+buffered incomplete input. Zero-length inputs do not imply EOF.
+`Finish` explicitly signals EOF, drains pending output, and reports
+`InvalidData` for a truncated sequence under `Reject`; `Replace` emits a
+replacement scalar when output capacity permits. On `InvalidData`, counts
+still identify the accepted prefix and offending units in the current input
+remain unconsumed. An incomplete prefix consumed by an earlier call remains
+codec-owned state until reset; reporting an error cannot retroactively return
+those units to the caller. `Reset` abandons pending state. Source and
+destination cannot overlap.
+All destination slots are valid initialized values before the call; `write`
+permits replacement, not construction of arbitrary uninitialized `T`.
+An encoder consumes validated `rune` scalars, so it needs no malformed-input
+policy; `InvalidData` applies to decoding malformed code units.
 
 The proposed TRRM String row has a 4-byte encoding-flags/unit-count header,
 explicit code-unit terminator and padded, 4-byte-aligned data. It is not a
@@ -261,6 +459,10 @@ public mut unique struct Vector<T>
 ```
 
 A lease owns a specific current allocation, extent/alignment and release action; allocator context is a provider for later allocations, not the current allocation. `Adopt` validates existing storage (size product, actual alignment and necessary tracing/barrier capabilities); a release token cannot manufacture memory. `Count` is initialized elements, not capacity. Growth allocates replacement first, copies/cleans initialized prefix, publishes only after success, then releases old storage; forbidden while a view loans that allocation. Initial vector requires `[Copy]`; broader element/allocator policy is open. View/guard spellings are provisional.
+`Dispose` here names explicit release on a particular owned lease/provider;
+it neither imports .NET `IDisposable` nor implies a universal object finalizer.
+Provider cleanup must not invalidate allocations whose release responsibility
+was transferred elsewhere.
 
 ### `MemoryPrimitives`
 
@@ -374,6 +576,24 @@ need collector roots/barriers independently of memory order.
 
 `GetPrevious` returns the value observed by that RMW; `GetUpdated` returns the value produced by that same RMW, not a subsequent read that might observe another writer. `[Copy]` and `[Sized]` alone do not establish raw-byte representation eligibility. The proposed ordinary byte-span unaligned overloads exclude managed-reference-containing types; arbitrary bytes cannot manufacture a managed handle or bypass collector/provenance requirements. Any collector-aware typed-memory operation needs its own explicit contract.
 
+### Storage and memory inventory beyond the sample
+
+| Family / namespace | Proposed signatures or members | Required authority |
+|---|---|---|
+| `AllocationLease` / `Terrum.Collections` | `ByteLength`, `Alignment`, `Dispose()`; optional checked `SliceBytes(offset, length) -> Span<uint8>` | Owns one allocation/release, not a provider; slicing retains lease |
+| `AllocatorContext` / `Terrum.Collections` | `Allocate(bytes, alignment) -> AllocationLease`, `Dispose()`; `TryAllocate(..., init ref<AllocationLease>) -> bool` | Provider must outlive outstanding allocations or explicitly transfer release capability |
+| `Buffer<T>` / `Terrum.Collections` | `Capacity`, `Count`, `Adopt`, `Initialize`, `AsSpan`, `GetWriteAccess`, `Clear`, `Dispose` candidate | Initialized prefix versus vacant capacity; unique owner and trace/barrier policy |
+| `Vector<T>` / `Terrum.Collections` | `Create`, `Count`, `Capacity`, `Add`, `Reserve`, `AsSpan`, `Clear`, `GetWriteAccess` candidate | Growth retains allocator context, replaces lease transactionally; views prevent relocation |
+| `Arena` / `Terrum.Collections`, **OPEN** | `Allocate(bytes, alignment) -> Span<uint8>`, `Reset()`, `Dispose()` | Borrowed slices block reset/disposal; arena does not independently own every returned slice |
+| `MemoryPool<T>` / `Terrum.Collections`, **OPEN** | `Rent(length) -> unique MemoryOwner<T>`; owner `AsSpan`, `Dispose` | Return/reuse only after all loans end; pooled bytes do not imply initialized `T` |
+| `MemoryPrimitives` / `Terrum` | `AtomicRead/Write`, RMW families, strong CAS/observation, `Fence`, `CompilerFence`, non-temporal read/write/copy/complete, cache writeback/invalidate | See the complete proposed member set and strict representation/order/range constraints above |
+
+The added arena/pool rows are coverage candidates, **not** exports in the
+current `foundation.api.terrum`. In particular, neither allocator nor GC
+provider is silently global. Native `T` storage is permitted only if its
+initialization, alignment, move/copy, cleanup and any tracing requirements
+can be met; a `Span<uint8>` is not an arbitrary typed allocation.
+
 ## 5. Collections, iteration and eager algorithms
 
 Initial managed collections from `collections.api.terrum` (design-only):
@@ -469,7 +689,157 @@ public static class SpanAlgorithms
 }
 ```
 
-`TryIndexOf` false means no index was published. `Select` preflights destination size and rejects any overlap before callback. `Where` reserves upper-bound capacity, calls predicate once per element, and permits disjoint storage or exact same-start compaction; displaced overlap is rejected before callbacks. Stateful callbacks are mutable borrowed values. Callback failure may leave accepted prefix; no rollback or predicate replay. General lazy/GroupBy/Join/Sort surfaces are not inventoried.
+`TryIndexOf` false means no index was published. `Select` preflights destination size and rejects any overlap before callback. `Where` reserves upper-bound capacity, calls predicate once per element, and permits disjoint storage or exact same-start compaction; displaced overlap is rejected before callbacks. Stateful callbacks are mutable borrowed values. Callback failure may leave accepted prefix; no rollback or predicate replay. General lazy/GroupBy/Join surfaces are not inventoried; one bounded sort signature follows.
+
+### Sequence and eager-operation inventory
+
+The three `SpanAlgorithms` declarations above supply the complete
+representative signature shapes for a mutable comparer, selector and
+predicate. The following **proposed** matrix fills out the protocol family
+without repeating a concrete declaration for every element type. `Span<T>`
+means a non-owning readonly input; a `write` destination must be explicit.
+All algorithms check bounds, destination length and prohibited overlap before
+their first callback or write; callback failures are not transactional unless
+an operation says otherwise.
+
+| Protocol / type | Proposed members and shape | Outcome / ownership |
+|---|---|---|
+| `ISequence<T>` | `GetEnumerator() -> TCursor` via an associated cursor relationship (**OPEN**) | Iterator construction is not enumeration or storage transfer |
+| `ICursor<T>` | `MoveNext() -> bool`; `Current -> ref<T>` or `[Copy]` value | Lending current cannot outlive cursor advancement; relation syntax OPEN |
+| `IAsyncCursor<T>` | `MoveNextAsync() -> Task<bool>`; `Current -> ref<T>` | Producer borrows persist through each completion; structured close required |
+| `SpanAlgorithms` search | `Contains`, `IndexOf`/`TryIndexOf`, `LastIndexOf`, `Find`/`TryFind`, `CountWhere`, `All`, `Any` | Explicit equality witness or predicate; no unknown-index sentinel |
+| `SpanAlgorithms` transform | `Select`, `Where`, `Zip`, `ForEach`, `Fill`, `Reverse`, `CopyTo`, `MoveWithin` | Mutable callbacks take `write ref<TCallback>`; destination/overlap contracts differ by operation |
+| `OrderedSpanAlgorithms` aggregate | `Fold<T,TState,TFolder>`; prospective `Sum<T>`, `Min/Max<T,TOrder>` | Initial accumulator/witness explicit; empty min/max return presence, not fabricated `T` |
+| `OrderedSpanAlgorithms` order | `Sort<T,TOrder>(write Span<T>,ref<TOrder>)`, `TryBinarySearch<T,TOrder>(Span<T>,ref<T>,ref<TOrder>,init ref<nuint>)` | Ordering witness must define total key policy; sort comparator failures can leave permutation partial |
+| `List<T>` / managed | `Count`, index, `TryGet`, `Add`, `Insert`, `RemoveAt`, `Clear`, `GetWriteAccess`, `GetEnumerator` | `[ManagedStorable],[Copy],[Sized]` initial bounds; structural mutation checks all guards |
+| `LinkedList<T>` / managed | `First`, `Last`, `AddFirst/Last`, `AddBefore/After`, `Remove`, `Clear`, cursor | Stable node identity, detached node is not attached to two lists |
+| `Queue<T>`, `Stack<T>` / managed, **new** | `Count`, `Enqueue/Push`, `TryDequeue/TryPop(init ref<T>)`, `TryPeek(init ref<T>)`, `Clear` | Initial same managed Copy bounds; false output vacant; no `default(T)` |
+| `SortedSet<T,TOrder>` / managed, **new** | `Count`, `Order`, `Contains`, `TryAdd`, `Remove`, `Clear`, ascending cursor | Explicit total-order witness; comparison-zero means duplicate |
+| `Deque<T>` / owned, **new** | `Count`, `PushFront/Back`, `TryPopFront/Back(init ref<T>)`, `GetSegments()` | Segments are guarded loans, never a fabricated one-span contiguous view |
+| `Dictionary<TKey,TValue,TComparer>`, `HashSet<T,TComparer>` | `Count`, comparer, `TryGet`/`Contains`, `TryAdd`, `Remove`, `Clear`, guarded cursor | Explicit key comparer; complete sample and failure contracts in §13 |
+
+### Proposed ordered and sequential collection declarations
+
+These signatures expand the matrix for one managed `[Copy]` storage profile.
+They do not choose a generic associated-cursor contract or a universal
+sequence witness. A concrete cursor returns copied values; its loan on the
+collection and traversal invalidation are part of the proposed contract.
+`IOrderComparer`, `IFolder` and `OrderedSpanAlgorithms` belong to proposed
+`Terrum.Collections.Algorithms`; the collection and cursor types belong to
+proposed `Terrum.Collections`.
+
+```terrum
+public interface IOrderComparer<T>
+{
+    int32 Compare(ref<T> left, ref<T> right);
+}
+public interface IFolder<T, TState>
+{
+    mut TState Fold(TState state, ref<T> value);
+}
+public static class OrderedSpanAlgorithms
+{
+    public static bool Any<T, TPredicate>(Span<T> source,
+        write ref<TPredicate> predicate)
+        where TPredicate : IPredicate<T>;
+    public static nuint CountWhere<T, TPredicate>(Span<T> source,
+        write ref<TPredicate> predicate)
+        where TPredicate : IPredicate<T>;
+    public static bool TryBinarySearch<T, TOrder>(Span<T> source, ref<T> value,
+        ref<TOrder> order, init ref<nuint> index)
+        where TOrder : IOrderComparer<T>;
+    public static void Sort<T, TOrder>(write Span<T> values, ref<TOrder> order)
+        where T : [Copy]
+        where TOrder : IOrderComparer<T>;
+    public static TState Fold<T, TState, TFolder>(Span<T> source,
+        TState seed, write ref<TFolder> folder)
+        where TFolder : IFolder<T, TState>;
+}
+public mut class SortedSet<T, TOrder>
+    where T : [ManagedStorable], [Copy], [Sized]
+    where TOrder : IOrderComparer<T>, [ManagedStorable], [Copy], [Sized]
+{
+    public SortedSet(TOrder order, nuint capacity);
+    public nuint Count { get; }
+    public TOrder Order { get; }
+    public bool Contains(T value);
+    public mut Result<bool, Error> TryAdd(T value);
+    public mut bool Remove(T value);
+    public mut void Clear();
+    public SortedSetCursor<T, TOrder> GetEnumerator();
+}
+public mut unique struct SortedSetCursor<T, TOrder>
+    where T : [ManagedStorable], [Copy], [Sized]
+    where TOrder : IOrderComparer<T>, [ManagedStorable], [Copy], [Sized]
+{
+    public mut bool MoveNext();
+    public T Current { get; }
+}
+public mut class Queue<T>
+    where T : [ManagedStorable], [Copy], [Sized]
+{
+    public Queue(nuint capacity);
+    public nuint Count { get; }
+    public mut Result<void, Error> Enqueue(T value);
+    public mut bool TryDequeue(init ref<T> value);
+    public bool TryPeek(init ref<T> value);
+    public mut void Clear();
+    public QueueCursor<T> GetEnumerator();
+}
+public mut unique struct QueueCursor<T>
+    where T : [ManagedStorable], [Copy], [Sized]
+{
+    public mut bool MoveNext();
+    public T Current { get; }
+}
+public mut class Stack<T>
+    where T : [ManagedStorable], [Copy], [Sized]
+{
+    public Stack(nuint capacity);
+    public nuint Count { get; }
+    public mut Result<void, Error> Push(T value);
+    public mut bool TryPop(init ref<T> value);
+    public bool TryPeek(init ref<T> value);
+    public mut void Clear();
+    public StackCursor<T> GetEnumerator();
+}
+public mut unique struct StackCursor<T>
+    where T : [ManagedStorable], [Copy], [Sized]
+{
+    public mut bool MoveNext();
+    public T Current { get; }
+}
+```
+
+`Compare` is a readonly witness: negative/zero/positive determine order and
+equality; it must remain consistent while values are stored or searched.
+`Any` short-circuits on its first match; `CountWhere` visits every element
+once. Both use the existing `IPredicate<T>` and retain its explicitly
+borrowed callback, without materializing a sequence or replaying earlier
+elements.
+`TryBinarySearch` requires sorted input, chooses the first equal index, and
+leaves `index` vacant when absent. `Sort` may leave a valid permutation if
+comparison fails; it never manufactures or duplicates an affine owner.
+`Fold` consumes the explicit seed and returns its final state, including for
+an empty source. `SortedSet` iterates ascending, treats comparison-zero as
+duplicate, and publishes no insertion on allocation failure. `Queue` traverses
+oldest first, `Stack` newest first. Their insertion failures preserve contents;
+an empty `TryDequeue`, `TryPop` or `TryPeek` leaves the output vacant. Capacity
+constructors have the same unresolved checked construction-failure transport
+as the keyed collections in §13. A cursor may not be used across structural
+mutation; it never outlives its source, and a copied `Current` is available
+only after successful advancement. Conditional publication and cursor
+registration/close metadata remain **OPEN**; neither follows from these
+bodyless signatures.
+
+`[Iterator]` denotes a lazy producer rather than a collection of eager
+results; async producers have a distinct awaitable advancement contract.
+Neither function-call syntax nor `ISequence<T>` alone authorizes hidden
+materialization, replay of a stateful callback, or a captured loan that
+escapes its lifetime. Cursor registration, close/abandon APIs, and
+associated-cursor constraints remain **OPEN**. A deterministic snapshot requires
+an explicit allocated result and policy. Collection-expression registration
+is checked per builder, not inferred from `TryAdd` spelling.
 
 ### Collection `params` binding (accepted direction; signatures illustrative)
 
@@ -594,13 +964,42 @@ public struct decimal32 : IParsable<decimal32>, IFormattable, IScalarIeee754<dec
 }
 ```
 
-`IScalarNumber` and `IScalarIeee754` are optional composites; universal number protocol is not required. `TOther`/`TResult` may differ from `TSelf`. Vector arithmetic is not scalar classification. Named integer associated types such as `Wider`/`Signed`/`Unsigned` resolve through the selected interface witness; explicit associated equality can bind another type parameter, with no reverse inference from a projection. Exact member, equality, witness-selection and conversion-witness syntax remains specification work.
+`IScalarNumber` and `IScalarIeee754` are optional composites; universal number protocol is not required. `TOther`/`TResult` may differ from `TSelf`. Vector arithmetic is not scalar classification. Named integer associated types such as `Wider`/`Signed`/`Unsigned` resolve through the selected interface witness, with no reverse inference from a projection. Associated declarations and explicit `.via<I>` witness selection have approved forms; associated-equality constraints and these particular numeric/conversion witness relationships remain open.
 
 `int32.TryAdd/Subtract/Multiply` are checked expected failures; false publishes no output. `int32.FromBits` and `float32.ToBits` reinterpret bits, not numerically convert. Integer arithmetic is checked by default. Bare numeric literals have no default width; target context selects their type. The canonical [conversion policy](../conversions.md#conversion-policies) is: checked integer conversion preserves or throws, unchecked integer conversion wraps to destination-width bits, and saturation is explicit; floating-to-floating conversion follows IEEE-754 without language failure; float-to-int truncates then checked-throws or unchecked/explicitly-saturates, never modulo-narrows, with NaN converting to zero. Floating APIs are target-specific; exact source/destination witness lookup and user-defined declarations remain open.
 
+### Numeric protocol, conversion and math matrix
+
+The grammar's approved operator and literal forms do not confer these
+**proposed** interfaces on all numeric primitives. Each row names a
+separately checkable operation relationship; no generic `Number` root
+silently provides every row.
+
+| Candidate protocol / service | Signature family | Applicability / policy |
+|---|---|---|
+| `IAdditionOperators<TLeft,TRight,TResult>`; `ISubtractionOperators<...>` | `static TResult operator +(TLeft,TRight)` / `-` | Result and right operand need not be same type; no promotion |
+| `IMultiplyOperators<...>`; `IDivisionOperators<...>`; `IModulusOperators<...>` | corresponding `static TResult operator` | Division by zero, remainder sign, overflow and floating exceptions require per-family policy |
+| `IUnaryPlusOperators<T,TResult>`; `IUnaryNegationOperators<T,TResult>` | `static TResult operator +(T)` / `-(T)` | Only types with valid result/overflow contract participate |
+| `IComparisonOperators<TLeft,TRight>`; `IBitwiseOperators<T>`; `IShiftOperators<T,TCount>` | `<`, `<=`, `>`, `>=` returning `bool`; `&`, `\|`, `^`, `~`, shifts returning `T` | Numeric `<` on NaN is unordered; bitwise eligibility is not inferred from arithmetic |
+| `IAdditiveIdentity<T,TResult>`; `IMultiplicativeIdentity<T,TResult>` | `static TResult Zero` / `One` | Identity is a witness, not universal default construction |
+| `IScalarIeee754<T>` | `IsNaN`, `IsFinite`, `FusedMultiplyAdd`; candidate `IsInfinity`, `CopySign`, `NextUp`, `NextDown` | FMA explicitly rounds once; decimal and binary format behavior are profiled separately |
+| `ICheckedConversion<TDestination,TSource>`; `ISaturatingConversion<...>`; `ITruncatingConversion<...>` | `ConvertChecked`, `ConvertSaturating`, `ConvertTruncating` | Checked, unchecked and saturation remain distinct; no conversion chains or back-inferred witnesses |
+| `NumericKeys<T>` / **OPEN** comparer witness | `Equals(ref<T>,ref<T>)`, `GetHashCode(ref<T>) -> uint64` | Equal NaNs and signed zero; decimal equal cohorts share hash |
+| `Math<T>` / **new proposal** | `Abs`, `Min`, `Max`, `Clamp`, `Sqrt`, `Pow`, `Exp`, `Log`, `Sin`, `Cos` as applicable | Candidate per-format/domain contracts; do not fabricate every operation for every scalar |
+| `BitOperations<T>` / **new proposal** | `LeadingZeroCount`, `TrailingZeroCount`, `PopCount`, `RotateLeft/Right`, `ReverseBits` | Integer bit width and signed representation defined per member; no implicit `T -> uint64` |
+
+Conversions that reinterpret representation (matching-width `FromBits`/
+`ToBits`) are not instances of numerical conversion protocols. Hash policy,
+rounding mode and mathematical reproducibility must be specified before
+standardizing concrete implementations. `float32` and `decimal32` in the
+sample do not imply CLR `Single`/`Decimal` layout or a shared .NET numeric
+interface graph. Integer associated `Wider`, `Signed` and `Unsigned` bindings
+remain checked per witness; an unconstrained `Wider` is not a convertible
+destination merely because its name suggests one.
+
 ## 7. Fixed SIMD, scalable vectors and tensors
 
-SIMD values are fixed/scalable ABI values; tensors are logical views over memory. These are different representations. Fixed-vector registration is explicit and checked; width/mask/name resemblance is not membership. Family grammar and associated-mask binding are open.
+SIMD values are fixed/scalable ABI values; tensors are logical views over memory. These are different representations. Fixed-vector registration is explicit and checked; width/mask/name resemblance is not membership. Family registration and the particular associated-mask relationships are open.
 
 ```terrum
 // Declaration-only specialization of simd.api.terrum's local fixed-family contract.
@@ -667,6 +1066,28 @@ public static class TensorPrimitives
 
 `simd.api.terrum` contains concrete type heads for `simd128<T>`/mask and a local pseudo-family contract for their static members; the declarations above specialize that member set for 128 bits. They remain design-only, not compiler bindings or runtime exports. Other fixed widths appear only in the family registration sketch. `simd<T>` is a separate scalable, initially sizeless type, not a host-selected fixed width. Masked-off lane access, tails, lane order, aliasing, FP contraction and reductions need explicit contracts. Tensor lengths are `nuint`, strides signed `nint`; rank-zero is scalar count one, any zero dimension yields zero without multiplying the remaining dimensions or computing `(length - 1)` addresses. Validate signed offset/address bounds for nonempty shapes. Shape metadata has its own lifetime dependency. Writable views require injective mappings; broadcast/zero-stride views cannot write when logical indexes alias. Copy preflights shape/aliasing, allows disjoint or identical per-index mappings only, and allocates no hidden temporary. Empty sum/dot return additive identity/zero. Exact default layout, scalable target ABI, family syntax and reproducible versus relaxed reduction APIs remain open.
 
+| **OPEN** fixed-family registration | Proposed common static family on each registered pair | Status |
+|---|---|---|
+| `simd64<T>` + `simd64mask<T>` | Same `Splat`, `Load/LoadMasked`, `Store/StoreMasked`, comparisons, `Select`, mask `First/Any/All` as the complete `simd128<T>` shape above | Width/element/mask ABI separately checked, not exported by the sample |
+| `simd128<T>` + `simd128mask<T>` | Complete sample above | Concrete heads exist in sketch; registration syntax OPEN |
+| `simd256<T>` + `simd256mask<T>` | Same common members, specialized lane count | Checked target support and fallback required |
+| `simd512<T>` + `simd512mask<T>` | Same common members, specialized lane count | Checked target support and fallback required |
+| `simd<T>` + scalable predicate | `Splat`, predicated load/store, comparisons, select, active-lane reduction | Separate target profile: sizeless storage/call/suspension restrictions |
+
+| Tensor family / proposed extension | Signature shape |
+|---|---|
+| `TensorShape` | `Rank`, `ElementCount`, immutable `Lengths`, signed `Strides`; checked `Create(lengths,strides,init ref<shape>)` candidate, with owned or explicitly borrowed metadata |
+| `TensorSpan<T>` | `Shape`, `ElementCount`, matched-access indexed loan, `Slice`, `Transpose`; `Reshape` only after dense-layout proof |
+| `TensorViews` | readonly/writable `View`, `TryAsDenseSpan`, `CopyTo`; candidate `BroadcastTo` returns readonly view only |
+| `TensorPrimitives` | `Add`, `Sum`, `Dot` as above; candidate `Multiply`, `Scale`, `ReduceRows`, `MatMul` require explicit shapes, destination and reduction order |
+
+Active masked lanes must be in bounds; inactive masked loads/stores do not
+touch memory. A float reduction's strict row-major order and relaxed
+architecture-dependent regrouping need distinct API names/contracts.
+An overlapping tensor view is not rendered writable merely by qualifying
+its descriptor `mut`. SIMD shape registration does not make tensors SIMD ABI
+values or grant generic vectorization of callback bodies.
+
 ## 8. Callables, tasks, errors, time, random and application services
 
 `func<Args..., R>` and `fnptr<Args..., R>` are fixed-signature family notation, with result last—not source-level arbitrary type packs. `func` is the lifetime-aware single-cast callable family; `fnptr` is a raw closed-signature code pointer without retained environment. Bound `func` retains declared target/capture dependencies and cannot extend borrowed lifetime; `fnptr` target code must outlive use. There is no implicit closure boxing, multicast delegate or automatic genericization. Foreign ABI/callback details and exact grammar remain open.
@@ -694,6 +1115,32 @@ neither cancels it nor discharges errors/captures. Cancellation is a request,
 not completion. Exact task, executor, affinity and awaiter APIs remain open.
 
 `IRandom` is referenced as a nominal protocol for mutable generic use through `write ref<TRandom>`, without defensive copies/boxing; storing concrete `TRandom` additionally requires `[Sized]`. The design sample defines `mut uint32 NextUInt32()` and `ISeedableRandom.Reseed(uint32 seed)` only; no RNG quality, entropy or cryptographic guarantee is specified.
+
+```terrum
+public interface IRandom
+{
+    mut uint32 NextUInt32();
+}
+public interface ISeedableRandom : IRandom
+{
+    mut void Reseed(uint32 seed);
+}
+public static uint32 Draw<TRandom>(write ref<TRandom> random)
+    where TRandom : IRandom;
+public struct uint32 : IFormattable
+{
+    public static uint32 AddWrapping(uint32 left, uint32 right);
+    public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
+        where TWriter : ITextWriter;
+}
+```
+
+`CounterRandom(uint32 seed)` and
+`DifferentRandom<TRandom>(TRandom inner, uint32 mask)` with
+`TRandom : IRandom, [Sized]` are sample implementations, not mandatory
+algorithms. Entropy, seed material, statistical quality and cryptographic
+security require separate capability contracts; `NextUInt32` alone promises
+none. See the complete primitive/protocol inventory in §§1 and 6.
 
 Entry shapes: `Main` returning `void`/`int32` or `MainAsync` returning `Task`/`Task<int32>`, with no arguments or `Span<TextSpan> args` (excluding program name). Host arguments and roots last through async completion/structured cleanup.
 
@@ -740,18 +1187,22 @@ Standard output is default; `Error` selects stderr. Writes can expose partial pr
 
 ## 9. Accepted direction and unresolved choices
 
+Unresolved source-language decisions are collected separately in the
+[grammar question proposal](grammar-open-questions.md); this section retains
+the library/API choices and their dependencies.
+
 The following separates semantic constraints from source and API decisions
 that remain open:
 
-1. **Presence/result:** normalized optional flattening is the accepted semantic direction; settle only the source spelling/alias projection for `Option<T>`. A nominal `Missing | Found(T?)` union remains distinct when present-null must differ from missing. `Result<T,E>` and error payload design remain proposed; declaration-specific vacancy/publication contracts must be explicit.
+1. **Presence/result:** normalized optional flattening and namespace-level transparent alias syntax/export are approved; whether `Option<T>` is publicly exported is a library decision. A nominal `Missing | Found(T?)` union remains distinct when present-null must differ from missing. `Result<T,E>` and error payload design remain proposed; declaration-specific vacancy/publication contracts must be explicit.
 2. **Equality/hash semantics:** clarify how concrete `int32.GetHashCode()` relates to numeric-key hashing; it does not imply a universal root contract. Settle reusable primitive key-comparer declarations.
-3. **`init ref<T>` contracts:** semantics and `Create(init value)` call-site spelling are accepted direction; conditional outcome metadata and optional outputs remain open. These proposed signatures define no executable ABI.
+3. **`init ref<T>` contracts:** semantics and `Create(init value)` call-site spelling are accepted direction; per-API conditional publication clauses and compiled output metadata remain open. These proposed signatures define no executable ABI.
 4. **Memory signatures:** checked location/range grammar; legal CAS success/failure order pairs and bitwise-eligible representations; fence coverage/compiler-fence scope; non-temporal/cache safety and target support. Preserve compile-time-known ordering, accepted defaults, lock-free default and checked/wrapping selection.
 5. **Collections/elements:** allocator/failure contract, non-Copy/borrowed/affine storage, guard alias/reentrancy enforcement, write-access naming, builder abandonment/error contract, lending iteration.
 6. **Numerics:** integer associated-relation declarations and witness lookup; primitive operator/conversion matrix; floating/decimal policy gaps; align key hashing with comparer.
 7. **SIMD/tensors:** fixed family/mask syntax, member registration/ABI and scalable restrictions; tensor shape storage/anchor, checked stride math, alias contract and reproducible reduction API.
 8. **Tasks/errors/services:** Task members/awaiter/completion ownership representation; exact scheduling/affinity APIs; cancellation; error/exception object/failure ABI; RNG guarantees beyond the sample methods; time and filesystem/network abstractions.
-9. **Notation/metadata:** generic defaults, family/extension/constraint syntax, fixed-signature `func`/`fnptr` family notation, handler/output attributes, public metadata and ABI. Source spellings remain illustrative.
+9. **Notation/metadata:** approved generic-default, alias and character grammar must be kept distinct from OPEN family registration/conditional-member and fixed-signature family details. Handler/output contract binding and the relevant public metadata/ABI still need checking.
 10. **Collection `params`:** modifier changes call form, not parameter type; bind a matching collection directly in normal form and use expanded form to construct new slots. Apply the accepted per-argument dominance and declared-specificity rules; fixed arity beats expanded form only on an otherwise equal match, and crossed argument matches are ambiguous. Specify exact grammar/diagnostics and generic collection-expression inference; any future enumeration needs explicit spread.
 11. **Adapters/extension interfaces:** ordinary implementations remain declared by their type; package imports do not add retroactive global conformances. Explicit adapters may add extension-interface behavior without changing the original witness set. Keep ABI-transparent nominal wrappers distinct from adapters; equal payload bits do not prove validity or total projection. Specify adapter intent/forwarding, dispatch metadata and any one-way projections only with validity, representation, access, ownership, lifetime and container guarantees. No blanket generic covariance or physical multiple-vtable layout is selected.
 12. **Families and operation protocols:** families explicitly opt in and declare checked projections/constraints; no universal `Type<T>`-to-`Type<void>` erasure or inferred covariance follows. Preserve declared family relationships such as `TextSpan<void>`. No universal root is introduced merely for equality/hash/formatting; use operation-specific witnesses/interfaces and explicit adapters. Specify eligible adapter projections and readonly views with representation, validity, access, backing/lifetime and cost checks; writable storage remains invariant.
@@ -769,35 +1220,15 @@ The following distinctions and signature questions remain open:
 - `int32.GetHashCode()` does not imply a universal root contract. Review only whether the primitive method denotes the same key-hash semantics as `float32`/`decimal32` or is a separate concrete helper; generic map-key use remains governed by explicit comparer witnesses.
 - `TensorShape.Lengths`/`Strides` are `Span` properties but docs require immutable independently live metadata. Their exact readonly/view qualification and ownership source are not expressed by these signatures.
 - `TensorViews.View` must preserve both data and shape dependencies, but no final multi-source lifetime/anchor syntax exists; shown signature alone is insufficient proof.
-- `IParsable.TryParse(... init ref<T>)` uses the accepted `init` direction; its output contract remains open.
+- `IParsable.TryParse(... init ref<T>)` follows the canonical parse contract: true fully initializes, false leaves the output vacant. The library declarations and their compiled conditional-outcome metadata must encode and prove this contract; the signature alone does not.
 - The [memory model](../memory-model.md) defines accepted operation families, result forms and ordering; the signatures above propose source forms while exact grammar, target range contracts and some CAS declarations remain open.
-- `Task<TResult = void>` is a type-family direction; type-default grammar and Task members are not finalized. `Task` does not erase an owning `Task<T>` result. Optional normalization is semantic; its type-substitution rules and exact source grammar remain open.
+- `Task<TResult = void>` uses the approved generic-default syntax; this particular library type and its task members are not finalized. `Task` does not erase an owning `Task<T>` result. Optional normalization is semantic; source `T?` is approved, while exported `Option<T>` is only proposed.
 
 ## 11. Scoped proposed signatures: random and `uint32`
 
-This scoped proposal (not a production RNG API) declares only these public
-members:
-
-```terrum
-public interface IRandom
-{
-    mut uint32 NextUInt32();
-}
-public interface ISeedableRandom : IRandom
-{
-    mut void Reseed(uint32 seed);
-}
-public static uint32 Draw<TRandom>(write ref<TRandom> random)
-    where TRandom : IRandom;
-public struct uint32 : IFormattable
-{
-    public static uint32 AddWrapping(uint32 left, uint32 right);
-    public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
-        where TWriter : ITextWriter;
-}
-```
-
-The sample also has `CounterRandom(uint32 seed)` and `DifferentRandom<TRandom>(TRandom inner, uint32 mask)` with `TRandom : IRandom, [Sized]`; their backing state/algorithm is not reproduced. `NextUInt32` provides no implied entropy, statistical quality, cryptographic security, or OS randomness guarantee.
+The single scoped sample inventory is now in §8 (with primitive and conversion
+relationships in §§1 and 6); this heading preserves earlier section links.
+It is not a production RNG profile.
 
 ## 12. Proposed treatment of consequential open shapes
 
@@ -829,7 +1260,7 @@ public state, not frozen private layout or wire ABI.
 
 ### Expected failures and error values
 
-Use a nominal `Result<T,E>` for expected domain alternatives and retain exceptions for exceptional language/runtime failures. Do not make every error an exception object or invent a universal object root. This is a *candidate* family syntax; payload ownership follows `T`/`E` (a result containing an owner is not `[Copy]`).
+Use a proposed nominal `Result<T,E>` for expected domain alternatives and retain exceptions for exceptional language/runtime failures. Do not make every error an exception object or invent a universal object root. Union declaration grammar remains **OPEN**; payload ownership follows `T`/`E` (a result containing an owner is not `[Copy]`).
 
 ```terrum
 public struct ErrorCode
@@ -846,12 +1277,11 @@ public struct Error : IFormattable
         where TWriter : ITextWriter;
 }
 
-public nominal union Result<T, E>
-{
-    Success(T value);
-    Failure(E error);
-}
 ```
+
+| **OPEN** nominal case representation | Proposed cases | Ownership |
+|---|---|---|
+| `Result<T,E>` | `Success(T value)`, `Failure(E error)` | Variant moves/copies only when its complete payload permits it |
 
 `Domain`/`Value` identify a documented condition; numeric assignments/registry are open and should not be guessed from OS error constants. `Message` is optional owned immutable text, not a mandatory allocation or an implicit `ToString`; callers can handle codes without formatting. A failed Result is data, not an exception. `require` and thrown exceptions remain separate. Keep `T?`/`Option<T>` for absence, not error status.
 
@@ -901,58 +1331,87 @@ public enum TaskStatus : int32
     Canceled
 }
 
-public nominal union TaskOutcome<T>
-{
-    Completed(T value);
-    Faulted(Error error);
-    Canceled;
-}
-
 public mut unique class Task<T = void>
 {
     public TaskStatus Status { get; }
     public bool IsCompleted { get; }
     public bool HasOutcome { get; }
-    public TaskOutcome<T> GetOutcomeCopy() where T : [Copy];
-    public mut bool Start();
-    public mut bool RequestCancellation();
     public mut bool TryTakeOutcome(init ref<TaskOutcome<T>> outcome);
     public mut TaskAwaiter<T> GetAwaiter();
 }
-
-// Bare Task is the declared Task<void> family member, not a derived type.
 public struct TaskAwaiter<T>
 {
     public bool IsCompleted { get; }
     public ref<TaskOutcome<T>> GetResult();
     public void OnCompleted(func<void> continuation);
 }
-
 public struct CancellationToken
 {
     public bool IsCancellationRequested { get; }
 }
-
 public mut unique class CancellationSource
 {
     public CancellationToken Token { get; }
     public mut void Cancel();
 }
-
 public mut unique struct TaskScope
 {
     public TaskScope();
-    public mut void Start<T>(move Task<T> operation);
+    public mut void Adopt<T>(Task<T> operation);
     public mut Task<void> JoinAsync();
     public mut void RequestCancellation();
 }
 ```
 
-The concrete alias/inheritance syntax is illustrative; prefer the one `Task<T = void>` family if the grammar can express it, so `Task` is exactly `Task<void>`. `Task<T>` is a unique operation/completion owner, not a freely copied `[Copy]` value. `TaskAwaiter<T>.GetResult()` and `Task<T>.GetOutcomeCopy()` provide two explicitly different paths: the first returns a checked readonly borrow tied to the task lifetime, the second is available only when every payload in the copied outcome (`T` and `Error`) is `[Copy]`. Borrowed access cannot overlap an exclusive take; reborrowing a payload that retains write capability still obeys the ordinary access/share checker. `TryTakeOutcome` transfers the outcome once, including any unique payload; `HasOutcome` is false until completion and after that transfer. Completion observation remains repeatable after a take, but result access does not: `GetResult()` or `GetOutcomeCopy()` when no outcome remains must fail through a checked `require`/invalid-state path (the precise failure transport remains open), never fabricate or return an uninitialized value. Repeated awaits may observe the same completion, but they never duplicate an owning result; repeatable by-value access requires `[Copy]`, while repeatable borrowed access requires a valid checked borrow/share contract. For `Task<void>`, completion carries no value. `Completed(Result<T,E>.Failure(...))` is an expected domain failure; `Faulted(Error)` is a typed terminal diagnostic; `Canceled` is a cooperative cancellation outcome. This deliberately does not promise a catchable universal exception object or preserve runtime exception identity/stack; that would need its own contract, and `Error` is not a root type.
+| **OPEN** task/cancellation family | Proposed signatures and relationships |
+|---|---|
+| `TaskOutcome<T>` nominal sum | `Completed(T value)`, `Faulted(Error error)`, `Canceled`; union source grammar OPEN |
+| `Task<T>` | Complete representative signature above; method and capture contracts still proposed |
+| conditional Copy-only observation | `Task<T>.GetOutcomeCopy() -> TaskOutcome<T>` only when **all** variant payloads are `[Copy]`; relationship syntax OPEN |
+| `TaskAwaiter<T>` | Complete representative signature above; continuation registration and error propagation OPEN |
+| `CancellationToken` / `CancellationSource` | Complete representative signatures above; token retains request-state dependency and source owns unique request authority |
+| `TaskScope` | Complete representative signature above; scope close waits for adopted completion and cleanup |
+| `IExecutor` / **new proposal** | `Schedule(func<void>)`, `Yield() -> Task<void>`, `ResumeOn(IExecutor) -> awaitable`; scheduler and continuation affinity remain separately checked contracts |
+
+The approved generic-default form makes bare `Task` exactly `Task<void>` if
+this candidate declaration is adopted, not a base type or result erasure.
+`Task<T>` is a unique completion owner, not a freely copied `[Copy]` value.
+An async call has **already started** inline through its first real
+suspension; `TaskScope.Adopt` accepts responsibility for an operation, not a
+cold-task `Start`. A named unique task is passed as `scope.Adopt(move task)`;
+`move` is a call expression, not a parameter modifier.
+`TaskAwaiter<T>.GetResult()` and Copy-only
+`GetOutcomeCopy()` are distinct paths: the former borrows from the operation
+owner and the latter copies only valid payloads. Borrowing cannot overlap
+exclusive take. `TryTakeOutcome` transfers an outcome once; false leaves its
+output vacant. Completion observation remains repeatable after a take, but
+payload access cannot synthesize another owning result. For `Task<void>`,
+completion carries `()`. `Completed(Result<T,E>.Failure(...))` is an expected
+domain failure, `Faulted(Error)` a terminal diagnostic and `Canceled` a
+cooperative outcome. No catchable universal exception object or preserved
+runtime exception identity/stack is promised.
+
+`HasOutcome` is false before completion and after a successful take.
+`GetResult()` and the conditional copy accessor require a completed,
+remaining outcome; otherwise they fail through a checked invalid-state
+path, never fabricate a value. A borrowed result retains the task-owner
+dependency and cannot overlap an exclusive take.
 
 The accepted execution model starts an async function inline when called and continues until actual suspension. Completed awaits continue inline; incomplete ordinary awaits do not capture the caller's executor or require a worker hop. Affinity-bound functions/callbacks retain their own declared executor through suspension, cleanup and unwinding; independent helpers do not inherit affinity merely from their caller. `Run` schedules an initial invocation and adopts its full async completion without binding every helper continuation or choosing the caller's continuation. An explicit awaitable adapter such as `ResumeOn(executor)` selects the awaiting continuation without rescheduling the producer; an explicit `Yield` may request a scheduling boundary. Executor choice does not bypass transfer, sharing, lifetime, affinity or cleanup checks.
 
-The `TaskScope`, `Start`, capture, task-handle disposal and outcome APIs shown here remain a separate library proposal, not an adopted lifecycle contract. Their cold-task behavior in particular does not describe or override the accepted async function-call model. Repeated observation, responsibility ownership, cancellation and retained dependencies still require coherent exact API contracts. Any cross-thread scheduling requires every captured value to satisfy explicit transfer/share and lifetime contracts; arbitrary thread-confined captures cannot be sent to a worker. `Task<T>` is not automatically `[ThreadShareable]`, and no ambient scheduler can waive these checks. Dropping a handle is never cancellation. `CancellationSource` uniquely controls a shared request; its token is a non-owning view and may not be default-fabricated. Requesting cancellation is an idempotent, monotonic, cooperative signal; it does not forcibly stop an operation or end borrowed-buffer, receiver, or owner dependencies before the operation stops and cleans up. Cross-thread request/observation guarantees remain a memory/runtime contract to specify.
+`TaskScope`, adoption, capture, task-handle cleanup and outcome APIs remain
+separate library proposals, not an adopted lifecycle contract. Repeated
+observation, responsibility ownership, cancellation and retained dependencies
+need coherent exact contracts. Any cross-thread scheduling requires captured
+values to satisfy explicit transfer/share and lifetime contracts; arbitrary
+thread-confined captures cannot be sent to a worker. `Task<T>` is not
+automatically `[ThreadShareable]`, and no ambient scheduler waives checks.
+Dropping a handle is never cancellation. `CancellationSource` uniquely
+controls a shared request; its token retains the source dependency and may
+not be default-fabricated. Cancellation is an idempotent, monotonic,
+cooperative request; it does not release borrowed buffers or captured
+receivers before completion and cleanup. Cross-thread request/observation
+guarantees remain a memory/runtime contract to specify.
 
 `GetAwaiter` and result observation signatures are **PROPOSED**; exact `await`
 integration, task-state synchronization, error aggregation in `JoinAsync`,
@@ -1030,7 +1489,6 @@ public interface IByteStream
     mut Result<nuint, Error> Write(Span<uint8> source);
     mut Result<void, Error> Flush();
     mut Result<void, Error> Close();
-    [NoThrow, Cleanup] mut void Dispose();
     [Captures(nameof(destination))]
     mut Task<Result<nuint, Error>> ReadAsync(write Span<uint8> destination,
         CancellationToken cancellation);
@@ -1050,7 +1508,6 @@ public mut unique struct FileHandle : IByteStream
     public mut Result<nuint, Error> Write(Span<uint8> source);
     public mut Result<void, Error> Flush();
     public mut Result<void, Error> Close();
-    [NoThrow, Cleanup] public mut void Dispose();
     [Captures(nameof(destination))]
     public mut Task<Result<nuint, Error>> ReadAsync(write Span<uint8> destination,
         CancellationToken cancellation);
@@ -1089,7 +1546,6 @@ public mut unique struct TcpConnection : IByteStream
     public mut Task<Result<nuint, Error>> WriteAsync(Span<uint8> source,
         CancellationToken cancellation);
     public mut Result<void, Error> Close();
-    [NoThrow, Cleanup] public mut void Dispose();
 }
 public mut unique struct TcpListener
 {
@@ -1097,7 +1553,6 @@ public mut unique struct TcpListener
     public bool IsOpen { get; }
     public mut Task<Result<TcpConnection, Error>> AcceptAsync(CancellationToken cancellation);
     public mut Result<void, Error> Close();
-    [NoThrow, Cleanup] public mut void Dispose();
 }
 public class NetworkClient
 {
@@ -1108,7 +1563,102 @@ public class NetworkClient
 
 `FileSystem` is an explicit host-supplied capability rooted to an authorized filesystem scope; `relativePath` cannot escape that root. There is no ambient current directory, unrestricted global `File`, arbitrary path-based service locator, or implicit path encoding conversion in this minimum. Path normalization, symbolic-link policy and platform error mapping must be specified by the host profile before adoption. `TcpEndpoint` is a small immutable value over a shared immutable `Text` handle, not a unique resource owner; `ConnectAsync` takes this value rather than retaining a temporary text span, with backing lifetime still governed by the operation's declared dependencies. DNS/network errors are explicit `Result` failures.
 
-Reads return bytes read; `0` means EOF only when the destination is nonempty. An empty read returns zero without probing EOF. Writes may be partial and the caller advances by the returned count; the proposed contract requires a successful write of nonempty input to report positive progress, not a zero-count success that invites a retry loop. Buffer-size/alias checks occur before access. Async stream calls capture their buffer and exclusive stream access until completion, including after cancellation is requested; their declared operation lifetime must cover those loans through completion and cleanup. One in-flight mutating operation per stream is the proposed default. `Close` invalidates the Terrum wrapper authority even when the target reports an error; the underlying OS resource may then be indeterminate. Its `Result` must carry the reported failure, and the target/runtime contract must define what release is known. Never blindly retry a close against a possibly reused numeric descriptor or claim target release on every error. The shown no-throw `Dispose` signature is provisional: it cannot silently convert a target close failure into success, but its explicit error-reporting/deferred-cleanup policy is unresolved. This reference makes no per-target guarantee of OS release on every failure; callers needing an observable result use `Close`, while implicit cleanup behavior still requires a runtime contract. Unique handles cannot be copied; `move` transfers release responsibility. Result unions carrying handles are likewise non-`Copy`. Network listener/client tasks follow the same cancellation and task ownership rules; no zero-copy, TLS, datagram, proxy, or ambient DNS configuration surface is implied.
+Reads return bytes read; `0` means EOF only when the destination is nonempty. An empty read returns zero without probing EOF. Writes may be partial and the caller advances by the returned count; the proposed contract requires a successful write of nonempty input to report positive progress, not a zero-count success that invites a retry loop. Buffer-size/alias checks occur before access. Async stream calls capture their buffer and exclusive stream access until completion, including after cancellation is requested; their declared operation lifetime must cover those loans through completion and cleanup. One in-flight mutating operation per stream is the proposed default. `Close` invalidates the Terrum wrapper authority even when the target reports an error; the underlying OS resource may then be indeterminate. Its `Result` must carry the reported failure, and the target/runtime contract must define what release is known. Never blindly retry a close against a possibly reused numeric descriptor or claim target release on every error. Cleanup of an unclosed unique handle must report or supervise target failure under a separately specified no-throw cleanup contract; it cannot silently convert failure into success. This reference makes no per-target guarantee of OS release on every failure; callers needing an observable result use `Close`, while implicit cleanup behavior still requires a runtime contract. Unique handles cannot be copied; `move` transfers release responsibility. Result unions carrying handles are likewise non-`Copy`. Network listener/client tasks follow the same cancellation and task ownership rules; no zero-copy or TLS default is implied; proposed datagrams appear in the capability matrix below.
+
+### Proposed UTF-8 stream text adapters
+
+Unlike the raw byte stream, these proposed `Terrum.IO` adapters select UTF-8
+explicitly; the reader also selects a malformed-input policy. They borrow a
+specific stream, rather than owning/closing it or discovering one from an
+ambient terminal. The borrowed
+stream remains exclusively accessible to the adapter until that adapter is
+closed; actual constructor capture/lifetime metadata is still **OPEN**.
+
+```terrum
+public mut unique struct Utf8TextReader<TStream>
+    where TStream : IByteStream
+{
+    [Captures(nameof(source))]
+    public Utf8TextReader(write ref<TStream> source,
+        MalformedTextPolicy policy, nuint bufferCapacity);
+    public mut Result<bool, Error> ReadScalar(init ref<rune> value);
+    public mut Result<bool, Error> ReadLine(init ref<own<val<Text>>> value);
+    public mut Result<void, Error> Close();
+}
+public mut unique struct Utf8TextWriter<TStream>
+    where TStream : IByteStream
+{
+    [Captures(nameof(destination))]
+    public Utf8TextWriter(write ref<TStream> destination, nuint bufferCapacity);
+    public mut Result<void, Error> Write(TextSpan source);
+    public mut Result<void, Error> WriteScalar(rune value);
+    public mut Result<void, Error> Flush();
+    public mut Result<void, Error> Close();
+}
+```
+
+The reader distinguishes EOF (`Success(false)`, output vacant) from an empty
+line (`Success(true)`, initialized empty text); an error also leaves the
+output vacant and makes the reader terminal after a partial line has been
+consumed. A final unterminated line is returned once. `ReadLine`
+recognizes LF and CRLF and excludes the terminator. The reader decodes
+complete scalars across byte reads and finishes its decoder only on
+EOF observed by reading a nonempty buffer; malformed input follows the
+selected policy. The byte reader converts stream bytes into `char8` code
+units explicitly; it does not reinterpret an arbitrary `Span<uint8>` as a
+validated text view. Buffer capacity must be positive. Writer
+calls transcode scalars to UTF-8, buffer as needed and drain partial writes.
+An error after some bytes were written is not rollback: this initial
+adapter contract makes such an error terminal for the adapter, forbids
+retrying the same `Write`, and still requires an observable `Close`.
+`Flush` drains adapter bytes and calls the underlying stream's `Flush`;
+`Close` attempts the same drain, releases the loan on completion and reports
+failure without pretending underlying stream closure. Adapter buffer
+allocation/constructor failure transport and checked capture/close metadata
+are **OPEN**. These synchronous methods create no task or early release of
+captured buffers.
+
+### Capability breadth: files, networking, terminal, globalization, serialization
+
+The complete representative byte-stream/handle and scoped filesystem shapes
+above establish the access/ownership pattern. The following is a **proposed
+reference inventory** for review breadth, not additional exports from the
+sample `library/application.api.terrum`. Candidate namespace assignments are
+`Terrum.IO`, `Terrum.Net`, `Terrum.Globalization`, and
+`Terrum.Serialization`; moving application services out of `Terrum` requires
+an explicit namespace/compatibility decision. No row implies an ambient
+singleton, a default encoding, or authority to escape its supplied capability.
+
+| Candidate family | Proposed signature inventory | Substrate / boundary |
+|---|---|---|
+| `IByteStream`, `ISeekableByteStream` | `Read`, `Write`, `Flush`, async counterparts; seekable adds `GetLength() -> Result<uint64,Error>`, `Seek(int64,SeekOrigin) -> Result<uint64,Error>` | Stream may be nonseekable, partial, owned or borrowed; close and cleanup policy separately specified |
+| `MemoryByteStream` | `Create(write Span<uint8>)`; `Read`, `Write`, `Seek`, `Position` | Captures backing access; no allocation or escalation from readonly bytes |
+| `BufferedByteStream<TStream>` | `Create(TStream, Buffer<uint8>)`, with `TStream : IByteStream`; `Read`, `Write`, `Flush`, `Close` | Consumes concrete inner-stream and buffer owners using ordinary call-site moves; no implied erased owned-interface representation; flush/close errors remain observable |
+| `FileSystem`, `FileHandle` | `OpenRead/Write`, `FileExists`, `CreateDirectory`, `DeleteFile`; handle `GetLength`, `Seek`, `Read/Write`, `Flush`, `Close` | Explicit filesystem root; authorized relative path and symlink policy |
+| `DirectoryCursor` | `MoveNext() -> Result<bool,Error>`, `Current -> ref<DirectoryEntry>`, `Close()` | Directory capability retained; entry view expires on advance/close |
+| `FileMetadata`, `DirectoryEntry` | `Kind`, `Length?`, `ModifiedTime?`, `Name: Text` candidate | Metadata is observed state, not atomic with later open; text encoding policy explicit |
+| `TcpEndpoint`, `TcpConnection`, `TcpListener`, `NetworkClient` | `ConnectAsync`, `Bind`, `AcceptAsync`, stream I/O and `Close` | Host networking capability; DNS and endpoint-name policy explicit |
+| `DatagramSocket` / new | `Bind`, `ReceiveFromAsync(write Span<uint8>, cancellation) -> Task<Result<DatagramRead,Error>>`, `SendToAsync(endpoint,Span<uint8>,cancellation) -> Task<Result<nuint,Error>>` | One datagram versus stream progress; truncation and peer address reported explicitly |
+| `Terminal`, `TextWriter` | `Output`, `Error`, `Write`, `WriteLine`, `WriteLineAsync`; proposed input adapter `Utf8TextReader<TStream>` | Explicit standard-stream host capability; input decoding and output encoding not inferred |
+| `Locale`, `CultureData` | `Locale.Parse(TextSpan,init ref<Locale>) -> bool`, `CultureData.Load(Locale,provider) -> Result<CultureData,Error>` | Injected versioned data provider; no implicit process locale or culture in core parse |
+| `NumberFormatter`, `DateTimeFormatter` | `TryFormat(value,write ref<ITextWriter>, ref<CultureData>) -> bool`; paired `TryParse(text,ref<CultureData>,init ref<T>) -> bool` | Locale-sensitive APIs explicitly separate from ordinal/invariant primitive formatting |
+| `TimeZoneDatabase`, `TimeZone` | `Find(TextSpan) -> Result<TimeZone,Error>`, `Convert(Instant,TimeZone) -> LocalDateTime` | Versioned rule provider; ambiguity/gap resolution needs explicit policy |
+| `IByteEncoder<T>`, `IByteDecoder<T>` | `Encode(ref<T>,write Span<uint8>,init ref<nuint> written) -> Result<bool,Error>`; `Decode(Span<uint8>,init ref<T>,init ref<nuint> consumed) -> Result<bool,Error>` | Explicit schema/version, incremental state, output-publication rules |
+| `BinarySerializer<T>`, `TextSerializer<T>` | `Write(ref<T>,write ref<IByteStream>) -> Result<void,Error>`; `Read(write ref<IByteStream>,init ref<T>) -> Result<bool,Error>` | Checked registration/schema/encoding; no reflection on arbitrary objects or hidden allocation |
+
+These rows are signature families, not a generic capability-object base
+class. `IByteStream` is a behavioral witness; an erased owned stream requires
+an explicit ownership/dispatch representation. `FileSystem` and
+`NetworkClient` must be constructed or injected by a host that actually
+grants their substrate; a `static File.Open(path)` would bypass that authority.
+`Utf8TextReader`/terminal input depends on an explicit decoder and distinguishes
+EOF from an empty line. Locale-aware operations cannot change invariant
+`TryParse`/`TryFormat` merely by changing process state. Deserialization
+checks length/limits, depth, version, references and partial-initialization
+cleanup before publishing `T`; schema registration is **OPEN**, not inferred
+from type spelling. Incremental codecs must state which prefix has been
+consumed or written on error. A writable `Span<uint8>` grants destination
+access, not ownership of the stream or permission to retain it indefinitely.
 
 ### Application entry
 
