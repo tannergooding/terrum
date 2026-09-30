@@ -1121,7 +1121,23 @@ public static class SpanAlgorithms
         write ref<TPredicate> predicate, init ref<T> value)
         where T : [Copy]
         where TPredicate : IPredicate<T>;
+    public static bool TryFindLast<T, TPredicate>(Span<T> source,
+        write ref<TPredicate> predicate, init ref<T> value)
+        where T : [Copy]
+        where TPredicate : IPredicate<T>;
+    public static bool TryFindIndex<T, TPredicate>(Span<T> source,
+        write ref<TPredicate> predicate, init ref<nuint> index)
+        where TPredicate : IPredicate<T>;
+    public static bool TryFindLastIndex<T, TPredicate>(Span<T> source,
+        write ref<TPredicate> predicate, init ref<nuint> index)
+        where TPredicate : IPredicate<T>;
+    public static bool Any<T, TPredicate>(Span<T> source,
+        write ref<TPredicate> predicate)
+        where TPredicate : IPredicate<T>;
     public static bool All<T, TPredicate>(Span<T> source,
+        write ref<TPredicate> predicate)
+        where TPredicate : IPredicate<T>;
+    public static nuint CountWhere<T, TPredicate>(Span<T> source,
         write ref<TPredicate> predicate)
         where TPredicate : IPredicate<T>;
     public static void Select<TSource, TResult, TMapper>(Span<TSource> source,
@@ -1167,7 +1183,11 @@ grant writable element access merely because its own state is mutable.
 | `Contains`, `TryIndexOf` | Visit from the beginning and stop at the first equality match; empty input returns false. A successful index names that first match. |
 | `TryLastIndexOf` | Visit from the end and stop at the first equality match in that direction; success publishes its original source index. |
 | `TryFind` | Visit from the beginning and copy the first matching element into the vacant output; no match leaves it vacant. An optional/null element can be a successful result. |
+| `TryFindLast` | Visit from the end and copy the first matching element in that direction; no match leaves the output vacant. No forward scan or predicate replay is implied. |
+| `TryFindIndex`, `TryFindLastIndex` | Search in increasing/decreasing source-index order, respectively, stopping at the first true predicate in that direction. Success publishes the original source index; no match leaves it vacant. No `[Copy]` element capability is required. |
+| `Any` | Stop at the first true predicate; empty input returns false without invoking it. |
 | `All` | Stop at the first false predicate; empty input returns true without invoking it. |
+| `CountWhere` | Visit every element once in increasing source-index order and count true results. Empty input returns zero. The result is at most the span length and fits `nuint` without widening or wrapping. |
 | `Zip` | Require equal input lengths and sufficient destination capacity before callbacks. Inputs may overlap each other, but neither may overlap the written destination prefix. Visit paired elements once in increasing index order; no shorter-input truncation or hidden padding. |
 | `ForEach` | Visit each element once in increasing index order; callback failure stops further visits. No deferred execution or materialized result. |
 | `Fill`, `Reverse` | Fill every initialized destination slot with a copy, or reverse the initialized span in place. Empty spans are valid; neither operation constructs vacant capacity. |
@@ -1186,6 +1206,18 @@ results instead transfer each separately produced result into its destination.
 Output publication/effect metadata and callback-loan enforcement remain
 **OPEN**. No callback is replayed after failure, and these signatures do not
 promise rollback, NoThrow or a hidden allocation-free callback.
+
+The predicate-only searches, quantifiers and count operation borrow elements
+without copying or retaining them. Copied-value searches add `[Copy]` because
+they publish an existing element, not because predicate execution itself
+requires it. A stateful predicate can distinguish forward and reverse visits;
+implementations must preserve the stated direction, invoke it at most once
+per visited element and stop immediately on the specified result or failure.
+They cannot replace a reverse search with a forward scan that remembers the
+last match. A predicate exception is not a no-match result: it preserves the
+existing checked failure behavior and leaves an initialization output vacant,
+without undoing earlier callback-state writes. This does not grant element
+mutation, reentrant source invalidation or escaping loans.
 
 ### Sequence and eager-operation inventory
 
