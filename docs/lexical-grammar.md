@@ -149,7 +149,10 @@ access, interpolation format suffix or another colon role. Grammar selects
 the role before type checking, without retrying a failed interpretation.
 Declaration-relationship colons require separating trivia on both sides
 in conformance/interface-base lists, enum underlying types and generic
-constraints. Named-prefix, label and format colons retain their separate roles.
+constraints. Label, named-argument, tuple-name and attribute-target colons
+attach to the preceding name or selector's closing delimiter, with optional
+trivia afterward. Thus `name: value` and `name:value` are valid, while
+`name : value` rejects in those roles. Format colons retain their own grammar.
 Symbolic prefix operators attach directly to their following operand token;
 symbolic postfix operators attach directly to their preceding operand token.
 Member-access `.` and `?.` must adjoin the receiver's final token or the
@@ -170,6 +173,17 @@ and line breaks around enclosed tokens. Multiline calls keep the opening
 `(` attached to the callee while permitting arguments and the closing `)`
 on subsequent lines. Receiver/operator attachment remains independent of
 interior padding, and literal/interpolation delimiters retain their own rules.
+Declaration parameter `(` attaches to the callable's final name or operator
+token, declaration indexer `[` to `this`, and attribute argument `(` to the
+attribute name. `operator +(T x)` uses declaration punctuation, not a
+binary-expression operator's spacing. Qualified-name dots in types,
+namespaces, imports and attribute names attach on both sides; expression
+member access keeps its either-side rule regardless of the receiver's type.
+Structural control-flow parentheses and external block braces retain
+flexible outer trivia. The canonical formatter emits one space at these
+boundaries on a single line: `if (...) { ... }`, `else { ... }` and
+`} while (...);`. Line breaking is separate layout work, not a reason to
+reject the unformatted `if(...){...}` source form.
 Commas and semicolons are fixed structural separators with flexible trivia
 on either side, not postfix operators or parts of operator runs. Leading-comma
 multiline alignment is valid. Spacing does not change where a separator,
@@ -179,6 +193,11 @@ to adjoin the preceding name. Interior trivia remains optional, including
 comments and multiline arguments/closers. A constructed type remains a
 sequence of lexical tokens; generic delimiters are recognized by grammatical
 role, distinct from spaced binary comparisons.
+Direct constant generic arguments are literals or qualified constant names.
+Other constant expressions must be parenthesized, including negative
+arguments such as `(-1)` and compounds such as `(N >> 1)`. These syntax
+boundaries do not widen eligible constant domains or constrain ordinary
+default expressions.
 Designated keyword-introduced angle lists likewise attach their `<` to
 the introducer: `default<I>`, `.via<I>`, `policy<Domain.Case>` and
 `ref<T>` (including `init ref<T>` and `implicit ref<T>`). Their interiors
@@ -190,21 +209,23 @@ or generic closing delimiter. Type-context adjacency permits `List<T?>`,
 operators containing those glyph runs. `T ?` rejects, as does repeated
 source optional marking `T??`. Spaced coalescing `a ?? b` is unchanged.
 Keyword operators retain word boundaries. Other delimiter roles and
-range syntax retain their own grammatical
-rules; their exact remaining spacing requirements are separate design work.
+range syntax retain their own grammatical rules.
 
 Punctuation adjacency follows an allow list: one defined spelling or an
 explicit grammatical boundary, not an enumeration of forbidden combinations.
-A contiguous run of operator glyphs must be one defined operator or
-punctuator, not implicitly concatenated operators: `x+++y` rejects,
+A contiguous run from the ASCII glyph set `!%&*+-./:<=>?^|~`
+must be one defined operator or punctuator, not implicitly concatenated
+operators: `x+++y` rejects,
 whereas `x++ + y` and
 `x + ++y` satisfy the operator-role spacing rules. Trivia can separate
 operators; grouping delimiters, commas and semicolons are not part of such a
 run. Nested generic
-closing delimiters are recognized in type-argument context. Exact glyph
-membership and contextual exceptions, including optional/type punctuation
-and comment openers, remain to specify. Neither recovery nor a formatter may
-guess a different expression from an invalid run.
+closing delimiters and optional suffix boundaries are recognized in type
+context. Literal tokens, selected comment forms and narrow keyword escapes
+take priority over operator-run validation. `$`, `@`, grouping/list
+delimiters and Unicode lookalikes are not operator glyphs. Other contextual
+splitting requires an explicit grammatical rule. Neither recovery nor a
+formatter may guess a different expression from an invalid run.
 
 `..^` is one defined composite punctuator for an end-relative upper slice
 bound, as in `items[start..^1]`. The grammar also permits separated `..`
@@ -266,14 +287,34 @@ checked contracts. Exact recovery for these text forms remains open.
 ## Trivia and diagnostics
 
 Horizontal whitespace, line breaks, `//` comments up to but not including
-the break, and non-nesting `/* ... */` comments are leading trivia.
-Documentation adds one slash: `///` introduces a documentation line, and
-`//* ... *//` is a non-nesting documentation block. Recognize `//*` before
-ordinary `//`; within that block, only `*//` closes it, not `*/`.
+the break, and non-nesting block comments are leading trivia.
+Documentation adds one slash: `///` introduces a documentation line; block
+openers use `/` followed by stars for ordinary comments, or `//` followed by
+stars for documentation. Recognize documentation-block openers before
+ordinary `//` line comments.
+
+The maximal contiguous opening star run selects a positive fence length
+`N`. Scan opaque content for a whole `N`-star run followed immediately by
+one slash for ordinary comments or two for documentation. A shorter
+closing-looking star run is payload; a longer one with the required slash
+suffix rejects, matching the raw-string whole-fence rule. Consume exactly
+the selected closer's one or two slashes, leaving any additional slashes
+for subsequent lexing. Opening and closing extents never overlap:
+`/**/` consumes `/**` as its two-star opener, then `/` as payload and is
+unterminated.
+
+For one-star fences, the forms remain `/* ... */` and `//* ... *//`;
+`//* */` does not close a documentation block. A two-star ordinary example
+is `/** /* */ text **/`: its inner one-star terminator remains payload.
+No opener, string or other token is interpreted within comment contents.
+In `/** /**/ **/`, the first `**/` closes the comment; the final `**/` is
+outside it and is not a valid continuation of that comment. Generalized
+fences do not create nesting or a tooling-specific escape from the closer.
 Documentation trivia retains its source extent while participating in
 declaration attachment and separate documentation extraction.
-Generalized matching-length star fences and their exact closing-run rules
-remain unspecified.
+These approved fence rules are source targets, not evidence of current
+scanner adoption; fixed-fence empty-comment behavior is not generalized-fence
+conformance.
 The final zero-width EOF token owns trailing trivia. Unterminated block
 comments receive a diagnostic. Malformed surrogate units inside any comment form are
 diagnosed without changing the trivia text. Lexical diagnostic codes are

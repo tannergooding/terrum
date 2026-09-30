@@ -899,9 +899,13 @@ Declaration-attached `///` before attributes/modifiers and `//* ... *//`
 comments use GFM-compatible prose. Leading prose before the first recognized
 metadata heading is the implicit summary, with optional `# summary`.
 Documentation adds one slash to the ordinary line/block comment marker.
-Recognize `//*` as a documentation-block opener before recognizing ordinary
-`//` line comments; documentation blocks close with `*//` and do not nest.
-Generalized matching-length star fences remain separate lexical design work.
+Recognize documentation-block openers before ordinary `//` line comments.
+The whole opening star run selects the fence length; its whole matching
+closer has two slashes for documentation, not the ordinary block's one.
+Thus `//* ... *//` closes, while `//* ... */` does not. Contents remain
+opaque and nonnesting; longer closing-looking star runs reject, as for raw
+quote fences. The [lexical contract](lexical-grammar.md#trivia-and-diagnostics)
+defines nonoverlapping fences and their exact boundary behavior.
 Top-level `# remarks`, `# param name`, `# typeparam name`, `# returns`,
 `# value`, `# throws Type`, `# safety` and `# example` headings introduce
 structured sections; lower-level headings remain prose. Blank lines remain

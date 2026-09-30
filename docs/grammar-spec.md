@@ -61,8 +61,12 @@ The documentation marker adds one slash to the ordinary comment form:
 ordinary line comments use `//`, documentation lines use `///`, ordinary
 block comments use `/* ... */`, and documentation blocks use `//* ... *//`.
 Recognize the documentation-block opener before ordinary line comments.
-Documentation blocks do not nest. Generalized matching-length star fences,
-including empty-fence and longer-closing-run rules, remain unspecified.
+Both block forms select their star-fence length from the whole opening star
+run. Closers require the same whole star run and respectively one or two
+slashes; longer closing-looking star runs reject. Contents are opaque and
+do not nest. Opening and closing fences cannot overlap, so `/**/` opens a
+two-star comment rather than representing an empty one. See the
+[lexical trivia contract](lexical-grammar.md#trivia-and-diagnostics).
 
 ## 2. Lexical notation
 
@@ -268,7 +272,7 @@ spacing or type does not trigger another interpretation. Keyword operators
 retain their word-boundary requirements. Other punctuation, including
 grouping/list delimiters, generic delimiters and range syntax, follows its
 own grammatical rules; it is not automatically classified as an expression
-operator. Exact remaining punctuation requirements are separate design work.
+operator.
 These are source validity requirements, not merely formatter preferences.
 Assignment and binding operators also require separating trivia on both
 sides, including `=`, complete compound-assignment spellings, declaration
@@ -294,6 +298,12 @@ constraints: `struct S : I`, `enum E : int32` and `where T : I`.
 These colons connect declared relationships; they are not attached type
 suffixes. Label, named-argument, tuple-name, attribute-target and format
 colons follow their own grammatical roles.
+Label, named-argument, tuple-name and attribute-target colons attach to the
+preceding name or selector's closing delimiter. Ordinary trivia after the
+colon is optional: `count: value` and `count:value` are valid, while
+`count : value` rejects in those roles. Use `outer: while (ready)` and
+`[param(count): Limit(16)]`; this does not select label scope or attribute
+schemas. Interpolation format colons retain their separate grammar.
 Trivia does not permit splitting or merging a token spelling after lexing.
 Receiver/name-attached delimited constructs share a boundary rule:
 the opener attaches to its receiver or introducing name, the interior
@@ -303,18 +313,42 @@ the construct. Calls `x(...)`, indexing `x[...]` and generic application
 of a compound receiver, not only an identifier; generic lists attach to
 their introducing name. Interior trivia does not relax operator spacing,
 nesting, argument or other content requirements.
+Callable declaration parameter lists attach `(` to the final name or
+operator token; indexer declarations attach `[` to `this`, and attribute
+argument lists attach `(` to the attribute name. Use `F(int32 x)`,
+`Box(int32 x)`, `operator +(T x)`, `this[nuint index]` and `[Limit(16)]`,
+not `F (int32 x)`, `operator + (T x)`, `this [nuint index]` or
+`[Limit (16)]`. Declaration operator tokens do not acquire binary-expression
+spacing requirements.
+Qualified-name dots in types, namespaces, imports and attribute names attach
+on both sides: `Terrum.Collections.List<T>`, not
+`Terrum .Collections.List<T>` or `Terrum. Collections.List<T>`. Expression
+member access retains its either-side attachment rule, even when the receiver
+binds to a type; syntax determines the role before lookup.
+Structural control-flow parentheses and external block braces allow flexible
+outer trivia: both `if(ready){ ... }` and `if (ready) { ... }` are valid.
+On a single line, the canonical formatter separates a structural keyword
+from `(`, a header from `{`, and `}` from a following structural keyword
+with one space: `if (...) { ... }`, `else { ... }` and `} while (...);`.
+Multiline layout may use line breaks at those boundaries.
+This formatting convention is not an additional source-validity rule and
+does not relax receiver/name attachment or interior operator spacing.
 Punctuation adjacency follows an allow list, not a list of forbidden runs.
-A contiguous run of operator glyphs must be one defined operator or
-punctuator, not an implicit concatenation of separate operators.
+A contiguous run from the ASCII glyph set `!%&*+-./:<=>?^|~`
+must be one defined operator or punctuator, not an implicit concatenation
+of separate operators.
 Thus `x+++y` rejects, while
 `x++ + y` and `x + ++y` separate and attach operators according to their
 roles. Whitespace or a comment can separate operators; ordinary grouping
 delimiters, commas and
 semicolons are not part of the run. Nested generic closing delimiters are
 recognized in type-argument context, so `List<List<T>>` does not require
-spaces. Exact glyph membership and contextual boundary rules, including
-optional/type punctuation and comment openers, remain lexical specification
-work; this is not permission to reinterpret a run by guessing user intent.
+spaces. Literal tokens, selected comment forms and narrow keyword escapes
+take lexical priority over operator-run validation. `$`, `@`, grouping/list
+delimiters and Unicode lookalikes are not operator glyphs. Grammar-authorized
+type-context boundaries, including optional suffixes and nested generic
+closers, are separate explicit rules, not permission to reinterpret a run
+by guessing user intent.
 Unlisted combinations require separation; adding an operator spelling or a
 contextual adjacency exception requires an explicit language rule.
 
@@ -811,6 +845,17 @@ Nested generic closing delimiters retain their type-context recognition, so
 `List<List<T>>` does not require separating its closers. Comparison `<` and
 `>` remain spaced binary expression operators, not generic delimiters.
 
+Direct constant generic arguments are literals or qualified constant names;
+other constant expressions require grouping. Use `InlineArray<T, N>`,
+`InlineArray<T, (N >> 1)>` and
+`InlineArray<T, (N >= Minimum ? N : Minimum)>`.
+A negative argument currently requires `(-1)`, because the sign is an
+operator rather than part of the literal; an ungrouped signed-argument
+exception is not adopted. This boundary does not restrict ordinary default
+expressions or interpolation conditionals. The selected formal still checks
+its eligible constant domain: syntax for a literal does not admit strings,
+nulls or other values into the initial integer/Boolean/nominal-enum domains.
+
 Designated keyword-introduced angle lists use the same opener attachment
 and flexible interior trivia: `default<I>`, `.via<I>`,
 `policy<Domain.Case>` and `init ref<T>` require `<` to adjoin its
@@ -1152,7 +1197,10 @@ Primary         = "(", [ Expression ], ")" | TupleExpression
                 | [ "require" ], "policy", PolicyCases, "(", Expression, ")"
                 | "default", "<", Type, ">" ;
 TypeArguments   = "<", GenericArgument, { ",", GenericArgument }, ">" ;
-GenericArgument = Type | ConstantExpression | "_" | "default" ;
+GenericArgument = Type | ConstantGenericArgument | "_" | "default" ;
+ConstantGenericArgument = ConstantLiteral | DottedIdentifier
+                        | "(", ConstantExpression, ")" ;
+ConstantLiteral = Number | String | RawText | Character | Boolean | Null ;
 PolicyCases     = "<", PolicyCase, { ",", PolicyCase }, ">" ;
 PolicyCase      = DottedIdentifier ;
 ObjectInitializer = "{", { Identifier, "=", Expression, ";" }, "}" ;
@@ -2339,7 +2387,7 @@ appears in §2.
 
 | Concept | Defined direction | Still to specify |
 |---|---|---|
-| Lexical tokens | §2 gives keyword escapes and contextual-word positions; primitive names are identifiers with reserved bindings. | Exact punctuation adjacency allow list and malformed floating-token recovery. |
+| Lexical tokens | §2 gives keyword escapes, contextual-word positions, explicit operator glyphs/priority, role-based attachment and whole-star comment fences; primitive names are identifiers with reserved bindings. | Malformed floating-token and delimiter recovery; compiler/formatter adoption. |
 | Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw framing/headers, deterministic interpolation, identifier/quoted/expression formats and runtime alignment. | Complete floating token recovery, character diagnostics, raw/interpolation recovery and registered text/whole-output normalization APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or nested block namespaces without mixing, with lexically scoped imports before declarations. | Other namespace forms, if any. |

@@ -8,7 +8,7 @@
 > to choose new semantics on the user's behalf.
 
 This is a decision inventory, not a compiler backlog. Stable question numbers
-are retained; gaps in the pending queue are intentional. Nine resolved IDs
+are retained; gaps in the pending queue are intentional. Ten resolved IDs
 have only [canonical link redirects](#resolved-question-link-redirects) at
 the end of this document, so old review links remain usable without mixing
 their rules into the questions below.
@@ -22,156 +22,20 @@ is the question does not assert that it is valid. No candidate establishes a
 new grammar production. Method bodies omitted from surrounding
 examples are not a new bodyless-concrete-declaration rule.
 
-There are **33 pending numbered groups**, with seven explicit punctuation
-subquestions under Q03. Partially resolved groups ask only about their
-remaining choice; settled context is linked or labeled, not another vote.
+There are **32 pending numbered groups**. Q03 and all seven punctuation
+subquestions have canonical redirects, not pending votes. Partially resolved
+groups ask only about their remaining choice; settled context is linked or
+labeled, not another vote.
 
 | Pending area | Stable IDs |
 |---|---|
-| Punctuation, visibility and attributes | Q03.1-Q03.7, Q06, Q07 |
+| Visibility and attributes | Q06, Q07 |
 | Generic/witness lookup and declaration forms | Q12-Q14, Q16-Q18 |
 | References, initialization and operators | Q19-Q26 |
 | Other source forms and contracts | Q27-Q37, Q40-Q42 |
 | Documentation | Q38-Q39 |
 
 ## Lexical and declaration choices
-
-### Q03. Exact operator-run boundaries
-
-Only Q03.1-Q03.7 below need a response. The operator-run allow list,
-role-based spacing, receiver/generic/type attachment, flexible interiors and
-separators, `..^`, slice offsets and declaration connector rules are already
-in the [official lexical grammar](../grammar-spec.md#2-lexical-notation).
-
-#### Q03.1. Exact operator glyph set and lexical priority
-
-**Question:** Which characters participate in a strict operator run, and
-which already-defined lexical forms take priority?
-**Example:** `x + +y` contains separated binary/unary operators;
-`x+++y` rejects, while `"+++"` is literal content.
-
-**C# model:** C# has a finite token catalog and lexical priority, but does
-not apply Terrum's one-assigned-spelling-per-run rule.
-
-**Recommendation:** Enumerate the ASCII glyph set
-`!%&*+-./:<=>?^|~`; exclude grouping/list delimiters and literal/identifier
-introducers such as `$` and `@`. Recognize literals, selected comment forms
-and narrow keyword escapes before operator-run validation. Enumerate
-type-context splitting separately; neither Unicode lookalikes nor recovery
-may invent an operator. This keeps token evolution explicit and auditable.
-
-#### Q03.2. Qualified-name dots outside expression member access
-
-**Question:** Should type, namespace, import and attribute names require
-their qualifying dots to attach on both sides?
-**Example:** `Terrum.Collections.List<T>` versus
-`Terrum .Collections.List<T>` or `Terrum. Collections.List<T>`.
-
-**C# model:** Qualified-name structure is C#-inspired; C# permits trivia
-around these dots.
-
-**Recommendation:** Require both-sided attachment in qualified-name
-syntax, treating the path as one named construction. Keep the already
-accepted either-side rule for expression member access, even when its
-receiver ultimately binds to a type. Select the role from syntax, never
-type lookup. This is stricter than C# and prevents a qualified type/import
-path from being visually fragmented. A long constructed type can still
-wrap inside its generic argument list without splitting the path's dots.
-
-#### Q03.3. Declaration and attribute argument openers
-
-**Question:** Should callable parameter lists, indexer declarations and
-attribute argument lists adopt the receiver/name attachment already chosen
-for calls?
-**Example:** `int32 F(int32 x)`, `Box(int32 x)`,
-`operator +(T x)`, `this[nuint index]` and `[Limit(16)]`.
-
-**C# model:** These declaration shapes are C#-inspired; C# permits trivia
-between the name/operator/`this` and its opener.
-
-**Recommendation:** Attach the opener to the declaration's final name or
-operator token, to indexer `this`, or to the attribute name; retain flexible
-interior trivia. Reject `F (int32 x)`, `operator + (T x)`,
-`this [nuint index]` and `[Limit (16)]`. An operator symbol in a declaration
-is not an expression binary operator, so its declaration spacing comes
-from this role. This gives definitions and uses the same visual boundary.
-
-#### Q03.4. Control-flow grouping and external block spacing
-
-**Question:** Should structural control-flow parentheses and block braces
-have a mandatory outer spacing style?
-**Example:** `if(ready){ ... }` versus `if (ready) { ... }`;
-`else{ ... }` versus `else { ... }`.
-
-**C# model:** C# permits both spellings; formatting is independent of grammar.
-
-**Recommendation:** Keep outer trivia flexible for these structural roles.
-They have no expression receiver, and their fixed delimiters already supply
-boundaries. Preserve inner operator rules and exact statement nesting.
-A formatter can prefer spaced keywords/braces without creating a new
-language requirement. Do not confuse `if (...)` with postfix `f(...)`.
-
-#### Q03.5. Label and named-prefix colons
-
-**Question:** Should a colon naming a label, argument, tuple element or
-attribute target attach to its preceding name/selector?
-**Example:** `outer: while (ready)`, `F(count: value)`,
-`(count: value, other: next)` and `[param(count): Limit(16)]`.
-
-**C# model:** These naming purposes are C#-inspired, but C# permits trivia
-before the colon.
-
-**Recommendation:** Attach the colon to the preceding name or selector's
-closing delimiter; permit ordinary trivia after it. Thus `count: value`
-and `count:value` remain valid, while `count : value` rejects in these
-roles. This keeps the prefix's name and marker together. The tradeoff is
-rejecting padded/leading-colon alignment, unlike the accepted flexible comma
-layout. Declaration relationship colons instead retain their accepted
-both-sided separation. No label scope or attribute schema is selected here.
-
-#### Q03.6. Constant-generic expression boundaries
-
-**Question:** Should direct constant arguments be limited to literals and
-constant names, with other constant expressions parenthesized?
-**Example:** `InlineArray<T, (N >> 1)>` and
-`InlineArray<T, (N >= Minimum ? N : Minimum)>`.
-
-**C# model:** C# has neither value generic formals nor this argument-boundary
-restriction. Ordinary expression grouping is the comparison point.
-
-**Recommendation:** Keep literal/qualified constant-name arguments concise,
-but group compound constant expressions. Under this proposal a negative
-argument uses `(-1)` because its sign is an operator, not part of a literal.
-This prevents comparison/shift glyphs from competing with generic closers
-without redefining their expression meanings. Q12 governs eligible value
-domains and default dependencies separately. Interpolation still accepts a
-full conditional without mandatory grouping.
-
-#### Q03.7. Generalized comment fences and compatibility
-
-**Question:** Should a block comment select its closing fence
-from the opening star count, analogously to the selected delimiter length of
-raw text, and how would empty existing comments remain compatible?
-**Example:** Candidate `/*** **/ ***/` contains `**/` as payload and ends
-at the three-star fence. `/**/` exposes the empty-comment compatibility case.
-
-**C# model:** Selected star-count fences are not C# block-comment syntax.
-C# uses a fixed nonnesting `/* ... */` boundary.
-
-**Settled context:** The extra-slash documentation marker is already in the
-[official lexical grammar](../grammar-spec.md#2-lexical-notation).
-Only generalized star-count fences remain under review, for ordinary and
-documentation blocks alike. Select generalized fence syntax,
-including empty/nonoverlapping fences, shorter terminators as payload and whether
-longer terminator-looking runs are payload or errors.
-**Recommendation:** Retain the accepted fixed forms until an explicit,
-versioned fence grammar covers these cases. If fences are adopted, use a
-maximal opening-star count and whole-run closing
-star matches, not a matching suffix inside a longer star run. Specify the
-one-/two-slash closing boundary without consuming a following comment's
-slashes, and preserve or explicitly version existing empty-comment
-recognition; maximal star counting alone must not silently reinterpret
-`/**/`. Do not introduce nesting as an accidental side effect.
 
 ### Q06. Visibility and modifier applicability
 
@@ -891,6 +755,38 @@ Resolved; see the [official grammar](../grammar-spec.md#2-lexical-notation).
 ### Q02. Reserved versus contextual words
 
 Resolved; see the [official grammar](../grammar-spec.md#2-lexical-notation).
+
+### Q03. Exact operator-run boundaries
+
+Resolved; see the [official lexical grammar](../grammar-spec.md#2-lexical-notation).
+
+#### Q03.1. Exact operator glyph set and lexical priority
+
+Resolved; see [punctuation boundaries](../lexical-grammar.md#punctuation-boundaries).
+
+#### Q03.2. Qualified-name dots outside expression member access
+
+Resolved; see [punctuation boundaries](../lexical-grammar.md#punctuation-boundaries).
+
+#### Q03.3. Declaration and attribute argument openers
+
+Resolved; see [punctuation boundaries](../lexical-grammar.md#punctuation-boundaries).
+
+#### Q03.4. Control-flow grouping and external block spacing
+
+Resolved; see [structural syntax and canonical formatter spacing](../lexical-grammar.md#punctuation-boundaries).
+
+#### Q03.5. Label and named-prefix colons
+
+Resolved; see [punctuation boundaries](../lexical-grammar.md#punctuation-boundaries).
+
+#### Q03.6. Constant-generic expression boundaries
+
+Resolved; see [constant arguments](../grammar-spec.md#32-types-parameters-and-arguments); negatives currently require grouping.
+
+#### Q03.7. Generalized comment fences and compatibility
+
+Resolved; see [whole-star fences and opaque comment contents](../lexical-grammar.md#trivia-and-diagnostics).
 
 ### Q04. Hex-float versus member-access token boundaries
 
