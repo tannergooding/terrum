@@ -21,6 +21,11 @@ contracts. The [approved current semantic IL/metadata design](il-metadata.md),
 [IL extension proposal](proposals/il-extensions.md) are separate documents;
 source approval does not adopt proposed APIs or metadata extensions.
 
+The [remaining source-question proposal](proposals/grammar-open-questions.md)
+collects unresolved decisions, comparisons and recommendations. Those
+recommendations are not normative; the explicit unspecified boundaries here
+remain in force until a decision is adopted.
+
 ## 1. Scope, status, and notation
 
 The notation is EBNF-like: `{ X }` means zero or more, `[ X ]` means
@@ -1491,12 +1496,11 @@ is made here; generic defaults and collection spreads are not type packs.
 
 For `Foo(5).Bar(); Baz();`, materialization is shorthand for initializing an ordinary hidden local at the argument's original evaluation point in the current enclosing lexical scope, then passing its readonly reference. The local is not hoisted to scope entry and does not create a shorter lifetime-only scope. If conditional or short-circuit control flow skips the argument, no local is initialized and there is no owner to clean up. Scope exit follows ordinary initialized/moved-state cleanup. A valid returned reference may be used by later statements in that scope, subject to ordinary declared dependencies; existing place/backing lifetimes are not widened and capture/suspension/escape permissions do not change. See the canonical [reference contract](language-contracts.md#1-one-call-and-reference-model) and [implicit-loan lifetime rules](lifetimes.md#parameter-only-implicit-readonly-loans). General source/loan metadata remain open.
 
-**Open recommendation:** implicit borrowing introduces no special two-phase
-reservation/activation mechanism. Form the reference when the equivalent
-explicit loan forms it; if a future ordinary reference or mutating-receiver
-contract needs reservation, specify its aliasing, reentrancy and timing
-semantics for both spellings first. Convenience syntax must not silently
-select a distinct mechanism.
+Ordinary reference/receiver reservation timing remains unspecified; see
+[Q21](proposals/grammar-open-questions.md#q21-reservation-versus-immediate-reference-formation)
+for alternatives and a recommendation. Implicit borrowing must use the
+same mechanism as its explicit expansion, not select a distinct mechanism
+merely because it is convenience syntax.
 
 ### 5.6 Reserved underscore and discard statement
 

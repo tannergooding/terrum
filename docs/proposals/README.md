@@ -10,6 +10,9 @@ without approving adjacent grammar or API forms.
 
 - [Core-library proposal](core-library-reference.md) records candidate
   declarations, dependency layers and unresolved API contracts.
+- [Remaining source-language questions](grammar-open-questions.md) collects
+  unresolved user decisions with source examples, C# comparisons and
+  recommendations; it excludes implementation tasks and deferred features.
 - [Static-proof and constant-evaluation proposal](static-proof-and-constant-evaluation.md)
   collects candidate minimum proof rules, effects and evaluator budgets;
   the portable-floor policy itself is accepted.
@@ -19,8 +22,9 @@ without approving adjacent grammar or API forms.
 
 These proposals are the homes for candidate API signatures
 and format extensions, not a second checklist of accepted policy or
-implementation tasks. Remaining source choices are identified in the approved
-[source grammar](../grammar-spec.md); approval of its settled forms does not
+implementation tasks. Remaining source choices are collected in the
+[question proposal](grammar-open-questions.md), with explicit boundaries in the
+approved [source grammar](../grammar-spec.md); approval of its settled forms does not
 resolve those choices or adopt the library and IL-extension proposals.
 Accepted call, output, cleanup and proof contracts are
 in [language contracts](../language-contracts.md); detailed lifetime,

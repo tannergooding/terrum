@@ -186,6 +186,10 @@ stability declaration is deferred until closer to v1.
 Substantial compiler, runtime, and library increments may proceed against
 the approved [source grammar](grammar-spec.md) without waiting for its
 remaining open decisions or approval of the core-library proposal.
+The [remaining source-question proposal](proposals/grammar-open-questions.md)
+separates actual undecided source contracts from implementation work, ABI/API
+choices and explicitly deferred features. Its recommendations require review;
+compiler progress does not adopt them.
 The approved current [metadata design](il-metadata.md) and
 [coded instruction set](il-instruction-set.md) define specified framing,
 row and bounded Body contracts, not compiler support or a released byte
