@@ -437,17 +437,22 @@ InterfaceBaseList = ":", Type, { ",", Type } ;
 IntegralType    = DottedIdentifier ;
 ConstantExpression = Expression ;
 MemberName      = Identifier | Type, ".", Identifier ;
-ConstructorDecl = Identifier, ParameterList, { PostconditionClause }, CallableBody ;
-PostconditionClause = "ensure", Expression ;
+ConstructorDecl = Identifier, ParameterList, ContractClauses, CallableBody ;
+ContractClauses = { PreconditionClause }, { PostconditionClause } ;
+PreconditionClause = "require", ContractPredicate ;
+PostconditionClause = "ensure", ContractPredicate ;
+ContractPredicate = Expression ;
 ReturnValueReference = "return" ;
 FunctionDefinition = Type, MemberName, [ TypeParameterList ], ParameterList,
-                     { ConstraintClause }, { PostconditionClause },
+                     { ConstraintClause }, ContractClauses,
                      ( CallableBody | ";" ) ;
 InterfaceFunction = FunctionDefinition ;
-OperatorDefinition = Type, "operator", OperatorSymbol, ParameterList, CallableBody ;
-ConversionDefinition = "operator", Type, "(", Type, Identifier, ")", CallableBody ;
+OperatorDefinition = Type, "operator", OperatorSymbol, ParameterList,
+                     ContractClauses, CallableBody ;
+ConversionDefinition = "operator", Type, "(", Type, Identifier, ")",
+                       ContractClauses, CallableBody ;
 InterfaceOperator = Type, "operator", OperatorSymbol, ParameterList,
-                    ( ";" | CallableBody ) ;
+                    ContractClauses, ( ";" | CallableBody ) ;
 CallableBody    = Block | ExpressionBody ;
 ExpressionBody  = "=>", ( ExpressionStatement | AssignmentStatement
                        | DiscardStatement | RequireStatement | ThrowStatement ) ;
@@ -455,11 +460,11 @@ FieldDecl       = Type, Identifier, [ "=", Expression ], ";" ;
 PropertyDefinition = Type, MemberName,
                      ( "{", GetterDefinition,
                        [ SetterDefinition | InitDefinition ], "}"
-                     | ExpressionBody ) ;
+                     | ContractClauses, ExpressionBody ) ;
 AccessorPrefix  = { Attribute | "mut" } ;
-GetterDefinition = AccessorPrefix, "get", ( CallableBody | ";" ) ;
-SetterDefinition = AccessorPrefix, "set", ( CallableBody | ";" ) ;
-InitDefinition   = { Attribute }, "init", ( CallableBody | ";" ) ;
+GetterDefinition = AccessorPrefix, "get", ContractClauses, ( CallableBody | ";" ) ;
+SetterDefinition = AccessorPrefix, "set", ContractClauses, ( CallableBody | ";" ) ;
+InitDefinition   = { Attribute }, "init", ContractClauses, ( CallableBody | ";" ) ;
 InterfaceProperty = Type, Identifier, "{", InterfaceGetter,
                     [ InterfaceSetter | InterfaceInit ], "}" ;
 InterfaceGetter = GetterDefinition ;
@@ -467,11 +472,11 @@ InterfaceSetter = SetterDefinition ;
 InterfaceInit   = InitDefinition ;
 IndexerDefinition = Type, [ Type, "." ], "this", IndexParameters,
                     ( "{", IndexGetter, [ IndexSetter | IndexInit ], "}"
-                    | ExpressionBody ) ;
+                    | ContractClauses, ExpressionBody ) ;
 IndexParameters = "[", Parameter, { ",", Parameter }, "]" ;
-IndexGetter     = AccessorPrefix, "get", CallableBody ;
-IndexSetter     = AccessorPrefix, "set", CallableBody ;
-IndexInit       = { Attribute }, "init", CallableBody ;
+IndexGetter     = AccessorPrefix, "get", ContractClauses, CallableBody ;
+IndexSetter     = AccessorPrefix, "set", ContractClauses, CallableBody ;
+IndexInit       = { Attribute }, "init", ContractClauses, CallableBody ;
 InterfaceIndexer = Type, "this", IndexParameters,
                    "{", InterfaceGetter, [ InterfaceSetter | InterfaceInit ], "}" ;
 
@@ -502,8 +507,9 @@ member identity. An unrelated same-named constant does not satisfy it.
 The `ContextualPrefix` placeholder still requires context-specific
 validation; permutation does not make every modifier legal on every
 declaration. Repeated visibility and conflicting effects reject. Callable
-contract clauses, if introduced, follow the parameter list; return types
-remain before the callable name, consistently for functions and operators.
+contract clauses follow the parameter list and any generic constraints;
+return types remain before the callable name, consistently for functions
+and operators.
 `<this T>` marks the single implementing-type formal of an interface;
 ordinary interfaces need not declare one. A conformance binds it to the
 implementing nominal type, not an arbitrary argument. Other formals follow
@@ -534,6 +540,28 @@ described in §5.12.
 Core's privileged primitive declaration uses `StructDecl` and `FieldDecl`
 without a separate grammar production; its binding and representation
 restrictions are semantic checks, not lexical exceptions.
+
+Declaration contracts group zero or more `require` clauses before zero or
+more `ensure` clauses, with no statement semicolon between clauses and the
+body. Preconditions and postconditions execute in declaration order within
+their own established phases, not interleaved source phases.
+A predicate ends at an unparenthesized top-level `=>` that introduces the
+callable's expression body. Lambdas within a contract must be grouped or
+nested inside another expression delimiter, such as a call argument list;
+the parser does not choose between a lambda and a body by testing type
+validity. Ordinary parentheses around the whole predicate are permitted,
+not required.
+Functions, constructors, operators and conversions share this clause form.
+Accessor clauses follow `get`, `set` or `init`; a getter-only expression-bodied
+property/indexer places its getter clauses before `=>`. A full accessor list
+puts contracts on the individual accessors, not an ambiguous property-wide
+call phase. Bodyless interface requirements end in their ordinary `;` after
+the clauses. Automatic property accessors still perform their declared
+checks around their generated operation; contracts do not create implicit
+indexer storage. Anonymous callable contract syntax remains separate work.
+Body-level `require expression;` is an authored check, not a public
+precondition inferred from the body. Published clauses obey ordinary
+effective-visibility, access, ownership, lifetime and effect restrictions.
 
 Top-level and concrete function/operator definitions have bodies unless
 explicitly marked `partial`; a bodyless partial function must have exactly
@@ -1156,9 +1184,9 @@ or claim an implementation.
   adds no noescape rule or permission to widen declared dependencies.
   Conditional outputs follow [declaration postconditions](../language-contracts.md#2-outcome-initialization-and-nullability-are-separate):
   `ensure` is an ordinary Boolean postcondition, live/nullable-live/vacant
-  states remain distinct, and vacant storage is never read. Exact `ensure`
-  full placement and metadata remain open beyond the constructor-completion
-  clauses below (see [§5.8](#58-postcondition-syntax-for-conditional-output-state)).
+  states remain distinct, and vacant storage is never read. Named callable
+  clauses use §3.1; anonymous/producer contract forms and correlated-output
+  metadata remain open (see [§5.8](#58-postcondition-syntax-for-conditional-output-state)).
   `init ref<T>` means
   vacant-storage initialization, distinct from ordinary `ref`/`write ref`;
   `Create(init value)` is the accepted call-site spelling, with exact
@@ -1583,9 +1611,10 @@ ordinary failure/unwinding; completed body `finally` blocks are not rerun and
 body side effects are not rolled back. This does not add a separate output
 publication transaction.
 
-§3.1 gives constructor/function `ensure` placement and the contextual result
-reference. Clause placement on other callable forms and the source-to-metadata
-mapping for correlated initialization facts remain open. There is no
+§3.1 gives grouped declaration `require`/`ensure` placement across named
+callable forms and the contextual result reference. Anonymous callable
+contracts, producer phase mapping and source-to-metadata mapping for
+correlated initialization facts remain open. There is no
 special conditional postcondition block grammar. See the canonical
 [conditional output contract](../language-contracts.md#2-outcome-initialization-and-nullability-are-separate).
 
@@ -1780,8 +1809,8 @@ binary has a newly appended slot. Exact witness-mapping syntax and metadata
 representation remain open. Do not infer legality from the permissive `ContextualPrefix` placeholder.
 Legal prefix modifiers may be permuted without changing the contract;
 duplicates, conflicting visibility and illegal modifier/declaration pairs
-reject. Context-specific callable clauses, once specified, follow the
-parameter list; result types remain in prefix position.
+reject. Named callable contract clauses follow the parameter list and generic
+constraints as specified in §3.1; result types remain in prefix position.
 
 **Proposed vocabulary:** `extern` introduces an externally implemented declaration; and
 `extension` a scoped extension declaration. Their productions, restrictions,
@@ -1969,7 +1998,7 @@ they are not ordinary overloads merely because they use operator punctuation.
 Still **OPEN** for a full source grammar: nominal safe union cases and complete
 patterns, associated equality and family/adapter declarations,
 conditional/default conformance and text-target fragment contracts,
-general `const` declarations/expressions, full contract-clause placement,
+general `const` declarations/expressions, anonymous callable contract clauses,
 general ownership/reference results, constructor inference, async completion
 and scheduling protocols, producers, capture/exception transport, and registered collection-fragment
 construction. Source type packs and tuple arity extensions remain deferred.
@@ -2048,7 +2077,7 @@ appears in §2.
 | Expressions | §3.4 gives conditional/coalescing/optional access, half-open slicing, end-relative bounds, tuples, target-directed static/async lambdas, await and collection spreads. | Slice/first-class index/range protocols, callable capture/representation, awaiter registration and collection-fragment contracts; comprehensions/repetition deferred for library/tensor design. |
 | Patterns | §3.3 gives shared switch arms, guarded matching, compatible `or` bindings and explicit constant/wildcard transfers. | Full nominal-case, relational and destructuring patterns. |
 | Policies | §§3.3–3.4 and 5.12 describe lexical preferences, strict selection and constant-formal forwarding. | Variant-declaration syntax and compile-time queries. |
-| Contracts | §§3.1, 3.3 and 5.8 give bounded `ensure` placement, contextual result `return` and ordinary contract checks. | Remaining callable/precondition clauses, producer phases and correlated-output metadata. |
+| Contracts | §§3.1, 3.3 and 5.8 give grouped named-callable `require`/`ensure`, contextual result `return` and distinct body-level checks. | Anonymous callable clauses, producer phases and correlated-output metadata. |
 | Static proof | §5.9 describes the portable static-proof floor. | Constant-evaluation and symbolic source forms. |
 | Exceptions | §§3.3–3.4 give typed/bare catches, filters, throw expressions, rethrow and explicit captured-failure propagation. | Catch eligibility, capture APIs, transport, unwind phase and chaining metadata. |
 | Cleanup | §§3.3 and 5.12 distinguish lexical `defer` from `[Cleanup]`. | Defer action validation and attribute placement. |
