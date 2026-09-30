@@ -1230,7 +1230,10 @@ A separate compact-linear reader takes the owning MethodDef, MethodSig,
 Param and TypeSpec rows and checks the fail-fast scalar subset of `ConstBits`,
 `ConstSigned`, `Copy`, `Unary`, `Binary`, `Convert`, `Select`,
 `MakeOptional`, `None`, `IsPresent`, `CheckedBinary`, `CheckedConvert`,
-`CheckedNegate`, `CheckedDivRem`, `Return` and `Fail`. Optional scalar
+`CheckedNegate`, `CheckedDivRem`, local static `Call`, `Return` and `Fail`.
+Calls inspect authored MethodDefs in the same module with by-value scalar
+or optional arguments and result (including void); imported/packed targets,
+receivers and generics reject. Optional scalar
 types retain their presence separately from their underlying atomic type;
 `Return 0` is valid only for a declared `void` result.
 It reconstructs parameter and operation
@@ -1250,8 +1253,8 @@ block and an existing operation or its terminator; it does not verify
 source-file contents.
 A separate compact-indexed reader checks the approved conditional-sum, merge
 and bounded loop examples and their scalar subset:
-root-free, fail-fast bodies with flat sibling loop regions, including an
-entry-block header, each with a declared exit and reachable backedge;
+root-free, fail-fast bodies with entry-header, sibling and nested loop regions,
+each with a declared exit and reachable backedge;
 `Branch` and `BranchIf` edges have checked typed block arguments. It accepts
 scalar `ConstBits`,
 `ConstSigned`, `Copy`, scalar `Unary`, `Binary`, integer `Convert`

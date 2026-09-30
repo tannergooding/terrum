@@ -384,12 +384,61 @@ public sealed class TrRmCompactLinearBodyReaderTests
         Assert.Throws<InvalidDataException>(() => Inspect(row, 0));
     }
 
+    [Theory]
+    [InlineData(new byte[] { 0x12, 2, 2, 1, 1 })]
+    [InlineData(new byte[] { 0xF0, 0x04, 0x12, 2, 2, 1, 0, 1 })]
+    [InlineData(new byte[] { 0xF0, 0x05, 0x12, 2, 0, 2, 0, 1, 0, 1, 0 })]
+    public void InspectsLocalStaticScalarCall(byte[] operation)
+    {
+        byte[] row = [0x04, 1, 1, 0, 0, 0, 1, .. operation, 0x83, 2];
+        var index = Inspect(row, 1, secondMethod: true);
+        Assert.Equal(2, index.ValueCount);
+        Assert.Equal([-1, 7], index.Definitions);
+        Assert.Equal([0, 1], index.LastUses);
+        Assert.Equal([1, 1], index.UseBlocks);
+    }
+
+    [Fact]
+    public void InspectsVoidLocalCallWithoutValueDefinition()
+    {
+        byte[] row = [0x04, 0, 1, 0x12, 0, 2, 0, 0x83, 0];
+        var index = Inspect(row, 0, typeCode: 0, secondMethod: true);
+        Assert.Equal(1, index.Operations);
+        Assert.Equal(0, index.ValueCount);
+        Assert.Empty(index.Definitions);
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0x12, 2, 0, 1, 1 })]
+    [InlineData(new byte[] { 0x12, 2, 3, 1, 1 })]
+    [InlineData(new byte[] { 0x12, 2, 2, 0, 1 })]
+    [InlineData(new byte[] { 0x12, 2, 2, 2, 1 })]
+    [InlineData(new byte[] { 0x12, 0, 2, 1, 1 })]
+    [InlineData(new byte[] { 0x12, 2, 2, 1, 2 })]
+    [InlineData(new byte[] { 0xF0, 0x0C, 0x12, 2, 2, 1, 1 })]
+    public void RejectsMalformedLocalCalls(byte[] operation)
+    {
+        byte[] row = [0x04, 1, 1, 0, 0, 0, 1, .. operation, 0x83, 2];
+        Assert.Throws<InvalidDataException>(() => Inspect(row, 1, secondMethod: true));
+    }
+
+    [Fact]
+    public void RejectsLocalCallToMethodWithoutBodyOrMatchingParameterMode()
+    {
+        byte[] row = [0x04, 1, 1, 0, 0, 0, 1, 0x12, 2, 2, 1, 1, 0x83, 2];
+        Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
+            secondMethod: true, secondBody: false));
+        Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
+            secondMethod: true, parameterMode: 2));
+    }
+
     private static (int Operations, int ValueCount, int[] Definitions, int[] LastUses,
         int[] UseBlocks, byte[] TypeCodes, bool[] Optional) Inspect(
         byte[] row, int parameterCount, byte runtimePolicy = 0, byte parameterMode = 0,
         bool duplicateSignatureType = false, byte typeCode = 8,
         byte? secondTypeCode = null, bool resultUsesSecondType = false,
-        bool secondTypeOptional = false, bool parameterUsesSecondType = false)
+        bool secondTypeOptional = false, bool parameterUsesSecondType = false,
+        bool secondMethod = false, bool secondBody = true)
     {
         var names = new TrRmStringTableReader(
             TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]), 2);
@@ -401,7 +450,8 @@ public sealed class TrRmCompactLinearBodyReaderTests
         Write(moduleBytes, 32, 1);
         Write(moduleBytes, 36, 1);
         Write(moduleBytes, 40, 1);
-        var modules = new TrRmModuleTableReader(moduleBytes, 1, names, 0, 0, 1, 0);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, names, 0, 0,
+            secondMethod ? 2 : 1, 0);
         var typeDefs = new TrRmTypeDefTableReader([], 0, names, modules, 0, 0, 0, 0);
         var second = duplicateSignatureType ? typeCode : secondTypeCode;
         byte[] typeBytes = secondTypeOptional
@@ -430,17 +480,27 @@ public sealed class TrRmCompactLinearBodyReaderTests
 
         var parameters = parameterCount == 0 ? default
             : new TrRmParamTableReader(paramBytes, parameterCount, signatures, types);
-        var methodBytes = new byte[28];
+        var methodBytes = new byte[secondMethod ? 56 : 28];
         Write(methodBytes, 4, 2);
         Write(methodBytes, 8, 1);
         Write(methodBytes, 12, 2);
         Write(methodBytes, 24, 1);
-        var methods = new TrRmMethodDefTableReader(methodBytes, 1, names, modules,
-            typeDefs, signatures, 0, 1);
-        var bodyBytes = new byte[8 + row.Length];
-        Write(bodyBytes, 4, (uint)row.Length);
-        row.CopyTo(bodyBytes, 8);
-        var bodies = new TrRmBodyTableReader(bodyBytes, 1);
+        if (secondMethod)
+        {
+            methodBytes.AsSpan(0, 28).CopyTo(methodBytes.AsSpan(28));
+            Write(methodBytes, 52, secondBody ? 2u : 0u);
+        }
+
+        var bodyCount = secondMethod && secondBody ? 2 : 1;
+        var methods = new TrRmMethodDefTableReader(methodBytes,
+            secondMethod ? 2 : 1, names, modules, typeDefs, signatures, 0, bodyCount);
+        byte[] targetRow = parameterCount == 0 && typeCode == 0
+            ? [0x04, 0, 0, 0x83, 0]
+            : [0x04, 1, 1, 0, 0, 0, 0, 0x83, 1];
+        var bodyBytes = secondMethod && secondBody
+            ? TrRmVariableTableWriter.EncodeBodies([row, targetRow])
+            : TrRmVariableTableWriter.EncodeBodies([row]);
+        var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
         var reader = new TrRmCompactLinearBodyReader(bodies, 1, modules, methods,
             signatures, parameters, types);
         var definitions = new int[reader.ValueCount];

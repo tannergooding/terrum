@@ -107,10 +107,10 @@ public readonly ref struct TrRmCompactLinearBodyReader
         for (var ordinal = 0; ordinal < operationCount; ordinal++)
         {
             var offset = position;
-            var (opcode, referenceWidth, dataWidth) = ReadInstruction(body, ref position);
+            var (opcode, referenceWidth, countWidth, dataWidth) =
+                ReadInstruction(body, ref position);
             if (opcode is not (1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9 or 0x0A
-                or 0x15 or 0x16 or 0x17 or 0x18)
-                || valueCount == maximum)
+                or 0x12 or 0x15 or 0x16 or 0x17 or 0x18))
             {
                 throw InvalidBody();
             }
@@ -123,9 +123,12 @@ public readonly ref struct TrRmCompactLinearBodyReader
             }
 
             var result = ReadLocal(body, ref position, referenceWidth);
-            if (result != ++valueCount)
+            if (opcode != 0x12 || result != 0)
             {
-                throw InvalidBody();
+                if (valueCount == maximum || result != ++valueCount)
+                {
+                    throw InvalidBody();
+                }
             }
 
             var secondResult = 0;
@@ -220,6 +223,60 @@ public readonly ref struct TrRmCompactLinearBodyReader
 
                 resultType = 1;
             }
+            else if (opcode == 0x12)
+            {
+                var method = ReadLocal(body, ref position, referenceWidth);
+                var callerModule = methods.GetOwnerModule(methodRow);
+                var (firstMethod, lastMethod) = modules.GetMethodDefRange(callerModule);
+                if (method == 0 || method > lastMethod - firstMethod)
+                {
+                    throw InvalidBody();
+                }
+
+                var target = firstMethod + method - 1;
+                if (methods.GetBodyRow(target) == 0)
+                {
+                    throw InvalidBody();
+                }
+
+                var targetSignature = methods.GetSignature(target);
+                if (signatures.GetReceiverTypeSpec(targetSignature) != 0
+                    || signatures.GetGenericCount(targetSignature) != 0)
+                {
+                    throw InvalidBody();
+                }
+
+                var targetResult = signatures.GetResultTypeSpec(targetSignature);
+                var resultRow = types.GetRow(targetResult);
+                var voidResult = resultRow.Length == 3 && resultRow[0] == 1
+                    && resultRow[1] == 0 && resultRow[2] == 0;
+                if (voidResult ? result != 0 : result == 0)
+                {
+                    throw InvalidBody();
+                }
+
+                resultType = voidResult ? (ushort)0
+                    : MatchType(types, mappedTypes, targetResult);
+                var (firstArgument, argumentCount) = signatures.GetParamRange(targetSignature);
+                var arguments = ReadLocal(body, ref position, countWidth);
+                if (arguments != argumentCount
+                    || arguments > (body.Length - position) / referenceWidth)
+                {
+                    throw InvalidBody();
+                }
+
+                for (var argument = 0; argument < arguments; argument++)
+                {
+                    var source = Use(body, ref position, referenceWidth,
+                        result == 0 ? valueCount + 1 : result, ordinal);
+                    if (parameters.GetMode(firstArgument + argument) != 0
+                        || source != MatchType(types, mappedTypes,
+                            parameters.GetTypeSpec(firstArgument + argument)))
+                    {
+                        throw InvalidBody();
+                    }
+                }
+            }
             else if (opcode is 6 or 0x16)
             {
                 var typeId = ReadLocal(body, ref position, referenceWidth);
@@ -313,13 +370,16 @@ public readonly ref struct TrRmCompactLinearBodyReader
             }
 
             if ((opcode is not (1 or 2) && dataWidth != 0)
-                || Array.IndexOf(mappedTypes, resultType, 1) < 0)
+                || resultType != 0 && Array.IndexOf(mappedTypes, resultType, 1) < 0)
             {
                 throw InvalidBody();
             }
 
-            _values[result].TypeKey = resultType;
-            _values[result].DefinitionOffset = offset;
+            if (result != 0)
+            {
+                _values[result].TypeKey = resultType;
+                _values[result].DefinitionOffset = offset;
+            }
             if (secondResult != 0)
             {
                 _values[secondResult].TypeKey = resultType;
@@ -328,8 +388,9 @@ public readonly ref struct TrRmCompactLinearBodyReader
         }
 
         _valueCount = valueCount;
-        var (terminator, terminatorWidth, terminatorDataWidth) = ReadInstruction(body, ref position);
-        if (terminatorDataWidth != 0)
+        var (terminator, terminatorWidth, terminatorCountWidth, terminatorDataWidth) =
+            ReadInstruction(body, ref position);
+        if (terminatorCountWidth != 1 || terminatorDataWidth != 0)
         {
             throw InvalidBody();
         }
@@ -460,7 +521,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
         return body[position++];
     }
 
-    private static (byte Opcode, int ReferenceWidth, int DataWidth) ReadInstruction(
+    private static (byte Opcode, int ReferenceWidth, int CountWidth, int DataWidth) ReadInstruction(
         ReadOnlySpan<byte> body, ref int position)
     {
         if (position >= body.Length)
@@ -471,7 +532,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
         var opcode = body[position++];
         if (opcode != 0xF0)
         {
-            return (opcode, 1, opcode is 1 or 2 ? 1 : 0);
+            return (opcode, 1, 1, opcode is 1 or 2 ? 1 : 0);
         }
 
         if (position + 2 > body.Length)
@@ -480,19 +541,22 @@ public readonly ref struct TrRmCompactLinearBodyReader
         }
 
         var layout = body[position++];
-        if (layout == 0 || (layout & 0xCC) != 0 || (layout & 3) == 3)
+        opcode = body[position++];
+        if (layout == 0 || (layout & 0xC0) != 0
+            || (layout & 3) == 3 || ((layout >> 2) & 3) == 3
+            || opcode != 0x12 && (layout & 0x0C) != 0)
         {
             throw InvalidBody();
         }
 
-        opcode = body[position++];
         var dataWidth = opcode is 1 or 2 ? 1 << ((layout >> 4) & 3) : 0;
         if (dataWidth == 0 && (layout & 0x30) != 0)
         {
             throw InvalidBody();
         }
 
-        return (opcode, (layout & 3) switch { 0 => 1, 1 => 2, _ => 4 }, dataWidth);
+        return (opcode, (layout & 3) switch { 0 => 1, 1 => 2, _ => 4 },
+            ((layout >> 2) & 3) switch { 0 => 1, 1 => 2, _ => 4 }, dataWidth);
     }
 
     private static int ReadLocal(ReadOnlySpan<byte> body, ref int position, int width)

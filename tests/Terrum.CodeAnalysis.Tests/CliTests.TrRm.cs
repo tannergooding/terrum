@@ -184,6 +184,75 @@ public sealed partial class CliTests
     }
 
     [Fact]
+    public async Task ValidateTrRmCompactLinearChecksPersistedLocalCallAsync()
+    {
+        var module = new byte[44];
+        foreach (var offset in new[] { 0, 4, 28, 32, 36, 40 })
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
+        }
+
+        var strings = TrRmStringTableWriter.EncodeNames(
+            [("Module", 0), ("Call", 0), ("Target", 0)]);
+        byte[] typeSpec = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
+        var signature = new byte[24];
+        BinaryPrimitives.WriteUInt32LittleEndian(signature, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(signature.AsSpan(8), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(signature.AsSpan(12), 1);
+        var parameter = new byte[16];
+        BinaryPrimitives.WriteUInt32LittleEndian(parameter, 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(parameter.AsSpan(8), 1);
+        var methods = new byte[56];
+        foreach (var start in new[] { 0, 28 })
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(start + 4),
+                (uint)(start / 28 + 2));
+            BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(start + 8), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(start + 12), 2);
+            BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(start + 24),
+                (uint)(start / 28 + 1));
+        }
+
+        byte[] caller = [0x04, 1, 1, 0, 0, 0, 1, 0x12, 2, 2, 1, 1, 0x83, 2];
+        byte[] callee = [0x04, 1, 1, 0, 0, 0, 0, 0x83, 1];
+        byte[] Artifact() => TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, module),
+            new TrRmSection(0x0002, 0, 3, strings),
+            new TrRmSection(0x0011, 0, 1, typeSpec),
+            new TrRmSection(0x0016, 0, 2, methods),
+            new TrRmSection(0x0017, 0, 1, signature),
+            new TrRmSection(0x0018, 0, 1, parameter),
+            new TrRmSection(0x0020, 0, 2,
+                TrRmVariableTableWriter.EncodeBodies([caller, callee])),
+        ]);
+
+        var path = Path.Combine(Path.GetTempPath(), $"terrum-trrm-linear-call-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            await File.WriteAllBytesAsync(path, Artifact());
+            foreach (var command in new[] { "validate-trrm-structure",
+                "validate-trrm-compact-linear", "validate-trrm-compact" })
+            {
+                var (valid, output, error) = await RunAsync([], command, path, "--json");
+                Assert.True(valid == 0, output + error);
+            }
+
+            caller[9] = 0;
+            await File.WriteAllBytesAsync(path, Artifact());
+            var (structural, _, _) = await RunAsync([],
+                "validate-trrm-structure", path, "--json");
+            Assert.Equal(0, structural);
+            var (invalid, _, _) = await RunAsync([],
+                "validate-trrm-compact-linear", path, "--json");
+            Assert.Equal(1, invalid);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task ValidateTrRmCompactIndexedChecksBodiesAndSourceLocationsAsync()
     {
         var module = new byte[44];
