@@ -1458,8 +1458,8 @@ lifetime contract or a source program's validity.
 ## Executable TRRM scalar interchange
 
 `TrRmExecutableCompiler.Emit(BoundProgram, moduleIdentity)` produces actual
-approved `(1, 0)` metadata and compact-linear Body bytes, separately from the
-development `.trm` semantic-module encoding. The additive CLI path is:
+approved `(1, 0)` metadata and compact-linear or compact-indexed Body bytes,
+separately from the development `.trm` semantic-module encoding. The additive CLI path is:
 
 ```text
 terrumc compile-trrm <source|-> --identity <name> -o <artifact.trrm> --runtime fail-fast [--library] [--source <path>] [--json]
@@ -1490,17 +1490,31 @@ not supported by this loader. DLL exports use the existing scalar native ABI.
 Independent native consumers do not imply TRRM Import/ModuleRef linking.
 
 Initialized scalar locals, ordinary local reassignment, scalar discards,
-and a terminal return lower to immutable value IDs. Reassignment changes the
+and returns lower to immutable value IDs. Reassignment changes the
 current source-slot mapping, not a serialized place; prior reads retain their
 snapshots. Every operation is materialized once, in source order, even when
-its result is discarded or reused. The loader accepts `ConstBits`,
+its result is discarded or reused. Lazy conditional expressions and Boolean
+short-circuit operators, `if`/`else`, pre-tested `while` loops, nested loops,
+nearest `break`/`continue` and early returns use indexed basic blocks.
+Assignments carry their current values through typed block parameters;
+edge arguments are copied simultaneously, including cyclic loop-carried
+copies. Native lowering emits direct branches, not a block-ID interpreter.
+Inactive arms do not execute their operations or checked failures.
+
+Loading audits block extents, definition indices, value types, exact use and
+liveness inventories, dominance, region entry/exit and backedges before
+creating an immutable internal graph. The mandatory semantic verifier
+rechecks that graph's parameter/result/effect contract against its containing
+declaration. Linear Bodies retain their existing structured lowering.
+The loader accepts `ConstBits`,
 `ConstSigned`, `Copy`, Boolean NOT, integer bitwise NOT/unary plus,
 scalar equality/inequality, integer ordering/bitwise operations, checked
-integer arithmetic/negation, checked numeric conversion and `Return`.
+integer arithmetic/negation, checked numeric conversion, `Branch`,
+`BranchIf` and `Return`.
 Integer division/remainder retain their distinct signed-minimum behavior.
 `char16` has conversion/equality semantics, not integer arithmetic or ordering.
 Retained shifts, wrapping/saturating conversion, optional values, eager
-`Select`, combined division/remainder and `Fail` are outside this initial
+`Select`, combined division/remainder and `Fail` are outside this bounded
 executable implementation even where the approved ISA assigns them.
 
 Body and instruction widths are emitted minimally; loading performs a strict
@@ -1515,20 +1529,31 @@ contract clauses reject, as do unsupported sections, parameter modes,
 generic/nominal declarations and qualified types.
 
 Calls, including local `NoThrow` calls, remain **inspection-only** assigned
-shapes in the approved ISA; this execution path rejects them. Branches,
-loops, places, roots, ownership, cleanup, exceptional transfer and imported
-declarations are not implemented here. Checked-exception source or execution
+shapes in the approved ISA; this execution path rejects them. Branch- or
+loop-local declarations, vacant locals, post-tested/iterator loops, transfers
+beyond the nearest loop, retained update/compound-assignment expressions,
+places, roots, ownership, cleanup, exceptional transfer and imported
+declarations are not implemented here. Indexed loop emission requires a
+reachable backedge and a designated exit; it does not synthesize a backedge
+for a source loop whose body always transfers out. Source scope support is
+an implementation boundary, not an unresolved language contract.
+Loaded indexed graphs execute but cannot be re-emitted through the structured
+source emitter or serialized as development semantic-module IR.
+Checked-exception source or execution
 requests reject rather than relabeling a fail-fast artifact; the existing
 source and development semantic/native commands still support both policies.
 No new protected Body encoding, native ABI or public profile was invented.
 The existing verifier bounds apply, including 1,024 functions, 64 parameters
-per function and 256 materialized scalar values per function; parameter and
-operation-result IDs share that last bound. These are implementation limits,
-not new normative format limits.
+per function and 256 materialized scalar values per function; method parameters,
+operation results and block parameters share that last bound. Indexed
+dominance auditing also uses the existing 100,000-visit analysis bound.
+These are implementation limits, not new normative format limits.
 
 Independent handwritten metadata/Body fixtures, malformed IDs/types/effects,
-reserved Contract flags, source-free process loading, actual scalar DLL
-exports and native byte parity exercise this boundary. The structural
+reserved Contract flags, handwritten merges and cyclic backedge copies,
+source-free process loading, actual scalar DLL exports, exact persisted
+EXE/DLL byte parity, inactive-arm behavior and ordered checked failures
+exercise this boundary. The structural
 `validate-trrm-*` commands keep their narrower inspection contracts; their
 success alone never authorizes execution.
 

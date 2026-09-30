@@ -15,8 +15,10 @@ text or a native DLL. It is distinct from the approved current
 [`TRRM` metadata design](il-metadata.md), whose candidate `(1, 0)`
 framing and rows are not this development semantic-module writer's output.
 The separate [`compile-trrm` execution path](implementation.md#executable-trrm-scalar-interchange)
-now emits approved metadata and compact-linear Bodies to `.trrm` files for a
-self-contained, fail-fast scalar subset. It does not replace the `.trm`
+now emits approved metadata and compact-linear/indexed Bodies to `.trrm` files
+for a self-contained, fail-fast scalar subset with bounded branches and loops.
+Loaded indexed graphs are not serializable as development structured IR.
+It does not replace the `.trm`
 producer/consumer commands or add TRRM import linking. This page describes
 the existing development semantic/native module paths.
 The highest implemented semantic revision is 45, selected

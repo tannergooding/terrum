@@ -18,9 +18,10 @@ stored loans and managed layouts, general exception objects and the standard lib
 implemented.
 
 An additive [TRRM scalar interchange path](docs/implementation.md#executable-trrm-scalar-interchange)
-now compiles verified source to approved metadata and compact-linear Body
+now compiles verified source to approved metadata and compact-linear/indexed Body
 bytes, audits them on source-free load, and uses the shared backend for JIT,
-EXE and DLL output. This is a self-contained fail-fast scalar subset, not
+EXE and DLL output, including bounded branches, lazy expressions and nested
+assignment loops. This is a self-contained fail-fast scalar subset, not
 general interchange, imported-call linking or checked-exception Body support.
 Existing source and development semantic/native module commands are unchanged.
 
