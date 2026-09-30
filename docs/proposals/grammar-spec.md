@@ -60,7 +60,7 @@ syntax boundaries:
 - Source positions and token lengths count UTF-16 code units. Identifier starts/continues follow the pinned Unicode 17.0.0 XID properties plus `_`; spelling is ordinal, case-sensitive, and not normalized. Keywords are lower-case ASCII token spellings. Primitive names such as `int32` are ordinary identifiers.
 - Whitespace and comments are leading trivia; line breaks include CRLF, CR, LF, NEL, LS, PS. Line/block comments do not nest. EOF owns trailing trivia.
 - Unsuffixed decimal, hexadecimal (`0x`/`0X`), binary (`0b`/`0B`) and proposed hexadecimal floating-point forms are described below. Separators may occur between digits and, for based values, immediately after the prefix. Signs are separate operators except an exponent sign. Width suffixes are invalid; `10i32` is not a typed literal. `_123` is an identifier.
-- Strings use `"..."` with the documented escapes; no interpolation exists. Character literals and numeric suffixes are not tokens.
+- Strings use `"..."` with the documented escapes; interpolation syntax remains open. Single-quoted character literals denote one decoded Unicode scalar; numeric width suffixes are invalid.
 - Lexical diagnostics preserve malformed source spelling; bad characters/surrogates, invalid escapes, unterminated literals/comments, bad prefixes, separators, and attached width suffixes have distinct diagnostic codes in the lexical reference.
 
 The schematic lexical terminals used below are:
@@ -80,6 +80,7 @@ Digit            = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
 HexDigit         = Digit | "a".."f" | "A".."F" ;
 BinaryDigit      = "0" | "1" ;
 String           = '"', { StringCharacter | Escape }, '"' ;
+Character        = "'", ( CharacterScalar | Escape | "\'" ), "'" ;
 Escape           = "\n" | "\r" | "\t" | "\\" | '\"' | "\0"
                  | "\u", HexDigit, HexDigit, HexDigit, HexDigit
                  | "\U", HexDigit, HexDigit, HexDigit, HexDigit,
@@ -101,6 +102,21 @@ which tokens are formed under lexical longest-match and identifier-boundary
 rules; whitespace is not permission to split or merge token spellings after
 lexing. Comments and line breaks follow their documented trivia rules,
 not an arbitrary mandatory space-around-operator policy.
+A contiguous run of operator glyphs must be one defined operator, not an
+implicit concatenation of separate operators. Thus `x+++y` rejects, while
+`x++ +y` and `x+ ++y` separate the operators explicitly. Whitespace or a
+comment can separate operators; ordinary grouping delimiters, commas and
+semicolons are not part of the run. Nested generic closing delimiters are
+recognized in type-argument context, so `List<List<T>>` does not require
+spaces. Exact glyph membership and contextual boundary rules, including
+optional/type punctuation and comment openers, remain lexical specification
+work; this is not permission to reinterpret a run by guessing user intent.
+
+`CharacterScalar` excludes an unescaped quote, backslash or line break.
+Escape decoding must yield exactly one Unicode scalar, never a surrogate.
+The expected character type must represent it: `char32`/`rune` admits any
+scalar, `char16` one nonsurrogate code unit, and `char8` ASCII. There is no
+fallback character type.
 
 `Number` is one token: unary `-` is an operator, not part of the number.
 Numeric target selection/range and the lack of a default type are semantic
@@ -115,6 +131,12 @@ included in `Number` and `Primary` just like other numeric literals.
 Its token-boundary and diagnostic rules (including incomplete `p` exponents,
 separators and identifier tails), target-format rounding and literal
 conversion rules still need to be specified before adoption.
+The selected floating target supplies the format; a hex float's exact
+binary-rational value is rounded directly to that format using the selected
+IEEE-754 nearest/ties-even default and the established overflow/underflow
+rules, not through an intermediate host floating type. Both
+`float32 x = 0x1.fp+2;` and `var x = float32(0x1.fp+2);` select `float32`;
+`var x = 0x1.fp+2;` has no target and diagnoses.
 The [lexical grammar](../lexical-grammar.md) specifies the adopted lexical
 profile separately; this candidate does not silently revise that contract.
 
@@ -161,7 +183,7 @@ context.
 | Concept | Intended words | Source role |
 |---|---|---|
 | File imports | `using` | Bring names into scope. |
-| Namespace | `namespace` | Declare the file-scoped namespace. |
+| Namespace | `namespace` | Declare a file-scoped namespace or namespace blocks, without mixing them in a file. |
 | Visibility | `public`, `internal`, `private` | Restrict declaration access. |
 | Nominal declarations | `struct`, `class`, `interface`, `enum`, `union` | Name types; union declaration syntax remains open. |
 | Type aliases | `alias` | Name a namespace-level transparent type synonym with declaration visibility. |
@@ -174,19 +196,21 @@ context.
 | Property backing | `field` | Access only the enclosing property's backing place. |
 | Receiver and self binder | `this` | Refer to the member receiver and mark an interface's implementing-type formal as `<this T>`. |
 | Generic constraints | `where` | State formal parameter constraints. |
-| Compile-time values | `const` | Require static evaluation; const-value formal syntax remains open. |
+| Compile-time values | `const` | Require static evaluation or declare a compile-time value formal. |
 | Type forms | `void`, `var` | Name a zero-data result or infer a local type. |
 | Ownership | `unique`, `own`, `move` | Express ownership and explicit transfer. |
 | Reference access | `mut`, `ref`, `write`, `pin` | Qualify places, loans and references; pin qualifies `ref<T>` only. |
 | Parameter and argument modes | `init`, `implicit`, `params` | Express vacant initialization, implicit loans or collection arguments; not every combination is legal. |
-| Branching | `if`, `else`, `switch`, `case`, `default` | Choose conditional or switch arms; `default<I>` also selects an interface default body. |
+| Branching | `if`, `else`, `switch` | Choose conditional paths or pattern arms. |
+| Default selection | `default` | Select a declared generic default or an interface default body. |
+| Witness selection | contextual `via` | Explicitly select an existing interface witness after `.`. |
 | Patterns | `when`, `is`, `some`, `and`, `or`, `not` | Match values and guard arms; full pattern grammar remains open. |
 | Loops and iteration | `while`, `do`, `for`, `in`, `break`, `continue` | Iterate and transfer to the nearest loop. |
 | Results | `return` | Complete a call. |
 | Producers | `yield` | Produce a suspended value; producer syntax remains open. |
 | Asynchrony | `async`, `await` | Declare and suspend async work; exact syntax remains open. |
 | Contracts | `require`, `ensure` | Check preconditions or postconditions; declaration grammar remains open. |
-| Exception flow | `try`, `catch`, `finally`, `throw` | Handle or propagate failures; typed catches remain open. |
+| Exception flow | `try`, `catch`, `finally`, `throw` | Handle or propagate failures under their checked transport contracts. |
 | Deferred cleanup | `defer` | Register lexical-block-exit actions. |
 | Unsafe authorization | `unsafe` | Scope operations that require caller authorization. |
 | Policy selection | `policy` | Prefer or require a method variant. |
@@ -209,12 +233,14 @@ modifiers may be permuted; duplicate or conflicting modifiers reject.
 ### 3.1 Source-file structure and declarations
 
 ```ebnf
-CompilationUnit  = { FileAttribute }, { UsingDirective }, [ FileNamespace ],
-                   { TopDeclaration }, EOF ;
+CompilationUnit  = { FileAttribute }, { UsingDirective },
+                   ( FileNamespace, { TopDeclaration }
+                   | { TopDeclaration | NamespaceDecl } ), EOF ;
 FileAttribute    = "[", ( "module" | "assembly" ), ":", AttributeName,
                    [ AttributeArguments ], "]" ;
 UsingDirective  = "using", DottedIdentifier, ";" ;
 FileNamespace   = "namespace", DottedIdentifier, ";" ;
+NamespaceDecl   = "namespace", DottedIdentifier, "{", { TopDeclaration }, "}" ;
 DottedIdentifier = Identifier, { ".", Identifier } ;
 
 TopDeclaration = TopPrefix, ( StructDecl | ClassDecl | InterfaceDecl
@@ -223,11 +249,13 @@ TopDeclaration = TopPrefix, ( StructDecl | ClassDecl | InterfaceDecl
 MemberDeclaration = MemberPrefix,
                     ( ConstructorDecl | FunctionDefinition | OperatorDefinition
                     | ConversionDefinition
-                    | FieldDecl | PropertyDefinition | AssociatedTypeBinding
+                    | FieldDecl | PropertyDefinition | IndexerDefinition
+                    | AssociatedTypeBinding
                     | AssociatedConstantBinding ) ;
 InterfaceMemberDeclaration = InterfaceMemberPrefix,
                              ( InterfaceFunction | InterfaceOperator
-                             | InterfaceProperty | AssociatedTypeRequirement
+                             | InterfaceProperty | InterfaceIndexer
+                             | AssociatedTypeRequirement
                              | InterfaceConstant ) ;
 TopPrefix       = ContextualPrefix ;
 MemberPrefix    = ContextualPrefix ;
@@ -235,8 +263,10 @@ InterfaceMemberPrefix = ContextualPrefix ;
 AliasPrefix     = { Attribute | VisibilityModifier } ;
 Attribute       = "[", [ AttributeTarget, ":" ], AttributeName,
                   [ AttributeArguments ], "]" ;
-AttributeTarget = "type" | "field" | "property" | "get" | "set" | "init"
-                | "method" | "return" | "param" ;
+AttributeTarget = SingletonTarget
+                | NamedTarget, [ "(", Identifier, ")" ] ;
+SingletonTarget = "type" | "get" | "set" | "init" | "return" ;
+NamedTarget     = "field" | "property" | "method" | "param" | "typeparam" ;
 AttributeName   = DottedIdentifier ;
 AttributeArguments = "(", [ ConstantExpression,
                      { ",", ConstantExpression } ], ")" ;
@@ -257,40 +287,60 @@ EnumDecl        = "enum", Identifier, ":", IntegralType,
                   "{", [ EnumMember, { ",", EnumMember }, [ "," ] ], "}" ;
 EnumMember      = Identifier, [ "=", ConstantExpression ] ;
 AliasDecl       = "alias", Identifier, [ TypeParameterList ], "=", Type, ";" ;
-AssociatedTypeRequirement = "type", Identifier, ";" ;
-AssociatedTypeBinding = "type", Identifier, "=", Type, ";" ;
+AssociatedTypeRequirement = "type", Identifier, [ "=", Type ], ";" ;
+AssociatedTypeBinding = "type", MemberName, "=", Type, ";" ;
 InterfaceConstant = "const", Type, Identifier,
                     [ "=", ConstantExpression ], ";" ;
-AssociatedConstantBinding = "const", Type, Identifier, "=",
+AssociatedConstantBinding = "const", Type, MemberName, "=",
                             ConstantExpression, ";" ;
 ConformanceList = ":", Type, { ",", Type } ;
 InterfaceBaseList = ":", Type, { ",", Type } ;
 IntegralType    = DottedIdentifier ;
 ConstantExpression = Expression ;
-ConstructorDecl = Identifier, ParameterList, Block ;
-FunctionDefinition = Type, Identifier, [ TypeParameterList ], ParameterList,
-                     { ConstraintClause }, ( Block | ";" ) ;
-InterfaceFunction = Type, Identifier, [ TypeParameterList ], ParameterList,
-                    { ConstraintClause }, ( ";" | Block ) ;
-OperatorDefinition = Type, "operator", OperatorSymbol, ParameterList, Block ;
-ConversionDefinition = "operator", Type, "(", Type, Identifier, ")", Block ;
+MemberName      = Identifier | Type, ".", Identifier ;
+ConstructorDecl = Identifier, ParameterList, { PostconditionClause }, CallableBody ;
+PostconditionClause = "ensure", Expression ;
+FunctionDefinition = Type, MemberName, [ TypeParameterList ], ParameterList,
+                     { ConstraintClause }, { PostconditionClause },
+                     ( CallableBody | ";" ) ;
+InterfaceFunction = FunctionDefinition ;
+OperatorDefinition = Type, "operator", OperatorSymbol, ParameterList, CallableBody ;
+ConversionDefinition = "operator", Type, "(", Type, Identifier, ")", CallableBody ;
 InterfaceOperator = Type, "operator", OperatorSymbol, ParameterList,
-                    ( ";" | Block ) ;
+                    ( ";" | CallableBody ) ;
+CallableBody    = Block | ExpressionBody ;
+ExpressionBody  = "=>", ( ExpressionStatement | AssignmentStatement
+                       | DiscardStatement | RequireStatement | ThrowStatement ) ;
 FieldDecl       = Type, Identifier, [ "=", Expression ], ";" ;
-PropertyDefinition = Type, Identifier, "{", GetterDefinition,
-                     [ SetterDefinition | InitDefinition ], "}" ;
-GetterDefinition = { Attribute }, "get", ( Block | ";" ) ;
-SetterDefinition = { Attribute }, "set", ( Block | ";" ) ;
-InitDefinition   = { Attribute }, "init", ( Block | ";" ) ;
+PropertyDefinition = Type, MemberName,
+                     ( "{", GetterDefinition,
+                       [ SetterDefinition | InitDefinition ], "}"
+                     | ExpressionBody ) ;
+AccessorPrefix  = { Attribute | "mut" } ;
+GetterDefinition = AccessorPrefix, "get", ( CallableBody | ";" ) ;
+SetterDefinition = AccessorPrefix, "set", ( CallableBody | ";" ) ;
+InitDefinition   = { Attribute }, "init", ( CallableBody | ";" ) ;
 InterfaceProperty = Type, Identifier, "{", InterfaceGetter,
                     [ InterfaceSetter | InterfaceInit ], "}" ;
-InterfaceGetter = { Attribute }, "get", ( ";" | Block ) ;
-InterfaceSetter = { Attribute }, "set", ( ";" | Block ) ;
-InterfaceInit   = { Attribute }, "init", ( ";" | Block ) ;
+InterfaceGetter = GetterDefinition ;
+InterfaceSetter = SetterDefinition ;
+InterfaceInit   = InitDefinition ;
+IndexerDefinition = Type, [ Type, "." ], "this", IndexParameters,
+                    ( "{", IndexGetter, [ IndexSetter | IndexInit ], "}"
+                    | ExpressionBody ) ;
+IndexParameters = "[", Parameter, { ",", Parameter }, "]" ;
+IndexGetter     = AccessorPrefix, "get", CallableBody ;
+IndexSetter     = AccessorPrefix, "set", CallableBody ;
+IndexInit       = { Attribute }, "init", CallableBody ;
+InterfaceIndexer = Type, "this", IndexParameters,
+                   "{", InterfaceGetter, [ InterfaceSetter | InterfaceInit ], "}" ;
 
-TypeParameterList = "<", Identifier, { ",", Identifier }, ">" ;
-InterfaceTypeParameters = "<", [ "this" ], Identifier,
-                          { ",", Identifier }, ">" ;
+TypeParameterList = "<", GenericFormal, { ",", GenericFormal }, ">" ;
+GenericFormal   = { Attribute }, ( Identifier, [ "=", Type ]
+                | "const", Type, Identifier, [ "=", ConstantExpression ] ) ;
+InterfaceTypeParameters = "<", ( { Attribute }, "this", Identifier
+                                | GenericFormal ),
+                          { ",", GenericFormal }, ">" ;
 ConstraintClause  = "where", Identifier, ":",
                     ( Type | "[", Identifier, "]" ),
                     { ",", ( Type | "[", Identifier, "]" ) } ;
@@ -300,8 +350,11 @@ OperatorSymbol  = "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^"
                 | "++" | "--" | "true" | "false" ;
 ```
 
-This candidate requires a single file-scoped namespace after using directives
-and before declarations. Fields and constructors occur in class/struct bodies;
+This candidate permits one file-scoped namespace or namespace blocks, without
+mixing those forms in a file. Namespace blocks may coexist with root
+declarations; nested namespace blocks and namespace-local imports remain
+separate grammar work. Declarations retain source order within compiler file
+order. Fields and constructors occur in class/struct bodies;
 interface members do not include fields or constructors. An interface
 constant with an initializer is fixed by its declaration; one without an
 initializer requires an implementer-supplied `const` binding of that selected
@@ -324,6 +377,13 @@ in particular `[get: Name]` on a property targets its getter, not the whole
 property. Neither unknown nor misplaced targets silently fall back to the
 declaration. Attribute arguments here are a syntactic approximation;
 constant-value eligibility and multiplicity require semantic validation.
+Attributes may attach directly to their target or identify a named target on
+the enclosing declaration: `[param(count): Attr]` and `[typeparam(T): Attr]`
+bind the same formal identities as inline attributes. A selector must resolve
+exactly one applicable target, and placements share multiplicity and partial
+merge rules. An untargeted callable attribute applies to the callable, not
+its result; result attributes use `[return: Attr]`. No selector performs
+overload guessing.
 Core's privileged primitive declaration uses `StructDecl` and `FieldDecl`
 without a separate grammar production; its binding and representation
 restrictions are semantic checks, not lexical exceptions.
@@ -367,17 +427,22 @@ Its namespace-level placement and visibility are deliberate; aliases are
 not nested in nominal types in this proposal. Associated
 `type Name;` declares an interface requirement; `type Name = Type;` in an
 implementing nominal type binds a selected requirement rather than declaring
-an arbitrary nested nominal type. Exact binding, default associated types, alias cycles, qualification and
-cross-module export rules remain open (see §5.4).
-Only a named property is proposed here; neither property production is an
-indexer or `this[...]` form. `get`, `set` and accessor `init` need lexical
-decisions; accessor effects attach to their attributes, not the entire
-property. A `set` or `init` body receives a typed `value` parameter; `init`
-is construction-only. The interaction of mixed explicit/automatic accessors,
-modifier applicability remains **OPEN**. Constructors
-must name their enclosing type. The `++` and `--` operator spellings in
-`OperatorSymbol` need tokenization and operator-contract rules before
-adoption.
+an arbitrary nested nominal type. Witness mapping, alias cycles and metadata
+remain separate checked contracts (see §5.4).
+Named properties and authored `this[...]` indexers use accessor-local effects.
+A `set` or `init` body receives a typed `value` parameter. `mut get` and
+`mut set` declare writable receiver requirements when necessary; plain
+accessors may write through an independently writable referent without
+mutating the receiver. `init` alone grants initialization-phase mutability;
+there is no `mut init` form. An auto-setter that writes receiver backing
+storage requires `mut set`. An indexer has no implicit per-index backing
+`field`; concrete indexer accessors require bodies. Interface accessor
+semicolons instead declare implementation requirements.
+An expression body returns its expression for value-producing members and
+executes one legal statement for void methods, setters, init accessors and
+constructors. It is shorthand for the corresponding checked block, not a
+general assignment-expression feature. Constructors name their enclosing
+type and must still establish their published completion guarantees.
 Nested type declarations are deliberately excluded from this candidate
 grammar; this is a proposed scope boundary, not a claim that nested type
 arguments in `Type` are excluded. See [§5.11](#511-nested-types-and-scoped-operators).
@@ -395,11 +460,18 @@ interface IAdd<T>
 ### 3.2 Types, parameters, and arguments
 
 ```ebnf
-Type            = [ "write" ], [ "pin" ], ( "void" | DottedIdentifier ),
-                  [ "<", Type, { ",", Type }, ">" ], [ "?" ] ;
+Type            = [ "write" ], [ "pin" ], ( NamedType | TupleType ), [ "?" ] ;
+NamedType       = ( "void" | DottedIdentifier ), [ TypeArguments ],
+                  [ ".", "via", "<", Type, ">", ".", Identifier ] ;
+TupleType       = "(", TupleTypeElement, ",", TupleTypeElement,
+                  { ",", TupleTypeElement }, ")" ;
+TupleTypeElement = Type, [ Identifier ] ;
 ParameterList   = "(", [ Parameter, { ",", Parameter } ], ")" ;
-Parameter       = [ PassingMode ], Type, Identifier
-                | "init", "ref", "<", Type, ">", Identifier ;
+Parameter       = { Attribute }, ParameterBinding ;
+ParameterBinding = [ PassingMode ], Type, Identifier, [ "=", ConstantExpression ]
+                 | "init", "ref", "<", Type, ">", Identifier
+                 | "implicit", "ref", "<", Type, ">", Identifier
+                 | "params", Type, Identifier ;
 PassingMode     = "ref" | "mut", "ref" ;
 
 Arguments       = "(", [ Argument, { ",", Argument } ], ")" ;
@@ -414,8 +486,34 @@ passing mode (`mut ref`), not a type argument. Grammar does not itself grant a
 particular lifetime, write authority, representation conversion, or generic
 variance.
 
-Argument labels and passing modes are source forms only; argument reordering,
-overload resolution, and output behavior are semantic contracts. The proposed
+Generic type and `const Domain P` value formals may have declared defaults,
+and defaulted and required formals may interleave. Explicit arguments pin
+their positions, typed arguments establish types, expected-result context
+fills unresolved positions, then declared defaults fill omitted unresolved
+positions before contextual literals/lambdas are checked. An explicit `_`
+requires inference and cannot fall back to a default. `default` explicitly
+selects one formal's declared default and rejects if none exists.
+Omitting a suffix or the whole list may use defaults; an empty comma slot
+such as `Make<, int32>()` is invalid. Defaults must satisfy the formal's
+constraints; they do not rescue contradictory or ambiguous inference.
+Permitted constant-value domains beyond named policy enums and dependency
+rules for defaults remain to specify.
+
+Ordinary defaults are checked, publishable compile-time `Copy` values,
+including eligible nominal aggregates, not just primitive/enum values.
+An omitted value is selected at caller source compilation; changing a
+provider's default does not rewrite unchanged compiled calls. Reference and
+initialization loans have no defaults from this rule; owning and object-
+identity defaults need separate contracts. Required and defaulted parameters
+may interleave, but `params` must be final and is an ordinary collection
+parameter, not a new by-reference mode or type pack.
+
+Named arguments may reorder binding but supplied expressions always evaluate
+left-to-right in source order. Unknown/duplicate labels and unsupplied
+required parameters reject. A positional argument may follow an in-position
+named argument; after an out-of-position label, subsequent arguments must be
+named. There is no search for the next unfilled parameter and no empty slot.
+Overload selection and output behavior remain checked semantic contracts. The proposed
 `init ref<T>` is a distinct initialization-loan parameter form, with the
 accepted call-site spelling `Create(init value)`. `write` qualifies access
 through a reference and `pin` qualifies only `ref<T>` (for example,
@@ -439,16 +537,18 @@ accepted forms.
 
 ```ebnf
 Block           = "{", { Statement }, "}" ;
-Statement       = Block | IfStatement | WhileStatement | ForStatement
-                | ForEachStatement
+Statement       = Block | IfStatement | LoopStatement | SwitchStatement
                 | RequireStatement | TryStatement | UnsafeStatement
                 | DeferStatement | PolicyStatement
-                | ReturnStatement | LoopTransfer | LocalDecl
+                | ReturnStatement | ThrowStatement | LoopTransfer
+                | SwitchTransfer | LocalDecl | DeconstructionDecl
                 | DiscardStatement | AssignmentStatement
                 | ExpressionStatement | ";" ;
 IfStatement     = "if", "(", Expression, ")", Block,
                   [ "else", ( Block | IfStatement ) ] ;
 WhileStatement  = "while", "(", Expression, ")", Block ;
+LoopStatement   = [ Identifier, ":" ],
+                  ( WhileStatement | ForStatement | ForEachStatement ) ;
 ForStatement    = "for", "(", [ ForInit ], ";", [ Expression ], ";",
                   [ ForStep ], ")", Block ;
 ForInit         = LocalBinding | StepExpression ;
@@ -459,19 +559,52 @@ ForEachStatement = "for", "(", [ "mut" | "ref" | "mut", "ref" ],
                    "in", Expression, ")", Block ;
 RequireStatement = "require", Expression, ";" ;
 TryStatement    = "try", Block, ( "finally", Block
-                  | "catch", Block, [ "finally", Block ] ) ;
+                  | CatchClause, { CatchClause }, [ "finally", Block ] ) ;
+CatchClause     = "catch", [ "(", Type, ( Identifier | "_" ), ")",
+                            [ "when", "(", Expression, ")" ] ], Block ;
 UnsafeStatement = "unsafe", Block ;
 DeferStatement  = "defer", ( ExpressionStatement | Block ) ;
 PolicyStatement = [ "require" ], "policy", PolicyCases, Block ;
 ReturnStatement = "return", [ Expression ], ";" ;
-LoopTransfer    = ( "break" | "continue" ), ";" ;
+ThrowStatement  = "throw", [ Expression ], ";" ;
+LoopTransfer    = ( "break" | "continue" ), [ Identifier ], ";" ;
+SwitchTransfer  = "continue",
+                  ( CaseLiteral | "_" | "(", ConstantExpression, ")" ), ";" ;
+CaseLiteral     = [ "+" | "-" ], ( DecimalDigits | HexInteger | BinaryInteger ) ;
 LocalDecl       = LocalBinding, ";" | VacantLocal ;
 LocalBinding    = [ "mut" ], ( "var" | Type ), Identifier, "=", Expression ;
 VacantLocal     = "init", ( "var" | Type ), Identifier, ";" ;
 DiscardStatement = "_", "=", Expression, ";" ;
 AssignmentStatement = Assignment, ";" ;
-Assignment      = Expression, "=", Expression ;
+Assignment      = Expression, AssignmentOperator, Expression
+                | DeconstructionPlaces, "=", Expression ;
+AssignmentOperator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
+                   | "&=" | "|=" | "^=" | "<<=" | ">>=" | ">>>=" | "??=" ;
 ExpressionStatement = Expression, ";" ;
+DeconstructionDecl = "var", DeconstructionBindings, "=", Expression, ";"
+                    | TypedDeconstruction, "=", Expression, ";" ;
+DeconstructionBindings = "(", BindingTarget, ",", BindingTarget,
+                         { ",", BindingTarget }, ")" ;
+BindingTarget   = Identifier | "_" | DeconstructionBindings ;
+TypedDeconstruction = "(", TypedBinding, ",", TypedBinding,
+                      { ",", TypedBinding }, ")" ;
+TypedBinding    = Type, Identifier | "_" | TypedDeconstruction ;
+DeconstructionPlaces = "(", PlaceTarget, ",", PlaceTarget,
+                       { ",", PlaceTarget }, ")" ;
+PlaceTarget     = Expression | "_" | DeconstructionPlaces ;
+
+SwitchStatement = "switch", "(", Expression, ")",
+                  "{", [ StatementArm, { ",", StatementArm }, [ "," ] ], "}" ;
+StatementArm    = ArmHeader, "=>", Block ;
+SwitchExpression = "switch", "(", Expression, ")",
+                   "{", [ ValueArm, { ",", ValueArm }, [ "," ] ], "}" ;
+ValueArm        = ArmHeader, "=>", Expression ;
+ArmHeader       = { Attribute }, Pattern, [ "when", "(", Expression, ")" ] ;
+Pattern         = PatternOperand, { PatternOperator, PatternOperand } ;
+PatternOperand  = { "not" }, PatternAtom ;
+PatternOperator = "and" | "or" ;
+PatternAtom     = "_" | "null" | "some", ( Identifier | "_" )
+                | ConstantExpression | "(", Pattern, ")" ;
 ```
 
 `for` initializers and iterators omit their internal semicolon; an iterator
@@ -488,7 +621,7 @@ the current element remain **OPEN**; these spellings do not grant escaping
 loans or overlapping mutation.
 Blocks are required after `if`, `while`, `for`, `try`, `catch`,
 `finally`, and `unsafe`; a single unbraced statement is not part of this
-candidate. `catch` has no exception type or binding syntax. Assignment is a
+candidate. Assignment is a
 statement-level form, not a general right-associative expression; its left
 expression must pass a writable-place check, which this syntactic
 approximation does not define. `DiscardStatement` is only the standalone
@@ -496,12 +629,71 @@ discard form: `_` here is not an identifier or a pattern wildcard. In a
 pattern it is a separate nonbinding wildcard; it is not an absence literal.
 Recovery forms are not alternate accepted syntax.
 
+Tuple deconstruction is structural, including nested tuples and `_`
+discards; it does not discover a nominal `Deconstruct` method by name.
+Declarations evaluate the right-hand side once. Assignment evaluates
+destination places once left-to-right, then the right-hand side before any
+write, then writes left-to-right. Ordinary access, alias, copy/move, and
+cleanup checks apply; a later failure does not roll back completed writes.
+
+Switch statements and expressions share pattern arms. The scrutinee evaluates
+once and arms are considered in order; a guard runs only after its pattern
+matches. Guards are ordinary checked Boolean code with preserved effects
+and failures, not purity/NoThrow-only expressions. Both switch forms require
+coverage or an unguarded wildcard fallback. Normal completion of an arm exits
+the switch, with no implicit fallthrough or switch-specific `break`.
+`continue N;` enters an existing unguarded constant arm in the same statement
+switch directly without rematching; the target must have no pattern bindings.
+Named or compound constant targets use `continue (N);`, while
+`continue label;` denotes a loop label and bare `continue;` remains loop-only.
+`continue _;` targets the unguarded wildcard. Forward and backward targets
+are legal, cleanup runs when leaving an arm, and these transfers cannot
+escape a cleanup action. Expression switches have no cross-arm transfer.
+A source switch does not guarantee a jump table; a target-checked request
+remains a possible separate design.
+
+Pattern combinators use precedence `not`, then `and`, then `or`.
+An `or` pattern may expose bindings only when all alternatives establish
+the same names with the same complete type, ownership, access and lifetime
+contracts. Full nominal-case, relational and destructuring patterns remain
+to specify beyond the bounded forms above.
+An ordinary wildcard suppresses missing-known-case warnings.
+`[Exhaustive] _ => ...` retains a fallback while requesting those warnings;
+guarded arms do not establish coverage merely by naming a case. The compiler
+also warns when a known case reaches a fallback proved to have no normal
+completion using a verified `DoesNotReturn` contract, not a helper-name guess.
+Nonreturning does not imply always throwing. Authored fallback code, including
+a throwing `unreachable()` helper, remains executable unless soundly proved
+unreachable under all relevant inputs and replacement boundaries. Neither
+undefined behavior nor a diagnostic authorizes changing source intent.
+
+Typed catches bind a declared failure type and a name or `_`; bare `catch`
+handles contract-catchable failures without a universal payload object.
+`when` filters are checked Boolean code: false continues handler selection,
+and a filter failure follows ordinary failure/chaining rules rather than
+silently becoming false. Catch matching, unwind phase, eligibility, and
+failure transport remain separate design work. Bare `throw;` rethrows the
+active handled failure; it is invalid outside a handler or in a separately
+invoked lambda merely declared there. `throw expression` evaluates its
+operand once and has no normal result; the operand must satisfy an eligible
+failure contract.
+
+Explicit checked capture is required to retain provenance for propagation
+after the catch. `throw captured;` uses that captured-failure contract,
+without special `throw<preserve>` syntax. Captured state cannot retain
+invalid references into unwound frames or rerun prior cleanup. Propagation
+is repeatable only under a checked sharing contract; unique state is
+consumed instead. Original provenance is preserved without destructive
+updates shared by multiple observers. Capture APIs, representation,
+ownership metadata, and cause/transport rules remain open.
+
 ### 3.4 Expressions and precedence
 
 The candidate grammar uses the precedence table to parse an operand, then
 repeated binary operators and operands. For example, `a && b || c` is
 `(a && b) || c`; there is no need to read a chain of one production per
-operator level. Binary operators at the same level associate left. Prefix
+operator level. Ordinary binary operators at the same level associate left;
+`??` and `?:` associate right. Prefix
 operators nest right; postfix calls, member access and indexing bind more
 tightly than prefix operators. Parentheses group a full `Expression` and
 override the table, so they are not a binary precedence level. `is null`
@@ -509,18 +701,20 @@ and `is some name` have equality precedence. The table is highest first:
 
 | Level | Syntax | Associativity |
 |---:|---|---|
-| 12 | postfix call, member access, index | left |
-| 11 | prefix `+ - ! ~ move` | prefix/right-nesting |
-| 10 | `* / %` | left |
-| 9 | `+ -` | left |
-| 8 | `<< >> >>>` | left |
-| 7 | `< <= > >=` | left |
-| 6 | `== !=`, `is null`, `is some name` | left |
-| 5 | `&` | left |
-| 4 | `^` | left |
-| 3 | `|` | left |
-| 2 | `&&` | left |
-| 1 | `||` | left |
+| 14 | postfix call, member access, index, `?.`, `?[]`, `++`, `--` | left |
+| 13 | prefix `+ - ! ~ move ++ --` | prefix/right-nesting |
+| 12 | `* / %` | left |
+| 11 | `+ -` | left |
+| 10 | `<< >> >>>` | left |
+| 9 | `< <= > >=` | left |
+| 8 | `== !=`, `is null`, `is some name`, `is init` | left |
+| 7 | `&` | left |
+| 6 | `^` | left |
+| 5 | `|` | left |
+| 4 | `&&` | left |
+| 3 | `||` | left |
+| 2 | `??` | right |
+| 1 | `?:` | right |
 
 `<<` and `>>` are left and arithmetic right shift respectively; `>>>` is
 zero-filling right shift. Counts are checked and left shift truncates to the
@@ -533,27 +727,50 @@ not imply chained-comparison meaning. In
 bound value, e.g. `maybe is some value`.
 
 ```ebnf
-Expression      = Operand, { ( BinaryOperator, Operand | IsTest ) } ;
-Operand         = { PrefixOperator }, Postfix ;
-PrefixOperator  = "+" | "-" | "!" | "~" | "move" ;
+Expression      = LambdaExpression | ThrowExpression | ConditionalExpression ;
+ConditionalExpression = OperatorExpression,
+                        [ "?", Expression, ":", Expression ] ;
+OperatorExpression = Operand, { ( BinaryOperator, Operand | IsTest ) } ;
+Operand         = { PrefixOperator }, ( Postfix | ThrowExpression ) ;
+PrefixOperator  = "+" | "-" | "!" | "~" | "move" | "++" | "--" ;
 BinaryOperator  = "*" | "/" | "%" | "+" | "-"
                 | "<<" | ">>" | ">>>"
                 | "<" | "<=" | ">" | ">=" | "==" | "!="
-                | "&" | "^" | "|" | "&&" | "||" ;
-IsTest          = "is", ( "null" | "some", Identifier ) ;
-Postfix         = Primary, { "." , Identifier | Arguments
-                           | "[", Expression, "]" } ;
-Primary         = "(", Expression, ")" | "new", Type, Arguments,
+                | "&" | "^" | "|" | "&&" | "||" | "??" ;
+IsTest          = "is", ( "null" | "some", Identifier | "init" ) ;
+Postfix         = Primary, { PostfixPart } ;
+PostfixPart     = ".", Identifier, [ TypeArguments ]
+                | ".", "via", "<", Type, ">"
+                | Arguments | "[", Expression, { ",", Expression }, "]"
+                | "?.", Identifier, [ TypeArguments ]
+                | "?[", Expression, { ",", Expression }, "]"
+                | "++" | "--" ;
+Primary         = "(", [ Expression ], ")" | TupleExpression
+                | SwitchExpression | CollectionExpression
+                | "new", Type, Arguments,
                   [ ObjectInitializer ]
-                | Number | String | Boolean | Null
+                | Number | String | Character | Boolean | Null | "field"
                 | Identifier, [ TypeArguments, Arguments ]
                 | "unsafe", "(", Expression, ")"
                 | [ "require" ], "policy", PolicyCases, "(", Expression, ")"
                 | "default", "<", Type, ">" ;
-TypeArguments   = "<", Type, { ",", Type }, ">" ;
+TypeArguments   = "<", GenericArgument, { ",", GenericArgument }, ">" ;
+GenericArgument = Type | ConstantExpression | "_" | "default" ;
 PolicyCases     = "<", PolicyCase, { ",", PolicyCase }, ">" ;
 PolicyCase      = DottedIdentifier ;
 ObjectInitializer = "{", { Identifier, "=", Expression, ";" }, "}" ;
+TupleExpression = "(", TupleElement, ",", TupleElement,
+                  { ",", TupleElement }, ")" ;
+TupleElement    = [ Identifier, ":" ], Expression ;
+LambdaExpression = [ "static" ], LambdaParameters, "=>", ( Expression | Block ) ;
+LambdaParameters = Identifier | "_"
+                 | "(", [ LambdaParameter, { ",", LambdaParameter } ], ")" ;
+LambdaParameter = Identifier | "_"
+                | { Attribute }, [ PassingMode ], Type, ( Identifier | "_" ) ;
+ThrowExpression = "throw", Expression ;
+CollectionExpression = "[", [ CollectionElement,
+                       { ",", CollectionElement }, [ "," ] ], "]" ;
+CollectionElement = Expression | "..", Expression ;
 ```
 
 `IsTest` is a postfix-like binary test at equality precedence: it consumes
@@ -564,12 +781,13 @@ tail as the right form. Unlike an ordinary binary operator, it may bind
 participates in `Number` exactly like the other numeric alternatives; its
 value semantics and lexical adoption gates are described in §2.
 
-The generic-call alternative is explicit function-call syntax, not a general
-expression type-application operator. It does not express partial holes (`_`),
-static type methods, constructor-specific generic parameters/inference, or
-type packs. The proposed productions do not define conditional `?:`,
-null-coalescing, lambda, tuple, range, `await`, `throw`, type-test,
-prefix-cast, or general assignment expressions. `T(expression)` is an
+Generic argument parsing uses the selected declaration's formal kinds to
+distinguish type arguments from constant-value expressions; the broad
+alternatives above do not permit arbitrary runtime expressions as constants.
+The grammar includes explicit `_` inference holes and `default` selectors,
+not source type packs or unresolved exported holes. Constructor-specific
+inference, general range, `await`, type-test and prefix-cast forms remain
+separate work; assignment remains a statement. `T(expression)` is an
 ordinary type-call-shaped expression; its checked-conversion interpretation
 is semantic.
 `unsafe(expr)` scopes caller-unsafe obligations to the expression; it is
@@ -578,6 +796,63 @@ expressions select declared variants under §5.12; there is no separate
 `unchecked` expression or block. `default<I>.Member(...)`
 directly selects a named interface's available default body under a checked
 conformance; ordinary interface calls still use the selected witness.
+Direct default-body selection is restricted to the current implementing
+`this` inside an interface default body or its conforming type/adapter
+implementation. It cannot bypass another receiver's implementation from
+outside; authored forwarding APIs may expose that behavior explicitly.
+
+`condition ? a : b` evaluates its condition once and only the selected arm;
+both arms are checked under the expected result contract. `value ?? fallback`
+reads a live initialized optional, using its contained value when present
+and evaluating the fallback only for null. Neither reads vacant storage or
+implicitly moves a unique value out of a borrowed optional.
+`place ??= fallback;` evaluates a writable initialized optional place once
+and assigns only when null; it is not vacancy initialization.
+`?.` and `?[]` skip the remainder of their continuous access/call chain,
+including arguments and indices, when that receiver is null. Parentheses
+end the chain, and a separately optional member requires its own handling.
+Results are lifted to normalized optionals; bounds errors and invoked
+member failures remain ordinary failures. Optional-access chains are not
+assignment destinations, but permitted method calls still obey their
+ordinary receiver and effect contracts.
+
+Prefix/postfix `++` and `--` initially apply to writable `Copy` places.
+The place evaluates once, a checked operator produces its replacement,
+and prefix returns the new value while postfix returns the saved old one.
+Operator failure does not commit the replacement, but does not roll back
+other already-performed effects. Unique/owning update contracts remain open.
+
+Tuples have two or more elements with optional names, not a new nominal
+identity or implied foreign/public ABI. `(x)` remains grouping and `()` is
+the void value. Zero-/one-arity tuple extensions, including any unified
+grouping/decomposition model, are deferred with eventual type-pack design;
+there is no `(x,)` form. An unnamed element uses `pair[0]` with a required
+compile-time constant, zero-based in-range index, producing that element's
+exact type. Named elements use their declared names without synthesized
+`Item1` aliases. An arbitrary runtime index cannot pick a heterogeneous
+result type from this rule.
+
+Lambdas require an explicit or contextual callable contract. An explicitly
+typed parameter list does not make `var f = (int32 x) => x + 1` infer a
+canonical `func` or `fnptr` representation. Expression/block bodies obey
+ordinary result, effect, capture, ownership and lifetime checks.
+`static` forbids capturing enclosing locals, parameters or `this`, but does
+not itself select a representation, allocation strategy or inlining.
+Contextually generic lambdas retain their definition-site constraint contract.
+
+Collection expressions are target-typed and use only a registered, checked
+construction contract; `[]` is empty and no default array/List or numeric
+width is invented. `..sequence` spreads can interleave with ordinary elements
+under eligible iteration and construction contracts, without reinterpretation
+or implicit ownership transfer. Conditional inclusion composes existing forms:
+`..(condition ? [element] : [])`; no collection-specific `if` form is added.
+Contextual typing of such fragments and whether direct nesting has a
+no-intermediate construction contract remain unresolved; optimization may
+not erase observable builder effects or failures. The accepted eager-capture
+and drain ordering must be preserved. Mapping/filtering initially compose
+sequence APIs and spreads. Dedicated comprehensions and repetition are
+deferred for deeper library design, including tensor rank/shape, broadcasting,
+traversal, allocation, and copy-versus-per-element-generation contracts.
 
 `defer expr;` and `defer { ... }` register an action when execution reaches
 the statement. The expression or block runs when the enclosing lexical block
@@ -609,7 +884,8 @@ or claim an implementation.
   Conditional outputs follow [declaration postconditions](../language-contracts.md#2-outcome-initialization-and-nullability-are-separate):
   `ensure` is an ordinary Boolean postcondition, live/nullable-live/vacant
   states remain distinct, and vacant storage is never read. Exact `ensure`
-  placement and metadata remain open (see [§5.8](#58-postcondition-syntax-for-conditional-output-state)).
+  full placement and metadata remain open beyond the constructor-completion
+  clauses below (see [§5.8](#58-postcondition-syntax-for-conditional-output-state)).
   `init ref<T>` means
   vacant-storage initialization, distinct from ordinary `ref`/`write ref`;
   `Create(init value)` is the accepted call-site spelling, with exact
@@ -619,9 +895,10 @@ or claim an implementation.
   membership follow [type-family contracts](../type-families.md#explicit-families)
   and [associated relationships](../type-families.md#nominal-witnesses-and-associated-relationships).
   Optional projection is non-injective and semantically idempotent, but
-  repeated source `T??` is not proposed syntax. Inference, partial holes,
-  generic methods/classes/constructors, and exact associated-type grammar
-  remain open; type packs are out of scope.
+  repeated source `T??` is not proposed syntax. This proposal gives `_` holes,
+  generic defaults and selected associated-type spellings; full inference,
+  constructor and witness contracts remain separate work. Type packs are
+  deferred, not ruled out as a future language capability.
 - **Functions and overloads:** overload selection is source-time and fixes the
   selected declaration and closed type arguments; runtime virtual/interface
   dispatch is separate. Applicability and ranking follow [callable and
@@ -677,7 +954,7 @@ or claim an implementation.
   `T(expression)` is a checked conversion, literals are context-typed, and
   numeric operators are checked by default. Floating APIs are target-specific;
   character literals and custom literal registration remain proposed,
-  floating literal binding needs source rules, and `utf8z("...")` is an
+  floating token-boundary and registration details remain work, and `utf8z("...")` is an
   ordinary call rather than a lexer prefix.
 
 ## 5. Open grammar and semantic choices
@@ -836,8 +1113,12 @@ not a distinct wrapper or new witness. Aliases are namespace-level
 declarations, with `public`, `internal` or `private` visibility like other
 top-level declarations; they are not nominal members. Exporting or
 qualifying an alias cannot create a new nominal identity or change the
-target's access, ownership, layout or compatibility contract. Cross-module
-export, cycle detection and generic substitution still need checked rules.
+target's access, ownership, layout or compatibility contract. A public alias
+is exported as a named transparent source declaration; executable signatures
+use its resolved target identity. Its public name and target mapping are source
+contracts, not a new nominal runtime type. `Option<T>` is informative, not a
+decision that Core or another library exports it. Cycles, substitution and
+the exact alias metadata encoding still need checked rules.
 Associated-type bindings are distinct: they satisfy a selected interface
 member and have witness identity, rather than providing a general synonym.
 
@@ -847,11 +1128,33 @@ It is the first formal when present; a conformance binds it to its
 implementing type. Interfaces with no self dependency omit it. Ordinary
 type formals follow it, and the checked witness retains the selected
 interface/member identity. This does not alter the accepted associated-type
-relations; precise witness mapping and metadata remain open.
+relations; metadata encoding remains open. An interface such as
+`interface ISource { type Item; }` need not declare a self formal merely to
+have associated members.
 
-**Open:** formalize projection and associated-equality productions; witness
-selection, qualification and collision rules; and their metadata
-representation. Keep family opt-in and declared checked projections; do
+An associated requirement may have a replaceable checked default,
+`type Item = uint8;`; bodyless `type Item;` requires an implementation binding.
+Conflicting inherited defaults require explicit resolution. A type can
+implement two interfaces with same-named members explicitly, implicitly, or
+one each. One implicit member can satisfy both only if it fulfills both
+contracts; the witness identities remain distinct. Explicit declarations use
+interface-qualified names, for example `type IReadable.Item = uint8;` and
+`uint8 IReadable.Read() { ... }`.
+
+`T.Item` resolves when exactly one applicable selected witness supplies it.
+`T.via<ISource>.Item` and `x.via<ISource>.Member()` select an existing witness
+explicitly; `via` is contextual after `.`. They do not create conformance,
+implicitly box/convert the receiver, expose unrelated private members, or
+bypass the selected implementation. Conformance visibility follows the
+effective visibility of its type and interface, with no independent witness
+visibility. Access is equivalent to what a caller could obtain through a
+valid constrained helper, not broader. Conflicting claims for the same
+type/interface pair reject rather than being resolved with `via`.
+Extension-interface behavior still needs an explicit adapter and does not
+change the original type's witnesses.
+
+**Open:** complete associated-equality and inherited-witness qualification
+rules and their metadata representation. Keep family opt-in and declared checked projections; do
 not introduce universal erasure or inferred covariance.
 Interface constructors are not part of this proposal: a future requirement
 needs a checked construction and initialization-completion contract. Fixed
@@ -860,8 +1163,8 @@ definition; a bodyless `const T Name;` instead requires a checked
 implementer-supplied binding. They have distinct identity/versioning rules
 and neither follows automatically from a `type Name;` requirement.
 
-**Source type packs are outside this proposal's scope.** No production or
-recommendation for variadic type parameters is made here.
+**Source type packs are deferred.** No production for variadic type parameters
+is made here; generic defaults and collection spreads are not type packs.
 
 ### 5.5 Accepted temporary scope for `implicit ref<T>`
 
@@ -888,7 +1191,8 @@ identifier and not approved by the discard decision. In a match over `T?`,
 when those are the only possibilities. The wildcard still means "any
 remaining value", not `none`: it also matches other unhandled cases if the
 matched type has them. `null` remains the optional absence value. The
-switch/pattern productions and exhaustiveness rules remain to be specified.
+bounded switch/pattern productions and coverage rules are in §3.3; complete
+nominal-case and destructuring patterns remain to specify.
 
 ```terrum
 // Accepted discard semantics; candidate source form:
@@ -1029,16 +1333,17 @@ initialization safety. No example fixes the exact source spelling.
 
 **Accepted direction:** by-value properties on compact `Copy` structs and
 source classes. **Proposed forms:** `get`, `set`, and construction-only `init`
-accessors, including backed auto-properties (§3.1). Ref-returning properties
-and indexers remain separate questions.
+accessors, including backed auto-properties and authored indexers (§3.1).
+Ref-returning properties and indexers still need the general result-loan contract.
 
 Interface properties are separate contract members: a bodyless interface
 getter requires a conformance implementation, while a getter body supplies a
-default under §5.12. Indexers (including the core-library `this[...]` sketches) have no production
-here and remain design-only.
+default under §5.12. Instance `this[...]` indexers are parameterized accessor
+contracts; concrete accessors require authored bodies, not automatic
+per-index backing storage.
 
 An explicit concrete getter body makes the getter an ordinary checked
-read-only callable member; `{ get; }` generates a backed auto-getter under
+callable member with its declared readonly or `mut` receiver; `{ get; }` generates a backed auto-getter under
 the proposed extension. Accessor attributes such as `[NoThrow]` attach to
 the getter:
 
@@ -1068,7 +1373,8 @@ class Counter
 Accessor effects attach to the accessor: `[NoThrow] get { ... }`.
 `[get: NoThrow] public int32 Count { get { ... } }` applies to the
 getter from the enclosing property declaration. An expression-bodied
-property remains open; targeted attributes do not imply it. File attributes
+getter-only property such as `int32 Size => width;` has the same checked
+getter semantics. File attributes
 use `[module: Name]`, or `[assembly: Name]` when an assembly identity is
 declared by the build. Other explicit target labels are in §3.1;
 placement, supported attribute classes, arguments and multiplicity must
@@ -1078,20 +1384,31 @@ An ordinary `[NoThrow] public int32 GetCount() { ... }` method is an
 alternative callable form; it is not a property-effect placement option.
 
 Treat the accessor as a named, source-bound
-callable member with a readonly receiver and by-value result. The property
+callable member with its checked receiver requirement and result. The property
 declaration and accessor must carry checked member identity and effect metadata;
 do not infer a hidden `get_Name` function from a property name. A module may
 encode the accessor as a callable internally, but consumers bind the declared
 property/accessor identity and contract rather than a magic naming convention.
 
-The candidate productions cover named accessors; mixed explicit/automatic
-backing rules, effect placement, and metadata representation remain open.
+Auto accessors and explicit bodies may mix. Any auto accessor, or any use of
+property-local `field`, creates exactly one implicit backing field shared by
+that property's accessors at its declaration position. A body may omit
+`field` even when another accessor needs it. A property with only authored
+bodies and no `field` use has no implicit storage. Indexers do not acquire a
+per-index backing field from this rule. Detailed initialization of implicit
+storage, accessor applicability and metadata representation remain work.
+`mut get` and `mut set` follow ordinary method receiver contracts; writing
+through an independently writable referent does not by itself mutate `this`.
+`init` provides mutability within its initialization scope without a redundant
+`mut init` modifier.
 
 **Proposed construction rule:** a constructor initializes all private state
 it does not leave to declared `init` properties. Its published completion
-contract identifies which `init` properties it establishes and which remain
-obligations for its caller; the exact postcondition syntax is not fixed by
-`ensure Prop is init` as an illustrative phrase. The caller must initialize
+contract guarantees a minimum set of `init` properties through checked,
+published clauses such as `S(int32 value) ensure P is init { P = value; }`.
+Each guarantee must hold on every successful constructor return and be
+available to downstream source and artifact consumers, not inferred from
+today's body or duplicated by a routine attribute. The caller must initialize
 each remaining property before the object is fully constructed. In
 `new T(...) { P = value; }`, initializer entries execute in source order
 after the constructor, within the same unpublished construction phase.
@@ -1099,6 +1416,14 @@ Construction publishes the object only after all storage and property
 obligations are fulfilled and the final invariant/postcondition checks
 succeed. Failures clean partial state without publishing a live object.
 This is not a general right to invoke `init` on an already constructed value.
+An init property is writable during the unpublished construction phase,
+not restricted to one assignment. Constructor and caller initializers may
+both assign it in source order, with ordinary replacement/cleanup checks;
+the last assignment determines the final value. Adding a guaranteed
+property can serve old callers that still initialize it, while removing a
+guarantee cannot serve callers that relied on it. A new consumer requiring
+the stronger guarantee cannot bind an older weaker provider. Other value,
+effect and invariant promises remain independently checked.
 Direct `new T(...).with(P: value)` may use an explicitly declared
 initializer-completion operation with the same gate; the qualifying
 annotation, validation hook, update syntax and ordinary wither contract
@@ -1109,19 +1434,17 @@ completion obligations.
 
 ### 5.11 Nested types and scoped operators
 
-**Recommendation (PROPOSED):** begin with namespace-level nominal types and
-their members; do not make nested type declarations a prerequisite for the
-initial general grammar. Private nesting is genuinely useful for hiding
+**Proposed boundary:** defer nested nominal types; begin with namespace-level
+types and their members. Private nesting is genuinely useful for hiding
 implementation details, tying a helper's type parameters to its container,
 and grouping tightly related types. On the other hand, nested public types
 couple API naming and accessibility to their outer type, complicate
 qualification, generic substitution, metadata identity, source lookup and
 binary compatibility, and often read better as separate namespace types.
 Module-internal namespace types already hide a helper from external
-consumers, though not from the rest of its module. Allowing only private
-nesting later is a reasonable next step if use cases justify the added
-binding and identity rules; nesting does not imply an implicit outer
-instance or capture.
+consumers, though not from the rest of its module. Core-library naming such as `List<T>.Enumerator` versus `ListEnumerator<T>`
+is a reason to revisit the boundary before fixing public library identities.
+Nesting, if added, does not imply an implicit outer instance or capture.
 
 **Recommendation (PROPOSED):** do not allow operator declarations in
 `TopDeclaration`. A user operator is selected from the containing type's
@@ -1169,11 +1492,11 @@ duplicates, conflicting visibility and illegal modifier/declaration pairs
 reject. Context-specific callable clauses, once specified, follow the
 parameter list; result types remain in prefix position.
 
-**Proposed vocabulary:** `do` introduces a post-tested loop; `set` a
-writable property accessor; `when` a pattern guard; `yield` a producer
+**Proposed vocabulary:** `do` introduces a post-tested loop; `yield` a producer
 suspension point; `extern` an externally implemented declaration; and
 `extension` a scoped extension declaration. Their productions, restrictions,
-effects and lowering remain open. `unsafe` has block and
+effects and lowering remain open. Accessors and `when` guards have bounded
+productions above without implying complete effect/representation contracts. `unsafe` has block and
 parenthesized-expression forms; default arithmetic remains checked.
 `defer` registers an
 explicit lexical-block-exit action (not automatic `[Cleanup]`, function-exit
@@ -1182,11 +1505,13 @@ can share a cleanup region, but conditional registration and reverse order
 must remain observable. Failures obey the same chaining and propagation
 rules as an authored `finally`; `defer` does not introduce unsafe recovery.
 
-`default` labels a switch arm and introduces `default<I>.Member(...)`,
+`default` selects a generic formal's declared default and introduces `default<I>.Member(...)`,
 which selects the named interface's default body directly without inventing a
 default value for `I`, stateful base-class inheritance or implicit
-linearization. The form may also apply to an
-explicit adapter implementing an extension interface, but cannot reach an
+linearization. Direct default-body invocation is restricted to the current
+implementing `this` inside interface default bodies or a conforming
+type/adapter implementation, not arbitrary receivers from outside.
+It may apply to an explicit adapter implementing an extension interface, but cannot reach an
 unrelated extension or fabricate conformance. Calls made within a default
 body still dispatch through the selected witness. Access, effects and diamond
 resolution are checked. No `override` keyword is proposed: an explicit
@@ -1216,7 +1541,8 @@ implementations, but must not add or alter the published contract of an
 existing declaration, including making a method unsafe or changing a
 type's layout. Independently pre-generated files have ordinary source-file
 status, not the compiler-known provenance of an in-compilation generator.
-Detailed merge compatibility and mixed auto/explicit backing rules remain open.
+Detailed merge compatibility, including partial accessor implementations and
+attribute multiplicity, remains open; ordinary mixed backing is defined in §5.10.
 
 **Policy selection (PROPOSED):** policy domains may be Core-defined or
 user-defined enums. A policy case is a compile-time preference for a variant
@@ -1256,10 +1582,10 @@ checked operation when no variant matches; use
 `require policy<Arithmetic.Wrap>` when wrapping selection is required. The
 names of the Core cases remain to be specified.
 
-The `policy<...>` arguments above are compile-time enum values; this does not
-select a syntax for const-value generic formals. A future generic formal
-could carry such a value into `policy<P>` with checked definition-site
-binding, but ordinary runtime enum parameters require explicit dispatch and
+The `policy<...>` arguments above are compile-time enum values. A generic
+`const Arithmetic P = Arithmetic.Strict` formal can forward such a value
+into `policy<P>` under definition-site checking. Ordinary runtime enum
+parameters require explicit dispatch and
 cannot select different source overloads depending on inlining. A query such
 as `if (policy<P>)` remains open until compile-time conditional and generic
 rules specify whether it tests the active request or a particular call's
@@ -1291,47 +1617,32 @@ declarations.
 
 ### 5.13 Operators, assignments and expression gaps
 
-**Accepted semantics, source form OPEN:** user `operator +=` is a separate declared contract from
+**Accepted semantics; declaration contract still to complete:** user `operator +=` is a separate declared contract from
 `operator +`, using a `write ref<T>` destination; it cannot be desugared to
-read/copy/write or inferred from addition. The same question applies to
-`-=`, `*=`, `/=`, `%=`, `&=`, `|=` and `^=`: spelling, legal places, precedence,
-evaluation order, failure behavior, source tokenization and whether each
-operator is supported must be specified together. The candidate
-`AssignmentStatement` only covers `=`; compound-assignment and
-increment/decrement spellings need lexical and contract rules. Do not treat
-compound assignments as the existing binary operators followed by `=`.
+read/copy/write or inferred from addition. The same distinct-contract rule
+applies to nominal `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=` and
+`>>>=`. Their statement spellings are in §3.3; explicit nominal declaration
+shape and metadata still need completion. A destination must satisfy the
+ordinary writable-place checks, not merely parse as an expression. Built-in
+integer shift assignments evaluate the place once and check shift counts.
+`??=` is the built-in initialized-optional operation described in §3.4,
+not a grant of arbitrary nominal overloading.
+Do not split compound operator spellings into an ordinary binary operator
+followed by `=`. Pointer dereference/address formation and short-circuit
+`&&`/`||` overloading need their own access and evaluation-order contracts;
+they are not ordinary overloads merely because they use operator punctuation.
 
-```ebnf
-(* PROPOSED extension only; not part of section 3's productions. *)
-CompoundAssignmentStatement = Place, CompoundAssignmentOperator, Expression, ";" ;
-CompoundAssignmentOperator = "+=" | "-=" | "*=" | "/=" | "%="
-                           | "&=" | "|=" | "^=" ;
-Place = Expression ;
-```
-
-`Place` requires a separately specified assignability check; an arbitrary
-expression is not a writable destination. A concrete declaration production
-for each compound operator and source/metadata binding must be designed before
-this shorthand becomes a legal statement. The candidate built-in shifts `<<`, `>>` and `>>>` follow the accepted
-checked-count/width rules. Their declaration and witness contracts, and
-compound `<<=`, `>>=` and `>>>=` forms, still need separate specification.
-Pointer dereference/address formation, short-circuit
-`&&`/`||` and optional fallback require their own access or evaluation-order
-contracts; they are not ordinary overloads merely because they have an
-operator-like spelling.
-
-Still **OPEN** for a full source grammar: nominal safe union cases and
-patterns/matching, associated-type projection/equality and family/adapter declarations,
-conditional/default conformance, conditional expressions, character and
-text-target fragments, general `const` declarations/expressions, `ensure`
-placement, `init ref<T>` parameters, optional access/ownership forms,
-generic defaults and constructor inference, lambdas, async/await, throw,
-typed catches, interpolation and collections. Words such as `switch`, `case`,
-`async`, `await`, `union`, `throw` and `own` need complete syntax, binding,
-effects and representation rules, not isolated extra alternatives in
-`Statement` or `Primary`. The proposed `Primary` includes `Number`, including `HexFloat`; its proposed
-lexical spelling is already given in §2, while value/boundary rules remain
-to be specified before adoption.
+Still **OPEN** for a full source grammar: nominal safe union cases and complete
+patterns, associated equality and family/adapter declarations,
+conditional/default conformance, text-target fragments and interpolation,
+general `const` declarations/expressions, full contract-clause placement,
+general ownership/reference results, constructor inference, async/await and
+producers, capture/exception transport, and registered collection-fragment
+construction. Source type packs and tuple arity extensions remain deferred.
+Giving a form candidate syntax does not complete its checked lifetime,
+effect, representation or separate-compilation contracts. Hexadecimal float
+spelling and target rounding are above; exact lexical recovery/boundaries
+remain to specify.
 
 ### 5.14 Documentation-comment grammar and tooling
 
@@ -1377,35 +1688,35 @@ appears in §2.
 | Concept | Defined direction | Still to specify |
 |---|---|---|
 | Lexical tokens | §2 gives identifier and reserved-word forms; primitive names are identifiers with reserved bindings. | Exact contextual-word classification and `HexFloat` token boundaries/diagnostics. |
-| Literals | §§2 and 4 sketch string and numeric forms and their target selection. | Floating literal target-format semantics and character forms. |
+| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding. | Complete floating token recovery, character diagnostics and registered text forms. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
-| Namespace | §3.1 sketches one file-scoped namespace. | Other namespace forms, if any. |
+| Namespace | §3.1 permits file-scoped or block namespaces, without mixing. | Nested namespace blocks and namespace-local imports. |
 | Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
 | Nominal types | §3.1 sketches structs, classes, interfaces and integral-base enums. | Union and nested declarations, enum constant restrictions and contextual attributes. |
-| Generic declarations | §3.1 sketches type formals and constraints. | Const-value formals, defaults, associated types and inference. |
-| Aliases | §§3.1 and 5.4 place visible transparent `alias Name<T> = Type;` declarations at namespace scope. | Cycles, substitution and cross-module export. |
-| Associated types | §§3.1 and 5.4 sketch `type Name;` requirements, `type Name = Type;` bindings and the `<this T>` self formal. | Projection/associated-equality grammar, explicit witness qualification and metadata. |
+| Generic declarations | §§3.1–3.2 give type/constant formals, defaults, `_` inference and explicit `default` selection. | Permitted value domains, default dependencies and complete inference contracts. |
+| Aliases | §§3.1 and 5.4 give namespace-level aliases and transparent public source export. | Cycles, substitution and metadata encoding. |
+| Associated types | §§3.1 and 5.4 give requirements, replaceable defaults, qualified bindings, optional `<this T>` and `.via<I>` selection. | Complete associated-equality, inherited-witness rules and metadata. |
 | Partial declarations | §5.12 defines one-identity merge and body-provision rules. | Detailed merge compatibility and attribute multiplicity. |
 | Core primitive declarations | §2 preserves reserved primitive identities with a privileged backing field. | Artifact identity, permitted members and separate-compilation enforcement. |
 | Fields | §3.1 sketches instance fields. | Applicable attribute contracts and layout restrictions. |
-| Constructors | §§3.1 and 5.10 describe owner-named constructors and initialization obligations. | Exact construction-completion contract spelling. |
-| Properties | §§3.1, 5.10 and 5.12 describe accessors, backing storage, property-local `field` and explicit accessor attribute targets. | Mixed auto/explicit backing, effect/attribute applicability, ref returns and indexers. |
+| Constructors | §§3.1 and 5.10 give `ensure P is init` minimum guarantees and repeatable unpublished init-property writes. | Completion validation hooks, value/effect compatibility and metadata encoding. |
+| Properties | §§3.1, 5.10 and 5.12 give mixed backing, receiver modes, expression bodies and authored indexers. | Implicit storage initialization, ref-result contracts and metadata. |
 | Operators | §§3.1, 5.7 and 5.13 describe nominal unary/binary operators and distinct compound-operation contracts. | Compound-operator declarations, tokenization, places and evaluation order. |
 | Conversions | §§3.1 and 5.12 sketch `operator T(U source)` and explicit `T(value)`. | Conversion eligibility and constructor/conversion ranking. |
-| Interface members | §§3.1, 5.4 and 5.12 distinguish required members, replaceable defaults, fixed constants and required associated constants; constructors remain deferred. | Explicit witness mapping, inherited-default resolution and representation. |
-| Types | §3.2 sketches recursive types and normalized optionals. | Optional access and associated-type forms. |
+| Interface members | §§3.1, 5.4 and 5.12 give explicit qualified implementations, shared implicit implementations and restricted current-receiver default-body bypass. | Complete inherited-default resolution and representation; constructors remain deferred. |
+| Types | §3.2 gives recursive types, tuple types and normalized optionals. | General ownership/reference-result forms and public tuple ABI. |
 | Ownership | §§3.2 and 5.12 sketch owner forms and explicit transfer. | Complete ownership-form grammar. |
 | Reference access | §§3.2 and 5.12 sketch loans and reference qualifications. | Complete legality of `pin`, `write` and other qualifier combinations. |
-| Parameters | §§3.2, 5.1–5.2 sketch modes and implicit borrowing. | `params`, exact implicit-loan grammar and output-contract clauses. |
-| Arguments | §§3.2 and 5.1 sketch labels and `init` arguments. | Legal passing-mode and place combinations. |
+| Parameters | §§3.2, 5.1–5.2 give modes, final `params`, eligible Copy defaults and direct/named attribute targets. | Complete qualifier legality and output/loan metadata. |
+| Arguments | §§3.2 and 5.1 give labels, source-order evaluation and position-preserving named/positional mixtures. | Complete passing-mode/place and overload contracts. |
 | Statements | §3.3 sketches blocks, transfers and standalone discard. | Statement-place checks and producer/async statements. |
 | Iteration | §3.3 sketches by-value and `ref`/`mut ref` `for (... in ...)`; §5.12 names `do`. | Iterator loan/backing contracts and post-test loop production. |
-| Expressions | §3.4 sketches precedence, type calls and initializers. | Conditional expressions, lambdas and collections. |
-| Patterns | §§3.3–3.4 sketch bounded `is` tests. | Full matching, guards and combinator binding. |
-| Policies | §§3.3–3.4 and 5.12 describe lexical preferences, fallback and strict `require policy`. | Variant-declaration syntax, const-enum formals and compile-time queries. |
+| Expressions | §3.4 gives conditional/coalescing/optional access, tuples, target-directed lambdas and collection spreads. | Callable capture/representation and collection-fragment contracts; comprehensions/repetition deferred for library/tensor design. |
+| Patterns | §3.3 gives shared switch arms, guarded matching, compatible `or` bindings and explicit constant/wildcard transfers. | Full nominal-case, relational and destructuring patterns. |
+| Policies | §§3.3–3.4 and 5.12 describe lexical preferences, strict selection and constant-formal forwarding. | Variant-declaration syntax and compile-time queries. |
 | Contracts | §§3.3 and 5.8 describe `require` and `ensure` direction. | Declaration clauses and correlated output facts. |
 | Static proof | §5.9 describes the portable static-proof floor. | Constant-evaluation and symbolic source forms. |
-| Exceptions | §3.3 sketches `try` and `catch`. | Typed catches and exception expressions. |
+| Exceptions | §§3.3–3.4 give typed/bare catches, filters, throw expressions, rethrow and explicit captured-failure propagation. | Catch eligibility, capture APIs, transport, unwind phase and chaining metadata. |
 | Cleanup | §§3.3 and 5.12 distinguish lexical `defer` from `[Cleanup]`. | Defer action validation and attribute placement. |
 | Finalization | §5.12 does not equate GC finalization with cleanup. | Whether finalizers exist and their lifecycle/ABI contract. |
 | Documentation comments | §§1 and 5.14 describe attachment and structured prose direction. | Exact markup/reference grammar and XML artifact schema. |
