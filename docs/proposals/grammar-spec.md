@@ -138,9 +138,20 @@ JSON braces and interpolates `count`. Quote-fence length and brace-delimiter
 length are independent. Raw text segments perform neither backslash escape
 decoding nor brace doubling. Hole expressions retain ordinary lexical and
 parsing rules; their nested literals and delimiters are not outer text
-segments. `lexer-raw-interpolated-content` denotes these alternating segments
-and holes under the selected delimiter lengths. Longer text brace runs,
-multiline framing and exact recovery remain separate lexical design work.
+segments. In text mode, an opening brace run of length `R`, with
+`N <= R < 2N`, emits its first `R - N` braces literally and uses its final
+`N` braces to open a hole. After parsing the hole expression, a closing
+run of that range uses its first `N` braces to close the hole and emits the
+remaining braces literally. Expression-owned nested delimiters are parsed
+as expression syntax before identifying the hole closer. A closing run
+requiring a hole when no hole is open rejects.
+Boundary runs of `2N` or more reject; increase the dollar count for longer
+literal runs. Thus `$$"""{{{value}}}"""` emits literal braces around the
+formatted value. The split is fixed by lexical position and delimiter
+count, never by testing alternative expression interpretations.
+`lexer-raw-interpolated-content` denotes these alternating segments and
+holes under the selected delimiter lengths. Multiline framing and exact
+recovery remain separate lexical design work.
 Both interpolated forms use the same checked target-directed handler and
 capture/drain contracts in §3.4.
 
@@ -1857,7 +1868,7 @@ appears in §2.
 | Concept | Defined direction | Still to specify |
 |---|---|---|
 | Lexical tokens | §2 gives identifier and reserved-word forms; primitive names are identifiers with reserved bindings. | Exact contextual-word classification and `HexFloat` token boundaries/diagnostics. |
-| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw quote fences, `$"..."` interpolation and `$`-count raw interpolation. | Complete floating token recovery, character diagnostics, raw boundary/multiline/long-brace rules, format/alignment spelling and registered text APIs. |
+| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw quote fences, `$"..."` interpolation and deterministic `$`-count raw interpolation. | Complete floating token recovery, character diagnostics, raw quote-boundary/multiline rules, format/alignment spelling and registered text APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or block namespaces, without mixing. | Nested namespace blocks and namespace-local imports. |
 | Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
