@@ -150,24 +150,26 @@ properties or a complete standard library. The Core artifact identity,
 full permitted member forms and enforcement across separate compilation
 remain open design work.
 
-`void` is a distinct keyword. The current lexer's keyword tokens are `using`,
-`namespace`, `public`, `internal`, `private`, `static`, `void`, `var`, `mut`,
-`ref`, `out`, `if`, `else`, `while`, `return`, `true`, `false`, `struct`,
-`class`, `interface`, `enum`, `union`, `unique`, `own`, `move`, `new`, `for`,
-`foreach`, `break`, `continue`, `switch`, `case`, `default`, `null`, `async`,
-`await`, `require`, `try`, `catch`, `finally`, `throw`, `unsafe`, `abstract`,
-`operator`, `where`, and `write`. Recognition alone does not authorize any
-source form. `abstract` remains a reserved lexical token for the bounded
-parser's existing syntax; it is not a declaration modifier in the target
-interface grammar below. Candidate words such as `init`, `implicit`, `params`,
-`ensure`, `get`, `set`, `some`, `is`, `const`, `do`, `when`, `yield`, `extern`,
-`extension`, `unchecked`, `defer`, `base`, `pin`, and `this` need explicit
-keyword-versus-contextual-token decisions before adoption; they are not all
-current keyword tokens. `default`, `operator`, and `write` already have
-keyword tokens; `init` is the accepted target initialization-loan spelling.
-In particular,
-§3.4 uses `is` contextually although it is not a current keyword token. `_` is
-its own reserved token.
+`void` is a distinct keyword; primitive type spellings are not keyword
+tokens. The table groups spelling by purpose, not grammar legality. "Current"
+means the lexer recognizes the token; "candidate" needs a keyword-versus-
+contextual-token decision and is not necessarily implemented.
+
+| Purpose | Current lexer tokens | Candidate words in the target grammar |
+|---|---|---|
+| Files, visibility and declarations | `using`, `namespace`, `public`, `internal`, `private`, `static`, `struct`, `class`, `interface`, `enum`, `union`, `operator`, `where` | `extern`, `extension`, `partial` |
+| Types, ownership and parameters | `void`, `var`, `mut`, `unique`, `own`, `ref`, `out`, `write` | `init`, `implicit`, `params`, `pin`, `const` |
+| Control flow, cleanup and policies | `if`, `else`, `while`, `for`, `foreach`, `break`, `continue`, `switch`, `case`, `default`, `return`, `require`, `try`, `catch`, `finally`, `throw`, `async`, `await`, `unsafe` | `in`, `do`, `when`, `yield`, `defer`, `policy` |
+| Values, matching and members | `true`, `false`, `null`, `move`, `new` | `some`, `is`, `and`, `or`, `not`, `get`, `set`, `field`, `this`, `ensure` |
+| Legacy lexer only | `abstract` | none |
+
+Recognition alone does not authorize a source form. `abstract` remains
+reserved for the bounded parser's legacy syntax, not a target declaration
+modifier; `out` remains implemented but the target uses `init ref<T>` for
+initialization loans. `default`, `operator`, and `write` already have keyword
+tokens. §3.4 uses `is` contextually although it is not currently a keyword.
+`_` is a distinct reserved token. No `unchecked` source keyword is proposed:
+arithmetic selection uses policy cases instead.
 
 ## 3. Candidate grammar productions (PROPOSED)
 
@@ -190,6 +192,7 @@ TopDeclaration = TopPrefix, ( StructDecl | ClassDecl | InterfaceDecl
                               | EnumDecl | FunctionDefinition ) ;
 MemberDeclaration = MemberPrefix,
                     ( ConstructorDecl | FunctionDefinition | OperatorDefinition
+                    | ConversionDefinition
                     | FieldDecl | PropertyDefinition ) ;
 InterfaceMemberDeclaration = InterfaceMemberPrefix,
                              ( InterfaceFunction | InterfaceOperator
@@ -199,7 +202,7 @@ MemberPrefix    = ContextualPrefix ;
 InterfaceMemberPrefix = ContextualPrefix ;
 Attribute       = "[", Identifier, "]" ;
 DeclarationModifier = "public" | "internal" | "private" | "static"
-                    | "mut" | "unique" | "unsafe" ;
+                    | "mut" | "unique" | "unsafe" | "partial" ;
 
 StructDecl      = "struct", Identifier, [ TypeParameterList ],
                   [ ConformanceList ], { ConstraintClause },
@@ -219,17 +222,24 @@ IntegralType    = DottedIdentifier ;
 ConstantExpression = Expression ;
 ConstructorDecl = Identifier, ParameterList, Block ;
 FunctionDefinition = Type, Identifier, [ TypeParameterList ], ParameterList,
-                     { ConstraintClause }, Block ;
+                     { ConstraintClause }, ( Block | ";" ) ;
 InterfaceFunction = Type, Identifier, [ TypeParameterList ], ParameterList,
                     { ConstraintClause }, ( ";" | Block ) ;
 OperatorDefinition = Type, "operator", OperatorSymbol, ParameterList, Block ;
+ConversionDefinition = "operator", Type, "(", Type, Identifier, ")", Block ;
 InterfaceOperator = Type, "operator", OperatorSymbol, ParameterList,
                     ( ";" | Block ) ;
 FieldDecl       = Type, Identifier, [ "=", Expression ], ";" ;
-PropertyDefinition = Type, Identifier, "{", GetterDefinition, "}" ;
-GetterDefinition = { Attribute }, "get", Block ;
-InterfaceProperty = Type, Identifier, "{", InterfaceGetter, "}" ;
+PropertyDefinition = Type, Identifier, "{", GetterDefinition,
+                     [ SetterDefinition | InitDefinition ], "}" ;
+GetterDefinition = { Attribute }, "get", ( Block | ";" ) ;
+SetterDefinition = { Attribute }, "set", ( Block | ";" ) ;
+InitDefinition   = { Attribute }, "init", ( Block | ";" ) ;
+InterfaceProperty = Type, Identifier, "{", InterfaceGetter,
+                    [ InterfaceSetter | InterfaceInit ], "}" ;
 InterfaceGetter = { Attribute }, "get", ( ";" | Block ) ;
+InterfaceSetter = { Attribute }, "set", ( ";" | Block ) ;
+InterfaceInit   = { Attribute }, "init", ( ";" | Block ) ;
 
 TypeParameterList = "<", Identifier, { ",", Identifier }, ">" ;
 ConstraintClause  = "where", Identifier, ":",
@@ -250,9 +260,12 @@ Core's privileged primitive declaration uses `StructDecl` and `FieldDecl`
 without a separate grammar production; its binding and representation
 restrictions are semantic checks, not lexical exceptions.
 
-Top-level and concrete function/operator definitions and concrete property
-getters have bodies. Only interface function, operator, and getter declarations
-may end in `;`; that form requires a conformance implementation. A body on an
+Top-level and concrete function/operator definitions have bodies unless
+explicitly marked `partial`; a bodyless partial function must have exactly
+one matching implementation in the compilation. A concrete property accessor
+ending in `;` uses checked compiler-generated backing storage; an explicit
+accessor needs a body. Interface members may end in `;` to require a
+conformance implementation. A body on an
 interface member supplies a default. For each inherited interface member, a
 checked nominal conformance maps its declaring-interface member identity to a
 compatible explicit implementation when present, otherwise to its default
@@ -266,7 +279,12 @@ These are interface contract and witness rules, not concrete inheritance (see
 Operators belong to the declaring nominal type or an interface contract,
 **not** a global declaration. Retroactive behavior for another type needs an
 explicit adapter or wrapper witness, not a global extension operator. A
-bodyless static interface operator is a required compile-time witness; a
+conversion declaration `operator T(U source)` is a separate nominal member
+form with result `T` and one by-value `U` input, invoked explicitly as
+`T(source)`. It requires `static` and has no separate return-type prefix or
+conversion keyword. Constructor-versus-conversion ranking and duplicate source-/target-owned
+conversion eligibility remain open; declaration order cannot break ties.
+A bodyless static interface operator is a required compile-time witness; a
 bodyful one supplies a default. Static operator witness selection needs no
 runtime vtable. The candidate generic type parameters and conformance lists
 apply to structs **and** classes; interface base lists express interface
@@ -274,12 +292,13 @@ composition, not implementation of an interface by itself.
 The candidate integral enum base and constant-valued members preserve unnamed
 underlying values; `[Flags]` is an optional declaration contract, not a
 different closed enum grammar. `IntegralType` and `ConstantExpression` require
-semantic restrictions beyond their syntactic approximations. Only a
-named getter-only property is proposed here; neither property production is an
-indexer or `this[...]` form. `get` is a candidate contextual token;
-accessor effects attach to its attributes, not the entire property. The exact
-property/accessor grammar, attribute targets, modifier applicability and
-ordering remain **OPEN**. Constructors must name their enclosing type. The
+semantic restrictions beyond their syntactic approximations. Only a named property is proposed here; neither property production is an
+indexer or `this[...]` form. `get`, `set` and accessor `init` need lexical
+decisions; accessor effects attach to their attributes, not the entire
+property. A `set` or `init` body receives a typed `value` parameter; `init`
+is construction-only. The interaction of mixed explicit/automatic accessors,
+attribute targets and modifier applicability remains **OPEN**. Constructors
+must name their enclosing type. The
 lexer does not yet recognize `++` or `--` as single tokens; their inclusion in
 `OperatorSymbol` is a future source-form proposal, not executable syntax.
 Nested type declarations are deliberately excluded from this candidate
@@ -345,8 +364,9 @@ accepted forms.
 ```ebnf
 Block           = "{", { Statement }, "}" ;
 Statement       = Block | IfStatement | WhileStatement | ForStatement
+                | ForEachStatement
                 | RequireStatement | TryStatement | UnsafeStatement
-                | UncheckedStatement | DeferStatement | PolicyStatement
+                | DeferStatement | PolicyStatement
                 | ReturnStatement | LoopTransfer | LocalDecl
                 | DiscardStatement | AssignmentStatement
                 | ExpressionStatement | ";" ;
@@ -357,11 +377,12 @@ ForStatement    = "for", "(", [ ForInit ], ";", [ Expression ], ";",
                   [ ForStep ], ")", Block ;
 ForInit         = LocalDeclNoSemi | ExpressionStatementNoSemi | empty ;
 ForStep         = ExpressionStatementNoSemi | empty ;
+ForEachStatement = "for", "(", [ "mut" ], ( "var" | Type ), Identifier,
+                   "in", Expression, ")", Block ;
 RequireStatement = "require", Expression, ";" ;
 TryStatement    = "try", Block, ( "finally", Block
                   | "catch", Block, [ "finally", Block ] ) ;
 UnsafeStatement = "unsafe", Block ;
-UncheckedStatement = "unchecked", Block ;
 DeferStatement  = "defer", ( Expression, ";" | Block ) ;
 PolicyStatement = [ "require" ], "policy", PolicyCases, Block ;
 ReturnStatement = "return", [ Expression ], ";" ;
@@ -382,8 +403,9 @@ candidate. `catch` has no exception type or binding syntax. Assignment is a
 statement-level form, not a general right-associative expression; its left
 expression must pass a writable-place check, which this syntactic
 approximation does not define. `DiscardStatement` is only the standalone
-discard form: `_` is not an identifier, pattern wildcard, or omitted lambda
-parameter. Recovery forms are not alternate accepted syntax.
+discard form: `_` here is not an identifier or a pattern wildcard. In a
+pattern it is a separate nonbinding wildcard; it is not an absence literal.
+Recovery forms are not alternate accepted syntax.
 
 ### 3.4 Expressions and precedence
 
@@ -425,16 +447,17 @@ Multiplicative  = Unary, { ( "*" | "/" | "%" ), Unary } ;
 Unary           = ( "+" | "-" | "!" | "~" | "move" ), Unary | Postfix ;
 Postfix         = Primary, { ( ".", Identifier | Arguments
                              | "[", Expression, "]" ) } ;
-Primary         = "(", [ Expression ], ")" | "new", Type, Arguments
+Primary         = "(", [ Expression ], ")" | "new", Type, Arguments,
+                  [ ObjectInitializer ]
                 | Number | String | Boolean | Null
                 | Identifier | Identifier, TypeArguments, Arguments
                 | "unsafe", "(", Expression, ")"
-                | "unchecked", "(", Expression, ")"
                 | [ "require" ], "policy", PolicyCases, "(", Expression, ")"
-                | "base", "<", Type, ">" ;
+                | "default", "<", Type, ">" ;
 TypeArguments   = "<", Type, { ",", Type }, ">" ;
 PolicyCases     = "<", PolicyCase, { ",", PolicyCase }, ">" ;
 PolicyCase      = DottedIdentifier ;
+ObjectInitializer = "{", { Identifier, "=", Expression, ";" }, "}" ;
 ```
 
 `HexFloat` participates in the proposed `Number` alternative above; the
@@ -449,10 +472,9 @@ prefix-cast, or general assignment expressions. `T(expression)` is an
 ordinary type-call-shaped expression; its checked-conversion interpretation
 is semantic.
 `unsafe(expr)` scopes caller-unsafe obligations to the expression; it is
-not a cast and does not switch arithmetic policy. `unchecked(expr)` selects
-declared unchecked variants only for participating operations inside the
-expression, without changing unrelated checks or callees. The block forms
-scope the same respective rules over their bodies. `base<I>.Member(...)`
+not a cast and does not switch arithmetic policy. Policy blocks and
+expressions select declared variants under §5.12; there is no separate
+`unchecked` expression or block. `default<I>.Member(...)`
 directly selects a named interface's available default body under a checked
 conformance; ordinary interface calls still use the selected witness.
 
@@ -738,7 +760,12 @@ and has no name-dependent fallback. Positional wildcard patterns and omitted
 lambda parameter names are separate nonbinding contexts; they do not consume
 the matched value or alter argument evaluation/parameter mode. A possible
 generic type hole is another distinct nonbinding grammar role, not a named
-identifier and not approved by the discard decision.
+identifier and not approved by the discard decision. In a match over `T?`,
+`some` covers the present case and `_` can cover the remaining absent case
+when those are the only possibilities. The wildcard still means "any
+remaining value", not `none`: it also matches other unhandled cases if the
+matched type has them. `null` remains the optional absence value. The
+switch/pattern productions and exhaustiveness rules remain to be specified.
 
 ```terrum
 // Accepted discard semantics; candidate source form:
@@ -874,22 +901,23 @@ soundly redundant. A runtime alternative is unavailable for compile-time-only
 layout/type/metadata requirements and does not weaken structural lifetime or
 initialization safety. No example fixes the exact source spelling.
 
-### 5.10 Getter-only properties and accessor-local effects (accepted direction)
+### 5.10 Properties and accessor-local effects
 
-**Accepted target direction:** this brief is limited
-to explicit getter-only, by-value properties on compact `Copy` structs and
-source classes. It does not adopt setters, auto-properties, ref-returning
-properties, or general property/accessor behavior.
+**Previously accepted minimum:** explicit getter-only, by-value properties
+on compact `Copy` structs and source classes. **Proposed extension:** `get`,
+`set`, and construction-only `init` accessors, including backed
+auto-properties; the source forms in §3.1 are candidates, not implemented
+grammar. Ref-returning properties and indexers remain separate questions.
 
 Interface properties are separate contract members: a bodyless interface
 getter requires a conformance implementation, while a getter body supplies a
-default under §5.12. This does not broaden the accepted concrete-property
-direction above. Indexers (including the core-library `this[...]` sketches)
-have no production here and remain design-only.
+default under §5.12. Indexers (including the core-library `this[...]` sketches) have no production
+here and remain design-only.
 
-An explicit concrete getter body should make the getter an ordinary checked
-read-only callable member; `{ get; }` on a concrete type is not a body form.
-Accessor attributes such as `[NoThrow]` attach to the getter:
+An explicit concrete getter body makes the getter an ordinary checked
+read-only callable member; `{ get; }` generates a backed auto-getter under
+the proposed extension. Accessor attributes such as `[NoThrow]` attach to
+the getter:
 
 ```terrum
 // Candidate property form illustrating the accepted direction:
@@ -929,8 +957,29 @@ do not infer a hidden `get_Name` function from a property name. A module may
 encode the accessor as a callable internally, but consumers bind the declared
 property/accessor identity and contract rather than a magic naming convention.
 
-The exact property and accessor grammar, effect placement, and metadata
-representation remain open. This example does not claim compiler support.
+The candidate productions cover named accessors; mixed explicit/automatic
+backing rules, effect placement, and metadata representation remain open.
+This example does not claim compiler support.
+
+**Proposed construction rule:** a constructor initializes all private state
+it does not leave to declared `init` properties. Its published completion
+contract identifies which `init` properties it establishes and which remain
+obligations for its caller; the exact postcondition syntax is not fixed by
+`ensure Prop is init` as an illustrative phrase. The caller must initialize
+each remaining property before the object is fully constructed. In
+`new T(...) { P = value; }`, initializer entries execute in source order
+after the constructor, within the same unpublished construction phase.
+Construction publishes the object only after all storage and property
+obligations are fulfilled and the final invariant/postcondition checks
+succeed. Failures clean partial state without publishing a live object.
+This is not a general right to invoke `init` on an already constructed value.
+Direct `new T(...).with(P: value)` may use an explicitly declared
+initializer-completion operation with the same gate; the qualifying
+annotation, validation hook, update syntax and ordinary wither contract
+remain open. A normal `.with(...)` on an already live value instead produces
+a separately validated updated value; it cannot mutate its source through
+`init`. No `required` modifier is needed solely to express constructor
+completion obligations.
 
 ### 5.11 Nested types and scoped operators
 
@@ -995,18 +1044,19 @@ representation remain open. Do not infer legality from the permissive
 writable property accessor; `when` a pattern guard; `yield` a producer
 suspension point; `extern` an externally implemented declaration; and
 `extension` a scoped extension declaration. Their productions, restrictions,
-effects and lowering remain open. `unsafe` and `unchecked` each have block
-and parenthesized-expression forms in this proposal; default arithmetic
-remains checked without a `checked` source toggle. `defer` registers an
+effects and lowering remain open. `unsafe` has block and
+parenthesized-expression forms; default arithmetic remains checked.
+`defer` registers an
 explicit lexical-block-exit action (not automatic `[Cleanup]`, function-exit
 deferral, or delayed live-value destruction). One scope's registered actions
 can share a cleanup region, but conditional registration and reverse order
 must remain observable. Failures obey the same chaining and propagation
 rules as an authored `finally`; `defer` does not introduce unsafe recovery.
 
-`default` labels a switch arm, not an interface call. `base<I>.Member(...)`
-selects the named interface's default body directly, not stateful base-class
-inheritance or implicit linearization. The form may also apply to an
+`default` labels a switch arm and introduces `default<I>.Member(...)`,
+which selects the named interface's default body directly without inventing a
+default value for `I`, stateful base-class inheritance or implicit
+linearization. The form may also apply to an
 explicit adapter implementing an extension interface, but cannot reach an
 unrelated extension or fabricate conformance. Calls made within a default
 body still dispatch through the selected witness. Access, effects and diamond
@@ -1014,10 +1064,36 @@ resolution are checked. No `override` keyword is proposed: an explicit
 conformance implementation replaces an available default by member identity,
 not by a same-named declaration. `pin` qualifies `ref<T>` in `Type`, not
 `ptr<T>` or a pinning statement; `pinned` need not also be a keyword.
+`field` is available only within its property accessors, as the checked
+backing place of that property, not through ordinary member lookup; its write
+authority depends on the property's backing-storage contract. Backing fields
+occupy the property's position in field order, as do auto-properties: an
+explicit field `a`, auto-property `b`, computed property `c`, field-backed
+property `d`, and explicit field `e` have storage order `a, b, d, e`.
+This order also applies to layouts where field order is observable.
+`partial` merges explicitly marked type/member declarations across files
+in one module, including generated parts, in the order the compiler receives
+the files and then source order within each file. Every merged part must
+declare `partial`, have matching kind and generic identity, and yield one
+resulting identity without duplicate members or implementations. A partial
+member may have a bodyless defining part, but exactly one implementation
+body must be provided in the compilation; the implementing part cannot
+change its signature, published contract or accessor shape. Explicitly
+repeated visibility, modifiers, constraints and contract-affecting attributes
+must agree, but need not be repeated on every part. Compatible noncontract
+attributes combine in input/source order subject to their multiplicity rules.
+A source generator running within the compilation may supply new parts and
+implementations, but must not add or alter the published contract of an
+existing declaration, including making a method unsafe or changing a
+type's layout. Independently pre-generated files have ordinary source-file
+status, not the compiler-known provenance of an in-compilation generator.
+Detailed merge compatibility and mixed auto/explicit backing rules remain open.
 
-**Policy selection (PROPOSED):** initially, policy enum domains are defined
-by Core, and methods may declare variants of their own unannotated base
-declaration. Resolve that base by ordinary overload rules first. Variants
+**Policy selection (PROPOSED):** policy domains may be Core-defined or
+user-defined enums. A policy case is a compile-time preference for a variant
+of the method being called, not a hook or interception mechanism. Methods may
+declare variants of their own unannotated base declaration. Resolve that
+base by ordinary overload rules first. Variants
 have the same parameter/result types and ownership/loan shape; effects may
 differ by policy. No imported extension can attach a variant to an unrelated
 declaration. A `policy<Domain.Case>` scope is a preference, not a guarantee:
@@ -1038,9 +1114,18 @@ not exponential in the number of active domains. A `require policy<...>`
 scope is a strict boundary: calls within it must select a variant satisfying
 its complete case tuple, rather than silently using an incompatible variant
 or the base. All other policy scopes preserve ordinary fallback. The exact
-source annotation on variant declarations and the relationship to existing
-`unchecked` syntax remain open; no policy may manufacture access, lifetime,
-initialization, unsafe authorization or a runtime GC exclusion lease.
+source annotation on variant declarations remains open; no policy may
+manufacture access, lifetime, initialization, unsafe authorization or a
+runtime GC exclusion lease.
+
+Core-defined arithmetic policy cases may have compiler-known overflow
+contracts, allowing sound arithmetic optimization for their selected
+variants. User-defined policy cases select declared variants by the same
+rules, without automatically acquiring Core's intrinsic semantics. A
+preference such as `policy<Arithmetic.Wrap>` may fall back to the unannotated
+checked operation when no variant matches; use
+`require policy<Arithmetic.Wrap>` when wrapping selection is required. The
+names of the Core cases remain to be specified.
 
 The `policy<...>` arguments above are compile-time enum values; this does not
 select a syntax for const-value generic formals. A future generic formal
@@ -1049,17 +1134,20 @@ binding, but ordinary runtime enum parameters require explicit dispatch and
 cannot select different source overloads depending on inlining. A query such
 as `if (policy<P>)` remains open until compile-time conditional and generic
 rules specify whether it tests the active request or a particular call's
-selected variant. User-defined policy domains are a separate future question:
-their authors cannot retroactively intercept another owner's methods, and
-their enum case alone cannot prove a mathematical law about a variant.
+selected variant. A policy case names the requested variant; its name does
+not by itself impose additional semantic obligations. `require policy<...>`
+guarantees selection of a matching variant, not properties beyond that
+variant's declared contract.
 
-Type-call conversions already use `T(expression)`; `cast` and `explicit`
-are not needed to invoke them. User-defined conversion *declarations*, raw
-reinterpretation, and their safety constraints still need contracts before
-selecting declaration or expression keywords. `operator` already has a token
-and is required for the proposed type/interface-scoped operator declarations.
-Do not reserve iteration or pattern words beyond `foreach`, `is`, `some`,
-`when` and `yield` merely by analogy with another language. Reflection and
+Type-call conversions already use `T(expression)`. The proposed user
+conversion declaration `operator T(U source)` fixes its destination type
+at declaration; it does not grant raw reinterpretation or implicit
+conversion. Conversion ownership, ambiguity, effects and safety constraints
+remain open. `operator` already has a token; `cast` and `explicit` need not
+be reserved solely to declare or invoke a checked conversion.
+`in` marks the proposed iteration form; `and`, `or` and `not` combine
+patterns, distinct from Boolean `&&`, `||` and `!`. The full pattern and
+iteration binding rules remain open. Reflection and
 layout queries, allocation forms, and pinning need separate semantic and
 representation decisions before choosing between intrinsic names and
 keywords; `new` already covers the proposed ordinary allocation form.
@@ -1159,10 +1247,10 @@ proposal, and accepted semantics do not approve its syntax.
 |---|---|---|
 | Lexing, keywords, built-in names | The canonical current lexer contract is [lexical grammar](../lexical-grammar.md); §2 includes `HexFloat` in the proposed `Number` production. Primitive spellings are identifier tokens with reserved type bindings; `void` is a keyword. | `abstract` remains a lexical token for legacy parser syntax, not a target modifier. `is` is used contextually but is not a current keyword token; `get`, `some`, `init`, `implicit`, `params`, `ensure`, and `const` need token decisions. The bounded `--corelib` mode attaches APIs to six compiler-owned primitives; Core artifact identity and full member contracts remain open. |
 | Files and nominal declarations | **P** §3.1 sketches using/file namespace, top-level functions, structs, classes, interfaces, and integral-base enums; interface bases differ from nominal conformances. | Exact modifier/attribute legality and enum constant restrictions remain open. No union or nested nominal declaration is proposed; recursive generic type arguments in `Type` are not excluded. |
-| Constructors, members, operators, properties | **P** §3.1 requires bodies for concrete functions/operators/getters; constructors name their owner; operators are type/interface members, not global declarations. **A** §5.7 specifies unary operator direction; §5.10 limits property direction to explicit getter-only by-value properties. | Interface `;` versus body forms are separated in §3.1. Property/accessor effects, attribute targets, and metadata remain **O**; setters, auto/ref-return properties and indexers are not adopted. `++`/`--` appear only as future operator spellings, not current lexer tokens. |
+| Constructors, members, operators, properties | **P** §3.1 sketches concrete members, `get`/`set`/`init` and backed auto-properties; constructors name their owner; operators are type/interface members, not global declarations. **A** §5.7 specifies unary operator direction; §5.12 fixes property-local `field`, storage ordering for backed/auto-properties, and partial merge order and implementation requirements. | Interface `;` versus body forms are separated in §3.1. Mixed accessor backing, attribute targets, effect metadata and construction-completion contract syntax remain **O**; ref-return properties and indexers are not adopted. `++`/`--` appear only as future operator spellings, not current lexer tokens. |
 | Interface witnesses and dispatch | **A** §5.12: bodyless members require checked implementations; bodies supply replaceable defaults, selected by declaring-member identity. **P** §3.1 sketches the corresponding `;`/body forms. Static operator witnesses need no runtime vtable. | Explicit mapping syntax, metadata/ABI, inherited-default resolution syntax, and compatible binding for older witnesses remain **O**. No physical slot layout is selected. |
 | Types, parameters, arguments, modifiers | **P** §3.2 sketches recursive type arguments, one optional marker, `ref`/`mut ref`/`init ref<T>`, labels, `init` arguments and `pin` on references. `mut`, `unique`, `unsafe`, visibility and `static` are candidate modifier vocabulary. | `implicit ref<T>`, `write` parameter legality, `params`, generic defaults/inference, associated types, `ensure` contracts and exact modifier combinations remain **O**. Prefix names are context-valid placeholders; `abstract` is deliberately absent from target modifiers. |
-| Statements and expressions | **P** §§3.3–3.4 sketch blocks, control flow, locals, calls, assignments, `policy<...>` scopes, precedence, `is null`/`is some`, and `T(expression)`. **A** §5.6 gives standalone discard semantics; §3.3 records its distinct `_ = expression;` form. | Assignment's left side needs a writable-place check; catch typing/binding, policy-variant declaration syntax, const-enum generic form, constant-evaluation/static-proof syntax, and omitted constructs (including lambdas, patterns, `throw`, `await`, conditional expressions and general assignment expressions) remain outside this grammar. `is`/`some` token treatment remains open. |
+| Statements and expressions | **P** §§3.3–3.4 sketch blocks, `for (... in ...)`, object initializers, calls, assignments, `policy<...>` scopes, precedence, `is null`/`is some`, and `T(expression)`. **A** §5.6 gives standalone discard and nonbinding wildcard semantics; §3.3 records the distinct `_ = expression;` form. §5.12 admits user-defined policy enum domains. | Assignment's left side needs a writable-place check; catch typing/binding, policy-variant declaration syntax, const-enum generic form, constant-evaluation/static-proof syntax, and omitted constructs (including lambdas, patterns, `throw`, `await`, conditional expressions and general assignment expressions) remain outside this grammar. Pattern combinator and iteration binding rules remain open. |
 | Literals and compound operations | **P** `HexFloat` is part of the proposed `Number` and `Primary`; **I** currently covers decimal/hex/binary integer tokens, decimal fractional tokens and strings, not hex floats or executable floating literals. **A** §5.13 separates compound-operation semantics from `+`. | Hex-float token diagnostics and floating-value semantics still need implementation. Compound-assignment spelling, tokens, places and evaluation rules are **O**; `+=`…`^=` shorthand in §5.13 is not legal grammar. |
 | Cleanup and finalizers | **A** deterministic `[Cleanup]` is distinct from GC finalization; **I** support is listed by the implementation reference. | Attribute placement is still governed by open contextual-prefix rules. No finalizer production is proposed; whether to support one and its lifecycle/ABI contract remain **O** (§5.12). |
 | Implemented boundary | **I** is defined only by [implementation](../implementation.md), not by this proposal's examples or productions. | Nothing marked **P** is thereby implemented or source-compatible. |

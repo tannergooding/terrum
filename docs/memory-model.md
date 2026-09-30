@@ -897,7 +897,7 @@ are not part of the initial operation set.
 
 ### Arithmetic policy
 
-Default arithmetic remains checked. Lexical `unchecked` selects an explicitly
+Default arithmetic remains checked. A policy scope can select an explicitly
 declared wrapping variant of a participating arithmetic operation:
 
 The marker and declaration forms below are schematic; exact syntax and
@@ -905,16 +905,17 @@ metadata remain to specify.
 
 ```text
 MemoryPrimitives.AtomicAdd(location, amount)
-unchecked(MemoryPrimitives.AtomicAdd(location, amount))
+require policy<Arithmetic.Wrap>(MemoryPrimitives.AtomicAdd(location, amount))
 ```
 
-The preferred declaration model is a checked/unchecked pair with the same
-operation name and parameter/result shape. Binding selects the declared variant
-and its effects; it does not dynamically propagate checkedness into arbitrary
-callees. Nonparticipating calls retain their declared behavior. A participating
-operation lacking the requested variant diagnoses rather than silently changing
-policy. Exact declaration syntax and metadata remain open; a compile-time
-policy parameter may implement the pair without duplicating bodies.
+The Core domain and case names in this example are illustrative. The
+unannotated checked operation and a wrapping variant share a name and
+parameter/result shape. Binding selects the variant and its effects; it does
+not dynamically propagate arithmetic policy into arbitrary callees.
+Nonparticipating calls retain their declared behavior. A plain
+`policy<Arithmetic.Wrap>` scope is a preference and can fall back to the
+unannotated checked operation; the `require` form above diagnoses a missing
+variant. Exact variant declaration syntax and metadata remain open.
 
 Only overflow policy changes, not atomicity, ordering, bounds, lifetime or
 access permissions. Checked overflow leaves the location unchanged. Return
@@ -928,8 +929,8 @@ designs pending compiler support; they do not silently replace checked
 behavior.
 
 The [conversion policy](conversions.md#conversion-policies) governs lexical
-selection more generally; this does not claim an implemented `unchecked`
-function-declaration feature.
+selection more generally; this does not claim an implemented policy-variant
+declaration feature or a separate `unchecked` source form.
 
 ### Ordering and fences
 

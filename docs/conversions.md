@@ -204,17 +204,20 @@ source/destination witness lookup and user-defined operator declaration grammar
 remain to be specified; consumers must bind to a published contract, never
 inspect a body or silently switch to another policy.
 
-Named wrapping operations remain sufficient for the current sketches. The
-proposed lexical `unchecked` selector chooses a declared unchecked variant of an
-operator, conversion, or arithmetic function at the use site; `AtomicAdd` is an
-example of a function family whose arithmetic policy may be selected
-explicitly. Integer-to-integer conversion wraps modulo 2^N for an N-bit destination;
-floating-to-integer conversion truncates toward zero and saturates, with NaN
-converting to zero. This is not ambient checkedness flowing into arbitrary
-callees. Prefer paired checked and unchecked declarations; exact syntax and
-metadata remain open, and a compile-time policy argument is one possible
-implementation. No unchecked block/parser form is established here. A missing
-requested variant does not fall back to checked behavior or another overload.
+Named wrapping operations remain sufficient for the current sketches.
+Lexical `policy<Arithmetic.Wrap>` selects a declared wrapping variant of an
+operator, conversion, or arithmetic function at the use site; `AtomicAdd` is
+an example of a function family whose arithmetic policy may be selected
+explicitly. Core policy domain and case names are illustrative, not fixed.
+Integer-to-integer wrapping conversion reduces modulo 2^N for an N-bit
+destination; the specified non-checked floating-to-integer conversion
+truncates toward zero and saturates, with NaN converting to zero. Selection
+is not ambient checkedness flowing into arbitrary callees. The unannotated
+operation remains checked. A plain policy scope prefers matching variants,
+then tries enclosing scopes and the unannotated operation; use
+`require policy<Arithmetic.Wrap>` to reject a missing wrapping variant rather
+than silently accept checked behavior. Exact variant declaration syntax and
+metadata remain open; there is no separate `unchecked` block or expression.
 Only arithmetic overflow behavior and the selected conversion policy change;
 bounds, validity, lifetime and other safety checks remain checked. Named
 `AddWrapping` and `Try...` APIs such as `TryAdd` remain explicit library
