@@ -147,6 +147,9 @@ Conditional-expression connectors `?` and `:` require separating trivia
 on both sides. This does not apply to an optional-type suffix, optional
 access, interpolation format suffix or another colon role. Grammar selects
 the role before type checking, without retrying a failed interpretation.
+Declaration-relationship colons require separating trivia on both sides
+in conformance/interface-base lists, enum underlying types and generic
+constraints. Named-prefix, label and format colons retain their separate roles.
 Symbolic prefix operators attach directly to their following operand token;
 symbolic postfix operators attach directly to their preceding operand token.
 Member-access `.` and `?.` must adjoin the receiver's final token or the

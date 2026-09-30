@@ -79,10 +79,10 @@ defined operator/punctuator per contiguous run except explicit contextual
 exceptions.
 Unlike C#, operator-role spacing and attachment are source validity rules.
 
-**Recommendation (under review):** Use an explicit allow list, not a deny
+**Accepted boundary framework:** Use an explicit allow list, not a deny
 list or backtracking over possible expressions. Separate punctuation tokens
 require trivia unless a listed lexical/grammatical boundary permits adjacency.
-The proposed allow list is:
+The boundary inventory is:
 
 | Allowed adjacency | Scope and example |
 |---|---|
@@ -98,8 +98,8 @@ permitted. New operators must be added to the language's defined spelling
 catalog; new adjacency exceptions must be added to this list. Neither a
 formatter nor error recovery guesses an expression from an unlisted run.
 This keeps common indexing concise while making separation the ordinary
-rule and preserving room for future operators. Exact operator-glyph
-membership and adoption of the proposed list remain open.
+rule and preserving room for future operators. Remaining details are
+separated into Q03.1-Q03.7 below; their recommendations are not adopted.
 
 **Additional boundary cases under review:** Delimiter adjacency is a lexical
 permission, not permission to mismatch or arbitrarily interleave nesting.
@@ -268,23 +268,135 @@ connector, while the format colon follows its own grammar.
 differs from C#'s trivia-insensitive spelling. Other colon roles remain
 separate decisions.
 
-**Declaration relationship colon question (awaiting review):** Should `:`
-require separating trivia on both sides in type conformance/base lists,
-enum underlying types and generic constraints?
-**Recommendation:** Yes: use `struct S : I`, `enum E : int32` and
+**Accepted declaration relationship colon spacing:** Require separating
+trivia on both sides in conformance/interface-base lists, enum underlying
+types and generic constraints. Use `struct S : I`, `enum E : int32` and
 `where T : I`, rejecting squashed equivalents. This colon connects declared
 relationships rather than being an attached type suffix. Existing eligibility,
 conformance, underlying-type and constraint checks remain unchanged.
 **C# model:** These declaration spellings are C#-inspired, but mandatory
 separation differs from C#'s trivia-insensitive colon spelling.
-Label, named-argument, tuple-name, attribute-target and interpolation format
-colons are distinct roles. This recommendation has not been accepted.
+Label, named-argument, tuple-name and attribute-target colons remain distinct
+roles. Interpolation already permits ordinary source trivia between suffix
+tokens; quoted format contents retain their literal whitespace. Do not reopen
+that accepted format grammar as an expression-colon spacing question.
 
-**Comment-fence question:** Should a block comment select its closing fence
+#### Q03.1. Exact operator glyph set and lexical priority
+
+**Question:** Which characters participate in a strict operator run, and
+which already-defined lexical forms take priority?
+**Example:** `x + +y` contains separated binary/unary operators;
+`x+++y` rejects, while `"+++"` is literal content.
+
+**C# model:** C# has a finite token catalog and lexical priority, but does
+not apply Terrum's one-assigned-spelling-per-run rule.
+
+**Recommendation:** Enumerate the ASCII glyph set
+`!%&*+-./:<=>?^|~`; exclude grouping/list delimiters and literal/identifier
+introducers such as `$` and `@`. Recognize literals, selected comment forms
+and narrow keyword escapes before operator-run validation. Enumerate
+type-context splitting separately; neither Unicode lookalikes nor recovery
+may invent an operator. This keeps token evolution explicit and auditable.
+
+#### Q03.2. Qualified-name dots outside expression member access
+
+**Question:** Should type, namespace, import and attribute names require
+their qualifying dots to attach on both sides?
+**Example:** `Terrum.Collections.List<T>` versus
+`Terrum .Collections.List<T>` or `Terrum. Collections.List<T>`.
+
+**C# model:** Qualified-name structure is C#-inspired; C# permits trivia
+around these dots.
+
+**Recommendation:** Require both-sided attachment in qualified-name
+syntax, treating the path as one named construction. Keep the already
+accepted either-side rule for expression member access, even when its
+receiver ultimately binds to a type. Select the role from syntax, never
+type lookup. This is stricter than C# and prevents a qualified type/import
+path from being visually fragmented. A long constructed type can still
+wrap inside its generic argument list without splitting the path's dots.
+
+#### Q03.3. Declaration and attribute argument openers
+
+**Question:** Should callable parameter lists, indexer declarations and
+attribute argument lists adopt the receiver/name attachment already chosen
+for calls?
+**Example:** `int32 F(int32 x)`, `Box(int32 x)`,
+`operator +(T x)`, `this[nuint index]` and `[Limit(16)]`.
+
+**C# model:** These declaration shapes are C#-inspired; C# permits trivia
+between the name/operator/`this` and its opener.
+
+**Recommendation:** Attach the opener to the declaration's final name or
+operator token, to indexer `this`, or to the attribute name; retain flexible
+interior trivia. Reject `F (int32 x)`, `operator + (T x)`,
+`this [nuint index]` and `[Limit (16)]`. An operator symbol in a declaration
+is not an expression binary operator, so its declaration spacing comes
+from this role. This gives definitions and uses the same visual boundary.
+
+#### Q03.4. Control-flow grouping and external block spacing
+
+**Question:** Should structural control-flow parentheses and block braces
+have a mandatory outer spacing style?
+**Example:** `if(ready){ ... }` versus `if (ready) { ... }`;
+`else{ ... }` versus `else { ... }`.
+
+**C# model:** C# permits both spellings; formatting is independent of grammar.
+
+**Recommendation:** Keep outer trivia flexible for these structural roles.
+They have no expression receiver, and their fixed delimiters already supply
+boundaries. Preserve inner operator rules and exact statement nesting.
+A formatter can prefer spaced keywords/braces without creating a new
+language requirement. Do not confuse `if (...)` with postfix `f(...)`.
+
+#### Q03.5. Label and named-prefix colons
+
+**Question:** Should a colon naming a label, argument, tuple element or
+attribute target attach to its preceding name/selector?
+**Example:** `outer: while (ready)`, `F(count: value)`,
+`(count: value, other: next)` and `[param(count): Limit(16)]`.
+
+**C# model:** These naming purposes are C#-inspired, but C# permits trivia
+before the colon.
+
+**Recommendation:** Attach the colon to the preceding name or selector's
+closing delimiter; permit ordinary trivia after it. Thus `count: value`
+and `count:value` remain valid, while `count : value` rejects in these
+roles. This keeps the prefix's name and marker together. The tradeoff is
+rejecting padded/leading-colon alignment, unlike the accepted flexible comma
+layout. Declaration relationship colons instead retain their accepted
+both-sided separation. No label scope or attribute schema is selected here.
+
+#### Q03.6. Constant-generic expression boundaries
+
+**Question:** Should direct constant arguments be limited to literals and
+constant names, with other constant expressions parenthesized?
+**Example:** `InlineArray<T, (N >> 1)>` and
+`InlineArray<T, (N >= Minimum ? N : Minimum)>`.
+
+**C# model:** C# has neither value generic formals nor this argument-boundary
+restriction. Ordinary expression grouping is the comparison point.
+
+**Recommendation:** Keep literal/qualified constant-name arguments concise,
+but group compound constant expressions. Under this proposal a negative
+argument uses `(-1)` because its sign is an operator, not part of a literal.
+This prevents comparison/shift glyphs from competing with generic closers
+without redefining their expression meanings. Q12 governs eligible value
+domains and default dependencies separately. Interpolation still accepts a
+full conditional without mandatory grouping.
+
+#### Q03.7. Generalized comment fences and compatibility
+
+**Question:** Should a block comment select its closing fence
 from the opening star count, analogously to the selected delimiter length of
-raw text? Candidate `/*** **/ ***/` would contain `**/` as payload and end at
-the three-star fence. This is not C# block-comment syntax and is not an
-adopted Terrum rule. **Accepted documentation marker:** Documentation adds
+raw text, and how would empty existing comments remain compatible?
+**Example:** Candidate `/*** **/ ***/` contains `**/` as payload and ends
+at the three-star fence. `/**/` exposes the empty-comment compatibility case.
+
+**C# model:** Selected star-count fences are not C# block-comment syntax.
+C# uses a fixed nonnesting `/* ... */` boundary.
+
+**Accepted documentation marker:** Documentation adds
 one slash to the ordinary line/block form: `///` and `//* ... *//`.
 Documentation blocks are recognized before ordinary line comments.
 The longer star-count fences below remain candidates, independent of that
@@ -300,24 +412,15 @@ accepted marker distinction:
 The selected marker is in the canonical source/lexical grammar; a plain
 `/** ... */` is not a documentation form. Select generalized fence syntax,
 including empty/nonoverlapping fences, shorter terminators as payload and whether
-longer terminator-looking runs are payload or errors. **Recommendation:** If
-fences are adopted, use a maximal opening-star count and whole-run closing
+longer terminator-looking runs are payload or errors.
+**Recommendation:** Retain the accepted fixed forms until an explicit,
+versioned fence grammar covers these cases. If fences are adopted, use a
+maximal opening-star count and whole-run closing
 star matches, not a matching suffix inside a longer star run. Specify the
 one-/two-slash closing boundary without consuming a following comment's
-slashes. Do not introduce nesting as an accidental side effect.
-
-**Constant-generic argument boundary question:** Should direct constant
-arguments be limited to literals and constant names (including qualified
-names), with other expressions parenthesized? Candidate
-`InlineArray<T, (N >> 1)>` explicitly separates a shift from generic closers;
-`InlineArray<T, (N >= Minimum ? N : Minimum)>` separates comparison and
-conditional syntax from the argument boundary. Direct `InlineArray<T, N>`
-and `InlineArray<T, 16>` remain concise. Under this proposed rule, unary
-negative arguments also need grouping because their sign is an operator,
-not part of the literal. This does not select constant-value domains or
-default dependencies from Q12. It is not a restriction on interpolation:
-the accepted interpolation grammar already parses a complete conditional
-expression before alignment/format suffixes, without mandatory grouping.
+slashes, and preserve or explicitly version existing empty-comment
+recognition; maximal star counting alone must not silently reinterpret
+`/**/`. Do not introduce nesting as an accidental side effect.
 
 ### Q04. Hex-float versus member-access token boundaries
 
@@ -398,14 +501,23 @@ repeat or merge? Direct/named targets and selectors are already specified.
 not CLR attribute classes, boxed attribute values, or C#'s fixed argument-type
 catalog.
 
-**Recommendation:** Use checked declared argument types with compile-time
-values, explicit target eligibility and explicit multiplicity. Retain
+**Clarified recommendation (awaiting confirmation):** Reuse the language's
+checked, encodable compile-time constant values rather than inventing a
+second evaluator or allowing arbitrary runtime objects. Each resolved
+attribute identity declares its argument schema, applicable targets and
+whether repetition is permitted. Being a constant is necessary, not enough:
+the value must match the attribute's declared argument type and encoding.
+Type-reference arguments require an explicitly supported schema, not an
+implicit first-class type-object API. Retain
 source-order merging only where multiplicity permits it; reject unknown
 targets rather than redirecting them.
+For example, `Limit(16)` can use an integer constant and a declaration that
+permits a parameter target but forbids repetition; repeating that resolved
+attribute on `count` rejects even though both arguments are constants.
 
 ### Q08. Partial-declaration compatibility
 
-**Question:** Complete matching and conflict rules for generic parameter names,
+**Accepted:** Complete matching and conflict rules for generic parameter names,
 accessor parts, attributes, defaults and repeated clauses. One identity, one
 implementation, consistent contracts and deterministic file/source order are
 already approved.
@@ -416,13 +528,17 @@ already approved.
 historical erasable private partial methods; it requires an implementation
 and forbids generators from altering an existing published contract.
 
-**Recommendation:** Match by declared identity and complete signature; require
+**Rule:** Match by declared identity and complete signature; require
 explicit repeated defaults/contracts to agree rather than accumulate stronger
 obligations. This makes generated-part integration reviewable and stable.
+A generator may not silently remove a required API by omitting its body.
+Any future optional-generation/API-absence mechanism must be explicitly
+declared and separately specified; none is adopted here.
 
 ### Q09. Enum constant and flag restrictions
 
-**Question:** Specify eligible underlying integer types, implicit member-value
+**Accepted direction:** Integral underlying types only; specify eligible
+integer catalogs, implicit member-value
 progression/overflow, duplicate-valued names and `[Flags]` validity checks.
 Unnamed underlying values remain permitted.
 **Example:** `enum Access : uint32 { Read = 1, Write = 2 }`
@@ -431,13 +547,19 @@ Unnamed underlying values remain permitted.
 width families, required constant evaluation and checked arithmetic differ.
 Do not infer closed-case exhaustiveness from an enum declaration.
 
-**Recommendation:** Check constants in the exact underlying type; reject
+**Rule:** Check constants in the exact underlying type; reject
 implicit successor overflow, permit deliberate aliases, and keep flags
 annotation validation separate from runtime value validity.
+Strings, type identities and other case payloads are different facilities,
+not implicitly another enum base. An integral ID plus separately typed
+lookup storage remains available without repeated string comparisons.
+Exact eligible profile catalogs and flags-attribute schemas remain explicit
+profile/schema work, not permission to infer closed-case exhaustiveness.
 
 ### Q10. Reserved primitive bindings and privileged members
 
-**Question:** Finalize the primitive-name set, native-sized spellings, and
+**Accepted direction:** Publish a closed selected primitive binding catalog,
+independent of optional library APIs, and finalize
 which member forms a designated Core declaration may supply. One intrinsic
 backing field and the prohibition on source-defined primitive operators are
 already specified.
@@ -448,47 +570,64 @@ the designated Core compilation.
 identifier tokens with privileged primitive binding; no keyword escape grants
 that privilege.
 
-**Recommendation:** Publish a closed primitive binding catalog independently
+**Rule:** Publish a closed primitive binding catalog independently
 of optional library APIs, and allow ordinary checked members only where they
 cannot redefine representation or built-in arithmetic. Artifact identity is
 separate metadata/build work, not this source decision.
+The lowest **`language`** profile supplies the selected language-required
+bindings/substrate; **Core** adds a scoped, generally useful surface above it.
+Foundation/Application and ecosystem packages retain their explicit runtime
+dependencies. The [core-library reference](core-library-reference.md#dependency-layers)
+records this distinction. Exact primitive width/native-sized catalogs and
+optional API inventories are not automatically approved by the layering.
 
 ## Types, lookup and references
 
 ### Q11. Alias recursion and substitution
 
-**Question:** Specify well-formed generic alias expansion, recursive cycles,
-qualification and accessibility of the expanded target. Transparent public
+**Accepted:** Require finite generic alias expansion, diagnose recursive
+cycles, and preserve qualification and accessibility of the expanded target. Transparent public
 export and namespace-only placement are already approved.
 **Example:** `public alias Rows<T> = List<List<T>>;`
 
 **C# model:** Not C# `using` aliases: C# aliases do not introduce generic alias
 formals or exported alias declarations. See the official using reference.
 
-**Recommendation:** Require finite structural expansion, diagnose cycles with
+**Rule:** Require finite structural expansion, diagnose cycles with
 the declaration chain, and preserve complete qualified arguments. Recursive
 data should use nominal declarations, not an infinitely expanded synonym.
 
 ### Q12. Constant formals and dependent defaults
 
-**Question:** Which compile-time value domains may form generic arguments?
-Can defaults refer to earlier or later formals, and how are dependency cycles
-diagnosed? Defaults may already interleave with required formals; `_` never
+**Accepted initial domains/dependencies:** Fixed-width integers, Boolean and
+nominal enums may form compile-time value arguments.
+Defaults depend only on earlier formals; self/forward/cyclic dependencies
+reject. Defaults may interleave with required formals; `_` never
 falls back to a default.
 **Example:** `struct Pair<T, U = T> { }` exposes a dependency between formals.
 
 **C# model:** Not C# generic parameter defaults or constant generic parameters;
 neither is part of the C# generic declaration model.
 
-**Recommendation:** Beyond the named policy enums already contemplated by the
+**Rule:** Beyond the named policy enums already contemplated by the
 grammar, initially permit fixed-width integer, Boolean and nominal enum
 constants, but not floating values, arbitrary structs, references or allocated
-object identities. For example, the candidate
+object identities. For example,
 `struct Tile<T, const uint32 Width, const uint32 Height = Width> { }`
-would allow a width-dependent default. A default may depend only on earlier
-formals; self, forward and cyclic dependencies reject. These proposed domain
+allows a width-dependent default. A default may depend only on earlier
+formals; self, forward and cyclic dependencies reject. These accepted domain
 and dependency restrictions support widths/policies without a cyclic solver
-or an unbounded compile-time object identity model.
+or an unbounded compile-time object identity model. Transparent aliases
+expand before eligibility checking; aliases of allowed domains remain
+allowed without creating a new constant category.
+
+**Remaining wrapper question:** Should an eligible one-field primitive
+wrapper be allowed as a constant formal domain? **Recommendation:** Consider
+an opt-in checked subset with constant construction, full initialization,
+canonical equality/encoding and preserved nominal identity. `Transparent`
+or `Blittable` layout alone proves none of these. This remains proposed:
+the user's interest in simple wrappers does not approve arbitrary aggregate
+constants or erase their invariants.
 
 ### Q13. Remaining overload specificity and constructor inference
 
@@ -496,8 +635,27 @@ or an unbounded compile-time object identity model.
 generic inference, declared projections, defaults and constructor candidates.
 Do not revisit argument dominance, no numeric fallback, fixed-versus-expanded
 priority, member priority, or the exclusion of return-only overloads.
-**Example:** `int32 Parse(int32 value) => value;` versus a generic
-`T Parse<T>(T value) => value;` exposes the remaining equally applicable case.
+**Concrete example (recommendation still under review):**
+
+```terrum
+int32 Parse(int32 value) => value;
+T Parse<T>(T value) where T : [Copy] => value;
+int32 Read() => Parse(int32(7));
+```
+
+At the call, the explicit type call gives the argument type `int32`.
+The nongeneric parameter is exactly `int32`; inference makes the generic
+parameter `T = int32`, also an exact argument match. The proposed last
+tie-break chooses the nongeneric declaration only after argument quality
+ties. `Parse<int32>(int32(7))` explicitly selects the generic candidate.
+Neither result type alone nor a conversion search creates this tie.
+
+For structural generic specificity, compare candidate parameter shapes
+`T` and `Span<U>` at an actual `Span<int32>` argument. Both can become
+that exact parameter type, but the `Span<U>` shape is more specific.
+This is a proposed ranking, not a count of inferred formals or a new
+implicit numeric promotion rule. Constructor inference remains separately
+under review.
 
 **C# model:** Partly C#-inspired, with material differences: Terrum may use an
 expected result to fill unresolved generic positions, forbids implicit numeric
@@ -518,28 +676,53 @@ the missing form is a constraint equating that projection with `U`.
 **C# model:** Not C# associated types. Its generic constraints and static
 abstract interfaces are comparison points, not associated-type equality.
 
-**Recommendation:** Add an explicit equality clause with the candidate spelling
-`where T.via<ISource>.Item == U`. Here `==` compares type identities in a
-constraint, not runtime values, and the clause requires the named `ISource`
-witness rather than searching for an implementer. Resolve the witness and
+**Spelling decision remains open:** The earlier `==` candidate emphasized
+exact type identity, not runtime value equality. `is` is a reasonable
+alternative if constraint grammar gives it that exact meaning.
+
+| Candidate constraint | Meaning under consideration |
+|---|---|
+| `where T : ISource` | Require the named interface conformance/witness; not exact identity with the interface. |
+| `where T.via<ISource>.Item is U` | Require equality of complete resolved types; not an assignability test or runtime pattern. |
+| `where T.via<ISource>.Item == U` | Alternative spelling for that same proposed type-identity requirement. |
+
+**Recommendation:** Retain `:` for ordinary conformance and prefer a
+separate `is` identity clause for an associated projection, rather than
+silently replacing every `where T : I` with pattern syntax. This avoids
+confusing witness availability with exact type identity; it is not approved.
+For example, a source whose selected `Item` is `int32` satisfies the identity
+clause when `U` resolves to `int32`, not `int64`; a transparent alias of
+`int32` resolves to the same identity. Full access/ownership qualification
+still matters. Resolve the witness and
 ordinary type arguments first, then check equality; do not infer an otherwise
 unbound `T` backward from `Item`. The new clause is proposed, not accepted.
 
 ### Q15. Inherited default/member resolution
 
-**Question:** Complete qualification and resolution for multiple inherited
+**Accepted:** Complete qualification and resolution for multiple inherited
 paths to the same member or competing defaults. Explicit implementations,
 separate witness identities and restricted `default<I>.Member()` are settled.
 **Example:** `interface ICombined : ILeft, IRight { }` needs a resolution rule
 when both paths supply the relevant default.
 
 **C# model:** C# default interfaces require a unique most-specific
-implementation. Terrum must not import an inheritance-order tie-break or a
+implementation, as specified by the [default-interface most-specific rule](https://github.com/dotnet/csharplang/blob/main/proposals/csharp-8.0/default-interface-methods.md#the-most-specific-implementation-rule).
+Terrum must not import an inheritance-order tie-break or a
 physical vtable model; its associated members also participate.
+For independently declared members C# can disambiguate through an interface
+reference/cast and explicit implementation; it does not lack all interface
+qualification. Terrum's `.via<I>` is explicit witness selection, while
+restricted `default<I>` is intentional default-body selection, not a
+general cast. See [C# explicit interface implementation](https://learn.microsoft.com/en-us/dotnet/csharp/programming-guide/interfaces/explicit-interface-implementation).
 
-**Recommendation:** Require one unambiguous inherited identity/default or an
+**Rule:** Require one unambiguous inherited identity/default or an
 explicit resolution. Reuse the same rule for associated defaults and callable
 defaults, so adding an unrelated base cannot silently retarget calls.
+Two paths inheriting the same `IBase.Read` identity are not two new members.
+Two interfaces independently declaring `Read` retain distinct identities:
+`value.via<ILeft>.Read()` names the left witness, not an inheritance-order
+winner. Conflicting claims for the same type/interface pair still reject;
+`via` does not repair an invalid conformance.
 
 ### Q16. Extension declarations and call disambiguation
 
@@ -553,9 +736,33 @@ unrelated extension.
 **C# model:** Extension lookup is C#-inspired, but do not import C# 14 extension
 block syntax or permit retroactive conformance merely because it is available.
 
-**Recommendation:** Keep explicit static-call qualification available and
+**Accepted boundary direction; syntax still open:** Keep explicit static-call qualification available and
 make extension eligibility lexical, with the receiver's full access/loan
 contract. Avoid a second overload-ranking system.
+
+**Concrete candidates and callers:**
+
+```terrum
+struct MetricsA
+{
+    public static int32 Measure(int32 value) => value;
+}
+struct MetricsB
+{
+    public static int32 Measure(int32 value) => value + 1;
+}
+int32 ChooseA(int32 value) => MetricsA.Measure(value);
+int32 ChooseB(int32 value) => MetricsB.Measure(value);
+```
+
+These are ordinary qualified static calls. If both methods are explicitly
+made eligible as extensions in one lexical scope, `value.Measure()` has
+two equally good candidates and is ambiguous; the qualified calls select
+7 and 8 respectively for argument 7. An applicable ordinary instance member
+wins before extension lookup. `value.via<IMeasure>` cannot select either
+helper unless the value has that actual interface witness. Extension
+declaration/import eligibility syntax remains pending; no registration
+attribute or block syntax is invented by this example.
 
 ### Q17. Adapter declaration and forwarding
 
@@ -567,9 +774,31 @@ does not by itself forward an original object's representation or members.
 **C# model:** Not C# extension methods or inheritance. Terrum adapters retain
 their own witness set; no original type gains a new conformance.
 
-**Recommendation:** Begin with explicit nominal wrappers and declared
+**Accepted boundary direction; dedicated syntax still open:** Begin with explicit nominal wrappers and declared
 forwarding operations. Add projection syntax only where validity, ownership,
 access, backing and cost contracts are expressible; equal bits are insufficient.
+
+**Concrete ordinary-wrapper example:**
+
+```terrum
+interface IMeasure { int32 Measure(); }
+struct MeasuredInt : IMeasure
+{
+    private int32 _value;
+    public MeasuredInt(int32 value) { _value = value; }
+    public int32 Measure() => _value;
+}
+```
+
+`MeasuredInt(7)` copies the integer into a new nominal value that supplies
+`IMeasure`; it does not make `int32` implement that interface. Forwarding is
+an authored checked member, not an automatically invented vtable.
+This example avoids unresolved stored-loan syntax. A wrapper around an
+object/view must also publish its backing/lifetime and access dependencies.
+A narrowing wrapper such as a nonnegative integer cannot admit arbitrary
+negative `int32` bits, and `List<int32>` cannot become `List<MeasuredInt>`
+merely because their element payload sizes match. Dedicated adapter and
+one-way container-projection syntax remain pending.
 
 ### Q18. Family and conditional-member declarations
 
@@ -584,6 +813,22 @@ relationships that C# name/arity matching does not provide.
 **Recommendation:** Separate family membership from extension lookup; require
 declared projection and per-member constraints. Keep a conditional member's
 guarantee visible to definition-site generic checking.
+
+**Concrete family/member distinction (APIs remain proposals):**
+
+| Source form | Candidate operation and required relationship |
+|---|---|
+| `TextSpan<char16>` | `.AsSpan()` yields `Span<char16>`; `.AsTextSpan()` yields validated erased `TextSpan<void>`, preserving backing and encoding information. |
+| `TextSpan<void>` | Has encoding-independent text operations; no unconditional typed `.AsSpan()` member that invents a code-unit type or transcodes silently. |
+| Ordinary `Box<int32>` | Has only its declared members; no automatic projection to `Box<void>` from matching name/arity. |
+
+In a generic body over `TextSpan<TCodeUnit>`, typed code-unit access needs
+the declared `[TextCodeUnit]` capability/family member guarantee; using that
+member before establishing it rejects at definition checking, even if one
+later instantiation happens to be `char16`. Erased validated text is not
+an arbitrary writable byte span. Exact family/conditional-member declaration
+and projection syntax remain unapproved; the table describes the requested
+contract rather than introducing a new keyword.
 
 ### Q19. Complete parameter and reference qualifier matrix
 

@@ -69,8 +69,11 @@ or implementation layout.
 
 ## Dependency layers
 
-**Accepted layering direction:** distinguish the genuinely minimal
-requirements for core language operation from a standard application-library/
+**Accepted layering direction:** the lowest **`language`** profile specifies
+the selected language's compilation/conformance requirements and closed
+reserved-primitive binding catalog. **Core** is above that floor: a generally
+useful, deliberately scoped surface rather than everything needed for a rich
+framework/ecosystem. Distinguish these from a standard application-library/
 runtime surface and from feature-specific dependencies. Illustrative
 foundational forms include `ref<T>`, `ptr<T>` and `int32`; this is not an
 exhaustive required-type or API list. The extensive inventories in this
@@ -78,8 +81,16 @@ reference, especially the application services proposed in §13, are not
 mandatory for language conformance and do not require a universal object root,
 heap, tracing GC, scheduler or OS services solely for the language.
 
-The **Core**, **Foundation** and **Application** headings are proposed library
-dependency layers, not standardized runtime-profile names. Features
+The `language` baseline does not adopt every candidate primitive width or
+require every optional feature in every embedded/kernel/application
+environment. Its exact inventory, source-version/target mapping and primitive
+artifact authority remain explicit profile/build work. A designated Core
+compilation may attach checked APIs to selected primitive identities without
+changing their representation or authoring source primitive operators;
+merely omitting standard-library references grants no such authority.
+
+The **Core**, **Foundation** and **Application** headings remain proposed library
+dependency layers above the language floor, not standardized runtime-profile names. Features
 that need runtime facilities retain those dependencies and their checked
 contracts when used. An environment without a required facility cannot claim
 that feature by silently weakening its semantics or substituting an implicit
@@ -87,8 +98,9 @@ fallback. This direction allows embedded/kernel environments in principle; it do
 require every environment to support every feature. Exact baseline/API mapping
 and feature-to-runtime support remain open.
 
-| Candidate cumulative layer | Representative surface | Required substrate |
+| Baseline / candidate cumulative layer | Representative surface | Required substrate |
 |---|---|---|
+| **`language` baseline** | Selected compiler/runtime-owned primitive bindings, representation/reference forms and language-required checking services; not the entire signature inventory below | Explicit selected language/target facilities; ordinary packages cannot redefine intrinsic identity or operations |
 | **Core** | Numeric primitives and protocols, `void`/options, `Span<T>`, immutable code-unit/text views, static eager algorithms, shape/view and SIMD contracts | Checked value execution, bounds/access and cleanup/failure services; no ordinary-path allocation or OS facility |
 | **Foundation** | Explicitly owned buffers/vectors/maps, allocators/arenas/pools, owning native `Text`, persistent tensor-shape metadata and storage leases | Core and a caller/host-supplied allocator; no mandatory tracing collector |
 | **Application** | Managed list/linked list/dictionary/set/queue, ordinary managed `Text`, tasks, streams/terminal, files/network, globalization and serialization | Foundation plus tracing and appropriate host services |

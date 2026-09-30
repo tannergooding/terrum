@@ -16,6 +16,7 @@ preserve their full qualification and mutable storage is invariant.
 
 | Term | Meaning |
 |---|---|
+| Language baseline profile (`language`) | The selected compilation/conformance floor: its closed primitive binding catalog and required substrate, distinct from optional library APIs. Exact profile inventories and feature dependencies must be selected explicitly. |
 | Dependency layer (Core/Foundation/Application/Platform leaves) | A candidate cumulative package-boundary grouping, described in the [core-library proposal](proposals/core-library-reference.md#dependency-layers); each layer may depend only on preceding layers and its declared substrate. |
 | Storage-and-release lease | A per-allocation handle that grants access to allocated storage and the obligation to release it; distinct from an owned allocator context. |
 | Allocator context | A retained handle to an allocator, used to obtain leases; owned by a container such as a growing vector, not per-allocation. |
@@ -33,9 +34,19 @@ support. Current compiler and runtime support is tracked in
 
 ## Dependency layers and package boundaries
 
+The accepted lowest **`language`** profile describes what the selected
+language can compile and requires for those features. It publishes a closed
+reserved-primitive binding catalog independently of optional APIs; it does
+not grant an ordinary package authority to redefine those bindings.
+Above it, **Core** is the scoped generally useful surface, while broader
+framework/ecosystem facilities can be supplied by independent packages.
+Exact selected primitive/profile inventories remain separate from the
+candidate width/API listings.
+
 The candidate cumulative **Core/Foundation/Application/Platform**
 [dependency layers](proposals/core-library-reference.md#dependency-layers)
-are not language-conformance or target-runtime profiles. The Core
+are library groupings, not replacements for the `language` baseline or
+newly assigned target-runtime profiles. The Core
 library tier is broader than the genuinely minimal language requirements
 and is not a mandatory API baseline; `ref<T>`,
 `ptr<T>` and `int32` are illustrative foundational forms, not an exhaustive

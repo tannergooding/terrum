@@ -83,11 +83,16 @@ Associated types are named type members of a selected interface witness and
 `IInteger<TSelf>` may declare `type Wider;`, with an implementation binding
 that member to a concrete type; `T.Wider` is resolved through the selected
 `IInteger<T>` witness. A constraint may explicitly bind an associated type,
-for example `where T : IInteger<T, Wider = U>`. This does not infer the
+through a separately specified associated-identity clause. Candidate `is`
+and `==` spellings remain under review in
+[Q14](proposals/grammar-open-questions.md#q14-associated-equality-constraints);
+neither replaces ordinary conformance constraints. This does not infer the
 original `T` backward from an associated result. If multiple valid witnesses
 or relations could supply a projection, the use must explicitly disambiguate
-them. The associated-equality example above remains illustrative; complete
-equality, inherited-witness and metadata rules remain to be specified.
+them. The associated-identity clause remains proposed; complete
+identity-clause checking and metadata rules remain to be specified.
+Inherited defaults require an unambiguous identity/default or explicit
+resolution, never an inheritance/import-order winner.
 Associated bindings do not replace independent
 `[Copy]`, access, ownership, or family constraints.
 For a lending iterator, `Item<'a>` is one candidate associated relation; it
@@ -109,8 +114,10 @@ inside that body still dispatch through the witness.
 Namespace-level `alias` declarations are transparent type synonyms.
 A public alias exports its name and mapping as a source contract; executable
 signatures use the resolved target identity. It does not create a nominal
-type, new witness or changed access/layout contract. Cycles, substitution and
-metadata encoding remain open. See the
+type, new witness or changed access/layout contract. Expansion must be finite,
+reject direct/indirect synonym cycles with their
+declaration chain, and preserve complete qualified substitutions and
+effective target accessibility. Alias metadata encoding remains open. See the
 [alias and witness source rules](grammar-spec.md#54-aliases-and-associated-types-declarations-and-open-binding).
 
 ## Text views

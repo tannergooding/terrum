@@ -288,6 +288,12 @@ suffixes, optional access and other colon roles. Interpolation still permits
 `{flag ? left : right:X8}`: the conditional colon is separated, while the
 format colon follows its own grammar. Grouping the full conditional remains
 optional.
+Declaration-relationship `:` requires separating trivia on both sides
+in conformance/interface-base lists, enum underlying types and generic
+constraints: `struct S : I`, `enum E : int32` and `where T : I`.
+These colons connect declared relationships; they are not attached type
+suffixes. Label, named-argument, tuple-name, attribute-target and format
+colons follow their own grammatical roles.
 Trivia does not permit splitting or merging a token spelling after lexing.
 Receiver/name-attached delimited constructs share a boundary rule:
 the opener attaches to its receiver or introducing name, the interior
@@ -385,6 +391,11 @@ an ordinary nested struct. Outside the designated Core build, the same
 declaration is an error, regardless of spelling or namespace. The Core
 artifact identity, full permitted member forms and enforcement across
 separate compilation remain open design work.
+Each selected language profile must publish a closed reserved-primitive
+binding catalog independently of optional Core APIs. Privileged source
+members must satisfy ordinary checking and cannot redefine primitive
+representation or built-in operations. Candidate width families are not
+automatically added to that catalog.
 
 `void` is a distinct keyword; primitive type spellings are not keyword
 tokens. The following vocabulary is grouped by source role. Words in the
@@ -716,16 +727,22 @@ apply to structs **and** classes; interface base lists express interface
 composition, not implementation of an interface by itself.
 The integral enum base and constant-valued members preserve unnamed
 underlying values; `[Flags]` is an optional declaration contract, not a
-different closed enum grammar. `IntegralType` and `ConstantExpression` require
-semantic restrictions beyond their syntactic approximations. `AliasDecl`
+different closed enum grammar. Enum members are compile-time constants checked
+in the exact eligible underlying integer type. An implicit successor that
+overflows that type rejects; deliberate duplicate-valued names are permitted.
+`[Flags]` annotation checks remain separate from runtime value validity and
+do not forbid unnamed underlying values. String/type-valued cases are not an
+alternative enum base selected by this rule. Exact eligible integer catalogs
+and flags annotation schemas must be declared by the selected profile.
+`AliasDecl`
 names the target type without defining a new nominal identity or adding
 conformance; generic aliases substitute their type formals into the target.
 Its namespace-level placement and visibility are deliberate; aliases are
 not nested in nominal types. Associated
 `type Name;` declares an interface requirement; `type Name = Type;` in an
 implementing nominal type binds a selected requirement rather than declaring
-an arbitrary nested nominal type. Witness mapping, alias cycles and metadata
-remain separate checked contracts (see §5.4).
+an arbitrary nested nominal type. Witness mapping and metadata remain separate
+checked contracts; finite alias expansion is specified in §5.4.
 Named properties and authored `this[...]` indexers use accessor-local effects.
 A `set` or `init` body receives a typed `value` parameter. `mut get` and
 `mut set` declare writable receiver requirements when necessary; plain
@@ -829,8 +846,17 @@ selects one formal's declared default and rejects if none exists.
 Omitting a suffix or the whole list may use defaults; an empty comma slot
 such as `Make<, int32>()` is invalid. Defaults must satisfy the formal's
 constraints; they do not rescue contradictory or ambiguous inference.
-Permitted constant-value domains beyond named policy enums and dependency
-rules for defaults remain to specify.
+The initial constant-formal domains are fixed-width integers, Boolean and
+nominal enums. Floating values, arbitrary structs, references and allocated
+object identities are not eligible. Transparent aliases expand to their
+qualified target before eligibility checking; an alias does not create a
+new value domain. Eligibility of nominal primitive wrappers, including
+`Transparent`/`Blittable` wrappers, remains open: equal layout alone supplies
+neither a valid constant value nor canonical generic identity.
+A generic default may depend only on earlier formals. Self, forward and
+cyclic dependencies reject; interleaving required/defaulted formals does
+not change that direction. Defaults still satisfy the selected domain,
+constraints and complete qualification.
 
 Ordinary defaults are checked, publishable compile-time `Copy` values,
 including eligible nominal aggregates, not just primitive/enum values.
@@ -1641,8 +1667,11 @@ declarations such as `TextSpan<void>` are not reopened; this is not universal
 an interface witness. The §3.1 forms are `type Wider;` in the
 interface and `type Wider = MyWideInteger;` in a conforming type.
 `T.Wider` resolves through the selected `IInteger<T>` witness. An associated
-equality may explicitly bind a type parameter, illustratively
-`where T : IInteger<T, Wider = U>`. Do not infer the original `T` backward
+identity clause may explicitly equate a selected projection with another
+formal; its spelling remains under review in
+[Q14](proposals/grammar-open-questions.md#q14-associated-equality-constraints).
+This is distinct from ordinary `where T : I` conformance.
+Do not infer the original `T` backward
 from an associated result, choose an arbitrary implementer from a constraint,
 or silently resolve collisions; ambiguous witness/projection uses require
 explicit qualification.
@@ -1656,8 +1685,12 @@ target's access, ownership, layout or compatibility contract. A public alias
 is exported as a named transparent source declaration; executable signatures
 use its resolved target identity. Its public name and target mapping are source
 contracts, not a new nominal runtime type. `Option<T>` is informative, not a
-decision that Core or another library exports it. Cycles, substitution and
-the exact alias metadata encoding still need checked rules.
+decision that Core or another library exports it. Alias expansion must be
+finite; direct and indirect recursive synonym cycles reject with their
+declaration chain. Substitute complete qualified arguments without dropping
+access/ownership qualifiers, and validate effective accessibility of the
+expanded target. Recursive data uses nominal types, not an infinitely expanded
+alias. Exact alias metadata encoding remains open.
 Associated-type bindings are distinct: they satisfy a selected interface
 member and have witness identity, rather than providing a general synonym.
 
@@ -1674,6 +1707,12 @@ have associated members.
 An associated requirement may have a replaceable checked default,
 `type Item = uint8;`; bodyless `type Item;` requires an implementation binding.
 Conflicting inherited defaults require explicit resolution. A type can
+inherit a member through several paths without creating several copies of
+one declaring-interface identity. Selection requires one unambiguous
+inherited identity/default or an explicit checked resolution; unrelated
+competing defaults cannot be ranked by inheritance/import order. This applies
+to associated-type defaults as well as callable defaults, so an unrelated
+new base cannot silently retarget a previously resolved member. A type can
 implement two interfaces with same-named members explicitly, implicitly, or
 one each. One implicit member can satisfy both only if it fulfills both
 contracts; the witness identities remain distinct. Explicit declarations use
@@ -1692,8 +1731,9 @@ type/interface pair reject rather than being resolved with `via`.
 Extension-interface behavior still needs an explicit adapter and does not
 change the original type's witnesses.
 
-**Open:** complete associated-equality and inherited-witness qualification
-rules and their metadata representation. Keep family opt-in and declared checked projections; do
+**Open:** associated-identity clause spelling and its complete checking/
+metadata representation. Preserve the selected inherited-identity/default
+resolution rules. Keep family opt-in and declared checked projections; do
 not introduce universal erasure or inferred covariance.
 Interface constructors are deferred: a future requirement
 needs a checked construction and initialization-completion contract. Fixed
@@ -2146,8 +2186,15 @@ implementations, but must not add or alter the published contract of an
 existing declaration, including making a method unsafe or changing a
 type's layout. Independently pre-generated files have ordinary source-file
 status, not the compiler-known provenance of an in-compilation generator.
-Detailed merge compatibility, including partial accessor implementations and
-attribute multiplicity, remains open; ordinary mixed backing is defined in §5.10.
+Partial parts match by declared identity and complete signature, including
+generic formal names/order, callable parameters and accessor shape.
+Explicitly repeated defaults and contracts must agree after their required
+type/constant normalization rather than accumulate stronger obligations;
+omitting a repetition does not erase the existing promise. Attribute
+multiplicity remains a separate declared schema. A generator cannot silently
+remove an API by failing to provide its required implementation; any future
+API-absence mechanism needs explicit source permission and a separate
+contract. None is introduced here. Ordinary mixed backing is defined in §5.10.
 
 **Policy selection:** policy domains may be Core-defined or
 user-defined enums. A policy case is a compile-time preference for a variant
@@ -2297,11 +2344,11 @@ appears in §2.
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or nested block namespaces without mixing, with lexically scoped imports before declarations. | Other namespace forms, if any. |
 | Visibility | §3.1 permits namespace-level `public`/module-internal declarations and declaring-type `private`; equal namespace names do not cross module access boundaries. | File-limited visibility and the remaining declaration-kind modifier matrix. |
-| Nominal types | §3.1 sketches structs, classes, interfaces and integral-base enums. | Union and nested declarations, enum constant restrictions and contextual attributes. |
-| Generic declarations | §§3.1–3.2 give type/constant formals, defaults, `_` inference and explicit `default` selection. | Permitted value domains, default dependencies and complete inference contracts. |
-| Aliases | §§3.1 and 5.4 give namespace-level aliases and transparent public source export. | Cycles, substitution and metadata encoding. |
-| Associated types | §§3.1 and 5.4 give requirements, replaceable defaults, qualified bindings, optional `<this T>` and `.via<I>` selection. | Complete associated-equality, inherited-witness rules and metadata. |
-| Partial declarations | §5.12 defines one-identity merge and body-provision rules. | Detailed merge compatibility and attribute multiplicity. |
+| Nominal types | §3.1 sketches structs, classes, interfaces and integral-base enums with exact constants, checked successor overflow and deliberate aliases. | Union/nested declarations, selected integer catalogs, flags schemas and contextual attributes. |
+| Generic declarations | §§3.1–3.2 give bounded constant domains, earlier-only defaults, `_` inference and explicit `default` selection. | Nominal-wrapper constant eligibility and complete inference contracts. |
+| Aliases | §§3.1 and 5.4 give finite qualified expansion, cycle rejection, namespace-level aliases and transparent public export. | Metadata encoding. |
+| Associated types | §§3.1 and 5.4 give requirements, replaceable defaults, inherited identity resolution, qualified bindings, optional `<this T>` and `.via<I>` selection. | Complete associated-identity clause and metadata. |
+| Partial declarations | §5.12 defines one-identity merge, complete-signature agreement, consistent repeated defaults/contracts and required body provision. | Attribute multiplicity schemas and any explicitly permissioned future API-absence mechanism. |
 | Core primitive declarations | §2 preserves reserved primitive identities with a privileged backing field. | Artifact identity, permitted members and separate-compilation enforcement. |
 | Fields | §3.1 sketches instance fields. | Applicable attribute contracts and layout restrictions. |
 | Constructors | §§3.1 and 5.10 give `ensure P is init` minimum guarantees and repeatable unpublished init-property writes. | Completion validation hooks, value/effect compatibility and metadata encoding. |
