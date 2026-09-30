@@ -208,7 +208,7 @@ context.
 | Loops and iteration | `while`, `do`, `for`, `in`, `break`, `continue` | Iterate and transfer to the nearest loop. |
 | Results | `return` | Complete a call. |
 | Producers | `yield` | Produce a suspended value; producer syntax remains open. |
-| Asynchrony | `async`, `await` | Declare and suspend async work; exact syntax remains open. |
+| Asynchrony | `async`, `await` | Mark an async callable implementation and await a checked completion. |
 | Contracts | `require`, `ensure` | Check preconditions or postconditions; declaration grammar remains open. |
 | Exception flow | `try`, `catch`, `finally`, `throw` | Handle or propagate failures under their checked transport contracts. |
 | Deferred cleanup | `defer` | Register lexical-block-exit actions. |
@@ -272,7 +272,7 @@ AttributeArguments = "(", [ ConstantExpression,
                      { ",", ConstantExpression } ], ")" ;
 VisibilityModifier = "public" | "internal" | "private" ;
 DeclarationModifier = "public" | "internal" | "private" | "static"
-                    | "mut" | "unique" | "unsafe" | "partial" ;
+                    | "mut" | "unique" | "unsafe" | "partial" | "async" ;
 
 StructDecl      = "struct", Identifier, [ TypeParameterList ],
                   [ ConformanceList ], { ConstraintClause },
@@ -702,7 +702,7 @@ and `is some name` have equality precedence. The table is highest first:
 | Level | Syntax | Associativity |
 |---:|---|---|
 | 14 | postfix call, member access, index, `?.`, `?[]`, `++`, `--` | left |
-| 13 | prefix `+ - ! ~ move ++ --` | prefix/right-nesting |
+| 13 | prefix `+ - ! ~ move ++ -- await` | prefix/right-nesting |
 | 12 | `* / %` | left |
 | 11 | `+ -` | left |
 | 10 | `<< >> >>>` | left |
@@ -732,7 +732,7 @@ ConditionalExpression = OperatorExpression,
                         [ "?", Expression, ":", Expression ] ;
 OperatorExpression = Operand, { ( BinaryOperator, Operand | IsTest ) } ;
 Operand         = { PrefixOperator }, ( Postfix | ThrowExpression ) ;
-PrefixOperator  = "+" | "-" | "!" | "~" | "move" | "++" | "--" ;
+PrefixOperator  = "+" | "-" | "!" | "~" | "move" | "++" | "--" | "await" ;
 BinaryOperator  = "*" | "/" | "%" | "+" | "-"
                 | "<<" | ">>" | ">>>"
                 | "<" | "<=" | ">" | ">=" | "==" | "!="
@@ -762,7 +762,8 @@ ObjectInitializer = "{", { Identifier, "=", Expression, ";" }, "}" ;
 TupleExpression = "(", TupleElement, ",", TupleElement,
                   { ",", TupleElement }, ")" ;
 TupleElement    = [ Identifier, ":" ], Expression ;
-LambdaExpression = [ "static" ], LambdaParameters, "=>", ( Expression | Block ) ;
+LambdaExpression = LambdaPrefix, LambdaParameters, "=>", ( Expression | Block ) ;
+LambdaPrefix    = { "static" | "async" } ;
 LambdaParameters = Identifier | "_"
                  | "(", [ LambdaParameter, { ",", LambdaParameter } ], ")" ;
 LambdaParameter = Identifier | "_"
@@ -786,7 +787,7 @@ distinguish type arguments from constant-value expressions; the broad
 alternatives above do not permit arbitrary runtime expressions as constants.
 The grammar includes explicit `_` inference holes and `default` selectors,
 not source type packs or unresolved exported holes. Constructor-specific
-inference, general range, `await`, type-test and prefix-cast forms remain
+inference, general range, full type-test and prefix-cast forms remain
 separate work; assignment remains a statement. `T(expression)` is an
 ordinary type-call-shaped expression; its checked-conversion interpretation
 is semantic.
@@ -839,6 +840,30 @@ ordinary result, effect, capture, ownership and lifetime checks.
 `static` forbids capturing enclosing locals, parameters or `this`, but does
 not itself select a representation, allocation strategy or inlining.
 Contextually generic lambdas retain their definition-site constraint contract.
+
+`async` marks a function implementation or lambda, including expression-bodied
+forms; it is not part of the callable's result type. Declaration modifiers
+retain their ordinary legal permutation rules. Lambda `static` and `async`
+may occur in either order, at most once each. An async implementation must
+have a declared or contextual task-like completion result; arbitrary result
+types are not implicitly wrapped, and `async void` rejects. In an async body,
+successful return or expression-body evaluation supplies the completion's
+result, not a second task handle. Task-like and awaitable eligibility require
+checked contracts, not similarly named methods.
+
+`await expression` is a prefix expression within an async implementation.
+Postfix access/calls bind first; `await Read() + offset` means
+`(await Read()) + offset`, while `await (ChooseTask())` awaits the grouped
+operand. The operand evaluates once and its checked completion supplies the
+await expression's result or propagates failure under the ordinary failure
+rules. Awaiting a completed operation may continue inline; an incomplete
+operation suspends under its checked scheduling contract. Invocation starts
+eagerly, without implicit executor capture or a mandatory worker hop.
+Postconditions are checked before successful completion publication, and
+suspension preserves ownership, loan, cleanup and affinity obligations.
+A separately declared non-async lambda is not an async body merely because
+it occurs inside one. Awaiter registration, executor APIs, affinity annotations
+and completion representation remain separate specification work.
 
 Collection expressions are target-typed and use only a registered, checked
 construction contract; `[]` is empty and no default array/List or numeric
@@ -1636,8 +1661,8 @@ Still **OPEN** for a full source grammar: nominal safe union cases and complete
 patterns, associated equality and family/adapter declarations,
 conditional/default conformance, text-target fragments and interpolation,
 general `const` declarations/expressions, full contract-clause placement,
-general ownership/reference results, constructor inference, async/await and
-producers, capture/exception transport, and registered collection-fragment
+general ownership/reference results, constructor inference, async completion
+and scheduling protocols, producers, capture/exception transport, and registered collection-fragment
 construction. Source type packs and tuple arity extensions remain deferred.
 Giving a form candidate syntax does not complete its checked lifetime,
 effect, representation or separate-compilation contracts. Hexadecimal float
@@ -1709,9 +1734,9 @@ appears in §2.
 | Reference access | §§3.2 and 5.12 sketch loans and reference qualifications. | Complete legality of `pin`, `write` and other qualifier combinations. |
 | Parameters | §§3.2, 5.1–5.2 give modes, final `params`, eligible Copy defaults and direct/named attribute targets. | Complete qualifier legality and output/loan metadata. |
 | Arguments | §§3.2 and 5.1 give labels, source-order evaluation and position-preserving named/positional mixtures. | Complete passing-mode/place and overload contracts. |
-| Statements | §3.3 sketches blocks, transfers and standalone discard. | Statement-place checks and producer/async statements. |
+| Statements | §3.3 sketches blocks, transfers and standalone discard; §3.4 permits await expressions in async bodies. | Statement-place checks and producer statements. |
 | Iteration | §3.3 sketches by-value and `ref`/`mut ref` `for (... in ...)`; §5.12 names `do`. | Iterator loan/backing contracts and post-test loop production. |
-| Expressions | §3.4 gives conditional/coalescing/optional access, tuples, target-directed lambdas and collection spreads. | Callable capture/representation and collection-fragment contracts; comprehensions/repetition deferred for library/tensor design. |
+| Expressions | §3.4 gives conditional/coalescing/optional access, tuples, target-directed static/async lambdas, await and collection spreads. | Callable capture/representation, awaiter registration and collection-fragment contracts; comprehensions/repetition deferred for library/tensor design. |
 | Patterns | §3.3 gives shared switch arms, guarded matching, compatible `or` bindings and explicit constant/wildcard transfers. | Full nominal-case, relational and destructuring patterns. |
 | Policies | §§3.3–3.4 and 5.12 describe lexical preferences, strict selection and constant-formal forwarding. | Variant-declaration syntax and compile-time queries. |
 | Contracts | §§3.3 and 5.8 describe `require` and `ensure` direction. | Declaration clauses and correlated output facts. |
