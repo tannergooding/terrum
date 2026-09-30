@@ -243,6 +243,12 @@ internal static partial class Program
                         {
                             projectionVersion += 4;
                         }
+                        if (frontend.Statements.Any(static statement => statement.Kind == 3))
+                        {
+                            projectionVersion = 28
+                                + (frontend.Nodes.Any(static node => node.Operation == 83) ? 1 : 0)
+                                + (frontend.Nodes.Any(static node => node.Operation == 84) ? 2 : 0);
+                        }
                         writer.WriteNumber("projectionVersion", projectionVersion);
                         writer.WriteBoolean("expressionBody", frontend.IsExpressionBody);
                         writer.WriteNumber("conditionRoot", frontend.ConditionRoot);

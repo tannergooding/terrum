@@ -1584,6 +1584,58 @@ mut class ScalarFrontendState
             first.Range.Start, endDeclaration.Range.End);
     }
 
+    private mut bool ParseTreeWhile(int32 depth)
+    {
+        if (depth >= 6 || _statementCount >= 12)
+        {
+            Fail(1);
+            return false;
+        }
+        if (!Take(18, out var keyword) || !Take(46, out var open)
+            || !ParseTreeExpression(5, 1, 0, out var condition))
+        {
+            return false;
+        }
+        if (TreeWord(condition, 1) != 5)
+        {
+            return FailTreeType(condition);
+        }
+        if (!Take(47, out var close) || !Take(48, out var body))
+        {
+            return false;
+        }
+        int32 header = _statementCount;
+        if (!AddTreeStatement(3, 0, condition, keyword.Range.Start, body.Range.End))
+        {
+            return false;
+        }
+        require _tokens.TryGet(_at, out var first);
+        mut Token next = first;
+        while (next.Kind != 49 && _error == 0)
+        {
+            if (next.Kind == 18)
+            {
+                if (!ParseTreeWhile(depth + 1)) { return false; }
+            }
+            else if (next.Kind == 2
+                && _tokens.TryGet(_at + 1, out var equals)
+                && equals.Kind == 64)
+            {
+                if (!ParseTreeStatement()) { return false; }
+            }
+            else
+            {
+                FailAt(1, next.Range);
+                return false;
+            }
+            require _tokens.TryGet(_at, out next);
+        }
+        if (!Take(49, out var end)) { return false; }
+        Host.Frontend[332 + header * 5 + 1] = _statementCount;
+        Host.Frontend[332 + header * 5 + 4] = end.Range.End - keyword.Range.Start;
+        return true;
+    }
+
     private int32 TreePrecedence(int32 kind)
     {
         if (kind >= 59 && kind <= 61) { return 10; }
@@ -2035,10 +2087,10 @@ mut class ScalarFrontendState
                 require _tokens.TryGet(_at, out var firstStatement);
                 mut Token next = firstStatement;
                 while ((next.Kind == 12 || next.Kind == 13
-                    || next.Kind == 2)
+                    || next.Kind == 2 || next.Kind == 18)
                     && _error == 0)
                 {
-                    if (!ParseTreeStatement())
+                    if (!(next.Kind == 18 ? ParseTreeWhile(0) : ParseTreeStatement()))
                     {
                         break;
                     }
@@ -2254,6 +2306,7 @@ bool TryParseScalarFrontend(TokenSnapshot tokens, out ScalarFrontendResult resul
     {
         require chain.TryGet(index, out var token);
         if (token.Kind == 82 || token.Kind == 12 || token.Kind == 13
+            || token.Kind == 18
             || token.Kind == 64 || token.Kind == 56)
         {
             result = modern;

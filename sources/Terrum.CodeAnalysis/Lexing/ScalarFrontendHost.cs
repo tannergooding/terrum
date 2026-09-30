@@ -40,7 +40,7 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] is < 1 or > 27
+        if (words[0] is < 1 or > 31
             || words[1] is not (1 or 2))
         {
             throw InvalidResult();
@@ -85,7 +85,7 @@ public static class ScalarFrontendHost
             throw InvalidResult();
         }
 
-        if (words[0] is >= 20 and <= 27)
+        if (words[0] is >= 20 and <= 31)
         {
             return ReadTree();
         }
@@ -130,8 +130,8 @@ public static class ScalarFrontendHost
                 || (words[41] == 1 && words[15] != 0)
                 || !AllZero(42 + words[37] * 8, 298)
                 || (words[0] is 20 or 22 or 24 or 26 && !AllZero(298, WordCount))
-                || (words[0] is 21 or 23 or 25 or 27 && (words[298] is < 1 or > 12
-                    || words[299] is < 1 or > 8
+                || (words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 31 && (words[298] is < 1 or > 12
+                    || words[299] is < 0 or > 8 || words[0] < 28 && words[299] == 0
                     || words[41] != 0
                     || !AllZero(300 + words[299] * 4, 332)
                     || !AllZero(332 + words[298] * 5, WordCount))))
@@ -139,8 +139,8 @@ public static class ScalarFrontendHost
                 throw InvalidResult();
             }
             var locals = ImmutableArray.CreateBuilder<ScalarFrontendLocal>(
-                words[0] is 21 or 23 or 25 or 27 ? words[299] : 0);
-            for (var i = 0; i < (words[0] is 21 or 23 or 25 or 27 ? words[299] : 0); i++)
+                words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 31 ? words[299] : 0);
+            for (var i = 0; i < (words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 31 ? words[299] : 0); i++)
             {
                 var offset = 300 + i * 4;
                 var local = new ScalarFrontendLocal(words[offset], words[offset + 1] == 1,
@@ -154,14 +154,16 @@ public static class ScalarFrontendHost
             }
             var declaredLocals = locals.MoveToImmutable();
             var statements = ImmutableArray.CreateBuilder<ScalarFrontendStatement>(
-                words[0] is 21 or 23 or 25 or 27 ? words[298] : 0);
-            for (var i = 0; i < (words[0] is 21 or 23 or 25 or 27 ? words[298] : 0); i++)
+                words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 31 ? words[298] : 0);
+            for (var i = 0; i < (words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 31 ? words[298] : 0); i++)
             {
                 var offset = 332 + i * 5;
                 var statement = new ScalarFrontendStatement(words[offset], words[offset + 1],
                     words[offset + 2], Span(offset + 3));
-                if (statement.Kind is not (1 or 2)
-                    || statement.Slot <= count || statement.Slot > count + declaredLocals.Length
+                if (statement.Kind is not (1 or 2) && (words[0] < 28 || statement.Kind != 3)
+                    || (statement.Kind == 3
+                        ? statement.Slot <= i || statement.Slot > words[298]
+                        : statement.Slot <= count || statement.Slot > count + declaredLocals.Length)
                     || statement.Root < 0 || statement.Root >= words[37]
                     || !ValidSpan(statement.Span, nonempty: true))
                 {
@@ -170,6 +172,7 @@ public static class ScalarFrontendHost
                 statements.Add(statement);
             }
             var orderedStatements = statements.MoveToImmutable();
+            var bodySpans = new TextSpan[orderedStatements.Length];
             var nodes = ImmutableArray.CreateBuilder<ScalarFrontendNode>(words[37]);
             var depths = new int[words[37]];
             var intrinsicTypes = new int[words[37]];
@@ -276,8 +279,9 @@ public static class ScalarFrontendHost
                 };
                 nodes.Add(node);
             }
-            if (hasConversion != (words[0] is 22 or 23 or 26 or 27)
-                || hasConditional != (words[0] >= 24))
+            if (hasConversion != (words[0] is 22 or 23 or 26 or 27 or 29 or 31)
+                || hasConditional != (words[0] is >= 24 and <= 27 or 30 or 31)
+                || (words[0] >= 28) != orderedStatements.Any(static entry => entry.Kind == 3))
             {
                 throw InvalidResult();
             }
@@ -300,6 +304,7 @@ public static class ScalarFrontendHost
             var at = 0;
             var used = new bool[tree.Length];
             var activeLocals = 0;
+            var statementCursor = 0;
             var seenNames = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
             if (!lexical.Diagnostics.IsEmpty
                 || (isPublic && !Take(TokenKind.PublicKeyword))
@@ -339,58 +344,7 @@ public static class ScalarFrontendHost
                 {
                     throw InvalidResult();
                 }
-                for (var statement = 0; statement < orderedStatements.Length; statement++)
-                {
-                    var entry = orderedStatements[statement];
-                    var start = at;
-                    if (entry.Kind == 1)
-                    {
-                        if (entry.Slot != count + activeLocals + 1)
-                        {
-                            throw InvalidResult();
-                        }
-                        var local = declaredLocals[activeLocals];
-                        if ((local.IsMutable && !Take(TokenKind.MutKeyword))
-                            || (!local.IsMutable && tokens[at].Kind == TokenKind.MutKeyword)
-                            || (tokens[at].Kind != TokenKind.VarKeyword
-                                && tokens[at].Kind != TokenKind.Identifier)
-                            || !Take(tokens[at].Kind))
-                        {
-                            throw InvalidResult();
-                        }
-                        var inferred = tokens[at - 1].Kind == TokenKind.VarKeyword;
-                        if (!inferred && tokens[at - 1].Text != TypeName(local.Type)
-                            || !Take(TokenKind.Identifier)
-                            || tokens[at - 1].Span != local.Name
-                            || seenNames.Contains(tokens[at - 1].Text)
-                            || !Take(TokenKind.Equals)
-                            || tree[entry.Root].Type != local.Type
-                            || inferred && intrinsicTypes[entry.Root] == 0
-                            || !TakeTree(entry.Root) || !Take(TokenKind.Semicolon))
-                        {
-                            throw InvalidResult();
-                        }
-                        seenNames.Add(source.Text.Substring(local.Name.Start, local.Name.Length));
-                        activeLocals++;
-                    }
-                    else
-                    {
-                        var local = declaredLocals[entry.Slot - count - 1];
-                        if (entry.Slot > count + activeLocals || !local.IsMutable
-                            || !Take(TokenKind.Identifier)
-                            || tokens[at - 1].Text != source.Text.Substring(local.Name.Start, local.Name.Length)
-                            || !Take(TokenKind.Equals) || tree[entry.Root].Type != local.Type
-                            || !TakeTree(entry.Root) || !Take(TokenKind.Semicolon))
-                        {
-                            throw InvalidResult();
-                        }
-                    }
-                    if (entry.Span.Start != tokens[start].Span.Start
-                        || entry.Span.End != tokens[at - 1].Span.End)
-                    {
-                        throw InvalidResult();
-                    }
-                }
+                TakeStatements(orderedStatements.Length, 0);
                 if (activeLocals != declaredLocals.Length)
                 {
                     throw InvalidResult();
@@ -437,7 +391,8 @@ public static class ScalarFrontendHost
                 Root(conditionRoot), Root(trueRoot), Root(falseRoot));
             return projection with { Nodes = tree, ConditionRoot = conditionRoot,
                 TrueRoot = trueRoot, FalseRoot = falseRoot, IsExpressionBody = words[41] == 1,
-                Locals = declaredLocals, Statements = orderedStatements };
+                Locals = declaredLocals, Statements = orderedStatements
+                    .Select((entry, index) => entry with { BodySpan = bodySpans[index] }).ToImmutableArray() };
 
             ScalarFrontendExpression Root(int index) => index == -1
                 ? default : new ScalarFrontendExpression(tree[index].Type,
@@ -452,6 +407,92 @@ public static class ScalarFrontendHost
                 }
                 at++;
                 return true;
+            }
+
+            void TakeStatements(int end, int depth)
+            {
+                if (depth > 6)
+                {
+                    throw InvalidResult();
+                }
+                while (statementCursor < end)
+                {
+                    var statementIndex = statementCursor++;
+                    var entry = orderedStatements[statementIndex];
+                    var start = at;
+                    if (entry.Kind == 3)
+                    {
+                        if (entry.Slot < statementCursor || entry.Slot > end
+                            || tree[entry.Root].Type != 5
+                            || !Take(TokenKind.WhileKeyword)
+                            || !Take(TokenKind.OpenParen) || !TakeTree(entry.Root)
+                            || !Take(TokenKind.CloseParen) || !Take(TokenKind.OpenBrace))
+                        {
+                            throw InvalidResult();
+                        }
+                        var bodyStart = tokens[at - 1].Span.Start;
+                        TakeStatements(entry.Slot, depth + 1);
+                        if (!Take(TokenKind.CloseBrace))
+                        {
+                            throw InvalidResult();
+                        }
+                        bodySpans[statementIndex] = new TextSpan(bodyStart,
+                            tokens[at - 1].Span.End - bodyStart);
+                    }
+                    else if (entry.Kind == 1)
+                    {
+                        if (depth != 0 || activeLocals >= declaredLocals.Length
+                            || entry.Slot != count + activeLocals + 1)
+                        {
+                            throw InvalidResult();
+                        }
+                        var local = declaredLocals[activeLocals];
+                        if ((local.IsMutable && !Take(TokenKind.MutKeyword))
+                            || at >= tokens.Length
+                            || (!local.IsMutable && tokens[at].Kind == TokenKind.MutKeyword)
+                            || (tokens[at].Kind != TokenKind.VarKeyword
+                                && tokens[at].Kind != TokenKind.Identifier)
+                            || !Take(tokens[at].Kind))
+                        {
+                            throw InvalidResult();
+                        }
+                        var inferred = tokens[at - 1].Kind == TokenKind.VarKeyword;
+                        if (!inferred && tokens[at - 1].Text != TypeName(local.Type)
+                            || !Take(TokenKind.Identifier)
+                            || tokens[at - 1].Span != local.Name
+                            || seenNames.Contains(tokens[at - 1].Text)
+                            || !Take(TokenKind.Equals)
+                            || tree[entry.Root].Type != local.Type
+                            || inferred && intrinsicTypes[entry.Root] == 0
+                            || !TakeTree(entry.Root) || !Take(TokenKind.Semicolon))
+                        {
+                            throw InvalidResult();
+                        }
+                        seenNames.Add(source.Text.Substring(local.Name.Start, local.Name.Length));
+                        activeLocals++;
+                    }
+                    else
+                    {
+                        var local = declaredLocals[entry.Slot - count - 1];
+                        if (entry.Slot > count + activeLocals || !local.IsMutable
+                            || !Take(TokenKind.Identifier)
+                            || tokens[at - 1].Text != source.Text.Substring(local.Name.Start, local.Name.Length)
+                            || !Take(TokenKind.Equals) || tree[entry.Root].Type != local.Type
+                            || !TakeTree(entry.Root) || !Take(TokenKind.Semicolon))
+                        {
+                            throw InvalidResult();
+                        }
+                    }
+                    if (entry.Span.Start != tokens[start].Span.Start
+                        || entry.Span.End != tokens[at - 1].Span.End)
+                    {
+                        throw InvalidResult();
+                    }
+                }
+                if (statementCursor != end)
+                {
+                    throw InvalidResult();
+                }
             }
 
             bool TakeTree(int index)
@@ -1496,12 +1537,30 @@ public static class ScalarFrontendHost
         if (!result.Statements.IsDefault)
         {
             var expressions = treeExpressions ?? throw InvalidResult();
-            foreach (var statement in result.Statements)
+            var at = 0;
+            body.AddRange(LowerStatements(result.Statements.Length));
+
+            ImmutableArray<BoundStatement> LowerStatements(int end)
             {
-                var value = expressions[statement.Root];
-                body.Add(statement.Kind == 1
-                    ? new BoundLocal(statement.Slot - 1, value, statement.Span)
-                    : new BoundAssignment(statement.Slot - 1, value, statement.Span));
+                var statements = ImmutableArray.CreateBuilder<BoundStatement>();
+                while (at < end)
+                {
+                    var statement = result.Statements[at++];
+                    var value = expressions[statement.Root];
+                    if (statement.Kind == 3)
+                    {
+                        var nested = LowerStatements(statement.Slot);
+                        statements.Add(new BoundWhile(value, new BoundBlock(nested,
+                            statement.BodySpan), statement.Span));
+                    }
+                    else
+                    {
+                        statements.Add(statement.Kind == 1
+                            ? new BoundLocal(statement.Slot - 1, value, statement.Span)
+                            : new BoundAssignment(statement.Slot - 1, value, statement.Span));
+                    }
+                }
+                return statements.ToImmutable();
             }
         }
         if (result.HasCondition)
@@ -1916,7 +1975,10 @@ public readonly record struct ScalarFrontendNode(
 
 public readonly record struct ScalarFrontendLocal(int Type, bool IsMutable, TextSpan Name);
 
-public readonly record struct ScalarFrontendStatement(int Kind, int Slot, int Root, TextSpan Span);
+public readonly record struct ScalarFrontendStatement(int Kind, int Slot, int Root, TextSpan Span)
+{
+    public TextSpan BodySpan { get; init; }
+}
 
 public readonly record struct ScalarFrontendResult(
     bool IsValid, bool IsPublic, int ErrorCode, TextSpan ErrorSpan, int ReturnType, int ParameterCount,

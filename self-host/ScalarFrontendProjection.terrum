@@ -12,6 +12,11 @@ namespace Terrum.CodeAnalysis;
 // Versions 24/25 add conditional operation 84 without/with local records;
 // its left and right are condition and true-arm nodes, and its low word is
 // the false-arm node index. Versions 26/27 combine it with operation 83.
+// Versions 28..31 require local records and at least one while header (kind 3).
+// Its slot is the exclusive body-end statement index, root is its Boolean
+// condition and span covers the entire loop; +1 selects conversion, +2
+// selects conditional expressions. Nested bodies follow headers in preorder;
+// the parser admits at most six nested loop headers.
 void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expression)
 {
     Host.Frontend[offset] = expression.Type;
@@ -58,6 +63,22 @@ bool TryPublishScalarFrontend()
             if (Host.Frontend[42 + node * 8] == 84) { conditional = true; }
         }
         if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 4; }
+        mut bool hasWhile = false;
+        for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
+        {
+            if (Host.Frontend[332 + statement * 5] == 3) { hasWhile = true; }
+        }
+        if (hasWhile)
+        {
+            Host.Frontend[0] = 28;
+            mut bool conversion = false;
+            for (mut int32 node = 0; node < Host.Frontend[37]; node = node + 1)
+            {
+                if (Host.Frontend[42 + node * 8] == 83) { conversion = true; }
+            }
+            if (conversion) { Host.Frontend[0] = Host.Frontend[0] + 1; }
+            if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 2; }
+        }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {
