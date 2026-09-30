@@ -83,3 +83,120 @@ bool CanRemainderUInt32(uint32 left, uint32 right)
 {
     return right != 0;
 }
+
+[ConstEval]
+bool CanAddInt64(int64 left, int64 right)
+{
+    if (right > 0)
+    {
+        return left <= int64.MaxValue - right;
+    }
+
+    if (right < 0)
+    {
+        return left >= int64.MinValue - right;
+    }
+
+    return true;
+}
+
+[ConstEval]
+bool CanSubtractInt64(int64 left, int64 right)
+{
+    if (right > 0)
+    {
+        return left >= int64.MinValue + right;
+    }
+
+    if (right < 0)
+    {
+        return left <= int64.MaxValue + right;
+    }
+
+    return true;
+}
+
+[ConstEval]
+bool CanMultiplyInt64(int64 left, int64 right)
+{
+    if (left > 0)
+    {
+        if (right > 0)
+        {
+            return left <= int64.MaxValue / right;
+        }
+
+        if (right < 0)
+        {
+            return right >= int64.MinValue / left;
+        }
+    }
+    else if (left < 0)
+    {
+        if (right > 0)
+        {
+            return left >= int64.MinValue / right;
+        }
+
+        if (right < 0)
+        {
+            return left >= int64.MaxValue / right;
+        }
+    }
+
+    return true;
+}
+
+[ConstEval]
+bool CanDivideInt64(int64 left, int64 right)
+{
+    return right != 0 && !(left == int64.MinValue && right == -1);
+}
+
+[ConstEval]
+bool CanRemainderInt64(int64 left, int64 right)
+{
+    return right != 0;
+}
+
+[ConstEval]
+bool CanNegateInt64(int64 value)
+{
+    return value != int64.MinValue;
+}
+
+[ConstEval]
+bool CanAbsoluteInt64(int64 value)
+{
+    return value != int64.MinValue;
+}
+
+[ConstEval]
+bool CanAddUInt64(uint64 left, uint64 right)
+{
+    return left <= uint64.MaxValue - right;
+}
+
+[ConstEval]
+bool CanSubtractUInt64(uint64 left, uint64 right)
+{
+    return left >= right;
+}
+
+[ConstEval]
+bool CanMultiplyUInt64(uint64 left, uint64 right)
+{
+    return left == 0 || right <= uint64.MaxValue / left;
+}
+
+[ConstEval]
+bool CanDivideUInt64(uint64 left, uint64 right)
+{
+    return right != 0;
+}
+
+[ConstEval]
+bool CanRemainderUInt64(uint64 left, uint64 right)
+{
+    return right != 0;
+}

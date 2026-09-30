@@ -90,11 +90,13 @@ without a wire-version change. Required expressions cannot call imported
 functions. Public/generic `[ConstEval]`, non-scalar values, registered
 literal parsers and ambient I/O remain unsupported.
 The private [integer-facts candidate](../self-host/IntegerFacts.terrum) supplies
-bounded `[ConstEval]` predicates for checked `int32` and `uint32` arithmetic,
-including signed negation and absolute value. Signed subtraction and multiplication
-compare widened `int64` results, whose full `int32` input products fit safely;
-unsigned addition compares against the remaining headroom and multiplication
-divides the maximum bound only for a nonzero operand, so the checks cannot overflow.
+bounded `[ConstEval]` predicates for checked `int32`, `uint32`, `int64`
+and `uint64` arithmetic, including signed negation and absolute value.
+The `int32` subtraction and multiplication checks compare widened `int64`
+results, whose full `int32` input products fit safely. The 64-bit signed
+checks rearrange bounds before arithmetic; unsigned addition compares
+against remaining headroom and multiplication divides the maximum bound
+only for a nonzero operand. The predicates themselves cannot overflow.
 Zero divisors reject, signed-minimum division by `-1` rejects, and the
 corresponding remainder is defined. Required static proofs and ordinary AOT/JIT
 calls exercise these predicates under both runtime policies without publishing
