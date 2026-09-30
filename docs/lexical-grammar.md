@@ -18,8 +18,7 @@ comments and strings. Lines end at CRLF
 The character position inside a line includes its break when queried by offset;
 the next line starts immediately after the break. Tabs, VT, FF, ASCII space,
 NBSP, U+1680, U+2000–U+200A, U+202F, U+205F, and U+3000 are whitespace
-trivia, not line breaks. Current lexer and parser support is documented in
-[implementation](implementation.md).
+trivia, not line breaks.
 
 Identifiers start with `_` or Unicode 17.0.0 `XID_Start` and continue with
 `_` or `XID_Continue` (UAX #31), except that `_` alone is the reserved
@@ -32,9 +31,8 @@ start but not as the first character. This profile makes no additional
 contextual or default-ignorable exclusion: such characters remain significant
 in ordinal spelling, even when visually invisible. A disallowed
 scalar is an error token, including Unicode digits at identifier start.
-Keywords are the lower-case ASCII spellings represented in `TokenKind`,
-including reserved future grammar such as `struct`, `unique`, `move`, `async`,
-and `try`; primitive type names remain identifiers. All other admissible
+Keywords are the lower-case ASCII reserved spellings designated by the
+source grammar; primitive type names remain identifiers. All other admissible
 spellings are identifiers. `_name` and `_123` remain identifiers.
 The standalone `_ = expression;` statement evaluates the bound expression
 once, with its effects and failures, and cleans up an owning result at statement
@@ -42,8 +40,7 @@ exit. It does not name a destination or infer a type for a context-free literal.
 Void calls and named mutable-buffer-view `Set(index, value)` calls are separate
 expression statements. Generic type holes, wildcard patterns and unnamed
 lambda parameters are separate grammar constructs; the reserved token does not
-grant them discard semantics. Current executable coverage is documented in
-[implementation](implementation.md).
+grant them discard semantics.
 
 ## Numeric tokens
 
@@ -91,12 +88,12 @@ Hex digits include `a` through `f`, so `0x1f32` is one integer token whose full
 value is hexadecimal; its `f32` tail is not a width suffix. A non-hex suffix
 such as `0x1u32` is an invalid attached width suffix. Contextual target
 selection constructs decimal, hexadecimal and binary integers without a
-fallback numeric type. The executable boundary for fractional/exponent forms,
-custom literal parsers, registered string targets and `[ConstEval]` is
-documented in [implementation](implementation.md).
+fallback numeric type. Fractional/exponent value semantics, custom literal
+parsers, registered string targets and `[ConstEval]` are specified outside
+this lexical contract.
 
-Decimal integer literals retain numeric range semantics, including the
-existing direct negative signed-minimum case. Hexadecimal and binary literals
+Decimal integer literals have numeric range semantics, including the direct
+negative signed-minimum case. Hexadecimal and binary literals
 are target-width bit patterns: a signed target interprets the selected bits
 using its signed representation, while an unsigned target retains the
 unsigned value. Nonzero bits beyond the target width are rejected; leading
@@ -120,9 +117,8 @@ scalar/target-representability contract is in
 [conversions](conversions.md#character-intent); it does not choose UTF-16 as
 runtime text's default encoding. Checked numeric type-call conversions use
 `T(expression)`, not a numeric prefix-cast production. Source functions and
-local shadowing retain existing call precedence. Literal conversion remains
-distinct from raw tokenization; execution support is documented in
-[implementation](implementation.md).
+local shadowing follow call precedence independent of literal tokenization.
+Literal conversion remains distinct from raw tokenization.
 
 ## Trivia and diagnostics
 
@@ -139,10 +135,3 @@ without a digit, `TRM0008` for a binary prefix without a digit, and `TRM0009`
 for malformed digit separators. Every UTF-16 unit belongs exactly once
 to either token text or its leading trivia, including invalid input.
 Diagnostics for malformed text do not replace or normalize source characters.
-
-## Prior art
-
-The 2021 TerraFX lexer gist by Tanner Gooding and Contributors (MIT) is prior
-art for property selection and source preservation. Its rune-indexed spans,
-host Unicode categories and `IEnumerator` token model are not part of this
-contract.

@@ -5,12 +5,10 @@
 > implementation. Accepted semantic direction does not approve the candidate
 > productions below.
 
-This proposal covers source notation, candidate syntax, and selected semantic
-constraints. It inventories known gaps as well as candidate productions so
-that a tool does not mistake lexer recognition or an example for support.
-It is not an approved language specification; exact grammar and several
-semantic contracts remain open. Examples are informative unless explicitly
-identified as accepted semantic direction.
+This proposal specifies candidate source notation and selected semantic
+constraints. It is not yet an approved language specification; exact grammar
+and several semantic contracts remain open. Examples are informative unless
+explicitly identified as accepted semantic direction.
 
 The [language](../language.md), [memory model](../memory-model.md),
 [conversions](../conversions.md), [lifetimes](../lifetimes.md), and
@@ -35,8 +33,8 @@ constraints, candidate source forms, and unresolved choices. It makes no
 compatibility promise or implementation claim.
 
 This is a bounded source-language proposal, not a complete grammar for all
-language features. A lexical token does not by itself establish a production.
-Recovery syntax is not a conforming source form.
+language features. A reserved spelling does not by itself establish a
+production; recovery syntax is not a conforming source form.
 
 **Documentation-comment direction (accepted source form, detailed grammar
 open):** attach `///` documentation to declarations, with `/** ... */` as an
@@ -61,7 +59,7 @@ syntax boundaries:
 
 - Source positions and token lengths count UTF-16 code units. Identifier starts/continues follow the pinned Unicode 17.0.0 XID properties plus `_`; spelling is ordinal, case-sensitive, and not normalized. Keywords are lower-case ASCII token spellings. Primitive names such as `int32` are ordinary identifiers.
 - Whitespace and comments are leading trivia; line breaks include CRLF, CR, LF, NEL, LS, PS. Line/block comments do not nest. EOF owns trailing trivia.
-- The current lexer recognizes unsuffixed decimal, hexadecimal (`0x`/`0X`), or binary (`0b`/`0B`) numbers with separators between digits and, for based values, immediately after the prefix. Decimal fraction/exponent spellings lex but are not executable values. Hexadecimal floating-point syntax below is a **proposal**, not part of that lexer contract. Signs are separate operators except an exponent sign. Width suffixes are rejected; `10i32` is not a typed literal. `_123` is an identifier.
+- Unsuffixed decimal, hexadecimal (`0x`/`0X`), binary (`0b`/`0B`) and proposed hexadecimal floating-point forms are described below. Separators may occur between digits and, for based values, immediately after the prefix. Signs are separate operators except an exponent sign. Width suffixes are invalid; `10i32` is not a typed literal. `_123` is an identifier.
 - Strings use `"..."` with the documented escapes; no interpolation exists. Character literals and numeric suffixes are not tokens.
 - Lexical diagnostics preserve malformed source spelling; bad characters/surrogates, invalid escapes, unterminated literals/comments, bad prefixes, separators, and attached width suffixes have distinct diagnostic codes in the lexical reference.
 
@@ -103,13 +101,11 @@ token. It has digits on at least one side of the point; the exponent has
 decimal digits, and `_` follows the existing between-digits rules. A leading
 sign is separate from the token, unlike the exponent sign.
 
-This proposed `Number` production is broader than the implemented
-[lexical grammar](../lexical-grammar.md): its `HexFloat` alternative still
-needs coordinated token boundaries and diagnostics (including incomplete
-`p` exponents, separators and identifier tails), target-format rounding,
-literal conversion rules and implementation tests. Neither decimal nor
-hexadecimal floating spellings have an executable value in the present
-frontend.
+The proposed `HexFloat` alternative still needs specified token boundaries
+and diagnostics (including incomplete `p` exponents, separators and
+identifier tails), target-format rounding and literal conversion rules.
+The [lexical grammar](../lexical-grammar.md) specifies the adopted lexical
+profile separately; this candidate does not silently revise that contract.
 
 Primitive spellings (`int32`, `float32`, `bool`, `char16`, etc.) remain
 ordinary identifier **tokens**, not lexical keywords. Their exact type
@@ -121,12 +117,11 @@ floating, character, vector and decimal families are listed in the
 [language design](../language.md#primitives-strict-arithmetic-and-text);
 the set of reserved bindings follows the primitives actually selected by the
 language, not every candidate in this grammar. Neither `@identifier` nor
-backtick-delimited identifiers have a token or production in the current
-lexer or this proposal; keywords therefore cannot currently be used as
-names. A narrow `@identifier` keyword escape is a candidate for later review,
-not an adopted arbitrary-string delimiter. Core does not need an escape to
-declare `int32`: escaping a token would not confer the right to define a
-compiler-owned binding.
+backtick-delimited identifiers have a production here, so reserved words
+cannot be used as names. A narrow `@identifier`
+keyword escape remains an open alternative, not an adopted arbitrary-string
+delimiter. Core does not need an escape to declare `int32`: escaping a token
+would not confer the right to define a compiler-owned binding.
 
 **Core bootstrap proposal:** A designated Core-library compilation has no
 implicit prebuilt standard-library reference and has explicit permission to
@@ -142,34 +137,52 @@ instance fields and no source-defined primitive operators. That recursive
 field is a privileged intrinsic representation: the compiler/runtime give
 the primitive its fixed storage and do not recursively lay out the field as
 an ordinary nested struct. Outside the designated Core build, the same
-declaration is an error, regardless of spelling or namespace. The current
-bounded compiler uses a provisional `--corelib` build switch for six
-implemented primitives and source-defined static/readonly instance methods;
-it does not yet implement Core primitive conformances, constructors,
-properties or a complete standard library. The Core artifact identity,
-full permitted member forms and enforcement across separate compilation
-remain open design work.
+declaration is an error, regardless of spelling or namespace. The Core
+artifact identity, full permitted member forms and enforcement across
+separate compilation remain open design work.
 
 `void` is a distinct keyword; primitive type spellings are not keyword
-tokens. The table groups spelling by purpose, not grammar legality. "Current"
-means the lexer recognizes the token; "candidate" needs a keyword-versus-
-contextual-token decision and is not necessarily implemented.
+tokens. The following is the intended vocabulary, grouped by source role;
+the exact keyword-versus-contextual-token classification and the productions
+for some words remain open. Listing a word does not permit it in an arbitrary
+context.
 
-| Purpose | Current lexer tokens | Candidate words in the target grammar |
+| Concept | Intended words | Source role |
 |---|---|---|
-| Files, visibility and declarations | `using`, `namespace`, `public`, `internal`, `private`, `static`, `struct`, `class`, `interface`, `enum`, `union`, `operator`, `where` | `extern`, `extension`, `partial` |
-| Types, ownership and parameters | `void`, `var`, `mut`, `unique`, `own`, `ref`, `out`, `write` | `init`, `implicit`, `params`, `pin`, `const` |
-| Control flow, cleanup and policies | `if`, `else`, `while`, `for`, `foreach`, `break`, `continue`, `switch`, `case`, `default`, `return`, `require`, `try`, `catch`, `finally`, `throw`, `async`, `await`, `unsafe` | `in`, `do`, `when`, `yield`, `defer`, `policy` |
-| Values, matching and members | `true`, `false`, `null`, `move`, `new` | `some`, `is`, `and`, `or`, `not`, `get`, `set`, `field`, `this`, `ensure` |
-| Legacy lexer only | `abstract` | none |
+| File imports | `using` | Bring names into scope. |
+| Namespace | `namespace` | Declare the file-scoped namespace. |
+| Visibility | `public`, `internal`, `private` | Restrict declaration access. |
+| Nominal declarations | `struct`, `class`, `interface`, `enum`, `union` | Name types; union declaration syntax remains open. |
+| Declaration composition | `partial` | Merge parts of one identity. |
+| Extension declarations | `extension` | Declare scoped extensions; exact syntax remains open. |
+| External declarations | `extern` | Bind external definitions; exact syntax remains open. |
+| Member kinds | `static`, `operator` | Declare static members and operators. |
+| Property accessors | `get`, `set`, `init` | Read, write or initialize properties. |
+| Property backing | `field` | Access only the enclosing property's backing place. |
+| Receiver | `this` | Refer to the enclosing member's receiver. |
+| Generic constraints | `where` | State formal parameter constraints. |
+| Compile-time values | `const` | Require static evaluation; const-value formal syntax remains open. |
+| Type forms | `void`, `var` | Name a zero-data result or infer a local type. |
+| Ownership | `unique`, `own`, `move` | Express ownership and explicit transfer. |
+| Reference access | `mut`, `ref`, `write`, `pin` | Qualify places, loans and references; pin qualifies `ref<T>` only. |
+| Parameter and argument modes | `init`, `implicit`, `params` | Express vacant initialization, implicit loans or collection arguments; not every combination is legal. |
+| Branching | `if`, `else`, `switch`, `case`, `default` | Choose conditional or switch arms; `default<I>` also selects an interface default body. |
+| Patterns | `when`, `is`, `some`, `and`, `or`, `not` | Match values and guard arms; full pattern grammar remains open. |
+| Loops and iteration | `while`, `do`, `for`, `in`, `break`, `continue` | Iterate and transfer to the nearest loop. |
+| Results | `return` | Complete a call. |
+| Producers | `yield` | Produce a suspended value; producer syntax remains open. |
+| Asynchrony | `async`, `await` | Declare and suspend async work; exact syntax remains open. |
+| Contracts | `require`, `ensure` | Check preconditions or postconditions; declaration grammar remains open. |
+| Exception flow | `try`, `catch`, `finally`, `throw` | Handle or propagate failures; typed catches remain open. |
+| Deferred cleanup | `defer` | Register lexical-block-exit actions. |
+| Unsafe authorization | `unsafe` | Scope operations that require caller authorization. |
+| Policy selection | `policy` | Prefer or require a method variant. |
+| Literal values | `true`, `false`, `null` | Form Boolean and optional values. |
+| Construction | `new` | Begin ordinary construction. |
 
-Recognition alone does not authorize a source form. `abstract` remains
-reserved for the bounded parser's legacy syntax, not a target declaration
-modifier; `out` remains implemented but the target uses `init ref<T>` for
-initialization loans. `default`, `operator`, and `write` already have keyword
-tokens. §3.4 uses `is` contextually although it is not currently a keyword.
-`_` is a distinct reserved token. No `unchecked` source keyword is proposed:
-arithmetic selection uses policy cases instead.
+`_` is a distinct nonbinding token, not an identifier. Vacant initialization
+uses `init ref<T>`; arithmetic selection uses policy cases rather than a
+separate arithmetic-toggle source form.
 
 ## 3. Candidate grammar productions (PROPOSED)
 
@@ -298,16 +311,15 @@ decisions; accessor effects attach to their attributes, not the entire
 property. A `set` or `init` body receives a typed `value` parameter; `init`
 is construction-only. The interaction of mixed explicit/automatic accessors,
 attribute targets and modifier applicability remains **OPEN**. Constructors
-must name their enclosing type. The
-lexer does not yet recognize `++` or `--` as single tokens; their inclusion in
-`OperatorSymbol` is a future source-form proposal, not executable syntax.
+must name their enclosing type. The `++` and `--` operator spellings in
+`OperatorSymbol` need tokenization and operator-contract rules before
+adoption.
 Nested type declarations are deliberately excluded from this candidate
 grammar; this is a proposed scope boundary, not a claim that nested type
 arguments in `Type` are excluded. See [§5.11](#511-nested-types-and-scoped-operators).
 
 ```terrum
-// Design-only target sketch; not executable syntax. The present bounded
-// parser still requires "static abstract".
+// Candidate interface syntax.
 interface IAdd<T>
 {
     static T operator +(T left, T right);
@@ -460,8 +472,8 @@ PolicyCase      = DottedIdentifier ;
 ObjectInitializer = "{", { Identifier, "=", Expression, ";" }, "}" ;
 ```
 
-`HexFloat` participates in the proposed `Number` alternative above; the
-current lexer and compiler do not yet recognize or evaluate it.
+`HexFloat` participates in the proposed `Number` alternative above;
+its token boundaries and value semantics remain to be specified.
 
 The generic-call alternative is explicit function-call syntax, not a general
 expression type-application operator. It does not express partial holes (`_`),
@@ -533,9 +545,9 @@ or claim an implementation.
   remain open.
 - **Types and declarations:** type/declaration semantics follow [language
   interfaces and generic properties](../language.md#interfaces-access-and-generic-properties).
-  Lexical recognition of `enum`, `union`, `async`, `await`, `switch`, `case`,
-  `foreach`, `throw`, `own` or `unique` does not itself define a declaration or
-  statement production.
+  An intended reserved word does not establish a declaration or statement
+  production; union, async, matching and failure forms require their
+  respective grammar and semantic rules.
 - **Adapters, families, and protocols:** conformance, adapters, associated
   projections and family erasure follow [type-family contracts](../type-families.md#nominal-witnesses-and-associated-relationships).
   Conformance and projections are explicit and checked; imports, matching
@@ -575,8 +587,8 @@ or claim an implementation.
   defines character forms. There are no width suffixes or default numeric type;
   `T(expression)` is a checked conversion, literals are context-typed, and
   numeric operators are checked by default. Floating APIs are target-specific;
-  character literals and custom literal registration remain proposed, floating
-  forms may lex but are not executable values, and `utf8z("...")` is an
+  character literals and custom literal registration remain proposed,
+  floating literal binding needs source rules, and `utf8z("...")` is an
   ordinary call rather than a lexer prefix.
 
 ## 5. Open grammar and semantic choices
@@ -713,8 +725,7 @@ contract is checked; no extra trusted-implementation source marker is required. 
 default binary-trust model does not require downstream consumers to re-prove
 dependency bodies.
 
-The exact declaration grammar and contract metadata remain open. The example
-does not claim compiler support.
+The exact declaration grammar and contract metadata remain open.
 
 ### 5.4 Associated types: accepted direction, open source grammar; type packs out of scope
 
@@ -866,13 +877,12 @@ publication transaction.
 
 **Open:** exact `ensure` clause placement/grammar and the
 source-to-metadata mapping for correlated initialization facts. There is no
-special conditional postcondition block grammar. A `bool`/`out` form remains
-distinct from an `init ref<T>` contract. See the canonical
+special conditional postcondition block grammar. See the canonical
 [conditional output contract](../language-contracts.md#2-outcome-initialization-and-nullability-are-separate).
 
 ### 5.9 Static-proof floor and constant evaluation
 
-**Accepted policy, not parser-support claim:** required static obligations use
+**Accepted policy:** required static obligations use
 a versioned portable minimum of proof rules/complexity and guaranteed
 resources, available independently of optimization level. Sound
 beyond-floor analysis may prove harder cases, use larger budgets and accept
@@ -903,11 +913,10 @@ initialization safety. No example fixes the exact source spelling.
 
 ### 5.10 Properties and accessor-local effects
 
-**Previously accepted minimum:** explicit getter-only, by-value properties
-on compact `Copy` structs and source classes. **Proposed extension:** `get`,
-`set`, and construction-only `init` accessors, including backed
-auto-properties; the source forms in §3.1 are candidates, not implemented
-grammar. Ref-returning properties and indexers remain separate questions.
+**Accepted direction:** by-value properties on compact `Copy` structs and
+source classes. **Proposed forms:** `get`, `set`, and construction-only `init`
+accessors, including backed auto-properties (§3.1). Ref-returning properties
+and indexers remain separate questions.
 
 Interface properties are separate contract members: a bodyless interface
 getter requires a conformance implementation, while a getter body supplies a
@@ -959,7 +968,6 @@ property/accessor identity and contract rather than a magic naming convention.
 
 The candidate productions cover named accessors; mixed explicit/automatic
 backing rules, effect placement, and metadata representation remain open.
-This example does not claim compiler support.
 
 **Proposed construction rule:** a constructor initializes all private state
 it does not leave to declared `init` properties. Its published completion
@@ -1018,8 +1026,8 @@ type; `ref` and `init ref<T>` distinguish ordinary access from vacant-storage
 initialization.
 `unique` is an ownership form, not an access synonym. `unsafe` on a callable
 declares caller obligations while an `unsafe { ... }` block scopes operations
-inside a body. Interface requirements need no `abstract` modifier: a
-bodyless declaration requires a witness implementation, while a body supplies
+inside a body. A bodyless interface declaration requires a witness
+implementation, while a body supplies
 a default that a conforming type may explicitly replace. Both have the
 interface's declared member identity and contract. Each selected nominal
 conformance maps that identity to its checked explicit implementation, or to
@@ -1167,13 +1175,13 @@ declarations.
 read/copy/write or inferred from addition. The same question applies to
 `-=`, `*=`, `/=`, `%=`, `&=`, `|=` and `^=`: spelling, legal places, precedence,
 evaluation order, failure behavior, source tokenization and whether each
-operator is supported must be specified together. The current lexer has
-neither compound-assignment nor increment/decrement tokens, and the candidate
-`AssignmentStatement` only covers `=`. Do not treat compound assignments as
-the existing binary operators followed by `=`.
+operator is supported must be specified together. The candidate
+`AssignmentStatement` only covers `=`; compound-assignment and
+increment/decrement spellings need lexical and contract rules. Do not treat
+compound assignments as the existing binary operators followed by `=`.
 
 ```ebnf
-(* PROPOSED extension only; not part of section 3's current token set. *)
+(* PROPOSED extension only; not part of section 3's productions. *)
 CompoundAssignmentStatement = Place, CompoundAssignmentOperator, Expression, ";" ;
 CompoundAssignmentOperator = "+=" | "-=" | "*=" | "/=" | "%="
                            | "&=" | "|=" | "^=" ;
@@ -1191,20 +1199,17 @@ conditional/default conformance, conditional expressions, character and
 text-target fragments, general `const` declarations/expressions, `ensure`
 placement, `init ref<T>` parameters, optional access/ownership forms,
 generic defaults and constructor inference, lambdas, async/await, throw,
-typed catches, interpolation and collections. Reserved `switch`, `case`,
-`foreach`, `async`, `await`, `union`, `throw` and `own` are not implementations
-of those features. They need complete syntax, binding, effects and
-representation rules, not isolated extra alternatives in `Statement` or
-`Primary`. The proposed `Primary` includes `Number`, including `HexFloat`; current
-lexing recognizes decimal fractions and executable integer values, but not
-hexadecimal floating tokens or executable floating values. Coordinated
-lexical and numeric work remains required.
+typed catches, interpolation and collections. Words such as `switch`, `case`,
+`async`, `await`, `union`, `throw` and `own` need complete syntax, binding,
+effects and representation rules, not isolated extra alternatives in
+`Statement` or `Primary`. The proposed `Primary` includes `Number`, including
+`HexFloat`; its lexical and numeric contracts need to be specified together.
 
 ### 5.14 Documentation-comment grammar and tooling
 
 The accepted attachment, markup and contract boundary is in
 [language](../language.md#documentation-comments). The following details are
-**open specification work**, not parser or XML-schema approval:
+**open specification work**, not a defined XML schema:
 
 | Surface | What remains to specify |
 |---|---|
@@ -1225,38 +1230,56 @@ remote includes or reveal private declarations merely to resolve a link.
 
 ### 5.15 Specification-to-tooling gate
 
-Before promoting this proposal to an approved grammar or using it as a
-conformance source for tools, reconcile every production with the canonical
-lexical tokens (including contextual keywords and longest-match rules),
-restrict modifiers and declaration bodies by context, define all accepted
-semantic forms that currently lack productions, specify static semantics
-for invalid combinations, and add positive/negative parser and token-boundary
-fixtures. Separate the full target language from the bounded
-[implemented syntax](../implementation.md);
-accepting a candidate spelling in an example does not claim compiler support.
+Before promoting this proposal to an approved grammar, reconcile every
+production with the lexical contract (including contextual keywords and
+longest-match rules), restrict modifiers and declaration bodies by context,
+define the accepted semantic forms that lack productions, and specify static
+semantics for invalid combinations. Positive and negative source examples
+should cover the specified boundaries. A candidate spelling in an example
+does not establish a normative production.
 
-## 6. Coverage and conformance boundary
+## 6. Source-form coverage and open boundaries
 
-This map is an index, not an additional grammar or approval. **A** means
-accepted semantic direction, **P** a candidate source form only, **O** an
-unresolved choice, and **I** support documented by the implementation
-reference. These statuses can coexist; implementation does not approve a
-proposal, and accepted semantics do not approve its syntax.
+This index separates concepts for readers; it does not add productions or
+approve unresolved forms. The sections named in the middle column give the
+candidate source forms or accepted semantic direction. An open boundary
+remains unspecified rather than becoming legal merely because a related word
+appears in §2.
 
-| Surface | Coverage and status | Explicit boundary or remaining gap |
+| Concept | Defined direction | Still to specify |
 |---|---|---|
-| Lexing, keywords, built-in names | The canonical current lexer contract is [lexical grammar](../lexical-grammar.md); §2 includes `HexFloat` in the proposed `Number` production. Primitive spellings are identifier tokens with reserved type bindings; `void` is a keyword. | `abstract` remains a lexical token for legacy parser syntax, not a target modifier. `is` is used contextually but is not a current keyword token; `get`, `some`, `init`, `implicit`, `params`, `ensure`, and `const` need token decisions. The bounded `--corelib` mode attaches APIs to six compiler-owned primitives; Core artifact identity and full member contracts remain open. |
-| Files and nominal declarations | **P** §3.1 sketches using/file namespace, top-level functions, structs, classes, interfaces, and integral-base enums; interface bases differ from nominal conformances. | Exact modifier/attribute legality and enum constant restrictions remain open. No union or nested nominal declaration is proposed; recursive generic type arguments in `Type` are not excluded. |
-| Constructors, members, operators, properties | **P** §3.1 sketches concrete members, `get`/`set`/`init` and backed auto-properties; constructors name their owner; operators are type/interface members, not global declarations. **A** §5.7 specifies unary operator direction; §5.12 fixes property-local `field`, storage ordering for backed/auto-properties, and partial merge order and implementation requirements. | Interface `;` versus body forms are separated in §3.1. Mixed accessor backing, attribute targets, effect metadata and construction-completion contract syntax remain **O**; ref-return properties and indexers are not adopted. `++`/`--` appear only as future operator spellings, not current lexer tokens. |
-| Interface witnesses and dispatch | **A** §5.12: bodyless members require checked implementations; bodies supply replaceable defaults, selected by declaring-member identity. **P** §3.1 sketches the corresponding `;`/body forms. Static operator witnesses need no runtime vtable. | Explicit mapping syntax, metadata/ABI, inherited-default resolution syntax, and compatible binding for older witnesses remain **O**. No physical slot layout is selected. |
-| Types, parameters, arguments, modifiers | **P** §3.2 sketches recursive type arguments, one optional marker, `ref`/`mut ref`/`init ref<T>`, labels, `init` arguments and `pin` on references. `mut`, `unique`, `unsafe`, visibility and `static` are candidate modifier vocabulary. | `implicit ref<T>`, `write` parameter legality, `params`, generic defaults/inference, associated types, `ensure` contracts and exact modifier combinations remain **O**. Prefix names are context-valid placeholders; `abstract` is deliberately absent from target modifiers. |
-| Statements and expressions | **P** §§3.3–3.4 sketch blocks, `for (... in ...)`, object initializers, calls, assignments, `policy<...>` scopes, precedence, `is null`/`is some`, and `T(expression)`. **A** §5.6 gives standalone discard and nonbinding wildcard semantics; §3.3 records the distinct `_ = expression;` form. §5.12 admits user-defined policy enum domains. | Assignment's left side needs a writable-place check; catch typing/binding, policy-variant declaration syntax, const-enum generic form, constant-evaluation/static-proof syntax, and omitted constructs (including lambdas, patterns, `throw`, `await`, conditional expressions and general assignment expressions) remain outside this grammar. Pattern combinator and iteration binding rules remain open. |
-| Literals and compound operations | **P** `HexFloat` is part of the proposed `Number` and `Primary`; **I** currently covers decimal/hex/binary integer tokens, decimal fractional tokens and strings, not hex floats or executable floating literals. **A** §5.13 separates compound-operation semantics from `+`. | Hex-float token diagnostics and floating-value semantics still need implementation. Compound-assignment spelling, tokens, places and evaluation rules are **O**; `+=`…`^=` shorthand in §5.13 is not legal grammar. |
-| Cleanup and finalizers | **A** deterministic `[Cleanup]` is distinct from GC finalization; **I** support is listed by the implementation reference. | Attribute placement is still governed by open contextual-prefix rules. No finalizer production is proposed; whether to support one and its lifecycle/ABI contract remain **O** (§5.12). |
-| Implemented boundary | **I** is defined only by [implementation](../implementation.md), not by this proposal's examples or productions. | Nothing marked **P** is thereby implemented or source-compatible. |
+| Lexical tokens | §2 gives identifier and reserved-word forms; primitive names are identifiers with reserved bindings. | Exact contextual-word classification and `HexFloat` token boundaries/diagnostics. |
+| Literals | §§2 and 4 sketch string and numeric forms and their target selection. | Floating literal target-format semantics and character forms. |
+| Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
+| Namespace | §3.1 sketches one file-scoped namespace. | Other namespace forms, if any. |
+| Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
+| Nominal types | §3.1 sketches structs, classes, interfaces and integral-base enums. | Union and nested declarations, enum constant restrictions and contextual attributes. |
+| Generic declarations | §3.1 sketches type formals and constraints. | Const-value formals, defaults, associated types and inference. |
+| Partial declarations | §5.12 defines one-identity merge and body-provision rules. | Detailed merge compatibility and attribute multiplicity. |
+| Core primitive declarations | §2 preserves reserved primitive identities with a privileged backing field. | Artifact identity, permitted members and separate-compilation enforcement. |
+| Fields | §3.1 sketches instance fields. | Attribute targets and layout restrictions. |
+| Constructors | §§3.1 and 5.10 describe owner-named constructors and initialization obligations. | Exact construction-completion contract spelling. |
+| Properties | §§3.1, 5.10 and 5.12 describe accessors, backing storage and property-local `field`. | Mixed auto/explicit backing, effect/attribute targets, ref returns and indexers. |
+| Operators | §§3.1, 5.7 and 5.13 describe nominal unary/binary operators and distinct compound-operation contracts. | Compound-operator declarations, tokenization, places and evaluation order. |
+| Conversions | §§3.1 and 5.12 sketch `operator T(U source)` and explicit `T(value)`. | Conversion eligibility and constructor/conversion ranking. |
+| Interface members | §§3.1 and 5.12 distinguish required members and replaceable defaults by member identity. | Explicit witness mapping, inherited-default resolution and representation. |
+| Types | §3.2 sketches recursive types and normalized optionals. | Optional access and associated-type forms. |
+| Ownership | §§3.2 and 5.12 sketch owner forms and explicit transfer. | Complete ownership-form grammar. |
+| Reference access | §§3.2 and 5.12 sketch loans and reference qualifications. | Complete legality of `pin`, `write` and other qualifier combinations. |
+| Parameters | §§3.2, 5.1–5.2 sketch modes and implicit borrowing. | `params`, exact implicit-loan grammar and output-contract clauses. |
+| Arguments | §§3.2 and 5.1 sketch labels and `init` arguments. | Legal passing-mode and place combinations. |
+| Statements | §3.3 sketches blocks, transfers and standalone discard. | Statement-place checks and producer/async statements. |
+| Iteration | §3.3 sketches `for (... in ...)`; §5.12 names `do`. | Iteration binding and post-test loop production. |
+| Expressions | §3.4 sketches precedence, type calls and initializers. | Conditional expressions, lambdas and collections. |
+| Patterns | §§3.3–3.4 sketch bounded `is` tests. | Full matching, guards and combinator binding. |
+| Policies | §§3.3–3.4 and 5.12 describe lexical preferences, fallback and strict `require policy`. | Variant-declaration syntax, const-enum formals and compile-time queries. |
+| Contracts | §§3.3 and 5.8 describe `require` and `ensure` direction. | Declaration clauses and correlated output facts. |
+| Static proof | §5.9 describes the portable static-proof floor. | Constant-evaluation and symbolic source forms. |
+| Exceptions | §3.3 sketches `try` and `catch`. | Typed catches and exception expressions. |
+| Cleanup | §5.12 distinguishes lexical `defer` from `[Cleanup]`. | `defer` production and attribute placement. |
+| Finalization | §5.12 does not equate GC finalization with cleanup. | Whether finalizers exist and their lifecycle/ABI contract. |
+| Documentation comments | §§1 and 5.14 describe attachment and structured prose direction. | Exact markup/reference grammar and XML artifact schema. |
 
-An implementation conforms only to an adopted language specification and its
-specified lexical, grammatical, and static-semantic rules. A recovery tree or
-an example accepted in isolation is not evidence of conformance. The
-implementation boundary is in [implementation](../implementation.md); the
-lexical contract is in [lexical grammar](../lexical-grammar.md).
+Only an adopted specification and its lexical, grammatical and static-semantic
+rules establish conformance. The [implementation reference](../implementation.md)
+records supported subsets separately from this proposal.

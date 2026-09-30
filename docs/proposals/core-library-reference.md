@@ -57,7 +57,7 @@ and feature-to-runtime support remain open.
 ## Reading declarations
 
 - `mut` grants a writable place or receiver; `write` qualifies authority through a reference/view. They are not interchangeable. Readonly is the declaration default.
-- `ref<T>` is an ordinary reference/loan. `init ref<T>` names a vacant output destination, not writable access; the accepted call-site form is `Create(init value)`. Exact grammar, output contracts, and migration from `out` remain open.
+- `ref<T>` is an ordinary reference/loan. `init ref<T>` names a vacant output destination, not writable access; the accepted call-site form is `Create(init value)`. Exact grammar and output contracts remain open.
 - `write Span<T>` lends write access to backing slots; `mut Span<T>` only permits descriptor rebinding. `Span<write C>` is separately writable through each retained handle. Generic substitutions preserve their complete qualification.
 - `[Copy]`, `[Sized]`, `[ManagedStorable]`, `[TextCodeUnit]`, and `[SimdElement]` are checked properties/capabilities, not user assertions inferred from an interface name.
 - A signature does not express all dependencies. A returned view retains its backing/root/lease and any shape metadata. Ownership, allocation, checked failure, effect and task-completion rules are stated under the relevant family.
@@ -82,7 +82,7 @@ public nominal union Lookup<T>
 }
 ```
 
-`Lookup<T>.Missing` remains distinct from `Lookup<T>.Found(null)` when `T` is optional; `Option<T>` itself does not add a second presence state. Niche representations must be declared and validated; no invalid bit pattern, padding, or null encoding is available implicitly. The bounded `bool`/`out` contract leaves its output vacant on false. General `init ref<T>` does **not** universally mean false leaves the destination vacant: a declaration must specify initialization/publication outcomes and the checker must verify them. For example, an API contract for `bool TryParse(TextSpan, init ref<T>)` may specify false => vacant and true => initialized; the signature alone does not convey that rule. The `bool`/`out` and `init ref<T>` contracts are distinct until any migration is specified.
+`Lookup<T>.Missing` remains distinct from `Lookup<T>.Found(null)` when `T` is optional; `Option<T>` itself does not add a second presence state. Niche representations must be declared and validated; no invalid bit pattern, padding, or null encoding is available implicitly. General `init ref<T>` does **not** universally mean false leaves the destination vacant: a declaration must specify initialization/publication outcomes and the checker must verify them. For example, an API contract for `bool TryParse(TextSpan, init ref<T>)` may specify false => vacant and true => initialized; the signature alone does not convey that rule.
 
 Expected domain alternatives should be represented by a status/union/result contract; the proposed `Result<T,E>` shape is defined once in §13. Exceptional failures propagate. `require` can lift a declared false outcome into checked failure, but no general library-wide exception hierarchy/object ABI is selected. Catch/recovery is not implied by `require`.
 
@@ -90,10 +90,9 @@ Expected domain alternatives should be represented by a status/union/result cont
 
 These are opt-in behavior contracts, not automatic primitive or root
 conformance. Bodyless interface members require a checked witness; a body
-would supply an overridable default. The sketches use the proposed grammar,
-not the bounded parser's current `static abstract` spelling. Equality
-intended for a map key must be paired with a hash that agrees on equivalent
-values.
+would supply an overridable default. The sketches use the proposed grammar.
+Equality intended for a map key must be paired with a hash that agrees on
+equivalent values.
 
 ```terrum
 public interface IEqualityComparer<T>
@@ -596,7 +595,7 @@ public struct decimal32 : IParsable<decimal32>, IFormattable, IScalarIeee754<dec
 
 `IScalarNumber` and `IScalarIeee754` are optional composites; universal number protocol is not required. `TOther`/`TResult` may differ from `TSelf`. Vector arithmetic is not scalar classification. Named integer associated types such as `Wider`/`Signed`/`Unsigned` resolve through the selected interface witness; explicit associated equality can bind another type parameter, with no reverse inference from a projection. Exact member, equality, witness-selection and conversion-witness syntax remains specification work.
 
-`int32.TryAdd/Subtract/Multiply` are checked expected failures; false publishes no output. `int32.FromBits` and `float32.ToBits` reinterpret bits, not numerically convert. Integer arithmetic is checked by default. Existing executable checked type-call conversions cover `int32`, `uint32`, `int64`, `uint64`, and `char16`; see the [implementation reference](../implementation.md) for current support. Other declarations/conversions here are design-only. Bare numeric literals have no default width; target context selects their type. The canonical [conversion policy](../conversions.md#conversion-policies) is: checked integer conversion preserves or throws, unchecked integer conversion wraps to destination-width bits, and saturation is explicit; floating-to-floating conversion follows IEEE-754 without language failure; float-to-int truncates toward zero then checked-throws or unchecked/explicitly-saturates, never modulo-narrows, with NaN converting to zero. Floating APIs are target-specific; exact source/destination witness lookup and user-defined declarations remain open.
+`int32.TryAdd/Subtract/Multiply` are checked expected failures; false publishes no output. `int32.FromBits` and `float32.ToBits` reinterpret bits, not numerically convert. Integer arithmetic is checked by default. Bare numeric literals have no default width; target context selects their type. The canonical [conversion policy](../conversions.md#conversion-policies) is: checked integer conversion preserves or throws, unchecked integer conversion wraps to destination-width bits, and saturation is explicit; floating-to-floating conversion follows IEEE-754 without language failure; float-to-int truncates then checked-throws or unchecked/explicitly-saturates, never modulo-narrows, with NaN converting to zero. Floating APIs are target-specific; exact source/destination witness lookup and user-defined declarations remain open.
 
 ## 7. Fixed SIMD, scalable vectors and tensors
 
@@ -745,7 +744,7 @@ that remain open:
 
 1. **Presence/result:** normalized optional flattening is the accepted semantic direction; settle only the source spelling/alias projection for `Option<T>`. A nominal `Missing | Found(T?)` union remains distinct when present-null must differ from missing. `Result<T,E>` and error payload design remain proposed; declaration-specific vacancy/publication contracts must be explicit.
 2. **Equality/hash semantics:** clarify how concrete `int32.GetHashCode()` relates to numeric-key hashing; it does not imply a universal root contract. Settle reusable primitive key-comparer declarations.
-3. **`init ref<T>` migration:** semantics and `Create(init value)` call-site spelling are accepted direction; conditional outcome metadata, optional outputs and coordinated migration remain open. These proposed signatures define no executable ABI.
+3. **`init ref<T>` contracts:** semantics and `Create(init value)` call-site spelling are accepted direction; conditional outcome metadata and optional outputs remain open. These proposed signatures define no executable ABI.
 4. **Memory signatures:** checked location/range grammar; legal CAS success/failure order pairs and bitwise-eligible representations; fence coverage/compiler-fence scope; non-temporal/cache safety and target support. Preserve compile-time-known ordering, accepted defaults, lock-free default and checked/wrapping selection.
 5. **Collections/elements:** allocator/failure contract, non-Copy/borrowed/affine storage, guard alias/reentrancy enforcement, write-access naming, builder abandonment/error contract, lending iteration.
 6. **Numerics:** integer associated-relation declarations and witness lookup; primitive operator/conversion matrix; floating/decimal policy gaps; align key hashing with comparer.
@@ -769,7 +768,7 @@ The following distinctions and signature questions remain open:
 - `int32.GetHashCode()` does not imply a universal root contract. Review only whether the primitive method denotes the same key-hash semantics as `float32`/`decimal32` or is a separate concrete helper; generic map-key use remains governed by explicit comparer witnesses.
 - `TensorShape.Lengths`/`Strides` are `Span` properties but docs require immutable independently live metadata. Their exact readonly/view qualification and ownership source are not expressed by these signatures.
 - `TensorViews.View` must preserve both data and shape dependencies, but no final multi-source lifetime/anchor syntax exists; shown signature alone is insufficient proof.
-- `IParsable.TryParse(... init ref<T>)` uses the accepted `init` direction; its output contract and the migration from `bool`/`out` remain open.
+- `IParsable.TryParse(... init ref<T>)` uses the accepted `init` direction; its output contract remains open.
 - The [memory model](../memory-model.md) defines accepted operation families, result forms and ordering; the signatures above propose source forms while exact grammar, target range contracts and some CAS declarations remain open.
 - `Task<TResult = void>` is a type-family direction; type-default grammar and Task members are not finalized. `Task` does not erase an owning `Task<T>` result. Optional normalization is semantic; its type-substitution rules and exact source grammar remain open.
 
@@ -853,7 +852,7 @@ public nominal union Result<T, E>
 }
 ```
 
-`Domain`/`Value` identify a documented condition; numeric assignments/registry are open and should not be guessed from OS error constants. `Message` is optional owned immutable text, not a mandatory allocation or an implicit `ToString`; callers can handle codes without formatting. A failed Result is data, not an exception. `require` and thrown exceptions remain separate. Keep `T?`/`Option<T>` for absence, not error status. A bool/out form remains an alternative where its contract explicitly specifies that result shape.
+`Domain`/`Value` identify a documented condition; numeric assignments/registry are open and should not be guessed from OS error constants. `Message` is optional owned immutable text, not a mandatory allocation or an implicit `ToString`; callers can handle codes without formatting. A failed Result is data, not an exception. `require` and thrown exceptions remain separate. Keep `T?`/`Option<T>` for absence, not error status.
 
 ### Keyed collections (proposed baseline)
 

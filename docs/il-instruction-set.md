@@ -1690,8 +1690,8 @@ flow-sensitive vacancy, ownership and cleanup verification over every
 normal edge. Explicit Drop records the point of cleanup; a region marker
 alone does not execute it. In this revision any implicit failure departure
 with a live owner, loan, or required root rejects unless its cleanup and
-unwind representation is specified. This is deliberately narrower than the
-current compiler's private IR and does not weaken its executed guarantees.
+unwind representation is specified. No additional private representation
+implicitly extends this revision's accepted Body forms.
 
 ## Terminators and CFG
 
