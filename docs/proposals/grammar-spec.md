@@ -81,7 +81,9 @@ HexDigit         = Digit | "a".."f" | "A".."F" ;
 BinaryDigit      = "0" | "1" ;
 String           = '"', { StringCharacter | Escape }, '"' ;
 InterpolatedText = "$", '"',
-                   { InterpolatedTextCharacter | Escape | InterpolationHole }, '"' ;
+                   { InterpolatedTextCharacter | Escape | LiteralBrace
+                   | InterpolationHole }, '"' ;
+LiteralBrace     = "{{" | "}}" ;
 InterpolationHole = "{", Expression, "}" ;
 Character        = "'", ( CharacterScalar | Escape | "\'" ), "'" ;
 Escape           = "\n" | "\r" | "\t" | "\\" | '\"' | "\0"
@@ -98,10 +100,15 @@ keywords and the standalone reserved `_`; it is not three grammar symbols.
 `StringCharacter` excludes an unescaped quote, backslash, or line break; `\U` must decode to a Unicode scalar. Separators may repeat between digits and after a based prefix, but not at the end of a run or beside a decimal point/exponent marker/sign. The lexical reference defines malformed-token recovery and exact diagnostics.
 
 The `$"` interpolation opener is contiguous. `InterpolatedTextCharacter`
-excludes an unescaped quote, backslash, line break or brace; literal-brace
-spelling remains to specify. Hole expressions use ordinary expression
+excludes an unescaped quote, backslash, line break or brace. In a text segment,
+`{{` emits `{` and `}}` emits `}`; unmatched single braces reject.
+Existing Unicode escapes remain literal text even when they decode to a
+brace, never becoming interpolation delimiters after decoding.
+Hole expressions use ordinary expression
 parsing, including nested delimiters and their own quoted literals, not a
 scan that terminates at the first `}` regardless of nesting.
+Brace doubling applies only in text segments, not while parsing a hole's
+expression and its nested delimiters or literals.
 Ordinary strings retain literal braces. Format/alignment suffixes, raw
 multiline forms and exact interpolation recovery remain separate work.
 
@@ -1763,7 +1770,7 @@ they are not ordinary overloads merely because they use operator punctuation.
 Still **OPEN** for a full source grammar: nominal safe union cases and complete
 patterns, associated equality and family/adapter declarations,
 conditional/default conformance, text-target fragments, interpolation
-literal-brace spelling and format/alignment forms,
+format/alignment forms,
 general `const` declarations/expressions, full contract-clause placement,
 general ownership/reference results, constructor inference, async completion
 and scheduling protocols, producers, capture/exception transport, and registered collection-fragment
@@ -1817,7 +1824,7 @@ appears in §2.
 | Concept | Defined direction | Still to specify |
 |---|---|---|
 | Lexical tokens | §2 gives identifier and reserved-word forms; primitive names are identifiers with reserved bindings. | Exact contextual-word classification and `HexFloat` token boundaries/diagnostics. |
-| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §3.4 gives target-directed `$"..."` interpolation. | Complete floating token recovery, character diagnostics, literal-brace and format/alignment spelling and registered text APIs. |
+| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §3.4 gives target-directed `$"..."` interpolation with doubled literal braces. | Complete floating token recovery, character diagnostics, raw forms, format/alignment spelling and registered text APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or block namespaces, without mixing. | Nested namespace blocks and namespace-local imports. |
 | Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
