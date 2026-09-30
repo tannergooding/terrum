@@ -93,8 +93,7 @@ InterpolatedText = "$", '"',
 LiteralBrace     = "{{" | "}}" ;
 InterpolationHole = "{", InterpolationContents, "}" ;
 InterpolationContents = Expression, [ ",", Expression ], [ ":", FormatSpecifier ] ;
-FormatSpecifier = String | RawText | "(", Expression, ")" | BareFormatText ;
-BareFormatText  = lexer-interpolation-bare-format-text ;
+FormatSpecifier = Identifier | String | RawText | "(", Expression, ")" ;
 Character        = "'", ( CharacterScalar | Escape | "\'" ), "'" ;
 Escape           = "\n" | "\r" | "\t" | "\\" | '\"' | "\0"
                  | "\u", HexDigit, HexDigit, HexDigit, HexDigit
@@ -128,14 +127,19 @@ need no parentheses merely to protect their colon. Thus
 `{flag ? left : right:X8}` formats its result. The alignment expression uses
 the same expression-aware parsing.
 After `:`, quoted text supplies a format literal, a parenthesized expression
-supplies a runtime format, and otherwise the suffix is bare static format
-text. Selection is syntactic, not a test of format validity or expression
-binding. Examples are `{value:X8}`, `{value:"X8"}`, and
+supplies a runtime format, and an identifier supplies its spelling as static
+format text, not a symbol reference. Selection is syntactic, not a test of
+format validity or expression binding. Examples are `{value:X8}`, `{value:"X8"}`, and
 `{value:(formatSpec)}`. A raw text literal may supply the quoted format;
 other computed/interpolated formats can appear in the parenthesized
-expression. A static format beginning with `(` must be quoted rather than
-parsed as an expression. Bare-format boundaries, whitespace/escaping and
-exact interpolation recovery remain separate lexical work.
+expression. Identifier shorthand accommodates standard numeric format codes
+such as `X8` or `G17`. Quoted text can provide standard or custom formats;
+the expression form can provide any eligible format, including a nonconstant
+one. Punctuation, spaces and reserved-word spellings require a quoted format
+or the expression form. Ordinary source trivia may separate suffix tokens;
+quoted content retains its literal whitespace/escape rules. There is no
+separate bare-format escape language or lexer mode. Exact interpolation
+recovery remains separate lexical work.
 
 Raw text uses matching opening and closing quote fences of length three or
 greater. Their lengths must agree, and content quote runs must be shorter
@@ -1904,8 +1908,7 @@ they are not ordinary overloads merely because they use operator punctuation.
 
 Still **OPEN** for a full source grammar: nominal safe union cases and complete
 patterns, associated equality and family/adapter declarations,
-conditional/default conformance, text-target fragments and complete
-interpolation bare-format lexical rules,
+conditional/default conformance and text-target fragment contracts,
 general `const` declarations/expressions, full contract-clause placement,
 general ownership/reference results, constructor inference, async completion
 and scheduling protocols, producers, capture/exception transport, and registered collection-fragment
@@ -1959,7 +1962,7 @@ appears in §2.
 | Concept | Defined direction | Still to specify |
 |---|---|---|
 | Lexical tokens | §2 gives identifier and reserved-word forms; primitive names are identifiers with reserved bindings. | Exact contextual-word classification and `HexFloat` token boundaries/diagnostics. |
-| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw framing/headers, deterministic interpolation, bare/quoted/runtime formats and runtime alignment. | Complete floating token recovery, character diagnostics, raw/interpolation recovery, bare-format boundaries/whitespace/escaping and registered text/whole-output normalization APIs. |
+| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give raw framing/headers, deterministic interpolation, identifier/quoted/expression formats and runtime alignment. | Complete floating token recovery, character diagnostics, raw/interpolation recovery and registered text/whole-output normalization APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or block namespaces, without mixing. | Nested namespace blocks and namespace-local imports. |
 | Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
