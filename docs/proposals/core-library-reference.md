@@ -1905,6 +1905,7 @@ The following distinctions and signature questions remain open:
 - [Address/datagram operations](#proposed-address-values-and-datagram-operations) propose family-preserving address keys, capability-qualified binding and whole-message sends. Review numeric address grammar/scope IDs, client/listener capability separation and error consumption reporting before adopting these signatures.
 - [Binary values and fixed codecs](#proposed-binary-values-and-fixed-codecs) propose explicit byte-order operations and a bounded fixed-length witness. Review wire profiles, permitted codec effects and conditional publication; fixed-size encoding does not settle incremental schema registration, reflection or general object serialization.
 - [Globalization and civil-time providers](#proposed-globalization-and-civil-time-providers) propose immutable versioned data, explicit culture-sensitive formatting and inspectable local-time mappings. Review locale identifiers/fallback, calendar/range/leap-second profiles, zone rule versions and ambiguity policy; these do not alter invariant Core text or clock contracts.
+- [Borrowed byte-stream storage](#proposed-borrowed-byte-stream-storage) proposes a fixed-capacity memory stream over an exclusive backing loan. Buffered owning wrappers still need an explicit inner-stream ownership constraint; exact-read/copy helpers need error-progress reporting before they can promise precise consumption.
 
 ## 11. Scoped proposed signatures: random and `uint32`
 
@@ -2259,6 +2260,71 @@ public class NetworkClient
 `FileSystem` is an explicit host-supplied capability rooted to an authorized filesystem scope; `relativePath` cannot escape that root. There is no ambient current directory, unrestricted global `File`, arbitrary path-based service locator, or implicit path encoding conversion in this minimum. Path normalization, symbolic-link policy and platform error mapping must be specified by the host profile before adoption. `TcpEndpoint` is a small immutable value over a shared immutable `Text` handle, not a unique resource owner; `ConnectAsync` takes this value rather than retaining a temporary text span, with backing lifetime still governed by the operation's declared dependencies. DNS/network errors are explicit `Result` failures.
 
 Reads return bytes read; `0` means EOF only when the destination is nonempty. An empty read returns zero without probing EOF. Writes may be partial and the caller advances by the returned count; the proposed contract requires a successful write of nonempty input to report positive progress, not a zero-count success that invites a retry loop. Buffer-size/alias checks occur before access. Async stream calls capture their buffer and exclusive stream access until completion, including after cancellation is requested; their declared operation lifetime must cover those loans through completion and cleanup. One in-flight mutating operation per stream is the proposed default. `Close` invalidates the Terrum wrapper authority even when the target reports an error; the underlying OS resource may then be indeterminate. Its `Result` must carry the reported failure, and the target/runtime contract must define what release is known. Never blindly retry a close against a possibly reused numeric descriptor or claim target release on every error. Cleanup of an unclosed unique handle must report or supervise target failure under a separately specified no-throw cleanup contract; it cannot silently convert failure into success. This reference makes no per-target guarantee of OS release on every failure; callers needing an observable result use `Close`, while implicit cleanup behavior still requires a runtime contract. Unique handles cannot be copied; `move` transfers release responsibility. Result unions carrying handles are likewise non-`Copy`. Network listener/client tasks follow the same cancellation and task ownership rules; no zero-copy or TLS default is implied; proposed datagrams appear in the capability matrix below.
+
+### Proposed borrowed byte-stream storage
+
+This candidate `Terrum.IO` adapter supplies the already listed memory-stream
+shape without allocating or taking release responsibility for caller storage.
+It is **PROPOSED**, including its capture/close metadata. The public witness
+does not turn every byte view into an owned or seekable OS resource.
+
+```terrum
+public mut unique struct MemoryByteStream : ISeekableByteStream
+{
+    [Captures("storage")]
+    public MemoryByteStream(write Span<uint8> storage, nuint length);
+    public bool IsOpen { get; }
+    public bool CanRead { get; }
+    public bool CanWrite { get; }
+    public nuint Capacity { get; }
+    public uint64 Position { get; }
+    public Result<uint64, Error> GetLength();
+    public mut Result<uint64, Error> Seek(int64 offset, SeekOrigin origin);
+    public mut Result<nuint, Error> Read(write Span<uint8> destination);
+    public mut Result<nuint, Error> Write(Span<uint8> source);
+    public mut Result<void, Error> Flush();
+    public mut Result<void, Error> Close();
+    [Captures("destination")]
+    public mut Task<Result<nuint, Error>> ReadAsync(write Span<uint8> destination,
+        CancellationToken cancellation);
+    [Captures("source")]
+    public mut Task<Result<nuint, Error>> WriteAsync(Span<uint8> source,
+        CancellationToken cancellation);
+}
+```
+
+The constructor requires `length <= storage.Length`, sets the initial
+position to zero and retains exclusive access to the backing until close.
+Every supplied byte slot is already initialized; `length` selects logical
+content, not a permission to treat raw uninitialized allocation as a span.
+Capacity is fixed. Reads copy at most the remaining logical content and
+advance by their reported count; a nonempty read at the end reports EOF.
+Writes replace/extend the prefix up to capacity without allocation, and a
+nonempty write with no remaining capacity reports failure rather than
+zero-count success. Validation precedes access; source/destination overlap
+with retained backing needs an explicit rejection or checked overlap policy,
+not a hidden temporary. Suffix bytes outside the accepted write are unchanged.
+
+This initial candidate permits seek positions only in `[0, length]`; it does
+not expose an unwritten gap or silently fill caller storage. Offset arithmetic
+is checked before position changes. `Flush` has no external sink to drain;
+`Close` releases the backing loan, not the allocation owner, and invalidates
+further I/O. Async calls may complete inline but any incomplete operation must
+retain stream/buffer access and completion responsibility until settlement;
+dropping a task does not release the loan. Borrowed-view storage, cancellation,
+overlap and cleanup metadata remain explicit contracts before adoption.
+
+**Remaining composition questions:** An `IByteStream` witness alone proves
+neither unique ownership nor authority to close an independently aliased
+stream. A future `BufferedByteStream<TStream>` must specify which concrete
+owner/loan it receives and how that responsibility survives flush/close
+failure; a `[Sized]` constraint or erased interface spelling does not establish
+it. Likewise, `Result<nuint, Error>` reports successful progress but does not
+by itself report how much a failing read/write consumed or exposed. Exact-read,
+write-all and copy helpers cannot promise rollback or exact failed-call
+progress until the base stream contract or a richer progress result supplies
+it. These remain library questions, not new grammar or a fallback to assumed
+zero progress.
 
 ### Proposed filesystem metadata and directory traversal
 
@@ -2712,8 +2778,8 @@ singleton, a default encoding, or authority to escape its supplied capability.
 | Candidate family | Proposed signature inventory | Substrate / boundary |
 |---|---|---|
 | `IByteStream`, `ISeekableByteStream` | `Read`, `Write`, `Flush`, async counterparts; seekable adds `GetLength() -> Result<uint64,Error>`, `Seek(int64,SeekOrigin) -> Result<uint64,Error>` | Stream may be nonseekable, partial, owned or borrowed; close and cleanup policy separately specified |
-| `MemoryByteStream` | `Create(write Span<uint8>)`; `Read`, `Write`, `Seek`, `Position` | Captures backing access; no allocation or escalation from readonly bytes |
-| `BufferedByteStream<TStream>` | `Create(TStream, Buffer<uint8>)`, with `TStream : IByteStream`; `Read`, `Write`, `Flush`, `Close` | Consumes concrete inner-stream and buffer owners using ordinary call-site moves; no implied erased owned-interface representation; flush/close errors remain observable |
+| `MemoryByteStream` | Constructor over writable storage and logical length; `Read`, `Write`, `Seek`, `Position`, fixed `Capacity`, async counterparts and `Close` | Exclusive backing loan, no allocation/release ownership or escalation from readonly bytes |
+| `BufferedByteStream<TStream>` / **OPEN ownership** | Candidate `Create(TStream, Buffer<uint8>)`, with `TStream : IByteStream`; `Read`, `Write`, `Flush`, `Close` | Exact inner owner/loan constraint is OPEN; ordinary moves cannot prove ownership from a behavioral witness; no implied erased owned-interface representation; flush/close errors remain observable |
 | `FileSystem`, `FileHandle` | `OpenRead/Write/Directory`, `GetMetadata`, `FileExists`, `CreateDirectory`, `DeleteFile/EmptyDirectory`, `Rename`; handle `GetLength`, `SetLength`, `Seek`, `Read/Write`, `Flush`, `Close` | Explicit filesystem root; authorized relative path and symlink policy; seekability alone grants no write authority |
 | `DirectoryCursor` | `MoveNext() -> Result<bool,Error>`, `Current -> ref<DirectoryEntry>`, `Close()` | Directory capability retained; entry view expires on advance/close |
 | `FileMetadata`, `DirectoryEntry` | Metadata `Kind`, `Length?`, `ModifiedTime?`; entry `Name: Text`, `Metadata: FileMetadata` | Metadata is observed state, not atomic with later open; text encoding policy explicit |
