@@ -140,6 +140,7 @@ table. The proposed `Option<T>` alias is separately described in
 | Incremental text conversion | `MalformedTextPolicy`, `TextConversionStatus`, `TextConversionProgress`, `ITextDecoder`, `ITextEncoder`, `Utf8Decoder`, `Utf8Encoder` | [Transcoding](#proposed-text-construction-search-and-incremental-transcoding) |
 | Inline storage | `InlineArray` | [Inline storage](#general-span-and-inline-storage) |
 | Allocation and native owners | `AllocationLease`, `AllocatorContext`, `Buffer`, `Vector` | [Native storage](#explicit-native-storage-representative-foundation-inventory) |
+| Native double-ended storage | `Deque`, `DequeSegments`, `DequeWriteAccess` | [Deque signatures](#proposed-owned-double-ended-storage) |
 | Borrowed arena and rentals | `ByteArena`, `MemoryPool`, `MemoryOwner` | [Arena/pool](#proposed-borrowed-arena-and-typed-rental-storage) |
 | Memory operations | `MemoryOrder`, `CompareExchangeObservation`, `MemoryPrimitives` | [Memory primitives](#memoryprimitives) |
 | Managed lists | `List`, `ListCursor`, `ListBuilder`, `ListWriteAccess`, `LinkedListNode`, `LinkedList`, `LinkedListBuilder`, `LinkedListCursor` | [Collections](#5-collections-iteration-and-eager-algorithms) |
@@ -644,6 +645,95 @@ does not authorize replacement through an alias. Disposed-state and provider
 lifetime checks remain those of the owner above; these conveniences neither
 reacquire a disposed allocation nor select a global allocator.
 
+### Proposed owned double-ended storage
+
+These **PROPOSED** `Terrum.Collections` declarations complete the existing
+owned-deque inventory for the same `[Sized], [Copy]` element profile as
+`Vector<T>`. They describe a logical sequence with front/back access, not a
+promise of one contiguous span or a selected physical ring-buffer layout.
+The allocator is explicitly supplied and retained for future growth.
+
+```terrum
+public mut unique struct Deque<T>
+    where T : [Sized], [Copy]
+{
+    public static Deque<T> Create(AllocatorContext allocator);
+    public nuint Count { get; }
+    public nuint Capacity { get; }
+    public T this[nuint index] { get; mut set; }
+    public bool TryGet(nuint index, init ref<T> value);
+    public bool TryPeekFront(init ref<T> value);
+    public bool TryPeekBack(init ref<T> value);
+    public mut void PushFront(T value);
+    public mut void PushBack(T value);
+    public mut bool TryPushFront(T value);
+    public mut bool TryPushBack(T value);
+    public mut bool TryPopFront(init ref<T> value);
+    public mut bool TryPopBack(init ref<T> value);
+    public mut void Reserve(nuint capacity);
+    public mut bool TryReserve(nuint capacity);
+    public DequeSegments<T> GetSegments();
+    [ViewOf(Access.Write)] public mut DequeWriteAccess<T> GetWriteAccess();
+    public mut void Clear();
+    public mut void Dispose();
+}
+public struct DequeSegments<T>
+    where T : [Sized], [Copy]
+{
+    public Span<T> First { get; }
+    public Span<T> Second { get; }
+}
+public mut unique struct DequeWriteAccess<T>
+    where T : [Sized], [Copy]
+{
+    [ViewOf(Access.Write)] public write Span<T> First { get; }
+    [ViewOf(Access.Write)] public write Span<T> Second { get; }
+    public mut void Close();
+}
+```
+
+Logical index zero names the front, and `Count - 1` names the back only
+when nonempty. The indexer requires `index < Count`; `TryGet` returns false
+for an index outside the initialized sequence and leaves its output vacant.
+Empty peek/pop operations similarly return false without publication;
+success publishes one copied value. A successful pop removes exactly that
+end element and retires the vacated slot. Pushes add exactly one element at
+the selected end without changing the relative order of existing elements.
+Spare capacity is not readable initialized `T` storage, and no operation
+constructs `default(T)` to fill it.
+
+`Capacity >= Count`. Reservation never reduces capacity or changes the
+logical sequence; a sufficient capacity succeeds without allocation.
+The `TryPush`/`TryReserve` operations return false only for expected
+allocation refusal and preserve prior contents, count and capacity on that
+outcome. Invalid arithmetic, conflicting loans, disposed access and other
+checked failures do not become false. Ordinary push/reserve expose the
+provider's declared checked allocation-failure contract. Growth publishes
+replacement storage only after complete checked initialization; it neither
+retries a refusing provider nor promises rollback of its external effects.
+`Clear` retires initialized elements while retaining capacity.
+
+`GetSegments` returns two readonly loans whose concatenation is the complete
+front-to-back logical sequence. Their lengths sum to `Count`, their nonempty
+ranges are disjoint, and no vacant capacity is exposed. Either segment may
+be empty; callers must not infer a stable split point, physical offset or
+single-span representation. Both descriptors retain the deque's backing
+dependency, including copies or derived slices. Empty results are valid for
+an empty live deque, not a success-shaped substitute for disposed access.
+
+`GetWriteAccess` instead creates one exclusive guard over that initialized
+sequence. Its two writable spans follow the same logical order and disjoint
+coverage; they permit element replacement, not resizing or constructing
+vacant capacity. Structural mutation cannot occur behind either readonly
+segment loans or the exclusive guard, even when no allocation would occur.
+Every alias and reentrant operation checks conflicting authority.
+`Close` releases the guard only after all derived span loans end; repeated
+close is harmless, and segment access after close is a checked invalid-state
+failure. A readonly segment pair has no owner-release operation.
+Exact returned-dependency/guard metadata, implicit cleanup registration and
+failure transport remain **OPEN**; these signatures do not establish a
+concurrency protocol, stable element addresses or generic cursor selection.
+
 ### Proposed borrowed arena and typed rental storage
 
 These **PROPOSED** `Terrum.Collections` declarations expand the storage
@@ -849,6 +939,7 @@ need collector roots/barriers independently of memory order.
 | `AllocatorContext` / `Terrum.Collections` | `Allocate(bytes, alignment) -> AllocationLease`, `Dispose()`; `TryAllocate(..., init ref<AllocationLease>) -> bool` | Provider must outlive outstanding allocations or explicitly transfer release capability |
 | `Buffer<T>` / `Terrum.Collections` | `Capacity`, `Count`, `Adopt`, `Initialize`, `AsSpan`, `GetWriteAccess`, `Clear`, `Dispose` | Initialized prefix versus vacant capacity; unique owner and trace/barrier policy |
 | `Vector<T>` / `Terrum.Collections` | `Create`, `Count`, `Capacity`, copied index/`TryGet`, `Add`/`TryAdd`, `Insert`/`TryInsert`, `RemoveAt`, `Reserve`/`TryReserve`, span access, `Clear`, `Dispose` | Initialized prefix and explicit allocator; allocation refusal preserves prior state; conflicting views prevent structural mutation |
+| `Deque<T>` / `Terrum.Collections` | Explicit-provider `Create`, count/capacity/index/peek, front/back push/pop, reservation, readonly segment pair and exclusive writable guard, `Clear`, `Dispose` | Logical front-to-back initialized sequence; disjoint two-span coverage and retained backing; no fabricated contiguous span |
 | `ByteArena` / `Terrum.Collections` | Borrowed-backing constructor, `Capacity`, `Used`, `Allocate`, `TryAllocate`, `Reset`, `Dispose` | Fixed initialized byte backing; disjoint-slice, alignment and reset/disposal loan checks; owned/growable arena remains OPEN |
 | `MemoryPool<T>`, `MemoryOwner<T>` / `Terrum.Collections` | Explicit-provider `Create`, `Rent`/`TryRent`; rental `Capacity`, `Count`, `Initialize`, span access, `Clear`, `Dispose` | Unique rental/return responsibility; initialized prefix versus pooled capacity; pool disposal requires all rentals returned |
 | `MemoryPrimitives` / `Terrum` | `AtomicRead/Write`, RMW families, strong CAS/observation, `Fence`, `CompilerFence`, non-temporal read/write/copy/complete, cache writeback/invalidate | See the complete proposed member set and strict representation/order/range constraints above |
@@ -1120,7 +1211,7 @@ an operation says otherwise.
 | `LinkedList<T>` / managed | `First`, `Last`, `AddFirst/Last`, `AddBefore/After`, `Remove`, `Clear`, cursor | Stable node identity, detached node is not attached to two lists |
 | `Queue<T>`, `Stack<T>` / managed, **new** | Empty/capacity constructors, `Count`, `Capacity`, `Reserve`, `Enqueue/Push`, `TryDequeue/TryPop(init ref<T>)`, `TryPeek(init ref<T>)`, `Clear`, copied-value cursor and `Close` | Initial same managed Copy bounds; false output vacant; no `default(T)` |
 | `SortedSet<T,TOrder>` / managed, **new** | Explicit-order constructors, `Count`, `Capacity`, `Order`, `Reserve`, `Contains`, `TryAdd`, `Remove`, `Clear`, ascending cursor and `Close` | Explicit total-order witness; comparison-zero means duplicate |
-| `Deque<T>` / owned, **new** | `Count`, `PushFront/Back`, `TryPopFront/Back(init ref<T>)`, `GetSegments()` | Segments are guarded loans, never a fabricated one-span contiguous view |
+| `Deque<T>` / owned, **new** | Explicit-provider construction, count/capacity/index/peek, front/back push/pop, reservation, `GetSegments`, exclusive write guard, clear/disposal | Concrete Copy-profile declarations in §4; segment loans forbid structural mutation and never fabricate a contiguous span |
 | `Dictionary<TKey,TValue,TComparer>`, `HashSet<T,TComparer>` | Explicit-comparer constructors, `Count`, `Capacity`, comparer, `Reserve`, `TryGet`/`ContainsKey`/`Contains`, `TryAdd`, `Remove`, `Clear`, guarded cursor | Explicit key comparer; complete sample and failure contracts in §13 |
 
 #### Proposed sequence and cursor protocol candidates
