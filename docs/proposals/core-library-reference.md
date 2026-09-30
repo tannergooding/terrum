@@ -1901,6 +1901,8 @@ The following distinctions and signature questions remain open:
 - `IParsable.TryParse(... init ref<T>)` follows the canonical parse contract: true fully initializes, false leaves the output vacant. The library declarations and their compiled conditional-outcome metadata must encode and prove this contract; the signature alone does not.
 - The [memory model](../memory-model.md) defines accepted operation families, result forms and ordering; the signatures above propose source forms while exact grammar, target range contracts and some CAS declarations remain open.
 - `Task<TResult = void>` uses the approved generic-default syntax; this particular library type and its task members are not finalized. `Task` does not erase an owning `Task<T>` result. Optional normalization is semantic; source `T?` is approved, while exported `Option<T>` is only proposed.
+- [Filesystem metadata and traversal](#proposed-filesystem-metadata-and-directory-traversal) propose a terminal-on-error lending cursor and scoped rename operations. Review link traversal, enumeration invalidation, metadata availability/precision and which target rename guarantees are required; these are API/host-profile choices, not newly adopted source syntax.
+- [Address/datagram operations](#proposed-address-values-and-datagram-operations) propose family-preserving address keys, capability-qualified binding and whole-message sends. Review numeric address grammar/scope IDs, client/listener capability separation and error consumption reporting before adopting these signatures.
 
 ## 11. Scoped proposed signatures: random and `uint32`
 
@@ -2175,13 +2177,20 @@ public interface IByteStream
         CancellationToken cancellation);
 }
 
-public mut unique struct FileHandle : IByteStream
+public interface ISeekableByteStream : IByteStream
+{
+    Result<uint64, Error> GetLength();
+    mut Result<uint64, Error> Seek(int64 offset, SeekOrigin origin);
+}
+
+public mut unique struct FileHandle : ISeekableByteStream
 {
     public bool IsOpen { get; }
     public bool CanRead { get; }
     public bool CanWrite { get; }
     public Result<uint64, Error> GetLength();
     public mut Result<uint64, Error> Seek(int64 offset, SeekOrigin origin);
+    public mut Result<void, Error> SetLength(uint64 length);
     public mut Result<nuint, Error> Read(write Span<uint8> destination);
     public mut Result<nuint, Error> Write(Span<uint8> source);
     public mut Result<void, Error> Flush();
@@ -2200,8 +2209,13 @@ public class FileSystem
     public Result<FileHandle, Error> OpenWrite(TextSpan relativePath,
         FileDisposition disposition);
     public Result<bool, Error> FileExists(TextSpan relativePath);
+    public Result<FileMetadata, Error> GetMetadata(TextSpan relativePath);
+    public Result<DirectoryCursor, Error> OpenDirectory(TextSpan relativePath);
     public Result<void, Error> CreateDirectory(TextSpan relativePath);
     public Result<void, Error> DeleteFile(TextSpan relativePath);
+    public Result<void, Error> DeleteEmptyDirectory(TextSpan relativePath);
+    public Result<void, Error> Rename(TextSpan sourcePath,
+        TextSpan destinationPath, FileRenamePolicy policy);
 }
 
 public struct TcpEndpoint
@@ -2227,7 +2241,8 @@ public mut unique struct TcpConnection : IByteStream
 }
 public mut unique struct TcpListener
 {
-    public static Result<TcpListener, Error> Bind(TcpEndpoint endpoint);
+    public static Result<TcpListener, Error> Bind(NetworkClient network,
+        TcpEndpoint endpoint);
     public bool IsOpen { get; }
     public mut Task<Result<TcpConnection, Error>> AcceptAsync(CancellationToken cancellation);
     public mut Result<void, Error> Close();
@@ -2242,6 +2257,141 @@ public class NetworkClient
 `FileSystem` is an explicit host-supplied capability rooted to an authorized filesystem scope; `relativePath` cannot escape that root. There is no ambient current directory, unrestricted global `File`, arbitrary path-based service locator, or implicit path encoding conversion in this minimum. Path normalization, symbolic-link policy and platform error mapping must be specified by the host profile before adoption. `TcpEndpoint` is a small immutable value over a shared immutable `Text` handle, not a unique resource owner; `ConnectAsync` takes this value rather than retaining a temporary text span, with backing lifetime still governed by the operation's declared dependencies. DNS/network errors are explicit `Result` failures.
 
 Reads return bytes read; `0` means EOF only when the destination is nonempty. An empty read returns zero without probing EOF. Writes may be partial and the caller advances by the returned count; the proposed contract requires a successful write of nonempty input to report positive progress, not a zero-count success that invites a retry loop. Buffer-size/alias checks occur before access. Async stream calls capture their buffer and exclusive stream access until completion, including after cancellation is requested; their declared operation lifetime must cover those loans through completion and cleanup. One in-flight mutating operation per stream is the proposed default. `Close` invalidates the Terrum wrapper authority even when the target reports an error; the underlying OS resource may then be indeterminate. Its `Result` must carry the reported failure, and the target/runtime contract must define what release is known. Never blindly retry a close against a possibly reused numeric descriptor or claim target release on every error. Cleanup of an unclosed unique handle must report or supervise target failure under a separately specified no-throw cleanup contract; it cannot silently convert failure into success. This reference makes no per-target guarantee of OS release on every failure; callers needing an observable result use `Close`, while implicit cleanup behavior still requires a runtime contract. Unique handles cannot be copied; `move` transfers release responsibility. Result unions carrying handles are likewise non-`Copy`. Network listener/client tasks follow the same cancellation and task ownership rules; no zero-copy or TLS default is implied; proposed datagrams appear in the capability matrix below.
+
+### Proposed filesystem metadata and directory traversal
+
+These declarations expand the scoped filesystem inventory, not an ambient
+`Directory`/`File` service or a promise of portable filesystem transactions.
+The types and signatures remain **PROPOSED**. Optional metadata means
+unavailable/not applicable, not a fabricated zero length or epoch timestamp.
+
+```terrum
+public enum FileKind : int32
+{
+    Regular,
+    Directory,
+    SymbolicLink,
+    Other
+}
+public enum FileRenamePolicy : int32
+{
+    NoReplace,
+    ReplaceExisting
+}
+public struct FileMetadata
+{
+    public FileKind Kind { get; }
+    public uint64? Length { get; }
+    public Instant? ModifiedTime { get; }
+}
+public struct DirectoryEntry
+{
+    public Text Name { get; }
+    public FileMetadata Metadata { get; }
+}
+public mut unique struct DirectoryCursor
+{
+    public bool IsOpen { get; }
+    public ref<DirectoryEntry> Current { get; }
+    public mut Result<bool, Error> MoveNext();
+    public mut Result<void, Error> Close();
+}
+```
+
+`OpenDirectory` transfers one enumeration/release obligation in its successful
+result. A cursor retains its authorized filesystem scope. `Current` is readable
+only after `MoveNext` succeeds with `true`; its loan expires before the next
+advance or close. A successful `false` means exhaustion, not an error or an
+empty entry. An advance error vacates the current entry and makes this initial
+cursor contract terminal, while `Close` remains available. A copied eligible
+entry retains its immutable `Text` name independently of cursor storage.
+Neither ordering nor a snapshot of concurrent directory changes is promised.
+
+`GetMetadata` reports an observation, not a guarantee about a later open.
+Missing paths, denied access and I/O errors remain distinct from an optional
+metadata field. `FileExists` returns false for absence, not for every failure.
+`DeleteEmptyDirectory` does not recursively delete children. Both rename paths
+remain inside the supplied capability; `NoReplace` cannot be implemented by
+an unchecked existence-test/rename race. A profile without the requested
+rename guarantee reports an unsupported operation rather than silently
+substituting copy/delete. `SetLength` requires a writable file handle, never
+creates storage authority from seekability, and does not implicitly reposition
+the stream. Target extent limits, metadata precision, link traversal and exact
+rename guarantees remain host-profile/API decisions before adoption.
+
+### Proposed address values and datagram operations
+
+This candidate separates a parsed numeric address from `TcpEndpoint`'s host
+name and from DNS resolution. It does not select an OS socket representation,
+an implicit IPv4/IPv6 conversion or a default network capability.
+
+```terrum
+public struct IpAddress : IFormattable
+{
+    public bool IsIPv4 { get; }
+    public bool IsIPv6 { get; }
+    public static bool TryParse(TextSpan text, init ref<IpAddress> value);
+    public bool Equals(IpAddress other);
+    public uint64 GetKeyHashCode();
+    public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
+        where TWriter : ITextWriter;
+}
+public struct IpEndpoint
+{
+    public IpEndpoint(IpAddress address, uint16 port);
+    public IpAddress Address { get; }
+    public uint16 Port { get; }
+}
+public struct DatagramRead
+{
+    public IpEndpoint Peer { get; }
+    public nuint BytesWritten { get; }
+    public nuint? OriginalLength { get; }
+    public bool IsTruncated { get; }
+}
+public mut unique struct DatagramSocket
+{
+    public static Result<DatagramSocket, Error> Bind(NetworkClient network,
+        IpEndpoint endpoint);
+    public bool IsOpen { get; }
+    public IpEndpoint LocalEndpoint { get; }
+    [Captures("destination")]
+    public mut Task<Result<DatagramRead, Error>> ReceiveFromAsync(
+        write Span<uint8> destination, CancellationToken cancellation);
+    [Captures("source")]
+    public mut Task<Result<void, Error>> SendToAsync(IpEndpoint endpoint,
+        Span<uint8> source, CancellationToken cancellation);
+    public mut Result<void, Error> Close();
+}
+```
+
+`IpAddress.TryParse` accepts a complete numeric address, not a host name;
+success initializes the output and false leaves it vacant. Family and address
+bits participate in its proposed key identity: IPv4-mapped IPv6 is not
+silently equated with IPv4. Parsing/canonical formatting details, scope IDs
+and a separate DNS resolver surface remain **OPEN**. A key hash must
+agree with the selected equality; these members grant no universal root or
+automatic `IKeyComparer<IpAddress>` witness.
+
+Binding a TCP listener or datagram socket requires the supplied
+`NetworkClient` capability even though the factory is static. A returned owner
+retains the granted operation dependencies; passing a capability does not
+grant all endpoints, protocols or listening rights. Whether this broader
+capability should keep the `NetworkClient` name or split client/listener
+permissions into separate types remains an API question.
+
+A receive consumes at most one datagram. `BytesWritten` is the copied prefix;
+`IsTruncated` reports discarded payload, and `OriginalLength` is absent when
+the target cannot report its full length. A zero-length packet is a valid
+message, not stream EOF. An empty destination is therefore not a no-op stream
+read: it can consume a packet and report truncation. A successful send accepts
+one complete message, including an empty one; it returns `void`, not a byte
+count suggesting that the remainder may be retried as another datagram.
+Delivery is not promised by send success. The operation retains its buffer,
+socket access and completion responsibility through cancellation settlement.
+Exact failure/consumption reporting, size limits, address-family support and
+cleanup metadata remain required target/API contracts, not implicit success
+or rollback guarantees.
 
 ### Proposed UTF-8 stream text adapters
 
@@ -2312,11 +2462,11 @@ singleton, a default encoding, or authority to escape its supplied capability.
 | `IByteStream`, `ISeekableByteStream` | `Read`, `Write`, `Flush`, async counterparts; seekable adds `GetLength() -> Result<uint64,Error>`, `Seek(int64,SeekOrigin) -> Result<uint64,Error>` | Stream may be nonseekable, partial, owned or borrowed; close and cleanup policy separately specified |
 | `MemoryByteStream` | `Create(write Span<uint8>)`; `Read`, `Write`, `Seek`, `Position` | Captures backing access; no allocation or escalation from readonly bytes |
 | `BufferedByteStream<TStream>` | `Create(TStream, Buffer<uint8>)`, with `TStream : IByteStream`; `Read`, `Write`, `Flush`, `Close` | Consumes concrete inner-stream and buffer owners using ordinary call-site moves; no implied erased owned-interface representation; flush/close errors remain observable |
-| `FileSystem`, `FileHandle` | `OpenRead/Write`, `FileExists`, `CreateDirectory`, `DeleteFile`; handle `GetLength`, `Seek`, `Read/Write`, `Flush`, `Close` | Explicit filesystem root; authorized relative path and symlink policy |
+| `FileSystem`, `FileHandle` | `OpenRead/Write/Directory`, `GetMetadata`, `FileExists`, `CreateDirectory`, `DeleteFile/EmptyDirectory`, `Rename`; handle `GetLength`, `SetLength`, `Seek`, `Read/Write`, `Flush`, `Close` | Explicit filesystem root; authorized relative path and symlink policy; seekability alone grants no write authority |
 | `DirectoryCursor` | `MoveNext() -> Result<bool,Error>`, `Current -> ref<DirectoryEntry>`, `Close()` | Directory capability retained; entry view expires on advance/close |
-| `FileMetadata`, `DirectoryEntry` | `Kind`, `Length?`, `ModifiedTime?`, `Name: Text` candidate | Metadata is observed state, not atomic with later open; text encoding policy explicit |
-| `TcpEndpoint`, `TcpConnection`, `TcpListener`, `NetworkClient` | `ConnectAsync`, `Bind`, `AcceptAsync`, stream I/O and `Close` | Host networking capability; DNS and endpoint-name policy explicit |
-| `DatagramSocket` / new | `Bind`, `ReceiveFromAsync(write Span<uint8>, cancellation) -> Task<Result<DatagramRead,Error>>`, `SendToAsync(endpoint,Span<uint8>,cancellation) -> Task<Result<nuint,Error>>` | One datagram versus stream progress; truncation and peer address reported explicitly |
+| `FileMetadata`, `DirectoryEntry` | Metadata `Kind`, `Length?`, `ModifiedTime?`; entry `Name: Text`, `Metadata: FileMetadata` | Metadata is observed state, not atomic with later open; text encoding policy explicit |
+| `TcpEndpoint`, `TcpConnection`, `TcpListener`, `NetworkClient` | `ConnectAsync`, capability-qualified `Bind`, `AcceptAsync`, stream I/O and `Close` | Host networking capability; DNS and endpoint-name policy explicit |
+| `IpAddress`, `IpEndpoint`, `DatagramSocket`, `DatagramRead` | Numeric `TryParse`/format/key members; capability-qualified `Bind`; `ReceiveFromAsync -> Task<Result<DatagramRead,Error>>`; `SendToAsync -> Task<Result<void,Error>>` | One complete message versus stream progress; truncation, optional original length and peer address reported explicitly |
 | `Terminal`, `TextWriter` | `Output`, `Error`, `Write`, `WriteLine`, `WriteLineAsync`; proposed input adapter `Utf8TextReader<TStream>` | Explicit standard-stream host capability; input decoding and output encoding not inferred |
 | `Locale`, `CultureData` | `Locale.Parse(TextSpan,init ref<Locale>) -> bool`, `CultureData.Load(Locale,provider) -> Result<CultureData,Error>` | Injected versioned data provider; no implicit process locale or culture in core parse |
 | `NumberFormatter`, `DateTimeFormatter` | `TryFormat(value,write ref<ITextWriter>, ref<CultureData>) -> bool`; paired `TryParse(text,ref<CultureData>,init ref<T>) -> bool` | Locale-sensitive APIs explicitly separate from ordinal/invariant primitive formatting |
