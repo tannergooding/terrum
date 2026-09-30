@@ -968,10 +968,14 @@ public interface IFloatingClassification<this TSelf>
 optional scalar composites in the original sketch below complete the
 arithmetic/identity shapes. No scalar composite automatically entails
 division, bitwise operations, key equality or classification. Vector
-operators do not establish scalar classification. **OPEN:** per-type
-operator/witness matrix, right-shift fill, negative/out-of-range shift
-counts, division/remainder overflow and sign rules, and heterogeneous
-operator eligibility. Unary operators do not confer increment/decrement;
+operators do not establish scalar classification. Built-in integer operations
+retain their accepted language contracts: division truncates toward zero,
+division by zero and signed-minimum division by `-1` fail, and signed-minimum
+remainder by `-1` is zero. Shift counts are checked; `<<` truncates to the
+operand width, `>>` is arithmetic right shift and `>>>` is zero-filling right
+shift. **OPEN:** per-type operator/witness eligibility, eligible count types,
+heterogeneous operator eligibility and contracts for nominal implementations.
+Those choices do not reopen built-in arithmetic. Unary operators do not confer increment/decrement;
 ordinary numeric equality is not numeric-key equality or bit identity.
 For floats NaN is unordered and `==` leaves NaN unequal.
 `IIntegerRelations` is an optional relation proposal; the `uint32` witness
@@ -1134,7 +1138,7 @@ public struct uint32
     public static uint32 One { get; }
     public static uint32 MinValue { get; }
     public static uint32 MaxValue { get; }
-    [Literal(LiteralKind.Integer), ConstEval]
+    [Literal(LiteralKind.Integer)] [ConstEval]
     public static bool TryParse(TextSpan text, init ref<uint32> value);
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
@@ -1151,7 +1155,7 @@ public struct int8 : IParsable<int8>, IFormattable
     public static int8 One { get; }
     public static int8 MinValue { get; }
     public static int8 MaxValue { get; }
-    [Literal(LiteralKind.Integer), ConstEval]
+    [Literal(LiteralKind.Integer)] [ConstEval]
     public static bool TryParse(TextSpan text, init ref<int8> value);
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
