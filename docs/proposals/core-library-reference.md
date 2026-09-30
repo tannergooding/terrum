@@ -1081,10 +1081,10 @@ an operation says otherwise.
 | `OrderedSpanAlgorithms` order | `Sort<T,TOrder>(write Span<T>,ref<TOrder>)`, `TryBinarySearch<T,TOrder>(Span<T>,ref<T>,ref<TOrder>,init ref<nuint>)` | Ordering witness must define total key policy; sort comparator failures can leave permutation partial |
 | `List<T>` / managed | Constructors, `Count`, `Capacity`, index, `TryGet`, `Add`, `Insert`, `Reserve`, `RemoveAt`, `Clear`, write guard and concrete cursor | `[ManagedStorable],[Copy],[Sized]` initial bounds; initialized prefix, checked guards and explicit close |
 | `LinkedList<T>` / managed | `First`, `Last`, `AddFirst/Last`, `AddBefore/After`, `Remove`, `Clear`, cursor | Stable node identity, detached node is not attached to two lists |
-| `Queue<T>`, `Stack<T>` / managed, **new** | `Count`, `Enqueue/Push`, `TryDequeue/TryPop(init ref<T>)`, `TryPeek(init ref<T>)`, `Clear` | Initial same managed Copy bounds; false output vacant; no `default(T)` |
-| `SortedSet<T,TOrder>` / managed, **new** | `Count`, `Order`, `Contains`, `TryAdd`, `Remove`, `Clear`, ascending cursor | Explicit total-order witness; comparison-zero means duplicate |
+| `Queue<T>`, `Stack<T>` / managed, **new** | Empty/capacity constructors, `Count`, `Capacity`, `Reserve`, `Enqueue/Push`, `TryDequeue/TryPop(init ref<T>)`, `TryPeek(init ref<T>)`, `Clear`, copied-value cursor and `Close` | Initial same managed Copy bounds; false output vacant; no `default(T)` |
+| `SortedSet<T,TOrder>` / managed, **new** | Explicit-order constructors, `Count`, `Capacity`, `Order`, `Reserve`, `Contains`, `TryAdd`, `Remove`, `Clear`, ascending cursor and `Close` | Explicit total-order witness; comparison-zero means duplicate |
 | `Deque<T>` / owned, **new** | `Count`, `PushFront/Back`, `TryPopFront/Back(init ref<T>)`, `GetSegments()` | Segments are guarded loans, never a fabricated one-span contiguous view |
-| `Dictionary<TKey,TValue,TComparer>`, `HashSet<T,TComparer>` | `Count`, comparer, `TryGet`/`Contains`, `TryAdd`, `Remove`, `Clear`, guarded cursor | Explicit key comparer; complete sample and failure contracts in §13 |
+| `Dictionary<TKey,TValue,TComparer>`, `HashSet<T,TComparer>` | Explicit-comparer constructors, `Count`, `Capacity`, comparer, `Reserve`, `TryGet`/`ContainsKey`/`Contains`, `TryAdd`, `Remove`, `Clear`, guarded cursor | Explicit key comparer; complete sample and failure contracts in §13 |
 
 #### Proposed sequence and cursor protocol candidates
 
@@ -1276,10 +1276,13 @@ public mut class SortedSet<T, TOrder>
     where T : [ManagedStorable], [Copy], [Sized]
     where TOrder : IOrderComparer<T>, [ManagedStorable], [Copy], [Sized]
 {
+    public SortedSet(TOrder order);
     public SortedSet(TOrder order, nuint capacity);
     public nuint Count { get; }
+    public nuint Capacity { get; }
     public TOrder Order { get; }
     public bool Contains(T value);
+    public mut Result<void, Error> Reserve(nuint capacity);
     public mut Result<bool, Error> TryAdd(T value);
     public mut bool Remove(T value);
     public mut void Clear();
@@ -1291,12 +1294,16 @@ public mut unique struct SortedSetCursor<T, TOrder>
 {
     public mut bool MoveNext();
     public T Current { get; }
+    public mut void Close();
 }
 public mut class Queue<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
+    public Queue();
     public Queue(nuint capacity);
     public nuint Count { get; }
+    public nuint Capacity { get; }
+    public mut Result<void, Error> Reserve(nuint capacity);
     public mut Result<void, Error> Enqueue(T value);
     public mut bool TryDequeue(init ref<T> value);
     public bool TryPeek(init ref<T> value);
@@ -1308,12 +1315,16 @@ public mut unique struct QueueCursor<T>
 {
     public mut bool MoveNext();
     public T Current { get; }
+    public mut void Close();
 }
 public mut class Stack<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
+    public Stack();
     public Stack(nuint capacity);
     public nuint Count { get; }
+    public nuint Capacity { get; }
+    public mut Result<void, Error> Reserve(nuint capacity);
     public mut Result<void, Error> Push(T value);
     public mut bool TryPop(init ref<T> value);
     public bool TryPeek(init ref<T> value);
@@ -1325,6 +1336,7 @@ public mut unique struct StackCursor<T>
 {
     public mut bool MoveNext();
     public T Current { get; }
+    public mut void Close();
 }
 ```
 
@@ -1348,6 +1360,34 @@ mutation; it never outlives its source, and a copied `Current` is available
 only after successful advancement. Conditional publication and cursor
 registration/close metadata remain **OPEN**; neither follows from these
 bodyless signatures.
+
+The constructor overloads, capacity/reservation members and explicit cursor
+close members are **PROPOSED** additions completing these three managed
+Copy-profile shapes. An empty constructor has zero elements and needs no
+ordering witness for a queue or stack. `SortedSet(order)` still requires an
+explicit witness; there is no hidden default order. Capacity construction
+reserves at least the requested element capacity without constructing
+elements or `default(T)`. `Capacity >= Count`; physical storage counts,
+growth factors and layouts are not public contracts.
+
+`Reserve` never reduces capacity or changes contents, count or logical
+traversal order. An already sufficient capacity returns `Success(())`
+without allocation. Expected allocation failure returns `Failure(Error)`
+and preserves the prior collection. Capacity/count arithmetic and conflicting
+loan checks precede storage changes. Growth cannot relocate storage behind
+an unchecked cursor or outstanding element loan; checked structural
+invalidation still applies even when the element count is unchanged.
+`Clear` empties initialized storage while retaining reserved capacity.
+Unused capacity is vacant storage, not a source of readable `T` values.
+
+These concrete cursors use the same source-root retention, copied-value
+current state, checked structural invalidation and idempotent explicit
+`Close` contract as `ListCursor` above. False exhaustion leaves no current
+element; post-close advancement/current access is a checked invalid-state
+failure. Closing a cursor neither clears its collection nor frees the
+collection's reserved storage. This adds no associated-cursor selection,
+loop-close registration, implicit NoThrow cleanup or concurrent safety;
+their exact metadata remains **OPEN**.
 
 `[Iterator]` denotes a lazy producer rather than a collection of eager
 results; async producers have a distinct awaitable advancement contract.
@@ -2356,9 +2396,13 @@ public mut class Dictionary<TKey, TValue, TComparer>
     where TComparer : IKeyComparer<TKey>, [ManagedStorable], [Copy], [Sized]
 {
     public nuint Count { get; }
+    public nuint Capacity { get; }
     public TComparer Comparer { get; }
+    public Dictionary(TComparer comparer);
     public Dictionary(TComparer comparer, nuint capacity);
+    public bool ContainsKey(TKey key);
     public bool TryGet(TKey key, init ref<TValue> value);
+    public mut Result<void, Error> Reserve(nuint capacity);
     public mut Result<bool, Error> TryAdd(TKey key, TValue value);
     public mut Result<void, Error> Set(TKey key, TValue value);
     public mut bool Remove(TKey key);
@@ -2371,9 +2415,12 @@ public mut class HashSet<T, TComparer>
     where TComparer : IKeyComparer<T>, [ManagedStorable], [Copy], [Sized]
 {
     public nuint Count { get; }
+    public nuint Capacity { get; }
     public TComparer Comparer { get; }
+    public HashSet(TComparer comparer);
     public HashSet(TComparer comparer, nuint capacity);
     public bool Contains(T value);
+    public mut Result<void, Error> Reserve(nuint capacity);
     public mut Result<bool, Error> TryAdd(T value);
     public mut bool Remove(T value);
     public mut void Clear();
@@ -2407,7 +2454,32 @@ public mut unique struct HashSetCursor<T, TComparer>
 }
 ```
 
-These proposed constructors require both comparer and capacity; no `DefaultComparer` or hidden comparer lookup is provided, and missing values are never synthesized with `default(TValue)`. `TryGet` returns false for a missing key and leaves its output vacant; true publishes a copied value. `TryAdd` returns `Success(false)` for a duplicate without changing collection contents or count, `Success(true)` only after insertion, and `Failure(Error)` on allocation failure with no partial publication. `Set` inserts or updates and leaves the prior mapping unchanged if insertion allocation fails. `Remove` returns false when absent; `Clear` empties the collection. Construction validates capacity and is all-or-nothing; capacity/allocation failure must be a checked failure before an instance is published. The precise constructor-failure transport remains open because no constructor-failure ABI or library-wide exception hierarchy is accepted. Keys must retain equality/hash stability while stored; comparer behavior must also remain stable, and comparer equality must imply identical hashes. These collections add no automatic concurrent safety; callers need an explicit external synchronization contract. Initial key, value, element and stored-comparer constraints intentionally retain `[ManagedStorable]`, `[Copy]`, and `[Sized]`; broader affine/non-Copy storage is out of scope.
+These proposed constructors always require a comparer; the comparer-only
+overload constructs an empty collection without an element-capacity request.
+No `DefaultComparer` or hidden comparer lookup is provided, and missing values
+are never synthesized with `default(TValue)`. `TryGet` returns false for a missing key and leaves its output vacant; true publishes a copied value. `TryAdd` returns `Success(false)` for a duplicate without changing collection contents or count, `Success(true)` only after insertion, and `Failure(Error)` on allocation failure with no partial publication. `Set` inserts or updates and leaves the prior mapping unchanged if insertion allocation fails. `Remove` returns false when absent; `Clear` empties the collection. Construction validates capacity and is all-or-nothing; capacity/allocation failure must be a checked failure before an instance is published. The precise constructor-failure transport remains open because no constructor-failure ABI or library-wide exception hierarchy is accepted. Keys must retain equality/hash stability while stored; comparer behavior must also remain stable, and comparer equality must imply identical hashes. These collections add no automatic concurrent safety; callers need an explicit external synchronization contract. Initial key, value, element and stored-comparer constraints intentionally retain `[ManagedStorable]`, `[Copy]`, and `[Sized]`; broader affine/non-Copy storage is out of scope.
+
+The comparer-only constructors, capacity/reservation members and dictionary
+`ContainsKey` are **PROPOSED** additions. `ContainsKey` tests presence without
+copying or publishing a value; a stored optional/null value is still present.
+`Capacity` is usable element capacity, not the physical bucket count, and is
+at least `Count`. Capacity construction and `Reserve` reserve at least the
+requested capacity without creating readable empty-slot keys/values.
+Successful reservation preserves contents and count; an already sufficient
+capacity returns `Success(())` without allocation. Allocation failure returns
+`Failure(Error)` without publishing a partial table. Other checked failures
+propagate rather than being manufactured into an allocation error. Failed
+reservation preserves the prior contents, count and capacity; no rollback of
+external comparer side effects is promised.
+
+Reservation cannot reduce capacity or replace the stored comparer.
+`Clear` retains reserved capacity but releases initialized entries and their
+root dependencies. Capacity/count arithmetic and backing-loan checks precede
+storage changes. Unlike the list/ordered cursor invalidation proposal in §5,
+the keyed cursor loan below prohibits collection mutation while live;
+reservation cannot rehash or relocate that backing behind the loan.
+Growth strategy, hash caching, bucket layout and iteration order remain
+implementation details, not guarantees of these member names.
 
 The **PROPOSED** concrete cursors complete the traversal surface without
 choosing a generic associated-cursor witness or erased iterator. Each cursor
