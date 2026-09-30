@@ -1904,6 +1904,7 @@ The following distinctions and signature questions remain open:
 - [Filesystem metadata and traversal](#proposed-filesystem-metadata-and-directory-traversal) propose a terminal-on-error lending cursor and scoped rename operations. Review link traversal, enumeration invalidation, metadata availability/precision and which target rename guarantees are required; these are API/host-profile choices, not newly adopted source syntax.
 - [Address/datagram operations](#proposed-address-values-and-datagram-operations) propose family-preserving address keys, capability-qualified binding and whole-message sends. Review numeric address grammar/scope IDs, client/listener capability separation and error consumption reporting before adopting these signatures.
 - [Binary values and fixed codecs](#proposed-binary-values-and-fixed-codecs) propose explicit byte-order operations and a bounded fixed-length witness. Review wire profiles, permitted codec effects and conditional publication; fixed-size encoding does not settle incremental schema registration, reflection or general object serialization.
+- [Globalization and civil-time providers](#proposed-globalization-and-civil-time-providers) propose immutable versioned data, explicit culture-sensitive formatting and inspectable local-time mappings. Review locale identifiers/fallback, calendar/range/leap-second profiles, zone rule versions and ambiguity policy; these do not alter invariant Core text or clock contracts.
 
 ## 11. Scoped proposed signatures: random and `uint32`
 
@@ -2551,6 +2552,152 @@ remain separate **OPEN** contracts: they need framing, consumed/written
 progress on errors, resource/depth limits, schema versions and registration,
 not a hidden fallback to the fixed codec or raw memory copying.
 
+### Proposed globalization and civil-time providers
+
+The candidate `Terrum.Globalization` surface takes explicit immutable data
+snapshots. It does not consult a current-thread/process culture, operating
+system time zone or mutable global data registry. These are **PROPOSED**
+reference signatures; no locale inventory, data format or provider ABI is
+selected by their names.
+
+```terrum
+public struct Locale : IFormattable
+{
+    public Text Id { get; }
+    public static bool TryParse(TextSpan text, init ref<Locale> value);
+    public bool Equals(Locale other);
+    public uint64 GetKeyHashCode();
+    public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
+        where TWriter : ITextWriter;
+}
+public interface ICultureDataProvider
+{
+    Result<CultureData, Error> Load(Locale locale);
+}
+public class CultureData
+{
+    public Locale Locale { get; }
+    public Text DataVersion { get; }
+    public static Result<CultureData, Error> Load<TProvider>(Locale locale,
+        ref<TProvider> provider) where TProvider : ICultureDataProvider;
+}
+public struct NumberFormatter
+{
+    public static bool TryFormat<TWriter>(int32 value, write ref<TWriter> writer,
+        TextSpan format, ref<CultureData> culture) where TWriter : ITextWriter;
+    public static bool TryFormat<TWriter>(uint64 value, write ref<TWriter> writer,
+        TextSpan format, ref<CultureData> culture) where TWriter : ITextWriter;
+    public static bool TryFormat<TWriter>(float64 value, write ref<TWriter> writer,
+        TextSpan format, ref<CultureData> culture) where TWriter : ITextWriter;
+    public static bool TryFormat<TWriter>(decimal64 value, write ref<TWriter> writer,
+        TextSpan format, ref<CultureData> culture) where TWriter : ITextWriter;
+    public static bool TryParse(TextSpan text, TextSpan format,
+        ref<CultureData> culture, init ref<int32> value);
+    public static bool TryParse(TextSpan text, TextSpan format,
+        ref<CultureData> culture, init ref<uint64> value);
+    public static bool TryParse(TextSpan text, TextSpan format,
+        ref<CultureData> culture, init ref<float64> value);
+    public static bool TryParse(TextSpan text, TextSpan format,
+        ref<CultureData> culture, init ref<decimal64> value);
+}
+public struct LocalDateTime
+{
+    public int32 Year { get; }
+    public uint8 Month { get; }
+    public uint8 Day { get; }
+    public uint8 Hour { get; }
+    public uint8 Minute { get; }
+    public uint8 Second { get; }
+    public uint32 Nanosecond { get; }
+    public static bool TryCreate(int32 year, uint8 month, uint8 day,
+        uint8 hour, uint8 minute, uint8 second, uint32 nanosecond,
+        init ref<LocalDateTime> value);
+}
+public struct DateTimeFormatter
+{
+    public static bool TryFormat<TWriter>(LocalDateTime value,
+        write ref<TWriter> writer, TextSpan format, ref<CultureData> culture)
+        where TWriter : ITextWriter;
+    public static bool TryParse(TextSpan text, TextSpan format,
+        ref<CultureData> culture, init ref<LocalDateTime> value);
+}
+public interface ITimeZoneDataProvider
+{
+    Result<TimeZoneDatabase, Error> Load();
+}
+public class TimeZoneDatabase
+{
+    public Text DataVersion { get; }
+    public static Result<TimeZoneDatabase, Error> Load<TProvider>(
+        ref<TProvider> provider) where TProvider : ITimeZoneDataProvider;
+    public Result<TimeZone, Error> Find(TextSpan id);
+}
+public class TimeZone
+{
+    public Text Id { get; }
+    public Text DataVersion { get; }
+    public Result<LocalDateTime, Error> Convert(Instant instant);
+    public Result<LocalTimeMapping, Error> Map(LocalDateTime value);
+}
+public enum LocalTimeResolution : int32
+{
+    RejectAmbiguous,
+    Earlier,
+    Later
+}
+public class LocalTimeMapping
+{
+    public LocalDateTime Value { get; }
+    public Text ZoneId { get; }
+    public Text DataVersion { get; }
+    public nuint Count { get; }
+    public Instant this[nuint index] { get; }
+    public Result<Instant, Error> Resolve(LocalTimeResolution resolution);
+}
+```
+
+`Locale.TryParse` validates a complete identifier and initializes its output
+only on success. A syntactically valid locale does not imply that its data is
+available. `CultureData.Load` reports missing/invalid data instead of choosing
+the caller's process locale. Its immutable snapshot owns or explicitly retains
+all required backing independently of the provider loan. Version labels
+identify the selected data, not a promise of interchange compatibility.
+Identifier grammar, canonical key equivalence, parent-locale fallback and
+data-version selection remain **OPEN**. The key hash must match the chosen
+equality; no automatic comparer/root conformance is inferred.
+
+The formatter overloads operate on their actual declared scalar types;
+additional widths need their own selected profile. Parsing uses the explicit
+format/culture and whole input, returning false with the output vacant on
+expected malformed/range failure. These calls cannot change ordinal/invariant
+primitive `TryParse` or `TryFormat`. Writer refusal retains already accepted
+fragments and does not replay them. Format grammar, grouping, calendars and
+rounding remain explicit API/profile decisions, not a silently adopted .NET
+format-string catalog or ambient floating-point mode.
+
+`LocalDateTime` is a civil field value, not a UTC instant, offset, duration
+or clock-domain timestamp. `TryCreate` must validate the chosen calendar and
+field ranges before publication; supported years, the initial Gregorian
+profile and leap-second treatment remain **OPEN**, with no `default(T)`
+construction of invalid fields. Supporting multiple calendars would require
+an explicit calendar identity/relationship, not reinterpreting identical
+fields according to a current culture. `DateTimeFormatter` formats that civil value
+without secretly selecting a time zone. `Instant` keeps its separately
+proposed bounded Unix-nanosecond domain; not every valid civil value must fit it.
+
+The zone database and returned zones retain a particular immutable rule
+snapshot. Loading newer rules does not retarget an existing zone or mapping.
+`Map` exposes candidate instants in chronological order: zero for a local-time
+gap, one for an unambiguous value and multiple for an overlap, without an
+arbitrary two-candidate representation limit. The indexed result is copied;
+no cursor loan or mutable backing escapes. `Resolve` requires an explicit
+policy: reject ambiguity, choose the earliest, or choose the latest candidate.
+A gap fails under every listed policy; shifting it to another civil time
+would require a separately named operation. Unavailable rules and values
+outside the selected instant domain are errors, not an empty successful
+mapping. Exact calendar/rule coverage, resource bounds and failure transport
+must be specified before adoption; this invents no implicit OS zone provider.
+
 ### Capability breadth: files, networking, terminal, globalization, serialization
 
 The complete representative byte-stream/handle and scoped filesystem shapes
@@ -2573,9 +2720,9 @@ singleton, a default encoding, or authority to escape its supplied capability.
 | `TcpEndpoint`, `TcpConnection`, `TcpListener`, `NetworkClient` | `ConnectAsync`, capability-qualified `Bind`, `AcceptAsync`, stream I/O and `Close` | Host networking capability; DNS and endpoint-name policy explicit |
 | `IpAddress`, `IpEndpoint`, `DatagramSocket`, `DatagramRead` | Numeric `TryParse`/format/key members; capability-qualified `Bind`; `ReceiveFromAsync -> Task<Result<DatagramRead,Error>>`; `SendToAsync -> Task<Result<void,Error>>` | One complete message versus stream progress; truncation, optional original length and peer address reported explicitly |
 | `Terminal`, `TextWriter` | `Output`, `Error`, `Write`, `WriteLine`, `WriteLineAsync`; proposed input adapter `Utf8TextReader<TStream>` | Explicit standard-stream host capability; input decoding and output encoding not inferred |
-| `Locale`, `CultureData` | `Locale.Parse(TextSpan,init ref<Locale>) -> bool`, `CultureData.Load(Locale,provider) -> Result<CultureData,Error>` | Injected versioned data provider; no implicit process locale or culture in core parse |
-| `NumberFormatter`, `DateTimeFormatter` | `TryFormat(value,write ref<ITextWriter>, ref<CultureData>) -> bool`; paired `TryParse(text,ref<CultureData>,init ref<T>) -> bool` | Locale-sensitive APIs explicitly separate from ordinal/invariant primitive formatting |
-| `TimeZoneDatabase`, `TimeZone` | `Find(TextSpan) -> Result<TimeZone,Error>`, `Convert(Instant,TimeZone) -> LocalDateTime` | Versioned rule provider; ambiguity/gap resolution needs explicit policy |
+| `Locale`, `CultureData`, `ICultureDataProvider` | `Locale.TryParse`, explicit-provider `CultureData.Load`; immutable locale/data-version properties | Injected versioned data snapshot; no implicit process locale or culture in core parse |
+| `NumberFormatter`, `DateTimeFormatter` | Typed `TryFormat<TWriter>(value,writer,format,culture)` and `TryParse(text,format,culture,init value)` | Locale-sensitive APIs explicitly separate from ordinal/invariant primitive formatting; no scalar promotion or implicit zone/calendar |
+| `LocalDateTime`, `TimeZoneDatabase`, `TimeZone`, `LocalTimeMapping`, `ITimeZoneDataProvider` | Validated civil `TryCreate`; provider `Load`, zone `Find`/`Convert`/`Map`; mapping `Count`, copied index and explicit `Resolve` | Immutable rule versions, no UTC/civil conflation; gaps/overlaps and instant-domain failure remain explicit |
 | `BinaryPrimitives`, `IFixedBinaryCodec<T>`, `UInt32BinaryCodec`, `Int64BinaryCodec` | Closed signed/unsigned 16/32/64-bit byte-order reads/writes; fixed `EncodedLength`, `Encode`, `Decode` | Explicit wire bytes, no native-layout inference; checked vacancy/publication and no retained buffers |
 | `IByteEncoder<T>`, `IByteDecoder<T>` | `Encode(ref<T>,write Span<uint8>,init ref<nuint> written) -> Result<bool,Error>`; `Decode(Span<uint8>,init ref<T>,init ref<nuint> consumed) -> Result<bool,Error>` | Explicit schema/version, incremental state, output-publication rules |
 | `BinarySerializer<T>`, `TextSerializer<T>` | `Write(ref<T>,write ref<IByteStream>) -> Result<void,Error>`; `Read(write ref<IByteStream>,init ref<T>) -> Result<bool,Error>` | Checked registration/schema/encoding; no reflection on arbitrary objects or hidden allocation |
