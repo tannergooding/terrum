@@ -116,6 +116,63 @@ and feature-to-runtime support remain open.
 - A `params` parameter must be final; its approved production does not include a default expression. Eligible ordinary by-value parameters may have compile-time `[Copy]` defaults under the approved call rules. Neither a defaulted parameter nor `init ref<T>` supplies an uninitialized value to the callee; `init` remains a vacant output until publication. Constructor and `init`-property guarantees belong to contract clauses; mixed property backing and `init` mutability do not turn a readonly receiver into writable storage.
 - A signature does not express all dependencies. A returned view retains its backing/root/lease and any shape metadata. Ownership, allocation, checked failure, effect and task-completion rules are stated under the relevant family.
 
+## Type and protocol reference index
+
+This index locates the concrete public type/protocol shapes below, including
+sampled primitive declarations and explicitly unapproved alternatives. Names
+omit generic arguments for readability except where two different sequence
+shapes need distinguishing; the linked declaration supplies the formals,
+constraints and member signatures. Being indexed does not approve a type,
+its namespace, family registration, ABI or implementation.
+
+Generative width families, scalable SIMD, nominal sums such as `Result<T,E>`
+and matrix-only service candidates remain in their respective inventories;
+they are not complete declarations merely because their names appear in a
+table. The proposed `Option<T>` alias is separately described in
+[fundamental values](#1-fundamental-values-presence-and-outcomes).
+
+| Signature group | Concrete types/protocols | Reference |
+|---|---|---|
+| Equality, keying, parse and format | `IEqualityComparer`, `IKeyComparer`, `IParsable`, `IFormattable` | [Witnesses](#2-explicit-equality-keying-and-formatting-witnesses) |
+| Views and immutable text | `Span`, `IContiguousSequence`, `TextSpan`, `rune`, `Text` | [Text and views](#3-text-encoding-and-writers) |
+| Text output | `ITextWriter`, `SpanTextWriter` | [Writer signatures](#3-text-encoding-and-writers) |
+| Text construction and search | `TextBuilder`, `TextSearch` | [Construction/search](#proposed-text-construction-search-and-incremental-transcoding) |
+| Incremental text conversion | `MalformedTextPolicy`, `TextConversionStatus`, `TextConversionProgress`, `ITextDecoder`, `ITextEncoder`, `Utf8Decoder`, `Utf8Encoder` | [Transcoding](#proposed-text-construction-search-and-incremental-transcoding) |
+| Inline storage | `InlineArray` | [Inline storage](#general-span-and-inline-storage) |
+| Allocation and native owners | `AllocationLease`, `AllocatorContext`, `Buffer`, `Vector` | [Native storage](#explicit-native-storage-representative-foundation-inventory) |
+| Borrowed arena and rentals | `ByteArena`, `MemoryPool`, `MemoryOwner` | [Arena/pool](#proposed-borrowed-arena-and-typed-rental-storage) |
+| Memory operations | `MemoryOrder`, `CompareExchangeObservation`, `MemoryPrimitives` | [Memory primitives](#memoryprimitives) |
+| Managed lists | `List`, `ListBuilder`, `ListWriteAccess`, `LinkedListNode`, `LinkedList`, `LinkedListBuilder`, `LinkedListCursor` | [Collections](#5-collections-iteration-and-eager-algorithms) |
+| Eager callbacks and algorithms | `IMapper`, `IPredicate`, `IZipper`, `IVisitor`, `SpanAlgorithms` | [Eager signatures](#5-collections-iteration-and-eager-algorithms) |
+| Copied-value iteration | `ICursor`, `ISequence<T, TCursor>`, `Int32RangeCursor`, `Int32RangeSequence`, `IAsyncCursor`, `IAsyncSequence`, `Int32AsyncCursor`, `Int32AsyncSequence` | [Sequence/cursor candidates](#proposed-sequence-and-cursor-protocol-candidates) |
+| Unapproved associated/lending/consuming alternatives | `ISequence<T>`, `ILendingCursor`, `IAsyncLendingCursor`, `IConsumingCursor`, `IAsyncConsumingCursor` | [Iteration alternatives](#proposed-sequence-and-cursor-protocol-candidates) |
+| Ordering and folding | `IOrderComparer`, `IFolder`, `OrderedSpanAlgorithms` | [Ordered signatures](#proposed-ordered-and-sequential-collection-declarations) |
+| Ordered/sequential storage | `SortedSet`, `SortedSetCursor`, `Queue`, `QueueCursor`, `Stack`, `StackCursor` | [Collection signatures](#proposed-ordered-and-sequential-collection-declarations) |
+| Independent numeric operations | `ISubtractionOperators`, `IDivisionOperators`, `IRemainderOperators`, `IUnaryPlusOperators`, `IUnaryNegationOperators`, `IEqualityOperators`, `IComparisonOperators`, `IBitwiseOperators`, `IShiftOperators`, `IMultiplicativeIdentity`, `IIntegerRelations`, `IFloatingClassification` | [Operation protocols](#independently-selectable-operation-protocols) |
+| Sampled numeric witnesses | `IAdditionOperators`, `IMultiplyOperators`, `IAdditiveIdentity`, `IScalarNumber`, `IScalarIeee754` | [Sampled declarations](#existing-sampled-declarations) |
+| Selected conversion pairs | `ICheckedConversion`, `ISaturatingConversion`, `ITruncatingConversion` | [Conversion witnesses](#existing-sampled-declarations) |
+| Sampled primitives | `int32`, `float32`, `decimal32`; `uint32`, `int8` | [Initial samples](#existing-sampled-declarations), [width-family samples](#candidate-primitive-member-families) |
+| Closed scalar services | `BitOperations`, `Int32Math`, `Float32Math` | [Scalar services](#numeric-conversion-and-scalar-service-signatures) |
+| Fixed SIMD | `simd128`, `simd128mask`, `Simd128Conversions`, `Simd128Reductions` | [Fixed SIMD](#fixed-width-simd) |
+| Tensor metadata and views | `TensorShape`, `TensorSpan`, `TensorViews` | [Tensor views](#tensor-shapes-and-views) |
+| Tensor kernels | `TensorPrimitives` | [Tensor operations](#tensor-operations) |
+| Random-source witnesses | `IRandom`, `ISeedableRandom` | [Scoped random samples](#8-callables-tasks-errors-time-random-and-application-services) |
+| Terminal output | `TerminalOutput`, `Terminal`, `TextWriter` | [Terminal samples](#8-callables-tasks-errors-time-random-and-application-services) |
+| Expected-error payloads | `ErrorCode`, `Error` | [Error values](#expected-failures-and-error-values) |
+| Keyed storage and traversal | `Dictionary`, `HashSet`, `DictionaryEntry`, `DictionaryCursor`, `HashSetCursor` | [Keyed collections](#keyed-collections-proposed-baseline) |
+| Task ownership and cancellation | `TaskStatus`, `Task`, `TaskAwaiter`, `CancellationToken`, `CancellationSource`, `TaskScope` | [Task signatures](#tasks-await-cancellation-and-completion-responsibility) |
+| Time and clock capabilities | `Duration`, `Instant`, `MonotonicTimestamp`, `IUtcClock`, `IMonotonicClock`, `SystemClock` | [Time signatures](#time-values-and-clock-capabilities) |
+| Stream and file access | `SeekOrigin`, `FileDisposition`, `IByteStream`, `ISeekableByteStream`, `FileHandle`, `FileSystem` | [Streams/files](#streams-file-capability-and-network-endpoints) |
+| TCP capabilities | `TcpEndpoint`, `TcpConnection`, `TcpListener`, `NetworkClient` | [Network endpoints](#streams-file-capability-and-network-endpoints) |
+| Borrowed memory stream | `MemoryByteStream` | [Memory stream](#proposed-borrowed-byte-stream-storage) |
+| Progress-aware I/O | `ByteTransferStatus`, `ByteTransferResult`, `IProgressByteStream`, `ByteStreamAlgorithms` | [Progress operations](#proposed-progress-aware-stream-operations) |
+| File metadata and traversal | `FileKind`, `FileRenamePolicy`, `FileMetadata`, `DirectoryEntry`, `DirectoryCursor` | [Filesystem metadata](#proposed-filesystem-metadata-and-directory-traversal) |
+| Addresses and datagrams | `IpAddress`, `IpEndpoint`, `DatagramRead`, `DatagramSocket` | [Datagrams](#proposed-address-values-and-datagram-operations) |
+| UTF-8 stream adapters | `Utf8TextReader`, `Utf8TextWriter` | [Stream text adapters](#proposed-utf-8-stream-text-adapters) |
+| Binary values and fixed codecs | `BinaryPrimitives`, `ByteOrder`, `BinaryCodecStatus`, `IFixedBinaryCodec`, `UInt32BinaryCodec`, `Int64BinaryCodec` | [Binary codecs](#proposed-binary-values-and-fixed-codecs) |
+| Culture and civil formatting | `Locale`, `ICultureDataProvider`, `CultureData`, `NumberFormatter`, `LocalDateTime`, `DateTimeFormatter` | [Globalization](#proposed-globalization-and-civil-time-providers) |
+| Zone data and civil mappings | `ITimeZoneDataProvider`, `TimeZoneDatabase`, `TimeZone`, `LocalTimeResolution`, `LocalTimeMapping` | [Time zones](#proposed-globalization-and-civil-time-providers) |
+
 ## 1. Fundamental values, presence and outcomes
 
 `void` is the zero-data result type, with value `()`, usable as `func<void>` or `Task<void>`; there is no public `unit` or `never` primitive. There is no universal `default(T)` and no required universal root with `Equals`, `GetHashCode`, or `ToString`.
