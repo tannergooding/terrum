@@ -2077,7 +2077,7 @@ The following distinctions and signature questions remain open:
 - [Address/datagram operations](#proposed-address-values-and-datagram-operations) propose family-preserving address keys, capability-qualified binding and whole-message sends. Review numeric address grammar/scope IDs, client/listener capability separation and error consumption reporting before adopting these signatures.
 - [Binary values and fixed codecs](#proposed-binary-values-and-fixed-codecs) propose explicit byte-order operations and a bounded fixed-length witness. Review wire profiles, permitted codec effects and conditional publication; fixed-size encoding does not settle incremental schema registration, reflection or general object serialization.
 - [Globalization and civil-time providers](#proposed-globalization-and-civil-time-providers) propose immutable versioned data, explicit culture-sensitive formatting and inspectable local-time mappings. Review locale identifiers/fallback, calendar/range/leap-second profiles, zone rule versions and ambiguity policy; these do not alter invariant Core text or clock contracts.
-- [Borrowed byte-stream storage](#proposed-borrowed-byte-stream-storage) proposes a fixed-capacity memory stream over an exclusive backing loan. Buffered owning wrappers still need an explicit inner-stream ownership constraint; exact-read/copy helpers need error-progress reporting before they can promise precise consumption.
+- [Borrowed byte-stream storage](#proposed-borrowed-byte-stream-storage) proposes a fixed-capacity memory stream over an exclusive backing loan. [Progress-aware stream operations](#proposed-progress-aware-stream-operations) propose richer terminal results and exact-read/write-all helpers; review cancellation reporting, provider guarantees and capture metadata. Buffered owning wrappers and two-stream copy recovery remain open.
 
 ## 11. Scoped proposed signatures: random and `uint32`
 
@@ -2568,8 +2568,107 @@ it. Likewise, `Result<nuint, Error>` reports successful progress but does not
 by itself report how much a failing read/write consumed or exposed. Exact-read,
 write-all and copy helpers cannot promise rollback or exact failed-call
 progress until the base stream contract or a richer progress result supplies
-it. These remain library questions, not new grammar or a fallback to assumed
-zero progress.
+it. The following proposal supplies a separate witness for that guarantee;
+it does not retroactively strengthen `IByteStream`. Buffered ownership and
+two-stream copy recovery remain library questions, not new grammar or a
+fallback to assumed zero progress.
+
+### Proposed progress-aware stream operations
+
+These **PROPOSED** `Terrum.IO` signatures preserve an observable byte prefix
+on expected failure and cooperative cancellation. No existing stream
+declaration automatically implements the stronger witness.
+
+```terrum
+public enum ByteTransferStatus : int32
+{
+    Success,
+    EndOfStream,
+    Failed,
+    Canceled
+}
+public struct ByteTransferResult
+{
+    public ByteTransferStatus Status { get; }
+    public nuint Transferred { get; }
+    public Error? Failure { get; }
+    public static ByteTransferResult Success(nuint transferred);
+    public static ByteTransferResult EndOfStream(nuint transferred);
+    public static ByteTransferResult Failed(nuint transferred, Error failure);
+    public static ByteTransferResult Canceled(nuint transferred);
+}
+public interface IProgressByteStream : IByteStream
+{
+    mut ByteTransferResult ReadWithProgress(write Span<uint8> destination);
+    mut ByteTransferResult WriteWithProgress(Span<uint8> source);
+    [Captures("destination")]
+    mut Task<ByteTransferResult> ReadWithProgressAsync(
+        write Span<uint8> destination, CancellationToken cancellation);
+    [Captures("source")]
+    mut Task<ByteTransferResult> WriteWithProgressAsync(
+        Span<uint8> source, CancellationToken cancellation);
+}
+public static class ByteStreamAlgorithms
+{
+    public static ByteTransferResult ReadExactly<TStream>(
+        write ref<TStream> stream, write Span<uint8> destination)
+        where TStream : IProgressByteStream;
+    public static ByteTransferResult WriteAll<TStream>(
+        write ref<TStream> stream, Span<uint8> source)
+        where TStream : IProgressByteStream;
+    [Captures("stream", "destination")]
+    public static Task<ByteTransferResult> ReadExactlyAsync<TStream>(
+        write ref<TStream> stream, write Span<uint8> destination,
+        CancellationToken cancellation)
+        where TStream : IProgressByteStream;
+    [Captures("stream", "source")]
+    public static Task<ByteTransferResult> WriteAllAsync<TStream>(
+        write ref<TStream> stream, Span<uint8> source,
+        CancellationToken cancellation)
+        where TStream : IProgressByteStream;
+}
+```
+
+The result factories produce validated states: `Failure` is present exactly
+for `Failed`. `Transferred` is the contiguous requested prefix delivered to
+the caller's read destination or accepted from its write source, including
+progress made before a reported error/cancellation. It cannot exceed the
+requested span length. Read destination bytes beyond that prefix are
+unchanged. Accepted writes are logical stream progress, not an assertion
+that buffered bytes are flushed or durable.
+
+| Proposed operation | Terminal and progress contract |
+|---|---|
+| `ReadWithProgress` | A nonempty successful read reports positive progress. EOF may accompany a final prefix or zero bytes. An empty request succeeds with zero after ordinary validation, without probing EOF. |
+| `WriteWithProgress` | A nonempty successful write reports positive progress; EOF is not a valid write result. Failure/cancellation may accompany an accepted prefix. |
+| `ReadExactly` | Continue on successful partial reads using only the remaining destination suffix. Success means the whole request was filled. Premature EOF reports the total delivered prefix; EOF accompanying the final required bytes satisfies the request. |
+| `WriteAll` | Continue on successful partial writes using only the unaccepted source suffix. Success means the whole request was accepted, not flushed; failure reports the total accepted prefix. |
+| Async counterparts | Retain stream and buffer access until terminal completion/cleanup. Cooperative cancellation returns `Canceled` with the total known prefix, even if the request was already partially processed. |
+
+Helpers stop on failure/cancellation without replaying an accepted prefix or
+silently promoting a terminal error to success, even when its count equals
+the requested length. Empty helper requests perform no underlying I/O after
+validation. Count accumulation is bounded by the original request, not an
+unchecked running byte total. Invalid counts, zero-progress nonempty
+successes and write-EOF results are checked provider-contract failures, not
+retry instructions or fabricated EOF. Checked/runtime failures still
+propagate; these result contracts do not turn arbitrary exceptions into
+domain errors or promise recoverable counts after such exceptions.
+
+For these progress-aware async calls, handled cooperative cancellation is
+data in the normally completed task result, rather than a canceled task
+outcome that loses the byte count. This is an **API proposal**, not a change
+to general task cancellation. Capture/conditional-result metadata, provider
+conformance and failure transport must be specified before adoption.
+An ordinary `IByteStream` cannot implement this witness through an adapter
+that assumes zero progress on error. Helpers borrow the stream; they never
+close it, rewind it, roll back output or release its owner.
+
+A two-stream `CopyTo` needs separate consumed-source and accepted-destination
+counts plus recoverable buffered remainder on destination failure. One
+`Transferred` count cannot describe that state; its signature/ownership and
+resumption contract remain **OPEN** rather than being inferred from these
+single-stream helpers.
 
 ### Proposed filesystem metadata and directory traversal
 
@@ -3023,6 +3122,7 @@ singleton, a default encoding, or authority to escape its supplied capability.
 | Candidate family | Proposed signature inventory | Substrate / boundary |
 |---|---|---|
 | `IByteStream`, `ISeekableByteStream` | `Read`, `Write`, `Flush`, async counterparts; seekable adds `GetLength() -> Result<uint64,Error>`, `Seek(int64,SeekOrigin) -> Result<uint64,Error>` | Stream may be nonseekable, partial, owned or borrowed; close and cleanup policy separately specified |
+| `IProgressByteStream`, `ByteTransferResult`, `ByteStreamAlgorithms` | Progress-reporting read/write and async counterparts; `ReadExactly`, `WriteAll` and async helpers | Exact accepted prefix on expected failure/cancellation; stronger provider witness, no assumed zero progress or rollback |
 | `MemoryByteStream` | Constructor over writable storage and logical length; `Read`, `Write`, `Seek`, `Position`, fixed `Capacity`, async counterparts and `Close` | Exclusive backing loan, no allocation/release ownership or escalation from readonly bytes |
 | `BufferedByteStream<TStream>` / **OPEN ownership** | Candidate `Create(TStream, Buffer<uint8>)`, with `TStream : IByteStream`; `Read`, `Write`, `Flush`, `Close` | Exact inner owner/loan constraint is OPEN; ordinary moves cannot prove ownership from a behavioral witness; no implied erased owned-interface representation; flush/close errors remain observable |
 | `FileSystem`, `FileHandle` | `OpenRead/Write/Directory`, `GetMetadata`, `FileExists`, `CreateDirectory`, `DeleteFile/EmptyDirectory`, `Rename`; handle `GetLength`, `SetLength`, `Seek`, `Read/Write`, `Flush`, `Close` | Explicit filesystem root; authorized relative path and symlink policy; seekability alone grants no write authority |
