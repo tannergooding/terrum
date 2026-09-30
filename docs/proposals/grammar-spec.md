@@ -149,7 +149,13 @@ compared as characters, not visual columns, with no normalization.
 An empty closing indentation preserves all content indentation.
 In interpolated raw text, this transformation applies only to literal text
 line prefixes, not hole-expression trivia or the formatted values of holes.
-Interior newline value rules remain to specify.
+Interior source line-ending sequences are preserved, including CRLF versus
+LF and other recognized line breaks; compilation does not substitute a
+host-platform newline or normalize to LF. Framing removal treats CRLF as
+one line-break sequence and excludes both code units when it is framing.
+Source line-ending conversion can therefore change a raw value. Explicit
+normalization operations or handler metadata remain separate library design,
+not implicit literal behavior.
 
 Interpolated raw text prefixes its quote fence with one or more contiguous
 `$` characters. With `N` dollar signs, a hole uses `N` opening and `N` closing
@@ -1891,7 +1897,7 @@ appears in §2.
 | Concept | Defined direction | Still to specify |
 |---|---|---|
 | Lexical tokens | §2 gives identifier and reserved-word forms; primitive names are identifiers with reserved bindings. | Exact contextual-word classification and `HexFloat` token boundaries/diagnostics. |
-| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give framed/dedented raw text, `$"..."` interpolation and deterministic `$`-count raw interpolation. | Complete floating token recovery, character diagnostics, raw quote-boundary/newline rules, format/alignment spelling and registered text APIs. |
+| Literals | §§2 and 4 give character-scalar and context-typed numeric forms, including hex-float target rounding; §§2 and 3.4 give framed/dedented raw text with preserved line endings, `$"..."` interpolation and deterministic `$`-count raw interpolation. | Complete floating token recovery, character diagnostics, raw quote-boundary rules, format/alignment spelling and registered text/normalization APIs. |
 | Files | §3.1 sketches directive order. | Other directive/file forms, if any. |
 | Namespace | §3.1 permits file-scoped or block namespaces, without mixing. | Nested namespace blocks and namespace-local imports. |
 | Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
