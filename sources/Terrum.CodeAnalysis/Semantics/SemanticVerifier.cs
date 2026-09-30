@@ -368,7 +368,6 @@ public static class SemanticVerifier
                     || (function.IsConstructor && function.IsStatic)
                     || primitiveOwner is not null && (function.IsConstructor
                         || function.IsClassConstructor || function.IsCleanup
-                        || function.PropertyName is not null
                         || !function.IsStatic && !function.Variables.IsEmpty
                             && function.Variables[0].IsMutable)
                     || (!function.IsStatic && (function.Variables.IsEmpty

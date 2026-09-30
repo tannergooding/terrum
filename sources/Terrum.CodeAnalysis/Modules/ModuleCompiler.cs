@@ -43,6 +43,7 @@ public static partial class ModuleCompiler
     private const int TransparentLayoutVersion = 35;
     private const int WideClassFieldsVersion = 36;
     private const int CorePrimitiveVersion = 37;
+    private const int CorePrimitiveGetterVersion = 38;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -64,10 +65,15 @@ public static partial class ModuleCompiler
     private static bool HasWideClassFields(Module module) =>
         module.Classes.Any(static @class => @class.Fields.Length > 16);
 
-    private static bool HasCorePrimitiveMembers(Module module)
+    private static bool HasCorePrimitiveMembers(Module module, bool gettersOnly = false)
     {
         foreach (var item in module.Functions)
         {
+            if (gettersOnly && item.Function?.PropertyName is null
+                && !item.Contract.Contains("|Property:", StringComparison.Ordinal))
+            {
+                continue;
+            }
             var owner = item.Function?.DeclaringStruct;
             if (owner is null && item.Import)
             {
@@ -1415,7 +1421,9 @@ public static partial class ModuleCompiler
         }
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
-        var version = HasCorePrimitiveMembers(module)
+        var version = HasCorePrimitiveMembers(module, gettersOnly: true)
+            ? CorePrimitiveGetterVersion
+            : HasCorePrimitiveMembers(module)
             ? CorePrimitiveVersion
             : HasWideClassFields(module)
             ? WideClassFieldsVersion
@@ -1640,6 +1648,12 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Primitive-owned methods require the Core primitive module version.");
             }
+            if (version < CorePrimitiveGetterVersion && HasCorePrimitiveMembers(module, gettersOnly: true)
+                || version == CorePrimitiveGetterVersion
+                    && !HasCorePrimitiveMembers(module, gettersOnly: true))
+            {
+                throw new ModuleFormatException("Primitive-owned properties require semantic module version 38.");
+            }
             if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
                 || !items.Any(static item => item.Import && item.Function is BoundFunction function
                     && !ManagedExportShape.ScalarOnly(function))))
@@ -1692,7 +1706,8 @@ public static partial class ModuleCompiler
             or MutableFieldReceiverVersion or UniqueMutableReceiverVersion or UniqueMutableFieldReceiverVersion
             or MutableBufferFieldReceiverVersion or MutableBufferFieldViewVersion or ManagedValueExportVersion
             or ManagedGraphParticipantVersion or PrivateInitReferenceVersion or ExplicitGetterVersion
-            or TransparentLayoutVersion or WideClassFieldsVersion or CorePrimitiveVersion))
+            or TransparentLayoutVersion or WideClassFieldsVersion or CorePrimitiveVersion
+            or CorePrimitiveGetterVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }

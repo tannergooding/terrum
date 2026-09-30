@@ -314,9 +314,9 @@ internal sealed partial class Binder
                         {
                             if (TryPrimitiveType(structName, out _)
                                 && declaration.Kind is SyntaxKind.ConstructorDeclaration
-                                    or SyntaxKind.OperatorDeclaration or SyntaxKind.PropertyDeclaration)
+                                    or SyntaxKind.OperatorDeclaration)
                             {
-                                Report("TRM3001", "Core primitive declarations cannot define constructors, operators or properties.",
+                                Report("TRM3001", "Core primitive declarations cannot define constructors or operators.",
                                     declaration.Span);
                                 continue;
                             }
@@ -933,7 +933,8 @@ internal sealed partial class Binder
             }
             if (containingType is null || isStatic || isMutable || isCleanup || doesNotReturn
                 || (!TryResolveStruct(Qualify(containingType), out var propertyOwner)
-                    && !TryResolveClass(Qualify(containingType), out propertyOwner))
+                    && !TryResolveClass(Qualify(containingType), out propertyOwner)
+                    && !_primitiveDeclarations.Contains(containingType))
                 || (IsStruct(propertyOwner) && IsUnique(propertyOwner))
                 || TryFindField(propertyOwner, nameToken.Text, out _))
             {
@@ -2678,7 +2679,9 @@ internal sealed partial class Binder
     private bool TryFindGetter(PrimitiveType type, string name, out int getter)
     {
         var owner = IsClass(type) ? _classes[ManagedClassTypes.ClassIndex(type)].Name
-            : IsStruct(type) ? _structs[(int)type - 100].Name : null;
+            : IsStruct(type) ? _structs[(int)type - 100].Name
+            : TryPrimitiveType(TypeName(type), out var primitive) && primitive == type
+                ? TypeName(type) : null;
         getter = -1;
         return owner is not null && TryFindFunction(owner + ".#get:" + name, out getter)
             && _signatures[getter].PropertyName == name;

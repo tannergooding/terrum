@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
@@ -82,6 +83,156 @@ public sealed class CoreLibraryTests
             BoundRuntimePolicy.FailFast);
         Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.Empty(Assert.IsType<BoundProgram>(compilation.Program).Structures);
+    }
+
+    [Theory]
+    [InlineData("bool", BoundRuntimePolicy.FailFast)]
+    [InlineData("bool", BoundRuntimePolicy.CheckedExceptions)]
+    [InlineData("char16", BoundRuntimePolicy.FailFast)]
+    [InlineData("char16", BoundRuntimePolicy.CheckedExceptions)]
+    [InlineData("int32", BoundRuntimePolicy.FailFast)]
+    [InlineData("int32", BoundRuntimePolicy.CheckedExceptions)]
+    [InlineData("uint32", BoundRuntimePolicy.FailFast)]
+    [InlineData("uint32", BoundRuntimePolicy.CheckedExceptions)]
+    [InlineData("int64", BoundRuntimePolicy.FailFast)]
+    [InlineData("int64", BoundRuntimePolicy.CheckedExceptions)]
+    [InlineData("uint64", BoundRuntimePolicy.FailFast)]
+    [InlineData("uint64", BoundRuntimePolicy.CheckedExceptions)]
+    public void CorePrimitiveGetterRetainsIdentityAndServicesSeparateModule(
+        string name, BoundRuntimePolicy runtimePolicy)
+    {
+        var library = $$"""
+            public struct {{name}} {
+                private {{name}} value;
+                public static {{name}} Identity({{name}} input) { return input.value; }
+                public {{name}} Value { [NoThrow] get { return value; } }
+                private {{name}} PrivateValue { [NoThrow] get { return value; } }
+                public {{name}} ReadPrivate() { return PrivateValue; }
+                public {{name}} get_Value() { return value; }
+            }
+            """;
+        var source = name == "bool"
+            ? "int32 Main() { if (bool.Identity(true).Value && bool.Identity(true).ReadPrivate()) { return 7; } return 0; }"
+            : $"int32 Main() {{ {name} value = {name}.Identity({name}(7)); return int32(value.Value) + int32(value.ReadPrivate()) - 7; }}";
+        var compilation = Compilation.CreateCoreLibrary([SyntaxTree.Parse(library)], runtimePolicy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Assert.IsType<BoundProgram>(compilation.Program);
+        Assert.Empty(program.Structures);
+        Assert.Equal($"{name}.#get:Value", Assert.Single(program.Functions,
+            function => function.PropertyName == "Value").Name);
+        Assert.Null(Assert.Single(program.Functions,
+            function => function.Name == $"{name}.get_Value").PropertyName);
+        var exports = new[] { $"{name}.Identity", $"{name}.#get:Value", $"{name}.ReadPrivate" };
+        var producer = ModuleCompiler.CreateProducer(program, exports);
+        Assert.Equal(38, BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)));
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(source),
+            ModuleCompiler.CreateReference(producer), runtimePolicy);
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(consumerCompilation.Program), producer);
+        Assert.Equal(38, BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4)));
+        var linked = ModuleCompiler.Link(consumer, producer);
+        var policy = (NativeRuntimePolicy)runtimePolicy;
+        Assert.Equal(7, NativeJit.Execute(linked, policy));
+        Assert.NotEmpty(NativeEmitter.Emit(linked, policy));
+
+        var oldProducer = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(oldProducer.AsSpan(4), 37);
+        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(oldProducer));
+        var oldConsumer = (byte[])consumer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(oldConsumer.AsSpan(4), 37);
+        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(oldConsumer, producer));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CorePrimitiveGetterSupportsNativeModuleAndCompatibleReplacementAsync(
+        BoundRuntimePolicy runtimePolicy)
+    {
+        const string Original = """
+            public struct int32 {
+                private int32 value;
+                public static int32 Identity(int32 input) { return input.value; }
+                public int32 Value { [NoThrow] get { return value; } }
+            }
+            """;
+        var replacement = Original.Replace("get { return value; }", "get { return 8; }",
+            StringComparison.Ordinal);
+        var policy = (NativeRuntimePolicy)runtimePolicy;
+        var original = Compilation.CreateCoreLibrary([SyntaxTree.Parse(Original)], runtimePolicy);
+        var revised = Compilation.CreateCoreLibrary([SyntaxTree.Parse(replacement)], runtimePolicy);
+        Assert.False(original.HasErrors, string.Join(Environment.NewLine, original.Diagnostics));
+        Assert.False(revised.HasErrors, string.Join(Environment.NewLine, revised.Diagnostics));
+        string[] exports = ["int32.Identity", "int32.#get:Value"];
+        var firstProgram = Assert.IsType<BoundProgram>(original.Program);
+        var secondProgram = Assert.IsType<BoundProgram>(revised.Program);
+        var first = ModuleCompiler.CreateProducer(firstProgram, exports);
+        var second = ModuleCompiler.CreateProducer(secondProgram, exports);
+        var source = SyntaxTree.Parse("int32 Main() { return int32.Identity(7).Value; }");
+        var consumerCompilation = Compilation.Create(source,
+            ModuleCompiler.CreateReference(first), runtimePolicy);
+        Assert.False(consumerCompilation.HasErrors,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            Assert.IsType<BoundProgram>(consumerCompilation.Program), first);
+        Assert.Equal(8, NativeJit.Execute(ModuleCompiler.Link(consumer, second), policy));
+
+        var nativeFirst = NativeModuleCompiler.CreateProducer(firstProgram, exports, "Core", policy);
+        var nativeSecond = NativeModuleCompiler.CreateProducer(secondProgram, exports, "Core", policy);
+        var nativeCompilation = Compilation.Create(source,
+            NativeModuleCompiler.CreateGraphReference([nativeFirst]), runtimePolicy);
+        Assert.False(nativeCompilation.HasErrors, string.Join(Environment.NewLine, nativeCompilation.Diagnostics));
+        var nativeConsumer = NativeModuleCompiler.CreateGraphConsumer(
+            Assert.IsType<BoundProgram>(nativeCompilation.Program), [nativeFirst], policy);
+        Assert.Equal(7, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeFirst],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        Assert.Equal(8, await NativeModuleCompiler.RunGraphAsync(nativeConsumer, [nativeSecond],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData("bool")]
+    [InlineData("char16")]
+    [InlineData("int32")]
+    [InlineData("uint32")]
+    [InlineData("int64")]
+    [InlineData("uint64")]
+    public void CorePrimitiveGetterRejectsUnsupportedShapes(string name)
+    {
+        string[] declarations =
+        [
+            $"public static {name} Value {{ get {{ return value; }} }}",
+            $"public mut {name} Value {{ get {{ return value; }} }}",
+            $"public {name} Value {{ get; }}",
+            $"public {name} Value {{ get {{ return value; }} set {{ value = value; }} }}",
+        ];
+        foreach (var declaration in declarations)
+        {
+            var source = $"public struct {name} {{ private {name} value; {declaration} }}";
+            Assert.True(Compilation.CreateCoreLibrary([SyntaxTree.Parse(source)]).HasErrors);
+        }
+    }
+
+    [Fact]
+    public void CorePrimitiveGetterVisibilityIsNotInferredFromConventionalMethodName()
+    {
+        const string Source = """
+            public struct int32 {
+                private int32 value;
+                private int32 Hidden { get { return value; } }
+                public int32 get_Hidden() { return value; }
+            }
+            """;
+        var core = Compilation.CreateCoreLibrary([SyntaxTree.Parse(Source)]);
+        Assert.False(core.HasErrors, string.Join(Environment.NewLine, core.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(Assert.IsType<BoundProgram>(core.Program),
+            ["int32.get_Hidden"]);
+        var consumer = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return int32(7).Hidden; }"),
+            ModuleCompiler.CreateReference(producer));
+        Assert.True(consumer.HasErrors);
     }
 
     [Theory]

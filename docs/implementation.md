@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-27, semantic v37 Core primitive methods, native-10 through native-20
+## Current boundary: syntax-27, semantic v38 Core primitive getters, native-10 through native-20
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -24,13 +24,21 @@ its own type; the field reads as the compiler-owned primitive value without
 recursive storage. Core-defined static and readonly instance methods bind,
 export and execute through existing semantic modules and native DLLs;
 consumers resolve them to the library implementation rather than a second
-nominal type. Core primitive constructors, operators, properties,
+nominal type. Core primitive constructors, operators, setters,
 conformances, writable backing and a full standard-library build are not yet
 supported. Semantic module revision 37 marks primitive-owned methods in
 both producers and consumers; earlier revisions reject those declarations
 while retaining ordinary nominal layouts. The `--corelib` option is a
 provisional compiler build mode, not a verified Core artifact identity or a
 grant to ordinary dependencies.
+Designated Core primitive declarations also admit explicit readonly by-value
+getters for the six supported scalar types. A getter retains its own
+visibility, accessor-local `[NoThrow]` effect, private backing access and
+property identity distinct from an ordinary `get_Name` method. Semantic v38
+is selected when a primitive-owned getter is retained by a producer or
+consumer; older headers reject this shape, while primitive methods without
+getters retain v37. Independent semantic/native consumers and compatible
+producer replacements preserve getter calls without a new native ABI.
 The current parser rejects attached numeric width suffixes with `TRM0006` and
 has no prefix-cast production. It supports context-typed decimal, hexadecimal
 and binary integer literals without a fallback type, numeric digit separators,
@@ -729,12 +737,15 @@ use `init:` rather than `out:` contracts, while older private v33 declarations
 retain their original `out:` spelling. The scanner record, native profile and
 physical output ABI remain unchanged.
 `syntax-23` adds explicit getter-only, by-value properties on compact Copy
-structs and source classes. Accessor-local `[NoThrow]` is verified like the
-same contract on a method. Member reads bind to a readonly-receiver call, not
+structs, source classes and designated Core primitive declarations.
+Accessor-local `[NoThrow]` is verified like the same contract on a method.
+Member reads bind to a readonly-receiver call, not
 a field or a `get_Name` naming convention. Semantic v34 records the property's
 member identity alongside its function body and contract, including exported
 Copy-struct getter declarations; existing field layouts and their mutability
-are unchanged. Exported structs still require their existing public field
+are unchanged. Primitive-owned properties additionally require v38 in producer
+and consumer semantic modules; existing nominal getters retain their selected
+versions. Exported structs still require their existing public field
 layout, and managed class handles remain private to their image. Setter,
 auto-property, ref-return and expression-bodied forms are unsupported. No
 scanner or native ABI/profile version changes.

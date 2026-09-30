@@ -28,7 +28,11 @@ references remain unsupported. Compilation-local `Copy` generic templates
 can conditionally initialize `init ref<T>` without a public generic ABI.
 Syntax-23 adds explicit getter-only properties on Copy structs and source
 classes; semantic v34 records property identity without a scanner or native
-ABI change.
+ABI change. Designated Core primitive declarations use the same readonly
+by-value getter syntax, property identity and accessor effects with semantic
+v38, retaining their private compiler-owned backing and native ABI. Core
+constructors, operators, setters and general library bootstrap remain
+unsupported.
 Syntax-24 supports one-field transparent scalar wrappers with semantic v35
 layout identity. Syntax-25 supports bounded internal scalar `[ConstEval]`
 functions and required `const T name = expression;` locals without adding
