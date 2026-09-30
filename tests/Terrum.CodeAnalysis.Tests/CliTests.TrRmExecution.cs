@@ -1,0 +1,284 @@
+// Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
+
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+using Xunit;
+
+namespace Terrum.CodeAnalysis.Tests;
+
+public sealed partial class CliTests
+{
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int TrRmAdd(int left, int right);
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate long TrRmIdentity(long value);
+
+    [Fact]
+    public async Task PersistedTrRmRunsAndBuildsWithoutProducerSourceAsync()
+    {
+        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-consumer-{Guid.NewGuid():N}");
+        var artifact = prefix + ".trrm";
+        var executable = prefix + ".exe";
+        try
+        {
+            var (compiled, compileOutput, compileError) = await RunAsync(
+                Encoding.UTF8.GetBytes("int32 Main() { mut int32 x = 20; x = x + 22; return x; }"),
+                "compile-trrm", "-", "--identity", "consumer", "-o", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.True(compiled == 0, $"{compileOutput}{Environment.NewLine}{compileError}");
+            Assert.Empty(compileError);
+            Assert.True(File.Exists(artifact));
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.True(ran == 42, $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.Empty(runOutput);
+            Assert.Empty(runError);
+
+            var (built, buildOutput, buildError) = await RunAsync([], "build-trrm", artifact,
+                "-o", executable, "--runtime", "fail-fast", "--json");
+            Assert.True(built == 0, $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.Empty(buildError);
+            Assert.Equal(42, await ExecuteTrRmImageAsync(executable));
+        }
+        finally
+        {
+            File.Delete(artifact);
+            File.Delete(executable);
+        }
+    }
+
+    [Fact]
+    public async Task PersistedTrRmLibraryPublishesTwoIndependentNativeExportsAsync()
+    {
+        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-library-{Guid.NewGuid():N}");
+        var artifact = prefix + ".trrm";
+        var library = prefix + ".dll";
+        try
+        {
+            const string source = """
+                public int32 Add(int32 left, int32 right) { return left + right; }
+                public int64 Identity(int64 value) { return value; }
+                """;
+            var (compiled, stdout, stderr) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                "compile-trrm", "-", "--identity", "two-exports", "-o", artifact,
+                "--runtime", "fail-fast", "--library", "--json");
+            Assert.True(compiled == 0, $"{stdout}{Environment.NewLine}{stderr}");
+            Assert.Empty(stderr);
+            var (built, output, error) = await RunAsync([], "build-trrm-library", artifact,
+                "--export", "Add", "--export", "Identity", "-o", library,
+                "--runtime", "fail-fast", "--json");
+            Assert.True(built == 0, $"{output}{Environment.NewLine}{error}");
+            Assert.Empty(error);
+            var handle = NativeLibrary.Load(library);
+            try
+            {
+                var add = Marshal.GetDelegateForFunctionPointer<TrRmAdd>(
+                    NativeLibrary.GetExport(handle, "Add"));
+                var identity = Marshal.GetDelegateForFunctionPointer<TrRmIdentity>(
+                    NativeLibrary.GetExport(handle, "Identity"));
+                Assert.Equal(42, add(20, 22));
+                Assert.Equal(long.MinValue, identity(long.MinValue));
+            }
+            finally
+            {
+                NativeLibrary.Free(handle);
+            }
+        }
+        finally
+        {
+            File.Delete(artifact);
+            File.Delete(library);
+        }
+    }
+
+    [Theory]
+    [InlineData("int32 Main() { return 2147483647 + 1; }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { return 1 / 0; }", unchecked((int)0xE0540002))]
+    [InlineData("int32 Main() { return int32(uint32.MaxValue); }", unchecked((int)0xE0540001))]
+    [InlineData("int32 Main() { _ = int32(1) / 0; return 42; }", unchecked((int)0xE0540002))]
+    [InlineData("int32 Main() { int32 x = 1 / 0; return 42; }", unchecked((int)0xE0540002))]
+    [InlineData("int32 Main() { return (1 / 0) + (int32.MaxValue + 1); }", unchecked((int)0xE0540002))]
+    [InlineData("int32 Main() { return (int32.MaxValue + 1) + (1 / 0); }", unchecked((int)0xE0540001))]
+    public async Task TrRmCheckedFailureKeepsFailFastPolicyAfterPersistenceAsync(string source, int failure)
+    {
+        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-failure-{Guid.NewGuid():N}");
+        var artifact = prefix + ".trrm";
+        var executable = prefix + ".exe";
+        try
+        {
+            var (compiled, stdout, stderr) = await RunAsync(Encoding.UTF8.GetBytes(source),
+                "compile-trrm", "-", "--identity", "failure", "-o", artifact, "--runtime", "fail-fast", "--json");
+            Assert.True(compiled == 0, $"{stdout}{Environment.NewLine}{stderr}");
+            Assert.Empty(stderr);
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.True(ran == failure, $"Expected {failure:X8}, received {ran:X8}: {runOutput}{Environment.NewLine}{runError}");
+            var (built, output, error) = await RunAsync([], "build-trrm", artifact,
+                "-o", executable, "--runtime", "fail-fast", "--json");
+            Assert.True(built == 0, $"{output}{Environment.NewLine}{error}");
+            Assert.Equal(failure, await ExecuteTrRmImageAsync(executable));
+        }
+        finally
+        {
+            File.Delete(artifact);
+            File.Delete(executable);
+        }
+    }
+
+    private static async Task<int> ExecuteTrRmImageAsync(string executable)
+    {
+        using var process = Process.Start(new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        }) ?? throw new InvalidOperationException("Executable was not started.");
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Empty(await stdout);
+        Assert.Empty(await stderr);
+        return process.ExitCode;
+    }
+
+    [Theory]
+    [InlineData("compile-trrm")]
+    [InlineData("run-trrm")]
+    [InlineData("build-trrm")]
+    [InlineData("build-trrm-library")]
+    public async Task TrRmRejectsCheckedExceptionsAtEveryExecutionBoundaryAsync(string command)
+    {
+        var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-policy-{Guid.NewGuid():N}.trrm");
+        var arguments = command switch
+        {
+            "compile-trrm" => new[] { command, "-", "--identity", "policy", "-o", path, "--runtime", "checked-exceptions", "--json" },
+            "run-trrm" => [command, path, "--runtime", "checked-exceptions", "--json"],
+            "build-trrm" => [command, path, "-o", Path.ChangeExtension(path, ".exe"), "--runtime", "checked-exceptions", "--json"],
+            _ => [command, path, "--export", "Value", "-o", Path.ChangeExtension(path, ".dll"), "--runtime", "checked-exceptions", "--json"],
+        };
+        var (exit, stdout, stderr) = await RunAsync(
+            Encoding.UTF8.GetBytes("int32 Main() { return 42; }"), arguments);
+        Assert.True(exit == 1, $"{stdout}{Environment.NewLine}{stderr}");
+        Assert.Empty(stderr);
+        using var result = JsonDocument.Parse(stdout);
+        Assert.Equal("TRM5001", result.RootElement.GetProperty("diagnostics")[0]
+            .GetProperty("code").GetString());
+        Assert.Contains("fail-fast", result.RootElement.GetProperty("diagnostics")[0]
+            .GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task TrRmSourceRejectionDoesNotOverwritePreviousArtifactAsync()
+    {
+        var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-reject-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            await File.WriteAllBytesAsync(path, [0xAA, 0x55]);
+            var (exit, stdout, stderr) = await RunAsync(
+                Encoding.UTF8.GetBytes("int32 Main() { return true ? 42 : 0; }"),
+                "compile-trrm", "-", "--identity", "reject", "-o", path,
+                "--runtime", "fail-fast", "--json");
+            Assert.True(exit == 1, $"{stdout}{Environment.NewLine}{stderr}");
+            Assert.Empty(stderr);
+            Assert.Contains("TRM5001", stdout);
+            Assert.Equal(new byte[] { 0xAA, 0x55 }, await File.ReadAllBytesAsync(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task TrRmIndependentBytesExecuteInFreshProcessAsync()
+    {
+        var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-independent-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            byte[] body = [4, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 1];
+            await File.WriteAllBytesAsync(path, TrRmExecutionAuditTests.Artifact(body));
+            var (exit, stdout, stderr) = await RunAsync([], "run-trrm", path, "--runtime", "fail-fast", "--json");
+            Assert.True(exit == 42, $"{stdout}{Environment.NewLine}{stderr}");
+            Assert.Empty(stdout);
+            Assert.Empty(stderr);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TrRmInvalidEffectsPreserveNativeOutputAndRejectExecutionAsync(bool library)
+    {
+        var prefix = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-invalid-effects-{Guid.NewGuid():N}");
+        var artifact = prefix + ".trrm";
+        var output = prefix + (library ? ".dll" : ".exe");
+        try
+        {
+            byte[] body = [4, 1, 1, 0, 0, 0, 3,
+                1, 1, 1, 20, 1, 2, 1, 22, 0x15, 3, 1, 1, 2, 0x83, 3];
+            await File.WriteAllBytesAsync(artifact,
+                TrRmExecutionAuditTests.Artifact(body, entry: !library, effect: 1, exported: library));
+            await File.WriteAllBytesAsync(output, [0xAA, 0x55]);
+            var arguments = library
+                ? new[] { "build-trrm-library", artifact, "--export", "Main", "-o", output, "--runtime", "fail-fast", "--json" }
+                : ["build-trrm", artifact, "-o", output, "--runtime", "fail-fast", "--json"];
+            var (exit, stdout, stderr) = await RunAsync([], arguments);
+            Assert.True(exit == 1, $"{stdout}{Environment.NewLine}{stderr}");
+            Assert.Empty(stderr);
+            Assert.Contains("TRM5001", stdout);
+            Assert.Equal(new byte[] { 0xAA, 0x55 }, await File.ReadAllBytesAsync(output));
+            var (run, runOutput, runError) = await RunAsync([], "run-trrm", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.True(run == 1, $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.Contains("TRM5001", runOutput);
+        }
+        finally
+        {
+            File.Delete(artifact);
+            File.Delete(output);
+        }
+    }
+
+    [Fact]
+    public async Task TrRmMissingInputHasInputErrorStatusAsync()
+    {
+        var path = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-absent-{Guid.NewGuid():N}.trrm");
+        var (exit, stdout, stderr) = await RunAsync([], "run-trrm", path, "--runtime", "fail-fast", "--json");
+        Assert.True(exit == 2, $"{stdout}{Environment.NewLine}{stderr}");
+        Assert.Empty(stderr);
+        Assert.Contains("TRM2001", stdout);
+    }
+
+    [Fact]
+    public async Task TrRmInvalidUtf8PreservesOutputAndReportsInputFailureAsync()
+    {
+        var output = Path.Combine(Directory.GetCurrentDirectory(), $"trrm-invalid-utf8-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            await File.WriteAllBytesAsync(output, [0xAA, 0x55]);
+            var (exit, stdout, stderr) = await RunAsync([0xC3, 0x28],
+                "compile-trrm", "-", "--identity", "invalid-utf8", "-o", output,
+                "--runtime", "fail-fast", "--json");
+            Assert.True(exit == 2, $"{stdout}{Environment.NewLine}{stderr}");
+            Assert.Empty(stderr);
+            Assert.Contains("TRM2001", stdout);
+            Assert.Equal(new byte[] { 0xAA, 0x55 }, await File.ReadAllBytesAsync(output));
+        }
+        finally
+        {
+            File.Delete(output);
+        }
+    }
+}

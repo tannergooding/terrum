@@ -32,6 +32,10 @@ internal static partial class Program
         + "       terrumc validate-trrm-compact-linear <artifact> [--json]\n"
         + "       terrumc validate-trrm-compact-indexed <artifact> [--json]\n"
         + "       terrumc validate-trrm-compact <artifact> [--json]\n"
+        + "       terrumc compile-trrm <source|-> --identity <name> -o <artifact.trrm> --runtime fail-fast [--library] [--source <path>] [--json]\n"
+        + "       terrumc build-trrm <artifact.trrm> -o <output.exe> --runtime fail-fast [--json]\n"
+        + "       terrumc build-trrm-library <artifact.trrm> --export <name> [--export <name>] -o <output.dll> --runtime fail-fast [--json]\n"
+        + "       terrumc run-trrm <artifact.trrm> --runtime fail-fast [--json]\n"
         + "       terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <output.trm> [--runtime <fail-fast|checked-exceptions>] [--json]\n"
         + "       terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <output.trm> [--runtime <fail-fast|checked-exceptions>] [--json]\n"
         + "       terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
@@ -52,7 +56,9 @@ internal static partial class Program
         + "check/tokens/tree inspect syntax; analyze binds the native profile; build emits Windows x64 PE.\n"
         + "fail-fast explicitly selects process termination for runtime failures, not catchable exceptions.\n"
         + "checked-exceptions enables recovery and unwinding for four compiler-generated failure reasons.\n"
-        + "jit/run-module execute in this process and return the program's status; supervise them with a deadline.\n"
+        + "jit/run-module/run-trrm execute in this process and return the program's status; supervise them with a deadline.\n"
+        + "compile-trrm/build-trrm/build-trrm-library/run-trrm use audited fail-fast scalar metadata and compact Bodies, not the development semantic-module encoding.\n"
+        + "run-trrm returns Main's raw exit status; --json applies to diagnostics only. Checked-exception TRRM execution is unsupported.\n"
         + "scan-component/build-component/frontend-component/frontend-build-library/frontend-build/frontend-run execute native components in this process; supervise them with a deadline.\n"
         + "frontend-run returns Main's raw exit status without a success envelope; --json applies to diagnostics only.\n"
         + "validate-trrm-structure checks provisional (1, 0) framing and structural metadata only, not Body instructions or executable contracts.\n"
@@ -87,6 +93,12 @@ internal static partial class Program
             or "validate-trrm-compact")
         {
             return RunTrRmValidationCommand(args, json);
+        }
+
+        if (args.Length != 0 && args[0] is "compile-trrm" or "build-trrm"
+            or "build-trrm-library" or "run-trrm")
+        {
+            return RunTrRmExecutionCommand(args, json);
         }
 
         if (args.Length != 0 && args[0] is "compile-module" or "link-module" or "run-module")
