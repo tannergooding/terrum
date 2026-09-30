@@ -15,8 +15,11 @@ it is not a self-host compiler or an executable scanner/parser.
 The host test runner remains C#, even when it compiles and executes a candidate.
 The hosted [TRRM scalar pipeline](../docs/implementation.md#executable-trrm-scalar-interchange)
 now emits approved metadata and compact-linear/indexed Bodies and loads them for
-shared native execution without producer source, including bounded branches
-and loops. It is implemented in C#,
+shared native execution without producer source, including bounded branches,
+loops, integer shifts and initialized writable-local compounds/updates.
+Its `uint32` checked-count instructions use audited equal-width bit
+reinterpretations to preserve the source's `int32` count semantics.
+It is implemented in C#,
 supports fail-fast only, and does not make these broader Terrum compiler
 candidates self-hosting or change their provisional frontend projections.
 The host parser's current language version is syntax-36. Syntax-18's qualified

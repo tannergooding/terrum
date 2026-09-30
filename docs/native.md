@@ -21,6 +21,11 @@ The additive [approved-TRRM scalar path](implementation.md#executable-trrm-scala
 loads audited compact-linear/indexed Bodies into this same backend for JIT,
 EXE and DLL output. Indexed merges and nested loops lower to direct native
 branches; edge arguments are snapshotted before block-parameter writes.
+Integer shifts and writable-local compounds/updates use immutable old and
+replacement values through those same branches and loops. Equal-width integer
+reinterpretation preserves bits without a numeric range check; checked shifts
+still reject every count outside the operand width before the machine shift.
+This does not add unchecked source casts, mutable TRRM places or a new opcode.
 It supports fail-fast only; the approved Body subset does not
 encode checked-exception dispatch, even though the native backend supports
 that policy for the existing source and development-module paths. Loading

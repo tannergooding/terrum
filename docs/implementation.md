@@ -1534,26 +1534,48 @@ edge arguments are copied simultaneously, including cyclic loop-carried
 copies. Native lowering emits direct branches, not a block-ID interpreter.
 Inactive arms do not execute their operations or checked failures.
 
+The four integer primitives also support retained `<<`, `>>`, `>>>`,
+all eleven primitive compound-assignment statements, and prefix/postfix
+`++`/`--` on initialized writable named locals. These select indexed emission
+even without source branches. Updates capture the old immutable value before
+evaluating the RHS once; only successful computation supplies the replacement
+slot mapping. Prefix results select the replacement, postfix results the old
+value. Earlier RHS effects remain ordered, including `x += x++`, conditional
+RHS expressions and mutations in loop conditions.
+
+Source shift counts remain `int32`. The emitter uses `Convert` policy 3 to
+preserve their bits as the ISA's `uint32` counts, then `CheckedBinary` kind 6
+or 7 enforces the original width bound. Negative counts therefore fail rather
+than wrap or become masked counts. Signed logical right shift reinterprets
+the payload to the same-width unsigned type, applies kind 7, and reinterprets
+the result back. There is no kind 8 or checked numeric cast of a negative
+payload. Policy 3 accepts only equal-width integer representations, never
+`bool`, `char16`, optional or nominal values.
+
 Loading audits block extents, definition indices, value types, exact use and
 liveness inventories, dominance, region entry/exit and backedges before
 creating an immutable internal graph. The mandatory semantic verifier
 rechecks that graph's parameter/result/effect contract against its containing
-declaration. Linear Bodies retain their existing structured lowering.
+declaration. Independently supplied linear Bodies with shifts or policy-3
+conversions use the same internal graph; other linear Bodies retain their
+existing structured lowering. The internal representation-conversion node
+does not change checked source casts or add a development-module wire tag.
 The loader accepts `ConstBits`,
 `ConstSigned`, `Copy`, Boolean NOT, integer bitwise NOT/unary plus,
 scalar equality/inequality, integer ordering/bitwise operations, checked
-integer arithmetic/negation, checked numeric conversion, `Branch`,
+integer arithmetic/negation/count shifts, checked numeric conversion,
+equal-width integer bit reinterpretation, `Branch`,
 `BranchIf` and `Return`.
 Integer division/remainder retain their distinct signed-minimum behavior.
 `char16` has conversion/equality semantics, not integer arithmetic or ordering.
-Retained shifts, wrapping/saturating conversion, optional values, eager
+Wrapping/saturating conversion, optional values, eager
 `Select`, combined division/remainder and `Fail` are outside this bounded
 executable implementation even where the approved ISA assigns them.
 
 Body and instruction widths are emitted minimally; loading performs a strict
 minimal-width audit. Source binding may fold an expression to a constant
-before this boundary, including shifts; that does not enable its retained
-operation in TRRM. Required constant evaluation and body static proofs are
+before this boundary; only the supported retained operations are executable.
+Required constant evaluation and body static proofs are
 discharged by the binder. Compilation-local `[ConstEval]` eligibility is not a published
 TRRM contract. A retained `NoThrow` promise is encoded as an Effects clause
 and audited against every operation: the TRRM subset supplies no proof rule
@@ -1564,7 +1586,7 @@ generic/nominal declarations and qualified types.
 Calls, including local `NoThrow` calls, remain **inspection-only** assigned
 shapes in the approved ISA; this execution path rejects them. Branch- or
 loop-local declarations, vacant locals, post-tested/iterator loops, transfers
-beyond the nearest loop, retained update/compound-assignment expressions,
+beyond the nearest loop, field/nominal mutations,
 places, roots, ownership, cleanup, exceptional transfer and imported
 declarations are not implemented here. Indexed loop emission requires a
 reachable backedge and a designated exit; it does not synthesize a backedge
