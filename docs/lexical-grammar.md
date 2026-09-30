@@ -194,9 +194,16 @@ checked contracts. Exact recovery for these text forms remains open.
 ## Trivia and diagnostics
 
 Horizontal whitespace, line breaks, `//` comments up to but not including
-the break, and non-nesting `/* ... */` comments are leading trivia. The final
-zero-width EOF token owns trailing trivia. Unterminated block comments receive
-a diagnostic. Malformed surrogate units inside either comment form are
+the break, and non-nesting `/* ... */` comments are leading trivia.
+Documentation adds one slash: `///` introduces a documentation line, and
+`//* ... *//` is a non-nesting documentation block. Recognize `//*` before
+ordinary `//`; within that block, only `*//` closes it, not `*/`.
+Documentation trivia retains its source extent while participating in
+declaration attachment and separate documentation extraction.
+Generalized matching-length star fences and their exact closing-run rules
+remain unspecified.
+The final zero-width EOF token owns trailing trivia. Unterminated block
+comments receive a diagnostic. Malformed surrogate units inside any comment form are
 diagnosed without changing the trivia text. Lexical diagnostic codes are
 `TRM0001` for bad characters or malformed surrogates, `TRM0002` for an
 unterminated string, `TRM0003` for an unterminated block comment, `TRM0004`

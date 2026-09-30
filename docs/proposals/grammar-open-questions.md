@@ -77,9 +77,9 @@ The proposed allow list is:
 |---|---|
 | One defined operator/punctuator spelling | Exactly a spelling assigned by the grammar, such as `++`, `+=`, `<<`, `??`, `?.`, `=>` or `..`; not concatenated operators. |
 | Grouping and list delimiters | `(`, `)`, `[`, `]`, `{`, `}`, `,` and `;` bound separate tokens, as in `x*(-y)` or `f(a[i])`. |
-| Comment boundaries | Recognize `//` and `/*` before operator-run validation outside literals/comments, as in `x+/* explanation */y`. |
+| Comment boundaries | Recognize ordinary `//`/`/*` and selected documentation `///`/`//*` openers before operator-run validation outside literals/comments; documentation-block recognition precedes ordinary line comments. |
 | Type-context punctuation | Optional `?` followed by generic closers and consecutive generic closers, as in `List<T?>` and `List<List<T>>`; only when required by the type/argument grammar. |
-| Range/from-end boundary | `..` followed by upper-bound `^` in index/slice syntax, as in `items[start..^1]`; two contextual tokens, not a new general operator. |
+| Range/from-end punctuator | Candidate named composite `..^` introduces an end-relative upper slice bound, as in `items[start..^1]`; not a freely concatenated `..` and `^` or a general arithmetic operator. |
 
 Literal contents and escaped identifier tokens follow their own lexical
 rules, not operator-run validation. No other operator-token concatenation is
@@ -105,23 +105,22 @@ grouping unless a distinct spelling is deliberately defined.
 from the opening star count, analogously to the selected delimiter length of
 raw text? Candidate `/*** **/ ***/` would contain `**/` as payload and end at
 the three-star fence. This is not C# block-comment syntax and is not an
-adopted Terrum rule. The accepted documentation form `/** ... */` currently
-closes with one star, so counting its two opening stars as a fence would
-change that form. A candidate extra-slash distinction avoids assigning the
-same opener to ordinary fenced comments and documentation:
+adopted Terrum rule. **Accepted documentation marker:** Documentation adds
+one slash to the ordinary line/block form: `///` and `//* ... *//`.
+Documentation blocks are recognized before ordinary line comments.
+The longer star-count fences below remain candidates, independent of that
+accepted marker distinction:
 
-| Ordinary comment candidate | Documentation candidate |
+| Ordinary form | Documentation form |
 |---|---|
 | `// text` | `/// text` |
 | `/* text */` | `//* text *//` |
 | `/** text **/` | `//** text **//` |
 | `/**** text ****/` | `//**** text ****//` |
 
-These block documentation forms must be recognized before ordinary `//`
-line comments. They replace rather than silently preserve the accepted
-`/** ... */` documentation spelling, so require an explicit source-version
-decision. Select recognition and fence syntax together, including
-empty/nonoverlapping fences, shorter terminators as payload and whether
+The selected marker is in the canonical source/lexical grammar; a plain
+`/** ... */` is not a documentation form. Select generalized fence syntax,
+including empty/nonoverlapping fences, shorter terminators as payload and whether
 longer terminator-looking runs are payload or errors. **Recommendation:** If
 fences are adopted, use a maximal opening-star count and whole-run closing
 star matches, not a matching suffix inside a longer star run. Specify the
@@ -560,14 +559,26 @@ dereference the member obtained after one dereference. These are distinct
 operations, subject to ordinary type/authority checks, not interchangeable
 spellings. **Recommendation:** Require the explicit grouped forms when
 dereference and member access combine, rather than allowing the visually
-ambiguous `*p.M` if prefix dereference is selected. Also compare an indexer
+ambiguous `*p.M` if prefix dereference is selected. This does not settle
+whether standalone `*p` is allowed. An alternative candidate is a fenced
+dereference `(*expression)` with `(*` as a dedicated opener and `)` as its
+close; the entire interior expression supplies the pointer. Under that
+candidate `(*p + offset)` dereferences the address expression `p + offset`,
+not an already-dereferenced value plus an offset. Nested forms are
+`(*(*p))`; no bare `**p` or `****p` spelling is added. Selecting a contiguous
+`(*` token versus a grammar construct allowing trivia between `(` and `*`
+also needs a decision. Keep ordinary prefix dereference and this fenced
+alternative distinct rather than adopting one from a grouping example.
+Also compare an indexer
 spelling: candidate pointer `p[0]` corresponds to one dereference and
 `p[0][0].M` makes two indirections followed by member access explicit.
 Whether to offer indexing alone or alongside prefix dereference remains
 open; indexing must retain the same unsafe/provenance/lifetime/access
 obligations, not imply an unavailable length or bounds guarantee.
-Multiple prefix indirections use `*(*p)`; do not add a `**`
-punctuation exception. Pointer types remain `ptr<ptr<T>>`, not C-style `T**`.
+Under the general punctuation-separation proposal, multiple prefix
+indirections can use `*(*p)` or `* *p`; mandatory grouping would be an
+additional pointer-expression rule. Do not add a `**` punctuation exception.
+Pointer types remain `ptr<ptr<T>>`, not C-style `T**`.
 This grouping restriction is proposed, not part of the accepted postfix
 grammar. It does not supply provenance, bounds, pinning or writable authority.
 

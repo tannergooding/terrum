@@ -44,7 +44,7 @@ This is a bounded source-language specification. A reserved spelling does not by
 production; recovery syntax is not a conforming source form.
 
 **Documentation-comment direction (accepted source form, detailed grammar
-open):** attach `///` documentation to declarations, with `/** ... */` as an
+open):** attach `///` documentation to declarations, with `//* ... *//` as an
 equivalent block form. Use GFM-compatible prose, implicit leading summary and
 structured top-level headings such as `# param name` and `# safety`; ordinary
 lower-level headings remain prose. Declaration-scoped mentions such as
@@ -57,6 +57,12 @@ ownership, lifetime, output and failure guarantees come from checked
 declaration metadata. Exact Markdown tokenization/escaping, complex generic
 and overload reference grammar, XML schema, member IDs, inheritance and
 packaging remain work. Normal extraction does not execute embedded code or fetch remote includes.
+The documentation marker adds one slash to the ordinary comment form:
+ordinary line comments use `//`, documentation lines use `///`, ordinary
+block comments use `/* ... */`, and documentation blocks use `//* ... *//`.
+Recognize the documentation-block opener before ordinary line comments.
+Documentation blocks do not nest. Generalized matching-length star fences,
+including empty-fence and longer-closing-run rules, remain unspecified.
 
 ## 2. Lexical notation
 
@@ -2114,7 +2120,7 @@ The accepted attachment, markup and contract boundary is in
 
 | Surface | What remains to specify |
 |---|---|
-| Attachment | Exact `///` and `/** ... */` attachment across blank lines, attributes, multiple declarations and generated/partial declarations |
+| Attachment | Exact `///` and `//* ... *//` attachment across blank lines, attributes, multiple declarations and generated/partial declarations |
 | Markdown | Supported GFM normalization and XML/HTML-style tags; metadata-heading recognition, heading-name case and unknown-heading behavior without treating headings inside code, lists or quotes as metadata |
 | Mentions | Escaping and boundaries for `@value`, `@T`, `@Type.Member`, generic and overloaded targets; ordinary Markdown navigation versus explicit custom/qualified `xref:` links |
 | XML artifact | Schema/version, stable member IDs, parameter names, location, overload/generic identity and compatibility across evolution |

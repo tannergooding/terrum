@@ -894,9 +894,13 @@ and [native](native.md).
 
 ### Documentation comments
 
-Declaration-attached `///` before attributes/modifiers and `/** ... */`
+Declaration-attached `///` before attributes/modifiers and `//* ... *//`
 comments use GFM-compatible prose. Leading prose before the first recognized
 metadata heading is the implicit summary, with optional `# summary`.
+Documentation adds one slash to the ordinary line/block comment marker.
+Recognize `//*` as a documentation-block opener before recognizing ordinary
+`//` line comments; documentation blocks close with `*//` and do not nest.
+Generalized matching-length star fences remain separate lexical design work.
 Top-level `# remarks`, `# param name`, `# typeparam name`, `# returns`,
 `# value`, `# throws Type`, `# safety` and `# example` headings introduce
 structured sections; lower-level headings remain prose. Blank lines remain
