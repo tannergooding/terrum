@@ -558,7 +558,8 @@ puts contracts on the individual accessors, not an ambiguous property-wide
 call phase. Bodyless interface requirements end in their ordinary `;` after
 the clauses. Automatic property accessors still perform their declared
 checks around their generated operation; contracts do not create implicit
-indexer storage. Anonymous callable contract syntax remains separate work.
+indexer storage. Lambdas use the same grouping after their parameters and
+before their body arrow, subject to the target contract rules in §3.4.
 Body-level `require expression;` is an authored check, not a public
 precondition inferred from the body. Published clauses obey ordinary
 effective-visibility, access, ownership, lifetime and effect restrictions.
@@ -974,7 +975,8 @@ ObjectInitializer = "{", { Identifier, "=", Expression, ";" }, "}" ;
 TupleExpression = "(", TupleElement, ",", TupleElement,
                   { ",", TupleElement }, ")" ;
 TupleElement    = [ Identifier, ":" ], Expression ;
-LambdaExpression = LambdaPrefix, LambdaParameters, "=>", ( Expression | Block ) ;
+LambdaExpression = LambdaPrefix, LambdaParameters, ContractClauses,
+                   "=>", ( Expression | Block ) ;
 LambdaPrefix    = { "static" | "async" } ;
 LambdaParameters = Identifier | "_"
                  | "(", [ LambdaParameter, { ",", LambdaParameter } ], ")" ;
@@ -1084,6 +1086,18 @@ ordinary result, effect, capture, ownership and lifetime checks.
 `static` forbids capturing enclosing locals, parameters or `this`, but does
 not itself select a representation, allocation strategy or inlining.
 Contextually generic lambdas retain their definition-site constraint contract.
+Lambdas may place grouped `require` then `ensure` clauses after their
+parameters and before `=>`, using the same predicate/body-arrow boundary
+as named callables. Clauses are checked against the explicit/contextual
+callable target's published contract; they cannot silently strengthen its
+caller obligations, weaken its guarantees, or bypass its effect/access/
+lifetime bounds. Stronger requirements need an eligible advertised target
+contract or explicit declared adaptation, not a hidden target narrowing.
+Their presence does not infer a canonical callable representation.
+A lambda's own `ensure` binds contextual `return` to that lambda's result;
+an ordinary nested lambda inside another postcondition does not acquire a
+new result binding merely by existing there. Body-level checks remain
+ordinary authored checks, not inferred public contracts.
 
 `async` marks a function implementation or lambda, including expression-bodied
 forms; it is not part of the callable's result type. Declaration modifiers
@@ -1612,8 +1626,8 @@ body side effects are not rolled back. This does not add a separate output
 publication transaction.
 
 §3.1 gives grouped declaration `require`/`ensure` placement across named
-callable forms and the contextual result reference. Anonymous callable
-contracts, producer phase mapping and source-to-metadata mapping for
+callable forms and the contextual result reference. Lambda clauses follow the target-checked form in §3.4.
+Producer phase mapping and source-to-metadata mapping for
 correlated initialization facts remain open. There is no
 special conditional postcondition block grammar. See the canonical
 [conditional output contract](../language-contracts.md#2-outcome-initialization-and-nullability-are-separate).
@@ -1998,7 +2012,7 @@ they are not ordinary overloads merely because they use operator punctuation.
 Still **OPEN** for a full source grammar: nominal safe union cases and complete
 patterns, associated equality and family/adapter declarations,
 conditional/default conformance and text-target fragment contracts,
-general `const` declarations/expressions, anonymous callable contract clauses,
+general `const` declarations/expressions and proof-qualified contract forms,
 general ownership/reference results, constructor inference, async completion
 and scheduling protocols, producers, capture/exception transport, and registered collection-fragment
 construction. Source type packs and tuple arity extensions remain deferred.
@@ -2077,7 +2091,7 @@ appears in §2.
 | Expressions | §3.4 gives conditional/coalescing/optional access, half-open slicing, end-relative bounds, tuples, target-directed static/async lambdas, await and collection spreads. | Slice/first-class index/range protocols, callable capture/representation, awaiter registration and collection-fragment contracts; comprehensions/repetition deferred for library/tensor design. |
 | Patterns | §3.3 gives shared switch arms, guarded matching, compatible `or` bindings and explicit constant/wildcard transfers. | Full nominal-case, relational and destructuring patterns. |
 | Policies | §§3.3–3.4 and 5.12 describe lexical preferences, strict selection and constant-formal forwarding. | Variant-declaration syntax and compile-time queries. |
-| Contracts | §§3.1, 3.3 and 5.8 give grouped named-callable `require`/`ensure`, contextual result `return` and distinct body-level checks. | Anonymous callable clauses, producer phases and correlated-output metadata. |
+| Contracts | §§3.1, 3.3–3.4 and 5.8 give grouped named/lambda `require`/`ensure`, contextual result `return` and distinct body-level checks. | Proof-qualified forms, producer phases and correlated-output metadata. |
 | Static proof | §5.9 describes the portable static-proof floor. | Constant-evaluation and symbolic source forms. |
 | Exceptions | §§3.3–3.4 give typed/bare catches, filters, throw expressions, rethrow and explicit captured-failure propagation. | Catch eligibility, capture APIs, transport, unwind phase and chaining metadata. |
 | Cleanup | §§3.3 and 5.12 distinguish lexical `defer` from `[Cleanup]`. | Defer action validation and attribute placement. |
