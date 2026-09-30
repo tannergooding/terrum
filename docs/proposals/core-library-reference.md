@@ -142,7 +142,7 @@ table. The proposed `Option<T>` alias is separately described in
 | Allocation and native owners | `AllocationLease`, `AllocatorContext`, `Buffer`, `Vector` | [Native storage](#explicit-native-storage-representative-foundation-inventory) |
 | Borrowed arena and rentals | `ByteArena`, `MemoryPool`, `MemoryOwner` | [Arena/pool](#proposed-borrowed-arena-and-typed-rental-storage) |
 | Memory operations | `MemoryOrder`, `CompareExchangeObservation`, `MemoryPrimitives` | [Memory primitives](#memoryprimitives) |
-| Managed lists | `List`, `ListBuilder`, `ListWriteAccess`, `LinkedListNode`, `LinkedList`, `LinkedListBuilder`, `LinkedListCursor` | [Collections](#5-collections-iteration-and-eager-algorithms) |
+| Managed lists | `List`, `ListCursor`, `ListBuilder`, `ListWriteAccess`, `LinkedListNode`, `LinkedList`, `LinkedListBuilder`, `LinkedListCursor` | [Collections](#5-collections-iteration-and-eager-algorithms) |
 | Eager callbacks and algorithms | `IMapper`, `IPredicate`, `IZipper`, `IVisitor`, `SpanAlgorithms` | [Eager signatures](#5-collections-iteration-and-eager-algorithms) |
 | Copied-value iteration | `ICursor`, `ISequence<T, TCursor>`, `Int32RangeCursor`, `Int32RangeSequence`, `IAsyncCursor`, `IAsyncSequence`, `Int32AsyncCursor`, `Int32AsyncSequence` | [Sequence/cursor candidates](#proposed-sequence-and-cursor-protocol-candidates) |
 | Unapproved associated/lending/consuming alternatives | `ISequence<T>`, `ILendingCursor`, `IAsyncLendingCursor`, `IConsumingCursor`, `IAsyncConsumingCursor` | [Iteration alternatives](#proposed-sequence-and-cursor-protocol-candidates) |
@@ -835,15 +835,28 @@ type arguments.
 public mut class List<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
+    public List();
+    public List(nuint capacity);
     public nuint Count { get; }
+    public nuint Capacity { get; }
     public bool TryGet(nuint index, init ref<T> value);
     public mut void Add(T value);
+    public mut void Insert(nuint index, T value);
+    public mut void Reserve(nuint capacity);
     public T this[nuint index] { get; mut set; }
     public mut void Clear();
     public mut void RemoveAt(nuint index);
     [ViewOf(Access.Write)] public mut ListWriteAccess<T> GetWriteAccess();
     [ViewOf(Access.Write, "access")]
     public mut bool TryGetWriteAccess(init ref<ListWriteAccess<T>> access);
+    public ListCursor<T> GetEnumerator();
+}
+public mut unique struct ListCursor<T>
+    where T : [ManagedStorable], [Copy], [Sized]
+{
+    public mut bool MoveNext();
+    public T Current { get; }
+    public mut void Close();
 }
 public mut unique struct ListBuilder<T>
     where T : [ManagedStorable], [Copy], [Sized]
@@ -856,10 +869,12 @@ public mut unique struct ListWriteAccess<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
     [ViewOf(Access.Write)] public write Span<T> Span { get; }
+    public mut void Close();
 }
 public mut class LinkedListNode<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
+    public LinkedListNode(T value);
     public T Value { get; mut set; }
     [MatchedAccess] public LinkedListNode<T>? Previous { get; }
     [MatchedAccess] public LinkedListNode<T>? Next { get; }
@@ -868,11 +883,17 @@ public mut class LinkedListNode<T>
 public mut class LinkedList<T>
     where T : [ManagedStorable], [Copy], [Sized]
 {
+    public LinkedList();
     public nuint Count { get; }
     [MatchedAccess] public LinkedListNode<T>? First { get; }
     [MatchedAccess] public LinkedListNode<T>? Last { get; }
+    public mut write LinkedListNode<T> AddFirst(T value);
+    public mut void AddFirst(write LinkedListNode<T> node);
     public mut write LinkedListNode<T> AddLast(T value);
     public mut void AddLast(write LinkedListNode<T> node);
+    public mut write LinkedListNode<T> AddBefore(write LinkedListNode<T> anchor, T value);
+    public mut void AddBefore(write LinkedListNode<T> anchor, write LinkedListNode<T> node);
+    public mut write LinkedListNode<T> AddAfter(write LinkedListNode<T> anchor, T value);
     public mut void AddAfter(write LinkedListNode<T> anchor, write LinkedListNode<T> node);
     public mut void Remove(write LinkedListNode<T> node);
     public mut void Clear();
@@ -890,10 +911,53 @@ public mut unique struct LinkedListCursor<T>
 {
     public mut bool MoveNext();
     public T Current { get; }
+    public mut void Close();
 }
 ```
 
 The by-value `List<T>` indexer is valid under its explicit `[Copy]` constraint; that does not generalize to non-Copy `Span<T>`. Private buffer/access fields are intentionally omitted; public ABI/layout is not implied. A write guard is an exclusive nonescaping loan, not a cross-thread mutex. Builders construct privately in source order and publish only on success; abandonment/failure cleans partial state. Linked nodes have stable logical identity, not stable machine addresses; one owner maximum; removal/clear detach externally held nodes. Structural mutation invalidates traversal; payload replacement need not. Listed cursor copies `T`; lending, consuming and snapshot iteration are separate protocols. Initial `[ManagedStorable], [Copy], [Sized]` restrictions are not a permanent ban on reference/affine values in every collection.
+
+The added constructors, capacity/insertion members, list cursor and explicit
+close members are **PROPOSED** complete shapes for this managed Copy profile.
+The parameterless list starts empty; requested capacity reserves storage,
+not initialized elements. `Reserve` never reduces capacity or changes count.
+`Insert` accepts `index <= Count`, whereas `RemoveAt` and indexed replacement
+require `index < Count`. Capacity/count/version arithmetic and guard checks
+precede mutation; allocation failure preserves prior elements and count.
+Neither reserve nor growth fills unused slots with `default(T)`. Constructor
+and allocation-failure transport remain **OPEN**, as for other managed
+collection proposals.
+
+`ListCursor` traverses increasing indexes; `LinkedListCursor` follows logical
+node order. Each retains its source's lifetime/root dependency, not a
+materialized snapshot or an unchecked pointer into relocatable storage.
+`Current` copies one element only after successful advancement and before
+exhaustion or close. Structural invalidation is checked before advancing or
+reading current state; a structural mutation cannot make an old position
+silently name an unrelated element. Payload replacement alone is not
+structural and provides no immutable-snapshot promise. These cursors do not
+grant element-slot write authority or automatic concurrent safety.
+`Close` releases cursor dependencies once; repeated close is harmless,
+while advancement/current access after close is a checked invalid-state
+failure.
+
+`ListWriteAccess.Close` releases the exclusive guard only after all spans
+derived from it have ended. Every alias, ordinary list accessor, cursor and
+reentrant operation checks conflicting guard authority. Storage cannot
+relocate or change count behind a live write guard. Repeated close does not
+release authority twice; its `Span` property after close cannot return
+an empty success-shaped substitute. Explicit `Close` does not register a
+loop-close or no-throw implicit-cleanup operation by name. Exact cursor/root,
+guard-loan, invalidation and cleanup metadata remain **OPEN**.
+
+`LinkedListNode(value)` constructs a detached node with no owner/links;
+`LinkedList()` constructs an empty list. Value insertion allocates a fresh
+node, while node insertion requires an already detached node. A before/after
+anchor must belong to the target list. Membership, guard and count/version
+checks precede link changes; failed allocation publishes no node or partial
+splice. Removal clears owner/links and leaves the detached node usable.
+No insertion overload steals a node from another list or weakens matched
+readonly/write traversal access.
 
 The algorithms inventory is eager and nonmaterializing; no allocation, boxing, deferral or inferred SIMD from a closed callback:
 
@@ -1015,7 +1079,7 @@ an operation says otherwise.
 | `SpanAlgorithms` transform | `Select`, `Where`, `Zip`, `ForEach`, `Fill`, `Reverse`, `CopyTo`, `MoveWithin` | Mutable callbacks take `write ref<TCallback>`; destination/overlap contracts differ by operation |
 | `OrderedSpanAlgorithms` aggregate | `Fold<T,TState,TFolder>`; prospective `Sum<T>`, `Min/Max<T,TOrder>` | Initial accumulator/witness explicit; empty min/max return presence, not fabricated `T` |
 | `OrderedSpanAlgorithms` order | `Sort<T,TOrder>(write Span<T>,ref<TOrder>)`, `TryBinarySearch<T,TOrder>(Span<T>,ref<T>,ref<TOrder>,init ref<nuint>)` | Ordering witness must define total key policy; sort comparator failures can leave permutation partial |
-| `List<T>` / managed | `Count`, index, `TryGet`, `Add`, `Insert`, `RemoveAt`, `Clear`, `GetWriteAccess`, `GetEnumerator` | `[ManagedStorable],[Copy],[Sized]` initial bounds; structural mutation checks all guards |
+| `List<T>` / managed | Constructors, `Count`, `Capacity`, index, `TryGet`, `Add`, `Insert`, `Reserve`, `RemoveAt`, `Clear`, write guard and concrete cursor | `[ManagedStorable],[Copy],[Sized]` initial bounds; initialized prefix, checked guards and explicit close |
 | `LinkedList<T>` / managed | `First`, `Last`, `AddFirst/Last`, `AddBefore/After`, `Remove`, `Clear`, cursor | Stable node identity, detached node is not attached to two lists |
 | `Queue<T>`, `Stack<T>` / managed, **new** | `Count`, `Enqueue/Push`, `TryDequeue/TryPop(init ref<T>)`, `TryPeek(init ref<T>)`, `Clear` | Initial same managed Copy bounds; false output vacant; no `default(T)` |
 | `SortedSet<T,TOrder>` / managed, **new** | `Count`, `Order`, `Contains`, `TryAdd`, `Remove`, `Clear`, ascending cursor | Explicit total-order witness; comparison-zero means duplicate |
