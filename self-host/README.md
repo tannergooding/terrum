@@ -21,6 +21,10 @@ module-local scalar calls with the existing direct-call ABI.
 Initialized six-primitive locals in lexical blocks, branches and loops preserve
 scope visibility, outer mutations and per-iteration initialization through
 existing indexed values, without adding executable lexical regions or places.
+Indexed `do`/`for` emission preserves post-test ordering, one-time header
+initialization and iterator execution on normal completion/nearest continue,
+using the existing loop-region contract. Acyclic loops without a reachable
+backedge remain outside this emitter; no synthetic edge or wire revision is added.
 Its `uint32` checked-count instructions use audited equal-width bit
 reinterpretations to preserve the source's `int32` count semantics.
 It is implemented in C#,

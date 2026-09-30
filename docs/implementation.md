@@ -1570,12 +1570,25 @@ and returns lower to immutable value IDs. Reassignment changes the
 current source-slot mapping, not a serialized place; prior reads retain their
 snapshots. Every operation is materialized once, in source order, even when
 its result is discarded or reused. Lazy conditional expressions and Boolean
-short-circuit operators, `if`/`else`, pre-tested `while` loops, nested loops,
+short-circuit operators, `if`/`else`, `while`, `do` and scoped `for` loops,
 nearest `break`/`continue` and early returns use indexed basic blocks.
 Assignments carry their current values through typed block parameters;
 edge arguments are copied simultaneously, including cyclic loop-carried
 copies. Native lowering emits direct branches, not a block-ID interpreter.
 Inactive arms do not execute their operations or checked failures.
+
+Post-tested loops enter a body header before testing their condition.
+For initializers run once in the header's lexical scope; the condition runs
+before each body, and the iterator runs after normal body completion or nearest
+`continue`, but not after `break` or return. A distinct condition/iterator
+continuation carries target-visible snapshots from every incoming body edge.
+For forms already lowered with an appended iterator remain supported.
+These are ordinary indexed loop regions: no new region kind, instruction,
+flag or wire version distinguishes the source loop syntax.
+Transfers still consume the binder's existing one-based target depth, not
+label identities. A named source target already resolved to depth one is
+indistinguishable from a bare nearest transfer at this boundary; deeper
+targets remain unsupported. No named-transfer protocol is introduced.
 
 Initialized locals of all six scalar types are supported in lexical blocks,
 branch arms and loop bodies. Monotonic source variable identities remain
@@ -1655,12 +1668,16 @@ Calls to imported or packed cross-module targets, nominal/instance and
 generic/witness calls, and non-value/owning parameters remain unsupported.
 A `NoThrow` caller requires a declared and audited `NoThrow` callee; the
 runtime policy does not manufacture that guarantee.
-Vacant locals, post-tested/iterator loops, transfers
+Vacant locals, transfers
 beyond the nearest loop, field/nominal mutations,
 places, roots, ownership, cleanup, exceptional transfer and imported
 declarations are not implemented here. Indexed loop emission requires a
 reachable backedge and a designated exit; it does not synthesize a backedge
-for a source loop whose body always transfers out. Source scope support is
+for a source loop whose body always transfers out. A `do` body that always
+returns or breaks, for example, rejects rather than retaining an unreachable
+condition block; acyclic source loops are not erased into plain regions by
+this emitter. All retained inactive operations and every function Body still
+undergo mandatory validation. Source scope support is
 an implementation boundary, not an unresolved language contract.
 Loaded indexed graphs execute but cannot be re-emitted through the structured
 source emitter or serialized as development semantic-module IR.

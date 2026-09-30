@@ -37,6 +37,12 @@ captured return/call values; edge snapshots include only target-visible source
 identities, never uninitialized inner locals. Loop initializers execute per
 iteration. Copy-local scope adoption does not enable lexical region kind `02`,
 mutable places, cleanup or a new ABI.
+Indexed `do` loops enter at the body before testing. Scoped `for` initializers
+run once, and normal completion or nearest `continue` reaches the iterator
+before the next condition; break/return bypass it. Existing direct branches
+and staged edge copies preserve local/call snapshots through these targets.
+Emission still requires a reachable loop backedge; always-transferring bodies
+reject rather than acquiring synthetic edges or unaudited inactive blocks.
 It supports fail-fast only; the approved Body subset does not
 encode checked-exception dispatch, even though the native backend supports
 that policy for the existing source and development-module paths. Loading

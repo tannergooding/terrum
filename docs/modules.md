@@ -29,6 +29,10 @@ Initialized six-primitive locals in lexical blocks, branches and loops use
 existing indexed values and target-visible edge arguments. Scope retirement
 does not discard outer writes or recycle identities; loop initializers execute
 per iteration. This adds neither executable lexical regions nor a wire revision.
+Indexed `do` and scoped `for` loops retain body/condition/iterator ordering,
+nearest transfers and header-local scope through the existing region contract.
+They use the same source-free loading and native consumers; emission rejects
+acyclic loop shapes without a reachable backedge rather than inventing one.
 It does not replace the `.trm`
 producer/consumer commands or add TRRM import linking. This page describes
 the existing development semantic/native module paths.
@@ -46,8 +50,8 @@ remain unchanged; this projection revision is not a persisted module revision.
 Projection v51 adds bounded native-frontend `do`/`for` clauses and header scopes
 using existing verified block/loop nodes, including post-tested and iterator
 forms. Existing semantic/native feature selection handles those nodes without a
-new format or ABI revision. This does not expand the separate approved-TRRM
-source loop envelope.
+new format or ABI revision. The separately implemented approved-TRRM loop
+envelope is described above; the frontend projection is not its wire format.
 The highest implemented semantic revision is 45, selected
 by the artifact's required features; not every artifact uses revision 45.
 Revision-specific reader behavior and feature-dependent writer selection
