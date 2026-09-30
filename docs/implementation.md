@@ -1552,6 +1552,18 @@ edge arguments are copied simultaneously, including cyclic loop-carried
 copies. Native lowering emits direct branches, not a block-ID interpreter.
 Inactive arms do not execute their operations or checked failures.
 
+Initialized locals of all six scalar types are supported in lexical blocks,
+branch arms and loop bodies. Monotonic source variable identities remain
+separate from current SSA values and lexical membership: leaving a block
+retires its local mappings but retains outer mutations. Merge, header,
+backedge and exit arguments carry only the identities visible at the target;
+there are no invented values for declarations not yet initialized. Loop-local
+initializers execute on each entered iteration. Return values and previously
+evaluated call arguments retain their immutable snapshots after scope exit.
+Closed scopes may reuse spelling under the hosted binder's existing rules.
+These Copy-only scopes erase into existing plain/loop flow: reserved lexical
+region kind `02` is not executable, and no place or cleanup protocol is added.
+
 The four integer primitives also support retained `<<`, `>>`, `>>>`,
 all eleven primitive compound-assignment statements, and prefix/postfix
 `++`/`--` on initialized writable named locals. These select indexed emission
@@ -1617,8 +1629,8 @@ generic/nominal declarations and qualified types.
 Calls to imported or packed cross-module targets, nominal/instance and
 generic/witness calls, and non-value/owning parameters remain unsupported.
 A `NoThrow` caller requires a declared and audited `NoThrow` callee; the
-runtime policy does not manufacture that guarantee. Branch- or
-loop-local declarations, vacant locals, post-tested/iterator loops, transfers
+runtime policy does not manufacture that guarantee.
+Vacant locals, post-tested/iterator loops, transfers
 beyond the nearest loop, field/nominal mutations,
 places, roots, ownership, cleanup, exceptional transfer and imported
 declarations are not implemented here. Indexed loop emission requires a

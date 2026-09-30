@@ -31,6 +31,12 @@ register/stack ABI, including forward and recursive targets. Previously
 evaluated arguments remain snapshots across later mutations or lazy branches.
 Void calls execute without a synthetic value slot; call scratch/outgoing
 argument space is included in the same frame analysis as value-returning calls.
+Initialized scalar locals in lexical blocks, branches and loops use the same
+immutable values and native lowering. Scope exits retain outer writes and
+captured return/call values; edge snapshots include only target-visible source
+identities, never uninitialized inner locals. Loop initializers execute per
+iteration. Copy-local scope adoption does not enable lexical region kind `02`,
+mutable places, cleanup or a new ABI.
 It supports fail-fast only; the approved Body subset does not
 encode checked-exception dispatch, even though the native backend supports
 that policy for the existing source and development-module paths. Loading

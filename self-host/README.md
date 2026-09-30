@@ -18,6 +18,9 @@ now emits approved metadata and compact-linear/indexed Bodies and loads them for
 shared native execution without producer source, including bounded branches,
 loops, integer shifts, initialized writable-local compounds/updates and
 module-local scalar calls with the existing direct-call ABI.
+Initialized six-primitive locals in lexical blocks, branches and loops preserve
+scope visibility, outer mutations and per-iteration initialization through
+existing indexed values, without adding executable lexical regions or places.
 Its `uint32` checked-count instructions use audited equal-width bit
 reinterpretations to preserve the source's `int32` count semantics.
 It is implemented in C#,

@@ -25,6 +25,10 @@ policy-3 integer reinterpretations preserve the source shift contract without
 changing checked numeric conversions. Loaded scalar graphs, including linear
 Bodies that need these representation operations or calls, are not serializable as
 development structured IR.
+Initialized six-primitive locals in lexical blocks, branches and loops use
+existing indexed values and target-visible edge arguments. Scope retirement
+does not discard outer writes or recycle identities; loop initializers execute
+per iteration. This adds neither executable lexical regions nor a wire revision.
 It does not replace the `.trm`
 producer/consumer commands or add TRRM import linking. This page describes
 the existing development semantic/native module paths.
