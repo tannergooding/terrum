@@ -207,7 +207,7 @@ context.
 | Patterns | `when`, `is`, `some`, `and`, `or`, `not` | Match values and guard arms; full pattern grammar remains open. |
 | Loops and iteration | `while`, `do`, `for`, `in`, `break`, `continue` | Iterate and transfer to the nearest loop. |
 | Results | `return` | Complete a call. |
-| Producers | `yield` | Produce a suspended value; producer syntax remains open. |
+| Producers | `yield` | Emit an element from a producer; ordinary `return;` finishes it. |
 | Asynchrony | `async`, `await` | Mark an async callable implementation and await a checked completion. |
 | Contracts | `require`, `ensure` | Check preconditions or postconditions; declaration grammar remains open. |
 | Exception flow | `try`, `catch`, `finally`, `throw` | Handle or propagate failures under their checked transport contracts. |
@@ -540,7 +540,7 @@ Block           = "{", { Statement }, "}" ;
 Statement       = Block | IfStatement | LoopStatement | SwitchStatement
                 | RequireStatement | TryStatement | UnsafeStatement
                 | DeferStatement | PolicyStatement
-                | ReturnStatement | ThrowStatement | LoopTransfer
+                | ReturnStatement | YieldStatement | ThrowStatement | LoopTransfer
                 | SwitchTransfer | LocalDecl | DeconstructionDecl
                 | DiscardStatement | AssignmentStatement
                 | ExpressionStatement | ";" ;
@@ -566,6 +566,7 @@ UnsafeStatement = "unsafe", Block ;
 DeferStatement  = "defer", ( ExpressionStatement | Block ) ;
 PolicyStatement = [ "require" ], "policy", PolicyCases, Block ;
 ReturnStatement = "return", [ Expression ], ";" ;
+YieldStatement  = "yield", Expression, ";" ;
 ThrowStatement  = "throw", [ Expression ], ";" ;
 LoopTransfer    = ( "break" | "continue" ), [ Identifier ], ";" ;
 SwitchTransfer  = "continue",
@@ -1517,11 +1518,22 @@ duplicates, conflicting visibility and illegal modifier/declaration pairs
 reject. Context-specific callable clauses, once specified, follow the
 parameter list; result types remain in prefix position.
 
-**Proposed vocabulary:** `do` introduces a post-tested loop; `yield` a producer
-suspension point; `extern` an externally implemented declaration; and
+**Proposed vocabulary:** `do` introduces a post-tested loop;
+`extern` an externally implemented declaration; and
 `extension` a scoped extension declaration. Their productions, restrictions,
 effects and lowering remain open. Accessors and `when` guards have bounded
-productions above without implying complete effect/representation contracts. `unsafe` has block and
+productions above without implying complete effect/representation contracts.
+Producer statements use `yield expression;` to emit an element and suspend
+the producer, and `return;` to finish it; there is no `yield return`,
+`yield break`, or producer `return expression;` form. The yield operand
+evaluates once under the selected element contract. Emission does not imply
+an ownership transfer or extend a borrowed element's lifetime beyond its
+checked dependencies. A nested callable does not inherit producer eligibility
+from its enclosing body. This `yield` is not the scheduling operation
+`Yield()` and does not promise a thread switch. Producer declaration
+marking, start/resumption timing, element-loan contracts, abandonment cleanup
+and representation remain separate design work.
+`unsafe` has block and
 parenthesized-expression forms; default arithmetic remains checked.
 `defer` registers an
 explicit lexical-block-exit action (not automatic `[Cleanup]`, function-exit
@@ -1734,7 +1746,7 @@ appears in §2.
 | Reference access | §§3.2 and 5.12 sketch loans and reference qualifications. | Complete legality of `pin`, `write` and other qualifier combinations. |
 | Parameters | §§3.2, 5.1–5.2 give modes, final `params`, eligible Copy defaults and direct/named attribute targets. | Complete qualifier legality and output/loan metadata. |
 | Arguments | §§3.2 and 5.1 give labels, source-order evaluation and position-preserving named/positional mixtures. | Complete passing-mode/place and overload contracts. |
-| Statements | §3.3 sketches blocks, transfers and standalone discard; §3.4 permits await expressions in async bodies. | Statement-place checks and producer statements. |
+| Statements | §3.3 gives blocks, transfers, standalone discard and `yield expression;` / producer `return;`; §3.4 permits await expressions in async bodies. | Statement-place checks and producer declaration/lifetime contracts. |
 | Iteration | §3.3 sketches by-value and `ref`/`mut ref` `for (... in ...)`; §5.12 names `do`. | Iterator loan/backing contracts and post-test loop production. |
 | Expressions | §3.4 gives conditional/coalescing/optional access, tuples, target-directed static/async lambdas, await and collection spreads. | Callable capture/representation, awaiter registration and collection-fragment contracts; comprehensions/repetition deferred for library/tensor design. |
 | Patterns | §3.3 gives shared switch arms, guarded matching, compatible `or` bindings and explicit constant/wildcard transfers. | Full nominal-case, relational and destructuring patterns. |
