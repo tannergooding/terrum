@@ -13,6 +13,8 @@ named transfers reuse identifiers, `:`, `break` and `continue`. Neither
 scanner-5 records nor the syntax-protocol schema changes.
 Syntax-30's standalone vacant declarations reuse the contextual identifier
 `init`; no keyword or scanner record is added.
+Syntax-31's conditional expressions reuse the existing `?` and `:` tokens.
+Compiled-scanner input and hosted lexing produce the same checked lowering.
 
 The shared operator catalog includes syntax-28's `=>` token for expression
 bodies; no scanner record or schema revision is needed. Syntax-16 rejects attached

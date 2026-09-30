@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-30, semantic v40 vacant locals, native-10 through native-20
+## Current boundary: syntax-31, semantic v41 conditional expressions, native-10 through native-20
 
 The approved [source grammar](grammar-spec.md) is broader than this
 implementation. Syntax-28 adds `=>` bodies to supported top-level functions
@@ -45,13 +45,27 @@ rules apply. Semantic v40 is selected only when a retained body contains such
 a declaration; older feature-selected modules and the native ABI are unchanged.
 The bounded constant evaluator does not support vacant declarations.
 
+Syntax-31 adds right-associative `condition ? whenTrue : whenFalse` expressions
+below binary-operator precedence. The Boolean condition runs once; only its
+selected arm executes. Both arms must satisfy one non-void result contract,
+from the expected type or the same known arm type; one known arm can provide
+context for an untyped arm. Numeric promotion, inferred nullable/readonly
+joins between different known types and bare-literal fallback are not
+introduced. Existing scalar, Copy, unique and
+managed result contracts apply, including conditional output publication,
+moves, cleanup and exact roots. Inactive arms remain type/effect checked.
+Required constant evaluation evaluates only the selected arm, while retaining
+its declaration checks. Semantic v41 is selected for retained conditional
+nodes; older module versions reject them. This does not add null-coalescing,
+conditional access, throw expressions or target-typed lambdas.
+
 The executable Terrum scalar frontend additionally supports bounded nested
 expression trees and expression-bodied scalar functions through provisional
 projection v20, plus initialized scalar locals and assignments in v21.
 Up to eight typed or inferred locals and twelve ordered declaration/assignment
 statements may precede its terminal return/conditional-return envelope.
 Only `mut` locals can be reassigned; names bind sequentially, and inferred
-numeric literals have no fallback type. Calls, loops and vacant locals remain
+numeric literals have no fallback type. Ordinary calls, loops and vacant locals remain
 outside this native component. It retains existing v1–20 projections for their supported
 shapes. Its own parser and scalar binder produce up to 32 postorder nodes
 with bounded recursive descent; the host validates source anchors, types,
@@ -59,6 +73,16 @@ node order, roots and precedence before lowering to the existing verified
 native backend. This is real native compiler-component execution, not a
 standalone compiler, general language adoption or a native machine-code
 encoder. See the [component boundary](../self-host/README.md).
+
+Provisional projections v22 (without locals) and v23 (with locals) add checked
+numeric `T(expression)` conversions for `int32`, `uint32`, `int64`, `uint64`
+and `char16`. Literals construct in the target type, while already typed
+operands keep their source type before conversion. The reader checks the
+source spelling, active-name shadowing, literal context and operand type
+before using existing `BoundCast` lowering. All 25 source/destination pairs
+share the hosted checked semantics; Boolean conversions, ordinary calls and
+the host's new conditional expressions remain outside this native component.
+The 392-word buffer, 32-node limit and existing v1–21 shapes are unchanged.
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -983,7 +1007,11 @@ tree layout occupies words 37–297 after the original header. Version 21 adds
 statement/local counts at 298–299, eight four-word local records at 300–331
 and twelve five-word statement records at 332–391. The host validates local
 source names, declaration order, initializer types, live slots and mutability
-before lowering ordered statements. Earlier versions zero their unused
+before lowering ordered statements. Versions 22/23 add unary tree operation
+83 for checked conversions, respectively without/with local records; its
+type is the destination and its left child supplies the source value.
+Untyped literal subtrees must use that destination as their context.
+Earlier versions reject conversion nodes and zero their unused
 extensions. Versions 1–18 retain their original 34-word payload with
 three zero header-extension words.
 Version 19 assigns words 34–36 to the third parameter's type and UTF-16

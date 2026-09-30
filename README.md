@@ -35,9 +35,9 @@ integers construct target-width bit patterns; decimal literals retain numeric
 range semantics. `_` digit separators are supported in numeric digit runs.
 Attached width suffixes diagnose as `TRM0006`; missing hexadecimal and binary
 digits diagnose as `TRM0007` and `TRM0008`, and malformed separators diagnose
-as `TRM0009`. Prefix casts are no longer parsed. Floating literal binding,
-custom literal targets and `[ConstEval]` are not implemented yet; see the
-[implementation matrix](docs/implementation.md).
+as `TRM0009`. Prefix casts are no longer parsed. Floating literal binding and
+custom literal targets are not implemented yet; bounded scalar `[ConstEval]`
+support is described in the [implementation matrix](docs/implementation.md).
 
 The bounded profile specializes compilation-local top-level `Copy`-constrained
 function templates over multiple type parameters, including eligible scalars,
@@ -46,9 +46,12 @@ substitutions preserve readonly/write and supported optional qualification;
 they do not grant member, null-test or operator capabilities absent from the
 function's constraints. See the [bounded generic contract](docs/implementation.md#bounded-generic-functions)
 for inference, results, outputs, rooting and remaining limits.
-The current parser version is syntax-30. Standalone `init T name;` and
+The current parser version is syntax-31. Standalone `init T name;` and
 `init var name;` declare readonly vacant locals, published only by checked
 initialization; semantic v40 is selected when these declarations are retained.
+Syntax-31 adds target-checked conditional expressions: evaluate the condition
+once and only the selected result arm. Retained conditionals select semantic
+v41 without changing the native ABI.
 Syntax-18 recognizes qualified generic
 type arguments such as `write Record` and `write Record?`; managed generic
 producer examples use the existing semantic v24 managed contracts; other
@@ -62,8 +65,9 @@ Syntax-29 adds post-tested loops and enclosing-loop named transfers, retaining
 checked cleanup, initialization, managed rooting and constant evaluation.
 Semantic v39 carries those new loop nodes when used; native ABI and scanner
 record/schema remain unchanged. The native scalar frontend also executes
-bounded nested expression trees, expression-bodied functions and initialized
-scalar locals with ordered mutable assignments; it is still a compiler
+bounded nested expression trees, expression-bodied functions, initialized
+scalar locals with ordered mutable assignments and checked numeric type-calls;
+it is still a compiler
 component, not a self-host compiler.
 Copy structs can explicitly implement homogeneous binary operator protocols
 for `+`, `-`, `*`, `/`, `%`, `&`, `|` and `^`. Generic bodies may use only the

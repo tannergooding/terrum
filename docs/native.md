@@ -79,7 +79,10 @@ ABI changes; imported functions cannot satisfy required constant calls.
 Syntax-26 adds scalar `const expression` requirements in nested executable
 expressions, with the same limits and deferred constant substitution; no new
 native or semantic wire representation is emitted. The current parser version
-is syntax-30. Standalone `init T name;` and `init var name;` declare vacant
+is syntax-31. Conditional expressions evaluate one Boolean condition and only
+the selected target-checked arm, with existing cleanup and rooting behavior.
+Retained conditional nodes select semantic v41, not a new native ABI.
+Standalone `init T name;` and `init var name;` declare vacant
 readonly local slots without a default value. Existing checked initialization
 controls publication, owner cleanup and managed-root activation. Semantic v40
 persists these declarations when retained; they add no native ABI operation.
