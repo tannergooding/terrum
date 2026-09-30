@@ -136,6 +136,19 @@ compound-assignment nodes select semantic v45 (compound expression tag 26,
 admitted only in statement position).
 This adds no native ABI or profile version.
 
+The executable native scalar frontend adopts these primitive operations in
+projection v49: ordinary integer shifts, all eleven compound assignments and
+prefix/postfix updates of initialized writable named locals, including grouped
+names. It retains the hosted `int32` count and checked count-range policy,
+not the separate TRRM instruction contract. Shared update/compound nodes save
+the old destination before RHS effects and commit only after successful checked
+computation. Lazy branches and structured loops/returns use the same lowering
+under both native runtime policies. Independent source validation rejects
+forged places, types, source spans and older projection headers carrying new
+operations. Actual DLL calls, JIT/EXE execution, byte parity and unchanged
+persisted consumers cover the bounded component; no ABI/profile change,
+general call syntax, field mutation or nominal operation is added.
+
 The native scalar frontend's provisional projection v48 represents scalar
 returns as structured body statements: kind 8, slot 0, a typed result root and
 the keyword-through-semicolon span. Header words 38–40 are `-1`; the source

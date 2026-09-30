@@ -21,6 +21,12 @@ Loaded indexed graphs are not serializable as development structured IR.
 It does not replace the `.trm`
 producer/consumer commands or add TRRM import linking. This page describes
 the existing development semantic/native module paths.
+The native scalar frontend's projection v49 lowers integer shifts and local
+mutations to the same verified operations before these module writers run.
+It therefore reuses feature-selected semantic v43/v45 and existing native
+profiles rather than introducing a new persisted module format. Independently
+projected producers can service unchanged semantic/native consumers; this does
+not add general call parsing to the native frontend.
 The highest implemented semantic revision is 45, selected
 by the artifact's required features; not every artifact uses revision 45.
 Revision-specific reader behavior and feature-dependent writer selection

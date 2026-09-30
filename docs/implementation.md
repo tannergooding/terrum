@@ -234,6 +234,38 @@ nodes, 12 statement records, eight locals and six structural levels; the
 existing 16-level expression-recursion limit also remains. It continues to
 lower through the shared verifier/emitter and is not a standalone compiler.
 
+Projection v49 adds the hosted primitive integer shift and mutation envelope
+to this executable native component. `<<`, `>>` and `>>>` accept an `int32`
+count in the checked range 0–31 or 0–63 for the left operand's width; counts
+are not masked, and left shifts retain their truncating bit semantics.
+All eleven compound assignments and prefix/postfix `++`/`--` operate on
+initialized writable named `int32`, `uint32`, `int64` and `uint64` locals,
+including grouped names. Shift counts cannot supply the shifted value's
+literal or inferred type. Other compound operands have the destination type.
+Update statements retain the hosted direct-update-only restriction: grouping
+the place is supported, but grouping the whole update statement is not.
+The component emits the existing `BoundUpdate` and `BoundCompoundAssignment`
+nodes: the destination's old value is captured before the RHS, evaluation is
+once and ordered, failure precedes final writeback without rolling back earlier
+effects, and prefix/postfix select the replacement/saved value respectively.
+Branches, nested loops, nearest transfers, lazy expressions and returns retain
+their existing semantics under both runtime policies.
+
+The unchanged eight-word node record uses operations 86/87 for updates
+(`Low` is 1 for prefix, 0 for postfix), 88–90 for shifts and 91–101 for
+compounds. Compound statement kind 9 carries the destination slot and root;
+update statement kind 10 carries slot 0 and its root. Version 49 is selected
+only when a new operation occurs, and supports either the existing terminal
+envelope or structured return records. Versions 1–48 reject new operations
+and retain their original payloads. The independent source-bound reader checks
+place authority, active declarations, grouping, operand context, precedence,
+spans, node ownership and statement extents before shared lowering. Buffer,
+token/node/statement/local/depth limits, scanner records, token IDs and native
+ABI/profiles are unchanged. Calls, fields/nominal mutations, floating values,
+vacant locals, parameter mutation and new unchecked semantics are not added.
+Independent projections, exact checked statuses, actual DLL exports, hosted
+image parity and persisted semantic/native consumers exercise this boundary.
+
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
 immutable and usable independently. The separate [native profiles](native.md)
@@ -475,7 +507,7 @@ not a general unsafe escape hatch. Their consistency work is ordered in the
 | Lexing | Pinned Unicode identifiers with standalone `_` reserved, ASCII decimal, `0x`/`0X` hexadecimal and `0b`/`0B` binary numeric tokens, digit separators, decimal fractional/exponent token boundaries, comments, leading trivia, strings, diagnostics including `TRM0006`–`TRM0009` for numeric suffixes, missing based digits and malformed separators, EOF; the scanner-5 integer record retains suffix metadata only for diagnostic-bearing tokens | Interpolation, raw/character/native literals, directives |
 | Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, bounded source classes including `mut class`, readonly default and writable `mut` class receivers, non-owning compact-struct `mut` methods with named mutable-local receiver writeback, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Inheritance, unique/inline classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes and generic classes/structs (struct and field attributes diagnose `TRM3001`), parameter-only `implicit ref<T>` binding and ordinary reference-lifetime contracts, public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; source-class and `ManagedNode` optional handles with `write` capability preserved through fields, parameters, results and inference; repeated `?` diagnoses | `pin ref<T>`, scalar options, general generic optional normalization after substitution, family defaults/conditional conformance, general ownership/form qualifiers and general borrowed references, transparent-wrapper ABI contracts |
-| Statements | Initialized typed/inferred locals, standalone vacant locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, post-tested `do`, nearest/named enclosing-loop `break`/`continue`, return, statement-form `require`, bounded constant-only body `static require`/outer-body `static ensure`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment, managed optional `??=` and expression statements, standalone `_ = expression;` with statement-end owning cleanup | `defer`, policy blocks/expressions and variants, `unsafe(expr)`, `for (... in ...)`, general switch/patterns and wildcard patterns, other context-specific discard destinations, declaration pre/postconditions and symbolic static proofs, typed requirement-failure selection, general exception objects/throw, async, arithmetic/bitwise compound assignment |
+| Statements | Initialized typed/inferred locals, standalone vacant locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, post-tested `do`, nearest/named enclosing-loop `break`/`continue`, return, statement-form `require`, bounded constant-only body `static require`/outer-body `static ensure`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment, primitive integer compound assignment, managed optional `??=` and expression statements, standalone `_ = expression;` with statement-end owning cleanup | `defer`, policy blocks/expressions and variants, `unsafe(expr)`, `for (... in ...)`, general switch/patterns and wildcard patterns, other context-specific discard destinations, declaration pre/postconditions and symbolic static proofs, typed requirement-failure selection, general exception objects/throw, async, nominal compound assignment |
 | Expressions | Names, raw literals, `()`, grouping, unary/binary operations, target-checked `?:` and managed-handle `??`, context-typed decimal/hexadecimal/binary integer literals without fallback (based values construct target-width bit patterns), numeric digit separators, checked numeric type-call conversions for `int32`/`uint32`/`int64`/`uint64`/`char16`, member/index access, calls, scalar required `const` subexpressions and bounded internal `[ConstEval]` calls, explicit closed static-protocol calls including nominal `++`/`--` updates on the eligible writable `Copy`-struct place envelope with exact operand/result type equality, bounded inference of multiple independent type parameters for top-level generic function templates over eligible `Copy` structs, existing scalar value types and existing qualified source-class/`ManagedNode` handles (preserving readonly/write and supported optional qualification) from typed arguments or typed existing `out` destinations (expected-result context fills unresolved parameters present in the return type), generic signature-based result-type lookup, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique and initialized owning-field loans, qualified source-class/`ManagedNode` writes and mutable-class receivers, named-place and writable nested-field loans for compact-struct `mut` receivers including fully initialized unique roots/children, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations including `Set`/`TryAppend`/`Clear` and lexical `SliceMutable` through writable owning fields, and lexical readonly buffer slices | Floating/custom literal binding and registered borrowed-text parsers, public/generic constant-evaluation contracts, `require` output-expression form and exception-type selection, implicit `ref<T>` call-site loan introduction and temporary materialization, character literals, partial owning-field moves, owning field replacement, general expression temporaries, temporary/managed-class-field mutating-struct receivers, partial-constructor mutation, rebinding `this`, public mutating-receiver ABI, general stored loans/references, evaluation outside the native profile, user-defined conversions, unique/owning generic arguments, views, generic classes/structs, user structs containing managed fields, primitive operator conformance, general argument/result inference and partial holes, constructor/method inference, ordinary overload declarations (rejected with `TRM3003`), contextual discard/lambda `_` forms, general conditional access |
 | Managed storage | Aliasable `ManagedNode` and source-class handles, optional edges and non-null pattern snapshots, readonly bare handles and explicit `write` capability, mutable-class receiver checks, qualified field/parameter/result/inference paths, handle-free compact Copy fields in classes, descriptor-based cycle tracing, complete-publication class factories, exact frame/temporary roots and explicit nonmoving collection under both policies, including exceptional root retirement and escaping-frame unlink | Managed handles inside user structs, stored interior pointers, implicit GC, native DLL/module graph managed-handle ABI |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
@@ -745,8 +777,9 @@ For-loop initialization runs once, followed by condition, body and iterator;
 the iterator does not run after a returning or breaking body. `continue` runs
 the iterator before testing the next condition. An omitted condition is true.
 Initializer locals remain in scope through the header and body, not afterward.
-The iterator cannot reference body locals. Multiple comma-separated clauses,
-increment/compound-assignment operators are not implemented.
+The iterator cannot reference body locals. Multiple comma-separated clauses
+are not implemented; supported integer updates and compound assignments can
+occupy the iterator.
 Bare `break` and `continue` target the nearest enclosing loop; syntax-29 named
 forms select the enclosing loop with that label. They run the normal
 cleanup of exited scopes, including nested `finally` and owner cleanup, and
