@@ -93,6 +93,15 @@ Trivia           = whitespace | line-comment | non-nesting-block-comment ;
 keywords and the standalone reserved `_`; it is not three grammar symbols.
 `StringCharacter` excludes an unescaped quote, backslash, or line break; `\U` must decode to a Unicode scalar. Separators may repeat between digits and after a based prefix, but not at the end of a run or beside a decimal point/exponent marker/sign. The lexical reference defines malformed-token recovery and exact diagnostics.
 
+Trivia separates tokens but does not impose a style rule on otherwise
+unambiguous token sequences: `x+y` and `x + y` have the same meaning, as do
+`Foo.Bar`, `Foo. Bar` and `Foo . Bar`. A formatter may canonicalize spacing
+without making its output the only valid source. Spacing can still change
+which tokens are formed under lexical longest-match and identifier-boundary
+rules; whitespace is not permission to split or merge token spellings after
+lexing. Comments and line breaks follow their documented trivia rules,
+not an arbitrary mandatory space-around-operator policy.
+
 `Number` is one token: unary `-` is an operator, not part of the number.
 Numeric target selection/range and the lack of a default type are semantic
 rules (see [conversions](../conversions.md)). A hex float requires a binary
@@ -101,9 +110,11 @@ token. It has digits on at least one side of the point; the exponent has
 decimal digits, and `_` follows the existing between-digits rules. A leading
 sign is separate from the token, unlike the exponent sign.
 
-The proposed `HexFloat` alternative still needs specified token boundaries
-and diagnostics (including incomplete `p` exponents, separators and
-identifier tails), target-format rounding and literal conversion rules.
+The `HexFloat` production above specifies its candidate spelling and is
+included in `Number` and `Primary` just like other numeric literals.
+Its token-boundary and diagnostic rules (including incomplete `p` exponents,
+separators and identifier tails), target-format rounding and literal
+conversion rules still need to be specified before adoption.
 The [lexical grammar](../lexical-grammar.md) specifies the adopted lexical
 profile separately; this candidate does not silently revise that contract.
 
@@ -153,7 +164,7 @@ context.
 | Namespace | `namespace` | Declare the file-scoped namespace. |
 | Visibility | `public`, `internal`, `private` | Restrict declaration access. |
 | Nominal declarations | `struct`, `class`, `interface`, `enum`, `union` | Name types; union declaration syntax remains open. |
-| Type aliases | `alias` | Name a transparent type synonym; scope and visibility remain open. |
+| Type aliases | `alias` | Name a namespace-level transparent type synonym with declaration visibility. |
 | Associated types | `type` | Declare an interface requirement or bind it in a conformance. |
 | Declaration composition | `partial` | Merge parts of one identity. |
 | Extension declarations | `extension` | Declare scoped extensions; exact syntax remains open. |
@@ -161,7 +172,7 @@ context.
 | Member kinds | `static`, `operator` | Declare static members and operators. |
 | Property accessors | `get`, `set`, `init` | Read, write or initialize properties. |
 | Property backing | `field` | Access only the enclosing property's backing place. |
-| Receiver and self binder | `this` | Refer to the member receiver; `<this T>` is a candidate interface self-formal spelling. |
+| Receiver and self binder | `this` | Refer to the member receiver and mark an interface's implementing-type formal as `<this T>`. |
 | Generic constraints | `where` | State formal parameter constraints. |
 | Compile-time values | `const` | Require static evaluation; const-value formal syntax remains open. |
 | Type forms | `void`, `var` | Name a zero-data result or infer a local type. |
@@ -191,31 +202,45 @@ separate arithmetic-toggle source form.
 The productions below are candidates, not an adopted grammar. `Identifier`
 means one lexical identifier token; dotted names are written explicitly.
 Semantic constraints are stated separately.
-The prefix names below are metasyntactic placeholders, not productions: each
-stands for only the attributes/modifiers valid in its declaration context.
-Their exact sets and combinations remain **OPEN**.
+The prefix names below are metasyntactic placeholders for only the
+attributes/modifiers valid in each declaration context. Legal prefix
+modifiers may be permuted; duplicate or conflicting modifiers reject.
 
 ### 3.1 Source-file structure and declarations
 
 ```ebnf
-CompilationUnit  = { UsingDirective }, [ FileNamespace ], { TopDeclaration }, EOF ;
+CompilationUnit  = { FileAttribute }, { UsingDirective }, [ FileNamespace ],
+                   { TopDeclaration }, EOF ;
+FileAttribute    = "[", ( "module" | "assembly" ), ":", AttributeName,
+                   [ AttributeArguments ], "]" ;
 UsingDirective  = "using", DottedIdentifier, ";" ;
 FileNamespace   = "namespace", DottedIdentifier, ";" ;
 DottedIdentifier = Identifier, { ".", Identifier } ;
 
 TopDeclaration = TopPrefix, ( StructDecl | ClassDecl | InterfaceDecl
-                              | EnumDecl | AliasDecl | FunctionDefinition ) ;
+                              | EnumDecl | FunctionDefinition )
+               | AliasPrefix, AliasDecl ;
 MemberDeclaration = MemberPrefix,
                     ( ConstructorDecl | FunctionDefinition | OperatorDefinition
                     | ConversionDefinition
-                    | FieldDecl | PropertyDefinition | AssociatedTypeBinding ) ;
+                    | FieldDecl | PropertyDefinition | AssociatedTypeBinding
+                    | AssociatedConstantBinding ) ;
 InterfaceMemberDeclaration = InterfaceMemberPrefix,
                              ( InterfaceFunction | InterfaceOperator
-                             | InterfaceProperty | AssociatedTypeRequirement ) ;
+                             | InterfaceProperty | AssociatedTypeRequirement
+                             | InterfaceConstant ) ;
 TopPrefix       = ContextualPrefix ;
 MemberPrefix    = ContextualPrefix ;
 InterfaceMemberPrefix = ContextualPrefix ;
-Attribute       = "[", Identifier, "]" ;
+AliasPrefix     = { Attribute | VisibilityModifier } ;
+Attribute       = "[", [ AttributeTarget, ":" ], AttributeName,
+                  [ AttributeArguments ], "]" ;
+AttributeTarget = "type" | "field" | "property" | "get" | "set" | "init"
+                | "method" | "return" | "param" ;
+AttributeName   = DottedIdentifier ;
+AttributeArguments = "(", [ ConstantExpression,
+                     { ",", ConstantExpression } ], ")" ;
+VisibilityModifier = "public" | "internal" | "private" ;
 DeclarationModifier = "public" | "internal" | "private" | "static"
                     | "mut" | "unique" | "unsafe" | "partial" ;
 
@@ -225,7 +250,7 @@ StructDecl      = "struct", Identifier, [ TypeParameterList ],
 ClassDecl       = "class", Identifier, [ TypeParameterList ],
                   [ ConformanceList ], { ConstraintClause },
                   "{", { MemberDeclaration }, "}" ;
-InterfaceDecl   = "interface", Identifier, [ TypeParameterList ],
+InterfaceDecl   = "interface", Identifier, [ InterfaceTypeParameters ],
                   [ InterfaceBaseList ], { ConstraintClause },
                   "{", { InterfaceMemberDeclaration }, "}" ;
 EnumDecl        = "enum", Identifier, ":", IntegralType,
@@ -234,6 +259,10 @@ EnumMember      = Identifier, [ "=", ConstantExpression ] ;
 AliasDecl       = "alias", Identifier, [ TypeParameterList ], "=", Type, ";" ;
 AssociatedTypeRequirement = "type", Identifier, ";" ;
 AssociatedTypeBinding = "type", Identifier, "=", Type, ";" ;
+InterfaceConstant = "const", Type, Identifier,
+                    [ "=", ConstantExpression ], ";" ;
+AssociatedConstantBinding = "const", Type, Identifier, "=",
+                            ConstantExpression, ";" ;
 ConformanceList = ":", Type, { ",", Type } ;
 InterfaceBaseList = ":", Type, { ",", Type } ;
 IntegralType    = DottedIdentifier ;
@@ -260,26 +289,41 @@ InterfaceSetter = { Attribute }, "set", ( ";" | Block ) ;
 InterfaceInit   = { Attribute }, "init", ( ";" | Block ) ;
 
 TypeParameterList = "<", Identifier, { ",", Identifier }, ">" ;
+InterfaceTypeParameters = "<", [ "this" ], Identifier,
+                          { ",", Identifier }, ">" ;
 ConstraintClause  = "where", Identifier, ":",
                     ( Type | "[", Identifier, "]" ),
                     { ",", ( Type | "[", Identifier, "]" ) } ;
 OperatorSymbol  = "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^"
+                | "<<" | ">>" | ">>>"
                 | "==" | "!=" | "<" | "<=" | ">" | ">=" | "!" | "~"
                 | "++" | "--" | "true" | "false" ;
 ```
 
 This candidate requires a single file-scoped namespace after using directives
 and before declarations. Fields and constructors occur in class/struct bodies;
-interface members do not include fields or constructors. The `ContextualPrefix`
-placeholder is deliberate: attributes and modifiers are checked by declaration
-context, and their exact legal combinations remain **OPEN**. It is not a
-production that permits every modifier on every declaration. Whether legal
-prefix modifiers have one required order or permit permutations with duplicate
-and conflict checks remains open. Callable contract clauses may belong after
-the parameter list rather than in the prefix. Likewise, §3.1 sketches a
-prefix result type, while §5.7 uses an arrow only to describe conceptual
-operator results; `Name(args) -> Result` is a source-form alternative to
-evaluate consistently across functions, members and operators.
+interface members do not include fields or constructors. An interface
+constant with an initializer is fixed by its declaration; one without an
+initializer requires an implementer-supplied `const` binding of that selected
+member identity. An unrelated same-named constant does not satisfy it.
+The `ContextualPrefix` placeholder still requires context-specific
+validation; permutation does not make every modifier legal on every
+declaration. Repeated visibility and conflicting effects reject. Callable
+contract clauses, if introduced, follow the parameter list; return types
+remain before the callable name, consistently for functions and operators.
+`<this T>` marks the single implementing-type formal of an interface;
+ordinary interfaces need not declare one. A conformance binds it to the
+implementing nominal type, not an arbitrary argument. Other formals follow
+it; duplicate self formals reject.
+`AliasDecl` occurs only at namespace/file scope with the same visibility
+choices as other top-level declarations, not as a nominal member.
+File attributes precede imports. A `module` target binds module metadata;
+an `assembly` target is legal only if the build defines an assembly identity.
+Targeted declaration attributes must refer to an existing applicable target;
+in particular `[get: Name]` on a property targets its getter, not the whole
+property. Neither unknown nor misplaced targets silently fall back to the
+declaration. Attribute arguments here are a syntactic approximation;
+constant-value eligibility and multiplicity require semantic validation.
 Core's privileged primitive declaration uses `StructDecl` and `FieldDecl`
 without a separate grammar production; its binding and representation
 restrictions are semantic checks, not lexical exceptions.
@@ -319,18 +363,18 @@ different closed enum grammar. `IntegralType` and `ConstantExpression` require
 semantic restrictions beyond their syntactic approximations. `AliasDecl`
 names the target type without defining a new nominal identity or adding
 conformance; generic aliases substitute their type formals into the target.
-Its placement in `TopDeclaration` sketches a namespace-level form, not a
-decision to ban aliases at other legal declaration scopes. Associated
+Its namespace-level placement and visibility are deliberate; aliases are
+not nested in nominal types in this proposal. Associated
 `type Name;` declares an interface requirement; `type Name = Type;` in an
 implementing nominal type binds a selected requirement rather than declaring
-an arbitrary nested nominal type. Exact binding, visibility, default associated
-types, alias cycles, qualification and export rules remain open (see §5.4).
+an arbitrary nested nominal type. Exact binding, default associated types, alias cycles, qualification and
+cross-module export rules remain open (see §5.4).
 Only a named property is proposed here; neither property production is an
 indexer or `this[...]` form. `get`, `set` and accessor `init` need lexical
 decisions; accessor effects attach to their attributes, not the entire
 property. A `set` or `init` body receives a typed `value` parameter; `init`
 is construction-only. The interaction of mixed explicit/automatic accessors,
-attribute targets and modifier applicability remains **OPEN**. Constructors
+modifier applicability remains **OPEN**. Constructors
 must name their enclosing type. The `++` and `--` operator spellings in
 `OperatorSymbol` need tokenization and operator-contract rules before
 adoption.
@@ -407,29 +451,42 @@ IfStatement     = "if", "(", Expression, ")", Block,
 WhileStatement  = "while", "(", Expression, ")", Block ;
 ForStatement    = "for", "(", [ ForInit ], ";", [ Expression ], ";",
                   [ ForStep ], ")", Block ;
-ForInit         = LocalDeclNoSemi | ExpressionStatementNoSemi | empty ;
-ForStep         = ExpressionStatementNoSemi | empty ;
-ForEachStatement = "for", "(", [ "mut" ], ( "var" | Type ), Identifier,
+ForInit         = LocalBinding | StepExpression ;
+ForStep         = StepExpression ;
+StepExpression  = Expression | Assignment ;
+ForEachStatement = "for", "(", [ "mut" | "ref" | "mut", "ref" ],
+                   ( "var" | Type ), Identifier,
                    "in", Expression, ")", Block ;
 RequireStatement = "require", Expression, ";" ;
 TryStatement    = "try", Block, ( "finally", Block
                   | "catch", Block, [ "finally", Block ] ) ;
 UnsafeStatement = "unsafe", Block ;
-DeferStatement  = "defer", ( Expression, ";" | Block ) ;
+DeferStatement  = "defer", ( ExpressionStatement | Block ) ;
 PolicyStatement = [ "require" ], "policy", PolicyCases, Block ;
 ReturnStatement = "return", [ Expression ], ";" ;
 LoopTransfer    = ( "break" | "continue" ), ";" ;
-LocalDecl       = [ "mut" ], ( "var" | Type ), Identifier, "=", Expression, ";" ;
-LocalDeclNoSemi = [ "mut" ], ( "var" | Type ), Identifier, "=", Expression ;
+LocalDecl       = LocalBinding, ";" | VacantLocal ;
+LocalBinding    = [ "mut" ], ( "var" | Type ), Identifier, "=", Expression ;
+VacantLocal     = "init", ( "var" | Type ), Identifier, ";" ;
 DiscardStatement = "_", "=", Expression, ";" ;
-AssignmentStatement = Expression, "=", Expression, ";" ;
+AssignmentStatement = Assignment, ";" ;
+Assignment      = Expression, "=", Expression ;
 ExpressionStatement = Expression, ";" ;
-ExpressionStatementNoSemi = Expression, [ "=", Expression ] ;
 ```
 
 `for` initializers and iterators omit their internal semicolon; an iterator
-may be an expression or one `=` assignment. Local declarations require an
-initializer. Blocks are required after `if`, `while`, `for`, `try`, `catch`,
+may be an expression or one `=` assignment. Ordinary local bindings require an
+initializer. `init var name;` instead declares vacant storage whose type is
+established by a checked initialization; proposed `init T name;` makes its
+type explicit. Neither form is a default value, and neither permits reads
+before complete publication. Bare `T name;` is not a declaration here.
+By-value iteration is the default. `ref` iteration borrows an element place
+read-only and `mut ref` requires a writable element loan from the iterator;
+neither silently copies a value or upgrades a readonly source. The iterator
+protocol, loan extent, backing dependency and whether advancing it invalidates
+the current element remain **OPEN**; these spellings do not grant escaping
+loans or overlapping mutation.
+Blocks are required after `if`, `while`, `for`, `try`, `catch`,
 `finally`, and `unsafe`; a single unbraced statement is not part of this
 candidate. `catch` has no exception type or binding syntax. Assignment is a
 statement-level form, not a general right-associative expression; its left
@@ -441,16 +498,22 @@ Recovery forms are not alternate accepted syntax.
 
 ### 3.4 Expressions and precedence
 
-The candidate grammar makes binary operators left-associative. Calls,
-member-access and index postfixes bind within a primary expression. `is null`
-and `is some name` have equality precedence. The proposed precedence table,
-highest first:
+The candidate grammar uses the precedence table to parse an operand, then
+repeated binary operators and operands. For example, `a && b || c` is
+`(a && b) || c`; there is no need to read a chain of one production per
+operator level. Binary operators at the same level associate left. Prefix
+operators nest right; postfix calls, member access and indexing bind more
+tightly than prefix operators. Parentheses group a full `Expression` and
+override the table, so they are not a binary precedence level. `is null`
+and `is some name` have equality precedence. The table is highest first:
 
 | Level | Syntax | Associativity |
 |---:|---|---|
+| 12 | postfix call, member access, index | left |
 | 11 | prefix `+ - ! ~ move` | prefix/right-nesting |
 | 10 | `* / %` | left |
 | 9 | `+ -` | left |
+| 8 | `<< >> >>>` | left |
 | 7 | `< <= > >=` | left |
 | 6 | `== !=`, `is null`, `is some name` | left |
 | 5 | `&` | left |
@@ -459,30 +522,31 @@ highest first:
 | 2 | `&&` | left |
 | 1 | `||` | left |
 
-Comparisons may chain syntactically (`a < b < c`) and require semantic
-checking; the grammar does not imply chained-comparison meaning. In
+`<<` and `>>` are left and arithmetic right shift respectively; `>>>` is
+zero-filling right shift. Counts are checked and left shift truncates to the
+operand width as required by the language arithmetic contract. Built-in
+operator availability is distinct from whether a nominal type may declare an
+overload or a generic protocol may require it. Comparisons may chain
+syntactically (`a < b < c`) and require semantic checking; the grammar does
+not imply chained-comparison meaning. In
 `is some`, `some` is contextual and is followed by an identifier naming the
 bound value, e.g. `maybe is some value`.
 
 ```ebnf
-Expression      = LogicalOr ;
-LogicalOr       = LogicalAnd, { "||", LogicalAnd } ;
-LogicalAnd      = BitwiseOr, { "&&", BitwiseOr } ;
-BitwiseOr       = BitwiseXor, { "|", BitwiseXor } ;
-BitwiseXor      = BitwiseAnd, { "^", BitwiseAnd } ;
-BitwiseAnd      = Equality, { "&", Equality } ;
-Equality        = Relational, { ( ( "==" | "!=" ), Relational | IsTail ) } ;
-IsTail          = "is", ( "null" | "some", Identifier ) ;
-Relational      = Additive, { ( "<" | "<=" | ">" | ">=" ), Additive } ;
-Additive        = Multiplicative, { ( "+" | "-" ), Multiplicative } ;
-Multiplicative  = Unary, { ( "*" | "/" | "%" ), Unary } ;
-Unary           = ( "+" | "-" | "!" | "~" | "move" ), Unary | Postfix ;
-Postfix         = Primary, { ( ".", Identifier | Arguments
-                             | "[", Expression, "]" ) } ;
-Primary         = "(", [ Expression ], ")" | "new", Type, Arguments,
+Expression      = Operand, { ( BinaryOperator, Operand | IsTest ) } ;
+Operand         = { PrefixOperator }, Postfix ;
+PrefixOperator  = "+" | "-" | "!" | "~" | "move" ;
+BinaryOperator  = "*" | "/" | "%" | "+" | "-"
+                | "<<" | ">>" | ">>>"
+                | "<" | "<=" | ">" | ">=" | "==" | "!="
+                | "&" | "^" | "|" | "&&" | "||" ;
+IsTest          = "is", ( "null" | "some", Identifier ) ;
+Postfix         = Primary, { "." , Identifier | Arguments
+                           | "[", Expression, "]" } ;
+Primary         = "(", Expression, ")" | "new", Type, Arguments,
                   [ ObjectInitializer ]
                 | Number | String | Boolean | Null
-                | Identifier | Identifier, TypeArguments, Arguments
+                | Identifier, [ TypeArguments, Arguments ]
                 | "unsafe", "(", Expression, ")"
                 | [ "require" ], "policy", PolicyCases, "(", Expression, ")"
                 | "default", "<", Type, ">" ;
@@ -492,8 +556,13 @@ PolicyCase      = DottedIdentifier ;
 ObjectInitializer = "{", { Identifier, "=", Expression, ";" }, "}" ;
 ```
 
-`HexFloat` participates in the proposed `Number` alternative above;
-its token boundaries and value semantics remain to be specified.
+`IsTest` is a postfix-like binary test at equality precedence: it consumes
+the preceding expression as its left operand and its `null` or `some name`
+tail as the right form. Unlike an ordinary binary operator, it may bind
+`name` for the appropriate checked scope. The table, not the flat
+`BinaryOperator` alternatives, resolves any mixed expression. `HexFloat`
+participates in `Number` exactly like the other numeric alternatives; its
+value semantics and lexical adoption gates are described in §2.
 
 The generic-call alternative is explicit function-call syntax, not a general
 expression type-application operator. It does not express partial holes (`_`),
@@ -763,30 +832,33 @@ or silently resolve collisions; ambiguous witness/projection uses require
 explicit qualification.
 
 **Proposed alias form:** `alias Option<T> = T?;` names the same resolved type,
-not a distinct wrapper or new witness. Exporting or qualifying an alias
-cannot create a new nominal identity or change the target's access, ownership,
-layout or compatibility contract. Whether aliases are permitted as members
-or only at namespace scope, their legal visibility and use across module
-boundaries, cycle detection and generic substitution rules remain open.
+not a distinct wrapper or new witness. Aliases are namespace-level
+declarations, with `public`, `internal` or `private` visibility like other
+top-level declarations; they are not nominal members. Exporting or
+qualifying an alias cannot create a new nominal identity or change the
+target's access, ownership, layout or compatibility contract. Cross-module
+export, cycle detection and generic substitution still need checked rules.
 Associated-type bindings are distinct: they satisfy a selected interface
 member and have witness identity, rather than providing a general synonym.
 
-**Candidate self-binding spelling for review:** `interface IInteger<this T>`
-could name the implementing type as the interface's `T` formal, in place of
-an implicit `Self` name. This has no §3.1 production yet; its uniqueness,
-conformance binding, use in non-generic interfaces and interaction with
-ordinary type parameters need decisions. It does not alter the accepted
-associated-type relations.
+**Proposed self-binding spelling:** `interface IInteger<this T>` declares
+one explicit implementing-type formal rather than an implicit `Self` name.
+It is the first formal when present; a conformance binds it to its
+implementing type. Interfaces with no self dependency omit it. Ordinary
+type formals follow it, and the checked witness retains the selected
+interface/member identity. This does not alter the accepted associated-type
+relations; precise witness mapping and metadata remain open.
 
 **Open:** formalize projection and associated-equality productions; witness
 selection, qualification and collision rules; and their metadata
 representation. Keep family opt-in and declared checked projections; do
 not introduce universal erasure or inferred covariance.
-Interface construction requirements and constant members are separate open
-questions: neither follows from a `type Name;` requirement. A constructor
-requirement would need a checked construction and initialization-completion
-contract; a fixed interface constant and an implementer-supplied associated
-constant have different binding and versioning rules.
+Interface constructors are not part of this proposal: a future requirement
+needs a checked construction and initialization-completion contract. Fixed
+`const T Name = value;` interface constants are owned by the interface
+definition; a bodyless `const T Name;` instead requires a checked
+implementer-supplied binding. They have distinct identity/versioning rules
+and neither follows automatically from a `type Name;` requirement.
 
 **Source type packs are outside this proposal's scope.** No production or
 recommendation for variadic type parameters is made here.
@@ -842,19 +914,18 @@ protocol names or source declarations.
 
 ```terrum
 // Conceptual signatures only; no interface names or source declarations selected:
-operator +(T operand) -> R;  // T is the containing type (or nullable T?).
-operator -(T operand) -> R;
-operator !(T operand) -> R;  // R need not be bool.
-operator ~(T operand) -> R;
-operator ++(T operand) -> T; // Static; operand-shaped result.
-operator --(T operand) -> T;
-operator true(T operand) -> bool;
-operator false(T operand) -> bool;
+R operator +(T operand);  // T is the containing type (or nullable T?).
+R operator -(T operand);
+R operator !(T operand);  // R need not be bool.
+R operator ~(T operand);
+T operator ++(T operand); // Static; operand-shaped result.
+T operator --(T operand);
+bool operator true(T operand);
+bool operator false(T operand);
 ```
 
-The arrow in these conceptual signatures describes a result relationship,
-not a second accepted declaration form alongside §3.1's prefix result.
-Result placement for all callable declarations remains a source-form decision.
+Callable result types precede their names; these examples do not add
+operator witness or implementation contracts.
 No return-only overload is permitted: result type is part of the selected
 operation contract, not a mechanism for distinguishing declarations. The
 `true`/`false` pairing is the explicit pair requirement here; do not infer
@@ -994,15 +1065,14 @@ class Counter
 }
 ```
 
-Accessor effects attach to the accessor: `[NoThrow] get { ... }`. If an
-expression-bodied property form is supported, `[get: Attr] public int32 Count
-=> 5` is a possible attribute-target direction; this does not select
-expression-bodied property support or an alternate effect placement.
-The candidate `Attribute` production currently covers only `[Name]`.
-Targeted attributes such as `[get: Name]` on the enclosing property, and
-module-level attributes, need explicit placement and target-validation rules;
-an `assembly` target would require an assembly concept rather than being
-inferred from a source file.
+Accessor effects attach to the accessor: `[NoThrow] get { ... }`.
+`[get: NoThrow] public int32 Count { get { ... } }` applies to the
+getter from the enclosing property declaration. An expression-bodied
+property remains open; targeted attributes do not imply it. File attributes
+use `[module: Name]`, or `[assembly: Name]` when an assembly identity is
+declared by the build. Other explicit target labels are in §3.1;
+placement, supported attribute classes, arguments and multiplicity must
+be checked against the selected target rather than inferred by name.
 
 An ordinary `[NoThrow] public int32 GetCount() { ... }` method is an
 alternative callable form; it is not a property-effect placement option.
@@ -1067,7 +1137,7 @@ semantics](../language.md#interfaces-access-and-generic-properties).
 
 ### 5.12 Modifiers, cleanup and finalization
 
-**Accepted semantic separation; exact grammar OPEN:** `public`/`internal`/
+**Accepted semantic separation; legal combinations need checking:** `public`/`internal`/
 `private` are visibility; `static` is member placement; `mut` controls a
 place/receiver/nominal declaration; `write` qualifies referent access in a
 type; `ref` and `init ref<T>` distinguish ordinary access from vacant-storage
@@ -1093,8 +1163,11 @@ no inheritance-order tie-break or implicit linearization selects one.
 Adding a default to an existing interface remains subject to compatible
 binding/dispatch for older implementations, not an assumption that an older
 binary has a newly appended slot. Exact witness-mapping syntax and metadata
-representation remain open. Do not infer legality from the permissive
-`ContextualPrefix` placeholder.
+representation remain open. Do not infer legality from the permissive `ContextualPrefix` placeholder.
+Legal prefix modifiers may be permuted without changing the contract;
+duplicates, conflicting visibility and illegal modifier/declaration pairs
+reject. Context-specific callable clauses, once specified, follow the
+parameter list; result types remain in prefix position.
 
 **Proposed vocabulary:** `do` introduces a post-tested loop; `set` a
 writable property accessor; `when` a pattern guard; `yield` a producer
@@ -1239,9 +1312,10 @@ Place = Expression ;
 `Place` requires a separately specified assignability check; an arbitrary
 expression is not a writable destination. A concrete declaration production
 for each compound operator and source/metadata binding must be designed before
-this shorthand becomes a legal statement. The approved checked-count shift
-semantics do not yet supply `<<`/`>>` operator declarations or `<<=`/`>>=`
-compound forms. Pointer dereference/address formation, short-circuit
+this shorthand becomes a legal statement. The candidate built-in shifts `<<`, `>>` and `>>>` follow the accepted
+checked-count/width rules. Their declaration and witness contracts, and
+compound `<<=`, `>>=` and `>>>=` forms, still need separate specification.
+Pointer dereference/address formation, short-circuit
 `&&`/`||` and optional fallback require their own access or evaluation-order
 contracts; they are not ordinary overloads merely because they have an
 operator-like spelling.
@@ -1255,8 +1329,9 @@ generic defaults and constructor inference, lambdas, async/await, throw,
 typed catches, interpolation and collections. Words such as `switch`, `case`,
 `async`, `await`, `union`, `throw` and `own` need complete syntax, binding,
 effects and representation rules, not isolated extra alternatives in
-`Statement` or `Primary`. The proposed `Primary` includes `Number`, including
-`HexFloat`; its lexical and numeric contracts need to be specified together.
+`Statement` or `Primary`. The proposed `Primary` includes `Number`, including `HexFloat`; its proposed
+lexical spelling is already given in §2, while value/boundary rules remain
+to be specified before adoption.
 
 ### 5.14 Documentation-comment grammar and tooling
 
@@ -1308,30 +1383,30 @@ appears in §2.
 | Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
 | Nominal types | §3.1 sketches structs, classes, interfaces and integral-base enums. | Union and nested declarations, enum constant restrictions and contextual attributes. |
 | Generic declarations | §3.1 sketches type formals and constraints. | Const-value formals, defaults, associated types and inference. |
-| Aliases | §§3.1 and 5.4 sketch `alias Name<T> = Type;` as a transparent synonym. | Scope, visibility, cycles, substitution and cross-module export. |
-| Associated types | §§3.1 and 5.4 sketch `type Name;` requirements and `type Name = Type;` witness bindings. | Projection/associated-equality grammar, explicit witness qualification and self-binder syntax. |
+| Aliases | §§3.1 and 5.4 place visible transparent `alias Name<T> = Type;` declarations at namespace scope. | Cycles, substitution and cross-module export. |
+| Associated types | §§3.1 and 5.4 sketch `type Name;` requirements, `type Name = Type;` bindings and the `<this T>` self formal. | Projection/associated-equality grammar, explicit witness qualification and metadata. |
 | Partial declarations | §5.12 defines one-identity merge and body-provision rules. | Detailed merge compatibility and attribute multiplicity. |
 | Core primitive declarations | §2 preserves reserved primitive identities with a privileged backing field. | Artifact identity, permitted members and separate-compilation enforcement. |
-| Fields | §3.1 sketches instance fields. | Attribute targets and layout restrictions. |
+| Fields | §3.1 sketches instance fields. | Applicable attribute contracts and layout restrictions. |
 | Constructors | §§3.1 and 5.10 describe owner-named constructors and initialization obligations. | Exact construction-completion contract spelling. |
-| Properties | §§3.1, 5.10 and 5.12 describe accessors, backing storage and property-local `field`. | Mixed auto/explicit backing, effect/attribute targets, ref returns and indexers. |
+| Properties | §§3.1, 5.10 and 5.12 describe accessors, backing storage, property-local `field` and explicit accessor attribute targets. | Mixed auto/explicit backing, effect/attribute applicability, ref returns and indexers. |
 | Operators | §§3.1, 5.7 and 5.13 describe nominal unary/binary operators and distinct compound-operation contracts. | Compound-operator declarations, tokenization, places and evaluation order. |
 | Conversions | §§3.1 and 5.12 sketch `operator T(U source)` and explicit `T(value)`. | Conversion eligibility and constructor/conversion ranking. |
-| Interface members | §§3.1 and 5.12 distinguish required members and replaceable defaults by member identity. | Explicit witness mapping, inherited-default resolution and representation. |
+| Interface members | §§3.1, 5.4 and 5.12 distinguish required members, replaceable defaults, fixed constants and required associated constants; constructors remain deferred. | Explicit witness mapping, inherited-default resolution and representation. |
 | Types | §3.2 sketches recursive types and normalized optionals. | Optional access and associated-type forms. |
 | Ownership | §§3.2 and 5.12 sketch owner forms and explicit transfer. | Complete ownership-form grammar. |
 | Reference access | §§3.2 and 5.12 sketch loans and reference qualifications. | Complete legality of `pin`, `write` and other qualifier combinations. |
 | Parameters | §§3.2, 5.1–5.2 sketch modes and implicit borrowing. | `params`, exact implicit-loan grammar and output-contract clauses. |
 | Arguments | §§3.2 and 5.1 sketch labels and `init` arguments. | Legal passing-mode and place combinations. |
 | Statements | §3.3 sketches blocks, transfers and standalone discard. | Statement-place checks and producer/async statements. |
-| Iteration | §3.3 sketches `for (... in ...)`; §5.12 names `do`. | Iteration binding and post-test loop production. |
+| Iteration | §3.3 sketches by-value and `ref`/`mut ref` `for (... in ...)`; §5.12 names `do`. | Iterator loan/backing contracts and post-test loop production. |
 | Expressions | §3.4 sketches precedence, type calls and initializers. | Conditional expressions, lambdas and collections. |
 | Patterns | §§3.3–3.4 sketch bounded `is` tests. | Full matching, guards and combinator binding. |
 | Policies | §§3.3–3.4 and 5.12 describe lexical preferences, fallback and strict `require policy`. | Variant-declaration syntax, const-enum formals and compile-time queries. |
 | Contracts | §§3.3 and 5.8 describe `require` and `ensure` direction. | Declaration clauses and correlated output facts. |
 | Static proof | §5.9 describes the portable static-proof floor. | Constant-evaluation and symbolic source forms. |
 | Exceptions | §3.3 sketches `try` and `catch`. | Typed catches and exception expressions. |
-| Cleanup | §5.12 distinguishes lexical `defer` from `[Cleanup]`. | `defer` production and attribute placement. |
+| Cleanup | §§3.3 and 5.12 distinguish lexical `defer` from `[Cleanup]`. | Defer action validation and attribute placement. |
 | Finalization | §5.12 does not equate GC finalization with cleanup. | Whether finalizers exist and their lifecycle/ABI contract. |
 | Documentation comments | §§1 and 5.14 describe attachment and structured prose direction. | Exact markup/reference grammar and XML artifact schema. |
 
