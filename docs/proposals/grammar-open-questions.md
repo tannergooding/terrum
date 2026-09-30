@@ -256,9 +256,8 @@ not form an arrow. Its callable/arm semantics and delimiter roles remain
 unchanged. **C# model:** Arrow syntax is C#-inspired, but mandatory outer
 separation deliberately differs from C#'s trivia-insensitive spelling.
 
-**Conditional connector spacing question (awaiting review):** Should the
-`?` and `:` parts of a conditional expression require separation on both
-sides? **Recommendation:** Yes: use `flag ? left : right`, rejecting
+**Accepted conditional connector spacing:** Require separation on both
+sides of the `?` and `:` parts. Use `flag ? left : right`, rejecting
 `flag?left:right`. These are expression connectors, not an optional-type
 suffix or an optional-access token. Their grammatical role selects the
 spacing rule before type checking.
@@ -267,7 +266,19 @@ as in `{flag ? left : right:X8}`: the first colon is a separated conditional
 connector, while the format colon follows its own grammar.
 **C# model:** Conditional syntax is C#-inspired, but mandatory separation
 differs from C#'s trivia-insensitive spelling. Other colon roles remain
-separate decisions. This recommendation has not been accepted.
+separate decisions.
+
+**Declaration relationship colon question (awaiting review):** Should `:`
+require separating trivia on both sides in type conformance/base lists,
+enum underlying types and generic constraints?
+**Recommendation:** Yes: use `struct S : I`, `enum E : int32` and
+`where T : I`, rejecting squashed equivalents. This colon connects declared
+relationships rather than being an attached type suffix. Existing eligibility,
+conformance, underlying-type and constraint checks remain unchanged.
+**C# model:** These declaration spellings are C#-inspired, but mandatory
+separation differs from C#'s trivia-insensitive colon spelling.
+Label, named-argument, tuple-name, attribute-target and interpolation format
+colons are distinct roles. This recommendation has not been accepted.
 
 **Comment-fence question:** Should a block comment select its closing fence
 from the opening star count, analogously to the selected delimiter length of

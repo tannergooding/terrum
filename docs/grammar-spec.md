@@ -281,6 +281,13 @@ The `=>` connector requires separating trivia on both sides in expression
 bodies, lambdas and switch arms. Use `int32 F() => 1;`, `x => x + 1`
 and `0 => 1`, not their squashed counterparts. `=>` is one indivisible
 spelling; `= >` does not form an arrow.
+Conditional-expression `?` and `:` each require separating trivia on both
+sides: use `flag ? left : right`, not `flag?left:right` or partially
+squashed variants. Their grammatical role is distinct from optional-type
+suffixes, optional access and other colon roles. Interpolation still permits
+`{flag ? left : right:X8}`: the conditional colon is separated, while the
+format colon follows its own grammar. Grouping the full conditional remains
+optional.
 Trivia does not permit splitting or merging a token spelling after lexing.
 Receiver/name-attached delimited constructs share a boundary rule:
 the opener attaches to its receiver or introducing name, the interior

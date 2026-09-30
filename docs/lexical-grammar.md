@@ -143,6 +143,10 @@ and associated bindings. Thus `x = value` and `x += value` are valid forms,
 while `x=value` and `x+=value` reject regardless of the types involved.
 The expression-body/lambda/switch-arm connector `=>` likewise requires
 separating trivia on both sides. Its token spelling remains indivisible.
+Conditional-expression connectors `?` and `:` require separating trivia
+on both sides. This does not apply to an optional-type suffix, optional
+access, interpolation format suffix or another colon role. Grammar selects
+the role before type checking, without retrying a failed interpretation.
 Symbolic prefix operators attach directly to their following operand token;
 symbolic postfix operators attach directly to their preceding operand token.
 Member-access `.` and `?.` must adjoin the receiver's final token or the
