@@ -458,6 +458,8 @@ public mut unique struct AllocationLease
 public mut unique struct AllocatorContext
 {
     public mut AllocationLease Allocate(nuint byteLength, nuint alignment);
+    public mut bool TryAllocate(nuint byteLength, nuint alignment,
+        init ref<AllocationLease> storage);
     public mut void Dispose();
 }
 public mut unique struct Buffer<T>
@@ -470,6 +472,7 @@ public mut unique struct Buffer<T>
     public Span<T> AsSpan();
     [ViewOf(Access.Write)] public mut write Span<T> GetWriteAccess();
     public mut void Clear();
+    public mut void Dispose();
 }
 public mut unique struct Vector<T>
     where T : [Sized], [Copy]
@@ -480,7 +483,9 @@ public mut unique struct Vector<T>
     public mut void Add(T value);
     public mut void Reserve(nuint capacity);
     public Span<T> AsSpan();
+    [ViewOf(Access.Write)] public mut write Span<T> GetWriteAccess();
     public mut void Clear();
+    public mut void Dispose();
 }
 ```
 
@@ -489,6 +494,26 @@ A lease owns a specific current allocation, extent/alignment and release action;
 it neither imports .NET `IDisposable` nor implies a universal object finalizer.
 Provider cleanup must not invalidate allocations whose release responsibility
 was transferred elsewhere.
+
+These are **PROPOSED** complete member sets for the sampled native owners,
+not cleanup registrations or implemented generic exports. `TryAllocate`
+distinguishes an allocation refusal from invalid arguments: false leaves the
+lease output vacant, true publishes the complete allocation/release
+responsibility, and invalid size/alignment requests retain checked
+validation rather than masquerading as resource exhaustion.
+
+`Buffer.Initialize` extends the initialized prefix at exactly `Count`, with
+`Count < Capacity`; it does not expose holes or overwrite a live owner without
+its replacement contract. Both span accessors expose only initialized
+elements. `GetWriteAccess` lends those existing elements exclusively and does
+not grant construction authority over unused capacity. `Clear` cleans the
+initialized prefix while retaining storage capacity. Explicit disposal ends
+the owned storage's lifetime and must not proceed while any conflicting view
+remains live. Subsequent storage access cannot silently produce an empty
+span. Exact disposed-state diagnostics, release-failure reporting and
+implicit no-throw cleanup metadata remain open; the `Dispose` name alone
+supplies none of them. A vector retains its explicitly supplied allocator
+dependency for future growth rather than consulting an ambient provider.
 
 ### `MemoryPrimitives`
 
@@ -608,8 +633,8 @@ need collector roots/barriers independently of memory order.
 |---|---|---|
 | `AllocationLease` / `Terrum.Collections` | `ByteLength`, `Alignment`, `Dispose()`; optional checked `SliceBytes(offset, length) -> Span<uint8>` | Owns one allocation/release, not a provider; slicing retains lease |
 | `AllocatorContext` / `Terrum.Collections` | `Allocate(bytes, alignment) -> AllocationLease`, `Dispose()`; `TryAllocate(..., init ref<AllocationLease>) -> bool` | Provider must outlive outstanding allocations or explicitly transfer release capability |
-| `Buffer<T>` / `Terrum.Collections` | `Capacity`, `Count`, `Adopt`, `Initialize`, `AsSpan`, `GetWriteAccess`, `Clear`, `Dispose` candidate | Initialized prefix versus vacant capacity; unique owner and trace/barrier policy |
-| `Vector<T>` / `Terrum.Collections` | `Create`, `Count`, `Capacity`, `Add`, `Reserve`, `AsSpan`, `Clear`, `GetWriteAccess` candidate | Growth retains allocator context, replaces lease transactionally; views prevent relocation |
+| `Buffer<T>` / `Terrum.Collections` | `Capacity`, `Count`, `Adopt`, `Initialize`, `AsSpan`, `GetWriteAccess`, `Clear`, `Dispose` | Initialized prefix versus vacant capacity; unique owner and trace/barrier policy |
+| `Vector<T>` / `Terrum.Collections` | `Create`, `Count`, `Capacity`, `Add`, `Reserve`, `AsSpan`, `GetWriteAccess`, `Clear`, `Dispose` | Growth retains allocator context, replaces lease transactionally; views prevent relocation |
 | `Arena` / `Terrum.Collections`, **OPEN** | `Allocate(bytes, alignment) -> Span<uint8>`, `Reset()`, `Dispose()` | Borrowed slices block reset/disposal; arena does not independently own every returned slice |
 | `MemoryPool<T>` / `Terrum.Collections`, **OPEN** | `Rent(length) -> unique MemoryOwner<T>`; owner `AsSpan`, `Dispose` | Return/reuse only after all loans end; pooled bytes do not imply initialized `T` |
 | `MemoryPrimitives` / `Terrum` | `AtomicRead/Write`, RMW families, strong CAS/observation, `Fence`, `CompilerFence`, non-temporal read/write/copy/complete, cache writeback/invalidate | See the complete proposed member set and strict representation/order/range constraints above |
