@@ -2125,13 +2125,20 @@ public struct Duration
 {
     public int64 Nanoseconds { get; }
     public static Duration Zero { get; }
+    public static Duration FromNanoseconds(int64 nanoseconds);
+    public static int32 Compare(Duration left, Duration right);
     public static bool TryAdd(Duration left, Duration right, init ref<Duration> result);
     public static bool TrySubtract(Duration left, Duration right, init ref<Duration> result);
+    public static bool TryMultiply(Duration value, int64 factor, init ref<Duration> result);
+    public static bool TryDivideTruncating(Duration value, int64 divisor,
+        init ref<Duration> result);
 }
 
 public struct Instant
 {
     public int64 UnixNanoseconds { get; }
+    public static Instant FromUnixNanoseconds(int64 nanoseconds);
+    public static int32 Compare(Instant left, Instant right);
     public static bool TryAdd(Instant instant, Duration delta, init ref<Instant> result);
     public static bool TrySubtract(Instant later, Instant earlier, init ref<Duration> result);
 }
@@ -2159,6 +2166,23 @@ public struct SystemClock : IUtcClock, IMonotonicClock
 ```
 
 `Duration` is signed nanoseconds for arithmetic/interop, not a promise of nanosecond clock precision; checked range failure returns false and leaves output vacant. `Instant` uses Unix epoch only for UTC timestamps. Monotonic timestamps are opaque, have no public epoch/counter, and compare only through the same clock instance/domain; `TryGetElapsed` rejects foreign or reversed/overflowing pairs. Wall clocks can move backward and are not substitutes for elapsed-time measurement. Inject clock interfaces into code needing determinism; no ambient global clock, timezone database, calendar, timer queue, or sleep API is implied. The chosen nanosecond range is approximately ±292 years, trading a simple scalar representation for a bounded epoch; range/precision can be revisited before adoption.
+
+The **PROPOSED** factories accept every `int64` payload exactly and expose
+the same count through the corresponding getter; neither reads a clock nor
+converts a local civil time. These two nominal types do not implicitly
+interconvert. `Compare` returns negative/zero/positive for less/equal/greater
+without subtracting counts into a potentially overflowing duration.
+`TryMultiply` rejects an unrepresentable product. `TryDivideTruncating`
+explicitly discards a fractional nanosecond toward zero; zero divisors and
+the signed-minimum divided by `-1` reject. Every false arithmetic result
+leaves its output vacant. No floating scaling, calendar unit, saturation,
+wrapping or rounding choice is hidden in these signatures.
+
+Instant ordering compares the proposed Unix counts, not observed clock
+monotonicity. Epoch/leap-second mapping remains a host-profile question;
+construction alone does not verify that a timestamp corresponds to an
+observed event. Formatting, parsing and conversions involving civil time
+remain separately provider-qualified proposals.
 
 ### Streams, file capability and network endpoints
 
