@@ -1016,6 +1016,12 @@ internal sealed partial class PeCompiler
         {
             case BoundUnary unary:
                 return ExpressionSpills(unary.Operand, ref maximumArguments);
+            case BoundUpdate update:
+                return Math.Max(3, update.Place switch {
+                    BoundFieldRead field => ExpressionSpills(field.Receiver, ref maximumArguments),
+                    BoundBufferRead buffer => ExpressionSpills(buffer.Index, ref maximumArguments),
+                    _ => 0,
+                });
             case BoundCast cast:
                 return ExpressionSpills(cast.Operand, ref maximumArguments);
             case BoundOptionalLift lift:
@@ -1122,6 +1128,50 @@ internal sealed partial class PeCompiler
         EmitUniqueFieldPlace(fieldRead.Receiver);
         var field = _program.Structures[(int)fieldRead.Receiver.Type - 100].Fields[fieldRead.Field];
         _code.PointerOffset(field.Offset);
+    }
+
+    private bool UpdateAddress(BoundExpression place, int spill)
+    {
+        switch (place)
+        {
+            case BoundRead read:
+                if (read.Variable == 0 && IsBorrowedReceiver())
+                {
+                    _code.Load64(Slot(0));
+                }
+                else
+                {
+                    _code.Address(OwnerPlace(read.Variable));
+                }
+                return false;
+            case BoundBufferRead buffer:
+                Expression(buffer.Index, spill);
+                CheckBufferIndex(buffer.Buffer);
+                _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), _bufferOffsets[buffer.Buffer]));
+                _code.Bytes(0x48, 0x8D, 0x04, 0x82); // lea rax,[rdx+rax*4]
+                return false;
+            case BoundFieldRead field:
+                bool rooted;
+                int offset;
+                if (ManagedClassTypes.IsClass(field.Receiver.Type))
+                {
+                    Expression(field.Receiver, spill);
+                    _code.Store64(Spill(spill));
+                    SetManagedRoot(Spill(spill), active: true);
+                    offset = 32 + _program.Classes[ManagedClassTypes.ClassIndex(field.Receiver.Type)]
+                        .Fields[field.Field].Offset;
+                    rooted = true;
+                }
+                else
+                {
+                    rooted = UpdateAddress(field.Receiver, spill);
+                    offset = _program.Structures[(int)field.Receiver.Type - 100].Fields[field.Field].Offset;
+                }
+                _code.PointerOffset(offset);
+                return rooted;
+            default:
+                throw new InvalidOperationException("Verified update requires a writable place.");
+        }
     }
 
     private void DropOwner(int variable)
@@ -2238,6 +2288,47 @@ internal sealed partial class PeCompiler
                     case TokenKind.Bang:
                         _code.Bytes(0x83, 0xF0, 0x01);
                         break;
+                }
+                break;
+            case BoundUpdate update:
+                var rootedUpdate = UpdateAddress(update.Place, spill);
+                _code.Store64(Spill(spill + 1));
+                _code.LoadPointerField(0, IsWide(update.Type) ? 8 : 4);
+                StoreValue(Spill(spill + 2), update.Type);
+                var updateBegin = _code.Position;
+                var updateFunclet = -1;
+                if (rootedUpdate && _checkedExceptions && !_emittingFunclet)
+                {
+                    updateFunclet = _funclets.Count;
+                    _funclets.Add((new BoundBlock([], update.Span), _currentFunction, 0, 0));
+                    _managedStagedRoots.Add(updateFunclet, [Spill(spill)]);
+                }
+                if (IsWide(update.Type))
+                {
+                    _code.Byte(0x48);
+                }
+                _code.Bytes(0x83, update.Operator == TokenKind.PlusPlus ? (byte)0xC0 : (byte)0xE8, 0x01);
+                RuntimeBranch(update.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64
+                    ? (byte)0x82 : (byte)0x80, 0);
+                _code.Load64(Spill(spill + 1), destinationRegister: true);
+                if (IsWide(update.Type))
+                {
+                    _code.Byte(0x48);
+                }
+                _code.Bytes(0x89, 0x02);
+                if (updateFunclet >= 0)
+                {
+                    _code.Byte(0x90);
+                    _scopes[_currentFunction].Add(new NativeExceptionScope(updateBegin, _code.Position,
+                        -updateFunclet - 1, 0));
+                }
+                if (rootedUpdate)
+                {
+                    SetManagedRoot(Spill(spill), active: false);
+                }
+                if (!update.IsPrefix)
+                {
+                    LoadValue(Spill(spill + 2), update.Type);
                 }
                 break;
             case BoundCast cast:

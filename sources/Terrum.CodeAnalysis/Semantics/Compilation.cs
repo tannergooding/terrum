@@ -227,6 +227,9 @@ public sealed class Compilation
                         case BoundUnary unary:
                             expressions.Push(unary.Operand);
                             break;
+                        case BoundUpdate update:
+                            expressions.Push(update.Place);
+                            break;
                         case BoundCast cast:
                             expressions.Push(cast.Operand);
                             break;

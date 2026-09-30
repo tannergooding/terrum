@@ -1591,9 +1591,9 @@ internal sealed partial class Binder
                 {
                     return viewSet;
                 }
-                if (expressionNode.Kind != SyntaxKind.InvocationExpression)
+                if (expressionNode.Kind is not (SyntaxKind.InvocationExpression or SyntaxKind.UpdateExpression))
                 {
-                    Report("TRM3009", "Only direct calls may be used as expression statements.", expressionNode.Span);
+                    Report("TRM3009", "Only direct calls and updates may be used as expression statements.", expressionNode.Span);
                 }
 
                 return new BoundExpressionStatement(BindExpression(expressionNode, null), node.Span);
@@ -1983,6 +1983,31 @@ internal sealed partial class Binder
         };
     }
 
+    private void CheckUpdateFieldPlace(BoundFieldRead place)
+    {
+        var receiver = place.Receiver;
+        if (IsClass(receiver.Type))
+        {
+            CheckFieldMutation(receiver.Type, place.Field, false, place.Span);
+            return;
+        }
+        if (!IsStruct(receiver.Type)
+            || (IsUnique(receiver.Type) && receiver is not BoundRead))
+        {
+            Report("TRM3008", "Update requires a writable Copy field path.", place.Span);
+            return;
+        }
+        CheckFieldMutation(receiver.Type, place.Field, false, place.Span);
+        if (receiver is BoundFieldRead parent)
+        {
+            CheckUpdateFieldPlace(parent);
+        }
+        else if (receiver is not BoundRead root || !_variables[root.Variable].IsMutable)
+        {
+            Report("TRM3008", "A Copy field update requires a mutable local or writable class field, not a temporary.", place.Span);
+        }
+    }
+
     private void CheckFieldMutation(PrimitiveType type, int field, bool constructingReceiver, TextSpan span)
     {
         var declaration = GetField(type, field);
@@ -2327,6 +2352,46 @@ internal sealed partial class Binder
                 }
 
                 expression = new BoundUnary(op.Kind, operand, operandType, node.Span);
+                break;
+            }
+
+            case SyntaxKind.UpdateExpression:
+            {
+                var prefix = node.Children[0] is SyntaxTokenElement;
+                var op = ((SyntaxTokenElement)node.Children[prefix ? 0 : 1]).Token;
+                var updateTarget = (SyntaxNode)node.Children[prefix ? 1 : 0];
+                while (updateTarget.Kind == SyntaxKind.ParenthesizedExpression)
+                {
+                    updateTarget = (SyntaxNode)updateTarget.Children[1];
+                }
+                var place = BindExpression(updateTarget, null);
+                if (place.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32
+                    or PrimitiveType.Int64 or PrimitiveType.UInt64))
+                {
+                    Report("TRM3007", "Increment and decrement require a Copy integer place.", updateTarget.Span);
+                }
+                switch (place)
+                {
+                    case BoundRead local:
+                        if (!_variables[local.Variable].IsMutable || local.Variable == 0 && _hasReceiver)
+                        {
+                            Report("TRM3008", "Update requires a mutable local, not a receiver or immutable slot.", updateTarget.Span);
+                        }
+                        break;
+                    case BoundFieldRead field:
+                        CheckUpdateFieldPlace(field);
+                        break;
+                    case BoundBufferRead buffer:
+                        if (!_buffers[buffer.Buffer].IsWritable)
+                        {
+                            Report("TRM3008", "Update requires a writable host buffer.", updateTarget.Span);
+                        }
+                        break;
+                    default:
+                        Report("TRM3008", "Update requires an initialized writable place, not a getter or temporary.", updateTarget.Span);
+                        break;
+                }
+                expression = new BoundUpdate(op.Kind, place, prefix, place.Type, node.Span);
                 break;
             }
 
@@ -3229,6 +3294,8 @@ internal sealed partial class Binder
                 }
                 return operation == TokenKind.Bang ? PrimitiveType.Bool : operand;
             }
+            case SyntaxKind.UpdateExpression:
+                return KnownType((SyntaxNode)node.Children[node.Children[0] is SyntaxTokenElement ? 1 : 0]);
             case SyntaxKind.BinaryExpression:
             {
                 var op = ((SyntaxTokenElement)node.Children[1]).Token.Kind;

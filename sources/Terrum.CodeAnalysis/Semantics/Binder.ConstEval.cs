@@ -114,6 +114,8 @@ internal sealed partial class Binder
                 return true;
             case BoundUnary unary:
                 return CheckConstExpression(unary.Operand, out unsupported);
+            case BoundUpdate { Place: BoundRead }:
+                return true;
             case BoundBinary binary:
                 return CheckConstExpression(binary.Left, out unsupported)
                     && CheckConstExpression(binary.Right, out unsupported);
@@ -303,6 +305,8 @@ internal sealed partial class Binder
             }
             case BoundUnary unary:
                 return unary with { Operand = ResolveConstExpression(unary.Operand, locals, functions, variableCount) };
+            case BoundUpdate update:
+                return update with { Place = ResolveConstExpression(update.Place, locals, functions, variableCount) };
             case BoundBinary binary:
                 return binary with {
                     Left = ResolveConstExpression(binary.Left, locals, functions, variableCount),
@@ -375,6 +379,15 @@ internal sealed partial class Binder
                 return constant;
             case BoundRead read when slots[read.Variable] is BoundConstant value:
                 return value;
+            case BoundUpdate { Place: BoundRead read } update when slots[read.Variable] is BoundConstant old:
+            {
+                var operation = update.Operator == TokenKind.PlusPlus ? TokenKind.Plus : TokenKind.Minus;
+                var next = FoldScalarConstant(new BoundBinary(operation, old,
+                    new BoundConstant(1, update.Type, update.Span), update.Type, update.Span))
+                    as BoundConstant ?? throw new ConstEvalFailure("ConstEval checked update overflowed.");
+                slots[read.Variable] = next;
+                return update.IsPrefix ? next : old;
+            }
             case BoundUnary unary:
             {
                 var operand = EvaluateConstExpression(unary.Operand, slots, functions, depth, state);

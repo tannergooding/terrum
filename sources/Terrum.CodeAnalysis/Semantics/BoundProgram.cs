@@ -526,6 +526,10 @@ public sealed record BoundMutableFieldLoan(BoundFieldRead Place, PrimitiveType T
 /// <param name="Span">The source range.</param>
 public sealed record BoundUnary(TokenKind Operator, BoundExpression Operand, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
 
+/// <summary>Reads a writable integer place once and commits a checked replacement before returning its selected value.</summary>
+public sealed record BoundUpdate(TokenKind Operator, BoundExpression Place, bool IsPrefix,
+    PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+
 /// <summary>A checked binary or short-circuit boolean operation.</summary>
 /// <param name="Operator">The operator token.</param>
 /// <param name="Left">The first input.</param>

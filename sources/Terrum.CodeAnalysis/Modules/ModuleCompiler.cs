@@ -48,6 +48,7 @@ public static partial class ModuleCompiler
     private const int VacantLocalVersion = 40;
     private const int ConditionalVersion = 41;
     private const int CoalescingVersion = 42;
+    private const int UpdateVersion = 43;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -828,7 +829,8 @@ public static partial class ModuleCompiler
         Action<BoundViewScope>? visitView = null, Action? visitLoopTransfer = null,
         Action<BoundMutableFieldLoan>? visitMutableFieldLoan = null,
         Action<BoundStatement>? visitStructuredLoop = null, Action<BoundVacantLocal>? visitVacantLocal = null,
-        Action<BoundConditional>? visitConditional = null, Action? visitCoalesce = null)
+        Action<BoundConditional>? visitConditional = null, Action? visitCoalesce = null,
+        Action? visitUpdate = null)
     {
         var calls = new List<int>();
         VisitStatement(body);
@@ -954,6 +956,10 @@ public static partial class ModuleCompiler
                 case BoundUnary unary:
                     VisitExpression(unary.Operand);
                     break;
+                case BoundUpdate update:
+                    visitUpdate?.Invoke();
+                    VisitExpression(update.Place);
+                    break;
                 case BoundBinary binary:
                     VisitExpression(binary.Left);
                     VisitExpression(binary.Right);
@@ -1035,6 +1041,13 @@ public static partial class ModuleCompiler
     {
         var found = false;
         _ = Calls(body, visitConditional: _ => found = true);
+        return found;
+    }
+
+    private static bool HasUpdate(BoundStatement body)
+    {
+        var found = false;
+        _ = Calls(body, visitUpdate: () => found = true);
         return found;
     }
 
@@ -1357,6 +1370,10 @@ public static partial class ModuleCompiler
                 Type = RemapType(unary.Type, source, destination, classOffset),
                 Operand = RemapExpression(unary.Operand, source, destination, classOffset),
             },
+            BoundUpdate update => update with {
+                Type = RemapType(update.Type, source, destination, classOffset),
+                Place = RemapExpression(update.Place, source, destination, classOffset),
+            },
             BoundBinary binary => binary with {
                 Type = RemapType(binary.Type, source, destination, classOffset),
                 Left = RemapExpression(binary.Left, source, destination, classOffset),
@@ -1556,6 +1573,11 @@ public static partial class ModuleCompiler
             && HasCoalescing(function.Body)))
         {
             version = Math.Max(version, CoalescingVersion);
+        }
+        if (module.Functions.Any(item => item.Function is BoundFunction function
+            && HasUpdate(function.Body)))
+        {
+            version = Math.Max(version, UpdateVersion);
         }
         writer.Write(Magic);
         writer.Write(version);
@@ -1779,6 +1801,13 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Coalescing requires semantic module version 42.");
             }
+            if (version < UpdateVersion && items.Any(item => item.Function is BoundFunction function
+                && HasUpdate(function.Body))
+                || version == UpdateVersion && !items.Any(item => item.Function is BoundFunction function
+                    && HasUpdate(function.Body)))
+            {
+                throw new ModuleFormatException("Update expressions require semantic module version 43.");
+            }
             if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
                 || !items.Any(static item => item.Import && item.Function is BoundFunction function
                     && !ManagedExportShape.ScalarOnly(function))))
@@ -1833,7 +1862,7 @@ public static partial class ModuleCompiler
             or ManagedGraphParticipantVersion or PrivateInitReferenceVersion or ExplicitGetterVersion
             or TransparentLayoutVersion or WideClassFieldsVersion or CorePrimitiveVersion
             or CorePrimitiveGetterVersion or StructuredLoopVersion or VacantLocalVersion or ConditionalVersion
-            or CoalescingVersion))
+            or CoalescingVersion or UpdateVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -2499,6 +2528,7 @@ public static partial class ModuleCompiler
             BoundConstant => (byte)1,
             BoundRead => (byte)2,
             BoundUnary => (byte)3,
+            BoundUpdate => (byte)24,
             BoundBinary => (byte)4,
             BoundConditional => (byte)22,
             BoundCoalesce => (byte)23,
@@ -2572,6 +2602,11 @@ public static partial class ModuleCompiler
                 writer.Write((int)unary.Operator);
                 PutExpression(writer, unary.Operand, names, ref remaining, depth + 1);
                 break;
+            case BoundUpdate update:
+                writer.Write((int)update.Operator);
+                writer.Write(update.IsPrefix);
+                PutExpression(writer, update.Place, names, ref remaining, depth + 1);
+                break;
             case BoundBinary binary:
                 writer.Write((int)binary.Operator);
                 PutExpression(writer, binary.Left, names, ref remaining, depth + 1);
@@ -2635,6 +2670,11 @@ public static partial class ModuleCompiler
                 return new BoundRead(reader.ReadInt32(), type, span);
             case 3:
                 return new BoundUnary((TokenKind)reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1, version), type, span);
+            case 24 when version >= UpdateVersion:
+                var updateOperator = (TokenKind)reader.ReadInt32();
+                var prefix = reader.ReadBoolean();
+                return new BoundUpdate(updateOperator, GetExpression(reader, ref remaining, depth + 1, version),
+                    prefix, type, span);
             case 4:
                 var op = (TokenKind)reader.ReadInt32();
                 var left = GetExpression(reader, ref remaining, depth + 1, version);
@@ -2762,6 +2802,7 @@ public static partial class ModuleCompiler
             ? new BoundCall(index, [.. call.Arguments.Select(argument => ResolveExpression(argument, names))], call.Type, call.Span)
             : throw new ModuleContractException($"Unresolved call target '{call.Name}'."),
         BoundUnary unary => unary with { Operand = ResolveExpression(unary.Operand, names) },
+        BoundUpdate update => update with { Place = ResolveExpression(update.Place, names) },
         BoundBinary binary => binary with { Left = ResolveExpression(binary.Left, names), Right = ResolveExpression(binary.Right, names) },
         BoundCoalesce coalesce => coalesce with {
             Optional = ResolveExpression(coalesce.Optional, names),

@@ -173,6 +173,14 @@ internal sealed partial class PeCompiler
                 case BoundUnary unary:
                     CollectExpression(unary.Operand, spill);
                     break;
+                case BoundUpdate update:
+                    if (update.Place is BoundFieldRead)
+                    {
+                        _ = slots.Add(spill);
+                    }
+                    CollectExpression(update.Place is BoundFieldRead receiver ? receiver.Receiver
+                        : update.Place is BoundBufferRead updateBuffer ? updateBuffer.Index : update.Place, spill);
+                    break;
                 case BoundCast cast:
                     CollectExpression(cast.Operand, spill);
                     break;

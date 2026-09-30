@@ -920,7 +920,18 @@ internal sealed class Parser
         }
         else if (unaryPrecedence != 0 && unaryPrecedence >= parentPrecedence)
         {
-            left = Node(SyntaxKind.UnaryExpression, [Take(), ParseExpression(unaryPrecedence)]);
+            var op = Take();
+            if (op.Token.Kind is TokenKind.PlusPlus or TokenKind.MinusMinus
+                && ((Current.Kind is TokenKind.Plus or TokenKind.Minus or TokenKind.PlusPlus or TokenKind.MinusMinus
+                        && Current.Span.Start == op.Span.End)
+                    || (_position >= 2 && _tokens[_position - 2].Kind is TokenKind.Plus or TokenKind.Minus
+                        && _tokens[_position - 2].Span.End == op.Span.Start)))
+            {
+                Report("TRM1001", "Separate adjacent operator glyphs with trivia.", Current.Span);
+            }
+            left = Node(op.Token.Kind is TokenKind.PlusPlus or TokenKind.MinusMinus
+                ? SyntaxKind.UpdateExpression : SyntaxKind.UnaryExpression,
+                [op, ParseExpression(unaryPrecedence)]);
         }
         else
         {
@@ -1024,6 +1035,16 @@ internal sealed class Parser
             else if (Current.Kind == TokenKind.OpenBracket)
             {
                 expression = Node(SyntaxKind.IndexExpression, [expression, Take(), ParseExpression(), Expect(TokenKind.CloseBracket)]);
+            }
+            else if (Current.Kind is TokenKind.PlusPlus or TokenKind.MinusMinus)
+            {
+                var op = Take();
+                if (Current.Kind is TokenKind.Plus or TokenKind.Minus or TokenKind.PlusPlus or TokenKind.MinusMinus
+                    && Current.Span.Start == op.Span.End)
+                {
+                    Report("TRM1001", "Separate adjacent operator glyphs with trivia.", Current.Span);
+                }
+                expression = Node(SyntaxKind.UpdateExpression, [expression, op]);
             }
             else
             {
@@ -1165,7 +1186,8 @@ internal sealed class Parser
     private static bool IsTypeStart(TokenKind kind) => kind is TokenKind.Identifier or TokenKind.VoidKeyword
         or TokenKind.WriteKeyword;
 
-    private static int UnaryPrecedence(TokenKind kind) => kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Bang or TokenKind.Tilde or TokenKind.MoveKeyword ? 12 : 0;
+    private static int UnaryPrecedence(TokenKind kind) => kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Bang
+        or TokenKind.Tilde or TokenKind.MoveKeyword or TokenKind.PlusPlus or TokenKind.MinusMinus ? 12 : 0;
 
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Non-operator tokens have zero precedence.")]
     private static int BinaryPrecedence(TokenKind kind) => kind switch {

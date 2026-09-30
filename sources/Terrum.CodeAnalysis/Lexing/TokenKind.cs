@@ -177,4 +177,8 @@ public enum TokenKind
     QuestionQuestion,
     /// <summary>The null-coalescing assignment operator (<c>??=</c>).</summary>
     QuestionQuestionEquals,
+    /// <summary>The increment operator (<c>++</c>).</summary>
+    PlusPlus,
+    /// <summary>The decrement operator (<c>--</c>).</summary>
+    MinusMinus,
 }

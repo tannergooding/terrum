@@ -135,6 +135,7 @@ public static partial class ModuleCompiler
                 Place = (BoundFieldRead)LegacyExpression(loan.Place),
             },
             BoundUnary unary => unary with { Type = type, Operand = LegacyExpression(unary.Operand) },
+            BoundUpdate update => update with { Type = type, Place = LegacyExpression(update.Place) },
             BoundBinary binary => binary with {
                 Type = type,
                 Left = LegacyExpression(binary.Left),

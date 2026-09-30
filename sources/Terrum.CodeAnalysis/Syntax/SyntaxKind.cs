@@ -133,4 +133,6 @@ public enum SyntaxKind
     LabeledLoopStatement,
     /// <summary>A right-associative conditional choice.</summary>
     ConditionalExpression,
+    /// <summary>A prefix or postfix update of an initialized writable Copy place.</summary>
+    UpdateExpression,
 }

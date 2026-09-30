@@ -654,6 +654,9 @@ public static class SemanticVerifier
                 case BoundUnary unary:
                     Expression(unary.Operand, scope, depth + 1);
                     break;
+                case BoundUpdate update:
+                    Expression(update.Place, scope, depth + 1);
+                    break;
                 case BoundCast cast:
                     Expression(cast.Operand, scope, depth + 1);
                     break;
@@ -1112,6 +1115,9 @@ public static class SemanticVerifier
                     break;
                 case BoundUnary unary:
                     Expression(unary.Operand, depth + 1, acquiringRoot);
+                    break;
+                case BoundUpdate update:
+                    Expression(update.Place, depth + 1, acquiringRoot);
                     break;
                 case BoundCast cast:
                     Expression(cast.Operand, depth + 1, acquiringRoot);
@@ -1754,7 +1760,7 @@ public static class SemanticVerifier
                 failures?.Add(initialized, fieldMasks);
                 return false;
             case BoundExpressionStatement expressionStatement:
-                if (expressionStatement.Expression is not (BoundCall or BoundViewRead))
+                if (expressionStatement.Expression is not (BoundCall or BoundViewRead or BoundUpdate))
                 {
                     throw Invalid();
                 }
@@ -2381,6 +2387,44 @@ public static class SemanticVerifier
         }
     }
 
+    private static void VerifyUpdatePlace(BoundExpression place, BoundFunction function,
+        BoundProgram program, ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        switch (place)
+        {
+            case BoundRead read when read.Variable >= 0 && read.Variable < function.Variables.Length
+                && read.Type == function.Variables[read.Variable].Type
+                && function.Variables[read.Variable].IsMutable:
+                return;
+            case BoundBufferRead buffer when buffer.Buffer >= 0 && buffer.Buffer < program.Buffers.Length
+                && program.Buffers[buffer.Buffer].IsWritable
+                && program.Buffers[buffer.Buffer].ElementType == buffer.Type:
+                return;
+            case BoundFieldRead field when field.Receiver is not null
+                && HasFields(program, field.Receiver.Type)
+                && field.Field >= 0 && field.Field < Fields(program, field.Receiver.Type).Length
+                && CanAccessField(function, program, field.Receiver.Type, field.Field)
+                && field.Type == Fields(program, field.Receiver.Type)[field.Field].Type
+                && Fields(program, field.Receiver.Type)[field.Field].IsMutable:
+                if (ManagedClassTypes.IsClass(field.Receiver.Type))
+                {
+                    if (ManagedClassTypes.IsWritable(field.Receiver.Type))
+                    {
+                        return;
+                    }
+                }
+                else if (!IsUnique(program, field.Receiver.Type)
+                    || field.Receiver is BoundRead)
+                {
+                    VerifyUpdatePlace(field.Receiver, function, program, ref remaining, depth + 1);
+                    return;
+                }
+                break;
+        }
+        throw InvalidEffect(place.Span, "Ownership");
+    }
+
     private static int VerifyUniqueFieldPlace(BoundFieldRead place, bool[] initialized, uint[] fieldMasks,
         BoundFunction function, BoundProgram program, ref int remaining, int depth)
     {
@@ -2725,6 +2769,21 @@ public static class SemanticVerifier
                 {
                     failures?.Add(initialized, fieldMasks);
                 }
+                break;
+            case BoundUpdate update:
+                if (update.Place is null || update.Operator is not (TokenKind.PlusPlus or TokenKind.MinusMinus)
+                    || update.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32
+                        or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                    || update.Place.Type != update.Type || function.IsNoThrow
+                    || update.Place is BoundRead { Variable: 0 } && function.DeclaringStruct is not null
+                        && !function.IsStatic)
+                {
+                    throw InvalidEffect(update.Span);
+                }
+                VerifyUpdatePlace(update.Place, function, program, ref remaining, depth + 1);
+                Expression(update.Place, initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+                failures?.Add(initialized, fieldMasks);
                 break;
             case BoundBinary binary:
                 var beforeLeft = (bool[])initialized.Clone();
@@ -3089,6 +3148,8 @@ public static class SemanticVerifier
             BoundMutableReceiverLoan loan => loan.Variable == variable,
             BoundMutableFieldLoan loan => LoanRoot(loan, ref remaining, depth + 1) == variable,
             BoundUnary unary => InvalidatesReservedOwner(unary.Operand, variable, ref remaining, depth + 1),
+            BoundUpdate update => WritesUpdateRoot(update.Place, variable, ref remaining, depth + 1)
+                || InvalidatesReservedOwner(update.Place, variable, ref remaining, depth + 1),
             BoundCast cast => InvalidatesReservedOwner(cast.Operand, variable, ref remaining, depth + 1),
             BoundOptionalLift lift => InvalidatesReservedOwner(lift.Value, variable, ref remaining, depth + 1),
             BoundReadonlyProjection projection => InvalidatesReservedOwner(projection.Value, variable, ref remaining, depth + 1),
@@ -3104,6 +3165,16 @@ public static class SemanticVerifier
             BoundFieldRead field => InvalidatesReservedOwner(field.Receiver, variable, ref remaining, depth + 1),
             BoundBufferRead buffer => InvalidatesReservedOwner(buffer.Index, variable, ref remaining, depth + 1),
             BoundViewRead view => InvalidatesReservedOwner(view.Index, variable, ref remaining, depth + 1),
+            _ => false,
+        };
+    }
+
+    private static bool WritesUpdateRoot(BoundExpression place, int variable, ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        return place switch {
+            BoundRead read => read.Variable == variable,
+            BoundFieldRead field => WritesUpdateRoot(field.Receiver, variable, ref remaining, depth + 1),
             _ => false,
         };
     }
@@ -3275,6 +3346,9 @@ public static class SemanticVerifier
                 break;
             case BoundUnary unary:
                 VacateNestedOutputs(unary.Operand, state, ref remaining);
+                break;
+            case BoundUpdate update:
+                VacateNestedOutputs(update.Place, state, ref remaining);
                 break;
             case BoundCast cast:
                 VacateNestedOutputs(cast.Operand, state, ref remaining);

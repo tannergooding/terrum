@@ -213,9 +213,9 @@ public sealed class Lexer
                 }
                 return TokenKind.Question;
             case '+':
-                return TokenKind.Plus;
+                return Compound('+', TokenKind.PlusPlus, TokenKind.Plus);
             case '-':
-                return TokenKind.Minus;
+                return Compound('-', TokenKind.MinusMinus, TokenKind.Minus);
             case '*':
                 return TokenKind.Star;
             case '/':
