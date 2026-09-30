@@ -230,7 +230,7 @@ public interface ITextWriter
 public mut unique struct SpanTextWriter<TCodeUnit> : ITextWriter
     where TCodeUnit : [TextCodeUnit]
 {
-    [Captures(nameof(destination))]
+    [Captures("destination")]
     public SpanTextWriter(write Span<TCodeUnit> destination);
     public nuint Written { get; }
     public mut bool TryWrite(TextSpan text);
@@ -241,7 +241,7 @@ public mut unique struct SpanTextWriter<TCodeUnit> : ITextWriter
 public class Text : IFormattable
 {
     public TextSpan AsSpan();
-    [TextTarget(nameof(content))]
+    [TextTarget("content")]
     public static own<val<Text>> Create<TContent>(TContent content)
         where TContent : IFormattable;
 }
@@ -596,7 +596,11 @@ can be met; a `Span<uint8>` is not an arbitrary typed allocation.
 
 ## 5. Collections, iteration and eager algorithms
 
-Initial managed collections from `collections.api.terrum` (design-only):
+Initial managed collections from `collections.api.terrum` (design-only).
+The collection-builder attribute argument below is **UNAPPROVED CANDIDATE
+SPELLING**: `typeof(ListBuilder<>)` is outside the adopted expression and
+attribute-argument grammar, which specifies neither `typeof` nor open-generic
+type arguments.
 
 ```terrum
 [CollectionBuilder(typeof(ListBuilder<>))]
@@ -610,7 +614,7 @@ public mut class List<T>
     public mut void Clear();
     public mut void RemoveAt(nuint index);
     [ViewOf(Access.Write)] public mut ListWriteAccess<T> GetWriteAccess();
-    [ViewOf(Access.Write, To = nameof(access))]
+    [ViewOf(Access.Write, "access")]
     public mut bool TryGetWriteAccess(init ref<ListWriteAccess<T>> access);
 }
 public mut unique struct ListBuilder<T>
@@ -1812,15 +1816,15 @@ Terminal/TextWriter are the existing scoped application I/O surface:
 public enum TerminalOutput : int32 { Standard, Error }
 public static class Terminal
 {
-    [TextTarget(nameof(content))]
+    [TextTarget("content")]
     public static void Write<TContent>(TContent content,
         TerminalOutput output = TerminalOutput.Standard)
         where TContent : IFormattable;
-    [TextTarget(nameof(content))]
+    [TextTarget("content")]
     public static void WriteLine<TContent>(TContent content,
         TerminalOutput output = TerminalOutput.Standard)
         where TContent : IFormattable;
-    [TextTarget(nameof(content))]
+    [TextTarget("content")]
     public static Task WriteLineAsync<TContent>(TContent content,
         TerminalOutput output = TerminalOutput.Standard)
         where TContent : IFormattable;
@@ -1833,13 +1837,13 @@ public mut class TextWriter : ITextWriter
     public mut bool TryWriteScalar(rune value);
     public mut bool TryWriteFormatted<TValue>(ref<TValue> value, TextSpan format)
         where TValue : IFormattable;
-    [TextTarget(nameof(content))]
+    [TextTarget("content")]
     public mut void Write<TContent>(TContent content)
         where TContent : IFormattable;
-    [TextTarget(nameof(content))]
+    [TextTarget("content")]
     public mut void WriteLine<TContent>(TContent content)
         where TContent : IFormattable;
-    [TextTarget(nameof(content))]
+    [TextTarget("content")]
     public mut Task WriteLineAsync<TContent>(TContent content)
         where TContent : IFormattable;
 }
@@ -2151,10 +2155,10 @@ public interface IByteStream
     mut Result<nuint, Error> Write(Span<uint8> source);
     mut Result<void, Error> Flush();
     mut Result<void, Error> Close();
-    [Captures(nameof(destination))]
+    [Captures("destination")]
     mut Task<Result<nuint, Error>> ReadAsync(write Span<uint8> destination,
         CancellationToken cancellation);
-    [Captures(nameof(source))]
+    [Captures("source")]
     mut Task<Result<nuint, Error>> WriteAsync(Span<uint8> source,
         CancellationToken cancellation);
 }
@@ -2170,10 +2174,10 @@ public mut unique struct FileHandle : IByteStream
     public mut Result<nuint, Error> Write(Span<uint8> source);
     public mut Result<void, Error> Flush();
     public mut Result<void, Error> Close();
-    [Captures(nameof(destination))]
+    [Captures("destination")]
     public mut Task<Result<nuint, Error>> ReadAsync(write Span<uint8> destination,
         CancellationToken cancellation);
-    [Captures(nameof(source))]
+    [Captures("source")]
     public mut Task<Result<nuint, Error>> WriteAsync(Span<uint8> source,
         CancellationToken cancellation);
 }
@@ -2201,10 +2205,10 @@ public mut unique struct TcpConnection : IByteStream
     public mut Result<nuint, Error> Read(write Span<uint8> destination);
     public mut Result<nuint, Error> Write(Span<uint8> source);
     public mut Result<void, Error> Flush();
-    [Captures(nameof(destination))]
+    [Captures("destination")]
     public mut Task<Result<nuint, Error>> ReadAsync(write Span<uint8> destination,
         CancellationToken cancellation);
-    [Captures(nameof(source))]
+    [Captures("source")]
     public mut Task<Result<nuint, Error>> WriteAsync(Span<uint8> source,
         CancellationToken cancellation);
     public mut Result<void, Error> Close();
@@ -2240,7 +2244,7 @@ closed; actual constructor capture/lifetime metadata is still **OPEN**.
 public mut unique struct Utf8TextReader<TStream>
     where TStream : IByteStream
 {
-    [Captures(nameof(source))]
+    [Captures("source")]
     public Utf8TextReader(write ref<TStream> source,
         MalformedTextPolicy policy, nuint bufferCapacity);
     public mut Result<bool, Error> ReadScalar(init ref<rune> value);
@@ -2250,7 +2254,7 @@ public mut unique struct Utf8TextReader<TStream>
 public mut unique struct Utf8TextWriter<TStream>
     where TStream : IByteStream
 {
-    [Captures(nameof(destination))]
+    [Captures("destination")]
     public Utf8TextWriter(write ref<TStream> destination, nuint bufferCapacity);
     public mut Result<void, Error> Write(TextSpan source);
     public mut Result<void, Error> WriteScalar(rune value);
