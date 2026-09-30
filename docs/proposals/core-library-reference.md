@@ -71,8 +71,8 @@ The accepted semantic direction normalizes optional `T?` substitutions: `T?` wit
 A distinct nominal union can preserve distinctions that optional normalization cannot, including missing versus present-null by making its payload itself optional. These are illustrative type shapes, not approved declaration grammar:
 
 ```terrum
-// Optional alias/projection intent; exact alias syntax is pending.
-Option<T> := T?;
+// Candidate transparent alias; declaration scope and export remain open.
+alias Option<T> = T?;
 
 // Separate nominal cases preserve Missing versus Found(null).
 public nominal union Lookup<T>

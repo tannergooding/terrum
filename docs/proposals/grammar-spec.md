@@ -153,13 +153,15 @@ context.
 | Namespace | `namespace` | Declare the file-scoped namespace. |
 | Visibility | `public`, `internal`, `private` | Restrict declaration access. |
 | Nominal declarations | `struct`, `class`, `interface`, `enum`, `union` | Name types; union declaration syntax remains open. |
+| Type aliases | `alias` | Name a transparent type synonym; scope and visibility remain open. |
+| Associated types | `type` | Declare an interface requirement or bind it in a conformance. |
 | Declaration composition | `partial` | Merge parts of one identity. |
 | Extension declarations | `extension` | Declare scoped extensions; exact syntax remains open. |
 | External declarations | `extern` | Bind external definitions; exact syntax remains open. |
 | Member kinds | `static`, `operator` | Declare static members and operators. |
 | Property accessors | `get`, `set`, `init` | Read, write or initialize properties. |
 | Property backing | `field` | Access only the enclosing property's backing place. |
-| Receiver | `this` | Refer to the enclosing member's receiver. |
+| Receiver and self binder | `this` | Refer to the member receiver; `<this T>` is a candidate interface self-formal spelling. |
 | Generic constraints | `where` | State formal parameter constraints. |
 | Compile-time values | `const` | Require static evaluation; const-value formal syntax remains open. |
 | Type forms | `void`, `var` | Name a zero-data result or infer a local type. |
@@ -202,14 +204,14 @@ FileNamespace   = "namespace", DottedIdentifier, ";" ;
 DottedIdentifier = Identifier, { ".", Identifier } ;
 
 TopDeclaration = TopPrefix, ( StructDecl | ClassDecl | InterfaceDecl
-                              | EnumDecl | FunctionDefinition ) ;
+                              | EnumDecl | AliasDecl | FunctionDefinition ) ;
 MemberDeclaration = MemberPrefix,
                     ( ConstructorDecl | FunctionDefinition | OperatorDefinition
                     | ConversionDefinition
-                    | FieldDecl | PropertyDefinition ) ;
+                    | FieldDecl | PropertyDefinition | AssociatedTypeBinding ) ;
 InterfaceMemberDeclaration = InterfaceMemberPrefix,
                              ( InterfaceFunction | InterfaceOperator
-                             | InterfaceProperty ) ;
+                             | InterfaceProperty | AssociatedTypeRequirement ) ;
 TopPrefix       = ContextualPrefix ;
 MemberPrefix    = ContextualPrefix ;
 InterfaceMemberPrefix = ContextualPrefix ;
@@ -229,6 +231,9 @@ InterfaceDecl   = "interface", Identifier, [ TypeParameterList ],
 EnumDecl        = "enum", Identifier, ":", IntegralType,
                   "{", [ EnumMember, { ",", EnumMember }, [ "," ] ], "}" ;
 EnumMember      = Identifier, [ "=", ConstantExpression ] ;
+AliasDecl       = "alias", Identifier, [ TypeParameterList ], "=", Type, ";" ;
+AssociatedTypeRequirement = "type", Identifier, ";" ;
+AssociatedTypeBinding = "type", Identifier, "=", Type, ";" ;
 ConformanceList = ":", Type, { ",", Type } ;
 InterfaceBaseList = ":", Type, { ",", Type } ;
 IntegralType    = DottedIdentifier ;
@@ -268,7 +273,13 @@ and before declarations. Fields and constructors occur in class/struct bodies;
 interface members do not include fields or constructors. The `ContextualPrefix`
 placeholder is deliberate: attributes and modifiers are checked by declaration
 context, and their exact legal combinations remain **OPEN**. It is not a
-production that permits every modifier on every declaration.
+production that permits every modifier on every declaration. Whether legal
+prefix modifiers have one required order or permit permutations with duplicate
+and conflict checks remains open. Callable contract clauses may belong after
+the parameter list rather than in the prefix. Likewise, §3.1 sketches a
+prefix result type, while §5.7 uses an arrow only to describe conceptual
+operator results; `Name(args) -> Result` is a source-form alternative to
+evaluate consistently across functions, members and operators.
 Core's privileged primitive declaration uses `StructDecl` and `FieldDecl`
 without a separate grammar production; its binding and representation
 restrictions are semantic checks, not lexical exceptions.
@@ -305,7 +316,16 @@ composition, not implementation of an interface by itself.
 The candidate integral enum base and constant-valued members preserve unnamed
 underlying values; `[Flags]` is an optional declaration contract, not a
 different closed enum grammar. `IntegralType` and `ConstantExpression` require
-semantic restrictions beyond their syntactic approximations. Only a named property is proposed here; neither property production is an
+semantic restrictions beyond their syntactic approximations. `AliasDecl`
+names the target type without defining a new nominal identity or adding
+conformance; generic aliases substitute their type formals into the target.
+Its placement in `TopDeclaration` sketches a namespace-level form, not a
+decision to ban aliases at other legal declaration scopes. Associated
+`type Name;` declares an interface requirement; `type Name = Type;` in an
+implementing nominal type binds a selected requirement rather than declaring
+an arbitrary nested nominal type. Exact binding, visibility, default associated
+types, alias cycles, qualification and export rules remain open (see §5.4).
+Only a named property is proposed here; neither property production is an
 indexer or `this[...]` form. `get`, `set` and accessor `init` need lexical
 decisions; accessor effects attach to their attributes, not the entire
 property. A `set` or `init` body receives a typed `value` parameter; `init`
@@ -727,26 +747,46 @@ dependency bodies.
 
 The exact declaration grammar and contract metadata remain open.
 
-### 5.4 Associated types: accepted direction, open source grammar; type packs out of scope
+### 5.4 Aliases and associated types: candidate declarations, open binding
 
 **Accepted semantic direction:** families opt in explicitly and declare
 checked associated projections and constraints. Existing explicit
 declarations such as `TextSpan<void>` are not reopened; this is not universal
 `Type<T>`-to-`Type<void>` erasure. Associated types are named type members of
-an interface witness. For example, `IInteger<TSelf>` may declare
-`type Wider;`, and a conformance binds it with
-`type Wider = MyWideInteger;`. `T.Wider` resolves through the selected
-`IInteger<T>` witness. An associated equality may explicitly bind a type
-parameter, illustratively `where T : IInteger<T, Wider = U>`. Do not infer the
-original `T` backward from an associated result, choose an arbitrary
-implementer from a constraint, or silently resolve collisions; ambiguous
-witness/projection uses require explicit qualification.
+an interface witness. The candidate §3.1 forms are `type Wider;` in the
+interface and `type Wider = MyWideInteger;` in a conforming type.
+`T.Wider` resolves through the selected `IInteger<T>` witness. An associated
+equality may explicitly bind a type parameter, illustratively
+`where T : IInteger<T, Wider = U>`. Do not infer the original `T` backward
+from an associated result, choose an arbitrary implementer from a constraint,
+or silently resolve collisions; ambiguous witness/projection uses require
+explicit qualification.
 
-**Open:** formalize the interface/member, implementation
-binding, projection, and associated-equality productions; witness selection,
-qualification and collision rules; and their metadata representation. Keep
-family opt-in and declared checked projections; do not introduce universal
-erasure or inferred covariance.
+**Proposed alias form:** `alias Option<T> = T?;` names the same resolved type,
+not a distinct wrapper or new witness. Exporting or qualifying an alias
+cannot create a new nominal identity or change the target's access, ownership,
+layout or compatibility contract. Whether aliases are permitted as members
+or only at namespace scope, their legal visibility and use across module
+boundaries, cycle detection and generic substitution rules remain open.
+Associated-type bindings are distinct: they satisfy a selected interface
+member and have witness identity, rather than providing a general synonym.
+
+**Candidate self-binding spelling for review:** `interface IInteger<this T>`
+could name the implementing type as the interface's `T` formal, in place of
+an implicit `Self` name. This has no §3.1 production yet; its uniqueness,
+conformance binding, use in non-generic interfaces and interaction with
+ordinary type parameters need decisions. It does not alter the accepted
+associated-type relations.
+
+**Open:** formalize projection and associated-equality productions; witness
+selection, qualification and collision rules; and their metadata
+representation. Keep family opt-in and declared checked projections; do
+not introduce universal erasure or inferred covariance.
+Interface construction requirements and constant members are separate open
+questions: neither follows from a `type Name;` requirement. A constructor
+requirement would need a checked construction and initialization-completion
+contract; a fixed interface constant and an implementer-supplied associated
+constant have different binding and versioning rules.
 
 **Source type packs are outside this proposal's scope.** No production or
 recommendation for variadic type parameters is made here.
@@ -812,6 +852,9 @@ operator true(T operand) -> bool;
 operator false(T operand) -> bool;
 ```
 
+The arrow in these conceptual signatures describes a result relationship,
+not a second accepted declaration form alongside §3.1's prefix result.
+Result placement for all callable declarations remains a source-form decision.
 No return-only overload is permitted: result type is part of the selected
 operation contract, not a mechanism for distinguishing declarations. The
 `true`/`false` pairing is the explicit pair requirement here; do not infer
@@ -955,6 +998,11 @@ Accessor effects attach to the accessor: `[NoThrow] get { ... }`. If an
 expression-bodied property form is supported, `[get: Attr] public int32 Count
 => 5` is a possible attribute-target direction; this does not select
 expression-bodied property support or an alternate effect placement.
+The candidate `Attribute` production currently covers only `[Name]`.
+Targeted attributes such as `[get: Name]` on the enclosing property, and
+module-level attributes, need explicit placement and target-validation rules;
+an `assembly` target would require an assembly concept rather than being
+inferred from a source file.
 
 An ordinary `[NoThrow] public int32 GetCount() { ... }` method is an
 alternative callable form; it is not a property-effect placement option.
@@ -1191,10 +1239,15 @@ Place = Expression ;
 `Place` requires a separately specified assignability check; an arbitrary
 expression is not a writable destination. A concrete declaration production
 for each compound operator and source/metadata binding must be designed before
-this shorthand becomes a legal statement.
+this shorthand becomes a legal statement. The approved checked-count shift
+semantics do not yet supply `<<`/`>>` operator declarations or `<<=`/`>>=`
+compound forms. Pointer dereference/address formation, short-circuit
+`&&`/`||` and optional fallback require their own access or evaluation-order
+contracts; they are not ordinary overloads merely because they have an
+operator-like spelling.
 
 Still **OPEN** for a full source grammar: nominal safe union cases and
-patterns/matching, associated-type bindings and family/adapter declarations,
+patterns/matching, associated-type projection/equality and family/adapter declarations,
 conditional/default conformance, conditional expressions, character and
 text-target fragments, general `const` declarations/expressions, `ensure`
 placement, `init ref<T>` parameters, optional access/ownership forms,
@@ -1255,6 +1308,8 @@ appears in §2.
 | Visibility | §2 lists access words; §3.1 uses context-restricted prefixes. | Legal access levels for each declaration kind. |
 | Nominal types | §3.1 sketches structs, classes, interfaces and integral-base enums. | Union and nested declarations, enum constant restrictions and contextual attributes. |
 | Generic declarations | §3.1 sketches type formals and constraints. | Const-value formals, defaults, associated types and inference. |
+| Aliases | §§3.1 and 5.4 sketch `alias Name<T> = Type;` as a transparent synonym. | Scope, visibility, cycles, substitution and cross-module export. |
+| Associated types | §§3.1 and 5.4 sketch `type Name;` requirements and `type Name = Type;` witness bindings. | Projection/associated-equality grammar, explicit witness qualification and self-binder syntax. |
 | Partial declarations | §5.12 defines one-identity merge and body-provision rules. | Detailed merge compatibility and attribute multiplicity. |
 | Core primitive declarations | §2 preserves reserved primitive identities with a privileged backing field. | Artifact identity, permitted members and separate-compilation enforcement. |
 | Fields | §3.1 sketches instance fields. | Attribute targets and layout restrictions. |
