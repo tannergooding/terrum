@@ -101,6 +101,21 @@ The `..^` proposal does not permit arbitrary range/spread-plus-prefix runs.
 Prefix chains such as `!!x`, `&*p` and `*&x` likewise need separation or
 grouping unless a distinct spelling is deliberately defined.
 
+**Access-attachment direction:** Add an operator-specific attachment rule,
+separate from punctuation-run recognition. Member-access `.` and `?.` must
+directly adjoin the receiver's final token or the following member's first
+token, or both. Thus `x.y`, `x. y`, `x .y` and a fluent chain continuing with
+`.Member` on the next line remain valid; `x . y` and `x ?. y` do not.
+Whitespace, line breaks and comments break attachment on that side.
+Grouping boundaries can supply attachment, as in `(x). Member`.
+The numeric-receiver grouping rule still applies independently.
+If Q26 selects prefix dereference, require `*` to attach to its following
+operand token: `*p`, `*(p)` and `*(*p)` are valid forms, but `* p` and
+`* *p` are not. Binary multiplication remains distinct and permits `x * y`.
+This attachment restriction deviates from C#'s trivia-insensitive member
+access and prefix dereference; it does not make arbitrary punctuation runs
+valid or select pointer-expression syntax by itself.
+
 **Comment-fence question:** Should a block comment select its closing fence
 from the opening star count, analogously to the selected delimiter length of
 raw text? Candidate `/*** **/ ***/` would contain `**/` as payload and end at
@@ -576,8 +591,12 @@ Whether to offer indexing alone or alongside prefix dereference remains
 open; indexing must retain the same unsafe/provenance/lifetime/access
 obligations, not imply an unavailable length or bounds guarantee.
 Under the general punctuation-separation proposal, multiple prefix
-indirections can use `*(*p)` or `* *p`; mandatory grouping would be an
-additional pointer-expression rule. Do not add a `**` punctuation exception.
+indirections require an explicit boundary between operators. With the
+access-attachment direction from Q03, prefix dereference must adjoin its
+following operand token, so use `*(*p)`, not `* *p` or `* p`.
+Grouping follows from attachment plus the absence of a `**` spelling,
+not a blanket restriction on every prefix operator.
+Do not add a `**` punctuation exception.
 Pointer types remain `ptr<ptr<T>>`, not C-style `T**`.
 This grouping restriction is proposed, not part of the accepted postfix
 grammar. It does not supply provenance, bounds, pinning or writable authority.
