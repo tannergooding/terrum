@@ -775,6 +775,14 @@ Nested generic closing delimiters retain their type-context recognition, so
 `List<List<T>>` does not require separating its closers. Comparison `<` and
 `>` remain spaced binary expression operators, not generic delimiters.
 
+The optional-type suffix `?` attaches directly to the type's final token:
+`T?`, `(T, U)?` and `List<T>?` are valid forms, but `T ?` and
+`List<T> ?` reject. In type context, optional suffixes may adjoin generic
+closing delimiters on either side, as in `List<T?>`, `List<T>?` and
+`List<List<T?>>`. These are explicit grammatical type boundaries, not
+general expression-operator spellings or permission to split arbitrary
+operator runs. Generic interior trivia remains optional, but may not
+separate a suffix from the type it qualifies.
 Repeated optional markers such as `T??` are not a valid source form.
 Optional normalization such as `T?` with an already-optional substitution is a
 separate semantic rule. In these productions, `mut` in a parameter is a

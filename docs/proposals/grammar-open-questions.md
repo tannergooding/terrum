@@ -88,7 +88,7 @@ The proposed allow list is:
 | One defined operator/punctuator spelling | Exactly a spelling assigned by the grammar, such as `++`, `+=`, `<<`, `??`, `?.`, `=>` or `..`; not concatenated operators. |
 | Grouping and list delimiters | `(`, `)`, `[`, `]`, `{`, `}`, `,` and `;` bound separate tokens, as in `x * (-y)` or `f(a[i])`; ordinary interior/separator trivia is flexible, with receiver attachment required for calls/indexing. |
 | Comment boundaries | Recognize ordinary `//`/`/*` and selected documentation `///`/`//*` openers before operator-run validation outside literals/comments; documentation-block recognition precedes ordinary line comments. |
-| Type-context punctuation | Optional `?` followed by generic closers and consecutive generic closers, as in `List<T?>` and `List<List<T>>`; only when required by the type/argument grammar. |
+| Type-context punctuation | Attached optional `?` before/after generic closers and consecutive generic closers, as in `List<T?>`, `List<T>?` and `List<List<T?>>`; only when required by the type/argument grammar. |
 | Range/from-end punctuator | Candidate named composite `..^` introduces an end-relative upper slice bound, as in `items[start..^1]`; not a freely concatenated `..` and `^` or a general arithmetic operator. |
 
 Literal contents and escaped identifier tokens follow their own lexical
@@ -183,12 +183,10 @@ checked against its declaration.
 **C# model:** Generic syntax is C#-inspired, but requiring opener attachment
 deviates from C#'s trivia-insensitive generic delimiters. Flexible interior
 trivia follows C#.
-Keyword-selected angle lists and optional-type punctuation remain separate
-decisions.
+Keyword-selected angle lists remain a separate decision.
 
-**Optional-type suffix question (awaiting review):** Should type suffix `?`
-attach directly to the type's final token?
-**Recommendation:** Require `T?`, `(T, U)?` and `List<T>?`, rejecting
+**Accepted optional-type suffix attachment:** Require type suffix `?` to
+attach directly to the type's final token. Use `T?`, `(T, U)?` and `List<T>?`, rejecting
 `T ?` and `List<T> ?`. In type context, explicitly permit optional markers
 next to generic closers, as in `List<T?>`, `List<T>?` and
 `List<List<T?>>`. These are grammatical type boundaries, not concatenated
@@ -198,6 +196,20 @@ the distinct spaced coalescing expression operator.
 **C# model:** Optional-type suffix syntax resembles C# nullable syntax,
 but mandatory attachment differs from C#'s trivia-insensitive spelling,
 and Terrum's optional semantics remain its own contract.
+
+**Keyword-selected angle-list question (awaiting review):** Should angle
+lists introduced by designated keywords follow the same opener-attachment
+rule as generic lists?
+**Recommendation:** Require `default<I>`, `.via<I>`,
+`policy<Domain.Case>` and `init ref<T>`; reject `default <I>`,
+`.via <I>`, `policy <Domain.Case>` and `init ref <T>`.
+Their `<` attaches to the designated introducer, with flexible interior
+trivia and a matching closer. This changes spacing only, not witness,
+policy or initialization-loan semantics. Word boundaries between separate
+keywords remain required; attachment does not permit `initref<T>`.
+**C# model:** These Terrum witness/policy/init forms have no direct C#
+equivalent. C# `default(T)` is a default-value expression, not Terrum's
+interface-default-body selector `default<I>`.
 This recommendation has not been accepted.
 
 **Comment-fence question:** Should a block comment select its closing fence

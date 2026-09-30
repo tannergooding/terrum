@@ -166,8 +166,13 @@ to adjoin the preceding name. Interior trivia remains optional, including
 comments and multiline arguments/closers. A constructed type remains a
 sequence of lexical tokens; generic delimiters are recognized by grammatical
 role, distinct from spaced binary comparisons.
+Optional-type suffix `?` adjoins the type's final token, including a tuple
+or generic closing delimiter. Type-context adjacency permits `List<T?>`,
+`List<T>?` and `List<List<T?>>`; it does not define general expression
+operators containing those glyph runs. `T ?` rejects, as does repeated
+source optional marking `T??`. Spaced coalescing `a ?? b` is unchanged.
 Keyword operators retain word boundaries. Other delimiter roles,
-optional-type punctuation and range syntax retain their own grammatical
+keyword-selected angle lists and range syntax retain their own grammatical
 rules; their exact remaining spacing requirements are separate design work.
 
 Punctuation adjacency follows an allow list: one defined spelling or an
