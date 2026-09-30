@@ -79,7 +79,7 @@ ABI changes; imported functions cannot satisfy required constant calls.
 Syntax-26 adds scalar `const expression` requirements in nested executable
 expressions, with the same limits and deferred constant substitution; no new
 native or semantic wire representation is emitted. The current parser version
-is syntax-28. Syntax-27 adds compile-time-only body `static require`
+is syntax-29. Syntax-27 adds compile-time-only body `static require`
 and outer-body `static ensure` for closed scalar proofs. Successful proofs
 leave no native operation or semantic wire record; known false, unsupported
 and unevaluated proofs diagnose before emission. Existing executable
@@ -771,7 +771,8 @@ skips the iterator; continuing reaches it before the next condition.
 An omitted condition is true. Header locals are scoped to the loop;
 the iterator cannot access body locals. Use assignments such as `i = i + 1`:
 increment operators and comma-separated clauses are not implemented.
-`break` and `continue` target the nearest loop and clean exited scopes inside-out,
+Bare `break` and `continue` target the nearest loop; syntax-29 named forms
+select an enclosing labeled loop. Both clean exited scopes inside-out,
 including `finally`, unique owners and exact managed roots. A `for` initializer's
 owner survives continue and retires on loop exit. Transfers out of `finally`
 are rejected; loops entirely within a `finally` may use their own transfers.
@@ -781,6 +782,16 @@ transfer; fail-fast termination still does not unwind.
 The [native loop-transfer fixture](../tests/native/managed-loop-transfer-abi.terrum)
 combines a retained initializer buffer, nested transfers/finally and managed
 cycles. Its C caller checks exact allocation/release counts under both policies.
+
+Syntax-29 also accepts `do { ... } while (condition);`: the body executes
+before the first test, and `continue` reaches that test after exited-scope
+cleanup. Labels may identify enclosing `while`, `for` and `do` loops.
+The bounded implementation rejects duplicate enclosing labels and permits
+reuse in disjoint scopes; the general source collision policy remains
+unspecified. Semantic v39 records post-tested loops and non-nearest transfer
+depths, while programs without those retained operations continue to select
+their earlier formats. Older headers reject the new nodes. Native calling
+conventions, cleanup funclets and public ABI do not change.
 
 Other integer widths, floating point, character/text literals, shifts, classes,
 optional/generic/family binding, general borrowed references, ownership/cleanup,

@@ -46,7 +46,7 @@ substitutions preserve readonly/write and supported optional qualification;
 they do not grant member, null-test or operator capabilities absent from the
 function's constraints. See the [bounded generic contract](docs/implementation.md#bounded-generic-functions)
 for inference, results, outputs, rooting and remaining limits.
-The current parser version is syntax-28. Syntax-18 recognizes qualified generic
+The current parser version is syntax-29. Syntax-18 recognizes qualified generic
 type arguments such as `write Record` and `write Record?`; managed generic
 producer examples use the existing semantic v24 managed contracts; other
 features still select their required versions. The native profile, wire
@@ -55,6 +55,12 @@ Syntax-28 adds expression bodies across supported functions, methods,
 operators, constructors and direct/explicit getters, reusing existing checked
 return/statement and cleanup lowering. It introduces no new callable ABI or
 module format; broader grammar approval is not compiler support.
+Syntax-29 adds post-tested loops and enclosing-loop named transfers, retaining
+checked cleanup, initialization, managed rooting and constant evaluation.
+Semantic v39 carries those new loop nodes when used; native ABI and scanner
+record/schema remain unchanged. The native scalar frontend also executes
+bounded nested expression trees and expression-bodied functions; it is still
+a compiler component, not a self-host compiler.
 Copy structs can explicitly implement homogeneous binary operator protocols
 for `+`, `-`, `*`, `/`, `%`, `&`, `|` and `^`. Generic bodies may use only the
 operators named by their constraints; identical signatures on unrelated

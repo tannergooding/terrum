@@ -1,6 +1,6 @@
 # Compiler and tooling implementation
 
-## Current boundary: syntax-28, semantic v38 Core primitive getters, native-10 through native-20
+## Current boundary: syntax-29, semantic v39 structured loops, native-10 through native-20
 
 The approved [source grammar](grammar-spec.md) is broader than this
 implementation. Syntax-28 adds `=>` bodies to supported top-level functions
@@ -20,6 +20,31 @@ semantic module versions and native ABI/profiles remain unchanged.
 Persisted semantic/native consumers use the same callable/property identity.
 This does not implement conversion declarations, setters, init accessors,
 auto-properties, indexers, lambdas, declaration contracts or async producers.
+
+Syntax-29 adds post-tested `do { ... } while (condition);` and lexical loop
+labels on `while`, `for` and `do`, with named `break`/`continue`. Transfer
+targets must be enclosing loops; transfers unwind exited cleanup and managed
+root scopes, and cannot escape a `finally` action. A post-tested `continue`
+checks its condition; a `for` continue executes the selected loop's iterator.
+Definite assignment includes the first post-tested iteration and all transfer
+edges. Required constant evaluation uses the same target/iteration order.
+The implemented subset rejects duplicate simultaneously enclosing labels
+but permits disjoint reuse; the general source collision policy remains
+[a question](proposals/grammar-open-questions.md#q37-loop-label-scope-and-shadowing).
+Semantic v39 is selected only for retained post-tested loops or non-nearest
+transfers; older headers reject those nodes. Ordinary pre-tested loops and
+nearest transfers retain their earlier feature-selected formats. No native
+ABI, scanner-5 record or syntax-protocol schema change is introduced.
+
+The executable Terrum scalar frontend additionally supports bounded nested
+expression trees and expression-bodied scalar functions through provisional
+projection v20. It retains existing v1–19 projections for their supported
+shapes. Its own parser and scalar binder produce up to 32 postorder nodes
+with bounded recursive descent; the host validates source anchors, types,
+node order, roots and precedence before lowering to the existing verified
+native backend. This is real native compiler-component execution, not a
+standalone compiler, general language adoption or a native machine-code
+encoder. See the [component boundary](../self-host/README.md).
 
 `Terrum.CodeAnalysis` is a reusable C# compiler library. `terrumc` exercises
 that library; it is not an independent parser or binder. Syntax snapshots remain
@@ -262,7 +287,7 @@ not a general unsafe escape hatch. Their consistency work is ordered in the
 | Lexing | Pinned Unicode identifiers with standalone `_` reserved, ASCII decimal, `0x`/`0X` hexadecimal and `0b`/`0B` binary numeric tokens, digit separators, decimal fractional/exponent token boundaries, comments, leading trivia, strings, diagnostics including `TRM0006`–`TRM0009` for numeric suffixes, missing based digits and malformed separators, EOF; the scanner-5 integer record retains suffix metadata only for diagnostic-bearing tokens | Interpolation, raw/character/native literals, directives |
 | Declarations | Using, file-scoped namespaces, functions, compact structs and `unique struct` with primitive/nested Copy/owning fields, bounded source classes including `mut class`, readonly default and writable `mut` class receivers, non-owning compact-struct `mut` methods with named mutable-local receiver writeback, explicit constructors/methods, checked `[NoThrow]`/`[DoesNotReturn]` and unique `[Cleanup]`; compilation-local static operator protocols and closed constrained functions; library binding and validated references, including combined leaf-producer [module sets](module-sets.md) and explicitly selected acyclic [native graphs](native-graph.md) | Inheritance, unique/inline classes, general interfaces, enums/unions, owning fields in Copy structs, general attributes and generic classes/structs (struct and field attributes diagnose `TRM3001`), parameter-only `implicit ref<T>` binding and ordinary reference-lifetime contracts, public generic witnesses, cyclic dependencies, automatic version resolution and resilient module layouts |
 | Types | Qualified named types, nested type arguments, one `?` per type nesting level, `void`; source-class and `ManagedNode` optional handles with `write` capability preserved through fields, parameters, results and inference; repeated `?` diagnoses | `pin ref<T>`, scalar options, general generic optional normalization after substitution, family defaults/conditional conformance, general ownership/form qualifiers and general borrowed references, transparent-wrapper ABI contracts |
-| Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, nearest-loop `break`/`continue`, return, statement-form `require`, bounded constant-only body `static require`/outer-body `static ensure`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements, standalone `_ = expression;` with statement-end owning cleanup | `defer`, policy blocks/expressions and variants, `unsafe(expr)`, `for (... in ...)`, labeled transfers, general switch/patterns and wildcard patterns, other context-specific discard destinations, declaration pre/postconditions and symbolic static proofs, typed requirement-failure selection, general exception objects/throw, async, compound assignment |
+| Statements | Initialized typed/inferred locals, `mut`, blocks, `if`/`else`, `while`, scoped `for`, post-tested `do`, nearest/named enclosing-loop `break`/`continue`, return, statement-form `require`, bounded constant-only body `static require`/outer-body `static ensure`, structured `try`/`finally`, unsafe checked `try`/`catch` (optionally with `finally`), assignment and expression statements, standalone `_ = expression;` with statement-end owning cleanup | `defer`, policy blocks/expressions and variants, `unsafe(expr)`, `for (... in ...)`, general switch/patterns and wildcard patterns, other context-specific discard destinations, declaration pre/postconditions and symbolic static proofs, typed requirement-failure selection, general exception objects/throw, async, compound assignment |
 | Expressions | Names, raw literals, `()`, grouping, unary/binary operations, context-typed decimal/hexadecimal/binary integer literals without fallback (based values construct target-width bit patterns), numeric digit separators, checked numeric type-call conversions for `int32`/`uint32`/`int64`/`uint64`/`char16`, member/index access, calls, scalar required `const` subexpressions and bounded internal `[ConstEval]` calls, explicit closed static-protocol calls, bounded inference of multiple independent type parameters for top-level generic function templates over eligible `Copy` structs, existing scalar value types and existing qualified source-class/`ManagedNode` handles (preserving readonly/write and supported optional qualification) from typed arguments or typed existing `out` destinations (expected-result context fills unresolved parameters present in the return type), generic signature-based result-type lookup, `new`, named whole-owner `move`, by-value unique arguments, conditional unique `bool`/`out` results, readonly unique and initialized owning-field loans, qualified source-class/`ManagedNode` writes and mutable-class receivers, named-place and writable nested-field loans for compact-struct `mut` receivers including fully initialized unique roots/children, named/ref/out argument syntax, checked synchronous `OwnedInt32Buffer` operations including `Set`/`TryAppend`/`Clear` and lexical `SliceMutable` through writable owning fields, and lexical readonly buffer slices | Floating/custom literal binding and registered borrowed-text parsers, public/generic constant-evaluation contracts, `require` output-expression form and exception-type selection, implicit `ref<T>` call-site loan introduction and temporary materialization, character literals, partial owning-field moves, owning field replacement, general expression temporaries, temporary/managed-class-field mutating-struct receivers, partial-constructor mutation, rebinding `this`, public mutating-receiver ABI, general stored loans/references, evaluation outside the native profile, user-defined conversions, unique/owning generic arguments, views, generic classes/structs, user structs containing managed fields, primitive operator conformance, general argument/result inference and partial holes, constructor/method inference, ordinary overload declarations (rejected with `TRM3003`), contextual discard/lambda `_` forms, conditional expressions |
 | Managed storage | Aliasable `ManagedNode` and source-class handles, optional edges and non-null pattern snapshots, readonly bare handles and explicit `write` capability, mutable-class receiver checks, qualified field/parameter/result/inference paths, handle-free compact Copy fields in classes, descriptor-based cycle tracing, complete-publication class factories, exact frame/temporary roots and explicit nonmoving collection under both policies, including exceptional root retirement and escaping-frame unlink | Managed handles inside user structs, stored interior pointers, implicit GC, native DLL/module graph managed-handle ABI |
 | Tooling | Traversal, lossless reconstruction, deterministic content IDs, checked edit batches, structured CLI schema | Semantic queries, rename, formatter, generators/analyzer loading, LSP, incremental reuse |
@@ -528,7 +553,8 @@ the iterator before testing the next condition. An omitted condition is true.
 Initializer locals remain in scope through the header and body, not afterward.
 The iterator cannot reference body locals. Multiple comma-separated clauses,
 increment/compound-assignment operators are not implemented.
-`break` and `continue` target the nearest enclosing loop. They run the normal
+Bare `break` and `continue` target the nearest enclosing loop; syntax-29 named
+forms select the enclosing loop with that label. They run the normal
 cleanup of exited scopes, including nested `finally` and owner cleanup, and
 retire those scopes' managed roots; a `for` initializer remains live across
 continue and retires when the loop exits. A transfer cannot escape a `finally`,
@@ -938,8 +964,10 @@ phase with the host source buffers, but `build-component` still passes
 scanner records to the hosted parser and binder. Connecting the native phase
 to that compilation handoff remains open. A separate
 [`ScalarFrontendProjection`](../self-host/ScalarFrontendProjection.terrum)
-can publish its typed result through a fixed 37-word host buffer; versions
-1–18 retain their original 34-word payload with three zero extension words.
+can publish its typed result through a fixed 298-word host buffer. The v20
+tree layout follows the original 37-word header; earlier versions zero the
+tree extension. Versions 1–18 retain their original 34-word payload with
+three zero header-extension words.
 Version 19 assigns words 34–36 to the third parameter's type and UTF-16
 name span. Its parameter/literal operations reserve the disjoint 40000 offset
 for the third parameter (using the first-parameter group before adding the

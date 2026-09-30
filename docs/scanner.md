@@ -8,6 +8,10 @@ The C# host supplies buffers and pinned lexical data; it does not pretokenize
 or make source-dependent classification decisions for the component.
 The scanner-5 contract reserves `_` as a distinct token rather than an
 identifier; underscore-prefixed names remain identifiers.
+The shared keyword catalog also recognizes syntax-29's `do`; loop labels and
+named transfers reuse identifiers, `:`, `break` and `continue`. Neither
+scanner-5 records nor the syntax-protocol schema changes.
+
 The shared operator catalog includes syntax-28's `=>` token for expression
 bodies; no scanner record or schema revision is needed. Syntax-16 rejects attached
 numeric width suffixes with `TRM0006`, diagnoses missing hexadecimal and
