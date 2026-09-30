@@ -192,8 +192,8 @@ public sealed partial class CliTests
             BinaryPrimitives.WriteUInt32LittleEndian(module.AsSpan(offset), 1);
         }
 
-        var strings = TrRmStringTableWriter.EncodeNames(
-            [("Module", 0), ("Call", 0), ("Target", 0)]);
+        var strings = TrRmStringTableWriter.EncodeTextRows(
+            [("Module", 0), ("Call", 0), ("Target", 0), ("", 0)]);
         byte[] typeSpec = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
         var signature = new byte[24];
         BinaryPrimitives.WriteUInt32LittleEndian(signature, 1);
@@ -221,13 +221,17 @@ public sealed partial class CliTests
         BinaryPrimitives.WriteUInt32LittleEndian(import, 1);
         BinaryPrimitives.WriteUInt32LittleEndian(import.AsSpan(4), 3);
         BinaryPrimitives.WriteUInt32LittleEndian(import.AsSpan(8), 0x1600_0002);
+        var owner = new byte[40];
+        BinaryPrimitives.WriteUInt32LittleEndian(owner, 4);
+        BinaryPrimitives.WriteUInt32LittleEndian(owner.AsSpan(4), 3);
+        BinaryPrimitives.WriteUInt32LittleEndian(owner.AsSpan(8), 6);
         byte[] Artifact(byte[] moduleBytes, uint moduleCount, byte[] callerBody,
-            bool imported = false)
+            bool imported = false, bool typeOwned = false)
         {
             var sections = new List<TrRmSection>
             {
                 new(0x0001, 0, moduleCount, moduleBytes),
-                new(0x0002, 0, 3, strings),
+                new(0x0002, 0, 4, strings),
             };
             if (imported)
             {
@@ -235,6 +239,11 @@ public sealed partial class CliTests
             }
 
             sections.Add(new(0x0011, 0, 1, typeSpec));
+            if (typeOwned)
+            {
+                sections.Add(new(0x0013, 0, 1, owner));
+            }
+
             sections.Add(new(0x0016, 0, 2, methods));
             sections.Add(new(0x0017, 0, 1, signature));
             sections.Add(new(0x0018, 0, 1, parameter));
@@ -249,7 +258,8 @@ public sealed partial class CliTests
             return TrRmArtifactWriter.Encode(sections);
         }
 
-        var path = Path.Combine(Path.GetTempPath(), $"terrum-trrm-linear-call-{Guid.NewGuid():N}.trrm");
+        var path = Path.Combine(Environment.CurrentDirectory,
+            $"terrum-trrm-linear-call-{Guid.NewGuid():N}.trrm");
         try
         {
             await File.WriteAllBytesAsync(path, Artifact(module, 1, caller));
@@ -314,6 +324,37 @@ public sealed partial class CliTests
             var (importedInvalid, _, _) = await RunAsync([],
                 "validate-trrm-compact-linear", path, "--json");
             Assert.Equal(1, importedInvalid);
+
+            BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(28), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(moduleRef.AsSpan(8), 0);
+            foreach (var (moduleBytes, moduleCount, callBody, imported) in new[]
+            {
+                (packedModule, 2u, packedCaller, false),
+                (module, 1u, importedCaller, true),
+            })
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(52),
+                    imported ? 0u : 2u);
+                await File.WriteAllBytesAsync(path, Artifact(moduleBytes, moduleCount,
+                    callBody, imported, typeOwned: true));
+                foreach (var command in new[] { "validate-trrm-structure",
+                    "validate-trrm-compact-linear", "validate-trrm-compact" })
+                {
+                    var (valid, output, error) = await RunAsync([], command, path, "--json");
+                    Assert.True(valid == 0, output + error);
+                }
+
+                BinaryPrimitives.WriteUInt32LittleEndian(owner.AsSpan(8), 4);
+                await File.WriteAllBytesAsync(path, Artifact(moduleBytes, moduleCount,
+                    callBody, imported, typeOwned: true));
+                var (ownerStructural, _, _) = await RunAsync([],
+                    "validate-trrm-structure", path, "--json");
+                Assert.Equal(0, ownerStructural);
+                var (ownerInvalid, _, _) = await RunAsync([],
+                    "validate-trrm-compact-linear", path, "--json");
+                Assert.Equal(1, ownerInvalid);
+                BinaryPrimitives.WriteUInt32LittleEndian(owner.AsSpan(8), 6);
+            }
         }
         finally
         {

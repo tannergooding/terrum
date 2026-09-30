@@ -28,7 +28,8 @@ public readonly ref struct TrRmCompactLinearBodyReader
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types)
-        : this(bodies, methodRow, modules, methods, signatures, parameters, types, default)
+        : this(bodies, methodRow, modules, methods, signatures, parameters, types,
+            default, default)
     {
     }
 
@@ -36,6 +37,16 @@ public readonly ref struct TrRmCompactLinearBodyReader
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, TrRmImportTableReader imports)
+        : this(bodies, methodRow, modules, methods, signatures, parameters, types,
+            default, imports)
+    {
+    }
+
+    public TrRmCompactLinearBodyReader(TrRmBodyTableReader bodies, int methodRow,
+        TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader types, TrRmTypeDefTableReader nominalTypes,
+        TrRmImportTableReader imports)
     {
         var bodyRow = methods.GetBodyRow(methodRow);
         if (bodyRow == 0
@@ -251,8 +262,7 @@ public readonly ref struct TrRmCompactLinearBodyReader
                     var (callerTarget, callerPolicy) = modules.GetRequirements(callerModule);
                     var (targetRequirement, targetPolicy) = modules.GetRequirements(targetModule);
                     if (targetModule == callerModule || methods.GetBodyRow(target) == 0
-                        || targetPolicy != callerPolicy || targetRequirement > callerTarget
-                        || methods.GetOwnerType(target) != 0 || methods.GetFlags(target) != 2)
+                        || targetPolicy != callerPolicy || targetRequirement > callerTarget)
                     {
                         throw InvalidBody();
                     }
@@ -266,10 +276,20 @@ public readonly ref struct TrRmCompactLinearBodyReader
                     target = firstMethod + method - 1;
                 }
 
-                if (methods.GetBodyRow(target) == 0)
+                var imported = methods.GetBodyRow(target) == 0;
+                var targetOwner = methods.GetOwnerType(target);
+                if ((method == 0 || imported)
+                    && (methods.GetFlags(target) != 2
+                        || targetOwner != 0 && (targetOwner > nominalTypes.Count
+                            || (nominalTypes.GetFlags(targetOwner) & 3) != 2
+                            || nominalTypes.GetGenericRange(targetOwner).Count != 0)))
                 {
-                    if (methods.GetOwnerType(target) != 0 || methods.GetFlags(target) != 2
-                        || !imports.TryGetExpectedRequirements(
+                    throw InvalidBody();
+                }
+
+                if (imported)
+                {
+                    if (!imports.TryGetExpectedRequirements(
                             0x1600_0000u | (uint)target, out var requirements))
                     {
                         throw InvalidBody();

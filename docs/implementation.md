@@ -1232,13 +1232,14 @@ Param and TypeSpec rows and checks the fail-fast scalar subset of `ConstBits`,
 `MakeOptional`, `None`, `IsPresent`, `CheckedBinary`, `CheckedConvert`,
 `CheckedNegate`, `CheckedDivRem`, static `Call`, `Return` and `Fail`.
 Calls inspect authored local MethodDefs, packed direct references to public
-global MethodDefs in another included module with a Body row, and retained
-imports of public global MethodDefs with an expected local definition and
-ModuleRef requirement. Packed and imported calls require compatible runtime
-policy and no stronger target requirement. Arguments and results (including
-void) are by-value scalar or optional types. Type-owned external targets,
-receivers and generics reject; this does not validate producer binding,
-effects or execution. Optional scalar
+global or public type-owned static MethodDefs in another included module with
+a Body row, and retained imports of public global or public type-owned static
+MethodDefs with an expected local definition and ModuleRef requirement.
+External type-owned targets require a public, non-generic owner TypeDef.
+Packed and imported calls require compatible runtime policy and no stronger
+target requirement. Arguments and results (including void) are by-value scalar
+or optional types. Receivers and generic methods reject; this does not
+validate producer binding, effects or execution. Optional scalar
 types retain their presence separately from their underlying atomic type;
 `Return 0` is valid only for a declared `void` result.
 It reconstructs parameter and operation

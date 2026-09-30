@@ -507,6 +507,74 @@ public sealed class TrRmCompactLinearBodyReaderTests
         }
     }
 
+    [Theory]
+    [InlineData(false, false, 2, 6, false, true)]
+    [InlineData(true, false, 2, 6, false, true)]
+    [InlineData(false, true, 2, 6, false, true)]
+    [InlineData(false, false, 0, 6, false, true)]
+    [InlineData(true, false, 0, 6, false, false)]
+    [InlineData(false, true, 0, 6, false, false)]
+    [InlineData(true, false, 2, 4, false, false)]
+    [InlineData(false, true, 2, 4, false, false)]
+    [InlineData(true, false, 2, 6, true, false)]
+    [InlineData(false, true, 2, 6, true, false)]
+    public void ChecksTypeOwnedStaticCall(bool packedTarget, bool expectedTarget,
+        byte targetVisibility, byte ownerFlags, bool genericOwner, bool valid)
+    {
+        byte[] row = packedTarget
+            ? [0x04, 1, 1, 0, 0, 0, 1,
+                0x12, 2, 0, 2, 0, 0, 0x16, 1, 1, 0x83, 2]
+            : [0x04, 1, 1, 0, 0, 0, 1, 0x12, 2, 2, 1, 1, 0x83, 2];
+        if (valid)
+        {
+            var index = Inspect(row, 1, secondMethod: true, packedTarget: packedTarget,
+                secondBody: !expectedTarget, expectedTarget: expectedTarget,
+                targetVisibility: targetVisibility, ownerFlags: ownerFlags,
+                genericOwner: genericOwner);
+            Assert.Equal(2, index.ValueCount);
+        }
+        else
+        {
+            Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
+                secondMethod: true, packedTarget: packedTarget,
+                secondBody: !expectedTarget, expectedTarget: expectedTarget,
+                targetVisibility: targetVisibility, ownerFlags: ownerFlags,
+                genericOwner: genericOwner));
+        }
+    }
+
+    [Theory]
+    [InlineData(true, 1, 0, 0, true)]
+    [InlineData(true, 0, 1, 0, false)]
+    [InlineData(true, 1, 0, 1, false)]
+    [InlineData(false, 1, 0, 0, true)]
+    [InlineData(false, 0, 1, 0, false)]
+    [InlineData(false, 1, 0, 1, false)]
+    public void ChecksTypeOwnedExternalCallRequirements(bool packedTarget,
+        byte callerRequirement, byte targetRequirement, byte targetPolicy, bool valid)
+    {
+        byte[] row = packedTarget
+            ? [0x04, 1, 1, 0, 0, 0, 1,
+                0x12, 2, 0, 2, 0, 0, 0x16, 1, 1, 0x83, 2]
+            : [0x04, 1, 1, 0, 0, 0, 1, 0x12, 2, 2, 1, 1, 0x83, 2];
+        if (valid)
+        {
+            Assert.Equal(2, Inspect(row, 1, secondMethod: true,
+                packedTarget: packedTarget, expectedTarget: !packedTarget,
+                secondBody: packedTarget, ownerFlags: 6,
+                callerRequirement: callerRequirement, targetRequirement: targetRequirement,
+                targetPolicy: targetPolicy).ValueCount);
+        }
+        else
+        {
+            Assert.Throws<InvalidDataException>(() => Inspect(row, 1,
+                secondMethod: true, packedTarget: packedTarget, expectedTarget: !packedTarget,
+                secondBody: packedTarget, ownerFlags: 6,
+                callerRequirement: callerRequirement, targetRequirement: targetRequirement,
+                targetPolicy: targetPolicy));
+        }
+    }
+
     private static (int Operations, int ValueCount, int[] Definitions, int[] LastUses,
         int[] UseBlocks, byte[] TypeCodes, bool[] Optional) Inspect(
         byte[] row, int parameterCount, byte runtimePolicy = 0, byte parameterMode = 0,
@@ -515,10 +583,11 @@ public sealed class TrRmCompactLinearBodyReaderTests
         bool secondTypeOptional = false, bool parameterUsesSecondType = false,
         bool secondMethod = false, bool secondBody = true, bool packedTarget = false,
         byte callerRequirement = 1, byte targetRequirement = 0, byte targetPolicy = 0,
-        byte targetVisibility = 2, bool expectedTarget = false)
+        byte targetVisibility = 2, bool expectedTarget = false,
+        byte? ownerFlags = null, bool genericOwner = false)
     {
         var names = new TrRmStringTableReader(
-            TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0)]), 2);
+            TrRmStringTableWriter.EncodeTextRows([("Module", 0), ("Run", 0), ("", 0)]), 3);
         var moduleBytes = new byte[packedTarget ? 88 : 44];
         Write(moduleBytes, 0, 1);
         Write(moduleBytes, 4, callerRequirement);
@@ -541,7 +610,7 @@ public sealed class TrRmCompactLinearBodyReaderTests
         }
 
         var modules = new TrRmModuleTableReader(moduleBytes, packedTarget ? 2 : 1,
-            names, expectedTarget ? 1 : 0, 0,
+            names, expectedTarget ? 1 : 0, ownerFlags is null ? 0 : 1,
             secondMethod ? 2 : 1, 0);
         byte[] reference = new byte[12];
         Write(reference, 0, 2);
@@ -549,7 +618,21 @@ public sealed class TrRmCompactLinearBodyReaderTests
         Write(reference, 8, targetPolicy);
         var references = new TrRmModuleRefTableReader(expectedTarget ? reference : [],
             expectedTarget ? 1 : 0, names, modules);
-        var typeDefs = new TrRmTypeDefTableReader([], 0, names, modules, 0, 0, 0, 0);
+        var ownerBytes = ownerFlags is null ? [] : new byte[40];
+        if (ownerFlags is not null)
+        {
+            Write(ownerBytes, 0, 3);
+            Write(ownerBytes, 4, 2);
+            Write(ownerBytes, 8, ownerFlags.Value);
+            if (genericOwner)
+            {
+                Write(ownerBytes, 20, 1);
+                Write(ownerBytes, 24, 1);
+            }
+        }
+
+        var typeDefs = new TrRmTypeDefTableReader(ownerBytes,
+            ownerFlags is null ? 0 : 1, names, modules, 0, genericOwner ? 1 : 0, 0, 0);
         var second = duplicateSignatureType ? typeCode : secondTypeCode;
         byte[] typeBytes = secondTypeOptional
             ? [0, 0, 0, 0, 3, 0, 0, 0, 9, 0, 0, 0, 1, 0, typeCode,
@@ -585,6 +668,11 @@ public sealed class TrRmCompactLinearBodyReaderTests
         if (secondMethod)
         {
             methodBytes.AsSpan(0, 28).CopyTo(methodBytes.AsSpan(28));
+            if (ownerFlags is not null)
+            {
+                Write(methodBytes, 28, 1);
+            }
+
             Write(methodBytes, 40, targetVisibility);
             Write(methodBytes, 52, secondBody ? 2u : 0u);
         }
@@ -606,7 +694,7 @@ public sealed class TrRmCompactLinearBodyReaderTests
         var imports = new TrRmImportTableReader(expectedTarget ? import : [],
             expectedTarget ? 1 : 0, names, references, typeDefs, methods, default);
         var reader = new TrRmCompactLinearBodyReader(bodies, 1, modules, methods,
-            signatures, parameters, types, imports);
+            signatures, parameters, types, typeDefs, imports);
         var definitions = new int[reader.ValueCount];
         var lastUses = new int[reader.ValueCount];
         var useBlocks = new int[reader.ValueCount];
