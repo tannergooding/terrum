@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -91,6 +92,12 @@ public sealed partial class CliTests
                 Assert.Equal(0, hostedBuild);
                 Assert.Equal(await File.ReadAllBytesAsync(hostedPath),
                     await File.ReadAllBytesAsync(nativePath));
+                using var process = Process.Start(new ProcessStartInfo(nativePath) {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                }) ?? throw new InvalidOperationException("Could not start native frontend executable.");
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+                Assert.Equal(expected, process.ExitCode);
             }
         }
         finally
