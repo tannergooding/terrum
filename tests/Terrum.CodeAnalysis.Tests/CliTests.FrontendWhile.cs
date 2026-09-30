@@ -177,7 +177,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { x = y; } return x; }")]
     [InlineData("int32 Main() { mut int32 x = 0; while (x + 1) { x = x + 1; } return x; }")]
     [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { x = true; } return x; }")]
-    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { return x; } return x; }")]
+    [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { return missing; } return x; }")]
     [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { break outer; } return x; }")]
     [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { continue outer; } return x; }")]
     [InlineData("int32 Main() { mut int32 x = 0; while (x < 2) { if (true) { mut int32 y = x; } } return x; }")]

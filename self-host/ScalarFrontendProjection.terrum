@@ -26,6 +26,11 @@ namespace Terrum.CodeAnalysis;
 // versions 44..47 additionally require a branch. Transfer slot names the
 // nearest enclosing kind-3 header record; root is -1 and span is the keyword
 // through semicolon. +1/+2 select conversion/?:.
+// Version 48 uses the same 392 words and tree/statement capacities, with
+// kind-8 source-ordered returns (slot 0, typed root, keyword-to-semicolon
+// span). Header roots 38..40 are -1 and word 15 is 0: there is no terminal
+// envelope. Version 48 admits the existing conversion, conditional, loop,
+// branch and nearest-loop transfer features without a cross-product version.
 void WriteScalarFrontendExpression(int32 offset, ScalarFrontendExpression expression)
 {
     Host.Frontend[offset] = expression.Type;
@@ -126,6 +131,14 @@ bool TryPublishScalarFrontend()
                 }
             }
             if (conditional) { Host.Frontend[0] = Host.Frontend[0] + 2; }
+        }
+        for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
+        {
+            if (Host.Frontend[332 + statement * 5] == 8)
+            {
+                Host.Frontend[0] = 48;
+                break;
+            }
         }
         Host.Frontend[15] = 0;
         if (result.HasCondition)

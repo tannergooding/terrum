@@ -151,7 +151,7 @@ public sealed partial class CliTests
     [InlineData("int32 Main() { continue; while (true) { } return 42; }")]
     [InlineData("int32 Main() { while (true) { break outer; } return 42; }")]
     [InlineData("int32 Main() { while (true) { continue outer; } return 42; }")]
-    [InlineData("int32 Main() { while (true) { return 42; } return 0; }")]
+    [InlineData("int32 Main() { while (true) { return missing; } return 0; }")]
     [InlineData("int32 Main() { while (true) { break; } continue; return 42; }")]
     public async Task FrontendInvalidTransfersRetainBuiltOutputAsync(string source)
     {

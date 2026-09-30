@@ -40,7 +40,7 @@ public static class ScalarFrontendHost
             words[index] = BinaryPrimitives.ReadInt32LittleEndian(bytes.Slice(index * 4, 4));
         }
 
-        if (words[0] is < 1 or > 47
+        if (words[0] is < 1 or > 48
             || words[1] is not (1 or 2))
         {
             throw InvalidResult();
@@ -85,7 +85,7 @@ public static class ScalarFrontendHost
             throw InvalidResult();
         }
 
-        if (words[0] is >= 20 and <= 47)
+        if (words[0] is >= 20 and <= 48)
         {
             return ReadTree();
         }
@@ -130,7 +130,7 @@ public static class ScalarFrontendHost
                 || (words[41] == 1 && words[15] != 0)
                 || !AllZero(42 + words[37] * 8, 298)
                 || (words[0] is 20 or 22 or 24 or 26 && !AllZero(298, WordCount))
-                || (words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 47 && (words[298] is < 1 or > 12
+                || (words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 48 && (words[298] is < 1 or > 12
                     || words[299] is < 0 or > 8 || words[0] < 28 && words[299] == 0
                     || words[41] != 0
                     || !AllZero(300 + words[299] * 4, 332)
@@ -139,8 +139,8 @@ public static class ScalarFrontendHost
                 throw InvalidResult();
             }
             var locals = ImmutableArray.CreateBuilder<ScalarFrontendLocal>(
-                words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 47 ? words[299] : 0);
-            for (var i = 0; i < (words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 47 ? words[299] : 0); i++)
+                words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 48 ? words[299] : 0);
+            for (var i = 0; i < (words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 48 ? words[299] : 0); i++)
             {
                 var offset = 300 + i * 4;
                 var local = new ScalarFrontendLocal(words[offset], words[offset + 1] == 1,
@@ -154,8 +154,8 @@ public static class ScalarFrontendHost
             }
             var declaredLocals = locals.MoveToImmutable();
             var statements = ImmutableArray.CreateBuilder<ScalarFrontendStatement>(
-                words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 47 ? words[298] : 0);
-            for (var i = 0; i < (words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 47 ? words[298] : 0); i++)
+                words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 48 ? words[298] : 0);
+            for (var i = 0; i < (words[0] is 21 or 23 or 25 or 27 or >= 28 and <= 48 ? words[298] : 0); i++)
             {
                 var offset = 332 + i * 5;
                 var statement = new ScalarFrontendStatement(words[offset], words[offset + 1],
@@ -165,10 +165,13 @@ public static class ScalarFrontendHost
                     && (statement.Kind is not (4 or 5) || words[0] < 32
                         || words[0] is >= 40 and <= 43)
                     && (statement.Kind is not (6 or 7) || words[0] < 40)
+                    && (statement.Kind != 8 || words[0] != 48)
                     || (statement.Kind is 3 or 4 or 5
                         ? statement.Slot <= i || statement.Slot > words[298]
                         : statement.Kind is 6 or 7
                             ? statement.Slot < 0 || statement.Slot >= i
+                            : statement.Kind == 8
+                                ? statement.Slot != 0
                             : statement.Slot <= count || statement.Slot > count + declaredLocals.Length)
                     || (statement.Kind is 5 or 6 or 7 ? statement.Root != -1
                         : statement.Root < 0 || statement.Root >= words[37])
@@ -289,7 +292,7 @@ public static class ScalarFrontendHost
                 };
                 nodes.Add(node);
             }
-            if (hasConversion != (words[0] is 22 or 23 or 26 or 27 or 29 or 31 or 33 or 35
+            if (words[0] != 48 && (hasConversion != (words[0] is 22 or 23 or 26 or 27 or 29 or 31 or 33 or 35
                     or 37 or 39 or 41 or 43 or 45 or 47)
                 || hasConditional != (words[0] is >= 24 and <= 27 or 30 or 31 or 34 or 35
                     or 38 or 39 or 42 or 43 or 46 or 47)
@@ -298,6 +301,7 @@ public static class ScalarFrontendHost
                 || (words[0] is >= 32 and <= 39 or >= 44 and <= 47)
                     != orderedStatements.Any(static entry => entry.Kind == 4)
                 || (words[0] >= 40) != orderedStatements.Any(static entry => entry.Kind is 6 or 7))
+                || (words[0] == 48 && !orderedStatements.Any(static entry => entry.Kind == 8)))
             {
                 throw InvalidResult();
             }
@@ -305,9 +309,12 @@ public static class ScalarFrontendHost
             var conditionRoot = words[38];
             var trueRoot = words[39];
             var falseRoot = words[40];
-            if (trueRoot is < 0 or >= 32 || trueRoot >= tree.Length
-                || tree[trueRoot].Type != words[5]
-                || (words[15] == 0
+            if (words[0] == 48
+                    ? words[15] != 0 || words[41] != 0
+                        || conditionRoot != -1 || trueRoot != -1 || falseRoot != -1
+                    : trueRoot is < 0 or >= 32 || trueRoot >= tree.Length
+                        || tree[trueRoot].Type != words[5]
+                        || (words[15] == 0
                     ? conditionRoot != -1 || falseRoot != -1
                     : conditionRoot < 0 || conditionRoot >= tree.Length
                         || tree[conditionRoot].Type != 5 || falseRoot < 0
@@ -371,8 +378,8 @@ public static class ScalarFrontendHost
                 {
                     throw InvalidResult();
                 }
-                if (!Take(TokenKind.ReturnKeyword) || !TakeTree(trueRoot)
-                    || !Take(TokenKind.Semicolon))
+                if (words[0] != 48 && (!Take(TokenKind.ReturnKeyword) || !TakeTree(trueRoot)
+                    || !Take(TokenKind.Semicolon)))
                 {
                     throw InvalidResult();
                 }
@@ -405,10 +412,16 @@ public static class ScalarFrontendHost
                 words[5], count, words[7], words[8], words[34], name,
                 firstName, secondName, thirdName, words[15] != 0, words[15] == 2,
                 Root(conditionRoot), Root(trueRoot), Root(falseRoot));
-            return projection with { Nodes = tree, ConditionRoot = conditionRoot,
+            projection = projection with { Nodes = tree, ConditionRoot = conditionRoot,
                 TrueRoot = trueRoot, FalseRoot = falseRoot, IsExpressionBody = words[41] == 1,
                 Locals = declaredLocals, Statements = orderedStatements
                     .Select((entry, index) => entry with { BodySpan = bodySpans[index] }).ToImmutableArray() };
+            if (words[0] == 48)
+            {
+                // v48 has no terminal envelope: every path must be checked before publishing success.
+                BindLibraryCore(source, projection, BoundRuntimePolicy.FailFast);
+            }
+            return projection;
 
             ScalarFrontendExpression Root(int index) => index == -1
                 ? default : new ScalarFrontendExpression(tree[index].Type,
@@ -529,6 +542,15 @@ public static class ScalarFrontendHost
                             || !Take(entry.Kind == 6 ? TokenKind.BreakKeyword
                                 : TokenKind.ContinueKeyword)
                             || !Take(TokenKind.Semicolon))
+                        {
+                            throw InvalidResult();
+                        }
+                    }
+                    else if (entry.Kind == 8)
+                    {
+                        if (tree[entry.Root].Type != words[5]
+                            || !Take(TokenKind.ReturnKeyword)
+                            || !TakeTree(entry.Root) || !Take(TokenKind.Semicolon))
                         {
                             throw InvalidResult();
                         }
@@ -1494,6 +1516,12 @@ public static class ScalarFrontendHost
         {
             throw InvalidResult();
         }
+        return BindLibraryCore(source, result, policy);
+    }
+
+    private static BoundProgram BindLibraryCore(SourceText source, ScalarFrontendResult result,
+        BoundRuntimePolicy policy)
+    {
         var variables = ImmutableArray.CreateBuilder<BoundVariable>(result.ParameterCount);
         if (result.ParameterCount > 0)
         {
@@ -1626,6 +1654,10 @@ public static class ScalarFrontendHost
                             ? new BoundBreak(statement.Span)
                             : new BoundContinue(statement.Span));
                     }
+                    else if (statement.Kind == 8)
+                    {
+                        statements.Add(new BoundReturn(expressions[statement.Root], statement.Span));
+                    }
                     else
                     {
                         var value = expressions[statement.Root];
@@ -1653,7 +1685,8 @@ public static class ScalarFrontendHost
                 body.Add(Return(result.WhenFalse));
             }
         }
-        else
+        else if (result.Statements.IsDefaultOrEmpty
+            || !result.Statements.Any(static statement => statement.Kind == 8))
         {
             body.Add(Return(result.WhenTrue));
         }
