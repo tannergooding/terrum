@@ -258,7 +258,7 @@ public sealed partial class CliTests
             return TrRmArtifactWriter.Encode(sections);
         }
 
-        var path = Path.Combine(Environment.CurrentDirectory,
+        var path = Path.Combine(AppContext.BaseDirectory,
             $"terrum-trrm-linear-call-{Guid.NewGuid():N}.trrm");
         try
         {
