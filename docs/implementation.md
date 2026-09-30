@@ -81,6 +81,14 @@ their folded local values use existing semantic/native module representations
 without a wire-version change. Required expressions cannot call imported
 functions. Public/generic `[ConstEval]`, non-scalar values, registered
 literal parsers and ambient I/O remain unsupported.
+The private [integer-facts candidate](../self-host/IntegerFacts.terrum) supplies
+bounded `[ConstEval]` predicates for checked `int32` addition, subtraction,
+multiplication, division, remainder and negation. Subtraction and multiplication
+compare widened `int64` results, whose full `int32` input products fit safely;
+zero divisors reject, signed-minimum division by `-1` rejects, and the
+corresponding remainder is defined. Required static proofs and ordinary AOT/JIT
+calls exercise these predicates under both runtime policies without publishing
+an arithmetic contract or changing operator behavior.
 
 Syntax-26 also supports `const expression` as a scalar subexpression
 requirement in locals, returns, call arguments and conditions. It uses the

@@ -15,3 +15,35 @@ bool CanAddInt32(int32 left, int32 right)
 
     return true;
 }
+
+[ConstEval]
+bool CanSubtractInt32(int32 left, int32 right)
+{
+    int64 difference = int64(left) - int64(right);
+    return difference >= int64(int32.MinValue) && difference <= int64(int32.MaxValue);
+}
+
+[ConstEval]
+bool CanMultiplyInt32(int32 left, int32 right)
+{
+    int64 product = int64(left) * int64(right);
+    return product >= int64(int32.MinValue) && product <= int64(int32.MaxValue);
+}
+
+[ConstEval]
+bool CanDivideInt32(int32 left, int32 right)
+{
+    return right != 0 && !(left == int32.MinValue && right == -1);
+}
+
+[ConstEval]
+bool CanRemainderInt32(int32 left, int32 right)
+{
+    return right != 0;
+}
+
+[ConstEval]
+bool CanNegateInt32(int32 value)
+{
+    return value != int32.MinValue;
+}
