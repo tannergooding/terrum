@@ -1005,6 +1005,8 @@ internal sealed partial class PeCompiler
                     : ExpressionSpills(optionalAssignment.Value, ref maximumArguments);
             case BoundDrop drop:
                 return drop.CleanupFunction >= 0 ? CleanupSpills(ref maximumArguments) : 0;
+            case BoundLifetimeEnd end:
+                return end.CleanupFunction >= 0 ? CleanupSpills(ref maximumArguments) : 0;
             case BoundFieldAssignment assignment:
                 return Math.Max(2, 1 + ExpressionSpills(assignment.Value, ref maximumArguments));
             case BoundBufferAssignment assignment:
@@ -1685,6 +1687,17 @@ internal sealed partial class PeCompiler
                 _code.Bytes(0x89, 0x04, 0x8A);
                 break;
             case BoundOwnerDeclaration or BoundVacantLocal:
+                break;
+            case BoundLifetimeEnd end:
+                var endedType = _program.Functions[_currentFunction].Variables[end.Variable].Type;
+                if (IsUnique(endedType))
+                {
+                    DropOwner(end.Variable);
+                }
+                else if (ManagedClassTypes.IsManaged(endedType))
+                {
+                    SetManagedRoot(Slot(end.Variable), active: false);
+                }
                 break;
             case BoundAssignment assignment:
                 Expression(assignment.Value, 0);

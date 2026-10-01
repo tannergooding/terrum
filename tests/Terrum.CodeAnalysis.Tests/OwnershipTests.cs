@@ -20,6 +20,92 @@ public sealed class OwnershipTests
     [Theory]
     [InlineData(BoundRuntimePolicy.FailFast)]
     [InlineData(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task LifetimeEndDropsEachValueExactlyOnceAtTheStatementAsync(BoundRuntimePolicy policy)
+    {
+        const string Source = """
+            unique struct Owner {
+                public int32 Id;
+                public Owner(int32 id) { Id = id; }
+                [NoThrow] [Cleanup] public void Close() {
+                    if (Host.Trace[0] == 0) { Host.Trace[0] = 1; }
+                    else if (Host.Trace[0] == 1) { Host.Trace[0] = 2; }
+                    else if (Host.Trace[0] == 2) { Host.Trace[0] = 3; }
+                    else if (Host.Trace[0] == 3) { Host.Trace[0] = 4; }
+                    else if (Host.Trace[0] == 4) { Host.Trace[0] = 5; }
+                    else { Host.Trace[0] = 6; }
+                    Host.Trace[1] = Host.Trace[1] ^ Id;
+                }
+            }
+            int32 Main() {
+                {
+                    Owner immutable = new Owner(1);
+                    immutable = _;
+                    if (Host.Trace[0] != 1 || Host.Trace[1] != 1) { return 1; }
+                    init Owner reusable;
+                    reusable = new Owner(2);
+                    reusable = _;
+                    if (Host.Trace[0] != 2 || Host.Trace[1] != 3) { return 2; }
+                    reusable = new Owner(3);
+                    mut Owner mutable = new Owner(4);
+                    mutable = _;
+                    mutable = new Owner(5);
+                    mutable = _;
+                    if (Host.Trace[0] != 4 || Host.Trace[1] != 2) { return 3; }
+                }
+                if (Host.Trace[0] != 5 || Host.Trace[1] != 1) { return 4; }
+                return 42;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source),
+            [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)], policy);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
+            (NativeRuntimePolicy)policy));
+        Assert.Equal(42, await RunNativeAsync(Source, policy, [0, 0]).ConfigureAwait(true));
+    }
+
+    [Fact]
+    public async Task LifetimeEndCleanupIsNotRepeatedByFinallyOrExceptionalUnwindAsync()
+    {
+        const string Source = """
+            unique struct Owner {
+                public int32 Id;
+                public Owner(int32 id) { Id = id; }
+                [NoThrow] [Cleanup] public void Close() {
+                    if (Host.Trace[0] == 0) { Host.Trace[0] = 1; }
+                    else { Host.Trace[0] = 2; }
+                    Host.Trace[1] = Host.Trace[1] ^ Id;
+                }
+            }
+            Owner Fail() { require false; return new Owner(99); }
+            int32 Main() {
+                unsafe {
+                    try {
+                        init Owner owner;
+                        owner = new Owner(1);
+                        try { owner = _; }
+                        finally { if (Host.Trace[0] != 1) { Host.Trace[1] = 100; } }
+                        owner = Fail();
+                    }
+                    catch {
+                        if (Host.Trace[0] != 1 || Host.Trace[1] != 1) { return 1; }
+                    }
+                }
+                if (Host.Trace[0] != 1 || Host.Trace[1] != 1) { return 2; }
+                return 42;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(Source),
+            [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)], BoundRuntimePolicy.CheckedExceptions);
+        Assert.False(compilation.HasErrors, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.Equal(42, NativeJit.Execute(Assert.IsType<BoundProgram>(compilation.Program),
+            NativeRuntimePolicy.CheckedExceptions));
+        Assert.Equal(42, await RunNativeAsync(Source, BoundRuntimePolicy.CheckedExceptions, [0, 0]).ConfigureAwait(true));
+    }
+
+    [Theory]
+    [InlineData(BoundRuntimePolicy.FailFast)]
+    [InlineData(BoundRuntimePolicy.CheckedExceptions)]
     public async Task StandaloneVacantOwnerDropsOnlyItsPublishedValueAsync(BoundRuntimePolicy policy)
     {
         const string Source = """

@@ -532,7 +532,11 @@ public static class SemanticVerifier
             {
                 continue;
             }
-            var initialized = new InitializationState(function.Variables.Length);
+            var initialized = new InitializationState(function.Variables.Length) {
+                StatementInputs = function.Variables.Any(variable => variable.Type is
+                    PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
+                    ? new Dictionary<BoundStatement, InitializationState>(ReferenceEqualityComparer.Instance) : null,
+            };
             if (function.IsConstructor)
             {
                 initialized.Fill(true, 1, function.ParameterCount);
@@ -561,9 +565,9 @@ public static class SemanticVerifier
             try
             {
                 VerifyOwnerScopes(function.Body, function, program);
-                VerifyViewScopes(function.Body, function);
                 VerifyManagedRoots(function);
                 var returns = Statement(function.Body, initialized, fieldMasks, declarations, function, program, ref remaining, 0);
+                VerifyViewScopes(function.Body, function, initialized.StatementInputs);
                 if (function.DoesNotReturn && !returns)
                 {
                     throw InvalidEffect(function.Body.Span, "DoesNotReturn");
@@ -843,7 +847,7 @@ public static class SemanticVerifier
                 case BoundReturn result when result.Value is not null:
                     Expression(result.Value, scope, depth + 1);
                     break;
-                case BoundDrop or BoundDropConstructedFields or BoundOwnerDeclaration or BoundReturn
+                case BoundLifetimeEnd or BoundDrop or BoundDropConstructedFields or BoundOwnerDeclaration or BoundReturn
                     or BoundBreak or BoundContinue:
                     break;
                 default:
@@ -1041,11 +1045,13 @@ public static class SemanticVerifier
         }
     }
 
-    private static void VerifyViewScopes(BoundBlock body, BoundFunction function)
+    private static void VerifyViewScopes(BoundBlock body, BoundFunction function,
+        Dictionary<BoundStatement, InitializationState>? inputs)
     {
         var roots = new int[function.Variables.Length];
         var exclusive = new bool[roots.Length];
         var active = new bool[roots.Length];
+        var backing = new int[roots.Length];
         var declared = new HashSet<int>();
         var remaining = MaximumAnalysisVisits;
 
@@ -1194,6 +1200,28 @@ public static class SemanticVerifier
             {
                 throw Invalid();
             }
+            // Borrow occupancy follows possible value liveness at this exact flow point,
+            // not the descriptor's lexical declaration. Joins retain either path's loan.
+            Array.Clear(roots);
+            Array.Clear(exclusive);
+            if (inputs is not null && !inputs.TryGetValue(statement, out _))
+            {
+                throw Invalid();
+            }
+            for (var slot = 0; slot < active.Length; slot++)
+            {
+                if (active[slot] && inputs is not null && !inputs[statement].IsVacant(slot))
+                {
+                    if (function.Variables[slot].Type == PrimitiveType.MutableInt32BufferView)
+                    {
+                        exclusive[backing[slot]] = true;
+                    }
+                    else
+                    {
+                        roots[backing[slot]]++;
+                    }
+                }
+            }
             switch (statement)
             {
                 case BoundBlock block:
@@ -1222,6 +1250,7 @@ public static class SemanticVerifier
                     {
                         throw InvalidEffect(view.Owner.Span, "Ownership");
                     }
+                    backing[view.Variable] = root;
                     if (exclusive[root] || (view.IsMutable && roots[root] != 0))
                     {
                         throw InvalidEffect(view.Span, "Ownership");
@@ -1239,14 +1268,6 @@ public static class SemanticVerifier
                     active[view.Variable] = true;
                     Statement(view.Body, depth + 1);
                     active[view.Variable] = false;
-                    if (view.IsMutable)
-                    {
-                        exclusive[root] = false;
-                    }
-                    else
-                    {
-                        roots[root]--;
-                    }
                     break;
                 case BoundLocal local:
                     if (local.Variable < 0 || local.Variable >= roots.Length
@@ -1280,6 +1301,13 @@ public static class SemanticVerifier
                         throw InvalidEffect(field.Span, "Ownership");
                     }
                     Expression(field.Value, depth + 1);
+                    break;
+                case BoundLifetimeEnd end:
+                    if (end.Variable < 0 || end.Variable >= roots.Length
+                        || roots[end.Variable] != 0 || exclusive[end.Variable])
+                    {
+                        throw InvalidEffect(end.Span, "Ownership");
+                    }
                     break;
                 case BoundDrop drop:
                     if (drop.Variable < 0 || drop.Variable >= roots.Length
@@ -1494,6 +1522,7 @@ public static class SemanticVerifier
         List<LoopScope>? loops = null)
     {
         Count(ref remaining, depth);
+        initialized.Record(statement);
         cleanups ??= [];
         loops ??= [];
         if (!reachable)
@@ -1558,6 +1587,28 @@ public static class SemanticVerifier
                 {
                     throw Invalid(output.Span);
                 }
+                return false;
+            case BoundLifetimeEnd end:
+                if (end.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                    || end.Variable >= initialized.Length
+                    || !declarations.Contains(end.Variable) || !initialized[end.Variable]
+                    || (function.Variables[end.Variable].Type is not (PrimitiveType.ReadonlyInt32BufferView
+                        or PrimitiveType.MutableInt32BufferView)
+                        && !ValidType(function.Variables[end.Variable].Type, allowVoid: false, program)))
+                {
+                    throw Invalid(end.Span);
+                }
+                var endType = function.Variables[end.Variable].Type;
+                var endMethod = IsUnique(program, endType) && endType != PrimitiveType.OwnedInt32Buffer
+                    ? program.Structures[(int)endType - 100].CleanupMethod : null;
+                if (endMethod is null ? end.CleanupFunction != -1
+                    : end.CleanupFunction < 0 || end.CleanupFunction >= program.Functions.Length
+                        || program.Functions[end.CleanupFunction].Name != endMethod)
+                {
+                    throw Invalid(end.Span);
+                }
+                initialized.Retire(end.Variable);
+                fieldMasks[end.Variable] = 0;
                 return false;
             case BoundDrop drop:
                 if (!inCleanup || drop.Variable < 0 || drop.Variable >= initialized.Length
@@ -1842,7 +1893,7 @@ public static class SemanticVerifier
                 return (!thenReachable || thenReturns) && (!elseReachable || elseReturns);
             case BoundWhile loop:
                 if ((loop.IsPostTested && loop.Iterator is not null)
-                    || loop.Iterator is not (null or BoundAssignment or BoundExpressionStatement
+                    || loop.Iterator is not (null or BoundLifetimeEnd or BoundAssignment or BoundExpressionStatement
                     or BoundBlock { Statements.IsEmpty: true, IsManagedLexicalScope: false, RetiredManagedLocals.IsEmpty: true }))
                 {
                     throw Invalid(loop.Span);
@@ -2406,9 +2457,11 @@ public static class SemanticVerifier
 
     private sealed class InitializationState
     {
-        // A join must preserve possible liveness as well as definite liveness:
-        // not definitely initialized does not prove that initialization is permitted.
+        // Joins retain never-published vacancy (1), liveness (2) and retired
+        // vacancy (4). Retiring an immutable value cannot authorize another init
+        // call, but an inline output may still retry before its first publication.
         private readonly byte[] _possibilities;
+        internal Dictionary<BoundStatement, InitializationState>? StatementInputs { get; init; }
 
         internal InitializationState(int length)
         {
@@ -2433,7 +2486,11 @@ public static class SemanticVerifier
             }
         }
 
-        internal bool IsVacant(int index) => _possibilities[index] == 1;
+        internal bool IsVacant(int index) => (_possibilities[index] & 2) == 0;
+
+        internal bool HasRetiredValue(int index) => (_possibilities[index] & 4) != 0;
+
+        internal void Retire(int index) => _possibilities[index] = 4;
 
         internal byte Possibilities(int index) => _possibilities[index];
 
@@ -2446,13 +2503,32 @@ public static class SemanticVerifier
 
         internal InitializationState Clone()
         {
-            var result = new InitializationState(Length);
+            var result = new InitializationState(Length) { StatementInputs = StatementInputs };
             CopyTo(result);
             return result;
         }
 
         internal void CopyTo(InitializationState destination) =>
             Array.Copy(_possibilities, destination._possibilities, Length);
+
+        internal void Record(BoundStatement statement)
+        {
+            if (StatementInputs is null)
+            {
+                return;
+            }
+            if (StatementInputs.TryGetValue(statement, out var input))
+            {
+                for (var index = 0; index < Length; index++)
+                {
+                    input.Merge(index, this);
+                }
+            }
+            else
+            {
+                StatementInputs.Add(statement, Clone());
+            }
+        }
     }
 
     private sealed class FailureEdges
@@ -2851,7 +2927,7 @@ public static class SemanticVerifier
                 {
                     throw InvalidEffect(move.Span, "Ownership");
                 }
-                initialized[move.Variable] = false;
+                initialized.Retire(move.Variable);
                 fieldMasks[move.Variable] = 0;
                 break;
             case BoundReceiverLoan loan:
@@ -3121,6 +3197,10 @@ public static class SemanticVerifier
                             || (!output.DeclaresVariable && !output.IsInit
                                 && !function.Variables[output.Variable].IsMutable)
                             || (output.IsInit && !output.DeclaresVariable && !initialized.IsVacant(output.Variable))
+                            || (output.IsInit && !output.DeclaresVariable
+                                && !function.Variables[output.Variable].IsMutable
+                                && !function.Variables[output.Variable].IsInitializationLocal
+                                && initialized.HasRetiredValue(output.Variable))
                             || output.IsInit != target.Variables[i + (target.IsConstructor ? 1 : 0)].IsInit)
                         {
                             throw Invalid();
@@ -3599,7 +3679,7 @@ public static class SemanticVerifier
                 {
                     throw InvalidEffect(move.Span, "Ownership");
                 }
-                state[move.Variable] = false;
+                state.Retire(move.Variable);
                 break;
             default:
                 throw Invalid();

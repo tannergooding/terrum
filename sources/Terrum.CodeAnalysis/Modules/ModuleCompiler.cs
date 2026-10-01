@@ -52,6 +52,7 @@ public static partial class ModuleCompiler
     private const int NominalUpdateVersion = 44;
     private const int CompoundAssignmentVersion = 45;
     private const int InitializationAssignmentVersion = 46;
+    private const int LifetimeEndVersion = 47;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -843,7 +844,8 @@ public static partial class ModuleCompiler
         Action<BoundStatement>? visitStructuredLoop = null, Action<BoundVacantLocal>? visitVacantLocal = null,
         Action<BoundConditional>? visitConditional = null, Action? visitCoalesce = null,
         Action? visitUpdate = null, Action? visitNominalUpdate = null,
-        Action? visitCompoundAssignment = null, Action<BoundAssignment>? visitAssignment = null)
+        Action? visitCompoundAssignment = null, Action<BoundAssignment>? visitAssignment = null,
+        Action? visitLifetimeEnd = null)
     {
         var calls = new List<int>();
         VisitStatement(body);
@@ -868,6 +870,16 @@ public static partial class ModuleCompiler
                 case BoundAssignment assignment:
                     visitAssignment?.Invoke(assignment);
                     VisitExpression(assignment.Value);
+                    break;
+                case BoundLifetimeEnd end:
+                    visitLifetimeEnd?.Invoke();
+                    if (end.CleanupFunction >= 0)
+                    {
+                        calls.Add(end.CleanupFunction);
+                    }
+                    break;
+                case SymbolicLifetimeEnd:
+                    visitLifetimeEnd?.Invoke();
                     break;
                 case BoundOptionalAssignment optionalAssignment:
                     visitCoalesce?.Invoke();
@@ -1075,6 +1087,13 @@ public static partial class ModuleCompiler
         _ = Calls(function.Body, visitAssignment: assignment => found |=
             assignment.Variable >= 0 && assignment.Variable < function.Variables.Length
                 && function.Variables[assignment.Variable].IsInitializationLocal);
+        return found;
+    }
+
+    private static bool HasLifetimeEnd(BoundStatement body)
+    {
+        var found = false;
+        _ = Calls(body, visitLifetimeEnd: () => found = true);
         return found;
     }
 
@@ -1507,7 +1526,7 @@ public static partial class ModuleCompiler
         return statement switch {
             BoundBlock block => block with { Statements = RemapStatements(block.Statements, source, destination, classOffset) },
             BoundLocal local => local with { Initializer = RemapExpression(local.Initializer, source, destination, classOffset) },
-            BoundOwnerDeclaration or BoundVacantLocal => statement,
+            BoundLifetimeEnd or SymbolicLifetimeEnd or BoundOwnerDeclaration or BoundVacantLocal => statement,
             BoundAssignment assignment => assignment with { Value = RemapExpression(assignment.Value, source, destination, classOffset) },
             BoundOptionalAssignment optionalAssignment => optionalAssignment with {
                 Place = RemapExpression(optionalAssignment.Place, source, destination, classOffset),
@@ -1665,6 +1684,11 @@ public static partial class ModuleCompiler
             && HasInitializationAssignment(function)))
         {
             version = Math.Max(version, InitializationAssignmentVersion);
+        }
+        if (module.Functions.Any(item => item.Function is BoundFunction function
+            && HasLifetimeEnd(function.Body)))
+        {
+            version = Math.Max(version, LifetimeEndVersion);
         }
         writer.Write(Magic);
         writer.Write(version);
@@ -1916,6 +1940,13 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Vacant-local assignments require semantic module version 46.");
             }
+            if ((version < LifetimeEndVersion && items.Any(item => item.Function is BoundFunction function
+                && HasLifetimeEnd(function.Body)))
+                || (version == LifetimeEndVersion && !items.Any(item => item.Function is BoundFunction function
+                    && HasLifetimeEnd(function.Body))))
+            {
+                throw new ModuleFormatException("Local lifetime ends require semantic module version 47.");
+            }
             if (version == ManagedValueExportVersion && (!HasPrivateManagedState(module)
                 || !items.Any(static item => item.Import && item.Function is BoundFunction function
                     && !ManagedExportShape.ScalarOnly(function))))
@@ -1971,7 +2002,7 @@ public static partial class ModuleCompiler
             or TransparentLayoutVersion or WideClassFieldsVersion or CorePrimitiveVersion
             or CorePrimitiveGetterVersion or StructuredLoopVersion or VacantLocalVersion or ConditionalVersion
             or CoalescingVersion or UpdateVersion or NominalUpdateVersion or CompoundAssignmentVersion
-            or InitializationAssignmentVersion))
+            or InitializationAssignmentVersion or LifetimeEndVersion))
         {
             throw new ModuleFormatException("Unknown module format or version.");
         }
@@ -2346,6 +2377,7 @@ public static partial class ModuleCompiler
             BoundDrop => (byte)13,
             BoundOwnerDeclaration => (byte)14,
             BoundVacantLocal when version >= VacantLocalVersion => (byte)24,
+            BoundLifetimeEnd when version >= LifetimeEndVersion => (byte)26,
             BoundDropConstructedFields => (byte)15,
             BoundViewScope => (byte)16,
             BoundViewSet => (byte)17,
@@ -2394,6 +2426,14 @@ public static partial class ModuleCompiler
                 break;
             case BoundVacantLocal vacant:
                 writer.Write(vacant.Variable);
+                break;
+            case BoundLifetimeEnd end:
+                writer.Write(end.Variable);
+                writer.Write(end.CleanupFunction >= 0);
+                if (end.CleanupFunction >= 0)
+                {
+                    PutString(writer, names[end.CleanupFunction]);
+                }
                 break;
             case BoundDropConstructedFields partial:
                 writer.Write(partial.Variable);
@@ -2590,6 +2630,9 @@ public static partial class ModuleCompiler
                 return new BoundOwnerDeclaration(reader.ReadInt32(), span);
             case 24 when version >= VacantLocalVersion:
                 return new BoundVacantLocal(reader.ReadInt32(), span);
+            case 26 when version >= LifetimeEndVersion:
+                var ended = reader.ReadInt32();
+                return new SymbolicLifetimeEnd(ended, GetBool(reader) ? GetString(reader) : null, span);
             case 15 when version >= CompositeVersion:
                 var constructedOwner = reader.ReadInt32();
                 var acquired = Count(reader, ValueLayout.MaximumSize);
@@ -2893,7 +2936,7 @@ public static partial class ModuleCompiler
     private static BoundStatement ResolveStatement(BoundStatement statement, IReadOnlyDictionary<string, int> names) => statement switch {
         BoundBlock block => block with { Statements = [.. block.Statements.Select(child => ResolveStatement(child, names))] },
         BoundLocal local => local with { Initializer = ResolveExpression(local.Initializer, names) },
-        BoundOwnerDeclaration or BoundVacantLocal => statement,
+        BoundLifetimeEnd or BoundOwnerDeclaration or BoundVacantLocal => statement,
         BoundAssignment assignment => assignment with { Value = ResolveExpression(assignment.Value, names) },
         BoundOptionalAssignment optionalAssignment => optionalAssignment with {
             Place = ResolveExpression(optionalAssignment.Place, names),
@@ -2929,6 +2972,11 @@ public static partial class ModuleCompiler
                 ? new BoundDrop(drop.Variable, method, drop.Span) { IsOutput = drop.IsOutput }
                 : throw new ModuleContractException($"Unresolved cleanup target '{drop.Name}'."),
         BoundDrop => statement,
+        SymbolicLifetimeEnd end => end.Name is null
+            ? new BoundLifetimeEnd(end.Variable, -1, end.Span)
+            : names.TryGetValue(end.Name, out var cleanup)
+                ? new BoundLifetimeEnd(end.Variable, cleanup, end.Span)
+                : throw new ModuleContractException($"Unresolved cleanup target '{end.Name}'."),
         BoundDropConstructedFields => statement,
         BoundUnsafe unsafeBlock => unsafeBlock with { Body = (BoundBlock)ResolveStatement(unsafeBlock.Body, names) },
         BoundTryCatch recovery => recovery with {
@@ -3052,6 +3100,7 @@ public static partial class ModuleCompiler
         public bool HasOwnershipTransfer { get; init; }
     }
     private sealed record SymbolicCall(string Name, ImmutableArray<BoundExpression> Arguments, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+    private sealed record SymbolicLifetimeEnd(int Variable, string? Name, TextSpan Span) : BoundStatement(Span);
     private sealed record SymbolicNominalUpdate(TokenKind Operator, BoundExpression Place, bool IsPrefix,
         string Name, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
     private sealed record SymbolicDrop(int Variable, string? Name, TextSpan Span) : BoundStatement(Span)

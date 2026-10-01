@@ -951,6 +951,7 @@ internal sealed partial class Binder
                     };
                 }
             }
+            proofBinder._localStart = proofBinder._variables.Count;
             var body = proofBinder.BindGenericBody(new GenericInstantiation(template, symbolicTypes));
             if (proofBinder._diagnostics.Count != 0)
             {

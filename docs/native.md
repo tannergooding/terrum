@@ -323,8 +323,25 @@ without granting live-value replacement authority; failed evaluation leaves
 vacancy. Retained initialization assignments select semantic v46, with local
 authority reconstructed from the vacant declaration. Conditional publication
 must be resolved before another initialization, including across loop and
-exception joins. This does not add vacant locals to the native scalar frontend
-or implement `name = _;`.
+exception joins. This does not add vacant locals to the native scalar frontend.
+Hosted `name = _;` ends a definitely live named local value without deleting
+its declaration or changing its type. A unique value uses the existing
+scope-exit drop helper, clearing cleanup eligibility before executing cleanup;
+later scope exit or checked unwind does not drop it again. A managed handle
+clears only its local root, without destroying other handles or forcing
+collection. A bounded buffer view retires its loan without destroying the
+backing allocation; an owner with any possibly live dependent view cannot end.
+Scalar and Copy values require no fabricated cleanup or default-value store.
+Standalone `init` and mutable locals can publish a new lifetime under their
+existing initialization authority; ordinary immutable locals cannot. Failed
+initialization leaves vacancy and does not reactivate a root or cleanup bit.
+Retained end nodes select private semantic v47 and are audited through
+producer/reference/consumer linking and private native graphs. Both PE and
+JIT policies use the same lowering, with no native ABI/profile or scanner
+change. Parameter/receiver aliases, fields, indexers, const aliases and
+unresolved/vacant locals reject. General ref/pin types, enums, arbitrary
+guards/ARC, view rebinding, source-free TRRM and the compiled scalar frontend
+are not adopted by this operation.
 Syntax-27 adds compile-time-only body `static require`
 and outer-body `static ensure` for closed scalar proofs. Successful proofs
 leave no native operation or semantic wire record; known false, unsupported

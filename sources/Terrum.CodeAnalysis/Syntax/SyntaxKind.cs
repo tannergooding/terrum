@@ -137,4 +137,6 @@ public enum SyntaxKind
     UpdateExpression,
     /// <summary>A built-in integer compound assignment statement.</summary>
     CompoundAssignmentStatement,
+    /// <summary>Ends the current value of a named local without ending its declaration.</summary>
+    LifetimeEndStatement,
 }

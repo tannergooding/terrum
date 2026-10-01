@@ -36,6 +36,8 @@ internal sealed partial class Binder
     private string _namespace = "";
     private readonly List<BoundVariable> _variables = [];
     private readonly HashSet<int> _unresolvedVacantLocals = [];
+    private readonly HashSet<int> _constLocals = [];
+    private int _localStart;
     private readonly List<Dictionary<string, int>> _scopes = [];
     private readonly List<LoopBinding> _loops = [];
     private int _finallyLoopDepth;
@@ -446,6 +448,7 @@ internal sealed partial class Binder
             _variables.Clear();
             _scopes.Clear();
             _unresolvedVacantLocals.Clear();
+            _constLocals.Clear();
             _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
             _returnType = signature.ReturnType;
             _currentStruct = signature.StructName;
@@ -475,6 +478,7 @@ internal sealed partial class Binder
                 }
             }
 
+            _localStart = _variables.Count;
             var body = signature.Generic is GenericInstantiation generic
                 ? BindGenericBody(generic) : BindCallableBody(syntaxBody);
             if (signature.IsConstructor)
@@ -1516,8 +1520,35 @@ internal sealed partial class Binder
                 if (local is BoundLocal boundLocal)
                 {
                     _ = _constRequired.Add(boundLocal);
+                    _ = _constLocals.Add(boundLocal.Variable);
                 }
                 return local;
+            }
+
+            case SyntaxKind.LifetimeEndStatement:
+            {
+                var target = (SyntaxNode)node.Children[0];
+                if (target.Kind != SyntaxKind.NameExpression)
+                {
+                    Report("TRM3008", "Lifetime end requires a named local binding.", target.Span);
+                    return new BoundBlock([], node.Span);
+                }
+                var token = ((SyntaxTokenElement)target.Children[0]).Token;
+                if (!TryFindVariable(token.Name, out var slot))
+                {
+                    Report("TRM3006", $"Unknown or not-yet-declared local '{token.Text}'.", token.Span);
+                    return new BoundBlock([], node.Span);
+                }
+                if (slot < _localStart
+                    || _constLocals.Contains(slot)
+                    || _unresolvedVacantLocals.Contains(slot))
+                {
+                    Report("TRM3008", "Lifetime end requires a resolved non-const local, not a parameter or receiver.", token.Span);
+                    return new BoundBlock([], node.Span);
+                }
+                var method = IsUnique(_variables[slot].Type) ? CleanupMethod(_variables[slot].Type) : null;
+                var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
+                return new BoundLifetimeEnd(slot, cleanupFunction, node.Span);
             }
 
             case SyntaxKind.AssignmentStatement:

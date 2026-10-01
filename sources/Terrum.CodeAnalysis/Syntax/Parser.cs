@@ -849,11 +849,12 @@ internal sealed class Parser
             or TokenKind.PipeEquals or TokenKind.CaretEquals or TokenKind.ShiftLeftEquals
             or TokenKind.ShiftRightEquals or TokenKind.ShiftRightUnsignedEquals;
         var compound = assignment && Current.Kind is not (TokenKind.Equals or TokenKind.QuestionQuestionEquals);
+        var lifetimeEnd = Current.Kind == TokenKind.Equals && Peek(1).Kind == TokenKind.Underscore;
 
         if (assignment)
         {
             children.Add(TakeSeparated());
-            children.Add(ParseExpression());
+            children.Add(lifetimeEnd ? Take() : ParseExpression());
         }
 
         if (semicolon)
@@ -861,7 +862,8 @@ internal sealed class Parser
             children.Add(Expect(TokenKind.Semicolon));
         }
 
-        return Node(compound ? SyntaxKind.CompoundAssignmentStatement
+        return Node(lifetimeEnd ? SyntaxKind.LifetimeEndStatement
+            : compound ? SyntaxKind.CompoundAssignmentStatement
             : assignment ? SyntaxKind.AssignmentStatement : SyntaxKind.ExpressionStatement, children);
     }
 

@@ -434,8 +434,17 @@ publication, cleanup and managed rooting.
 The host also initializes definitely vacant `init` locals by assignment,
 fixing inferred types and selecting semantic v46 for retained initialization
 assignments. Existing AOT/JIT lowering preserves failure vacancy, cleanup and
-managed-root publication. This does not add initialization locals or assignments
-to the compiled scalar frontend, or implement explicit local lifetime ending.
+managed-root publication. Hosted `name = _;` additionally ends a definitely
+live named local value, retiring unique cleanup, a local managed root or a
+bounded buffer-view loan at that statement. Its declaration/type survive;
+ordinary immutable bindings cannot initialize again, while standalone `init`
+and mutable storage retain their existing authority. Possibly live backing
+loans prevent premature owner ending. Retained end nodes select private
+semantic v47, with hostile/older-header rejection and PE/JIT parity under both
+policies. No scanner schema, native ABI/profile or source-free TRRM operation
+changes. General ref/pin types, enums, arbitrary guards/ARC and view rebinding
+remain unsupported. Neither initialization locals/assignments nor lifetime
+ending are added to the compiled scalar frontend.
 Host syntax-31 adds target-checked `?:` with selected-arm execution, conditional
 output facts and feature-selected semantic v41. The compiled scanner supplies
 the existing punctuation tokens; the native scalar subset is described above.

@@ -15,6 +15,73 @@ namespace Terrum.CodeAnalysis.Tests;
 
 public sealed partial class NativeManagedClassModuleTests
 {
+    [Theory]
+    [InlineData(NativeRuntimePolicy.FailFast)]
+    [InlineData(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task LifetimeEndGraphLibraryRetainsPrivateClassRootsThroughDependenciesAsync(NativeRuntimePolicy policy)
+    {
+        var leaf = NativeModuleCompiler.CreateProducer(Compile(
+            "public int32 Seed() { return 42; }", policy), ["Seed"], "EndSeed", policy);
+        var middle = NativeModuleCompiler.CreateGraphProducer(Compile("""
+            class Box {
+                public int32 Value;
+                public Box(int32 value) { Value = value; }
+            }
+            Box Create() {
+                require Box.TryCreate(Seed(), out var box);
+                return box;
+            }
+            public int32 Middle() {
+                init Box value;
+                value = Create();
+                Box duplicate = value;
+                value = _;
+                if (ManagedHeap.Collect() != 0 || duplicate.Value != 42) { return 1; }
+                duplicate = _;
+                if (ManagedHeap.Collect() != 1) { return 2; }
+                value = Create();
+                if (ManagedHeap.Collect() != 0 || value.Value != 42) { return 3; }
+                int32 result = value.Value;
+                value = _;
+                if (ManagedHeap.Collect() != 1) { return 4; }
+                return result;
+            }
+            """, policy, NativeModuleCompiler.CreateGraphReference([leaf])),
+            ["Middle"], "EndMiddle", [leaf], policy);
+        Assert.Equal(47, GraphSemanticVersion(middle));
+        Assert.Equal("native-19", NativeModuleCompiler.InspectGraphArtifact(middle).NativeProfileVersion);
+        foreach (var version in new[] { 32, 40, 41, 42, 43, 44, 45, 46 })
+        {
+            var old = SetGraphSemanticVersion(middle, version);
+            _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateGraphReference([old]));
+        }
+        var root = NativeModuleCompiler.CreateGraphConsumer(Compile(
+            "int32 Main() { return Middle(); }", policy,
+            NativeModuleCompiler.CreateGraphReference([middle]), library: false), [middle], policy);
+        NativeModuleCompiler.ValidateGraph(root, [middle, leaf]);
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphAsync(root, [middle, leaf],
+            TimeSpan.FromSeconds(10), policy).ConfigureAwait(true));
+        var framework = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = framework.Parent?.Name
+            ?? throw new InvalidOperationException("Missing test configuration directory.");
+        var apphost = Path.Combine(RepositoryRoot(), "artifacts", "bin", "sources", "terrumc",
+            configuration, framework.Name, "terrumc.exe");
+        Assert.Equal(42, await NativeModuleCompiler.RunGraphJitAsync(root, [leaf, middle],
+            apphost, TimeSpan.FromSeconds(30), policy).ConfigureAwait(true));
+
+        var noEnd = NativeModuleCompiler.CreateGraphProducer(Compile("""
+            public int32 NoEnd() {
+                init int32 adjustment;
+                adjustment = 1;
+                return Seed() + adjustment - 1;
+            }
+            """, policy, NativeModuleCompiler.CreateGraphReference([leaf])),
+            ["NoEnd"], "NoEndMiddle", [leaf], policy);
+        Assert.Equal(46, GraphSemanticVersion(noEnd));
+        var forged = SetGraphSemanticVersion(noEnd, 47);
+        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.CreateGraphReference([forged]));
+    }
+
     private const string ManagedGraphLeaf = """
         namespace Values;
         public struct Payload {

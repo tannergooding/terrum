@@ -361,13 +361,19 @@ public sealed record BoundBlock(ImmutableArray<BoundStatement> Statements, TextS
 /// <param name="Span">The source range.</param>
 public sealed record BoundLocal(int Variable, BoundExpression Initializer, TextSpan Span) : BoundStatement(Span);
 
-/// <summary>Declares typed storage that cannot be read until a checked init call publishes its value.</summary>
+/// <summary>Declares typed storage that cannot be read until checked initialization publishes its value.</summary>
 public sealed record BoundVacantLocal(int Variable, TextSpan Span) : BoundStatement(Span);
+
+/// <summary>Ends a definitely live named local value, performing its scope-exit obligations and leaving its fixed binding vacant.</summary>
+/// <param name="Variable">The declared local slot, never a parameter or receiver.</param>
+/// <param name="CleanupFunction">The verified unique cleanup function, or -1 for compiler-owned cleanup or values without cleanup.</param>
+/// <param name="Span">The source range.</param>
+public sealed record BoundLifetimeEnd(int Variable, int CleanupFunction, TextSpan Span) : BoundStatement(Span);
 
 /// <summary>Introduces a vacant owner whose initializer is a conditional output in the following region.</summary>
 public sealed record BoundOwnerDeclaration(int Variable, TextSpan Span) : BoundStatement(Span);
 
-/// <summary>Assigns an initialized mutable local.</summary>
+/// <summary>Assigns mutable storage or initializes a vacant initialization local without granting new authority.</summary>
 /// <param name="Variable">The local slot.</param>
 /// <param name="Value">The assigned value.</param>
 /// <param name="Span">The source range.</param>

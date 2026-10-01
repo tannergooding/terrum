@@ -78,7 +78,7 @@ internal sealed partial class Binder
                 return true;
             case BoundLocal local:
                 return CheckConstExpression(local.Initializer, out unsupported);
-            case BoundVacantLocal:
+            case BoundVacantLocal or BoundLifetimeEnd:
                 return false;
             case BoundAssignment assignment:
                 return CheckConstExpression(assignment.Value, out unsupported);
@@ -207,7 +207,7 @@ internal sealed partial class Binder
                     return local;
                 }
             }
-            case BoundVacantLocal:
+            case BoundVacantLocal or BoundLifetimeEnd:
                 return statement;
             case BoundIf conditional:
                 return conditional with {

@@ -324,7 +324,7 @@ public static partial class ModuleCompiler
                     or ExplicitGetterVersion or TransparentLayoutVersion or WideClassFieldsVersion
                     or StructuredLoopVersion or VacantLocalVersion or ConditionalVersion or CoalescingVersion
                     or UpdateVersion or NominalUpdateVersion or CompoundAssignmentVersion
-                    or InitializationAssignmentVersion))
+                    or InitializationAssignmentVersion or LifetimeEndVersion))
             {
                 throw new ModuleFormatException("Graph libraries cannot use the private class module version.");
             }
@@ -340,6 +340,13 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Graph library has no functions.");
             }
             var functions = ReadFunctions(reader, count, expectedConsumer: true, version, structures, classes);
+            if ((version < LifetimeEndVersion && functions.Any(item => item.Function is BoundFunction function
+                && HasLifetimeEnd(function.Body)))
+                || (version == LifetimeEndVersion && !functions.Any(item => item.Function is BoundFunction function
+                    && HasLifetimeEnd(function.Body))))
+            {
+                throw new ModuleFormatException("Local lifetime ends require semantic module version 47.");
+            }
             var module = new Module(true, -1, structures, functions) {
                 Classes = classes,
                 ImportedStructures = imported,
