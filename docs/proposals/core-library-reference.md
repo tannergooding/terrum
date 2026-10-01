@@ -431,8 +431,8 @@ text validation is selected by these names.
 | `TextSpan<TCodeUnit>` / Core | `IsEmpty`; `EqualsOrdinal(TextSpan/rune)`; `CompareOrdinal(TextSpan)`; `TryFormat(writer, format)` | Validation and encoding survive erasure; no implicit decoding fallback |
 | `rune` / Core | `Value`, `IsAscii`, UTF code-unit counts, `IsValid`, `TryCreate`, exact `TryDecodeSingleUtf8/16/32`, `TryEncodeUtf8/16/32`, `TryFormat` | Valid scalar only; explicit encodings; conditional publication and fragment-atomic writes |
 | `Text` / Foundation or Application | `AsSpan() -> TextSpan`; `TryFormat(writer, format)`; `Create<TContent>(content) -> own<val<Text>>` | Copy/transfer/lease of backing must be explicit; no mandated native object layout |
-| `TextBuilder<TCodeUnit>` / Foundation, **OPEN** registration | `Append(TextSpan)`, `AppendScalar(rune)`, `TryBuild(init ref<own<val<Text>>> output)` | Registered builder, owned/borrowed backing and failure cleanup need checked contracts |
-| `TextSearch` / Core | `StartsWithOrdinal`, `EndsWithOrdinal`, `TryIndexOfOrdinal`, `TryLastIndexOfOrdinal` | Scalar offsets; no culture, normalization or sentinel |
+| `TextBuilder<TCodeUnit>` / Foundation, **OPEN** registration | Constructors, `Length`, `Capacity`, `Reserve`, `Append`, `AppendScalar`, `TryAppend`, `TryAppendScalar`, `TryBuild`, `Clear` | Explicit code-unit capacity, whole-fragment allocation refusal; registration, backing and failure cleanup need checked contracts |
+| `TextSearch` / Core | `ScalarCount`, `TryGetScalar`, `TrySliceScalars`, `StartsWithOrdinal`, `EndsWithOrdinal`, `TryIndexOfOrdinal`, `TryLastIndexOfOrdinal` | Scalar positions; borrowed slices retain encoding/backing; no culture, normalization or sentinel |
 | `TextFormatting` / Core | `TryWrite<TWriter,TContent>(write ref<TWriter>, TContent) -> bool` | Typed forwarding, not stringify-to-temporary |
 | `ITextWriter`, `SpanTextWriter<TCodeUnit>` / Core | `TryWrite`, `TryWriteScalar`, `TryWriteFormatted`; `Written` for bounded writer | Refusal is per-fragment; no replay after visible partial writes |
 | `ITextDecoder<TCodeUnit>`, `ITextEncoder<TCodeUnit>` / Foundation | `Convert`, `Finish`, `Reset` with `TextConversionProgress`; concrete UTF-8 witnesses below | Caller advances by reported code units/scalars; EOF requires `Finish` |
@@ -469,6 +469,11 @@ public mut unique class TextBuilder<TCodeUnit>
 
 public static class TextSearch
 {
+    public static nuint ScalarCount(TextSpan source);
+    public static bool TryGetScalar(TextSpan source, nuint scalarIndex,
+        init ref<rune> value);
+    public static bool TrySliceScalars(TextSpan source, nuint scalarStart,
+        nuint scalarLength, init ref<TextSpan> result);
     public static bool StartsWithOrdinal(TextSpan source, TextSpan prefix);
     public static bool EndsWithOrdinal(TextSpan source, TextSpan suffix);
     public static bool TryIndexOfOrdinal(TextSpan source, TextSpan needle,
@@ -553,6 +558,38 @@ returns scalar offsets, not byte offsets; an empty needle matches position
 zero (or the source's scalar length for the last match). Ordinal search does
 not normalize or fold. Its `TryIndexOfOrdinal`/`TryLastIndexOfOrdinal` false
 outcomes leave `scalarIndex` vacant.
+
+`ScalarCount`, `TryGetScalar` and `TrySliceScalars` are **PROPOSED** additions
+for inspecting and borrowing validated text by Unicode scalar position.
+`ScalarCount` counts the entire view's scalars; empty text returns zero.
+It does not count UTF code units, bytes, grapheme clusters or display columns.
+The count fits `nuint` because each scalar occupies at least one code unit
+in the underlying bounded view.
+
+`TryGetScalar` uses a zero-based scalar index. True publishes exactly one
+valid `rune`; an index at or beyond the scalar count returns false and leaves
+`value` vacant. An encoded NUL is a valid scalar, not EOF or a missing-value
+sentinel. Access does not normalize, fold, replace or copy the text's backing.
+
+`TrySliceScalars` checks that the complete requested scalar range lies within
+the source and that both encoded endpoints are scalar boundaries. True
+publishes a borrowed validated `TextSpan` in the source's actual encoding,
+retaining its access, backing/root/lease and lifetime; no allocation,
+transcoding, mutation or owner transfer occurs. An empty slice at any valid
+boundary, including the end, succeeds and retains those dependencies.
+An out-of-range start or length returns false with no published view.
+Bounds must be checked without overflowing a start-plus-length sum, and a
+successful slice never divides a UTF-8 sequence or UTF-16 surrogate pair.
+
+These operations consume already validated text, not arbitrary raw code-unit
+spans. False is only the specified range failure, not a substitute for a
+conflicting loan, invalid source lifetime or other checked failure. Scalar
+indexing/slicing can require scanning the encoded prefix; no constant-time
+index, cached scalar map, hidden allocation or materialization is promised.
+The returned slice has the ordinary validated encoding-erased view type;
+these signatures add no conditional family member or typed projection.
+Exact source-to-output dependency and conditional-publication metadata remain
+**OPEN**; the initialization output alone is not a proof of the retained loan.
 
 The builder constructor, capacity/reservation and allocation-refusal
 additions are **PROPOSED**. `Length` counts initialized code units in the
