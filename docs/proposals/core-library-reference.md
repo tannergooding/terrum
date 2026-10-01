@@ -4,20 +4,17 @@
 > Proposal only: signatures and inventories are candidate designs, not
 > approved APIs or claims of implementation.
 
-This proposal describes candidate library declarations and dependency layers.
-Accepted semantic direction is identified separately from proposed signatures;
-exact syntax and several API contracts remain open. Examples do not establish
-conformance or implementation. This is not an ABI layout specification.
+This proposal inventories candidate APIs and dependency layers, not an
+approved or executable library. Accepted semantic direction, proposed
+signatures and open choices are marked separately below; examples do not
+establish conformance. This is not an ABI layout specification.
 
-The approved [source grammar](../grammar-spec.md) and
-[approved current semantic IL/metadata design](../il-metadata.md) are separate
-documents; neither adopts the signatures here. Related accepted direction is
-described in [language](../language.md), [libraries](../libraries.md),
-[language contracts](../language-contracts.md), [lifetimes](../lifetimes.md),
-[type families](../type-families.md), [conversions](../conversions.md), and
-[memory model](../memory-model.md). The design-only
-[`library/*.api.terrum`](../../library/) sketches are inventory inputs, not
-approved or executable reference assemblies.
+Canonical language and library contracts live in [language](../language.md),
+[libraries](../libraries.md), [language contracts](../language-contracts.md),
+[lifetimes](../lifetimes.md), [type families](../type-families.md),
+[conversions](../conversions.md) and [memory model](../memory-model.md).
+The design-only [`library/*.api.terrum`](../../library/) sketches are inventory
+inputs, not reference assemblies.
 
 ## Scope, status, and notation
 
@@ -1644,13 +1641,14 @@ preferred for named parameters. The receiver selector
 `[return: DependsOn("this")]` remains a candidate under
 [Q20.1](grammar-open-questions.md#q201-remaining-result-capture-and-backing-contracts);
 it is **UNAPPROVED** and does not itself specify which advancement invalidates
-the borrow. An item borrowing cursor state cannot outlive that state or
-silently survive a conflicting advance/suspension. A backing-only item loan
-instead preserves its declared backing dependency; it is not automatically
-shortened to the cursor-state lifetime. Async item loans must
-also retain backing and access obligations across each awaitable completion.
-The precise producer clause phases and suspension loans remain open
-([Q31](grammar-open-questions.md#q31-producer-contract-phases-and-suspension-loans)).
+the borrow. The accepted direction separates creation/completion obligations
+from advance/item obligations and requires declared suspension dependencies.
+An item borrowing cursor state cannot outlive that state or survive a
+conflicting advance; a backing-only item loan retains its declared backing
+dependency rather than being shortened to cursor-state lifetime. Async item
+loans retain backing and access obligations through each awaitable completion.
+Only exact producer protocol and phase identities remain open
+([Q31.1](grammar-open-questions.md#q311-producer-protocol-identities-and-phase-selectors)).
 
 `TryMoveNext(init ref<T>)` and its async counterpart are alternative
 consuming-advance candidates: a successful completion would transfer one

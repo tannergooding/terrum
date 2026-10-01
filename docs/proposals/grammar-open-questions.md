@@ -8,7 +8,7 @@
 > to choose new semantics on the user's behalf.
 
 This is a decision inventory, not a compiler backlog. Stable question numbers
-are retained; gaps in the pending queue are intentional. Eighteen parent IDs
+are retained; gaps in the pending queue are intentional. Twenty-one parent IDs
 have only [canonical link redirects](#resolved-question-link-redirects) at
 the end of this document, so old review links remain usable without mixing
 their rules into the questions below.
@@ -34,8 +34,8 @@ labeled, not another vote.
 |---|---|
 | Declaration applicability and modifier order | Q06 |
 | Extension eligibility, adapter and family declaration forms | Q16.1, Q17-Q18 |
-| References, initialization and operators | Q19, Q20.1, Q21, Q22.1, Q23-Q24, Q26 |
-| Other source forms and contracts | Q27-Q37, Q40-Q42 |
+| References, initialization and operators | Q19, Q20.1, Q21, Q22.2, Q23-Q24, Q26.1 |
+| Other source forms and contracts | Q27-Q30, Q31.1, Q32.1, Q33-Q37, Q40-Q42 |
 | Documentation | Q38-Q39 |
 
 ## Lexical and declaration choices
@@ -499,10 +499,10 @@ evaluation is not enough to make those cases safe.
 
 ## Construction, operators and expressions
 
-### Q22.1. Construction completion hook identity and phase
+### Q22.2. Completion hook declaration and registration
 
-**Question:** What explicit declared operation validates completed
-construction, and at what phase does it run?
+**Question:** How is the accepted completion operation declared/registered
+and identified in the published contract?
 Vacant backing, explicit property/constructor initialization, mixed backing,
 storage order, repeated unpublished `init`, and constructor minimum
 guarantees are
@@ -515,9 +515,36 @@ publication. The hook's identity and invocation form remain to specify.
 not inherit zero-initialized `default(T)` or substitute `required` annotations
 for checked constructor guarantees.
 
-**Recommendation:** Make completion validation an explicit declared operation
-with an identified phase after required initialization and before
-publication. Do not let ordinary live-value withers invoke `init`.
+**Accepted direction:** An explicit declared operation validates completion
+after required initialization and before publication. A live-value wither
+cannot invoke `init`. Q22.1 is resolved on that direction; the operation's
+source identity is not yet selected.
+
+**Terrum counterpart (candidate attribute identity only):**
+
+```terrum
+public class Point
+{
+    public int32 X { get; } = 1;
+    public int32 Y { get; init; }
+    public Point() { }
+
+    [ConstructionComplete]
+    private void Validate()
+    {
+        require X <= Y;
+    }
+}
+
+Point point = new Point() { Y = 3 };
+```
+
+The `ConstructionComplete` name/registration is **unapproved**; it illustrates
+the identity still needed. The constructor initializes `X`, the caller
+initializes `Y`, then the declared hook validates, then publication occurs.
+Failure cleans unpublished state. Renaming an unrelated method `Validate`
+does not register it. The earlier getter-only example below illustrates the
+already approved initialization routes, not this missing hook.
 
 **C# comparison:**
 
@@ -574,6 +601,38 @@ receiver-shaped compound declarations does not also approve C# instance
 | `ref<write C>` | No | Yes |
 | `write ref<write C>` | Yes | Yes |
 
+These four forms describe **loans to a handle slot**, not the preferred way
+to pass a class receiver. A class value already is a handle: passing
+`write C` directly grants object-write authority without a `ref<C>` loan to
+the variable containing that handle. `ref<write C>` is useful only when the
+operation actually needs that additional slot reference; it is unnecessary
+for a content-only operator. This is a semantic indirection distinction,
+not a promise about whether a backend optimizes a slot reference away.
+
+**Terrum counterpart (ordinary helper contracts):**
+
+```terrum
+void Mutate(write Counter destination, int32 increment)
+{
+    destination.Value += increment;
+}
+
+void Replace(write ref<Counter> destination, Counter replacement)
+{
+    destination = replacement;
+}
+```
+
+Here `Counter` is a copyable class handle with an accessible writable
+`Value`; `replacement` is already live. `Mutate` changes the object without
+replacing the caller's handle. `Replace` writes the handle slot without
+needing write authority over the old or new object's contents. Candidate
+`public static void operator +=(write Counter destination, int32 increment)`
+can therefore express content-only mutation without an extra slot loan.
+An instance candidate uses its declared writable receiver instead.
+For a struct, by-value passing would mutate a copy, so the destination-loan
+form remains materially different.
+
 Object mutation still needs the selected member's permissions; it does not
 grant arbitrary writes through every reachable reference. A static operator
 can mutate contents without replacing a handle, but requiring a writable
@@ -624,10 +683,15 @@ Static `operator T(U source)` spelling and explicit invocation are settled.
 **C# model:** Not C# syntax: C# separates `new T(x)` construction from `(T)x`
 conversion. Terrum's type-call form requires its own rule.
 
-**Recommendation:** Keep `new T(...)` for construction and require a unique
-eligible explicit conversion for a nonliteral type-call. Reject competing
-source/destination conversions rather than choose by declaration order.
-Preserve contextual literal construction as its own case.
+**Revised recommendation for review:** Keep `new T(...)` for construction.
+For a nonliteral conversion type-call, resolve an eligible destination-owned
+set first, then source-owned declarations only when the destination has no
+applicable conversion. Within each set require a unique best applicable
+declaration under the stated overload rules. An ambiguous destination set
+is an error, not permission to try the source; a selected destination
+conversion's failure is also not a fallback signal. This replaces the
+earlier equal-owner recommendation **only if approved**. Contextual literal
+construction remains its own case.
 
 **Explicit selector candidate:** `Target.via<Source>(source)` could select a
 conversion declared by `Source`, while `Target.via<Target>(source)` selects
@@ -645,6 +709,41 @@ contextual primitive literals as custom conversions just because the glyph
 resembles the provider selector. Named conversion/factory methods remain
 an explicit alternative without extending `.via` to this role.
 
+**Terrum counterpart and selector alternatives:**
+
+```terrum
+Target ordinary = Target(source);
+Target namedBySource = Source.ToTarget(source);
+Target namedByTarget = Target.FromSource(source);
+```
+
+The named forms use ordinary static-member selection if their authors
+declare those APIs. They already solve explicit selection without extending
+`.via`. A candidate `Source.Target(source)` could similarly name an authored
+factory; using it to select the source's `operator Target(...)` would need
+an explicit compiler-known conversion-member rule. It is not automatically
+an existing named method merely because the result type is `Target`.
+The same applies to candidate `Target.Target(source)`. Prefer ordinary
+authored factories if no special conversion selector is needed; if operators
+need a universal selector, choose its identity and any collision with
+ordinary members explicitly. Destination-first priority does not by itself
+create such members.
+
+**Actual generic-math comparison:** .NET's `INumberBase<TSelf>.CreateChecked`
+handles identity first, then calls the destination's
+`TryConvertFromChecked`, then the source's `TryConvertToChecked` only if the
+first reports unsupported. Saturating/truncating creation uses the same
+owner order. This is a declared numeric API protocol, not C# cast overload
+resolution. A checked range failure throws; it does not become
+"unsupported" and try the other owner.
+
+Terrum can adopt the **owner-priority idea** with compile-time applicability
+without also importing runtime trial calls. If runtime negotiation is wanted,
+it needs its own checked protocol, including effects and the precise
+unsupported result. Checked/saturating/truncating behavior must still belong
+to explicit contracts, not a policy block silently changing primitive
+conversions.
+
 **C# comparison:**
 
 ```csharp
@@ -659,10 +758,11 @@ competing conversion operators declared in source and destination types;
 the cast then has no syntax selecting their declaring owner and can be
 ambiguous. It does not compete with `new Target(source)` construction.
 
-### Q26. Pointer formation, dereference and pin acquisition
+### Q26.1. Pointer formation and dereference/member boundaries
 
 **Question:** Select the source operations that form/dereference pointers and
-acquire a pin, separately from the already approved pointer/reference types.
+convert an acquired pin, separately from the already approved
+pointer/reference types and pin-acquiring local.
 **Example:** A successfully acquired `pin ref<int32>` roots and stabilizes
 its backing for the pin loan's lifetime. `ptr<int32>` does not. Merely
 casting/requalifying an ordinary reference cannot manufacture that pin.
@@ -684,21 +784,21 @@ retaining its access and pin/backing dependencies. A safe-context warning
 for address formation is a separate proposed diagnostic policy, not a
 proof that the address is unsafe or permission to dereference it.
 
-**Pin-acquiring local candidate:**
+**Approved pin-acquiring local:**
 
 ```terrum
 pin ref<int32> pinned = ref storage;
 ```
 
-Here `storage` denotes eligible initialized storage. The initializer would
+Here `storage` denotes eligible initialized storage. The initializer is
 be an explicit checked acquisition operation, not a qualifier-only cast.
-The binding would keep its backing pinned for the promised local lifetime
+The binding keeps its backing pinned for the promised local lifetime
 or an explicit release/rebind. An address/conversion expression must designate
 the pinned `int32` backing, not the storage of the reference descriptor;
 whether the pin-to-pointer conversion is implicit or explicit remains open.
-These source forms are **candidates**, not approved grammar or current support.
-A checked acquisition API such as `Pin.TryAcquire` is another possible form,
-not a reason to deny the local binding's intended pin guarantee.
+The local acquisition is approved target grammar, **not current compiler
+support**. Pointer conversion and explicit release spelling remain pending;
+a potential `Pin.TryAcquire` API is not required in place of this local form.
 
 Clearing/rebinding the local cannot release its pin while a derived address,
 copy, capture or loan still depends on it. For example, deriving `p`,
@@ -750,6 +850,32 @@ spelling: candidate pointer `p[0]` corresponds to one dereference and
 Whether to offer indexing alone or alongside prefix dereference remains
 open; indexing must retain the same unsafe/provenance/lifetime/access
 obligations, not imply an unavailable length or bounds guarantee.
+
+**Revised prefix recommendation for review:** retain ordinary prefix
+precedence and permit the uncomplicated cases. Restrict the unparenthesized
+operand's postfix receiver chain when it contains member selection; grouping
+must say whether the member belongs to the pointer expression or pointee.
+Members inside a call's argument or an index expression do not become part
+of that receiver chain. This is a candidate rule, not an adopted restriction:
+
+| Candidate source | Meaning/status under this rule |
+|---|---|
+| `*p` or `(*p)` | One ordinary dereference. |
+| `*(p + offset)` | Dereference the computed address. |
+| `*GetPointer()` or `*pointers[index]` | Dereference the call/index result; no member chain ambiguity. |
+| `*p + offset` | Add to the dereferenced value; do not reinterpret as address arithmetic. |
+| `(*p).M` | Select the pointee's member. |
+| `*(p.M)` | Dereference the pointer-valued member. |
+| `*p.M` or `*GetPointer().M` | Reject; require one of the explicit member boundaries. |
+| `(*(p + offset)).M` | Select the computed address's pointee member. |
+| `*(p + offset).M` | Reject; ordinary postfix precedence would select `.M` before dereference. |
+| `*(*p)` | Two dereferences separated by a grouping boundary. |
+| `**p` | Reject under the already accepted maximal operator-run rule; no `**` spelling. |
+
+This does **not** give parentheses a special dereference-fence meaning.
+The current ordinary-prefix alternative's grouping behavior remains intact.
+It addresses the troublesome combinations rather than requiring every
+dereference to use a new delimiter or keyword.
 Under the general punctuation-separation proposal, multiple prefix
 indirections require an explicit boundary between operators. With the
 access-attachment direction from Q03, prefix dereference must adjoin its
@@ -806,6 +932,32 @@ none supplies Terrum's owning tagged-payload contract automatically.
 keeping evolvable cases separate from closed exhaustive dispatch. Require
 rooting/cleanup of unknown payloads before allowing compatible extension.
 
+**Terrum counterpart (candidate declaration/case syntax):**
+
+```terrum
+[Closed]
+public union Lookup<T>
+{
+    case Missing;
+    case Found(T value);
+}
+
+Lookup<int32?> missing = Lookup<int32?>.Missing;
+Lookup<int32?> presentNull = Lookup<int32?>.Found(null);
+Lookup<int32?> presentValue = Lookup<int32?>.Found(7);
+```
+
+`union`, `[Closed]`, the case declarations and case construction above are
+**unapproved candidate spellings**, not a new parser feature. They show the
+proposed single nominal result: the first value has no payload; the other
+two have a live `int32?` payload, absent or containing `7` respectively.
+Candidate arms `Lookup<int32?>.Missing => ...` and
+`Lookup<int32?>.Found(value) => ...` expose only that case's payload.
+They must not flatten `Found(null)` into `Missing`.
+Closedness means all declared cases suffice for exhaustive matching.
+An evolvable variant cannot use that assumption and needs an unknown-case
+fallback preserving opaque payload roots/cleanup.
+
 **C# comparison:**
 
 ```csharp
@@ -846,9 +998,41 @@ already exposes an optional payload without defining arbitrary destructuring.
 property-getter duplication, implicit numeric conversion, or ownership-neutral
 payload extraction merely from similar spelling.
 
-**Recommendation:** Specify evaluation once, binding modes and refinement
+**Recommendation:** Separate the already settled once-only scrutinee from
+new member/extractor evaluation rules. Specify binding modes and refinement
 invalidation before extending patterns. Keep tuple structure separate from
 name-discovered `Deconstruct` methods.
+
+**Terrum counterpart (candidate property/type/relational patterns):**
+
+```terrum
+switch (Next())
+{
+    Sample { Value: > 10 } when Guard() => Large(),
+    Sample { Value: > 0 } => Positive(),
+    _ => Other(),
+}
+```
+
+Those new pattern spellings are **unapproved**. Their candidate evaluation
+contract is concrete: call `Next()` once; attempt the first arm's type test
+then member read; call `Guard()` only if its pattern matches; call `Large()`
+only if the guard succeeds. Otherwise attempt the next arm, then its body
+only on success. `Other()` runs only on fallback. Failures are not
+nonmatches and cannot be silently retried.
+
+The additional choice is whether reads of `Value` are reused. Recommend
+one read per member path within an attempted arm, feeding its relational
+subpatterns from that value, and a new observation in a later attempted arm.
+A false, effectful guard could have changed the backing: "evaluate once"
+must not freeze every getter for the entire switch. Getters/extractors
+retain ordinary effects/failures; do not call `Deconstruct` by name.
+Optimizations require proof that changed observations/effects are
+unobservable. This precise member-read rule remains a recommendation.
+
+Binding ownership is a different question: binding a copyable `int32` is
+not permission to copy a unique payload, move out of a borrowed scrutinee,
+or retain a reference beyond its backing.
 
 **C# comparison:**
 
@@ -866,6 +1050,12 @@ record patterns can instead use generated `Deconstruct`. Similar spelling
 does not select Terrum's copy/borrow/move binding, permit getter repetition,
 or authorize name-discovered destructuring. Those additional contracts
 must be explicit before adding the corresponding forms.
+C# property-pattern lowering can reuse observations and does not provide
+the proposed per-attempt Terrum getter contract merely from similar syntax.
+For a direct operational comparison, ordinary C# code could store `Next()`
+once, read `Value` for the first attempt, run the guard if eligible, then
+read `Value` again before a later attempt. The point is which calls/reads
+are authorized, not just which new pattern tokens are accepted.
 
 ### Q29. First-class index/range values
 
@@ -879,6 +1069,23 @@ universal types or their runtime representations.
 **Recommendation:** Keep the contextual forms initially and require an
 explicit registered type/contract before allowing standalone values. This
 preserves checked domains and backing without inventing an allocating range.
+
+Yes: design/register first-class value contracts before admitting their
+standalone syntax; until then keep contextual slicing. That does not require
+allocating types or a universal `Index`/`Range`.
+
+**Terrum counterpart:**
+
+```terrum
+Slice<int32> middle = items[1.. ^1];
+```
+
+Here `items` has an eligible borrowed-slice contract; the established form
+uses that context's bound domains/backing. Candidate `Index last = ^1;`
+and `Range middle = 1..last;` would instead require registered standalone
+value contracts and a consuming slice contract. Those library names and
+forms are **not selected**; neither first-class values nor allocation
+elision are prerequisites for the contextual form above.
 
 **C# comparison:**
 
@@ -910,6 +1117,33 @@ must preserve its capture/drain ordering.
 registration. Do not promise allocation elision by syntax alone or turn
 observable builder effects into an optimization detail.
 
+**Terrum counterpart (the unresolved nesting is explicit):**
+
+```terrum
+List<int32> values = [1, ..(include ? [2, 3] : [])];
+```
+
+`List` is an illustrative registered target. If `include` is known true,
+flattening to `[1, 2, 3]` is valid **only when the selected contract permits
+equivalent direct-fragment construction** or an optimization proves the
+intermediate behavior unobservable. Allocation by itself need not be a
+required observable event. Identity/escape, allocation-refusal or failure,
+allocator hooks, cleanup and builder effects can nevertheless make a
+particular intermediate construction observable.
+
+A declared builder may drain captured elements through `Add`, a fragment
+through `AddRange`, or a direct fragment operation. These are illustrative
+operation names, not name-discovered registrations. First capture the
+selected element/sequence expressions in the accepted eager order; then
+drain according to the checked builder contract. Do not turn
+`Next(1), Next(2), Next(3)` into interleaved `Add(Next(...))` calls when that
+moves observable writes ahead of later captures. Nor can an optimizer
+substitute `AddRange` for `Add` merely because the final elements agree if
+their published effects/failures differ.
+
+The pending decision is the **source typing and guaranteed fragment
+protocol**, not whether a compiler may perform ordinary sound optimization.
+
 **C# comparison:**
 
 ```csharp
@@ -923,7 +1157,7 @@ Terrum's nested fragment can construct directly in its registered destination,
 nor define its move/refusal, ownership or observable builder-effect contract.
 An implementation optimization is not a source guarantee of those behaviors.
 
-### Q31. Producer contract phases and suspension loans
+### Q31.1. Producer protocol identities and phase selectors
 
 **Question:** Which declared clauses apply at producer creation, advance,
 yield and completion, and how are element/capture loans published?
@@ -934,9 +1168,42 @@ already starts lazily; adding an `ensure` must not silently mean per-yield.
 resolved `[Iterator]`, `yield expression;`, ordinary `return;`, and explicit
 checked close/loan obligations. C# does not supply Terrum's clause phases.
 
-**Recommendation:** Keep ordinary creation and completion contracts distinct
+**Accepted direction:** Keep ordinary creation and completion contracts distinct
 from advance/item contracts, selected by a declared producer protocol.
 Do not infer lifetime extension or per-yield checks from the body.
+
+**Remaining question:** Choose the producer protocol operation identities and
+phase selectors that publish those separate obligations. The direction is
+approved, not a particular clause annotation.
+
+**Terrum counterpart (ordinary wrapper plus accepted iterator forms):**
+
+```terrum
+Sequence<int32> Values(int32 count)
+{
+    require count >= 0;
+    return Produce(count);
+}
+
+[Iterator]
+Sequence<int32> Produce(int32 count)
+{
+    for (int32 i = 0; i < count; i++)
+    {
+        yield i;
+    }
+    return;
+}
+```
+
+`Sequence` represents an eligible declared producer contract.
+The ordinary wrapper checks at invocation; constructing `Produce` does
+not execute its loop. Advancement executes until yield/completion/failure.
+Per-item guarantees belong to the selected advance/item protocol;
+successful final-completion guarantees are not per-yield assertions, and
+early close follows its cleanup contract rather than pretending iteration
+finished normally. A yielded loan cannot outlive its published backing;
+the next advance/close must respect outstanding item-loan restrictions.
 
 **C# comparison:**
 
@@ -957,7 +1224,7 @@ call. Terrum's creation, per-advance, suspension and completion clauses need
 declared phases. C# deferred execution alone does not specify the ownership
 and loans retained across those phases or Terrum's checked close obligation.
 
-### Q32. Catch eligibility and failure matching
+### Q32.1. Catchability registration and filter phase
 
 **Question:** Which failure types may be caught, how does typed matching select
 a handler, and at what checked phase are filters evaluated? Transport bytes
@@ -969,9 +1236,37 @@ uses the approved typed/filter form within required unsafe recovery scope.
 hierarchy. A settled deviation is that a throwing filter does not silently
 become false; it follows ordinary failure/chaining rules.
 
-**Recommendation:** Match declared catchable contracts in source order and
+**Accepted direction:** Match declared catchable contracts in source order and
 make filter-phase access explicit. Never require speculative reads of
 unwound frames or silently erase a filter failure.
+
+**Remaining question:** Choose the catchability registration/type domain and
+exact filter/unwind phase. Agreeing with the direction does not select the
+C# `System.Exception` hierarchy or all its timing rules.
+
+**Terrum counterpart (failure APIs illustrative):**
+
+```terrum
+unsafe
+{
+    try { Work(); }
+    catch (IoFailure error) when (CanHandle(error))
+    {
+        Recover(error);
+    }
+    catch (Failure error)
+    {
+        Log(error);
+    }
+}
+```
+
+The selected failure profile must declare whether `IoFailure` matches
+`Failure`; this is not inherited CLR class matching. If the first type
+matches, its filter runs under checked access. False proceeds to the next
+handler. A throwing filter propagates/chains under the normal failure
+contract rather than being silently converted to false. No catch may
+retain invalid references into frames that have already been unwound.
 
 **C# comparison:**
 
@@ -1002,12 +1297,38 @@ call. Exact-tuple lexical preference and strict `require policy` are settled.
 of an already resolved base; the request is not ambient behavior inherited
 by callees.
 
-**Recommendation:** Use a candidate declaration annotation such as
-`[PolicyVariant("Add(int32, int32)", Arithmetic.Wrap)]` on the variant callable.
-The compiler resolves the constant signature string to one base declaration in
-the declaring scope and checks the policy tuple and complete callable contract;
-it must reject ambiguity rather than select an overload by spelling alone.
-This proposes an attribute contract, not an adopted attribute or wire identity.
+**Revised recommendation:** Use the callable's own declared identity and full
+signature to identify its base, with a semantic attribute supplying only the
+policy tuple. Do not repeat a hand-authored signature string.
+For example, the following is **candidate syntax**, with `PolicyVariant`
+an unapproved attribute identity:
+
+```terrum
+int32 Add(int32 left, int32 right)
+{
+    return left + right;
+}
+
+[PolicyVariant(Arithmetic.Wrap)]
+int32 Add(int32 left, int32 right)
+{
+    return WrappingMath.Add(left, right);
+}
+```
+
+`WrappingMath.Add` is an illustrative API with an explicit wrapping
+contract; the attribute does not make ordinary `+` inside the variant wrap.
+If multiple policy dimensions are declared, the attribute supplies their
+exact enum tuple, for example
+`[PolicyVariant(Arithmetic.Wrap, Precision.Fast)]`; these names do not
+establish a new domain.
+Match scope/name, generic formals and full parameter identity to one base,
+then verify the complete result/access/effect/lifetime contract and
+policy-domain tuple. An attributed declaration is a variant, not an ordinary
+duplicate overload; multiple bases or duplicate tuples reject.
+No matching by parameter names, abbreviated signature strings or source
+order. This proposes a declaration contract, not an adopted attribute or wire
+identity.
 Do not allow import-attached variants. Omit a general policy query until its
 subject is explicit; an active preference is not proof of selected behavior.
 
@@ -1043,6 +1364,39 @@ inherit CLR reflection objects or universal `default(T)`.
 **Recommendation:** Define compiler-known query identities and bounded
 constant domains, not magic arbitrary library names. Keep compile-time-only
 formation distinct from optional runtime folding.
+
+**Terrum counterpart (query names are candidates):**
+
+```terrum
+const int32 count = 4;
+const nuint headerBytes = SizeOf<Header>();
+const nuint headerAlignment = AlignOf<Header>();
+```
+
+The first statement is established. `SizeOf`/`AlignOf` illustrate
+**unapproved registered query identities** supplied by the language profile,
+not arbitrary functions the compiler recognizes by their names.
+For a `Header` with a published eligible layout, they would provide
+target-layout facts: a cross-compiler queries its selected target ABI, not
+the machine running the evaluator. The contract must say whether size is
+the inline value/handle size, object storage size or another measure.
+Do not let a incidental private layout become a portable constant promise;
+frozen/published layout and an eligible complete type are prerequisites
+for a query that promises that layout.
+
+Three decisions remain distinct: which declaration/attribute/generic
+contexts require constants; which values belong to an eligible published
+constant domain; and which registered queries expose what facts.
+Existing integer/Boolean/nominal-enum generic domains and guaranteed
+primitive-wrapper contracts do not thereby admit arbitrary constructed
+objects or CLR `Type` instances.
+
+A required `const`/attribute/generic argument must evaluate successfully
+under its checked constant rules or diagnose; it cannot silently execute
+at runtime. An ordinary runtime expression may be folded only when behavior
+is preserved. Query-specific registration must state whether runtime use
+is available; there is no universal reflection object or general runtime
+opt-out merely because the proposed query uses function-call notation.
 
 **C# comparison:**
 
@@ -1440,8 +1794,17 @@ defaults remain in
 
 Vacant backing and explicit property/constructor initialization approved;
 see [backed properties](../grammar-spec.md#510-properties-and-accessor-local-effects).
-The completion hook's identity and phase remain in
-[Q22.1](#q221-construction-completion-hook-identity-and-phase).
+Completion validation is declared after required initialization and before
+publication; only its identity/registration remains in
+[Q22.2](#q222-completion-hook-declaration-and-registration).
+
+<a id="q221-construction-completion-hook-identity-and-phase"></a>
+
+#### Q22.1. Construction completion hook identity and phase
+
+Direction approved; see the
+[completion contract](../grammar-spec.md#510-properties-and-accessor-local-effects).
+The exact declaration/registration spelling remains in Q22.2.
 
 ### Q25. User-defined short-circuit operations
 
@@ -1449,6 +1812,29 @@ Explicitly deferred until needed and designed as a complete protocol;
 see [operator boundaries](../grammar-spec.md#513-operators-assignments-and-expression-gaps).
 This does not adopt C# `true`/`false` derivation or alter built-in Boolean
 short-circuit ordering.
+
+### Q26. Pointer formation, dereference and pin acquisition
+
+The initialized `pin ref<T> name = ref place;` acquisition is approved;
+see [pin/reference contracts](../grammar-spec.md#32-types-parameters-and-arguments).
+Pointer conversion, warning/release policy and dereference/member choices
+remain in [Q26.1](#q261-pointer-formation-and-dereferencemember-boundaries).
+
+### Q31. Producer contract phases and suspension loans
+
+Creation/completion versus advance/item obligations and declared suspension
+dependencies are approved directions; see
+[producer contracts](../grammar-spec.md#512-modifiers-cleanup-and-finalization).
+Exact protocol/phase identities remain in
+[Q31.1](#q311-producer-protocol-identities-and-phase-selectors).
+
+### Q32. Catch eligibility and failure matching
+
+Declared catchable contracts match in source order with checked filter-phase
+access and normal filter-failure propagation; see
+[catch contracts](../grammar-spec.md#33-statements-and-local-declarations).
+Exact catchability registration and unwind timing remain in
+[Q32.1](#q321-catchability-registration-and-filter-phase).
 
 ## Official comparison sources
 
@@ -1480,6 +1866,7 @@ C# release than the standardized chapter; their differing scopes are explicit.
 - [C# `nameof`](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/operators/nameof): compile-time names and parameter references within attributes.
 - [C# pointer safety models](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/unsafe-code): distinguish the original model from the C# 15/.NET 11 preview's relaxed pointer formation; dereference still requires unsafe.
 - [C# `fixed`](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/statements/fixed): pinning duration and the declared pointer's scope, not an implicit pin acquired by an ordinary reference.
+- [.NET `INumberBase<TSelf>` implementation](https://github.com/dotnet/runtime/blob/main/src/libraries/System.Private.CoreLib/src/System/Numerics/INumberBase.cs): identity, destination-first and source-second checked/saturating/truncating creation; not C# cast ranking.
 - [C# exception handling](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/statements/exception-handling-statements): filter selection.
 - [.NET user-filtered handlers](https://learn.microsoft.com/en-us/dotnet/standard/exceptions/using-user-filtered-exception-handlers): explicitly specifies discarded filter exceptions and a false filter result for C#/VB.
 - [C# attributes](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/language-specification/attributes): attribute identity, placement and arguments.

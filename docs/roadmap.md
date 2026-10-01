@@ -1,334 +1,215 @@
 # Development roadmap
 
-The current milestone is a small checked native compiler, not the entire language.
-The [language](language.md) and [source grammar](grammar-spec.md) define
-approved semantic and source contracts, while
-[implementation](implementation.md) records actual support and tool contracts.
-The [proposal index](proposals/README.md) separates pending designs from
-the accepted contracts and this implementation sequence.
-The approved current [metadata design](il-metadata.md) and bounded
-[coded instruction set](il-instruction-set.md) are distinct from the
-still-proposed core-library and IL-extension drafts in the
-[proposal index](proposals/README.md). None is evidence of current compiler support.
+The project is a bounded checked native compiler, not the whole language.
+[Language and grammar specifications](grammar-spec.md) define target
+contracts; the [implementation reference](implementation.md) records current
+support; [proposals](proposals/README.md) collect unapproved choices.
+Approval, implementation, and pre-v1 stability are separate.
 
-| Stage | Deliverable | Exit evidence |
+## Active work (priority order)
+
+1. Adopt the approved maximal ASCII operator runs `!%&*+-./:<=>?^|~` across
+   supported hosted, native, scanner and projection paths. This work is still
+   in progress. It targets syntax-43 and may append a scanner diagnostic and
+   profile identity for invalid runs; that profile change is allowed. Preserve
+   existing record widths, token IDs, resource budgets and semantic/native ABI.
+2. Review source-contract decisions from the [grammar](grammar-spec.md) and
+   [decision queue](proposals/grammar-open-questions.md). Preserve accepted
+   decisions; recommendations remain proposals until approved.
+3. Refine concrete library proposals. Candidate signatures and contracts do
+   not imply parser, compiler, runtime or library support.
+
+The source-free TRRM scalar path remains fail-fast; checked-exception Bodies
+and richer contracts are not implemented. See
+[implementation](implementation.md) for the current support boundary.
+
+## Planned work (priority order)
+
+The roadmap has four current areas, in area priority order. The sequence below
+is priority order across pending work; numbering does not imply that a
+prerequisite has already been met.
+
+| Priority | Area | Next contracts and dependencies |
 |---|---|---|
-| Syntax foundation (implemented) | Source, Unicode lexer, lossless CST, recovery, CLI, content-bound edits | Public API/CLI tests for round trips, positions, malformed input, numeric boundaries and stale edits |
-| Source grammar stabilization (accepted contracts; partial compiler adoption) | Canonical grammar adopts keyword escape/context rules, lexical namespaces/imports and module visibility, grouped numeric receivers, whole-star ordinary/documentation comment fences, explicit operator glyphs/priority, role-based operator/binding/arrow/conditional/declaration-colon spacing, attached declaration/call/index/generic/type forms, both-sided qualified-name dots, attached named-prefix colons, grouped compound constant arguments, flexible structural trivia with canonical formatter spacing and explicit `..^`. Resolved attribute schemas/multiplicity, checked opt-in primitive-wrapper constant guarantees, generic specificity/staged constructor inference and exact associated-type `is` constraints join partial/default agreement, integral enum checks, finite aliases, bounded constant domains/earlier dependencies and inherited default identities. Explicit `.via<Provider>` selection, parameter-directed result dependencies with preferred `nameof`, and vacant backing with explicit getter-only property initialization are approved target contracts. The `language` baseline is distinct from the higher Core surface; API inventories remain proposals | Syntax-42/scanner-7 adopts closed-catalog `@keyword` names and currently supported comment/delimiter/dot/operator/conditional/colon/optional-type boundaries across hosted and native scalar surfaces, retaining raw spans, historical compatible records and unchanged semantic/native formats and frontend budgets. Unescaped keyword/context behavior remains bounded and maximal operator-run validation remains pending. Documentation approval alone does not upgrade implementation support: provider-selector implementation/declaration/import eligibility, result dependency annotations and getter-only construction rules remain unimplemented. Strict modifier ordering/applicability, adapter forwarding, family declaration spellings, remaining capture/default contracts and completion hooks remain review work. Concrete schemas, wrapper capability/value encoding and complete applicability/metadata remain separate work; nominal short-circuit protocols are explicitly deferred and no reserved Contract flag is assigned |
-| Generalized comment fences (implemented; syntax-37, scanner-6/schema-6) | Ordinary and documentation blocks use maximal opening star runs and exact whole-run one-/two-slash closers; contents remain opaque and nonnesting. Documentation line/block trivia append IDs 4/5; overlong suffixed fences report TRM0010 without losing source text | Exact diagnostics/extents, EOF trivia, truncation and opaque-interior cases; native scanner/frontend execution under both policies, current-profile rejection of incompatible fixed-fence records, retained outputs and unchanged projection/token/buffer limits. No documentation extraction schema, other punctuation/formatter implementation, semantic/ISA/Contract/native ABI change |
-| Receiver/name-attached delimiters (implemented; syntax-39) | Supported hosted calls, indexing, generics/type arguments, declaration parameters and attribute arguments require exact raw token attachment; interior and structural trivia remain permissive. Generic shape selection does not fall back after a spacing error. Native scalar headers/type calls and maintained probes enforce their supported boundaries; host reconstruction independently audits current syntax | Lossless positive/negative/recovery and prelexed/component coverage, escaped and compound receiver extents, hostile historical/current projection audits, native JIT/EXE/DLL and deterministic hosted parity under both runtime policies. No new constructs, other spacing adoption, scanner-7/schema-7/projection revision, budget or semantic/native ABI change |
-| Role-specific dot attachment (implemented; syntax-40) | Supported qualified type/namespace/import dots attach on both sides; expression member dots attach on either side before lookup, including type receivers. Raw spans distinguish whitespace, comments and newlines, preserving lossless recovery and syntactic generic selection | Hosted/prelexed/component role and boundary fixtures, escaped/Unicode/compound receivers, multiline generic interiors, native execution and unchanged persisted consumers under both policies. Native scalar input has no dot-bearing forms; projection audits retain that boundary. No qualified attributes, optional access, other spacing, scanner/schema/projection/budget or semantic/native ABI change |
-| Symbolic expression/binding/arrow spacing (implemented; syntax-41) | Supported binary operators, binding/assignment/compounds and expression-body arrows require both-sided trivia; symbolic prefixes/postfix updates attach to the immediate operand token. Raw boundaries preserve syntactic roles, precedence, lossless recovery and declaration/keyword exemptions | Hosted/prelexed/compiled-scanner matrices, direct native frontend/probe rejection before fallback, independent historical/current projection audits and JIT/EXE/DLL deterministic parity under both policies. Compatible records and persisted identities remain serviced. No new constructs, `?:`/colon/optional-type/operator-run adoption, scanner/schema/projection/budget or semantic/native ABI changes |
-| Contextual punctuation boundaries (implemented; syntax-42) | Supported conditional `?`/`:` and struct-conformance/generic-constraint colons require both-sided trivia; loop-label/named-argument colons attach before the colon with optional trivia afterward; optional-type `?` attaches to the final type token. Roles remain syntactic, repeated optional modifiers reject and recovery remains lossless | Hosted/prelexed/compiled-scanner boundaries, direct native scalar conditional rejection before fallback, independent historical/current projections and both-policy JIT/EXE/DLL byte/effect parity. Interface-base/enum-underlying lists, tuple names and attribute targets remain unsupported; no native labels/named arguments/optional types, operator-run adoption, scanner/schema/projection/budget or semantic/native ABI change |
-| Decimal type-call and suffix migration (implemented; syntax-14) | Context-typed decimal integer literals without a fallback type; checked numeric `T(expression)` conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`; attached width suffixes diagnose as `TRM0006`, and prefix casts are no longer parsed. Source-function/local shadowing retains existing call precedence. The scanner-4 five-word integer record is unchanged: valid literals are untagged, while rejected suffix tokens retain tag metadata for diagnostics | Parser/binder/native and scanner-component agree on direct decimal literal binding, supported conversions, signed minima, no fallback type and call precedence; diagnostics include `TRM0006` without changing the scanner record shape or schema version |
-| Contextual hexadecimal integer support (implemented; syntax-15) | Unsuffixed `0x`/`0X` integer literals bind directly in their expected type without a fallback; at least one ASCII hex digit is required (`TRM0007` otherwise), and `a`–`f` are digits, so `0x1f32` is not a width suffix. At syntax-15, based values used nonnegative magnitude/range interpretation; syntax-16 supersedes it with target-width bit patterns. Attached width suffixes remain rejected with `TRM0006`; the scanner-4 record layout/schema and semantic/native artifact versions are unchanged | Host and compiled scanner preserve exact token spans, agree on decimal/hex magnitudes and overflow, distinguish missing digits from width-suffix diagnostics, and parser/binder/native execution agree for contextual literals and checked type-call conversions |
-| Based integer bit patterns and separators (implemented; syntax-16) | Adds `0b`/`0B` integers and `_` separators in decimal, hexadecimal and binary digit runs, including runs after based prefixes. Based literals construct the expected target width as a bit pattern; leading zeroes/separators do not add significant bits, nonzero excess bits reject. Decimal range and signed-minimum behavior is unchanged. Missing binary digits diagnose as `TRM0008`; malformed separators as `TRM0009`; the scanner-4 record layout and semantic/native artifact versions remain unchanged | Host and compiled scanner agree on radix/separator token boundaries and diagnostics; scanner magnitudes ignore separators; binder and AOT/JIT agree on signed/unsigned target-width patterns, decimal ranges, checked typed conversions and checked unary-minus behavior |
-| General numeric conversion policies (accepted direction; implementation scheduled) | Checked integer-to-integer conversions preserve value or throw on range overflow; unchecked conversions wrap to destination-width bits; saturating integer conversions are explicit APIs. Floating-to-floating conversions follow IEEE-754 with nearest/ties-even default rounding, no language failures for inexactness, overflow to infinity, underflow, NaN or infinity, and no enabled FP traps. Floating-to-integer truncates toward zero; checked conversion throws for out-of-range results or NaN. Unchecked or explicitly saturating conversion saturates rather than modulo-narrows and converts NaN to zero. Preserve bounded checked integer conversions; floating support is not implemented | Pair-specific conversion/witness conformance, explicit alternate-rounding APIs, checked/unchecked range edges and floating exceptional values; do not change existing integer conversions or imply cross-format NaN payload preservation/exactness |
-| Integer binding and native AOT (implemented) | Typed functions/locals, contextual literals, structured control flow, mandatory verifier, direct Windows x64 PE emission | Positive/negative semantic tests, real native execution, checked failures, stack arguments, imports/unwind inspection and safe artifact replacement |
-| Approved TRRM scalar execution (bounded vertical slice implemented) | Source binding and verified scalar operations produce approved `(1, 0)` metadata and compact-linear/indexed Bodies; audited source-free loading feeds the shared JIT/EXE/DLL backend. Lazy expressions, branches, nested while/do/for loops, nearest transfers and early returns use immutable values, typed merge parameters and direct native branches with simultaneous edge copies. Post-tested bodies run before conditions; for initialization runs once, with iterator execution on normal completion/nearest continue but not break/return. Initialized six-primitive locals in lexical blocks/branches/loops preserve scope visibility, outer writes, per-iteration initialization and target-visible edge inventories without executable lexical regions. All three integer shifts, eleven primitive compounds and prefix/postfix updates on initialized writable named locals preserve old-value snapshots and ordered RHS effects; equal-width bit reinterpretation bridges source `int32` counts to checked `uint32` ISA counts and implements signed zero-fill shifts. Module-local direct scalar calls include forward/recursive targets, ordered argument snapshots and void effects without synthetic value IDs. One self-contained Windows x64 module, by-value scalars, declared NoThrow checks and fail-fast only; legacy semantic/native commands and ABI unchanged | Independent handwritten merges/loops/shifts/conversions/calls and consumer processes; metadata/DefId/type/effect, block-index/liveness/region tampering; all reserved Contract flag bits; actual scalar native exports and persisted byte parity; inactive arms, checked failure ordering, value/visit limits and atomic output retention. Acyclic source loops without a reachable backedge reject; no synthetic backedge or inactive-body audit bypass. Checked-exception requests reject; imported/cross-module or richer calls, field/nominal mutations, vacant/richer locals, roots/cleanup and broader contracts remain unsupported, not inferred from inspection success |
-| Bounded values and compiler components (bounded milestone implemented) | Checked signed/unsigned/code-unit numerics, nested aggregates up to 16 bytes, explicit places, conditional outputs, checked host buffers | Executed range/character/token/scanner candidates, exact token kinds and lossless trivia, shared pinned Unicode fixtures, boundary and invalid-state tests, independent C direct/indirect aggregate/out caller |
-| Early JIT and module proofs (bounded milestone implemented) | Shared x64 encoder, W^X/unwind lifetime, protected exception continuations, independent library/reference binding, versioned semantic contracts and native packages | AOT/JIT agreement; root-only JIT against unchanged persisted dependency DLLs; unchanged semantic/native consumer against compatible producer replacement; incompatible public contracts rejected before execution |
-| Accepted access migration (class/ManagedNode/compact-struct receiver batches validated) | Semantic v24: `mut class`, writable `mut` class receivers, readonly bare handles and `write` authority for source classes and `ManagedNode`, including optionals, fields, parameters, results and inference; exact output qualification, writable-storage invariance and legacy-artifact normalization. Semantic v25: persisted, non-exported `MutReceiver` methods on non-owning compact structs. Semantic v26: nested mutable-field loans rooted in named mutable locals or an existing writable `this`; every containing field must permit mutation, and calls address original subobjects. Source methods may be public or private without a public receiver ABI. Primitive buffer/view alignment and coherent `out`-to-`init ref<T>` migration remain scheduled | Normal-analysis Debug/Release builds and full suites; native ABI proof under both runtime policies; positive/negative declaration, receiver, handle, field and intrinsic checks; frozen v18/v19/v23 producer execution and unchanged-consumer module servicing; nested receiver writes survive checked exceptions, readonly/by-value behavior is preserved, forged field paths and immutable-place loans reject, and argument evaluation cannot invalidate reserved roots; v26 nested loans and v25 whole-local receivers reject under older headers and are selected by contract use regardless of managedness; private managed state and the absence of a public managed-handle ABI remain preserved |
-| Unique mutable receivers and field views (implemented; semantic v27-v30) | Ordinary `mut` methods on initialized named mutable unique owners or forwarded writable `this` update mutable scalar/Copy fields in place without ownership transfer, owning-field replacement, or cleanup-contract changes. v28 extends writable nested field paths through fully initialized unique roots and children; v29 admits owning-buffer field loans for `Set`, `TryAppend` and `Clear`; v30 admits lexical field `SliceMutable` with whole-root exclusion; readonly unique methods retain readonly loans | AOT/JIT updates and checked-failure persistence; recursive cleanup and native heap release exactly once; readonly, moved, temporary, partially initialized, view-conflicting and root-invalidating calls reject, including sibling-field access during an exclusive view; scope/unwind ends only the loan; malformed paths and forged readonly loans reject; unchanged-consumer private producer replacement, feature-dependent writer selection and older-header rejection; partial-constructor mutation, escaping views and public mutating-receiver ABI remain unsupported |
-| Conditional initialization loans (implemented bounded subset; syntax-22, semantic v33) | `bool`/`init ref<T>` declarations and `init name` calls distinguish vacancy-only initialization from legacy `out`; `init var name` introduces a vacant local. Successful boolean completion fully publishes supported scalar/Copy/unique output, while false or checked failure leaves it vacant. Public scalar, handle-free Copy and eligible unique outputs have distinct `init:` contracts; managed graph boundaries admit Copy outputs only. Compilation-local `Copy` generic templates support definition-checked conditional `init ref<T>` outputs with closed private specializations, but no public generic ABI. General references and declaration postconditions remain scheduled | Definite assignment and distinct passing modes reject reads, reinitialization and aliasing before publication; verified scratch/cleanup shares the existing native output ABI; v33 persists init parameter/call mode in semantic producer/consumer servicing, while historical private-v33 contracts and older out-only artifacts remain readable; symbolic definition proofs, typed-vacancy inference and independent module consumers cover generic init outputs |
-| Explicit by-value getters (implemented bounded subset; syntax-23, semantic v34) | Compact Copy structs and source classes support one explicit `get { ... }` body with optional getter-local `[NoThrow]`; readonly receiver and by-value result use existing call lowering. Property identity is recorded separately from the implementation name and from ordinary `get_Name` methods; public Copy-struct getters can be exported under the existing public-layout rule, while managed class state remains image-private | Positive/negative source access and effects, AOT/JIT under both runtime policies, semantic/native consumer servicing and managed graph intermediates; no setter, auto-property, ref return or new native ABI; expression bodies are added in syntax-28 |
-| Expression-bodied callables (implemented bounded subset; syntax-28) | `=>` bodies across supported functions, generic templates, methods, static operators, constructors and direct/explicit by-value getters reuse checked return or statement lowering. No conversion declaration, new accessor kind or callable ABI | Source round trips and rejection cases, owner cleanup and writable receivers, AOT/JIT under both policies, compiled-scanner parity and persisted semantic/native consumers; scanner-5/schema-5 and semantic/native formats unchanged |
-| Post-tested and named loop transfers (implemented bounded subset; syntax-29, semantic v39) | `do` loops and enclosing-loop named break/continue across while/for/do preserve checked initialization, cleanup, managed roots and constant evaluation. Simultaneously enclosing label duplicates are conservatively rejected pending the general source-scope decision | First-iteration/transfer definite assignment, condition/iterator order, nested cleanup and root retirement, both runtime policies, compiled-scanner and persisted semantic/native consumers; v39 selected only when new nodes are retained and older headers reject them; no native ABI change |
-| Native scalar expression trees (implemented compiler component; provisional projection v20) | Executable Terrum parsing and scalar binding of nested expressions and expression-bodied functions; up to 32 typed postorder nodes and bounded recursion, retaining the six-scalar/three-parameter envelope and existing v1–19 shapes | Source-bound projection validation, precedence/short-circuiting, integer limits, DLL byte parity and JIT under both policies, invalid/node-limit cases and atomic output retention; shared hosted verifier/emitter remains, not a standalone bootstrap compiler |
-| One-field transparent Copy layout (implemented bounded subset; syntax-24, semantic v35) | Explicit `[Layout(Transparent)]` on a one-field compact Copy wrapper over a scalar `bool`, `char16`, `int32`, `uint32`, `int64` or `uint64` carrier preserves nominal identity while matching the carrier's natural storage and Windows x64 direct call/result classification; semantic metadata retains intent and rejects incompatible replacements. No nested/owning carrier, packing/alignment override, implicit conversion or broad public-field policy change | Source and forged-layout diagnostics; independent C caller validates all six scalar widths; AOT/JIT and unchanged semantic/native consumers exercise compatible replacement under both policies; older non-transparent artifacts retain their versions |
-| Private sequential Copy layout (implemented bounded subset; provisional spelling) | `[Layout(Sequential)]` checks nonpublic compact Copy structs with private fields and eligible nested Copy values against the existing natural 1–16-byte declaration-order layout. Source IR retains the selection; private module serialization and prior ABI remain unchanged. This is not `Blittable`, a public-field export or independently replaceable frozen layout | Binder/verifier reject exposed, owning, malformed and misaligned shapes; independent C probe checks nested offset/size/alignment and aggregate calls, with source AOT/JIT and private semantic servicing. Next substantive layout increment: specify and version a fixed public `Blittable` profile before exposing fields or native-replaceable aggregates |
-| Full runtime and structured contracts (current) | Checked NoThrow and DoesNotReturn declarations; normal/exceptional `try`/`finally` funclets, unsafe bounded catch; nearest-loop break/continue with scoped for iterators; saved-RBP source frames and shared PE/JIT scope/unwind records; exact lexical/temporary roots and checked root unwind in the managed-node proof; standalone `_ = expression;` discard is implemented in syntax-20/scanner-5/schema-5, while other context-specific discard forms remain scheduled; explicit separation of by-value returns from source loans; general exception objects and broader runtime contracts remain open | Effect/normal-continuation source, IR and module checks; cleanup ordering and rooted return snapshots; independent C frame/unwind and escaping-native-catch proofs; bounded checked failure injection; root lifetime and malformed-IR checks across calls and cleanup; loop-transfer allocation/release accounting and persisted v21 servicing; standalone discard evaluates once and cleans owning results; wildcard patterns, lambda placeholders and generic type holes remain unsupported; general runtime integration remains outstanding |
-| Existing requirement/recovery regression gate (preserve first) | Preserve the implemented safe statement-form `require`, boolean/`out` conditional publication, false-only requirement-failure dispatch under the current policy, predicate-exception propagation, safe cleanup `finally`, unsafe checked recovery, and fail-fast's no-cleanup guarantee; this is regression coverage, not a new API implementation | Retain existing tests for predicate evaluation/publication, predicate exceptions versus false requirements, cleanup, recovery-policy gates, and conditional initialization; no behavioral change is implied by later declaration or lifting work |
-| Registered literals and constant evaluation (scalar `[ConstEval]` subset implemented; syntax-26, literal registration scheduled) | Internal scalar `[ConstEval]` declarations, required `const T name = expression;` locals and scalar `const expression` subexpressions evaluate checked scalar control flow with deterministic depth/step limits and no runtime fallback. Ordinary calls remain executable; public/generic contracts, owning/managed values, ambient I/O and registered borrowed-text literal parsers remain scheduled | Required values replace expressions at their original positions before verification; overflow, division by zero, unsupported effects and exhausted limits diagnose, including unreachable effects in declarations. AOT/JIT under both policies and unchanged semantic/native module consumers exercise private helper servicing without a new wire contract; future registered literals must validate borrowed source, full initialization/false vacancy and no runtime fallback |
-| Published conditions and static proofs (constant-only body subset implemented; syntax-27, published/symbolic forms scheduled) | Body-local `static require` proves a point obligation using closed scalar expressions or prior immutable `const` locals; outer-body `static ensure` proves a closed scalar condition independently of runtime state on all normal returns. Both use the bounded ConstEval evaluator, erase before executable IR and distinguish false/unestablished/unsupported diagnostics. Declaration preconditions/postconditions as versioned header contracts and symbolic proofs remain scheduled; ordinary body `require` remains the existing executable point check, not inferred public metadata. Where runtime behavior is legal, authors may explicitly choose an ordinary expression/check instead of a compile-time requirement; compilers never silently demote it. Accepted call boundary: prologue, preconditions, method body, postconditions, epilogue; body includes initialization of local/output values, authored execution/`finally`, local cleanup and untransferred owned-parameter cleanup before postconditions. Static proofs ultimately require a versioned minimum rule/complexity and resource floor | Stable diagnostics and compatibility checks for future stronger preconditions/weaker postconditions; required static obligations fail compilation if false or not established, never runtime fallback. Symbolic runtime values, exact rule catalog/accounting and minimum proof floor remain to specify; existing bounded constant evaluation uses exact target semantics. Runtime alternatives are unavailable for compile-time-only layout/type/metadata requirements and do not weaken structural lifetime/initialization safety. Entry snapshots/history remain deferred; ordinary postcondition checks execute at their declared phase unless soundly proven redundant, preserving effects/failures; no transactional rollback or rerun of completed `finally` is implied |
-| Requirement failure diagnostics and construction (scheduled after contract shape) | General exception construction/ABI, default failure annotations, explicit call-site override, and recognized null/range diagnostics without method-name inference or predicate re-evaluation | Predicate exceptions propagate unchanged; only false selects the declared/selected failure; supported exception shapes and diagnostics are stable across AOT/JIT and modules; arbitrary parameterless exception construction is not assumed |
-| Standalone vacant locals (implemented bounded subset; syntax-30, semantic v40) | `init T name;` and `init var name;` declare readonly vacant slots, including for-loop initializers. Type inference comes from checked initialization, never a default value; existing scalar, Copy, unique and managed output limits remain | Checked publication and rejection of premature reads/reinitialization, conditional owner cleanup and managed rooting, generic inference, malformed semantic-node rejection and independent semantic/native module servicing under both policies; v40 selected only when retained declarations require it, without ABI changes |
-| Native scalar local binding (implemented compiler component; provisional projection v21) | Up to eight initialized typed/inferred scalar locals and twelve ordered declarations/assignments precede the return envelope used through v47; v48 admits structured returns in branch/loop bodies. Sequential binding, mutability and contextual numeric typing are implemented in executable Terrum; ordinary calls and vacant declarations remain unsupported | Source-validated slot/type/order/mutability records, DLL byte parity, JIT/EXE results, checked failures and malformed projection rejection; v1–20 shapes retained, shared hosted verifier/emitter unchanged |
-| Conditional expressions (implemented bounded subset; syntax-31, semantic v41) | Right-associative `?:` evaluates one Boolean condition and only its selected non-void result arm, checked against the expected contract or compatible known types; no numeric promotion/literal fallback. Existing scalar/Copy/unique/managed rules, generics and ConstEval apply | Conditional output facts, moves, roots, inactive-arm effects, malformed IR, compiled-scanner parity and persisted semantic/native consumers under both policies; retained nodes select v41 without changing the native ABI |
-| Native checked numeric conversions (implemented compiler component; provisional projection v22/v23) | Numeric `T(expression)` type-calls across the five supported integer/code-unit types, respectively without/with local statements; target-directed literals and typed operands retain distinct binding rules | All 25 conversion pairs have both-policy DLL byte parity; nested/boundary cases have JIT and EXE execution, checked failures and atomic-output tests; source-bound reader rejects forged types, anchors, shadowing and old-version nodes; buffer and node limits unchanged |
-| Managed optional coalescing (implemented bounded subset; syntax-32, semantic v42) | Right-associative `??` and statement-form `??=` preserve single evaluation, lazy fallback and existing managed-handle nullability/access contracts. Assignment requires an initialized mutable local or writable mutable class field; scalar/unique optionals and general conditional access remain unsupported | Computed receiver roots, checked-failure cleanup, null/optional fallbacks, malformed IR, old-header rejection, scanner parity, AOT/JIT and independent semantic/native servicing under both policies; retained nodes select v42 without changing the native ABI |
-| Native scalar conditional trees (implemented compiler component; provisional projections v24–27) | Target-checked `?:` for the six supported scalar types, combined with locals and numeric conversions; no numeric promotion or inference from the predicate into result arms | Independent three-child/source/type/precedence validation, nested grouping and right association, selected-arm failure behavior, DLL byte parity, JIT/EXE execution and atomic failed-output retention under both policies; v1–23 remain readable with unchanged buffer/node/depth limits and shared hosted backend |
-| Primitive and nominal updates (implemented bounded subset; syntax-33/v43 primitives, syntax-35/v44 nominal updates) | Prefix/postfix `++`/`--` on initialized writable integer and eligible Copy-struct places evaluate the place once, save the old value and commit only a successful exact-type replacement. Nominal static calls preserve self/no-self protocols, constrained-generic definition proofs, effects and witness identity; failure does not roll back prior effects. No instance mutation, owning updates, primitive `char16` arithmetic or new witness ABI | Integer range checks; nominal direct and inferred generic calls, 16-byte saved/replacement values, nested fields, computed receiver effects and exceptional root retirement, malformed target/type/effect rejection, scanner/AOT parity, old-header rejection and independent semantic/native replacement under both policies. Primitive ConstEval remains scalar-only; nominal updates diagnose. No cross-module source-operator discovery or native ABI change |
-| Primitive shifts and compound assignment (implemented bounded subset; syntax-36, semantic v45) | Primitive `<<`, `>>`, `>>>` take an `int32`, `uint32`, `int64` or `uint64` left operand; statement-form `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`, `>>>=` operate on initialized writable places of those types. Exact same-type arithmetic/bitwise operands and `int32` shift counts; one place/old-value snapshot before one RHS evaluation; checked computation before writeback, with prior effects retained on failure. Scalar-slot compounds are available in bounded ConstEval. Nominal compounds, `char16`, unique-value updates and new destination loans remain unsupported | Feature selection includes ordinary shifts and compound nodes at v45; compounds use expression tag 26 in statement position. No native ABI/profile change |
-| Native scalar while bodies and transfers (implemented compiler component; provisional projections v28–48) | Existing v28–31 pre-tested assignment loops and v32–39 branch/loop bodies retain old payloads. Versions 40–43 add bare nearest-enclosing-while `break`/`continue` to loops without branches; v44–47 add them to branches. Projection v48 adds structured returns in branches/loops and rejects reachable non-void fallthrough. Return kind 8 has slot 0, a typed result root and keyword-through-semicolon span; words 38–40 are -1. No named transfers, body-local declarations, general calls or native updates | Independently checked source, roots, continuation, target/nesting/type and body extents; preserve 392 words, 64-token input, eight locals, twelve statement records, thirty-two expression nodes, sixteen expression-recursion levels and six structural levels. Earlier payloads/return shapes remain unchanged; shared hosted lowering is not a standalone compiler |
-| Native scalar shifts and mutations (implemented compiler component; provisional projection v49) | Ordinary integer shifts, all eleven compound assignments and prefix/postfix updates on initialized writable named locals, including grouped names, compose with existing branches/loops/returns. Hosted `int32` count policy, no type fallback from counts, old destination capture before RHS, once-only effects and successful-only final writeback reuse shared lowering | Independent source/projection audits, old-version rejection, all four integer types, exact checked statuses, actual DLL/component/JIT/EXE execution and hosted byte parity under both policies; unchanged semantic/native consumers and failed-output retention. Versions 1–48, fixed resource bounds, scanner records and ABI/profiles remain unchanged; no calls, field/nominal mutations or floating support |
-| Native scalar scoped declarations (implemented compiler component; provisional projection v50) | Initialized declarations of the existing six scalar types inside braced branches/loops, with sequential visibility, no enclosing-name shadowing, disjoint spelling reuse and monotonic local identities. Existing verified lowering preserves per-iteration initialization, outer mutations and nearest transfers/returns under both policies | Independent source-bound slot/scope/mutability/version audits and native/host execution parity; eight total local identities, all other limits, v1–49 servicing and ABI/persistence remain unchanged. No standalone block statements, vacant locals, general calls or richer values |
-| Native scalar do/for loops (implemented compiler component; provisional projection v51) | Braced post-tested and for loops preserve body/condition/iterator ordering, nearest transfers, scoped header/body locals and outer mutations. Empty clauses and existing scalar declaration/assignment/compound/update clauses use shared verified lowering under both policies; declarations are initializer-only. Non-fallthrough loops require no synthetic return | Independent source-bound header/clause/empty-marker audits, native/host JIT/EXE/DLL parity, exact failures and atomic rejection. For header plus two clause records share the twelve-record budget; all existing upper bounds, three-parameter ABI, scanner inventory and v1–50 servicing remain fixed. No named transfers, standalone blocks, calls, vacant/richer locals or new persisted format |
-| Static requirements and implementing-type formals (implemented bounded subset; syntax-34) | Bodyless `static` operator requirements, with optional first `<this T>` bound by the conforming nominal type or constrained generic formal; no-self protocols remain valid. `abstract` is an identifier, with its old token slot reserved | Definition-site proofs, inferred calls, effects and nominal witness checks; compiled-scanner parity, fresh CLI AOT/JIT and unchanged persisted semantic/native consumers under compatible private-specialization replacement. No heterogeneous binary witnesses, associated/default resolution or public witness ABI |
-| Native scalar branch bodies and transfers (implemented compiler component; provisional projections v32–39 branches, v44–47 transfers with branches) | Existing v32–39 braced `if`/optional `else` assignment bodies and nested loops remain unchanged. Versions 44–47 add nearest-while transfers within and across branches, supporting loops inside branches and branches inside loops. Each group selects conversions at +1, `?:` at +2, and both at +3; headers, else markers and transfers share existing statement/nesting limits | Independently source-bound branch extents and transfer source, type, nearest loop target and nesting; tampering, selected-arm/transfer behavior, component DLL parity, both-policy JIT/EXE and atomic output retention. Preserve old v1–43 payloads; shared hosted lowering remains |
-| Conditional-output lifting and matching (scheduled after output-contract migration) | Requirement-expression lifting for one declared success-conditioned output plus explicit status matching; preserves the existing boolean/`out` implementation until the coordinated `init ref<T>` migration | Evaluate once; publish only complete output on declared success; false/exception cleanup leaves no readable vacant output; multiple outputs and enum success predicates remain explicit; no `Try`-name or zero-enum guessing |
-| Bounded Copy generic specialization and inference (implemented; syntax-18, managed producer contract semantic v24) | Top-level function templates support multiple independently constrained type parameters over eligible `Copy` structs, scalar value types and existing source-class/`ManagedNode` handles with their readonly/write and supported optional forms. Typed arguments establish handle types before expected-result fallback; ordinary permitted result weakening does not retarget them. Existing conditional-output type and qualification rules, GC/rooting, semantic class remapping and native per-image heaps apply. Qualified generic-call type arguments do not change the scanner record/schema, wire format or native profile. See the [bounded generic contract](implementation.md#bounded-generic-functions) for inference and constraint details | No unique/owning arguments, views, generic classes/structs, managed fields inside user structs, partial holes, ordinary overloads, public generic ABI or new managed-handle ABI; handle substitutions do not grant member, null-test or operator capabilities |
-| Homogeneous binary operator protocols (implemented; syntax-17) | Extends explicit nominal Copy-struct protocols with subtraction, division, remainder and bitwise AND/OR/XOR alongside addition/multiplication; retains one bodyless static binary declaration, closed homogeneous conformance, definition-site constraints and declared effects; at this milestone, no primitive, unary, comparison, shift or heterogeneous witnesses | AOT/JIT arithmetic and bit-selection samples, checked overflow/zero-divisor failures and signed-min remainder, NoThrow checks, inferred helper composition and rejection of missing/conflicting nominal witnesses; compiled-scanner parity and private specialization replacement behind unchanged semantic/native consumers; no scanner layout, semantic version or physical ABI change |
-| Homogeneous equality/comparison protocols (implemented; syntax-19) | Six distinct source-declared nominal `Copy`-struct protocols for `==`, `!=`, `<`, `<=`, `>` and `>=`, each with homogeneous operands and `bool` result using the existing three-parameter static-operator shape; each conformance and generic constraint is explicit; no derived laws, inferred `NoThrow`, universal equality/hash/identity policy, primitive or heterogeneous witnesses, or public generic ABI | Generic `Clamp`/`Within`/`Different` and conditional equality selection preserve declared effect and publication rules; missing/conflicting protocol witnesses reject; AOT/direct-JIT, scanner parity and private semantic/native servicing validated under both policies, with no wire-format or native-profile bump |
-| Unary static operator protocols (implemented; syntax-21, nominal updates syntax-35) | Compilation-local unary `+`, `-`, `!`, `~` retain their two-formal operand/result contracts and may produce distinct `Copy` results. Nominal `++`/`--` calls reuse existing static requirements and witness servicing for eligible writable `Copy`-struct places, but require exact operand/result type equality. No public generic ABI, `true`/`false`, or nullable operands | Concrete and constrained definition-site calls use existing verified calls and closed specializations; effect promises, nominal witnesses and exact update result typing are checked. Failed writeback, prior effects and source-place eligibility are covered; retained nominal updates select semantic v44, with unchanged native ABI |
-| Async execution and completion (runtime support scheduled after syntax/literal migration) | Async calls start eagerly and run inline until actual suspension; completed awaits continue inline; incomplete awaits do not capture the caller's executor or mandate a worker hop. Declared function/callback affinity persists across suspension, including cleanup and unwinding; unbound helpers do not inherit caller affinity. `Run` schedules the initial invocation and adopts full async completion without binding all inner continuations or selecting the caller's continuation; explicit continuation placement and `Yield` are available by API direction. Task-like completion, including `Task<void>`, remains owned by a structured owner, explicit transfer or supervisor; cancellation is not completion or early borrow release; no `async void` | Completion and execution policies agree across synchronous prefixes, suspension, normal completion, faults/unwinding, already-completed awaits and explicit placement; checked transfer/share/lifetime/affinity constraints hold without implicit worker dispatch. Ownership paths cannot silently discard completion/error obligations; cancellation and failure retain captures through actual completion and cleanup; synchronous `void` remains valid |
-| Resources and graphs (bounded ownership and tracing implemented) | Compact unique POD/composite owners, whole-owner transfers, receiver loans, recursive cleanup, reusable native `int32` storage and lexical slices; source-defined managed classes with complete-publication construction, optional edges, compact handle-free Copy fields and constructor arguments, rooted presence snapshots and descriptor-based cycle tracing; schedule value/lending/consuming iterator categories and allocator/relocation contracts; partial field moves, escaping views, arbitrary owning graphs and broader resource adapters remain open | AOT/JIT ownership and exact roots; independent native allocation failure, direct/indirect aggregate construction/unwind and release accounting; copied token/range values surviving source-link collection, source-class cycles, heterogeneous edges, shared aliases, pointer-shaped scalar nonroots, and 4,096-object collection/reuse fixtures; iterator loans retain declared backing dependencies, cursor-state loans cannot overlap invalidating advancement, and allocation failure preserves cleanup/publication invariants; broader managed layouts and GC stress remain outstanding |
-| General references and implicit readonly parameter loans (scheduled with loan/parameter metadata) | Parameter-only `implicit ref<T>` borrows an eligible place or initializes a hidden local at the original argument-evaluation point in the current enclosing lexical scope, with ordinary readonly-reference semantics, no Copy/ownership transfer solely to borrow and no extra implicit-only noescape rule; skipped conditional/short-circuit evaluation creates no initialized local; declared result/backing dependencies and full `T` qualification are preserved; applies to concrete/generic parameters and explicit extension receivers, not ordinary receiver defaults; existing APIs change only by declaration; no standalone `implicit T`/`in T`, `view<T>` or representation attribute | Implement ordinary reference/loan metadata and lexical-local initialization/cleanup; do not hoist evaluation or create a lifetime-only region; apply ordinary reference lifetime, return, storage, capture and suspension checks without widening existing place/backing dependencies; preserve nested write capability, backing, roots and ownership when copying a Copy `T`; reject stacking with writable/init/pointer contracts or arbitrary conversions; explicit and implicit readonly-ref forms share a signature; ordinary `F(value)` chooses by-value `F(T)` when both apply; preserve source semantics under by-value/indirect ABI lowering, with no size threshold or adaptive type attribute |
-| General separate compilation (bounded native graphs and catalog resolution implemented) | Versioned semantic contracts, persisted EXE/DLL graphs with up to sixteen producers, unique-compatible selection from explicit local candidates, private managed-state replacement and semantic-v31 compact `Copy` exports; semantic v32 supports private managed consumers through ordinary single-provider semantic consumers and native single-provider/module-set entry points using scalar and handle-free `Copy` contracts. Semantic modules share one heap/root domain and remap private class identities; persisted native images retain separate domains. Semantic v32 persisted native graphs additionally permit managed intermediate and root producers. Implement accepted layout policy: private default `Auto`; declaration-order `Sequential`; offset-zero `Blittable` `Union`; one-field `Transparent` with carrier representation and argument/result ABI; and fixed per-target `Blittable: true` with size/alignment/offsets and transitive field compatibility. Layout kind alone does not freeze; unfrozen fields remain private, while frozen fields may be exposed without changing readonly/`mut` rules. Unfrozen layout-dependent values cannot cross independently replaceable dynamic boundaries, but may be used in layout-coupled compilation/rebuild/invalidation scopes. Add both power-of-two member packing and aggregate-over-alignment controls, including combined use and tail padding/array stride; exact source spellings, target limits, metadata and under-aligned access lowering remain specification work. Atomicity, `Copy`, sharing, arbitrary validity and universal wire encoding do not follow from layout. Preserve existing ABI through an explicit compatibility migration | Compatible replacement preserves semantic consumers and native graph root/intermediate images, including frozen older wire formats and managed implementations at leaf, middle and root; distinct leaf identities coexist; caller roots survive imported calls and collection is image-local; replacing a semantic provider requires native relinking for a new PE, while compatible native package replacement retains the persisted consumer image; transparent wrappers match carrier classification across direct/indirect calls; Blittable layout changes reject under the same contract unless separately versioned; unfrozen layout-dependent values either remain layout-coupled or are invalidated/rebuilt before use across a dynamic boundary; padding, initialization, raw-copy, malformed-layout and array-stride conformance cases hold; preserve compact-value/module contracts and feature migration; public managed-handle ABI and cross-image shared collection remain outstanding |
-| Managed-backed compact `Copy` exports (implemented; semantic v31) | Leaf producers may expose existing public, handle-free `Copy` values up to 16 bytes by value as parameters/results and through existing `bool`/`out` conditional outputs, including scalar outputs; private managed storage remains producer-local, and native ABI/profile versions do not change | Preserve nominal type provenance and public-field visibility for `Copy` types crossing the argument/result ABI, not automatically for the declaring owner; existing scalar-only static exports on public owners with private fields remain valid, and a static declaration on a unique owner does not transfer it; preserve `NoThrow` and existing value-ABI contracts; older headers reject expanded export shapes; no exported managed handles or unique values, nested managed-containing values, views, reference modes, mutating-receiver ABI or managed-leaf imports |
-| Managed graph participants and consumers (implemented; semantic v32) | Semantic v32 supports private managed consumers through ordinary single-provider semantic consumers and native single-provider/module-set entry points. Persisted acyclic native DLL graphs also permit managed roots and intermediate producers through scalar and handle-free public `Copy` by-value/result and `bool`/`out` contracts; each persisted image owns its heap and root chain, imported calls preserve caller roots, and collection is image-local. Semantic modules statically link into one heap/root domain and remap private class identities | AOT/root-only JIT leaf replacement with unchanged managed middle and root images under both runtime policies; semantic provider servicing and fresh static links; no cross-image handles, unique values, views, reference modes, cross-image shared collection, graph cycles, DLL-unload collection or native ABI/profile/package-format changes |
-| Nominal witnesses, adapters, families and operation protocols (scheduled) | Coherent checked behavioral witnesses; each type declares ordinary implementations, with no import-driven retroactive global conformance. Explicit adapter types may add extension-interface behavior without changing the original type. A one-way Original-to-Adapter projection is possible only under checked validity, representation, access, ownership, lifetime and container rules; no blanket generic covariance. Families require explicit opt-in and declared checked projections/constraints. No universal root is introduced merely for equality, hashing or formatting; use operation-specific witnesses/interfaces and explicit adapters. Specify exact syntax, forwarding, conflicts, dispatch metadata, projection eligibility and conformance evidence | Conflicting ordinary witness claims reject independent of import order; adapter selection preserves the original type's conformance set; invalid/narrowing representations do not gain total projections from equal bits; no projection weakens writable invariance; one selected witness binds each associated result; non-injective relations are not inverted; associated integer and SIMD relationships validate across AOT/JIT and module boundaries |
-| Explicit interface representations (scheduled) | Checked borrowed `ref<I>`/`write ref<I>` and managed `box<I>`/`write box<I>` forms, with slot access distinct from referent authority; no `dyn` keyword or implicit interface handle | Borrow/root/dispatch and module ABI checks; explicit inline-struct boxing and unique transfer; class-object projection preserves identity only under a checked representation; heterogeneous `List<box<I>>` retains normal storage/lifetime rules |
-| General overload binding and generic inference (scheduled) | General source-time overload binding recorded as a selected declaration plus closed generic arguments; ordered inference from explicit arguments, typed arguments, expected result, then contextual literals/lambdas; the explicit `value.via<Provider>.Member()` selector is approved in [grammar §5.2](grammar-spec.md#extension-provider-selection), but selector implementation and extension declaration/import eligibility/full checking remain open; ordinary by-value `T` wins over `implicit ref<T>` for `F(value)`, while explicit reference arguments may select a reference overload | Link/JIT never repeats source overload resolution; `Set(1)` ambiguity after an added `uint32` overload is diagnosed on recompilation while existing bindings remain stable; no numeric fallback, constraint-only overloads or unresolved exported holes; implicit versus explicit readonly-ref alone never distinguishes overloads; bounded Copy inference does not imply general overload or argument/result inference |
-| Evolvable types and compatibility forwarding (scheduled) | Open-by-default API/case evolution, explicit closed-case/layout/frozen contracts, exhaustiveness-checked `[Exhaustive]` fallbacks, exact metadata forwarders preserving full old contracts, and first-class build-tool compatibility analysis | Closed-case additions break compatibility; exhaustive dispatch retains checked unknown-case failure; fallback preserves valid payload cleanup/rooting and warns about missing known cases on recompilation; tooling reports binary and source-binding risks plus witness/default and layout/access/effect/lifetime changes without claiming behavioral proof |
-| Rich libraries and self-hosting | Executed range, scanner, integer, string and source-line components, including scanner-backed integer binding, an owned line-start index, reusable signed/unsigned decimal formatter and bounded managed token chain; compilation-local static operator protocols, composed structured generic algorithms, scalar results and conditional Copy outputs; schedule operation-specific equality, key/hash, formatting and display/debug witnesses, SIMD ABI families distinct from logical TensorSpan shape/stride views, and tensor primitive contracts; general generic algorithms, views/builders and public witness implementation remain scheduled | Shared host/self-host fixtures, byte-identical host/component images and numeric diagnostic parity, binary-searched UTF-16 positions, invariant 64-bit formatting boundaries and linked-storage count/version/collection checks; nominal wrappers execute constrained quadratic and composed 32-/64-bit integer-power algorithms through AOT/JIT, including private helper specialization replacement behind unchanged scalar exports; tensor empty/rank-zero/stride/overlap cases preserve shape and backing dependencies; recursive specialization reuse, mixed indirect Copy arguments/outputs, conditional token/range selection, and definition-site witness/effect/publication checks; equality/hash compatibility and explicit-formatting witness checks without universal root methods; functional interfaces and broadly composable kernels remain separately scheduled; no parser-only bootstrap or full standard-library claims |
-| Registered builders and parameter-directed handlers (scheduled within rich libraries) | Collection/text target registration, eager typed capture, and streaming handlers with explicit ownership, lifetime, refusal and publication contracts; expression handlers consume explicitly supported typed operation graphs, not arbitrary callback bodies | Holes evaluate once left-to-right before draining; move/copy/refusal/cleanup and failure publication are checked; alias/backing and capture dependencies are preserved; unsupported expression graphs diagnose or use separately declared fallback; no FMA, reassociation, reordering or changed effects/failure behavior is introduced silently |
-| Fixed-signature callables and tuples (scheduled) | After metadata, access, loan, effect, ABI and ownership contracts are established: transparent aliases; closed single-target `func`/`fnptr` signatures; tuple construction; named static callable views; fixed-signature contextual lambdas and checked nominal/callable witnesses, without boxing, user-declared delegate types or language-level multicast events; any event/subscription aggregation remains an explicit library contract | AOT/JIT and module-contract parity; signature/effect/access/lifetime/ABI witness checks; static/open/bound invocation, receiver access and capture cleanup; source-label compatibility and named-argument order; tuple copy/uniqueness/borrow checks; explicit aggregation defines order, exceptions/refusal, reentrancy, mutation/disposal and all-result handling; async aggregators retain responsibility for every returned task; no implicit tuple ABI or callable allocation |
-| Generic scalar/SIMD functors and explicit specialization (scheduled) | Named generic functors checked against definition-site constraints; exact closed-generic specialization references with declared CPU/OS requirements and priority; portable AOT baseline/variants with same-contract effects, access, lifetime, ownership and cleanup | Scalar and supported-width results against explicit contracts; exact target selection and deterministic tie rejection; CPU/OS dispatch reaches eligible variants and preserves fallback policy; differential tests/proof obligations compare handwritten algorithms with generic operation graphs; call/effect counts, cross-lane behavior, inactive lanes, tails and floating-point ordering/contraction; captured scalar values require explicit broadcast; a closed scalar callback never implies vectorization |
-| Contextually generic lambdas (scheduled) | Generic lambdas as shorthand for the same checked generic-functor contract, not a new type-pack facility | Constrained symbolic operations such as `x => x * x` validate `T` operations and Copy requirements; contextual scalar/SIMD behavior matches the named functor contract; capture and diagnostics are checked without arbitrary pack expansion or polymorphic callable erasure |
-| Later capabilities | Production JIT and additional native targets, async runtime implementation, generation/reflection, interop, scalable SIMD | Workload-specific correctness, ABI, lifetime, servicing and measured cost evidence |
+| 1 | Full runtime/structured contracts | Priorities 1–3, 9–10 below |
+| 2 | Resources/graphs | Priority 4 |
+| 3 | General separate compilation | Priorities 5–6 and 11 |
+| 4 | Rich libraries/self-hosting | Priorities 7–8 and 12 |
 
-The hosted C# compiler and a Terrum-authored bootstrap compiler are intended
-to remain maintained in parallel through at least 1.0 GA, not replace one
-another when the first self-build succeeds. Start with a bounded compiler and
-explicit host source/output adapters; add only the library contracts its real
-phases require. Compare both compilers on the same sources, dependencies,
-options, runtime policy and target profile: lexical and diagnostic facts first,
-then canonical semantic artifacts, and finally deterministic native output
-for their shared supported subset. A self-build gate compiles that bounded
-compiler with the hosted implementation, rebuilds it with the resulting
-compiler, and checks the next rebuild and native execution against shared
-fixtures. Terrum's compiler architecture need not imitate C# internals;
-semantic rules, optimization capabilities and target ABI should agree even
-when their algorithms and intermediate structures differ. Identical native
-bytes are achievable where both implementations deliberately share a
-deterministic lowering and emission profile, including ordering, layout and
-tie-breaking; equivalent behavior alone does not establish that profile.
-Byte equality applies only to specified canonical output, not to
-unspecified container metadata; differences must be explained rather than
-silently normalized away. The current scanner and library components are
-precursors, not evidence that this gate already passes.
+1. **Full runtime/structured contracts — references and safety.** Define
+   general reference/access/loan metadata and caller-unsafe declaration
+   contracts before relying on them across calls or imports. Exact syntax and
+   implementation remain pending.
+2. **Full runtime/structured contracts — initialization and outputs.** Complete
+   general `out`/`init ref<T>` declaration and call migration with definite
+   initialization, cleanup and publication rules. Preserve their distinct
+   contracts; this is not a parser-only rename.
+3. **Full runtime/structured contracts — conditions and constants.** Specify
+   published/static conditions and required literal/constant domains, including
+   proof/effect limits, before claiming general proof execution.
+4. **Resources/graphs.** Extend beyond bounded owners, views and managed graphs
+   only after representation, lifetime, cleanup, failure and publication
+   rules are defined. General stored views, partial field moves, arbitrary
+   owning graphs, allocators and relocation remain pending.
+5. **General separate compilation — layouts.** Specify fixed public
+   `Blittable` layouts, packing and over-alignment with target limits,
+   metadata, access lowering and compatibility checks. Exact source spellings
+   and implementation are not settled by this plan.
+6. **General separate compilation — binding contracts.** Complete overload
+   and witness selection plus adapter, family and explicit-interface
+   contracts. Keep unresolved declaration, lookup and compatibility choices
+   pending rather than adopting convenient host behavior.
+7. **Rich libraries — builders and handlers.** Specify registered builders and
+   handlers with checked eager capture before draining, ownership, refusal,
+   cleanup, failure and publication behavior.
+8. **Rich libraries — callables.** Progress in order from fixed-signature
+   callables and tuples, to generic scalar/SIMD functors, to contextual generic
+   lambdas. Each stage depends on its declared type, effect, access, loan,
+   ownership and ABI contracts; it does not imply type packs or polymorphic
+   callable erasure.
+9. **Full runtime/structured contracts — conversions.** Implement accepted
+   numeric-conversion policies, including floating support, only with their
+   target contracts and boundary behavior. This is not current floating-point
+   compiler support.
+10. **Full runtime/structured contracts — asynchronous producers.** Specify
+    completion, producer, capture and suspension contracts after their loan,
+    effect, ownership and cleanup prerequisites. This targeted work is not an
+    async-runtime support claim.
+11. **General separate compilation — evolution.** Add evolvable-case
+    contracts, exact-contract forwarders and compatibility analysis without
+    silently widening existing contracts.
+12. **Rich libraries/self-hosting — bootstrap components.** Grow the current
+    bounded components toward a compiler bootstrap only as their language and
+    library prerequisites are met and through the shared
+    [self-host gate](#compiler-and-self-hosting-gate).
 
-Do not implement all stages simultaneously. The source-class/`ManagedNode`
-readonly/writable, mutable-class-receiver, and named/nested mutable compact-struct
-receiver-writeback batches are validated. They preserve historical authority
-when normalizing private managed artifacts; primitive buffer/view access and
-the general `out` declaration/call migration to `init ref<T>` is
-scheduled separately from the bounded conditional-init subset.
-Preserve conditional publication, cleanup and module servicing. `init ref<T>`
-is not an alias for arbitrary writable references or a parser-only rename of
-`out`.
+These are pending contracts, not support claims. Exact grammar, metadata and
+implementation remain subject to their canonical specifications and proposals.
 
-The callable stages above are target work, not current compiler support. The
-existing bounded static native-export path and its physical ABI do not imply
-that `func`, general `fnptr`, tuples, callable witnesses or contextual lambdas
-are parsed or implemented. The fixed-signature stage precedes generic
-scalar/SIMD functors, which precede contextual generic lambdas; user-defined
-type packs, pack operations, polymorphic callable erasure and automatic
-vectorization of arbitrary callbacks are outside these scheduled stages.
+### Later capabilities excluded from this sequence
 
-Semantic version 24 carries the managed access capability contract. Semantic
-version 25 adds a distinct `MutReceiver` contract for persisted, non-exported
-mutating methods on non-owning compact structs; source visibility may be public
-or private. Semantic version 26 adds nested mutable-field loans rooted in
-named mutable locals or an existing writable `this`, requiring writable
-fields throughout the path. Older headers reject the respective contracts;
-whole-local non-owning receiver loans remain v25. Semantic v27 adds ordinary
-mutating unique-owner methods and rejects them under older headers.
-Semantic v28 adds nested mutable-field loans through fully initialized unique
-roots and children; earlier headers reject the broadened loan contract.
-Semantic v29 adds writable buffer-field loans for `Set`, `TryAppend` and
-`Clear`, without a new public or physical native ABI.
-Semantic v30 adds lexical mutable buffer-field views with the existing
-no-escape rules and conservative whole-root exclusion.
-Programs requiring none of these contracts retain
-their existing versions and bytes regardless of managedness.
-Readers normalize private managed artifacts
-from versions 18 through 23 into qualified internal IR without changing their
-justified capabilities. Semantic v31 permits compact handle-free `Copy`
-exports while keeping managed state and handles private.
+Production JIT, additional backends, wholesale source generation/reflection/
+interop and scalable SIMD remain outside these four current areas. This does
+not exclude the existing bounded JIT proof or the targeted asynchronous
+contracts listed above.
 
-General `ref<T>`/`ptr<T>`/`box<T>`/`val<T>`, explicit erased-interface
-representations, `write` views, `own<T>`, generic access constraints and
-general `init ref<T>` invocation semantics require their respective representation,
-lifetime, cleanup, ABI and regression work. They are scheduled implementation
-work, not part of the active class batch and not items to park under Later.
-The accepted call-site form is `Create(init value)`; syntax-22 supports
-bounded boolean-success helpers, while general migration remains scheduled.
-The immediate next coherent work extends the verified native corpus and its
-semantic checks, not a plugin loader or wholesale translation of every design
-sample. Stabilize syntax accessors while extending the grammar; keep
-diagnostics/source mappings usable on incomplete input.
+## Completed work (newest first)
 
-Concrete `Copy` helper composition is implemented within the bounded generic
-stage: templates can combine concrete local/imported value types and symbolic
-formals using normal declaration lookup and inference. Isolated proof contexts
-load only reached declarations and nested layouts, preserve accessibility and
-effects, and keep concrete witnesses distinct from formal constraints. This
-adds no source syntax, semantic wire version, native profile or public generic
-ABI; closed specializations remain ordinary private verified functions.
+Hashes identify local repository commits. Detailed support and compatibility
+boundaries remain in the [implementation reference](implementation.md).
 
-The same stage admits concrete source-class factories and members inside
-templates, retaining existing handle qualifications, cyclic descriptor layouts,
-conditional outputs and managed rooting. Only isolated definition proofs may
-use declaration-only managed dependencies; executable and persisted checks
-remain unchanged. This uses existing `TryCreate`, not a new construction form
-or public managed boundary.
+| Commit | Completed milestone |
+|---|---|
+| `d6e65d3` | Syntax 42: contextual punctuation boundaries |
+| `2f29b3e` | Full-width scalar, indexed and String TRRM serialization |
+| `6f0d088` | Syntax 41: symbolic operator and binding spacing |
+| `fb49af6` | Syntax 40: role-specific dot attachment |
+| `af21c1f` | Syntax 39: attached constructs |
+| `4e8fd9b` | Syntax 38: keyword escapes |
+| `f2dc5c1` | Syntax 37: generalized comment fences |
+| `8113012` | Indexed TRRM `do`/`for` loops |
+| `85e1743` | Native scalar `do`/`for` projection 51 |
+| `7c3c857` | Indexed lexical locals |
+| `9051689` | Native scoped-local projection 50 |
+| `3115e5a` | Module-local TRRM scalar calls |
+| `e2267db` | Indexed shifts and mutations |
+| `37576ad` | Native shifts and mutations, projection 49 |
+| `a2083b5` | Indexed branches and loops |
+| `0a5200e` | Initial persisted scalar TRRM execution |
 
-Within Rich libraries, define operation-specific checked witnesses for value
-equality, identity where supported, key equality paired with a compatible hash,
-invariant machine-readable formatting, and display/debug rendering. These are
-opt-in operations alongside primitive built-ins, not universal root methods or
-an obligation to make every value stringifiable. No universal root is
-introduced merely to provide these operations.
-
-The [proposal index](proposals/README.md) distinguishes unapproved forms
-from accepted contracts and scheduled implementation. Detailed boundaries live
-in [language](language.md), [lifetimes](lifetimes.md), [type families](type-families.md),
-[conversions](conversions.md) and [libraries](libraries.md). They include
-generic member-contract refinement, stored-view ABI, inline class eligibility,
-exception/low-memory ABI, associated/conditional-conformance grammar and
-explicit adapter witnesses, erased-interface dispatch ABI, match grammar and
-closed-case markers, forwarder attributes/source visibility and compatibility
-tooling policy, text representation, explicit async affinity/scheduler syntax,
-floating-destination conversion policies, scalable
-sharing ABI and final construction/annotation spellings. Accepted semantic
-policies are not reopened by these syntax/ABI questions; none should be
-silently fixed by a convenient host or machine instruction.
+Earlier compiler, runtime, module and component milestones are summarized in
+the implementation reference rather than repeated here as a second feature
+inventory.
 
 ## Language, semantic IL and metadata specification
 
-The long-term specification must cover both the source language and its
-execution/interchange contracts: comparable in scope to a language standard
-plus an infrastructure standard, without adopting CIL, CLR or their historical
-format choices. The semantic IL and metadata format are first-class work
-within full runtime/structured contracts and general separate compilation,
-not merely serialization details of the current compiler's private IR.
+Maintain one evolving language specification organized around syntax, types,
+static semantics and execution. Distinguish intended rules, implementation
+coverage and unresolved proposals; do not version chapters independently.
+Breaking changes remain possible before v1, with existing compatibility
+behavior and explicit migrations preserved. No pre-v1 stability promise is
+made. Work may proceed against approved grammar while remaining decisions stay
+in the proposal queue; using a provisional design for an increment does not
+approve other proposals.
 
-Maintain one evolving language specification, organized into syntax, types,
-static-semantics and execution chapters. Distinguish intended rules, actual
-implementation coverage and unresolved proposals. The specification is
-authoritative for current intent, not frozen forever; intentional pre-v1
-changes, including breaking changes, remain allowed and should become
-increasingly infrequent as the design solidifies. This does not require
-independently versioned chapters or create a perpetual compatibility promise.
-Existing implemented compatibility behavior and explicit migration
-requirements remain unchanged. No pre-v1 stability level is promised; any
-stability declaration is deferred until closer to v1.
+TRRM is a compact binary representation of the language and ecosystem: an
+input for metadata binding, reflection, tooling, linking and AOT/JIT code
+generation without source recompilation. It is not merely private-IR
+serialization or a verifier certificate. The approved source grammar and
+current `(1, 0)` metadata and coded-instruction designs specify target
+contracts, not a complete executable profile, current compiler support or a
+released schema. The complete Body/verifier contract, feature negotiation and
+resource budgets remain work. Source compilation checks authored bodies;
+binary consumers validate structure, references, binding, compatibility and
+caller use, then may rely on declared contracts for external dependencies
+without re-proving their bodies. Malformed data is never trusted.
 
-Substantial compiler, runtime, and library increments may proceed against
-the approved [source grammar](grammar-spec.md) without waiting for its
-remaining open decisions or approval of the core-library proposal.
-The [remaining source-question proposal](proposals/grammar-open-questions.md)
-separates actual undecided source contracts from implementation work, ABI/API
-choices and explicitly deferred features. Its recommendations require review;
-compiler progress does not adopt them.
-The approved current [metadata design](il-metadata.md) and
-[coded instruction set](il-instruction-set.md) define specified framing,
-row and bounded Body contracts, not compiler support or a released byte
-schema. Where an increment needs still-open specifics, use
-concrete working designs provisionally and mark implementation-dependent choices in
-the relevant design and implementation-status documentation; retrospective
-correction remains possible before v1. This is not blanket adoption of every
-proposal, an implementation-support claim, or a stability promise. Keep work
-within the four current roadmap areas, use coherent validated increments and
-local commits, and leave Later capabilities excluded.
+Pre-v1 changes, including breaking format changes, remain possible; no frozen
+versioning scheme, published managed-machine ABI, or pre-v1 stability level is
+promised. Preserve explicit migration requirements and existing compatibility
+behavior. Validate independently authored readers, writers and verifier cases,
+not only same-version round trips. Dynamically composed code must be checked
+against dependency, compiler and runtime assumptions before execution; an
+implementation may adapt, rebuild, discard or reject it. No JIT fallback or
+IR retention is required. Declared FFI exports remain fixed to their target
+profile.
 
-The intended IL is a compact binary representation of the language and
-ecosystem, carrying type information, metadata/contracts and operations. It is
-usable as compilation input for metadata binding, reflection and tooling, and
-for linking and AOT/JIT machine-code generation without source recompilation.
-It is not merely serialization of a private compiler object graph or a
-verifier certificate. Its ecosystem role is comparable to CIL without adopting
-its format. Compactness does not select a compression codec or container;
-pre-v1 IL breaks remain allowed and no frozen versioning scheme is selected.
-Source-to-IL-to-machine-code and source-to-object-file-to-machine-code are
-conceptual staging comparisons only; ordinary object files already contain
-machine code and are not generally an intermediate representation awaiting
-later assembly.
-Source compilation checks authored bodies against their contracts. The verifier
-is one consumer of metadata; ordinary binary consumers perform safe structural,
-reference, binding, compatibility and caller-use checks, then trust declared
-contracts for external dependencies without mandatory dependency-body
-re-proof. Callers still satisfy imported preconditions, access, ownership and
-effect contracts. This does not trust malformed bytes or change the current
-bounded readers/verifier. Optional deeper audit tooling is not a v1 promise;
-signing/provenance does not establish semantic correctness; no mandatory
-signature or trust store is selected.
+Keep minimal language conformance separate from the application-library and
+runtime surface. Core requirements stay small; richer features retain their
+checked dependencies without silent fallback. The library proposal is not an
+approved inventory, and no universal runtime, backend or API set is implied.
+The source specification, verifier, metadata/module interchange and target
+profiles must state their boundaries explicitly. Do not infer implementation
+from an approved syntax form or infer approval from an implementation choice.
 
-Separate minimal language conformance from the standard application-library/
-runtime surface and feature-specific dependencies. Core requirements remain
-genuinely small; richer facilities retain their checked dependencies when
-used, with no silent weakening or fallback. This does not define an exhaustive
-type/API list, named runtime profiles, universal support for every feature or
-an implemented embedded/kernel backend.
+## Compiler and self-hosting gate
 
-Specify the source language, semantic operations and verifier, metadata/module
-interchange, and runtime/target profiles with explicit boundaries. `TRRM` is
-the selected format identifier; approved metadata records and framing do not
-yet specify the complete executable body, verifier and feature contracts.
-Cover declaration identities and references, types, generic
-constraints/witnesses, access/ownership/lifetime and output contracts, effects,
-capabilities, layouts and runtime dependencies. Accepted documentation
-direction: attach `///` comments to declarations, with `/** ... */` equivalent;
-use GFM-compatible prose, implicit leading summaries, and structured
-top-level Markdown headings. Declaration-scoped mentions such as `@value`,
-`@T`, and `@Type.Member` resolve to structured references and may be
-post-processed. Ordinary Markdown links remain for document navigation;
-explicit `xref:` links support custom or qualified references. Documentation
-emits a separate XML artifact and does not define executable contracts.
-Exact tokenization/escaping, complex reference grammar, schema/member IDs,
-and packaging remain specification work.
+Maintain the hosted C# compiler and Terrum-authored compiler in parallel
+through at least 1.0 GA; the first self-build does not replace the host.
+Compare both on the same source, dependencies, options, runtime policy and
+target profile: lexical/diagnostic facts, canonical semantic artifacts, then
+native output for their shared subset. The gate is a hosted build, a rebuild
+with that compiler, and a further rebuild plus native execution against shared
+fixtures. Require byte equality only for output whose ordering, layout and
+tie-breaking are specified; explain other differences rather than normalizing
+them away. Current scanner/library components are precursors, not evidence that
+the gate passes.
 
-The `TRRM` specification must define byte framing and header,
-metadata-record relationships and identity, body/instruction/region structure,
-limits and accounting, validation, reference resolution, and unknown/reserved
-data behavior. It must distinguish source-language versions, semantic
-artifact-format revisions and physical native profiles. The approved current
-metadata and bounded coded-instruction designs specify a pre-release `(1, 0)`
-wire revision and a narrow executable subset, but feature negotiation,
-broader executable contracts and numerical resource budgets remain open;
-implementation coverage remains explicitly bounded. The scalar execution
-slice above now emits and loads actual approved metadata and compact Bodies;
-broader private-IR serialization does not become approved interchange.
-Establish conformance with independently exercised readers,
-writers and verifier cases rather than relying only on same-version round trips.
-
-`TRRM` is the selected identifier for the evolving Terrum semantic-IL/module
-format; no separate `LMOD` family is planned. The repository's current
-development semantic-module bytes (highest implemented revision 45) are evidence for the
-working specification, not an adopted final layout. Reader support for
-historical revisions 10–45 and feature-dependent writer selection are temporary
-repository implementation facts, scheduled for consolidation before v1; they
-do not create an external production compatibility obligation. The selected
-revision is a semantic artifact requirement, not an on-wire major/minor scheme
-or a 1.0 release decision. This work does not require a new
-backend or public managed ABI.
-Terrum makes no published frozen managed-machine ABI promise. Dynamically
-composed precompiled code must be validated against dependency/compiler/runtime
-assumptions before execution; implementation may adapt, recompile from an
-available form, discard, or reject incompatible code. No JIT fallback or IR
-retention is mandatory, so strict AOT may require rebuilding or fail. This
-does not weaken published language contracts or required static/safety checks;
-declared FFI exports remain fixed to their target-profile contract.
+Do not translate every design sample at once or build a plugin loader first.
+Extend the verified executable corpus and semantic checks in coherent slices;
+keep diagnostics and source mappings useful on incomplete input. Bounded
+managed access, unique-owner mutation and field-view contracts are implemented;
+primitive buffer/view alignment and general `out` to `init ref<T>` migration
+remain scheduled. The existing conditional-init subset is not general
+reference support. Bounded static exports do not imply `func`, general
+`fnptr`, tuples, callable witnesses or contextual lambdas. Fixed-signature
+callables precede generic scalar/SIMD functors, which precede contextual
+generic lambdas; type packs, polymorphic erasure and arbitrary callback
+vectorization are excluded from these stages.
 
 ## Memory-model implementation sequence
 
 The [memory model](memory-model.md) is accepted design, not implemented
-concurrency support. Integrate it through the four current areas above rather
-than introducing a parallel runtime or moving the work under Later capabilities.
-Each increment must preserve existing single-threaded behavior and remain
-honest about unsupported source and artifact contracts.
+concurrency support. Integrate it through the four roadmap areas above, while
+preserving existing single-threaded behavior.
 
-| Order | Increment and dependencies | Required evidence |
+| Order | Increment and prerequisite | Required evidence |
 |---|---|---|
-| 1 | Preserve the existing baseline within full runtime/structured contracts: observable evaluation, checked arithmetic, cleanup, ordinary access widths and current unsafe-recovery behavior | Source/IR/AOT/JIT regressions establish that optimization introduces no invalid accesses or extra observable faults/effects; unsafe discovery does not create new repair/trap behavior; no claim that current unsafe blocks implement general caller-unsafe contracts |
-| 2 | Implement the accepted `unsafe` callable-declaration contract for caller obligations, explicit unsafe-block requirements in bodies and at caller use sites, and producer-owned transfer/share capability rules alongside reference/loan/parameter metadata; integrate them with general separate compilation. No trusted-implementation source marker is required for ordinary safe declarations containing checked internal unsafe blocks | Safe callers cannot erase obligations through wrappers or imports; ordinary declarations do not propagate caller-unsafe obligations; unsafe operations remain explicitly scoped even in caller-unsafe methods; generic bodies use published constraints; private-layout or JIT facts do not alter source binding; incompatible capability/safety changes reject without freezing otherwise opaque layouts |
-| 3 | Implement the bounded `MemoryPrimitives` value-access and scalar-atomic surface after typed access paths, representation eligibility and compile-time order binding are available; start with supported Windows x64 profiles | Separate atomicity, ordering and progress checks; defined bitwise CAS comparison; checked overflow leaves storage unchanged; unaligned access does not imply a snapshot; exact target capabilities and AOT/JIT/module parity; no hidden lock fallback |
-| 4 | Build checked handoff, immutable publication and scoped synchronization protocols on those primitives within resources/graphs and rich libraries; provide explicitly selected coordinated fallback where feasible | Publication and mixed-order litmus tests; guard/lifetime/alias enforcement; lock-free versus wait-free claims justified independently; fallback users across modules share one protocol; no unconditional read-elision prohibition when required effects are preserved |
-| 5 | Extend reference atomics only after collector-aware roots, barriers, safepoints and reclamation are defined; add explicit SIMD/non-temporal/cache operations as their layout, feature and memory-domain contracts become available | Concurrent collection/root safety before safe reference APIs; source ranges and per-location guarantees survive SIMD lowering; non-temporal completion precedes publication; cache maintenance does not masquerade as DMA coherence or persistence |
+| 1 | Preserve observable evaluation, checked arithmetic, cleanup, ordinary access widths and current unsafe-recovery behavior. | Source/IR/AOT/JIT regressions show optimization adds no invalid access or observable fault/effect. Unsafe discovery must not invent repair or trap behavior; current unsafe blocks are not general caller-unsafe contracts. |
+| 2 | Implement caller obligations for `unsafe` callable declarations, explicit unsafe-block requirements, and producer-owned transfer/share capabilities with reference/loan/parameter metadata and separate compilation. Ordinary safe declarations may contain checked internal unsafe blocks; no trusted-implementation marker is required. | Wrappers/imports cannot erase obligations; unsafe operations remain scoped; generic bodies use published constraints; private layout/JIT facts do not change source binding; incompatible capability/safety changes reject without freezing opaque layouts. |
+| 3 | Add bounded `MemoryPrimitives` value access and scalar atomics after typed access paths, representation eligibility and compile-time order binding; begin with supported Windows x64 profiles. | Check atomicity, ordering and progress separately; define bitwise CAS comparison; checked overflow leaves storage unchanged; unaligned access is not a snapshot; prove target capability and AOT/JIT/module parity; no hidden lock fallback. |
+| 4 | Build checked handoff, immutable publication and scoped synchronization on those primitives within resources/graphs and rich libraries; allow an explicitly selected coordinated fallback where feasible. | Test publication and mixed-order litmus cases; enforce guards, lifetimes and aliases; justify lock-free and wait-free claims separately; share fallback protocols across modules; preserve effects while allowing valid read elision. |
+| 5 | Extend reference atomics only after collector-aware roots, barriers, safepoints and reclamation are defined. Add explicit SIMD, non-temporal and cache operations only with layout, feature and memory-domain contracts. | Establish concurrent root safety before reference APIs; preserve ranges and per-location guarantees through SIMD; complete non-temporal stores before publication; do not confuse cache maintenance with DMA coherence or persistence. |
 
-Before implementing explicit concurrent operations, complete the formal
-mixed-order/fence rules and executable litmus cases. Preserve the accepted
-explicit acquire-release relay rule, not implicit relaxed-RMW release
-sequences. Exact declaration spellings, conditional-capability metadata,
-CAS order-pair validation and target tables are specification deliverables
-within these increments. This sequence does not authorize additional backend
-architectures, a public managed-handle ABI, or wholesale implementation of the
-design-only library inventories.
+Before concurrent operations, specify mixed-order/fence rules and executable
+litmus cases. Preserve the accepted explicit acquire-release relay rule, not
+implicit relaxed-RMW release sequences. Exact declaration spellings,
+conditional-capability metadata, CAS order-pair validation and target tables
+remain specification work. This sequence does not authorize new backends,
+public managed-handle ABI, or wholesale adoption of design-only libraries.
 
-Represent access, ordering and lifetime effects in checked IR before lowering
-the concurrent operations. Persist and validate the required contracts across
-semantic imports, native producers, module sets and graphs, with feature-based
-version selection and rejection under incompatible headers. Existing ordinary
-IR and lexical unsafe recovery do not already encode those new guarantees.
+Represent access, ordering and lifetime effects in checked IR before lowering.
+Persist and validate those contracts across semantic imports, native producers,
+module sets and graphs, with feature-based version selection and rejection
+under incompatible headers. Existing ordinary IR and lexical unsafe recovery
+do not already encode those guarantees.

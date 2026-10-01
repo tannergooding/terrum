@@ -39,20 +39,19 @@ packages or push Git.
 Pack failures are checked independently for the default, preview and stable
 variants so a later successful command cannot hide an earlier failure.
 
-Use `-fast` for routine builds during large compiler changes. It passes
-`RunAnalyzers=false` and `GenerateDocumentationFile=false` only to the build
-action, skipping XML documentation generation and deferring .NET analyzer/style
-and trimming checks while retaining C# compilation, type checking, requested
-tests and Terrum's semantic verifier. At a full-analysis checkpoint, build
-and test without the switch in the same configuration: `.\build.cmd -test`
-for Debug or `.\build.cmd -configuration Release -test` for Release.
+Use `-fast` for iterative builds. It passes `RunAnalyzers=false` and
+`GenerateDocumentationFile=false` only to the build action, deferring .NET
+analyzer/style, trimming and XML documentation checks while retaining C#
+compilation, type checking, requested tests and Terrum's semantic verifier.
+It does not select actions. At a full-analysis checkpoint, build and test
+without `-fast` in the same configuration: `.\build.cmd -test` for Debug or
+`.\build.cmd -configuration Release -test` for Release.
 
-For a CI leg without analysis or packaging, select the actions explicitly:
-`.\scripts\cibuild.cmd -restore -build -test -fast`. The `-fast` switch only
-affects analysis and documentation generation, not which actions run. With no action switches,
-`cibuild.cmd` restores, builds, tests and packages; run it without `-fast`
-for the full-analysis packaging/checkpoint leg. Packaging consumes an
-existing build and does not run analysis on its own.
+The default `cibuild.cmd` restores, builds, tests and packages. Select a
+restore/build/test leg without packaging using
+`.\scripts\cibuild.cmd -restore -build -test -fast`; run the full-analysis
+packaging leg without `-fast`. Packaging consumes an existing build and does
+not run analysis by itself.
 
 ## Project-specific differences
 

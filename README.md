@@ -1,287 +1,100 @@
 # Terrum
 
-Terrum (TAIR-um), a programming language from TerraFX.
+Terrum (TAIR-um) is an experimental programming language from TerraFX. This
+repository contains its language design and C# compiler host; source syntax and
+public APIs are not stable.
 
-This repository hosts the language design and the C# bootstrap compiler/tooling.
-It is experimental; source syntax and public APIs are not stable.
+The compiler exposes a Unicode-aware, lossless syntax API and a bounded
+Windows x64 profile with direct PE emission and a JIT worker. The implemented
+subset includes checked scalar operations, compact values and unique owners,
+conditional outputs, bounded generics, managed roots/classes, and deterministic
+cleanup. General stored loans, managed layouts, general exception objects and
+the standard library are not implemented. See the
+[implementation reference](docs/implementation.md) for supported features and
+limits.
 
-The compiler combines a Unicode-aware, lossless syntax API with a bounded
-value-type profile and direct Windows x64 native emission. It binds declarations,
-checked numerics, compact structs, places and conditional outputs, then verifies
-structured operations before encoding. The same backend writes PE executables
-and supplies a bounded JIT execution worker, without CIL, LLVM or an external
-linker. Compact unique values support checked moves, owned calls and deterministic
-cleanup. Native buffers have checked lexical views, and a bounded managed-node
-runtime traces precise roots and reclaims cycles. Bounded source-defined classes
-add complete-publication construction and descriptor-based tracing. General
-stored loans and managed layouts, general exception objects and the standard library are not
+The additive [TRRM scalar path](docs/implementation.md#executable-trrm-scalar-interchange)
+emits approved metadata and compact-linear/indexed Bodies for a bounded
+source-free, fail-fast scalar subset. It uses the shared verifier and backend;
+general imported-call linking and checked-exception Body support are not
 implemented.
 
-An additive [TRRM scalar interchange path](docs/implementation.md#executable-trrm-scalar-interchange)
-now compiles verified source to approved metadata and compact-linear/indexed Body
-bytes, audits them on source-free load, and uses the shared backend for JIT,
-EXE and DLL output, including bounded branches, lazy expressions and nested
-assignment loops. This is a self-contained fail-fast scalar subset, not
-general interchange, imported-call linking or checked-exception Body support.
-Existing source and development semantic/native module commands are unchanged.
-
-The approved [source grammar](docs/grammar-spec.md) and related design
-documents describe the target contract separately
-from this executable subset; `samples\design` remains informative.
-Places default to readonly, `mut` applies to
-places/receivers, and `write` qualifies reference or view access. The bounded
-compiler supports `bool`/`init ref<T>` conditional initialization alongside
-legacy `bool`/`out` contracts; their caller vacancy rules remain distinct.
-Design sketches are not claims that the broader syntax and library surface
-are implemented; the bounded
-class/`ManagedNode` exception is described next.
-
-The syntax-16 numeric subset constructs context-typed decimal, hexadecimal and
-binary integers without a fallback type and supports checked `T(expression)`
-conversions for `int32`, `uint32`, `int64`, `uint64` and `char16`. Based
-integers construct target-width bit patterns; decimal literals retain numeric
-range semantics. `_` digit separators are supported in numeric digit runs.
-Attached width suffixes diagnose as `TRM0006`; missing hexadecimal and binary
-digits diagnose as `TRM0007` and `TRM0008`, and malformed separators diagnose
-as `TRM0009`. Prefix casts are no longer parsed. Floating literal binding and
-custom literal targets are not implemented yet; bounded scalar `[ConstEval]`
-support is described in the [implementation matrix](docs/implementation.md).
-
-The bounded profile specializes compilation-local top-level `Copy`-constrained
-function templates over multiple type parameters, including eligible scalars,
-`Copy` structs, and existing source-class/`ManagedNode` handles. Handle
-substitutions preserve readonly/write and supported optional qualification;
-they do not grant member, null-test or operator capabilities absent from the
-function's constraints. See the [bounded generic contract](docs/implementation.md#bounded-generic-functions)
-for inference, results, outputs, rooting and remaining limits.
-The current parser version is syntax-37, including generalized ordinary and
-documentation comment fences in the hosted lexer and compiled scanner-6.
-Standalone `init T name;` and
-`init var name;` declare readonly vacant locals, published only by checked
-initialization; semantic v40 is selected when these declarations are retained.
-Syntax-31 adds target-checked conditional expressions: evaluate the condition
-once and only the selected result arm. Retained conditionals select semantic
-v41 without changing the native ABI.
-Syntax-32 adds lazy `??` and statement-form `??=` for existing managed-handle
-optionals, with initialized writable destinations and feature-selected semantic
-v42 persistence. The native scalar component separately supports `?:` through
-projections v24–27, including local and numeric-conversion combinations; it
-still uses the shared hosted verifier/emitter.
-Syntax-33 adds checked prefix/postfix integer updates on supported writable
-integer places, with single evaluation and no replacement on failure;
-retained primitive updates select semantic v43. Syntax-35 adds nominal static
-`++`/`--` calls for the existing eligible writable `Copy`-struct place
-envelope. These evaluate the place once and preserve the old value for postfix
-or replacement for prefix; a failing operator does not write back, and earlier
-effects are not rolled back. The result type must equal the operand type,
-unlike other unary operators. This does not add instance mutation, owning-value
-updates, arbitrary `char16` arithmetic or new witness ABI. Retained nominal
-update calls select semantic v44; private operator bodies and closed generic
-specializations can change behind unchanged semantic/native consumers.
-Nominal updates are outside the scalar-only ConstEval interpreter.
-Syntax-36 adds primitive binary `<<`, `>>` and `>>>`, plus statement-form
-`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=` and `>>>=`
-for initialized writable `int32`, `uint32`, `int64` and `uint64` places.
-Arithmetic and bitwise operands must match the place type; binary shifts use
-one of those four integer types as the left operand and an `int32` count. The
-place and old value are captured once before the right-hand
-side, which runs once; checked computation precedes writeback, and earlier
-effects are not rolled back. Primitive scalar-slot compound assignments are
-available to bounded ConstEval. Nominal compounds, `char16`, unique-value
-updates and new destination loans are not added. Shift and compound-assignment
-nodes select semantic v45; compound statements use tag 26.
-Native scalar projection v48 adds structured scalar returns to branch/loop
-bodies and rejects reachable non-void fallthrough. It retains the
-source-validated 392-word interface and shared verifier/emitter; it is not a
-standalone compiler. Earlier projections retain their prior return shapes.
-Native scalar projections v28–31 add bounded assignment and nested-while
-bodies; v32–39 add braced `if`/`else` bodies and combinations with loops,
-conversions and conditional expressions. Projections v40–43 add nearest-while
-`break`/`continue` transfers to loop bodies without branches; v44–47 add
-branches as well, with conversions and conditional expressions selected by
-the same offsets in each group. The shared backend and projections v1–47 are
-retained. Static operator requirements use bodyless `static` declarations,
-optionally with a first `<this T>` formal bound by conformance. This remains a
-compilation-local witness subset, not a public generic ABI.
-Syntax-18 recognizes qualified generic
-type arguments such as `write Record` and `write Record?`; managed generic
-producer examples use the existing semantic v24 managed contracts; other
-features still select their required versions. The native profile, wire
-format, scanner record and schema remain unchanged by syntax-19.
-Syntax-28 adds expression bodies across supported functions, methods,
-operators, constructors and direct/explicit getters, reusing existing checked
-return/statement and cleanup lowering. It introduces no new callable ABI or
-module format; broader grammar approval is not compiler support.
-Syntax-29 adds post-tested loops and enclosing-loop named transfers, retaining
-checked cleanup, initialization, managed rooting and constant evaluation.
-Semantic v39 carries those new loop nodes when used; native ABI and scanner
-record/schema remain unchanged. The native scalar frontend also executes
-bounded nested expression trees, expression-bodied functions, initialized
-scalar locals with ordered mutable assignments and checked numeric type-calls;
-it is still a compiler
-component, not a self-host compiler.
-Copy structs can explicitly implement homogeneous binary operator protocols
-for `+`, `-`, `*`, `/`, `%`, `&`, `|` and `^`. Generic bodies may use only the
-operators named by their constraints; identical signatures on unrelated
-protocols do not substitute for a declared witness. Primitive operations in
-those implementations retain their checked arithmetic and bitwise semantics.
-Six distinct homogeneous Copy-struct comparison protocols (`==`, `!=`, `<`,
-`<=`, `>` and `>=`) are implemented in syntax-19; they do not infer
-operator laws or universal equality/hash behavior. Details are in the
-[bounded generic contract](docs/implementation.md#bounded-generic-functions).
-
-Semantic v24 validates managed-class/`ManagedNode` access: `mut class`,
-writable `mut` class methods, readonly bare handles and explicit `write`
-capability through qualified fields, parameters, results, optionals and
-inference. Constructors initialize unpublished objects before publication;
-a writable child handle retains its capability through a readonly parent,
-without deep-read propagation. Semantic v25 separately records non-exported
-`MutReceiver` methods on non-owning compact structs; source visibility may be
-public or private, but does not expose a mutating-receiver ABI. Called on a
-named mutable local, a writable nested field of that local, or forwarded
-through the existing writable `this` receiver and its writable fields, a
-mutating method borrows and updates the original place, including
-writes before a checked exception; readonly methods and by-value arguments
-retain copy behavior, and the ordinary nonmutating receiver ABI is unchanged.
-The verifier rejects forged mutable receiver loans from
-immutable places, while nested field writes through a valid receiver are
-allowed. Semantic v26 persists nested mutable-field loans, while v25 remains
-sufficient for whole-local non-owning receiver loans. Older module headers reject the
-respective contracts; programs needing neither retain their versions and
-bytes regardless of managedness. Readers
-continue to normalize private managed artifacts from versions 18 through 23
-without granting more authority than their original contract. Public scalar
-entry wrappers may call non-exported mutating methods; private helpers remain
-non-exported as well. The native handle ABI and private managed-state boundary
-are unchanged. Semantic v31 permits managed-backed leaf producers to export
-existing public, handle-free compact `Copy` values up to 16 bytes through the
-by-value and existing `bool`/`out` contracts. Semantic v32 supports private
-managed consumers through ordinary single-provider semantic creation/linking
-and native single-provider/module-set entry points; it also permits managed
-roots and intermediate producers in persisted acyclic native graphs. Semantic
-modules combine provider and consumer code into one image, remap private class
-identities, and share one heap/root domain; persisted native images retain
-image-local heaps and roots. These contracts expose no managed handles and add
-no public semantic `LinkSet` or native-set JIT API. Native ABI/profile versions
-and the graph package format are unchanged.
-
-Semantic v27 permits ordinary `mut` methods on unique structs through an
-initialized named mutable owner or forwarded writable `this`. These loans
-update mutable scalar/Copy fields without transferring ownership, replacing
-owning fields, or changing cleanup responsibility. Readonly unique loans
-cannot call mutating methods; older module versions reject the new contract.
-
-Semantic v28 extends nested mutable-field loans through fully initialized
-unique roots and unique child structs without consuming those owners.
-Semantic v29 admits `OwnedInt32Buffer.Set`, `TryAppend` and `Clear` through
-writable owning fields, retaining root reservation and recursive release.
-Semantic v30 admits lexical `SliceMutable` views from those fields. An active
-view excludes access through the entire containing root, including sibling
-fields, until normal scope exit or checked unwind ends the loan.
-Nested receivers such as `outer.Inner.Mutate()` require a writable root and
-writable fields along the complete path; readonly fields cannot be bypassed.
-Partially initialized roots, temporary or managed-class-field receiver places,
-rebinding `this`, public exported mutating-receiver ABIs and general references
-remain unsupported. General reference/view/ownership forms and `init ref<T>`
-call-site grammar remain unsupported; the separate legacy buffer-view access
-path still needs alignment. These bounded features do not imply general
-ownership/lifetime analysis or standard-library execution.
+The [grammar](docs/grammar-spec.md) and design documents specify target
+contracts independently of compiler support. Places default to readonly,
+`mut` qualifies writable places/receivers, and `write` grants writable
+reference/view access. Legacy `bool`/`out` and vacancy-only `bool`/`init ref<T>`
+outputs have distinct caller rules. `samples\design` and library proposals are
+informative, not implemented APIs.
 
 ## Build
 
-Use the exact .NET 11 RC SDK specified in `global.json`. The default commands
-use an existing installation; `-architecture x64` acquires that version under
-`artifacts\dotnet` instead, without changing the system SDK installation.
+Use the .NET 11 RC SDK pinned in `global.json`. The default commands use an
+existing installation; `-architecture x64` installs that SDK under
+`artifacts\dotnet` for the invocation without changing the system SDK.
 
 ```powershell
 .\restore.cmd
 .\build.cmd
-.\build.cmd -fast -test # iterative build/test during large changes
-.\build.cmd -test # full analyzer checkpoint (Debug)
-.\build.cmd -configuration Release -test # full analyzer checkpoint (Release)
+.\build.cmd -fast -test
+.\build.cmd -test
+.\build.cmd -configuration Release -test
 .\test.cmd
 .\pack.cmd
 dotnet run --project sources\terrumc -- check samples\syntax\hello.terrum
-dotnet run --project sources\terrumc -- tree samples\syntax\control-flow.terrum --json
 dotnet run --project sources\terrumc -- analyze samples\native\factorial.terrum
 dotnet run --project sources\terrumc -- build samples\native\factorial.terrum -o artifacts\factorial.exe --runtime fail-fast
 .\artifacts\factorial.exe
 $LASTEXITCODE # 720
 ```
 
-The wrappers use `scripts\build.ps1`, copied from TerraFX along with the build
-props/targets, EditorConfig and public signing key. Actions are explicit:
-`.\build.cmd -restore -test -configuration Release` restores, builds and tests;
-`.\pack.cmd` packages an existing build without publishing it. Direct
-`dotnet build Terrum.slnx` and `dotnet test Terrum.slnx` remain supported.
-See [build infrastructure](docs/building.md) for the few Terrum-specific changes.
-On Windows, building the full solution or `sources\terrumc\terrumc.csproj`
-also compiles the maintained `CharacterFacts`, `SourceRange` and `Token`
-sources into a native compiler-primitives DLL at
-`artifacts\bin\self-host\<configuration>\terrum-compiler-primitives.dll`.
-The incremental build skips regeneration when its inputs are unchanged. This
-native compiler-primitives companion is a library, not a self-host compiler or
-an executable scanner/parser.
+`-fast` supports iterative compile/test cycles: it skips .NET analyzers/style,
+trimming checks and XML documentation generation, but retains compilation,
+requested tests and Terrum verification. Run without `-fast` in the same
+configuration at a full-analysis checkpoint. `pack` packages an existing build
+and does not publish it.
+Direct `dotnet build Terrum.slnx` and `dotnet test Terrum.slnx` are supported.
+See [build infrastructure](docs/building.md) for wrapper behavior and
+Terrum-specific build differences.
 
-Outputs go to `artifacts\bin\<category>\<project>\<configuration>\<framework>`,
-intermediates to `artifacts\obj`, binary logs to `artifacts\log`, test results
-to `artifacts\tst` and packages to `artifacts\pkg`. Builds enforce TerraFX's
-analyzer/style policy, XML documentation, nullable analysis, public signing and
-trimming/AOT compatibility. Host overflow checks are enabled in Debug as in
-TerraFX; this is not the implementation of Terrum numeric semantics.
-For large changes, use `-fast -test` for routine compile/test cycles.
-This defers .NET analyzer/style and trimming checks and XML documentation
-generation, but not C# compiler errors, tests or Terrum's semantic verifier.
-Run a build without the switch in the same configuration at a full-analysis checkpoint. CI legs can opt
-into `-fast`; the packaging leg should run with full analysis.
+Build outputs are under `artifacts\bin`; intermediates, logs, test results and
+packages are under `artifacts\obj`, `artifacts\log`, `artifacts\tst` and
+`artifacts\pkg`. On Windows, the solution also builds a native
+compiler-primitives DLL from maintained Terrum sources. That library is not a
+self-host compiler or executable scanner/parser; see
+[self-host components](self-host/README.md).
 
 ## Layout
 
-| Location | Status |
+| Location | Purpose |
 |---|---|
-| `sources/Terrum.CodeAnalysis` | Reusable source/syntax, binding, verified operations, native backend and versioned semantic modules |
-| `sources/terrumc` | Human/JSON command-line consumer |
-| `tests/Terrum.CodeAnalysis.Tests` | Executable host and process-level CLI tests |
-| `samples/syntax` | Syntax fixtures accepted by the current parser; not executable Terrum |
-| `samples/native` | Executable Windows x64 numeric, control-flow and compact-value examples |
-| `samples/design`, `library` | Broader language/API sketches, not implemented libraries |
-| `self-host` | Candidate Terrum compiler components with explicit execution gates |
+| `sources/Terrum.CodeAnalysis` | Source/syntax APIs, binding, verification, native backend and semantic modules |
+| `sources/terrumc` | Human- and machine-facing CLI |
+| `tests/Terrum.CodeAnalysis.Tests` | Library and process-level CLI tests |
+| `samples/syntax` | Parser fixtures; not executable Terrum |
+| `samples/native` | Windows x64 executable examples |
+| `samples/design`, `library` | Language and API sketches |
+| `self-host` | Candidate compiler components and their execution gates |
 
 Read the [language design](docs/language.md), [language contracts](docs/language-contracts.md),
-[lifetime contracts](docs/lifetimes.md), [standard-library design](docs/libraries.md),
-[sample catalog](docs/samples.md),
-[syntax API and support matrix](docs/implementation.md), and [roadmap](docs/roadmap.md).
-The repository is the canonical design/development location.
-The [pending library, proof and IL-extension proposals](docs/proposals/README.md)
-identify unresolved choices; accepted rules live in the design documents above.
-Pending alternatives are not additions to the current implementation scope.
+[lifetime contracts](docs/lifetimes.md), [library design](docs/libraries.md),
+[sample catalog](docs/samples.md), and [roadmap](docs/roadmap.md).
+The [proposal index](docs/proposals/README.md) distinguishes unapproved
+alternatives from accepted contracts.
 
-The C#/.NET compiler host does not imply managed output. The first backend is
-Terrum-owned Windows x64 AOT. A CIL backend could be added for a demonstrated
-benefit, but it is neither a dependency nor the default. See the
-[native profile](docs/native.md) for its explicit fail-fast runtime contract,
-ABI, artifact format and unsupported features. Native execution tests require
-Windows x64; emission itself does not invoke installed platform toolchains.
-The [JIT proof](docs/jit.md) covers executable-memory and unwind lifetimes;
-[modules](docs/modules.md) demonstrate process-start compatible producer
-replacement against unchanged persisted semantic or native consumers, with
-contract checks before execution. [Native module sets](docs/module-sets.md) extend
-the persisted native consumer proof to multiple independent leaf DLLs.
-The [native graph proof](docs/native-graph.md) additionally supports dependencies
-between DLLs and validates the complete selected closure before execution.
-Neither is a production
-runtime or hot-servicing implementation. The [compiled scanner](docs/scanner.md)
-executes bounded Terrum tokenization against shared pinned Unicode data and
-decodes integer magnitudes without imposing a default numeric type.
-The `build-component` worker uses those native token/trivia and integer records
-in the real parser/binder/native-emission pipeline, without re-lexing the target
-source or decoding its integer magnitudes again in C#.
+The C# compiler host does not imply managed output. The native backend emits
+Terrum-owned Windows x64 code for AOT and JIT; CIL is neither a dependency nor
+the default.
+Native execution tests require Windows x64, though emission does not invoke an
+installed platform toolchain. The [native profile](docs/native.md) defines the
+runtime and ABI; [JIT](docs/jit.md), [modules](docs/modules.md),
+[module sets](docs/module-sets.md) and [native graphs](docs/native-graph.md)
+document bounded execution and replacement proofs, not a production runtime.
+The [compiled scanner](docs/scanner.md) documents its executable boundary.
 
-For machine consumers use the built `artifacts\bin\sources\terrumc\Debug\net11.0\terrumc.dll`
-rather than mixing `dotnet run` build messages with protocol output. CLI exit
-codes for inspection/build commands distinguish success (0), source/compile
-diagnostics (1), and usage/input/output errors (2). Execution workers instead
-return the program's status; component workers can terminate on a native scanner
-failure and must be supervised. `check` remains syntax-only; `analyze` binds.
-See the implementation guide for coordinates, recovery,
-schema versioning and content-bound edits.
+For machine protocols, use the built `terrumc.dll` rather than mixing
+`dotnet run` build output with protocol data. Inspection/build commands return
+0 on success, 1 for source/compile diagnostics, and 2 for usage or I/O errors.
+Execution workers return the program's status; component workers can terminate
+on native failure and must be supervised. `check` is syntax-only; `analyze`
+binds. The implementation reference documents coordinates, recovery,
+schema-versioning and content-bound edits.

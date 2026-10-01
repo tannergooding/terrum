@@ -227,6 +227,10 @@ delimiters and Unicode lookalikes are not operator glyphs. Other contextual
 splitting requires an explicit grammatical rule. Neither recovery nor a
 formatter may guess a different expression from an invalid run.
 
+This is the approved lexical target rule. Adoption across the supported
+hosted, native, scanner and projection paths is in progress; see the
+[implementation boundary](implementation.md) for current status.
+
 `..^` is one defined composite punctuator for an end-relative upper slice
 bound, as in `items[start..^1]`. The grammar also permits separated `..`
 and `^`, as in `items[start.. ^1]`, with the same slicing semantics.

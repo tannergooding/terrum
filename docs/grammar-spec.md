@@ -956,19 +956,22 @@ Overload selection and output behavior remain checked semantic contracts. The
 accepted call-site spelling `Create(init value)`. `write` qualifies access
 through a reference and `pin` qualifies only `ref<T>` (for example,
 `write pin ref<T>`); other uses of `pin` in this broad `Type` production
-are invalid. `pin ref<T>` keeps its backing object rooted and at a stable
-address for the pin loan's lifetime. It may be reborrowed as an ordinary
-`ref<T>` without preserving the pin guarantee for that reborrow, but the
-underlying pin cannot end while any derived address depends on it. A raw
-`ptr<T>` is an address, not a relocatable managed reference; its value
-does not itself pin or root a GC allocation. Forming one into GC storage
-requires a live pin with an enforced provenance/lifetime dependency, or
-independently stable storage. Merely retyping an existing reference or
-forming a raw pointer cannot manufacture pin acquisition. A successfully
-acquired `pin ref<T>` does root and stabilize its backing; the concrete
-acquisition operation, including whether an initialized local binding
-performs it, remains in
-[Q26](proposals/grammar-open-questions.md#q26-pointer-formation-dereference-and-pin-acquisition).
+are invalid. `pin ref<T>` keeps its backing rooted and address-stable for the
+pin-loan lifetime. The initialized local binding `pin ref<T> name = ref place;`
+explicitly and checkably acquires a pin from eligible initialized, addressable
+backing, preserving the source's access and root/owner dependencies. This is
+not a qualifier-only conversion or retyping of an ordinary reference. The pin
+lasts for the binding's promised local lifetime; release or rebinding must
+satisfy its dependency checks, and a derived address, copy, capture or loan
+that still depends on the pin prevents premature release. An ordinary
+`ref<T>` reborrow does not retain the pin guarantee; it retains only its
+ordinary backing/root lifetime dependency. A raw `ptr<T>` is a
+non-relocatable address and does not root or pin GC storage; forming one into
+GC storage requires a live pin with enforced provenance/lifetime or
+independently stable storage.
+Concrete release/null-reference spelling, safe pointer conversion and
+dereference/member syntax remain in
+[Q26.1](proposals/grammar-open-questions.md#q261-pointer-formation-and-dereferencemember-boundaries).
 Pinning a slot containing a class handle does not also pin the separately
 allocated object reached through that handle. `mut` qualifies
 a binding/receiver or a `mut ref` mode.
@@ -1147,8 +1150,14 @@ Typed catches bind a declared failure type and a name or `_`; bare `catch`
 handles contract-catchable failures without a universal payload object.
 `when` filters are checked Boolean code: false continues handler selection,
 and a filter failure follows ordinary failure/chaining rules rather than
-silently becoming false. Catch matching, unwind phase, eligibility, and
-failure transport remain separate design work. Bare `throw;` rethrows the
+silently becoming false. Handlers test declared catchable contracts in source
+order. A matched filter has checked access to the failure payload at its
+declared filter phase; it cannot depend on invalid references into already
+unwound frames. Catchability identity/registration and exact filter/unwind
+timing remain in
+[Q32.1](proposals/grammar-open-questions.md#q321-catchability-registration-and-filter-phase);
+failure transport remains separate design work.
+Bare `throw;` rethrows the
 active handled failure; it is invalid outside a handler or in a separately
 invoked lambda merely declared there. `throw expression` evaluates its
 operand once and has no normal result; the operand must satisfy an eligible
@@ -2271,8 +2280,17 @@ the stronger guarantee cannot bind an older weaker provider. Other value,
 effect and invariant promises remain independently checked.
 Direct `new T(...).with(P: value)` may use an explicitly declared
 initializer-completion operation with the same gate; the qualifying
-annotation, validation hook, update syntax and ordinary wither contract
-remain open. A normal `.with(...)` on an already live value instead produces
+annotation, update syntax and ordinary wither contract remain open. An
+explicit completion-validation operation runs after all
+required constructor/caller initialization and before publication. Its
+checked failure leaves no published live object and retains ordinary
+partial-state cleanup. It is not inferred from a method name or a
+constructor's current body, and an ordinary live-value wither cannot enter
+this construction phase.
+The exact hook declaration/registration spelling and invocation identity
+remain in
+[Q22.2](proposals/grammar-open-questions.md#q222-completion-hook-declaration-and-registration).
+A normal `.with(...)` on an already live value instead produces
 a separately validated updated value; it cannot mutate its source through
 `init`. No `required` modifier is needed solely to express constructor
 completion obligations.
@@ -2356,9 +2374,10 @@ runs until an element is yielded, the producer completes, or a failure
 propagates. Subsequent advances resume after the previous yield. Argument
 evaluation and producer construction can fail at invocation; body effects
 and failures occur during advancement. Captured loans retain their permitted
-backing lifetimes even if advancement is delayed or never occurs. Protocol
-method names, element-loan contracts and representation
-remain separate design work. `[Iterator]` marks the
+backing lifetimes even if advancement is delayed or never occurs. Element
+binding modes remain in
+[Q41](proposals/grammar-open-questions.md#q41-iteration-element-binding-modes);
+representation remains library design. `[Iterator]` marks the
 implementation; it is not a traversal-direction or element-access flag.
 `[Iterator]` composes with `async` for an async producer. Its declared result
 must satisfy a checked async-producer contract; `Task<Sequence<T>>` by itself
@@ -2367,8 +2386,8 @@ Async producer creation remains lazy, unlike ordinary eager async invocation.
 Advancement may suspend at an `await` and resumes under the ordinary checked
 scheduling, failure and affinity rules until yield, completion or failure.
 `yield expression;` still emits an element and `return;` finishes production;
-neither introduces an implicit result wrapper. Protocol names, advance and
-close operation identities and cancellation integration remain library design.
+neither introduces an implicit result wrapper. Cancellation integration
+remains library design.
 Closing a suspended producer unwinds entered scopes, executes applicable
 `finally` bodies and registered `defer` actions, and releases owned state under
 the checked cleanup contract; it does not run the remaining production body or enter previously
@@ -2378,6 +2397,13 @@ even though its body has not entered any scopes. Async close may suspend only
 under its declared contract, retaining the required state and dependencies
 until completion. Loop closing is structured as specified in §3.3; manual
 consumers retain the corresponding declared close/ownership obligations.
+Creation and completion obligations are distinct from per-advance/item
+obligations, as selected by the declared producer protocol. A plain callable
+clause does not become a per-yield assertion, and body inspection does not
+extend an element or capture loan. The protocol publishes dependencies
+retained during suspension and through close/completion. Only exact producer
+protocol/operation identities, phase selectors and clause spelling remain in
+[Q31.1](proposals/grammar-open-questions.md#q311-producer-protocol-identities-and-phase-selectors).
 Reverse traversal and readonly/writable items belong to the selected
 sequence/item contracts. Whether variations are exposed as adapters or
 explicitly declared policies remains library design. Any selection must
