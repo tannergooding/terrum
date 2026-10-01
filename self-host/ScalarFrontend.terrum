@@ -1924,7 +1924,7 @@ mut class ScalarFrontendState
                 else
                 {
                     mut bool whenFalse = false;
-                    if (cursor < end && TreeStatementWord(cursor, 0) == 5)
+                    if (cursor < end && IsTreeElseMarker(cursor))
                     {
                         int32 elseEnd = TreeStatementWord(cursor, 1);
                         whenFalse = TreeBodyReturns(cursor + 1, elseEnd);
@@ -2031,7 +2031,7 @@ mut class ScalarFrontendState
                     return true;
                 }
                 cursor = armEnd;
-                if (cursor < end && TreeStatementWord(cursor, 0) == 5)
+                if (cursor < end && IsTreeElseMarker(cursor))
                 {
                     int32 elseEnd = TreeStatementWord(cursor, 1);
                     if (condition != 1
@@ -2094,6 +2094,12 @@ mut class ScalarFrontendState
             returnType, _parameterCount, _firstType, _secondType, _thirdType,
             name, _first.Range, _second.Range, _third.Range,
             false, false, absent, absent, absent, out result);
+    }
+
+    private bool IsTreeElseMarker(int32 index)
+    {
+        int32 kind = TreeStatementWord(index, 0);
+        return kind == 5 || kind == 23;
     }
 
     private mut bool ParseTreeStructuredCallableBody()
@@ -2177,21 +2183,35 @@ mut class ScalarFrontendState
         require _tokens.TryGet(_at, out var next);
         if (next.Kind == 17)
         {
-            if (_statementCount >= 12 || !Take(17, out var otherwise)
-                || !Take(48, out var openFalse))
+            if (_statementCount >= 12 || !Take(17, out var otherwise))
             {
                 Fail(1);
                 return false;
             }
             int32 marker = _statementCount;
-            if (!AddTreeStatement(5, 0, -1, otherwise.Range.Start, openFalse.Range.End)
-                || !ParseTreeStructuredBody(depth + 1, nearestLoop)
-                || !Take(49, out var endFalse))
+            require _tokens.TryGet(_at, out var following);
+            if (following.Kind == 16)
             {
-                return false;
+                if (!AddTreeStatement(23, 0, -1, otherwise.Range.Start, following.Range.Start)
+                    || !ParseTreeIf(depth + 1, nearestLoop))
+                {
+                    return false;
+                }
+                require _tokens.TryGet(_at - 1, out var close);
+                end = close.Range.End;
             }
-            FinishTreeBody(marker, enclosingLocals, endFalse.Range.End);
-            end = endFalse.Range.End;
+            else
+            {
+                if (!Take(48, out var openFalse)
+                    || !AddTreeStatement(5, 0, -1, otherwise.Range.Start, openFalse.Range.End)
+                    || !ParseTreeStructuredBody(depth + 1, nearestLoop)
+                    || !Take(49, out var endFalse))
+                {
+                    return false;
+                }
+                end = endFalse.Range.End;
+            }
+            FinishTreeBody(marker, enclosingLocals, end);
         }
         Host.Frontend[332 + header * 5 + 4] = end - keyword.Range.Start;
         return true;

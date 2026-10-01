@@ -58,6 +58,8 @@ namespace Terrum.CodeAnalysis;
 // Bare and parenthesized unit-literal returns have root -1 and no expression node.
 // Version 57 admits a void arrow body: flag 41 is one, envelope roots are -1,
 // and exactly one existing kind-15 discard or kind-21 requirement record owns it.
+// Version 58 adds kind-23 else-if markers: root -1, slot exclusive nested-if end,
+// and raw span from else through the direct nested if, without a lexical block.
 bool HasScalarFrontendStatement(int32 kind)
 {
     for (mut int32 statement = 0; statement < Host.Frontend[298]; statement = statement + 1)
@@ -101,6 +103,7 @@ int32 GetScalarFrontendStatementVersion()
             }
         }
     }
+    if (maximumKind == 23) { return 58; }
     if (maximumKind == 21) { return 55; }
     if (maximumKind >= 16) { return 54; }
     if (maximumKind >= 14) { return maximumKind + 38; }
@@ -131,6 +134,7 @@ bool TryPublishScalarFrontend()
     {
         Host.Frontend[0] = result.ReturnType == 0
             ? (Host.Frontend[41] == 1 ? 57 : 56) : GetScalarFrontendTreeVersion();
+        if (HasScalarFrontendStatement(23)) { Host.Frontend[0] = 58; }
         Host.Frontend[15] = 0;
         if (result.HasCondition)
         {
