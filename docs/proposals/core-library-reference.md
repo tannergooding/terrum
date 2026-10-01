@@ -1389,8 +1389,8 @@ an operation says otherwise.
 | `SpanAlgorithms` search and predicates | `Contains`, `TryIndexOf`, `TryLastIndexOf`, `TryFind`, `TryFindLast`, `TryFindIndex`, `TryFindLastIndex`, `All`, `CountWhere`, `Any` | Explicit equality witness or predicate; directional visits and vacant no-match outputs, no unknown-index sentinel |
 | `SpanAlgorithms` sequence comparison | `SequenceEqual`, `StartsWith`, `EndsWith` | Explicit element-equality witness; readonly overlap allowed, no identical-backing shortcut that skips effects or NaN comparisons |
 | `SpanAlgorithms` transform | `Select`, `Where`, `Zip`, `ForEach`, `Fill`, `Reverse`, `CopyTo`, `MoveWithin` | Mutable callbacks take `write ref<TCallback>`; destination/overlap contracts differ by operation |
-| `OrderedSpanAlgorithms` aggregate | `Fold<T,TState,TFolder>`; prospective `Sum<T>`, `Min/Max<T,TOrder>` | Initial accumulator/witness explicit; empty min/max return presence, not fabricated `T` |
-| `OrderedSpanAlgorithms` order | `Sort<T,TOrder>(write Span<T>,ref<TOrder>)`, `TryBinarySearch<T,TOrder>(Span<T>,ref<T>,ref<TOrder>,init ref<nuint>)` | Ordering witness must define total key policy; sort comparator failures can leave permutation partial |
+| `OrderedSpanAlgorithms` aggregate | `Fold`, `TryMin`, `TryMax`; prospective `Sum` | Explicit seed or ordering witness; empty extrema leave output vacant, equal extrema choose the first source element |
+| `OrderedSpanAlgorithms` order | `LowerBound`, `UpperBound`, `TryBinarySearch`, `Sort` | Explicit total-order witness; logarithmic sorted bounds, first-equal search and possibly partial permutation on sort failure |
 | `List<T>` / managed | Constructors, `Count`, `Capacity`, index, `TryGet`, `Add`, `Insert`, `Reserve`, `RemoveAt`, `Clear`, write guard and concrete cursor | `[ManagedStorable],[Copy],[Sized]` initial bounds; initialized prefix, checked guards and explicit close |
 | `LinkedList<T>` / managed | `First`, `Last`, `AddFirst/Last`, `AddBefore/After`, `Remove`, `Clear`, cursor | Stable node identity, detached node is not attached to two lists |
 | `Queue<T>`, `Stack<T>` / managed, **new** | Empty/capacity constructors, `Count`, `Capacity`, `Reserve`, `Enqueue/Push`, `TryDequeue/TryPop(init ref<T>)`, `TryPeek(init ref<T>)`, `Clear`, copied-value cursor and `Close` | Initial same managed Copy bounds; false output vacant; no `default(T)` |
@@ -1568,10 +1568,24 @@ public interface IFolder<T, TState>
 }
 public static class OrderedSpanAlgorithms
 {
+    public static nuint LowerBound<T, TOrder>(Span<T> source, ref<T> value,
+        ref<TOrder> order)
+        where TOrder : IOrderComparer<T>;
+    public static nuint UpperBound<T, TOrder>(Span<T> source, ref<T> value,
+        ref<TOrder> order)
+        where TOrder : IOrderComparer<T>;
     public static bool TryBinarySearch<T, TOrder>(Span<T> source, ref<T> value,
         ref<TOrder> order, init ref<nuint> index)
         where TOrder : IOrderComparer<T>;
     public static void Sort<T, TOrder>(write Span<T> values, ref<TOrder> order)
+        where T : [Copy]
+        where TOrder : IOrderComparer<T>;
+    public static bool TryMin<T, TOrder>(Span<T> source, ref<TOrder> order,
+        init ref<T> value)
+        where T : [Copy]
+        where TOrder : IOrderComparer<T>;
+    public static bool TryMax<T, TOrder>(Span<T> source, ref<TOrder> order,
+        init ref<T> value)
         where T : [Copy]
         where TOrder : IOrderComparer<T>;
     public static TState Fold<T, TState, TFolder>(Span<T> source,
@@ -1652,7 +1666,9 @@ Predicate searches, `Any` and `CountWhere` belong to `SpanAlgorithms`
 above; they require no ordering witness and are not duplicated in this
 ordered-operation service.
 `TryBinarySearch` requires sorted input, chooses the first equal index, and
-leaves `index` vacant when absent. `Sort` may leave a valid permutation if
+leaves `index` vacant when absent. `LowerBound` and `UpperBound` expose
+insertion boundaries under that same ordering witness; their concrete
+contracts and copied extrema are below. `Sort` may leave a valid permutation if
 comparison fails; it never manufactures or duplicates an affine owner.
 `Fold` consumes the explicit seed and returns its final state, including for
 an empty source. `SortedSet` iterates ascending, treats comparison-zero as
@@ -1665,6 +1681,54 @@ mutation; it never outlives its source, and a copied `Current` is available
 only after successful advancement. Conditional publication and cursor
 registration/close metadata remain **OPEN**; neither follows from these
 bodyless signatures.
+
+The four bound/extremum members are **PROPOSED** additions to the existing
+eager Core service, not new language intrinsics or executable exports.
+They use the explicitly selected readonly order witness; no default
+comparison, equality witness or implicit total order is synthesized.
+
+| Proposed member | Search, visit and result contract |
+|---|---|
+| `LowerBound` | For input sorted in ascending witness order, return the first index whose element compares greater than or equal to `value`, or `source.Length` if none. Empty input returns zero without comparison. |
+| `UpperBound` | For the same sorted-input contract, return the first index whose element compares strictly greater than `value`, or `source.Length` if none. Empty input returns zero without comparison. |
+| `TryBinarySearch` | Return the first comparison-zero index, not an arbitrary duplicate. False leaves `index` vacant; it does not encode an insertion position or bitwise-complement sentinel in the output. |
+| `TryMin`, `TryMax` | Empty input returns false without comparison or publication. Otherwise seed the candidate from the first element, visit later elements in increasing source-index order and compare each once against the current candidate. Replace only for strictly smaller/larger order, retaining the first source element among equal extrema; true publishes a copy only after the scan succeeds. |
+
+Both bounds return a position from zero through `source.Length`, inclusive.
+That terminal position is not an element index and must not be dereferenced.
+Comparisons use the source element as the left operand and the requested
+value as the right operand. The equal-key range begins at `LowerBound` and
+ends just before `UpperBound`; the boundaries coincide if no key compares
+zero. Comparison-zero defines equivalence for these operations, not ordinary
+`==`, bit identity or a separately selected key comparer.
+
+Bounds and `TryBinarySearch` use logarithmically many comparisons and constant
+auxiliary storage without allocation, element copies or a hidden full sortedness
+scan. Sortedness under the same stable total-order witness is a caller
+precondition, not a runtime-validated property. An unsorted range has no
+search-result guarantee; normal checked typed access and index bounds still
+apply. A false result is not evidence that the input was sorted.
+Checked index arithmetic must remain valid even at the maximum representable
+span length; no operation requires forming `source.Length + 1`. Exact binary
+probe order is not a public contract. Comparer failure stops the operation,
+propagates as a checked failure and leaves any initialization output vacant;
+no retry, rollback or fabricated boundary is implied.
+
+Extrema need no sorted input. Their witness call compares the visited element
+on the left with the retained candidate on the right; a singleton publishes
+its sole copied element without comparison. `[Copy]` is required for that
+publication, not for binary search or insertion bounds. An optional/null
+element can be a successful result; absence of an
+extremum means an empty input, not a default or sentinel `T`. Failed comparison
+leaves the output vacant without undoing earlier witness effects.
+
+All of these operations borrow existing initialized elements and may not
+retain their loans or permit reentrant source invalidation. Readonly comparer
+requirements do not establish purity, NoThrow or a legal order for ordinary
+IEEE NaN comparisons; callers need a witness with a consistent explicit
+NaN/zero policy when those values are possible. Precise conditional-publication
+metadata, witness-effect checking and comparator failure transport remain
+**OPEN**, as for the other algorithm proposals.
 
 The constructor overloads, capacity/reservation members and explicit cursor
 close members are **PROPOSED** additions completing these three managed
