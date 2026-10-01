@@ -563,6 +563,50 @@ zero (or the source's scalar length for the last match). Ordinal search does
 not normalize or fold. Its `TryIndexOfOrdinal`/`TryLastIndexOfOrdinal` false
 outcomes leave `scalarIndex` vacant.
 
+The existing ordinal-search signatures use the same
+[Unicode scalar-sequence identity across encodings](../type-families.md#text-views),
+not byte identity or UTF-16 code-unit ordering. Source and needle may have
+different validated encodings; matching does not require allocating a
+transcoded copy. A match consumes the complete needle at a source scalar
+boundary. It cannot begin inside a UTF-8 sequence or surrogate pair, or
+finish with only part of a scalar. The original views retain their encoding
+and ordinary access/backing dependencies throughout the call.
+
+| Proposed operation | Complete match and boundary contract |
+|---|---|
+| `StartsWithOrdinal` | True exactly when the prefix's scalar sequence matches the beginning of the source; an empty prefix succeeds, including on empty source. |
+| `EndsWithOrdinal` | True exactly when the suffix's scalar sequence matches the end of the source; an empty suffix succeeds, including on empty source. |
+| `TryIndexOfOrdinal` | Publish the lowest source scalar index at which the entire needle matches. An empty needle succeeds at zero. |
+| `TryLastIndexOfOrdinal` | Publish the highest such source scalar index, including overlapping matches. An empty needle succeeds at the source's scalar count. |
+
+A nonempty needle longer than the source in scalars has no match. A false
+search leaves the initialization output vacant; it does not publish zero,
+the source length or an unknown-index sentinel. Zero and the end boundary
+can both be successful outputs, with the end available for an empty needle.
+The published index is an independent numeric value, not a borrowed view:
+it neither keeps the source alive nor grants later access to its storage.
+Conflicting loans, invalid lifetime/backing or other checked failures are
+not converted to a no-match result. No culture, case folding, normalization,
+grapheme segmentation or NUL termination is implied.
+
+For example, let the source scalar sequence be
+`U+0041 U+1F600 U+0041 U+1F600` and the needle be `U+1F600`.
+Both searches publish scalar indices `1` and `3`, respectively, regardless
+of either view's encoding. These positions differ from raw storage offsets:
+
+| Source encoding | First/last scalar index | First/last encoded code-unit offset |
+|---|---|---|
+| UTF-8 | `1`, `3` | `1`, `6` |
+| UTF-16 | `1`, `3` | `1`, `4` |
+| UTF-32 | `1`, `3` | `1`, `3` |
+
+In `aaa`, the needle `aa` matches at zero and one; last-search returns one,
+not zero from skipping overlapping candidates. An encoded `U+0000` is an
+ordinary scalar and may occur in either input. Canonically equivalent
+`U+00E9` and `U+0065 U+0301` do not match ordinally. These examples clarify
+the **proposed library contracts**, not new compiler support or an exact
+search/probe algorithm, complexity bound or hidden scalar-index cache.
+
 `ScalarCount`, `TryGetScalar` and `TrySliceScalars` are **PROPOSED** additions
 for inspecting and borrowing validated text by Unicode scalar position.
 `ScalarCount` counts the entire view's scalars; empty text returns zero.
