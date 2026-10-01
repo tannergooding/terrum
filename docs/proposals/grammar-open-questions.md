@@ -124,9 +124,21 @@ of C# keywords and multiword terms.
 
 **Remaining question:** Choose implicit versus explicit pin-to-pointer
 conversion, release/rebind spelling and any safe-context address-formation
-warning policy. Pin acquisition/dependency safety and ordinary prefix
-dereference with explicit member grouping are now approved in the
+warning policy. Only these three choices need acceptance:
+
+| Choice | What remains undecided |
+|---|---|
+| Conversion | Implicit `ptr<int32> p = pinned;` versus an explicit conversion such as `ptr<int32>(pinned)`. These are candidate spellings, not new productions. |
+| Release/rebind | Whether assignment of `nullref` and explicit ref reassignment perform release/rebind, or a dedicated operation is required. The exact writable-binding syntax must also fit Q06; this does not make the approved local implicitly mutable. |
+| Warning | Whether otherwise-valid address formation with `&` warns in a safe context. This is diagnostic policy, not another safety-proof decision. |
+
+Pin acquisition/dependency safety and ordinary prefix dereference with
+explicit member grouping are already in the
 [official grammar](../grammar-spec.md#513-operators-assignments-and-expression-gaps).
+
+<details>
+<summary>Settled pin and dereference context (not another vote)</summary>
+
 **Example:** A successfully acquired `pin ref<int32>` roots and stabilizes
 its backing for the pin loan's lifetime. `ptr<int32>` does not. Merely
 casting/requalifying an ordinary reference cannot manufacture that pin.
@@ -196,67 +208,81 @@ pointer indexer protocol, `->`, or pointer-to-reference `ref(p)` form was
 selected by that approval. Those alternatives are not additional pending
 votes or implicit safe conversion paths.
 
+</details>
+
 ### Q27. Nominal sums and closed-case declarations
 
-**Remaining question:** Choose declaration and construction spellings for
-explicit nominal tagged cases. Do not introduce `case`: switch arms already
-omit it, and unions should not add a one-off keyword.
-**Settled context:** Explicit closedness, exhaustive closed dispatch and
-unknown evolvable payload safety are in the
-[official grammar](../grammar-spec.md#4-accepted-language-direction).
-Optional flattening remains separate.
-**Example:** `enum LookupStatus : int32 { Missing, Found }` with a separate
-`init ref<T?>` output illustrates why `Found(null)` differs from `Missing`.
-
-**C# model:** Not a C# enum, inheritance hierarchy or `Nullable<T>` wrapper;
-none supplies Terrum's owning tagged-payload contract automatically.
-
-**Semantic example, not declaration syntax:**
+**Proposal for acceptance:** Use `union` with semicolon-terminated named
+cases, parameter-list payload declarations, qualified construction and a
+checked attribute for the closed-case-set promise. All spellings in this
+section are **proposed, not adopted or implemented**.
 
 ```terrum
+[ClosedCases]
+union Lookup<T> where T : [Copy]
+{
+    Missing;
+    Found(T value);
+}
+
 Lookup<int32?> missing = Lookup<int32?>.Missing;
 Lookup<int32?> presentNull = Lookup<int32?>.Found(null);
 Lookup<int32?> presentValue = Lookup<int32?>.Found(7);
 ```
 
-The case construction above remains **illustrative, unselected spelling**,
-not a new parser feature. It shows one nominal result: the first value has
-no payload; the other
-two have a live `int32?` payload, absent or containing `7` respectively.
-Candidate arms `Lookup<int32?>.Missing => ...` and
-`Lookup<int32?>.Found(value) => ...` expose only that case's payload.
-They must not flatten `Found(null)` into `Missing`.
-Closedness means all declared cases suffice for exhaustive matching.
-An evolvable variant cannot use that assumption and needs an unknown-case
-fallback preserving opaque payload roots/cleanup.
+The three concrete choices are:
 
-**C# comparison:**
+| Choice | Recommendation | Alternative and tradeoff |
+|---|---|---|
+| Case declarations | `Missing;` and `Found(T value);`, with ordinary type-first named parameters for multiple payloads | `Missing, Found(T value)` is enum-like, but commas would serve both the case list and payload lists. Semicolons keep each declaration's boundary explicit. |
+| Construction | `.Missing` for a no-payload case, `.Found(value)` for a payload case | `.Missing()` makes every case a call, but loses the visual distinction between a named no-payload value and supplying payload arguments. The proposed `.Missing` is construction syntax, not a promise of constant eligibility or a cached singleton. |
+| Closedness | Proposed parameterless `[ClosedCases]` on the union declaration; omission keeps the existing evolvable default | A `closed union` modifier is possible, but adds a keyword/order rule for a scoped compatibility promise. An attribute fits the existing checked semantic-contract mechanism without equating closed cases with frozen layout or API. |
+
+`ClosedCases` is a candidate attribute name, not a newly accepted Core API.
+Its eventual library definition and compiler-recognized metadata mapping must
+identify the union's case-set promise; ordinary attribute spelling alone
+cannot establish it. Exact attribute schema/encoding is separate from choosing
+this source form.
+
+The proposed case list has unique names, not overloaded cases. A payload list
+must be nonempty: use `Missing;`, not `Missing();`, for a no-payload declaration.
+Payload construction uses ordinary target-checked argument evaluation; its
+parameter names do not implicitly declare public fields, getters, equality,
+formatting, deconstruction or withers. These are the minimum named case
+construction operations, not record synthesis. Generic constraints and
+`unique union` retain their separate existing contracts.
+
+**Not part of this vote:** Pattern/destructuring spelling and copy/borrow/move
+extraction belong to Q28; declaration modifier ordering belongs to Q06.
+Accepting this example does not approve `Found(value)` as a pattern, a tag
+numbering/layout convention, native exports, constant eligibility or public
+payload accessors.
+
+The already accepted semantics are linked in the
+[official grammar](../grammar-spec.md#4-accepted-language-direction);
+they are not another acceptance request. In the example, `Found(null)` remains
+distinct from `Missing`, and removing `[ClosedCases]` changes the compatibility
+contract rather than the case-declaration syntax.
+
+**Rough C# comparison:** The declaration resembles named variants in a record
+hierarchy, and construction resembles selecting `Missing` versus
+`new Found(value)`:
 
 ```csharp
-enum LookupStatus { Missing, Found }
-LookupStatus Lookup(string key, out string? value)
-{
-    bool found = dictionary.TryGetValue(key, out value);
-    return found ? LookupStatus.Found : LookupStatus.Missing;
-}
+abstract record Lookup<T>;
+sealed record Missing<T> : Lookup<T>;
+sealed record Found<T>(T Value) : Lookup<T>;
+
+// Inside a method:
+Lookup<int?> missing = new Missing<int?>();
+Lookup<int?> presentNull = new Found<int?>(null);
+Lookup<int?> presentValue = new Found<int?>(7);
 ```
 
-Here `dictionary` is an existing `Dictionary<string, string?>`: a present
-key whose value is null returns `Found` and null; a missing key returns
-`Missing` and null. The status distinguishes them, but the C# result and
-output are independent values rather than one statically tagged payload.
-A C# record hierarchy can bundle a `Found(string? Value)` case and a
-`Missing` case, but does not automatically establish a closed exhaustiveness
-contract or affine payload cleanup.
-
-The corresponding **semantic sketch, not selected declaration syntax**, is
-`Lookup<T> = Missing | Found(T)`. `Found(null)` contains a live optional
-payload; `Missing` has no payload to read or destroy. A closed declaration
-can require exhaustive case handling. An evolvable declaration instead
-needs an explicit unknown-case path preserving any new payload's rooting
-and cleanup; treating an unrecognized tag as an empty `Missing` would lose
-those obligations. This is why an enum plus separate output, optional
-flattening, and a nominal sum are different contracts.
+These C# records synthesize members and use managed inheritance; neither is
+part of the Terrum proposal. The hierarchy also does not establish Terrum
+closedness or affine payload cleanup. This is a conceptual comparison, not a
+recommendation to lower unions into records or ordinary subclasses.
 
 ### Q28. Complete pattern and type-test forms
 
