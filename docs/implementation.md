@@ -97,7 +97,7 @@ are added. Its existing successful-projection current-syntax audit follows
 syntax-40; existing record/source audits still reject forged dot-bearing
 shapes that no scalar projection can represent. Scanner-7/schema-7, projections
 1–51, resource bounds, semantic/native formats, name identity and ABI remain
-unchanged. Other punctuation and spacing adoption remains separate work.
+unchanged. This migration adds no unrelated syntax.
 
 Syntax-39 adopts receiver/name-attached opening delimiters across supported
 calls, indexing, generic applications and type arguments, generic declaration
@@ -116,7 +116,7 @@ projection shapes; hostile records cannot authorize detached constructs.
 This adds no native general calls, indexing or generics, indexer declarations
 or broader attribute syntax. Scanner-7/schema-7, projections 1–51, resource
 limits, semantic formats, persisted names and native ABI remain unchanged.
-Other spacing rules and broader grammar adoption remain separate work.
+This migration adds no unrelated syntax.
 
 Syntax-38/scanner-7 adopts the approved contiguous `@keyword` identifiers.
 The closed ordinal escape catalog is exactly the vocabulary and contextual
@@ -435,8 +435,10 @@ mutability rules remain unchanged. Eight locals means eight total declaration
 identities across the function, not eight per scope. The 392 words, 64 tokens,
 12 statement records, 32 nodes, three parameters, 16 expression-recursion
 levels, six structural levels, scanner IDs and public ABI remain fixed.
-No standalone block statements, vacant locals, calls, richer values or new
-persisted semantic/native format are introduced.
+The hosted parser and indexed TRRM path support standalone lexical blocks, but
+the Terrum-authored scalar frontend does not project them.
+Vacant locals, calls, richer values and new persisted semantic/native formats
+remain unsupported.
 
 Projection v51 adds braced scalar `do` and `for` loops through the existing
 verified `BoundWhile` lowering under both runtime policies. `do` executes the

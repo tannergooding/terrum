@@ -8,13 +8,10 @@ Approval, implementation, and pre-v1 stability are separate.
 
 ## Active work (priority order)
 
-1. Maximal ASCII operator runs `!%&*+-./:<=>?^|~` are adopted in syntax-43
-   across supported hosted, native, scanner and projection paths. Scanner-8
-   appends invalid/unsupported-run diagnostics without changing layouts,
-   token IDs, projection versions or resource bounds. Actual hosted type
-   boundaries are certified before binding; native scalar forms have no
-   type exemptions. Range/slice/optional access and unrelated syntax remain
-   unsupported.
+1. Add standalone lexical blocks to the Terrum-authored native scalar
+   frontend. Hosted parsing and indexed TRRM already support them; this
+   frontend does not. Preserve name scope/identity, outer writes, nearest
+   transfers and cleanup, with independent source-bound projection audits.
 2. Review source-contract decisions from the [grammar](grammar-spec.md) and
    [decision queue](proposals/grammar-open-questions.md). Preserve accepted
    decisions; recommendations remain proposals until approved.
@@ -102,6 +99,7 @@ boundaries remain in the [implementation reference](implementation.md).
 
 | Commit | Completed milestone |
 |---|---|
+| `e06aee6` | Syntax 43: maximal ASCII punctuation runs and expected-linear indexed diagnostic audits |
 | `d6e65d3` | Syntax 42: contextual punctuation boundaries |
 | `2f29b3e` | Full-width scalar, indexed and String TRRM serialization |
 | `6f0d088` | Syntax 41: symbolic operator and binding spacing |

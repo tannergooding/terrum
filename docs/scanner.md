@@ -6,39 +6,23 @@ classification, keyword and operator selection, numeric token boundaries,
 quoted strings and escapes, leading trivia and lexical diagnostics in Terrum.
 The C# host supplies buffers and pinned lexical data; it does not pretokenize
 or make source-dependent classification decisions for the component.
-The scanner-5 contract reserves `_` as a distinct token rather than an
-identifier; underscore-prefixed names remain identifiers.
-The shared keyword catalog also recognizes syntax-29's `do`; loop labels and
-named transfers reuse identifiers, `:`, `break` and `continue`. Neither
-scanner-5 records nor the syntax-protocol schema changes.
-Syntax-30's standalone vacant declarations reuse the contextual identifier
-`init`; no keyword or scanner record is added.
-Syntax-31's conditional expressions reuse the existing `?` and `:` tokens.
-Syntax-32 appends `??` and `??=` identities to the operator catalog without
-renumbering existing tokens. Both scanners use longest matches; parser type
-recovery still retains and diagnoses repeated optional markers.
-Syntax-33 appends `++` and `--` as token identities 86 and 87, preserving all
-earlier identities and scanner-5 records. Both scanners select longest
-matches. New adjacent update/additive runs such as `x+++y` diagnose rather
-than being reinterpreted; trivia distinguishes `x++ +y` from `x+ ++y`.
-Syntax-34 treats `abstract` as an ordinary identifier, not a declaration
-modifier. Its retired slot 77 remains reserved; `operator`, `where` and all
-other token identities retain their values. The interface self marker `this`
-uses its existing contextual identifier spelling. Scanner-5 records and the
-syntax-protocol schema are unchanged.
-Syntax-35 nominal static `++`/`--` calls reuse token identities 86 and 87;
-there are no new scanner identities, record fields or schema changes.
-Compiled-scanner input and hosted lexing produce the same checked lowering.
-Syntax-36 appends token identities for primitive `<<`, `>>`, `>>>` and
-`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=` and `>>>=`,
-without renumbering earlier tokens. The hosted lexer and compiled scanner use
-the shared operator catalog and longest-match selection. Scanner-5 records,
-schema-5 and the integer record layout do not change.
-In generic type context the parser splits `>>`/`>>>` into source-partitioning
-closing tokens in the CST, retaining leading trivia on the first part.
-`SyntaxTree.Tokens` retains the original lexical stream; tree JSON uses the
-CST stream. The scanner's internal packed match reserves three width bits
-for the four-code-unit `>>>=` spelling; published token records are unchanged.
+`_` remains a distinct token, while underscore-prefixed names remain
+identifiers. Syntax-29–31 reuse existing spellings for `do`, contextual
+`init`, `?` and `:`; loop labels and named transfers also reuse identifiers,
+`:`, `break` and `continue`. Syntax-32 adds `??`/`??=`; syntax-33 appends
+`++`/`--` as token IDs 86/87; syntax-35 reuses those IDs for nominal static
+updates. Syntax-34 keeps slot 77 reserved and treats `abstract` as an ordinary
+identifier; `this` remains contextual. Adjacent runs such as `x+++y` diagnose
+instead of being reinterpreted, while trivia distinguishes `x++ +y` from
+`x+ ++y`.
+
+Syntax-36 appends `<<`, `>>`, `>>>` and `+=`, `-=`, `*=`, `/=`, `%=`, `&=`,
+`|=`, `^=`, `<<=`, `>>=` and `>>>=` without renumbering earlier tokens.
+Hosted and compiled scanners share longest-match selection. In generic type
+context, the parser partitions `>>`/`>>>` into CST closers, retaining leading
+trivia on the first part; `SyntaxTree.Tokens` keeps the original lexical
+stream. The internal match reserves three width bits for `>>>=`; published
+records remain unchanged through scanner-5.
 
 Syntax-37 advances the component to scanner-6/schema-6 for generalized
 ordinary and documentation comment fences. Maximal opening star runs select
@@ -258,49 +242,26 @@ with the current syntax profile reject as `TRM5001` in CLI adaptation rather tha
 A malformed token remains a `Bad`, `NumericLiteral`, or `StringLiteral` token
 with its raw source span; diagnostics do not replace source characters.
 
-Syntax-39 uses these unchanged raw token extents to require receiver/name
-attachment for supported opening delimiters. Scanner-7/schema-7 still
-tokenizes detached forms normally; hosted parsing (including current
-prelexed/component input) reports `TRM1006`. Native scalar parsing rejects
-detached function headers and supported scalar type calls, and the host
-audits current syntax before accepting successful frontend projections.
-Compatible historical token records remain readable; no scanner record,
-catalog, buffer or projection revision is needed for this syntax migration.
+Syntax-39–42 adopt delimiter attachment and role-specific dot/operator/
+contextual-punctuation spacing over existing raw token spans; they do not
+change tokenization. Hosted parsing and supported native scalar shapes enforce
+their respective boundaries. See the
+[implementation reference](implementation.md) for exact roles and
+diagnostics.
 
-Syntax-40 likewise uses unchanged raw dot and neighboring token spans:
-qualified type/namespace/import dots attach on both sides, while expression
-member dots attach on either side, independent of binding. The current
-hosted/prelexed/component parser reports `TRM1007` at a violating dot.
-Whitespace and every supported comment/newline trivia kind break attachment;
-the scanner still tokenizes them normally and compatible historical raw
-records remain readable. Qualified attributes and optional access are not
-added. Native scalar input has no supported dot-bearing forms, and its
-existing successful-projection current-syntax audit follows this profile.
-Scanner-7/schema-7, record widths, catalogs and frontend bounds are unchanged.
-
-Syntax-41 uses the same raw extents for symbolic expression operators:
-binary/binding/assignment operators and expression-body arrows require
-trivia on both sides (`TRM1008`); symbolic prefixes and postfix updates attach
-to their immediate operand boundary (`TRM1009`). Tokenization does not change.
-The current prelexed/component parser applies the hosted syntactic role,
-while native scalar parsing and maintained probes check their supported
-roles directly before fallback. Compatible historical raw records remain
-readable; successful frontend projections must satisfy current source syntax.
-Syntax-42 applies both-sided raw trivia to conditional `?`/`:` and current
-struct-conformance/generic-constraint colons. Loop-label/named-argument colons
-attach to the preceding name with optional trivia afterward; optional-type
-`?` attaches to the final type token. Native scalar `?`/`:` are exclusively
-conditional connectors and the shared snapshot check rejects bad boundaries
-directly before fallback. No additional colon/type roles are introduced.
-Syntax-43 independently classifies maximal ASCII punctuation runs in the
-compiled scanner. Unlisted runs are one Bad token with whole-run `TRM0011`;
-unsupported `..`, `..^` and `?.` are one Bad token with `TRM0012`. Only
-deferred `>`/`?` type-boundary candidates retain existing splitting, pending
-actual hosted-parser consumption. Native scalar snapshots have no such type
-exemption and check whole contiguous runs before spacing/fallback. Missing
-tokens never certify a boundary; repeated optional marking retains `TRM1005`.
-Scanner/schema advance to 8 only for the appended diagnostic catalog.
-Token IDs/widths, projections, bounds and semantic/native ABI remain fixed.
+Syntax-43 classifies maximal ASCII punctuation runs in the compiled scanner.
+Unlisted runs are one Bad token with whole-run `TRM0011`; unsupported `..`,
+`..^` and `?.` are one Bad token with `TRM0012`. Deferred `>`/`?`
+type-boundary candidates retain existing splitting only when actual hosted
+parser consumption certifies them; missing/recovery tokens cannot certify a
+boundary, and repeated optional marking retains `TRM1005`. Native scalar
+snapshots check whole runs before spacing/fallback, with no type exemptions.
+Scanner-8/schema-8
+adds only diagnostic identities 11/12; token IDs, record widths, projections,
+bounds and semantic/native ABI remain fixed. Historical raw records remain
+readable, while completed current adapters enforce current framing. See the
+[implementation reference](implementation.md) for current parser and
+unsupported-spelling boundaries.
 
 Keyword records are generated from the host `TokenKind` catalog's `*Keyword`
 members. Operator records use their lexical spellings, with fixture comparisons

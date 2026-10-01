@@ -30,31 +30,16 @@ reinterpretations to preserve the source's `int32` count semantics.
 It is implemented in C#,
 supports fail-fast only, and does not make these broader Terrum compiler
 candidates self-hosting or change their provisional frontend projections.
-Syntax-37/scanner-6 adopts whole-star ordinary/documentation comment fences,
-opaque nonnesting contents and exact one-/two-slash closers. Documentation
-trivia kinds 4/5 and overlong-fence diagnostic 10 append to existing records
-without widening them. The native snapshots/frontend consume those records
-within unchanged bounds and projection versions; historical fixed-fence
-outputs cannot masquerade as current parser input. No extraction schema,
-other punctuation adoption, semantic format or native ABI is added.
-Syntax-38–42 extend the hosted source profile and scanner-7 with keyword
-escapes and supported delimiter, dot, symbolic-operator and contextual
-punctuation boundaries. These migrations preserve raw spans and projection
-audits; they do not add unrelated constructs or change semantic/native formats.
-Syntax-43 adopts maximal ASCII operator runs `!%&*+-./:<=>?^|~` across
-supported hosted, native, scanner and projection paths. Scanner-8/schema-8
-appends diagnostics 11/12 for invalid/defined-but-unsupported full runs;
-raw historical records remain readable but completed current scans must
-satisfy current framing. Hosted generic closers/optional suffixes require
-actual parser consumption, not recovery or a general `>`/`?` allowlist.
-Native scalar snapshots linearly reject contiguous split/invalid runs before
-spacing/fallback and have no type-context exemptions. Unsupported range,
-slice and optional-access spellings remain Bad tokens, not new features.
-Record layouts, token IDs, projection versions, budgets and ABI stay fixed.
-See the
-[implementation reference](../docs/implementation.md),
-[lexical grammar](../docs/lexical-grammar.md) and
-[scanner contract](../docs/scanner.md) for current boundaries.
+Current scanner behavior and record compatibility are specified in the
+[scanner contract](../docs/scanner.md); hosted parser and native projection
+boundaries are in the [implementation reference](../docs/implementation.md).
+Scanner-8/schema-8 appends diagnostics 11/12 for invalid and unsupported
+maximal runs, including atomic Bad tokens for `..`, `..^` and `?.`. Hosted
+generic closers and optional suffixes require parser consumption; native
+scalar snapshots have no type exemptions. Historical raw records remain
+readable, while completed current adapters enforce current framing and syntax.
+Token IDs, record widths, projections 1–51, resource bounds and ABI remain
+fixed.
 
 The native scalar frontend remains a bounded projection, not a standalone
 compiler: it shares the hosted verifier/emitter and is limited to 16K source

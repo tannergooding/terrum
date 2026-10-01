@@ -110,43 +110,26 @@ ABI changes; imported functions cannot satisfy required constant calls.
 Syntax-26 adds scalar `const expression` requirements in nested executable
 expressions, with the same limits and deferred constant substitution; no new
 native or semantic wire representation is emitted. The current parser version
-is syntax-43. Supported symbolic expression binary/binding/assignment
-operators and expression-body arrows require trivia on both sides; symbolic
-prefixes/postfix updates attach to their immediate operand token boundary.
-The scalar frontend and maintained probes check raw ranges before legacy or
-modern fallback. Current-source projection audits independently reject
-spacing contradictions, even in compatible historical shapes. Legacy
-publication shares repeated monotone operation-threshold classification
-without changing versions 1–51 or the whole-program verification bound.
-Conditional `?`/`:` also require both-sided trivia, directly validated by the
-native snapshot before fallback. Hosted relationship colons, name-prefix
-colons and optional-type suffixes follow their current supported grammar roles;
-no native labels, named arguments, optional types or attribute targets are
-added. String/format interiors remain unchanged. The compiled scanner rejects
-unlisted maximal ASCII punctuation runs with whole-span diagnostic 11 and
-defined-but-unsupported spellings with diagnostic 12 (scanner/schema 8).
-The scalar snapshot gate linearly validates contiguous punctuation records
-before spacing/fallback, with no generic/type exemptions. Successful current
-and historical projections independently audit syntax-43. Layouts, IDs,
-projection versions and all work/resource bounds remain unchanged.
-Generalized comment fences and closed-catalog `@keyword` names
-execute in the compiled scanner and native frontend input path, preserving
-raw source ranges and underlying name identity without changing native
-profiles, persisted symbol identities or ABI.
-Supported receiver/name-attached delimiters now use exact raw token
-boundaries. Native scalar function headers and scalar type calls reject
-intervening trivia; their interiors and structural parentheses remain
-permissive. Successful frontend projections, including historical shapes,
-must satisfy current source syntax independently of the producer. Native
-general calls, indexing and generics are not added. Scanner-7/schema-7,
-frontend projections 1–51 and all existing resource bounds are unchanged.
-Syntax-40 distinguishes both-sided qualified-name dots from either-sided
-expression member dots before lookup, including receivers resolving to types.
-Compiled-scanner input uses the same hosted parser rule. Native scalar input
-does not support dot-bearing names or member access; this adoption adds no
-such shapes. Existing host current-syntax and source/record audits reject
-contradictory successful projections without changing native execution,
-persisted identity, projection versions or budgets.
+is syntax-43. The native scalar frontend checks supported raw spacing and
+attachment rules before shape selection or fallback, and audits successful
+current and historical projections against that syntax. Its punctuation-run
+check is linear and grants no generic/type-context exemptions. Native `?`/`:`
+are conditional connectors only; labels, named arguments, optional types,
+attribute targets, general calls/indexing/generics and dot-bearing forms are
+not added. Function headers and supported scalar type calls require attached
+delimiters, with interior and structural-parenthesis trivia unchanged.
+String/format interiors are unchanged. The compiled scanner and native input
+path support generalized comment fences and closed-catalog `@keyword` names,
+preserving raw source ranges and underlying name identity.
+
+Scanner-8/schema-8 appends diagnostic identities 11/12 for invalid and
+defined-but-unsupported maximal runs; see the
+[scanner contract](scanner.md) for their spans and record compatibility.
+Hosted role-specific punctuation rules are in the
+[implementation reference](implementation.md). Native scalar profiles,
+persisted identities and ABI remain unchanged; token IDs, scanner record
+widths, projection versions 1–51, resource bounds and the whole-program
+verification bound are fixed.
 Conditional expressions evaluate one Boolean condition and only
 the selected target-checked arm, with existing cleanup and rooting behavior.
 Retained conditional nodes select semantic v41, not a new native ABI.
